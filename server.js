@@ -2,85 +2,80 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const PDFDocument = require("pdfkit");
+const nodemailer = require("nodemailer");
 
 const app = express();
 app.use(express.json());
 
-// ===== ENV =====
+// ================= ENV =================
 const DATA_ROOT = process.env.DATA_DIR || "/var/data";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
-// Debug beim Start
-console.log("DATA_DIR env:", process.env.DATA_DIR);
-console.log("DATA_ROOT used:", DATA_ROOT);
-console.log("VERIFY_TOKEN set:", Boolean(VERIFY_TOKEN));
-console.log("WHATSAPP_TOKEN set:", Boolean(WHATSAPP_TOKEN));
+// ================= DEBUG =================
+console.log("DATA_ROOT:", DATA_ROOT);
+console.log("VERIFY_TOKEN set:", !!VERIFY_TOKEN);
+console.log("WHATSAPP_TOKEN set:", !!WHATSAPP_TOKEN);
 
-// ===== Option B: letzte Baustelle pro Absender merken =====
-const LAST_SITE_BY_SENDER = {}; // { wa_id: { siteCode, ts } }
-const SITE_TTL_MS = 4 * 60 * 60 * 1000; // 4 Stunden
+// ================= OPTION B =================
+const LAST_SITE_BY_SENDER = {};
+const SITE_TTL_MS = 4 * 60 * 60 * 1000;
 
 function rememberSite(sender, siteCode) {
   LAST_SITE_BY_SENDER[sender] = { siteCode, ts: Date.now() };
 }
 
 function recallSite(sender) {
-  const rec = LAST_SITE_BY_SENDER[sender];
-  if (!rec) return null;
-  if (Date.now() - rec.ts > SITE_TTL_MS) return null;
-  return rec.siteCode;
+  const r = LAST_SITE_BY_SENDER[sender];
+  if (!r) return null;
+  if (Date.now() - r.ts > SITE_TTL_MS) return null;
+  return r.siteCode;
 }
 
-// ===== Helpers =====
+// ================= HELPERS =================
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
-function toISODate(tsSeconds) {
-  const d = new Date(Number(tsSeconds) * 1000);
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+function toISODate(ts) {
+  return new Date(Number(ts) * 1000).toISOString().slice(0, 10);
 }
 
 function extractSiteCode(text) {
-  // Baustellennummern wie #260016
   const m = (text || "").match(/#(\d{6})\b/);
   return m ? m[1] : null;
 }
 
-function appendJsonLine(filePath, obj) {
-  fs.appendFileSync(filePath, JSON.stringify(obj) + "\n", "utf8");
+function appendJsonLine(file, obj) {
+  fs.appendFileSync(file, JSON.stringify(obj) + "\n", "utf8");
 }
 
-async function fetchMediaInfo(mediaId) {
-  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN fehlt (Render Environment)");
-  const url = `https://graph.facebook.com/v19.0/${mediaId}`;
-  const resp = await axios.get(url, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-    timeout: 20000,
-  });
-  return resp.data; // { url, mime_type, sha256, file_size, ... }
+function readJsonLines(file) {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map(l => JSON.parse(l));
 }
 
-async function downloadMediaToFile(mediaUrl, targetPath) {
-  const resp = await axios.get(mediaUrl, {
+async function fetchMedia(mediaId) {
+  const meta = await axios.get(
+    `https://graph.facebook.com/v19.0/${mediaId}`,
+    { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+  );
+  const bin = await axios.get(meta.data.url, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
     responseType: "arraybuffer",
-    timeout: 30000,
   });
-  fs.writeFileSync(targetPath, resp.data);
+  return { info: meta.data, data: bin.data };
 }
 
-// ===== Meta Webhook Verify (GET /webhook) =====
+// ================= WEBHOOK VERIFY =================
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-
-  if (!VERIFY_TOKEN) {
-    console.error("❌ VERIFY_TOKEN fehlt (Render Environment)");
-    return res.sendStatus(500);
-  }
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
     return res.status(200).send(challenge);
@@ -88,123 +83,138 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// ===== Receive WhatsApp events (POST /webhook) =====
+// ================= RECEIVE WHATSAPP =================
 app.post("/webhook", async (req, res) => {
-  // Wichtig: sofort antworten
   res.sendStatus(200);
 
   try {
-    const body = req.body;
-    if (body.object !== "whatsapp_business_account") return;
-
-    const entry = body.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-    const msg = value?.messages?.[0];
+    const msg = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!msg) return;
 
-    const sender = msg.from; // wa_id
-    const ts = msg.timestamp; // seconds
+    const sender = msg.from;
+    const ts = msg.timestamp;
     const date = toISODate(ts);
 
-    // Text nur bei type=text (bei image/audio kann es caption geben, aber nicht immer)
     const text =
       msg.type === "text"
-        ? (msg.text?.body || "")
-        : (msg.image?.caption || msg.video?.caption || "");
+        ? msg.text?.body || ""
+        : msg.image?.caption || msg.video?.caption || "";
 
-    // Baustelle bestimmen:
-    // 1) Code im Text -> merken
-    // 2) sonst letzte Baustelle vom Absender (4h)
     let siteCode = extractSiteCode(text);
-    if (siteCode) {
-      rememberSite(sender, siteCode);
-    } else {
-      siteCode = recallSite(sender) || "unknown";
-    }
+    if (siteCode) rememberSite(sender, siteCode);
+    else siteCode = recallSite(sender) || "unknown";
 
-    // Ordner: /var/data/<site>/<YYYY-MM-DD>/
     const dayDir = path.join(DATA_ROOT, siteCode, date);
     ensureDir(dayDir);
 
-    const logPath = path.join(dayDir, "log.jsonl");
+    const logFile = path.join(dayDir, "log.jsonl");
 
-    // Grundrecord
     const record = {
-      received_at: new Date().toISOString(),
-      site_code: siteCode,
-      from: sender,
-      message_id: msg.id,
-      timestamp: ts,
+      time: new Date(Number(ts) * 1000).toISOString(),
       type: msg.type,
-      text: text || "",
+      text,
     };
 
     // TEXT
     if (msg.type === "text") {
-      appendJsonLine(logPath, record);
-      console.log(`✅ saved text for #${siteCode} -> ${logPath}`);
+      appendJsonLine(logFile, record);
+      console.log(`✅ saved text for #${siteCode}`);
       return;
     }
 
     // IMAGE
-    if (msg.type === "image" && msg.image?.id) {
-      const mediaId = msg.image.id;
-      const info = await fetchMediaInfo(mediaId);
-
-      const ext = (info.mime_type || "").includes("png") ? "png" : "jpg";
-      const fileName = `${ts}_${mediaId}.${ext}`;
-      const filePath = path.join(dayDir, fileName);
-
-      await downloadMediaToFile(info.url, filePath);
-
-      record.media = {
-        id: mediaId,
-        mime_type: info.mime_type,
-        file_name: fileName,
-        file_path: filePath,
-      };
-
-      appendJsonLine(logPath, record);
-      console.log(`✅ saved image for #${siteCode} -> ${filePath}`);
+    if (msg.type === "image") {
+      const { info, data } = await fetchMedia(msg.image.id);
+      const file = `${ts}_${msg.image.id}.jpg`;
+      fs.writeFileSync(path.join(dayDir, file), data);
+      record.file = file;
+      appendJsonLine(logFile, record);
+      console.log(`✅ saved image for #${siteCode}`);
       return;
     }
 
-    // AUDIO / VOICE
-    // WhatsApp sendet oft msg.type === "audio" (voice notes sind auch audio)
-    if ((msg.type === "audio" || msg.type === "voice") && msg.audio?.id) {
-      const mediaId = msg.audio.id;
-      const info = await fetchMediaInfo(mediaId);
-
-      // meist audio/ogg (opus)
-      const ext = (info.mime_type || "").includes("mpeg") ? "mp3" : "ogg";
-      const fileName = `${ts}_${mediaId}.${ext}`;
-      const filePath = path.join(dayDir, fileName);
-
-      await downloadMediaToFile(info.url, filePath);
-
-      record.media = {
-        id: mediaId,
-        mime_type: info.mime_type,
-        file_name: fileName,
-        file_path: filePath,
-      };
-
-      appendJsonLine(logPath, record);
-      console.log(`✅ saved audio for #${siteCode} -> ${filePath}`);
+    // AUDIO
+    if (msg.type === "audio" || msg.type === "voice") {
+      const { info, data } = await fetchMedia(msg.audio.id);
+      const file = `${ts}_${msg.audio.id}.ogg`;
+      fs.writeFileSync(path.join(dayDir, file), data);
+      record.file = file;
+      appendJsonLine(logFile, record);
+      console.log(`✅ saved audio for #${siteCode}`);
       return;
     }
-
-    // Alles andere (optional später: video, document, sticker, etc.)
-    appendJsonLine(logPath, { ...record, note: "unhandled_type_or_missing_media" });
-    console.log(`ℹ️ saved unhandled for #${siteCode} -> ${logPath}`);
-  } catch (err) {
-    console.error("❌ webhook handler error:", err?.response?.data || err);
+  } catch (e) {
+    console.error("❌ webhook error:", e);
   }
 });
 
-// Health
-app.get("/", (req, res) => res.send("webhook läuft"));
+// ================= PDF + MAIL JOB =================
+app.post("/jobs/daily", async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const sites = fs.readdirSync(DATA_ROOT);
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server läuft auf Port", PORT));
+    for (const site of sites) {
+      const dayDir = path.join(DATA_ROOT, site, date);
+      if (!fs.existsSync(dayDir)) continue;
+
+      const pdfPath = path.join(dayDir, `Tagesprotokoll_${site}_${date}.pdf`);
+      const doc = new PDFDocument({ size: "A3", layout: "landscape", margin: 30 });
+      doc.pipe(fs.createWriteStream(pdfPath));
+
+      doc.fontSize(20).text(`Tagesprotokoll Baustelle #${site}`);
+      doc.fontSize(12).text(`Datum: ${date}`);
+      doc.moveDown();
+
+      const logs = readJsonLines(path.join(dayDir, "log.jsonl"));
+      doc.fontSize(12).text("Notizen:");
+      logs.filter(l => l.type === "text").forEach(l => {
+        doc.fontSize(10).text(`- ${l.text}`);
+      });
+
+      const images = fs.readdirSync(dayDir).filter(f => f.endsWith(".jpg"));
+      if (images.length) doc.addPage();
+
+      let x = 40, y = 80, i = 0;
+      for (const img of images) {
+        doc.image(path.join(dayDir, img), x, y, { fit: [250, 180] });
+        doc.fontSize(8).text(img, x, y + 185);
+        x += 270;
+        i++;
+        if (i % 3 === 0) { x = 40; y += 220; }
+        if (i % 6 === 0) { doc.addPage(); x = 40; y = 80; }
+      }
+
+      doc.end();
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT),
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      await transporter.sendMail({
+        from: process.env.MAIL_FROM,
+        to: process.env.MAIL_TO,
+        subject: `Tagesprotokoll Baustelle #${site} – ${date}`,
+        text: "Automatisch erstellt um 22:00",
+        attachments: [{ filename: path.basename(pdfPath), path: pdfPath }],
+      });
+
+      console.log(`📧 Mail sent for #${site}`);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("❌ job error:", e);
+    res.status(500).json({ ok: false });
+  }
+});
+
+// ================= HEALTH =================
+app.get("/", (_, res) => res.send("webhook läuft"));
+app.listen(3000, () => console.log("Server läuft auf Port 3000"));
