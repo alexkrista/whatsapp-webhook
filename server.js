@@ -1,565 +1,414 @@
-import express from "express";
-import axios from "axios";
-import dayjs from "dayjs";
-import fs from "fs-extra";
-import path from "path";
-import morgan from "morgan";
-import cron from "node-cron";
-import nodemailer from "nodemailer";
-import PDFDocument from "pdfkit";
+// server.js (CommonJS) — WhatsApp webhook + Media download + Daily PDF + Email via Brevo
+// Works on Render (Node 18+ / 20+ / 22+)
 
-// -------------------- CONFIG --------------------
+const express = require("express");
+const crypto = require("crypto");
+const fs = require("fs");
+const fsp = require("fs/promises");
+const path = require("path");
+const nodemailer = require("nodemailer");
+const sharp = require("sharp");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+
+// -------------------- ENV --------------------
 const PORT = process.env.PORT || 10000;
-const DATA_DIR = process.env.DATA_DIR || "/var/data"; // Render Disk: /var/data
+
+const DATA_DIR = process.env.DATA_DIR || "/var/data";
+
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // Meta WhatsApp "phone_number_id"
-const GRAPH_VERSION = process.env.GRAPH_VERSION || "v22.0";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // 1026421043884083
 
-// Brevo SMTP
+// Mail (Brevo SMTP)
 const SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
-const SMTP_PORT = Number(process.env.SMTP_PORT || "587");
-const SMTP_USER = process.env.SMTP_USER || ""; // z.B. a1e02a001@smtp-brevo.com
-const SMTP_PASS = process.env.SMTP_PASS || ""; // SMTP KEY (nicht dein Login-Passwort!)
-const MAIL_FROM = process.env.MAIL_FROM || ""; // MUSS in Brevo verifiziert sein!
-const MAIL_TO = process.env.MAIL_TO || "";     // alex@krista.at
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER || ""; // e.g. a1e02a001@smtp-brevo.com
+const SMTP_PASS = process.env.SMTP_PASS || ""; // SMTP key
+const MAIL_FROM = process.env.MAIL_FROM || SMTP_USER;
+const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 
-// Verhalten
-const CODE_TTL_MINUTES = Number(process.env.CODE_TTL_MINUTES || "10"); // 10-Min-Regel
-const DEFAULT_PROMPT_TEXT =
-  process.env.PROMPT_TEXT || "Bitte Baustellennummer mit # davor senden.";
+// Admin protection
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || ""; // set this!
 
-// Admin Schutz (optional, empfohlen)
-const ADMIN_KEY = process.env.ADMIN_KEY || ""; // wenn gesetzt, muss ?key=... dabei sein
+// -------------------- APP --------------------
+const app = express();
+app.use(express.json({ limit: "25mb" }));
 
-// -------------------- STATE --------------------
-const STATE_DIR = path.join(DATA_DIR, "_state");
-const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
-const SEEN_DIR = path.join(STATE_DIR, "seen");
-const seenMemory = new Map(); // messageId -> timestamp (für Dedupe in RAM)
-
-async function loadState() {
-  await fs.ensureDir(STATE_DIR);
-  await fs.ensureDir(SEEN_DIR);
-  if (await fs.pathExists(STATE_FILE)) {
-    try {
-      return await fs.readJson(STATE_FILE);
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-async function saveState(state) {
-  await fs.ensureDir(STATE_DIR);
-  await fs.writeJson(STATE_FILE, state, { spaces: 2 });
-}
-
-let lastCodeBySender = await loadState();
+// simple logger
+app.use((req, res, next) => {
+  const t = new Date().toISOString();
+  console.log(`[${t}] ${req.method} ${req.url}`);
+  next();
+});
 
 // -------------------- HELPERS --------------------
-function nowIso() {
-  return dayjs().format("YYYY-MM-DD HH:mm:ss");
-}
-
-function getDayFolder(date = dayjs()) {
-  return date.format("YYYY-MM-DD");
-}
-
-function isExpired(tsIso) {
-  if (!tsIso) return true;
-  const diffMin = dayjs().diff(dayjs(tsIso), "minute");
-  return diffMin > CODE_TTL_MINUTES;
-}
-
-function normalizeCode(code) {
-  // erwartet "#260016" oder "#0815"
-  if (!code) return null;
-  const m = String(code).trim().match(/^#(\d{1,12})$/);
-  if (!m) return null;
-  return m[1].padStart(4, "0"); // #0815 etc.
-}
-
-function extractCodeFromText(text) {
-  if (!text) return null;
-  const m = String(text).trim().match(/(^|\s)#(\d{1,12})(\s|$)/);
-  if (!m) return null;
-  return m[2].padStart(4, "0");
-}
-
-function senderState(sender) {
-  return lastCodeBySender?.[sender] || null;
-}
-
-async function markSeen(messageId) {
-  // RAM Dedupe + File Dedupe (robust gegen doppelte Webhook Zustellung)
-  if (!messageId) return false;
-
-  const ramTs = seenMemory.get(messageId);
-  if (ramTs) return true;
-
-  const marker = path.join(SEEN_DIR, `${messageId}.seen`);
-  if (await fs.pathExists(marker)) return true;
-
-  seenMemory.set(messageId, Date.now());
-  await fs.outputFile(marker, String(Date.now()));
-  return false;
-}
-
-function cleanupSeenMemory() {
-  const cutoff = Date.now() - 6 * 60 * 60 * 1000; // 6h
-  for (const [k, v] of seenMemory.entries()) {
-    if (v < cutoff) seenMemory.delete(k);
+function ensureEnvOrThrow() {
+  if (!VERIFY_TOKEN) console.warn("⚠️ VERIFY_TOKEN missing");
+  if (!WHATSAPP_TOKEN) console.warn("⚠️ WHATSAPP_TOKEN missing");
+  if (!PHONE_NUMBER_ID) console.warn("⚠️ PHONE_NUMBER_ID missing");
+  if (!SMTP_USER || !SMTP_PASS || !MAIL_TO_DEFAULT) {
+    console.warn("⚠️ SMTP_USER/SMTP_PASS/MAIL_TO_DEFAULT missing (mail will fail)");
   }
+  if (!ADMIN_TOKEN) console.warn("⚠️ ADMIN_TOKEN missing (admin endpoints unprotected!)");
 }
 
-function ensureAdmin(req, res) {
-  if (!ADMIN_KEY) return true; // wenn nicht gesetzt, offen
-  const key = req.query.key || req.headers["x-admin-key"];
-  if (key !== ADMIN_KEY) {
+function todayISO(d = new Date()) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function safeName(s) {
+  return String(s || "").replace(/[^\w.-]+/g, "_");
+}
+
+function parseJobIdFromText(text) {
+  // expects "#260016 ..." -> "260016"
+  const m = String(text || "").match(/#(\d{3,})/);
+  return m ? m[1] : "unknown";
+}
+
+async function mkdirp(p) {
+  await fsp.mkdir(p, { recursive: true });
+}
+
+async function appendJsonl(filePath, obj) {
+  await mkdirp(path.dirname(filePath));
+  await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
+}
+
+async function fetchJson(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText} for ${url}`);
+  return await r.json();
+}
+
+async function fetchBuffer(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText} for ${url}`);
+  const ab = await r.arrayBuffer();
+  return Buffer.from(ab);
+}
+
+function requireAdmin(req, res) {
+  if (!ADMIN_TOKEN) return true; // if not set, allow (but you should set it!)
+  const tok = req.headers["x-admin-token"] || req.query.token || "";
+  if (tok !== ADMIN_TOKEN) {
     res.status(403).send("Forbidden");
     return false;
   }
   return true;
 }
 
-async function ensureJobDirs(code) {
-  const base = path.join(DATA_DIR, code);
-  const day = getDayFolder();
-  const dayDir = path.join(base, day);
-  await fs.ensureDir(dayDir);
-  return { base, dayDir };
-}
-
-async function appendJsonl(filePath, obj) {
-  await fs.ensureDir(path.dirname(filePath));
-  await fs.appendFile(filePath, JSON.stringify(obj) + "\n");
-}
-
-async function whatsappSendText(toWaId, text) {
-  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-    console.log("⚠️ WhatsApp send skipped: token or phone_number_id missing");
-    return;
-  }
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
-  await axios.post(
-    url,
-    {
-      messaging_product: "whatsapp",
-      to: toWaId,
-      type: "text",
-      text: { body: text }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      timeout: 20000
-    }
-  );
-}
-
-async function metaGetMediaUrl(mediaId) {
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`;
-  const r = await axios.get(url, {
+// -------------------- WHATSAPP MEDIA DOWNLOAD --------------------
+async function downloadWhatsAppMedia(mediaId, outPath) {
+  // Step 1: get media URL
+  const meta = await fetchJson(`https://graph.facebook.com/v22.0/${mediaId}`, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-    timeout: 20000
   });
-  return r.data?.url;
-}
+  if (!meta || !meta.url) throw new Error("No media url in Graph response");
 
-async function metaDownloadToFile(downloadUrl, outPath) {
-  const r = await axios.get(downloadUrl, {
-    responseType: "arraybuffer",
+  // Step 2: download bytes
+  const buf = await fetchBuffer(meta.url, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-    timeout: 45000
-  });
-  await fs.outputFile(outPath, r.data);
-}
-
-// -------------------- EMAIL --------------------
-function makeTransporter() {
-  if (!SMTP_USER || !SMTP_PASS || !MAIL_FROM || !MAIL_TO) return null;
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: false,
-    auth: { user: SMTP_USER, pass: SMTP_PASS }
-  });
-}
-
-async function sendMailWithAttachments(subject, text, attachments) {
-  const t = makeTransporter();
-  if (!t) {
-    console.log("⚠️ Mail skipped: missing SMTP_USER/SMTP_PASS/MAIL_FROM/MAIL_TO");
-    return;
-  }
-  await t.sendMail({
-    from: MAIL_FROM,
-    to: MAIL_TO,
-    subject,
-    text,
-    attachments
-  });
-}
-
-// -------------------- PDF --------------------
-async function buildPdfForCode(code, dayStr) {
-  // Liest:
-  // - Textlog: /var/data/<code>/<day>/log.jsonl
-  // - Bilder:  /var/data/<code>/<day>/*.jpg
-  const dayDir = path.join(DATA_DIR, code, dayStr);
-  const logFile = path.join(dayDir, "log.jsonl");
-
-  const exists = await fs.pathExists(dayDir);
-  if (!exists) throw new Error(`No data folder: ${dayDir}`);
-
-  const outPdf = path.join(dayDir, `baustellenprotokoll_${code}_${dayStr}.pdf`);
-
-  // Daten sammeln
-  let entries = [];
-  if (await fs.pathExists(logFile)) {
-    const lines = (await fs.readFile(logFile, "utf8"))
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    for (const l of lines) {
-      try {
-        entries.push(JSON.parse(l));
-      } catch {}
-    }
-  }
-
-  // Bilder sammeln (nur jpg)
-  const files = await fs.readdir(dayDir);
-  const jpgs = files
-    .filter((f) => f.toLowerCase().endsWith(".jpg") || f.toLowerCase().endsWith(".jpeg"))
-    .sort();
-
-  // PDF schreiben (A4 quer, 6 Fotos/Seite wäre möglich – hier: A4 quer, 4 pro Seite als robustes Default)
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 24 });
-  const ws = fs.createWriteStream(outPdf);
-  doc.pipe(ws);
-
-  // Deckblatt
-  doc.fontSize(22).text("Baustellenprotokoll", { align: "center" });
-  doc.moveDown(0.5);
-  doc.fontSize(16).text(`Baustelle #${code}`, { align: "center" });
-  doc.moveDown(0.5);
-  doc.fontSize(12).text(`Datum: ${dayStr}`, { align: "center" });
-  doc.addPage();
-
-  // Text-Entries
-  doc.fontSize(14).text("Text / Ereignisse", { underline: true });
-  doc.moveDown(0.5);
-
-  if (entries.length === 0) {
-    doc.fontSize(11).text("Keine Texteingänge.", { color: "gray" });
-  } else {
-    doc.fontSize(11);
-    for (const e of entries) {
-      const t = e?.ts || "";
-      const from = e?.from || "";
-      const body = e?.text || "";
-      doc.text(`${t}  (${from})`);
-      doc.text(body);
-      doc.moveDown(0.5);
-    }
-  }
-
-  doc.addPage();
-  doc.fontSize(14).text("Fotos", { underline: true });
-  doc.moveDown(0.5);
-
-  if (jpgs.length === 0) {
-    doc.fontSize(11).text("Keine Fotos vorhanden.", { color: "gray" });
-  } else {
-    // 4 pro Seite (2x2) robust, ohne Bildverzerrung
-    const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
-
-    const cols = 2;
-    const rows = 2;
-    const cellW = pageW / cols;
-    const cellH = pageH / rows;
-
-    let idx = 0;
-    for (const f of jpgs) {
-      const x = doc.page.margins.left + (idx % cols) * cellW;
-      const y = doc.page.margins.top + Math.floor(idx / cols) * cellH;
-
-      const full = path.join(dayDir, f);
-      // Bild
-      doc.image(full, x + 8, y + 8, {
-        fit: [cellW - 16, cellH - 40],
-        align: "center",
-        valign: "center"
-      });
-      // Dateiname
-      doc.fontSize(9).text(f, x + 8, y + cellH - 24, { width: cellW - 16 });
-
-      idx++;
-      if (idx === cols * rows) {
-        idx = 0;
-        doc.addPage();
-      }
-    }
-  }
-
-  doc.end();
-
-  await new Promise((resolve, reject) => {
-    ws.on("finish", resolve);
-    ws.on("error", reject);
   });
 
-  return outPdf;
+  await mkdirp(path.dirname(outPath));
+  await fsp.writeFile(outPath, buf);
+  return { bytes: buf.length, mime_type: meta.mime_type || "", sha256: meta.sha256 || "" };
 }
 
-// -------------------- EXPRESS APP --------------------
-const app = express();
-app.use(express.json({ limit: "20mb" }));
-app.use(morgan("tiny"));
+// -------------------- ROUTES --------------------
+app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
+app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
-app.get("/", (req, res) => {
-  res.status(200).send("webhook läuft");
-});
-
-// Meta verification
+// Meta Webhook verification (GET)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+  if (mode === "subscribe" && token && token === VERIFY_TOKEN) {
     console.log("✅ Webhook verified");
-    return res.status(200).send(challenge);
+    return res.status(200).send(String(challenge));
   }
+  console.log("❌ Webhook verify failed");
   return res.sendStatus(403);
 });
 
+// Incoming messages (POST)
 app.post("/webhook", async (req, res) => {
   try {
-    res.sendStatus(200); // sofort ack
+    const body = req.body || {};
+    console.log("Incoming webhook:", JSON.stringify(body));
 
-    const body = req.body;
-    if (!body?.entry?.length) return;
+    // We always respond 200 quickly to Meta
+    res.sendStatus(200);
 
-    cleanupSeenMemory();
+    // Extract WhatsApp messages
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const msgs = value?.messages || [];
+    if (!Array.isArray(msgs) || msgs.length === 0) return;
 
-    for (const entry of body.entry) {
-      for (const change of entry.changes || []) {
-        const value = change.value;
-        const messages = value?.messages || [];
-        const contacts = value?.contacts || [];
-        const waFromProfile = contacts?.[0]?.profile?.name || "";
+    for (const msg of msgs) {
+      const msgType = msg.type;
+      const from = msg.from;
+      const ts = Number(msg.timestamp || 0) * 1000 || Date.now();
 
-        for (const msg of messages) {
-          const messageId = msg.id;
-          const already = await markSeen(messageId);
-          if (already) continue;
+      const text =
+        msgType === "text" ? msg.text?.body :
+        msgType === "button" ? msg.button?.text :
+        msgType === "interactive" ? JSON.stringify(msg.interactive) :
+        "";
 
-          const from = msg.from; // wa_id
-          const ts = dayjs.unix(Number(msg.timestamp || "0")).format("YYYY-MM-DD HH:mm:ss");
+      const jobId = parseJobIdFromText(text);
+      const date = todayISO(new Date(ts));
 
-          // Baustellencode ermitteln
-          let code = null;
+      const baseDir = path.join(DATA_DIR, jobId, date);
+      await mkdirp(baseDir);
 
-          if (msg.type === "text") {
-            const txt = msg.text?.body || "";
-            const extracted = extractCodeFromText(txt);
-            if (extracted) {
-              code = extracted;
-              lastCodeBySender[from] = { code, updatedAt: nowIso() };
-              await saveState(lastCodeBySender);
-            } else {
-              const st = senderState(from);
-              if (st?.code && !isExpired(st.updatedAt)) code = st.code;
-            }
-          } else {
-            const st = senderState(from);
-            if (st?.code && !isExpired(st.updatedAt)) code = st.code;
-          }
+      // Save full raw webhook into log.jsonl
+      const logPath = path.join(baseDir, "log.jsonl");
+      await appendJsonl(logPath, {
+        at: new Date(ts).toISOString(),
+        from,
+        type: msgType,
+        text,
+        raw: msg,
+      });
 
-          // Wenn kein Code -> unknown + WhatsApp Prompt
-          if (!code) {
-            const unknownDir = await ensureJobDirs("unknown");
-            const info = {
-              ts,
-              from,
-              name: waFromProfile,
-              type: msg.type,
-              messageId
-            };
-            await appendJsonl(path.join(unknownDir.dayDir, "log.jsonl"), info);
-
-            // Prompt an den User
-            await whatsappSendText(from, DEFAULT_PROMPT_TEXT);
-            console.log(`✅ saved ${msg.type} for #unknown -> ${unknownDir.dayDir}`);
-            continue;
-          }
-
-          // ordner sicherstellen
-          const { dayDir } = await ensureJobDirs(code);
-
-          // TEXT
-          if (msg.type === "text") {
-            const txt = msg.text?.body || "";
-            const obj = { ts, from, name: waFromProfile, type: "text", text: txt, messageId };
-            await appendJsonl(path.join(dayDir, "log.jsonl"), obj);
-
-            console.log(`✅ saved text for #${code} -> ${path.join(dayDir, "log.jsonl")}`);
-
-            // Befehle
-            const t = txt.trim().toLowerCase();
-            if (t === "pdf" || t === "pdf bitte" || t === "protokoll") {
-              await whatsappSendText(from, `OK – ich erstelle das PDF für #${code} (${getDayFolder()}) und sende es per Mail.`);
-              await runPdfAndMailFor(code, getDayFolder(), { onlyThisCode: true });
-            }
-          }
-
-          // IMAGE
-          if (msg.type === "image") {
-            const mediaId = msg.image?.id;
-            const metaPath = path.join(dayDir, `${msg.timestamp || Date.now()}_${mediaId}.json`);
-            await fs.writeJson(metaPath, { ts, from, name: waFromProfile, messageId, mediaId, raw: msg }, { spaces: 2 });
-            console.log(`✅ saved image meta for #${code} -> ${metaPath}`);
-
-            // Download JPG
-            if (mediaId && WHATSAPP_TOKEN) {
-              try {
-                const mediaUrl = await metaGetMediaUrl(mediaId);
-                const outJpg = path.join(dayDir, `${msg.timestamp || Date.now()}_${mediaId}.jpg`);
-                await metaDownloadToFile(mediaUrl, outJpg);
-                console.log(`✅ saved image for #${code} -> ${outJpg}`);
-              } catch (e) {
-                console.log(`❌ media download failed: ${e?.response?.status || ""} ${e?.response?.data ? JSON.stringify(e.response.data) : e.message}`);
-              }
-            } else {
-              console.log("⚠️ image download skipped: missing mediaId or WHATSAPP_TOKEN");
-            }
-          }
-
-          // Andere Typen: nur loggen
-          if (msg.type !== "text" && msg.type !== "image") {
-            const obj = { ts, from, name: waFromProfile, type: msg.type, messageId, raw: msg };
-            await appendJsonl(path.join(dayDir, "log.jsonl"), obj);
-            console.log(`✅ saved ${msg.type} for #${code} -> ${path.join(dayDir, "log.jsonl")}`);
-          }
-        }
+      // If media, download and store with timestamp prefix
+      if (msgType === "image" && msg.image?.id) {
+        const mediaId = msg.image.id;
+        const filename = `${Math.floor(ts / 1000)}_${mediaId}.jpg`;
+        const out = path.join(baseDir, filename);
+        const info = await downloadWhatsAppMedia(mediaId, out);
+        console.log(`✅ saved image for #${jobId} -> ${out} (${info.bytes} bytes)`);
+      } else if (msgType === "document" && msg.document?.id) {
+        const mediaId = msg.document.id;
+        const ext = (msg.document.mime_type || "").includes("pdf") ? "pdf" : "bin";
+        const filename = `${Math.floor(ts / 1000)}_${mediaId}.${ext}`;
+        const out = path.join(baseDir, filename);
+        const info = await downloadWhatsAppMedia(mediaId, out);
+        console.log(`✅ saved document for #${jobId} -> ${out} (${info.bytes} bytes)`);
+      } else if (msgType === "audio" && msg.audio?.id) {
+        const mediaId = msg.audio.id;
+        const filename = `${Math.floor(ts / 1000)}_${mediaId}.ogg`;
+        const out = path.join(baseDir, filename);
+        const info = await downloadWhatsAppMedia(mediaId, out);
+        console.log(`✅ saved audio for #${jobId} -> ${out} (${info.bytes} bytes)`);
       }
     }
-  } catch (err) {
-    console.log("Webhook error:", err?.stack || err?.message || err);
-  }
-});
-
-// -------------------- ADMIN ROUTES --------------------
-app.get("/admin/run-daily", async (req, res) => {
-  if (!ensureAdmin(req, res)) return;
-  try {
-    await runDailyForAllCodes();
-    res.status(200).send("OK");
   } catch (e) {
-    res.status(500).send(e?.message || String(e));
+    console.error("Webhook handler error:", e);
+    // NOTE: response already sent above
   }
 });
 
-app.get("/admin/run-code", async (req, res) => {
-  if (!ensureAdmin(req, res)) return;
-  const code = normalizeCode("#" + String(req.query.code || ""));
-  const dayStr = String(req.query.day || getDayFolder());
-  if (!code) return res.status(400).send("Missing/invalid code");
-  try {
-    await runPdfAndMailFor(code, dayStr, { onlyThisCode: true });
-    res.status(200).send(`OK ${code} ${dayStr}`);
-  } catch (e) {
-    res.status(500).send(e?.message || String(e));
-  }
-});
-
-// -------------------- DAILY JOB (22:00 Europe/Vienna) --------------------
-// Render läuft oft auf UTC. Wir setzen TZ auf Europe/Vienna, wenn vorhanden.
-process.env.TZ = process.env.TZ || "Europe/Vienna";
-
-cron.schedule("0 22 * * *", async () => {
-  try {
-    console.log("🕙 22:00 job: daily PDFs + mail");
-    await runDailyForAllCodes();
-  } catch (e) {
-    console.log("❌ daily job error:", e?.stack || e?.message || e);
-  }
-});
-
-// -------------------- JOB LOGIC --------------------
-async function listCodes() {
-  await fs.ensureDir(DATA_DIR);
-  const items = await fs.readdir(DATA_DIR);
-  // codes sind Ordner, die nur Ziffern haben + exclude _state
-  return items
-    .filter((n) => n !== "_state")
-    .filter((n) => /^\d+$/.test(n))
+// -------------------- PDF BUILD --------------------
+async function listImages(dir) {
+  const files = await fsp.readdir(dir).catch(() => []);
+  return files
+    .filter(f => /\.(jpg|jpeg|png)$/i.test(f))
+    .map(f => path.join(dir, f))
     .sort();
 }
 
-async function runPdfAndMailFor(code, dayStr, opts = {}) {
-  const pdfPath = await buildPdfForCode(code, dayStr);
-
-  // Mail subject/text
-  const subject = `Baustellenprotokoll #${code} – ${dayStr}`;
-  const text = `Im Anhang: Baustellenprotokoll #${code} vom ${dayStr}.`;
-
-  await sendMailWithAttachments(subject, text, [
-    {
-      filename: path.basename(pdfPath),
-      path: pdfPath
-    }
-  ]);
-
-  console.log(`📧 mailed PDF for #${code} -> ${MAIL_TO || "(MAIL_TO fehlt)"}`);
-  return pdfPath;
+async function readTextLog(dir) {
+  const logPath = path.join(dir, "log.jsonl");
+  const exists = fs.existsSync(logPath);
+  if (!exists) return [];
+  const content = await fsp.readFile(logPath, "utf8");
+  const lines = content.split("\n").filter(Boolean);
+  const items = [];
+  for (const line of lines) {
+    try { items.push(JSON.parse(line)); } catch {}
+  }
+  return items;
 }
 
-async function runDailyForAllCodes() {
-  const dayStr = getDayFolder();
-  const codes = await listCodes();
-  if (codes.length === 0) {
-    console.log("ℹ️ daily: no codes found");
-    return;
+async function buildPdfForJobDay(jobId, dayDir, outPdfPath) {
+  // A3 landscape in points: 420mm x 297mm -> 1190.55 x 841.89
+  const PAGE_W = 1190.55;
+  const PAGE_H = 841.89;
+
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const images = await listImages(dayDir);
+  const logs = await readTextLog(dayDir);
+
+  // --- Cover page ---
+  {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
+    page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
+    page.drawText(`Datum: ${path.basename(dayDir)}`, { x: 60, y: PAGE_H - 180, size: 16, font });
+    page.drawText(`Fotos: ${images.length}`, { x: 60, y: PAGE_H - 210, size: 16, font });
+    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
+
+    const hint = "Hinweis: Fotos sind chronologisch nach Dateiname sortiert.";
+    page.drawText(hint, { x: 60, y: 60, size: 12, font, color: rgb(0.3,0.3,0.3) });
   }
 
-  // optional: 1 Mail mit mehreren PDFs oder pro Baustelle eine Mail
-  // hier: pro Baustelle eine Mail (übersichtlich)
-  for (const code of codes) {
-    try {
-      // nur wenn es heute etwas gibt
-      const dayDir = path.join(DATA_DIR, code, dayStr);
-      if (!(await fs.pathExists(dayDir))) continue;
+  // --- Photos: 6 per page (3x2) ---
+  const cols = 3, rows = 2;
+  const margin = 40;
+  const gutter = 18;
+  const cellW = (PAGE_W - margin * 2 - gutter * (cols - 1)) / cols;
+  const cellH = (PAGE_H - margin * 2 - gutter * (rows - 1)) / rows;
 
-      const files = await fs.readdir(dayDir);
-      const hasSomething =
-        files.some((f) => f === "log.jsonl") ||
-        files.some((f) => f.toLowerCase().endsWith(".jpg") || f.toLowerCase().endsWith(".jpeg"));
+  for (let i = 0; i < images.length; i += 6) {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    const chunk = images.slice(i, i + 6);
 
-      if (!hasSomething) continue;
+    for (let j = 0; j < chunk.length; j++) {
+      const imgPath = chunk[j];
+      const col = j % cols;
+      const row = Math.floor(j / cols);
 
-      await runPdfAndMailFor(code, dayStr);
-    } catch (e) {
-      console.log(`❌ daily failed for #${code}:`, e?.message || e);
+      const x0 = margin + col * (cellW + gutter);
+      const yTop = PAGE_H - margin - row * (cellH + gutter);
+      const captionH = 24;
+
+      // Fit image into (cellW x (cellH - captionH))
+      const targetW = Math.floor(cellW);
+      const targetH = Math.floor(cellH - captionH);
+
+      // Resize/compress to keep PDF smaller
+      let imgBuf = await fsp.readFile(imgPath);
+      try {
+        imgBuf = await sharp(imgBuf)
+          .resize({ width: targetW, height: targetH, fit: "inside" })
+          .jpeg({ quality: 72 })
+          .toBuffer();
+      } catch {
+        // if sharp fails, keep original
+      }
+
+      const img = await pdf.embedJpg(imgBuf).catch(async () => {
+        // try png
+        return await pdf.embedPng(imgBuf);
+      });
+
+      const { width, height } = img.scale(1);
+      const scale = Math.min(targetW / width, targetH / height);
+      const drawW = width * scale;
+      const drawH = height * scale;
+
+      const x = x0 + (targetW - drawW) / 2;
+      const y = (yTop - captionH) - drawH;
+
+      page.drawImage(img, { x, y, width: drawW, height: drawH });
+
+      // caption = original filename
+      const fname = path.basename(imgPath);
+      page.drawText(fname, {
+        x: x0,
+        y: yTop - captionH + 6,
+        size: 10,
+        font,
+        color: rgb(0.2, 0.2, 0.2),
+      });
     }
   }
+
+  const bytes = await pdf.save();
+  await mkdirp(path.dirname(outPdfPath));
+  await fsp.writeFile(outPdfPath, bytes);
+  return { pages: pdf.getPageCount(), bytes: bytes.length };
 }
 
-// -------------------- START --------------------
-app.listen(PORT, async () => {
-  await fs.ensureDir(DATA_DIR);
-  await fs.ensureDir(STATE_DIR);
+// -------------------- EMAIL --------------------
+function makeMailer() {
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: false,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+}
 
-  console.log(`Server läuft auf Port ${PORT}`);
+async function sendMailWithPdf({ to, subject, text, pdfPath }) {
+  const mailer = makeMailer();
+  const pdfBuf = await fsp.readFile(pdfPath);
+  const info = await mailer.sendMail({
+    from: MAIL_FROM,
+    to,
+    subject,
+    text,
+    attachments: [
+      { filename: path.basename(pdfPath), content: pdfBuf, contentType: "application/pdf" },
+    ],
+  });
+  return info;
+}
+
+// -------------------- ADMIN: RUN DAILY --------------------
+app.get("/admin/run-daily", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    // Run for "today" by default, can override ?date=YYYY-MM-DD
+    const date = req.query.date || todayISO();
+    const to = req.query.to || MAIL_TO_DEFAULT;
+
+    if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
+
+    // For each jobId folder, build PDF for that day if folder exists
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const results = [];
+
+    for (const jobId of jobIds) {
+      const dayDir = path.join(DATA_DIR, jobId, date);
+      if (!fs.existsSync(dayDir)) continue;
+
+      const outPdf = path.join(DATA_DIR, jobId, date, `Baustellenprotokoll_${jobId}_${date}.pdf`);
+      const built = await buildPdfForJobDay(jobId, dayDir, outPdf);
+
+      // send
+      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+      const body = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
+      const sent = await sendMailWithPdf({ to, subject, text: body, pdfPath: outPdf });
+
+      results.push({ jobId, date, pdf: outPdf, pages: built.pages, bytes: built.bytes, messageId: sent.messageId });
+      console.log(`📧 sent ${jobId} ${date} -> ${to} (${built.pages} pages)`);
+    }
+
+    res.json({ ok: true, date, to, count: results.length, results });
+  } catch (e) {
+    console.error("admin/run-daily error:", e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Simple SMTP test
+app.get("/admin/test-mail", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const to = req.query.to || MAIL_TO_DEFAULT;
+    if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
+    const mailer = makeMailer();
+    const info = await mailer.sendMail({
+      from: MAIL_FROM,
+      to,
+      subject: "Testmail (Brevo SMTP)",
+      text: "Wenn du das liest, passt SMTP ✅",
+    });
+    res.json({ ok: true, messageId: info.messageId });
+  } catch (e) {
+    console.error("admin/test-mail error:", e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+ensureEnvOrThrow();
+
+app.listen(PORT, () => {
+  console.log(`✅ Server läuft auf Port ${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
-  console.log(`STATE_FILE=${STATE_FILE}`);
-  console.log(`PHONE_NUMBER_ID set: ${Boolean(PHONE_NUMBER_ID)}`);
 });
