@@ -3,103 +3,104 @@ import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc.js";
-import timezone from "dayjs/plugin/timezone.js";
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
+export async function buildPdfA3Landscape({ title, items, outPath }) {
+  await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
 
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-}
+  const doc = new PDFDocument({
+    size: "A3",
+    layout: "landscape",
+    margin: 28
+  });
 
-function listImages(dir) {
-  if (!fs.existsSync(dir)) return [];
-  const exts = new Set([".jpg", ".jpeg", ".png", ".webp"]);
-  return fs
-    .readdirSync(dir)
-    .filter((f) => exts.has(path.extname(f).toLowerCase()))
-    .map((f) => path.join(dir, f))
-    .sort();
-}
-
-async function fitImageToJpegBuffer(file, maxW, maxH, quality = 70) {
-  const img = sharp(file).rotate();
-  const meta = await img.metadata();
-
-  const scale = Math.min(maxW / (meta.width || maxW), maxH / (meta.height || maxH), 1);
-  const w = Math.floor((meta.width || maxW) * scale);
-  const h = Math.floor((meta.height || maxH) * scale);
-
-  return await img.resize(w, h, { fit: "inside" }).jpeg({ quality }).toBuffer();
-}
-
-export async function buildPdfForSiteToday({ dataDir, site, tz }) {
-  const date = dayjs().tz(tz).format("YYYY-MM-DD");
-  const dayDir = path.join(dataDir, site, date);
-  const outDir = path.join(dataDir, site, date);
-  ensureDir(outDir);
-
-  const outPath = path.join(outDir, `Baustellenprotokoll_${site}_${date}.pdf`);
-  const images = listImages(dayDir);
-
-  // A3 landscape: 420 x 297 mm
-  const doc = new PDFDocument({ size: "A3", layout: "landscape", margin: 24 });
   const stream = fs.createWriteStream(outPath);
   doc.pipe(stream);
 
-  // Title page
-  doc.fontSize(28).text("Baustellenprotokoll", { align: "left" });
-  doc.moveDown(0.5);
-  doc.fontSize(18).text(`Baustelle #${site}`);
-  doc.fontSize(14).text(`Datum: ${date}`);
+  // Titel
+  doc.fontSize(20).text(title, { align: "left" });
+  doc.moveDown(0.6);
+  doc.fontSize(10).fillColor("#444").text(`Erstellt: ${new Date().toLocaleString()}`);
+  doc.fillColor("#000");
   doc.moveDown(1);
-  doc.fontSize(10).fillColor("#666").text("Automatisch erstellt.");
-  doc.addPage();
 
-  // Grid: 3x2
-  const cols = 3;
-  const rows = 2;
-  const gap = 12;
-
+  // Layout: 6 Fotos pro Seite (3x2)
   const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
 
+  const cols = 3;
+  const rows = 2;
+  const gap = 14;
+
   const cellW = (pageW - gap * (cols - 1)) / cols;
-  const cellH = (pageH - gap * (rows - 1)) / rows;
+  const cellH = (pageH - 120 - gap * (rows - 1)) / rows; // oben Platz für Textblock
 
-  const captionH = 16;
-  const imgMaxW = cellW;
-  const imgMaxH = cellH - captionH;
+  let photoIndexOnPage = 0;
 
-  let idx = 0;
-  for (const file of images) {
-    const pos = idx % (cols * rows);
-    if (idx > 0 && pos === 0) doc.addPage();
+  const startNewPageIfNeeded = () => {
+    if (photoIndexOnPage === 0) return;
+    if (photoIndexOnPage >= 6) {
+      doc.addPage();
+      photoIndexOnPage = 0;
+    }
+  };
 
-    const r = Math.floor(pos / cols);
-    const c = pos % cols;
+  // Textblock (chronologisch)
+  doc.fontSize(11).text("Protokoll (Text):", { underline: true });
+  doc.moveDown(0.3);
+  doc.fontSize(10);
+  for (const it of items) {
+    if (it.type === "text") {
+      doc.text(`• ${it.when}  ${it.from}: ${it.text}`);
+    }
+  }
+  doc.moveDown(0.8);
 
-    const x = doc.page.margins.left + c * (cellW + gap);
-    const y = doc.page.margins.top + r * (cellH + gap);
-
-    // image
-    const buf = await fitImageToJpegBuffer(file, imgMaxW, imgMaxH, 70);
-    doc.image(buf, x, y, { fit: [imgMaxW, imgMaxH], align: "center", valign: "center" });
-
-    // caption = original filename
-    const base = path.basename(file);
-    doc
-      .fontSize(9)
-      .fillColor("#000")
-      .text(base, x, y + imgMaxH + 2, { width: cellW, align: "center" });
-
-    idx++;
+  // Fotos
+  const photos = items.filter((x) => x.type === "image");
+  if (photos.length) {
+    doc.fontSize(11).text("Fotos:", { underline: true });
+    doc.moveDown(0.4);
   }
 
-  if (images.length === 0) {
-    doc.fontSize(14).text("Keine Bilder für heute gefunden.", { align: "left" });
+  for (const p of photos) {
+    startNewPageIfNeeded();
+
+    const col = photoIndexOnPage % cols;
+    const row = Math.floor(photoIndexOnPage / cols);
+
+    const x = doc.page.margins.left + col * (cellW + gap);
+    const yBase = doc.y + row * (cellH + gap);
+
+    // Bild in "contain" (nicht verzerren)
+    // Wir rendern auf eine moderate Breite, damit PDF klein bleibt.
+    const imgBuf = await sharp(p.filePath)
+      .rotate()
+      .resize({
+        width: Math.floor(cellW * 1.2), // etwas Reserve
+        height: Math.floor(cellH * 1.2),
+        fit: "inside",
+        withoutEnlargement: true
+      })
+      .jpeg({ quality: 72 }) // PDF klein halten
+      .toBuffer();
+
+    // Bild platzieren
+    doc.image(imgBuf, x, yBase, { fit: [cellW, cellH], align: "center", valign: "center" });
+
+    // Dateiname darunter
+    doc.fontSize(8).fillColor("#333").text(p.fileName, x, yBase + cellH + 4, {
+      width: cellW,
+      align: "center"
+    });
+    doc.fillColor("#000");
+
+    photoIndexOnPage += 1;
+
+    // Wenn 3 Bilder in einer Reihe fertig sind, Cursor nicht verschieben lassen – wir arbeiten mit yBase.
+    // Am Ende der 2 Reihen setzen wir doc.y passend.
+    if (photoIndexOnPage % 6 === 0) {
+      doc.moveDown(0.5);
+    }
   }
 
   doc.end();
@@ -110,27 +111,4 @@ export async function buildPdfForSiteToday({ dataDir, site, tz }) {
   });
 
   return outPath;
-}
-
-export async function buildDailyPdfs({ dataDir, tz, mailFn }) {
-  // alle Baustellenordner durchgehen und für HEUTE erzeugen, wenn es Bilder gibt
-  const date = dayjs().tz(tz).format("YYYY-MM-DD");
-  const sites = fs.existsSync(dataDir)
-    ? fs.readdirSync(dataDir).filter((d) => /^\d+$/.test(d))
-    : [];
-
-  const done = [];
-  for (const site of sites) {
-    const dayDir = path.join(dataDir, site, date);
-    if (!fs.existsSync(dayDir)) continue;
-
-    const imgs = listImages(dayDir);
-    if (imgs.length === 0) continue;
-
-    const pdf = await buildPdfForSiteToday({ dataDir, site, tz });
-    if (mailFn) await mailFn(site, pdf);
-    done.push({ site, pdf, images: imgs.length });
-  }
-
-  return { date, count: done.length, done };
 }
