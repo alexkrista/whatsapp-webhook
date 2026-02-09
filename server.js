@@ -1,354 +1,318 @@
 import express from "express";
-import multer from "multer";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
 
-const app = express();
-
-// ---------- Config ----------
+// =====================
+// Config / ENV
+// =====================
 const PORT = process.env.PORT || 10000;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // required for sending replies
+
+// Render Disk empfohlen:
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
-
 const STATE_DIR = path.join(DATA_DIR, "_state");
-const STATE_FILE = path.join(STATE_DIR, "state.json");
+const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
 
-const UNKNOWN_REPLY_TEXT = "Bitte Baustellennummer mit # davor senden";
-const UNKNOWN_REPLY_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+// Meta Verify Token (Webhook Setup in Meta Dev Console)
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 
-// ---------- Helpers ----------
-function todayISO() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+// WhatsApp Cloud API
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // wichtig fürs Antworten
+
+const UNKNOWN_REPLY_TEXT =
+  'Bitte Baustellennummer mit # davor senden';
+
+// "10 Minuten Regel" vorbereiten (in späterem Schritt aktivieren)
+const CODE_TTL_MS = 10 * 60 * 1000;
+
+// =====================
+// Helpers: FS + State
+// =====================
+function ensureDir(p) {
+  fs.mkdirSync(p, { recursive: true });
 }
 
-function tsUnix() {
-  return Math.floor(Date.now() / 1000);
-}
-
-async function ensureDir(dir) {
-  await fs.promises.mkdir(dir, { recursive: true });
-}
-
-function safeJsonParse(txt, fallback) {
+function safeJsonParse(str, fallback) {
   try {
-    return JSON.parse(txt);
+    return JSON.parse(str);
   } catch {
     return fallback;
   }
 }
 
-async function loadState() {
-  await ensureDir(STATE_DIR);
-  try {
-    const txt = await fs.promises.readFile(STATE_FILE, "utf8");
-    const parsed = safeJsonParse(txt, {});
-
-    // robust defaults
-    const state = {
-      lastCodeBySender: parsed.lastCodeBySender && typeof parsed.lastCodeBySender === "object" ? parsed.lastCodeBySender : {},
-      lastUnknownReplyAtBySender:
-        parsed.lastUnknownReplyAtBySender && typeof parsed.lastUnknownReplyAtBySender === "object"
-          ? parsed.lastUnknownReplyAtBySender
-          : {},
-    };
-    return state;
-  } catch {
-    return { lastCodeBySender: {}, lastUnknownReplyAtBySender: {} };
-  }
+function loadState() {
+  ensureDir(STATE_DIR);
+  if (!fs.existsSync(STATE_FILE)) return {};
+  const raw = fs.readFileSync(STATE_FILE, "utf8");
+  return safeJsonParse(raw, {});
 }
 
-async function saveState(state) {
-  await ensureDir(STATE_DIR);
-  const tmp = STATE_FILE + ".tmp";
-  await fs.promises.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
-  await fs.promises.rename(tmp, STATE_FILE);
+function saveState(state) {
+  ensureDir(STATE_DIR);
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
-function extractCodeFromText(text) {
-  if (!text) return null;
-  // matches: #260016 or # 260016
-  const m = text.match(/#\s*([0-9]{3,20})/);
-  return m ? m[1] : null;
+// state: { "<wa_id>": { code: "260016", ts: 1700000000000 } }
+let state = loadState();
+
+function getSenderState(sender) {
+  return state?.[sender] || null;
 }
 
-function getExtFromMime(mime) {
-  if (!mime) return "";
-  const map = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "video/mp4": ".mp4",
-    "audio/mpeg": ".mp3",
-    "audio/ogg": ".ogg",
-    "application/pdf": ".pdf",
-  };
-  return map[mime] || "";
+function setSenderCode(sender, code) {
+  state[sender] = { code, ts: Date.now() };
+  saveState(state);
 }
 
-function randomId(n = 8) {
-  return crypto.randomBytes(n).toString("hex");
+function getActiveCode(sender) {
+  const st = getSenderState(sender);
+  if (!st?.code) return null;
+
+  // TTL optional (derzeit NICHT hart entfernen, nur vorbereitet)
+  // Wenn du willst, können wir in Schritt 3 "nach 10 Minuten ohne neue #..." zurücksetzen.
+  // if (Date.now() - st.ts > CODE_TTL_MS) return null;
+
+  return st.code;
 }
 
-async function appendJsonl(filePath, obj) {
-  await ensureDir(path.dirname(filePath));
-  await fs.promises.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
-}
-
-async function downloadWhatsAppMedia(mediaId) {
-  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
-
-  // 1) get media URL
-  const metaUrl = `https://graph.facebook.com/v22.0/${mediaId}`;
-  const r1 = await fetch(metaUrl, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-  });
-  if (!r1.ok) {
-    const t = await r1.text();
-    throw new Error(`Media meta fetch failed: ${r1.status} ${t}`);
-  }
-  const meta = await r1.json();
-  const url = meta.url;
-  const mime = meta.mime_type || meta.mimeType || "";
-
-  // 2) download file bytes
-  const r2 = await fetch(url, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-  });
-  if (!r2.ok) {
-    const t = await r2.text();
-    throw new Error(`Media download failed: ${r2.status} ${t}`);
-  }
-  const buf = Buffer.from(await r2.arrayBuffer());
-  return { buf, mime };
-}
-
+// =====================
+// Helpers: WhatsApp Reply
+// =====================
 async function sendWhatsAppText(toWaId, text) {
-  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) return;
+  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
+    console.warn("⚠️ Cannot reply: WHATSAPP_TOKEN or PHONE_NUMBER_ID missing.");
+    return;
+  }
 
   const url = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-  const body = {
+
+  const payload = {
     messaging_product: "whatsapp",
     to: toWaId,
     type: "text",
     text: { body: text },
   };
 
-  const r = await fetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
 
-  if (!r.ok) {
-    const t = await r.text();
-    console.error("WhatsApp send failed:", r.status, t);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error("❌ WhatsApp send failed:", res.status, body);
   }
 }
 
-// ---------- Express Middleware ----------
-app.use(express.json({ limit: "25mb" }));
-const upload = multer({ storage: multer.memoryStorage() });
+// =====================
+// Helpers: Save payloads
+// =====================
+function todayFolder() {
+  const d = new Date();
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
-// ---------- Routes ----------
+function writeJsonl(filePath, obj) {
+  const line = JSON.stringify(obj);
+  fs.appendFileSync(filePath, line + "\n", "utf8");
+}
+
+function normalizeCode(code) {
+  return String(code).replace(/[^0-9A-Za-z_-]/g, "").trim();
+}
+
+function extractCodeFromText(text) {
+  // findet z.B. "#260016" auch wenn davor/dahinter Text steht
+  const m = String(text || "").match(/#([0-9A-Za-z_-]{2,})/);
+  return m ? normalizeCode(m[1]) : null;
+}
+
+function getProjectDir(codeOrUnknown) {
+  const code = codeOrUnknown || "unknown";
+  return path.join(DATA_DIR, code, todayFolder());
+}
+
+// =====================
+// Express App
+// =====================
+const app = express();
+app.use(express.json({ limit: "20mb" }));
+
 app.get("/", (req, res) => {
-  res.status(200).send("webhook läuft");
+  res.status(200).send("Webhook läuft ✅");
 });
 
-// WhatsApp verify
+// Meta Webhook Verification (GET)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
+    console.log("✅ Webhook verified");
+    res.status(200).send(challenge);
+    return;
   }
-  return res.sendStatus(403);
+
+  console.warn("❌ Webhook verification failed");
+  res.sendStatus(403);
 });
 
-// WhatsApp incoming
+// Incoming Webhooks (POST)
 app.post("/webhook", async (req, res) => {
   try {
-    const payload = req.body;
+    const body = req.body;
 
-    // ACK fast
+    // Immer sofort antworten, damit Meta nicht erneut schickt
     res.sendStatus(200);
 
-    const state = await loadState();
+    // Debug log (optional)
+    console.log("Incoming webhook:", JSON.stringify(body));
 
-    const entry = payload?.entry?.[0];
+    const entry = body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
     const messages = value?.messages || [];
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return;
-    }
+    if (!Array.isArray(messages) || messages.length === 0) return;
 
+    const metadata = value?.metadata || {};
+    const waPhoneId = metadata?.phone_number_id;
+
+    // Nachrichten verarbeiten
     for (const msg of messages) {
-      const from = msg.from; // wa_id
-      const type = msg.type;
+      const from = msg?.from; // wa_id
+      if (!from) continue;
 
-      // ensure objects exist
-      state.lastCodeBySender = state.lastCodeBySender || {};
-      state.lastUnknownReplyAtBySender = state.lastUnknownReplyAtBySender || {};
+      // 1) Text: evtl. Code setzen
+      if (msg?.type === "text") {
+        const text = msg?.text?.body || "";
+        const code = extractCodeFromText(text);
 
-      // If text contains code, remember it
-      if (type === "text") {
-        const body = msg?.text?.body || "";
-        const code = extractCodeFromText(body);
         if (code) {
-          state.lastCodeBySender[from] = code;
-          await saveState(state);
+          setSenderCode(from, code);
 
-          // also log text under that code
-          const codeDir = path.join(DATA_DIR, code, todayISO());
-          const logFile = path.join(codeDir, "log.jsonl");
-          await appendJsonl(logFile, {
-            kind: "text",
+          // Logging
+          const dir = getProjectDir(code);
+          ensureDir(dir);
+          const logFile = path.join(dir, "log.jsonl");
+          writeJsonl(logFile, {
+            ts: Date.now(),
             from,
-            at: new Date().toISOString(),
-            whatsapp_timestamp: msg.timestamp,
-            text: body,
-            code,
+            type: "text",
+            body: text,
+            note: `code_set:${code}`,
           });
 
           console.log(`✅ saved text for #${code} -> ${logFile}`);
           continue;
         }
-      }
 
-      // Determine active code (last known)
-      const activeCode = state.lastCodeBySender[from] || "unknown";
-      const baseDir = path.join(DATA_DIR, activeCode, todayISO());
-      const logFile = path.join(baseDir, "log.jsonl");
+        // Kein Code im Text: je nach aktivem Code speichern
+        const active = getActiveCode(from);
+        const codeOrUnknown = active || "unknown";
+        const dir = getProjectDir(codeOrUnknown);
+        ensureDir(dir);
 
-      if (type === "text") {
-        const body = msg?.text?.body || "";
-        await appendJsonl(logFile, {
-          kind: "text",
+        const logFile = path.join(dir, "log.jsonl");
+        writeJsonl(logFile, {
+          ts: Date.now(),
           from,
-          at: new Date().toISOString(),
-          whatsapp_timestamp: msg.timestamp,
-          text: body,
-          code: activeCode,
+          type: "text",
+          body: text,
         });
-        console.log(`✅ saved text for #${activeCode} -> ${logFile}`);
-      } else {
-        // media types: image, video, audio, document, sticker...
-        const mediaObj = msg[type] || {};
-        const mediaId = mediaObj.id;
-        const caption = mediaObj.caption || "";
-        let filename = mediaObj.filename || "";
 
-        if (!mediaId) {
-          // still log something
-          await appendJsonl(logFile, {
-            kind: "media",
-            from,
-            at: new Date().toISOString(),
-            whatsapp_timestamp: msg.timestamp,
-            media_type: type,
-            note: "no media id found",
-            code: activeCode,
-          });
-          console.log(`⚠️ media without id for #${activeCode}`);
-        } else {
-          const { buf, mime } = await downloadWhatsAppMedia(mediaId);
-          const ext = path.extname(filename) || getExtFromMime(mime) || "";
-          const finalName = `${tsUnix()}_${randomId(6)}${ext || ""}`;
-          const filePath = path.join(baseDir, finalName);
+        console.log(`✅ saved text for #${codeOrUnknown} -> ${logFile}`);
 
-          await ensureDir(baseDir);
-          await fs.promises.writeFile(filePath, buf);
-
-          await appendJsonl(logFile, {
-            kind: "media",
-            from,
-            at: new Date().toISOString(),
-            whatsapp_timestamp: msg.timestamp,
-            media_type: type,
-            mime,
-            file: finalName,
-            caption,
-            code: activeCode,
-          });
-
-          console.log(`✅ saved ${type} for #${activeCode} -> ${filePath}`);
+        if (!active) {
+          await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
         }
+        continue;
       }
 
-      // If unknown: reply with cooldown
-      if (activeCode === "unknown") {
-        const last = state.lastUnknownReplyAtBySender[from] || 0;
-        const now = Date.now();
-        if (now - last >= UNKNOWN_REPLY_COOLDOWN_MS) {
+      // 2) Bilder (image)
+      if (msg?.type === "image") {
+        const active = getActiveCode(from);
+        const codeOrUnknown = active || "unknown";
+
+        const dir = getProjectDir(codeOrUnknown);
+        ensureDir(dir);
+
+        // Wir speichern erstmal nur METADATEN (kein Download des Bildes hier)
+        // -> Bild-Download machen wir im nächsten Schritt, wenn du willst.
+        const fileName = `${msg?.timestamp || Date.now()}_${msg?.image?.id || crypto.randomUUID()}.json`;
+        const filePath = path.join(dir, fileName);
+
+        fs.writeFileSync(
+          filePath,
+          JSON.stringify(
+            {
+              ts: Date.now(),
+              from,
+              type: "image",
+              wa_image_id: msg?.image?.id || null,
+              mime_type: msg?.image?.mime_type || null,
+              sha256: msg?.image?.sha256 || null,
+              caption: msg?.image?.caption || null,
+              raw: msg,
+            },
+            null,
+            2
+          ),
+          "utf8"
+        );
+
+        console.log(`✅ saved image meta for #${codeOrUnknown} -> ${filePath}`);
+
+        if (!active) {
           await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
-          state.lastUnknownReplyAtBySender[from] = now;
-          await saveState(state);
-          console.log(`↩️ replied to ${from} (unknown) with cooldown`);
-        } else {
-          console.log(`⏳ cooldown active for ${from} (unknown)`);
         }
-      } else {
-        // keep state updated (optional)
-        await saveState(state);
+        continue;
+      }
+
+      // 3) Alles andere: speichern als raw
+      const active = getActiveCode(from);
+      const codeOrUnknown = active || "unknown";
+      const dir = getProjectDir(codeOrUnknown);
+      ensureDir(dir);
+
+      const logFile = path.join(dir, "log.jsonl");
+      writeJsonl(logFile, {
+        ts: Date.now(),
+        from,
+        type: msg?.type || "unknown_type",
+        raw: msg,
+      });
+
+      console.log(`✅ saved message type=${msg?.type} for #${codeOrUnknown} -> ${logFile}`);
+
+      if (!active) {
+        await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
       }
     }
   } catch (err) {
     console.error("Webhook error:", err);
-    // response already sent
+    // response wurde schon gesendet
   }
 });
 
-// Optional manual upload endpoint (falls du willst)
-app.post("/upload", upload.single("file"), async (req, res) => {
-  try {
-    const code = req.body.code || "unknown";
-    const file = req.file;
-    if (!file) return res.status(400).send("missing file");
+// Health
+app.get("/health", (req, res) => res.status(200).json({ ok: true }));
 
-    const dir = path.join(DATA_DIR, code, todayISO());
-    await ensureDir(dir);
-    const ext = path.extname(file.originalname) || "";
-    const name = `${tsUnix()}_${randomId(6)}${ext}`;
-    const filePath = path.join(dir, name);
-    await fs.promises.writeFile(filePath, file.buffer);
-
-    res.json({ ok: true, savedAs: filePath });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e) });
-  }
-});
-
-// ---------- Start ----------
-(async () => {
-  await ensureDir(DATA_DIR);
-  await ensureDir(STATE_DIR);
-  const state = await loadState();
+app.listen(PORT, () => {
+  ensureDir(DATA_DIR);
+  ensureDir(STATE_DIR);
 
   console.log(`Server läuft auf Port ${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
   console.log(`STATE_FILE=${STATE_FILE}`);
   console.log(`PHONE_NUMBER_ID set: ${Boolean(PHONE_NUMBER_ID)}`);
-
-  // ensure defaults
-  state.lastCodeBySender = state.lastCodeBySender || {};
-  state.lastUnknownReplyAtBySender = state.lastUnknownReplyAtBySender || {};
-  await saveState(state);
-
-  app.listen(PORT, () => {
-    console.log("==> Your service is live 🚀");
-  });
-})();
+});
