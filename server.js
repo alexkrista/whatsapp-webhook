@@ -1,92 +1,106 @@
 import express from "express";
-import crypto from "crypto";
 import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 
-// =====================
-// Config / ENV
-// =====================
-const PORT = process.env.PORT || 10000;
+const app = express();
 
-// Render Disk empfohlen:
+// --- Config ---
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
-const STATE_DIR = path.join(DATA_DIR, "_state");
-const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
-
-// Meta Verify Token (Webhook Setup in Meta Dev Console)
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
-
-// WhatsApp Cloud API
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // wichtig fürs Antworten
+const PHONE_NUMBER_ID_ENV = process.env.PHONE_NUMBER_ID || ""; // optional
+const GRAPH_VERSION = process.env.GRAPH_VERSION || "v22.0";
 
-const UNKNOWN_REPLY_TEXT =
-  'Bitte Baustellennummer mit # davor senden';
+const STATE_DIR = path.join(DATA_DIR, "_state");
+const STATE_FILE = path.join(STATE_DIR, "state.json");
 
-// "10 Minuten Regel" vorbereiten (in späterem Schritt aktivieren)
-const CODE_TTL_MS = 10 * 60 * 1000;
+// WhatsApp sometimes sends large payloads
+app.use(express.json({ limit: "25mb" }));
 
-// =====================
-// Helpers: FS + State
-// =====================
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
+// --- Helpers ---
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function safeJsonParse(str, fallback) {
+function ymd(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+async function ensureDir(dir) {
+  await fsp.mkdir(dir, { recursive: true });
+}
+
+async function loadState() {
+  await ensureDir(STATE_DIR);
+  if (!fs.existsSync(STATE_FILE)) {
+    const init = {
+      lastCodeBySender: {},        // { "4366...": "260016" }
+      lastPromptAtBySender: {},    // { "4366...": 1700000000 }
+      lastPhoneNumberId: "",       // last seen from webhook metadata
+      seenMessageIds: {},          // { "wamid....": 1700000000 } for dedup
+    };
+    await fsp.writeFile(STATE_FILE, JSON.stringify(init, null, 2), "utf8");
+    return init;
+  }
+  const raw = await fsp.readFile(STATE_FILE, "utf8");
   try {
-    return JSON.parse(str);
+    return JSON.parse(raw);
   } catch {
-    return fallback;
+    // if file got corrupted, start fresh
+    const init = {
+      lastCodeBySender: {},
+      lastPromptAtBySender: {},
+      lastPhoneNumberId: "",
+      seenMessageIds: {},
+    };
+    await fsp.writeFile(STATE_FILE, JSON.stringify(init, null, 2), "utf8");
+    return init;
   }
 }
 
-function loadState() {
-  ensureDir(STATE_DIR);
-  if (!fs.existsSync(STATE_FILE)) return {};
-  const raw = fs.readFileSync(STATE_FILE, "utf8");
-  return safeJsonParse(raw, {});
+async function saveState(state) {
+  await ensureDir(STATE_DIR);
+  await fsp.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
-function saveState(state) {
-  ensureDir(STATE_DIR);
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+function extractCodeFromText(text) {
+  // Accept: "#260016" anywhere in message
+  const m = String(text || "").match(/#(\d{3,})/);
+  return m ? m[1] : null;
 }
 
-// state: { "<wa_id>": { code: "260016", ts: 1700000000000 } }
-let state = loadState();
-
-function getSenderState(sender) {
-  return state?.[sender] || null;
+function mimeToExt(mime) {
+  if (!mime) return "bin";
+  const m = mime.toLowerCase();
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("png")) return "png";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("gif")) return "gif";
+  if (m.includes("pdf")) return "pdf";
+  return "bin";
 }
 
-function setSenderCode(sender, code) {
-  state[sender] = { code, ts: Date.now() };
-  saveState(state);
+async function appendJsonl(filePath, obj) {
+  const line = JSON.stringify(obj) + "\n";
+  await fsp.appendFile(filePath, line, "utf8");
 }
 
-function getActiveCode(sender) {
-  const st = getSenderState(sender);
-  if (!st?.code) return null;
-
-  // TTL optional (derzeit NICHT hart entfernen, nur vorbereitet)
-  // Wenn du willst, können wir in Schritt 3 "nach 10 Minuten ohne neue #..." zurücksetzen.
-  // if (Date.now() - st.ts > CODE_TTL_MS) return null;
-
-  return st.code;
-}
-
-// =====================
-// Helpers: WhatsApp Reply
-// =====================
-async function sendWhatsAppText(toWaId, text) {
-  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-    console.warn("⚠️ Cannot reply: WHATSAPP_TOKEN or PHONE_NUMBER_ID missing.");
+async function sendWhatsAppText(toWaId, text, phoneNumberIdFromWebhook = "") {
+  const phoneNumberId = PHONE_NUMBER_ID_ENV || phoneNumberIdFromWebhook;
+  if (!WHATSAPP_TOKEN) {
+    console.log("⚠️ WHATSAPP_TOKEN fehlt – kann keine Antwort senden.");
+    return;
+  }
+  if (!phoneNumberId) {
+    console.log("⚠️ PHONE_NUMBER_ID fehlt – kann keine Antwort senden.");
     return;
   }
 
-  const url = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-
+  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/messages`;
   const payload = {
     messaging_product: "whatsapp",
     to: toWaId,
@@ -104,165 +118,186 @@ async function sendWhatsAppText(toWaId, text) {
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.error("❌ WhatsApp send failed:", res.status, body);
+    const t = await res.text().catch(() => "");
+    console.log(`⚠️ WhatsApp send failed (${res.status}): ${t}`);
   }
 }
 
-// =====================
-// Helpers: Save payloads
-// =====================
-function todayFolder() {
-  const d = new Date();
-  const yyyy = String(d.getFullYear());
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+// Download media bytes from WhatsApp
+async function fetchMediaBinary(mediaId) {
+  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
+
+  // 1) get media metadata incl. url + mime_type
+  const metaUrl = `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}?fields=url,mime_type`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+  });
+
+  if (!metaRes.ok) {
+    const t = await metaRes.text().catch(() => "");
+    throw new Error(`Meta fetch failed (${metaRes.status}): ${t}`);
+  }
+
+  const meta = await metaRes.json();
+  const mediaUrl = meta?.url;
+  const mime = meta?.mime_type || "";
+
+  if (!mediaUrl) throw new Error("No media url in metadata");
+
+  // 2) download bytes from url using token
+  const binRes = await fetch(mediaUrl, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+  });
+
+  if (!binRes.ok) {
+    const t = await binRes.text().catch(() => "");
+    throw new Error(`Binary fetch failed (${binRes.status}): ${t}`);
+  }
+
+  const arrayBuffer = await binRes.arrayBuffer();
+  const buf = Buffer.from(arrayBuffer);
+
+  return { buf, meta, mime };
 }
 
-function writeJsonl(filePath, obj) {
-  const line = JSON.stringify(obj);
-  fs.appendFileSync(filePath, line + "\n", "utf8");
+function unixToDate(ts) {
+  // ts is string seconds
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return new Date();
+  return new Date(n * 1000);
 }
 
-function normalizeCode(code) {
-  return String(code).replace(/[^0-9A-Za-z_-]/g, "").trim();
-}
-
-function extractCodeFromText(text) {
-  // findet z.B. "#260016" auch wenn davor/dahinter Text steht
-  const m = String(text || "").match(/#([0-9A-Za-z_-]{2,})/);
-  return m ? normalizeCode(m[1]) : null;
-}
-
-function getProjectDir(codeOrUnknown) {
-  const code = codeOrUnknown || "unknown";
-  return path.join(DATA_DIR, code, todayFolder());
-}
-
-// =====================
-// Express App
-// =====================
-const app = express();
-app.use(express.json({ limit: "20mb" }));
-
+// --- Routes ---
 app.get("/", (req, res) => {
-  res.status(200).send("Webhook läuft ✅");
+  res.status(200).send("webhook läuft");
 });
 
-// Meta Webhook Verification (GET)
+// Meta webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
-    res.status(200).send(challenge);
-    return;
+  if (mode === "subscribe" && token && challenge) {
+    if (token === VERIFY_TOKEN) {
+      console.log("✅ Webhook verified");
+      return res.status(200).send(String(challenge));
+    }
+    console.log("❌ Webhook verify failed (token mismatch)");
+    return res.sendStatus(403);
   }
 
-  console.warn("❌ Webhook verification failed");
-  res.sendStatus(403);
+  return res.status(200).send("ok");
 });
 
-// Incoming Webhooks (POST)
+// Main webhook receiver
 app.post("/webhook", async (req, res) => {
   try {
     const body = req.body;
 
-    // Immer sofort antworten, damit Meta nicht erneut schickt
-    res.sendStatus(200);
-
-    // Debug log (optional)
     console.log("Incoming webhook:", JSON.stringify(body));
 
+    // quick ack to Meta
+    res.sendStatus(200);
+
+    const state = await loadState();
+
     const entry = body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const field = changes?.field;
+
+    if (field !== "messages" || !value) return;
+
+    const phoneNumberIdFromWebhook = value?.metadata?.phone_number_id || "";
+    if (phoneNumberIdFromWebhook) {
+      state.lastPhoneNumberId = phoneNumberIdFromWebhook;
+    }
 
     const messages = value?.messages || [];
-    if (!Array.isArray(messages) || messages.length === 0) return;
+    const contacts = value?.contacts || [];
+    const contactWaId = contacts?.[0]?.wa_id || "";
 
-    const metadata = value?.metadata || {};
-    const waPhoneId = metadata?.phone_number_id;
-
-    // Nachrichten verarbeiten
+    // process each message
     for (const msg of messages) {
-      const from = msg?.from; // wa_id
-      if (!from) continue;
+      const msgId = msg?.id;
+      const from = msg?.from || contactWaId;
+      const type = msg?.type;
 
-      // 1) Text: evtl. Code setzen
-      if (msg?.type === "text") {
-        const text = msg?.text?.body || "";
-        const code = extractCodeFromText(text);
-
-        if (code) {
-          setSenderCode(from, code);
-
-          // Logging
-          const dir = getProjectDir(code);
-          ensureDir(dir);
-          const logFile = path.join(dir, "log.jsonl");
-          writeJsonl(logFile, {
-            ts: Date.now(),
-            from,
-            type: "text",
-            body: text,
-            note: `code_set:${code}`,
-          });
-
-          console.log(`✅ saved text for #${code} -> ${logFile}`);
+      // Dedup protection (if Meta retries)
+      if (msgId) {
+        if (state.seenMessageIds[msgId]) {
+          console.log("↩️ duplicate message ignored:", msgId);
           continue;
         }
+        state.seenMessageIds[msgId] = Math.floor(Date.now() / 1000);
+      }
 
-        // Kein Code im Text: je nach aktivem Code speichern
-        const active = getActiveCode(from);
-        const codeOrUnknown = active || "unknown";
-        const dir = getProjectDir(codeOrUnknown);
-        ensureDir(dir);
+      const activeCode = state.lastCodeBySender[from] || null;
+      const dt = unixToDate(msg?.timestamp);
+      const day = ymd(dt);
 
-        const logFile = path.join(dir, "log.jsonl");
-        writeJsonl(logFile, {
-          ts: Date.now(),
+      // --- TEXT ---
+      if (type === "text") {
+        const text = msg?.text?.body || "";
+        const foundCode = extractCodeFromText(text);
+
+        if (foundCode) {
+          state.lastCodeBySender[from] = foundCode;
+        }
+
+        const codeForSave = state.lastCodeBySender[from] || "unknown";
+        const dir = path.join(DATA_DIR, codeForSave, day);
+        await ensureDir(dir);
+
+        const logPath = path.join(dir, "log.jsonl");
+        await appendJsonl(logPath, {
+          at: nowIso(),
+          timestamp: msg?.timestamp,
           from,
           type: "text",
-          body: text,
+          message_id: msgId,
+          text,
+          active_code: state.lastCodeBySender[from] || null,
         });
 
-        console.log(`✅ saved text for #${codeOrUnknown} -> ${logFile}`);
+        console.log(`✅ saved text for #${codeForSave} -> ${logPath}`);
 
-        if (!active) {
-          await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+        // If still unknown, remind once per 10 minutes
+        if (!state.lastCodeBySender[from]) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const last = Number(state.lastPromptAtBySender[from] || 0);
+          if (nowSec - last >= 600) {
+            state.lastPromptAtBySender[from] = nowSec;
+            await sendWhatsAppText(from, "Bitte Baustellennummer mit # davor senden", phoneNumberIdFromWebhook || state.lastPhoneNumberId);
+          }
         }
+
         continue;
       }
 
-      // 2) Bilder (image)
-      if (msg?.type === "image") {
-        const active = getActiveCode(from);
-        const codeOrUnknown = active || "unknown";
+      // --- IMAGE ---
+      if (type === "image") {
+        const mediaId = msg?.image?.id;
+        const sha = msg?.image?.sha256 || "";
+        const mime = msg?.image?.mime_type || "";
 
-        const dir = getProjectDir(codeOrUnknown);
-        ensureDir(dir);
+        const codeForSave = state.lastCodeBySender[from] || "unknown";
+        const dir = path.join(DATA_DIR, codeForSave, day);
+        await ensureDir(dir);
 
-        // Wir speichern erstmal nur METADATEN (kein Download des Bildes hier)
-        // -> Bild-Download machen wir im nächsten Schritt, wenn du willst.
-        const fileName = `${msg?.timestamp || Date.now()}_${msg?.image?.id || crypto.randomUUID()}.json`;
-        const filePath = path.join(dir, fileName);
-
-        fs.writeFileSync(
-          filePath,
+        // always save meta json
+        const metaPath = path.join(dir, `${msg?.timestamp || Date.now()}_${mediaId}_meta.json`);
+        await fsp.writeFile(
+          metaPath,
           JSON.stringify(
             {
-              ts: Date.now(),
+              at: nowIso(),
+              timestamp: msg?.timestamp,
               from,
+              message_id: msgId,
               type: "image",
-              wa_image_id: msg?.image?.id || null,
-              mime_type: msg?.image?.mime_type || null,
-              sha256: msg?.image?.sha256 || null,
-              caption: msg?.image?.caption || null,
-              raw: msg,
+              image: { id: mediaId, mime_type: mime, sha256: sha },
             },
             null,
             2
@@ -270,49 +305,87 @@ app.post("/webhook", async (req, res) => {
           "utf8"
         );
 
-        console.log(`✅ saved image meta for #${codeOrUnknown} -> ${filePath}`);
+        console.log(`✅ saved image meta for #${codeForSave} -> ${metaPath}`);
 
-        if (!active) {
-          await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+        // download binary + save as file
+        if (mediaId) {
+          try {
+            const { buf, meta, mime: metaMime } = await fetchMediaBinary(mediaId);
+            const ext = mimeToExt(metaMime || mime);
+            const filePath = path.join(dir, `${msg?.timestamp || Date.now()}_${mediaId}.${ext}`);
+            await fsp.writeFile(filePath, buf);
+            console.log(`✅ saved image file for #${codeForSave} -> ${filePath}`);
+
+            // also append to log
+            const logPath = path.join(dir, "log.jsonl");
+            await appendJsonl(logPath, {
+              at: nowIso(),
+              timestamp: msg?.timestamp,
+              from,
+              type: "image",
+              message_id: msgId,
+              media_id: mediaId,
+              file: path.basename(filePath),
+              mime_type: metaMime || mime,
+              active_code: state.lastCodeBySender[from] || null,
+              graph_meta: meta || null,
+            });
+
+          } catch (e) {
+            console.log("❌ media download failed:", e?.message || e);
+          }
         }
+
+        // If unknown, remind once per 10 minutes
+        if (!state.lastCodeBySender[from]) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const last = Number(state.lastPromptAtBySender[from] || 0);
+          if (nowSec - last >= 600) {
+            state.lastPromptAtBySender[from] = nowSec;
+            await sendWhatsAppText(from, "Bitte Baustellennummer mit # davor senden", phoneNumberIdFromWebhook || state.lastPhoneNumberId);
+          }
+        }
+
         continue;
       }
 
-      // 3) Alles andere: speichern als raw
-      const active = getActiveCode(from);
-      const codeOrUnknown = active || "unknown";
-      const dir = getProjectDir(codeOrUnknown);
-      ensureDir(dir);
-
-      const logFile = path.join(dir, "log.jsonl");
-      writeJsonl(logFile, {
-        ts: Date.now(),
+      // other types (document/audio/video) can be added later
+      const codeForSave = state.lastCodeBySender[from] || "unknown";
+      const dir = path.join(DATA_DIR, codeForSave, day);
+      await ensureDir(dir);
+      const logPath = path.join(dir, "log.jsonl");
+      await appendJsonl(logPath, {
+        at: nowIso(),
+        timestamp: msg?.timestamp,
         from,
-        type: msg?.type || "unknown_type",
+        type: type || "unknown_type",
+        message_id: msgId,
         raw: msg,
+        active_code: state.lastCodeBySender[from] || null,
       });
-
-      console.log(`✅ saved message type=${msg?.type} for #${codeOrUnknown} -> ${logFile}`);
-
-      if (!active) {
-        await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
-      }
+      console.log(`✅ saved ${type} for #${codeForSave} -> ${logPath}`);
     }
+
+    // cleanup seenMessageIds (optional, keep last 7 days)
+    const cutoff = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+    for (const [k, v] of Object.entries(state.seenMessageIds || {})) {
+      if (Number(v) < cutoff) delete state.seenMessageIds[k];
+    }
+
+    await saveState(state);
   } catch (err) {
-    console.error("Webhook error:", err);
-    // response wurde schon gesendet
+    console.log("Webhook error:", err);
+    // response already 200’d above, so just log
   }
 });
 
-// Health
-app.get("/health", (req, res) => res.status(200).json({ ok: true }));
-
-app.listen(PORT, () => {
-  ensureDir(DATA_DIR);
-  ensureDir(STATE_DIR);
-
+// Start server
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, async () => {
+  const state = await loadState();
   console.log(`Server läuft auf Port ${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
   console.log(`STATE_FILE=${STATE_FILE}`);
-  console.log(`PHONE_NUMBER_ID set: ${Boolean(PHONE_NUMBER_ID)}`);
+  console.log(`PHONE_NUMBER_ID env set: ${Boolean(PHONE_NUMBER_ID_ENV)}`);
+  console.log("==> Your service is live 🎉");
 });
