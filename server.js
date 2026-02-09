@@ -5,17 +5,26 @@ const path = require("path");
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
+// ENV
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // für Auto-Antwort
 
+// Persistenter Merker (auf Disk)
 const STATE_DIR = path.join(DATA_DIR, "_state");
 const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
 
+// Unassigned Ordner statt "unknown"
 const UNASSIGNED_DIRNAME = "_unassigned";
 
-const LAST_CODE_BY_SENDER = new Map();
+// Text der Auto-Antwort (dein Wunsch)
+const UNASSIGNED_REPLY_TEXT = "Bitte Baustellennummer mit # vorab senden";
+
+// Merker im RAM
+const LAST_CODE_BY_SENDER = new Map(); // sender -> { code, setAt }
+const LAST_REPLY_BY_SENDER_DAY = new Map(); // sender -> "YYYY-MM-DD" (Anti-Spam)
 
 // -------- Helpers --------
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
@@ -25,8 +34,10 @@ function loadState() {
     if (!fs.existsSync(STATE_FILE)) return;
     const raw = fs.readFileSync(STATE_FILE, "utf8");
     const obj = JSON.parse(raw);
+
     for (const [sender, v] of Object.entries(obj)) {
       if (v?.code) LAST_CODE_BY_SENDER.set(sender, v);
+      if (v?.lastReplyDay) LAST_REPLY_BY_SENDER_DAY.set(sender, v.lastReplyDay);
     }
     console.log(`✅ state loaded: ${LAST_CODE_BY_SENDER.size} senders`);
   } catch (e) {
@@ -38,7 +49,19 @@ function saveState() {
   try {
     ensureDir(STATE_DIR);
     const obj = {};
-    for (const [sender, v] of LAST_CODE_BY_SENDER.entries()) obj[sender] = v;
+    const allSenders = new Set([
+      ...LAST_CODE_BY_SENDER.keys(),
+      ...LAST_REPLY_BY_SENDER_DAY.keys(),
+    ]);
+
+    for (const sender of allSenders) {
+      const codeObj = LAST_CODE_BY_SENDER.get(sender);
+      const lastReplyDay = LAST_REPLY_BY_SENDER_DAY.get(sender);
+      obj[sender] = {
+        ...(codeObj || {}),
+        ...(lastReplyDay ? { lastReplyDay } : {}),
+      };
+    }
     fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2), "utf8");
   } catch (e) {
     console.log("⚠️ state save failed (ignored):", e.message);
@@ -109,14 +132,42 @@ async function downloadWhatsAppMedia(mediaId) {
   return { buffer, mimeType: meta.mime_type || "" };
 }
 
-// ✅ Zusatz: Hinweis ins Log, wenn unassigned
+// ✅ WhatsApp Auto-Antwort senden (Text)
+async function sendWhatsAppText(to, text) {
+  if (!PHONE_NUMBER_ID) throw new Error("PHONE_NUMBER_ID missing");
+  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
+
+  const url = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: text },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`send message failed ${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+
+// ✅ Hinweis ins Log
 function writeUnassignedHint(logPath, from) {
   appendJsonl(logPath, {
     kind: "system_hint",
     ts: Math.floor(Date.now() / 1000),
     from,
-    message:
-      "⚠️ Kein Baustellencode gesetzt. Bitte zuerst eine Nachricht wie '#260016' senden, dann Fotos/Audio.",
+    message: UNASSIGNED_REPLY_TEXT,
   });
 }
 
@@ -171,9 +222,35 @@ app.post("/webhook", async (req, res) => {
 
       const logPath = path.join(dayDir, "log.jsonl");
 
-      // ✅ wenn unassigned: einmal Hinweis schreiben (nur bei der jeweiligen Nachricht)
+      // ✅ Wenn unassigned: Log-Hinweis + WhatsApp Auto-Antwort (max 1x/Tag)
       if (code === UNASSIGNED_DIRNAME) {
         writeUnassignedHint(logPath, from);
+
+        const lastReplyDay = LAST_REPLY_BY_SENDER_DAY.get(from);
+        if (lastReplyDay !== day) {
+          try {
+            await sendWhatsAppText(from, UNASSIGNED_REPLY_TEXT);
+            LAST_REPLY_BY_SENDER_DAY.set(from, day);
+            saveState();
+
+            appendJsonl(logPath, {
+              kind: "auto_reply_sent",
+              ts: Math.floor(Date.now() / 1000),
+              to: from,
+              text: UNASSIGNED_REPLY_TEXT,
+            });
+
+            console.log(`📩 auto-reply sent to ${from} (unassigned)`);
+          } catch (e) {
+            appendJsonl(logPath, {
+              kind: "auto_reply_error",
+              ts: Math.floor(Date.now() / 1000),
+              to: from,
+              error: String(e?.message || e),
+            });
+            console.log(`❌ auto-reply failed: ${e?.message || e}`);
+          }
+        }
       }
 
       appendJsonl(logPath, {
@@ -187,6 +264,7 @@ app.post("/webhook", async (req, res) => {
         assigned_code: code,
       });
 
+      // Medien speichern
       const mediaTypes = ["image", "document", "audio", "video", "sticker"];
       if (mediaTypes.includes(msg.type)) {
         const mediaObj = msg[msg.type];
@@ -252,4 +330,5 @@ app.listen(PORT, () => {
   console.log(`Server läuft auf Port ${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
   console.log(`STATE_FILE=${STATE_FILE}`);
+  console.log(`PHONE_NUMBER_ID set: ${!!PHONE_NUMBER_ID}`);
 });
