@@ -1,106 +1,148 @@
-// pdf.js (ESM)
 import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
 
-export async function buildPdfA3Landscape({ title, items, outPath }) {
-  await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+const IMG_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
-  const doc = new PDFDocument({
-    size: "A3",
-    layout: "landscape",
-    margin: 28
-  });
+function isImageFile(name) {
+  return IMG_EXTS.has(path.extname(name).toLowerCase());
+}
 
+function sortByFilename(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
+async function listImages(dayDir) {
+  try {
+    const files = await fsp.readdir(dayDir);
+    return files.filter(isImageFile).sort(sortByFilename).map((f) => path.join(dayDir, f));
+  } catch {
+    return [];
+  }
+}
+
+async function readLogLines(dayDir) {
+  const logPath = path.join(dayDir, "log.jsonl");
+  try {
+    const txt = await fsp.readFile(logPath, "utf8");
+    return txt
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        try { return JSON.parse(l); } catch { return null; }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Bild verkleinern + als JPEG in moderater Qualität (PDF klein halten)
+async function toPdfJpegBuffer(filePath, maxW, maxH) {
+  const img = sharp(filePath).rotate();
+  const meta = await img.metadata();
+  const w = meta.width || maxW;
+  const h = meta.height || maxH;
+  const scale = Math.min(maxW / w, maxH / h, 1);
+  const nw = Math.max(1, Math.floor(w * scale));
+  const nh = Math.max(1, Math.floor(h * scale));
+  return await img
+    .resize(nw, nh, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 72 })
+    .toBuffer();
+}
+
+export async function buildDailyPdf({
+  dataDir,
+  code,
+  day,          // "YYYY-MM-DD"
+  outPath,
+}) {
+  const dayDir = path.join(dataDir, code, day);
+  await fsp.mkdir(path.dirname(outPath), { recursive: true });
+
+  const logLines = await readLogLines(dayDir);
+  const images = await listImages(dayDir);
+
+  const doc = new PDFDocument({ size: "A3", layout: "landscape", margin: 24 });
   const stream = fs.createWriteStream(outPath);
   doc.pipe(stream);
 
-  // Titel
-  doc.fontSize(20).text(title, { align: "left" });
-  doc.moveDown(0.6);
-  doc.fontSize(10).fillColor("#444").text(`Erstellt: ${new Date().toLocaleString()}`);
-  doc.fillColor("#000");
+  // Deckblatt
+  doc.fontSize(28).text("Baustellenprotokoll", { align: "left" });
+  doc.moveDown(0.5);
+  doc.fontSize(18).text(`Baustelle #${code}`);
+  doc.fontSize(14).text(`Datum: ${day}`);
   doc.moveDown(1);
+  doc.fontSize(10).fillColor("#666").text("Automatisch erstellt.");
+  doc.fillColor("#000");
 
-  // Layout: 6 Fotos pro Seite (3x2)
-  const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+  // Textblock
+  doc.moveDown(1);
+  doc.fontSize(12).text("Protokoll (Text):", { underline: true });
+  doc.moveDown(0.4);
+  doc.fontSize(10);
+
+  const texts = logLines.filter((x) => x.type === "text" && x.text);
+  if (texts.length === 0) {
+    doc.text("— (keine Textnachrichten) —");
+  } else {
+    for (const t of texts) {
+      const time = t.timestamp ? new Date(Number(t.timestamp) * 1000).toLocaleTimeString() : "";
+      doc.text(`• ${time}  ${t.from}: ${t.text}`);
+    }
+  }
+
+  // Fotos
+  doc.addPage();
+  doc.fontSize(12).text("Fotos:", { underline: true });
+  doc.moveDown(0.5);
 
   const cols = 3;
   const rows = 2;
   const gap = 14;
 
+  const pageW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const pageH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+
   const cellW = (pageW - gap * (cols - 1)) / cols;
-  const cellH = (pageH - 120 - gap * (rows - 1)) / rows; // oben Platz für Textblock
+  const cellH = (pageH - gap * (rows - 1)) / rows;
 
-  let photoIndexOnPage = 0;
+  const captionH = 16;
+  const imgMaxW = cellW;
+  const imgMaxH = cellH - captionH;
 
-  const startNewPageIfNeeded = () => {
-    if (photoIndexOnPage === 0) return;
-    if (photoIndexOnPage >= 6) {
+  let i = 0;
+  for (const imgPath of images) {
+    const pos = i % (cols * rows);
+    if (i > 0 && pos === 0) {
       doc.addPage();
-      photoIndexOnPage = 0;
-    }
-  };
-
-  // Textblock (chronologisch)
-  doc.fontSize(11).text("Protokoll (Text):", { underline: true });
-  doc.moveDown(0.3);
-  doc.fontSize(10);
-  for (const it of items) {
-    if (it.type === "text") {
-      doc.text(`• ${it.when}  ${it.from}: ${it.text}`);
-    }
-  }
-  doc.moveDown(0.8);
-
-  // Fotos
-  const photos = items.filter((x) => x.type === "image");
-  if (photos.length) {
-    doc.fontSize(11).text("Fotos:", { underline: true });
-    doc.moveDown(0.4);
-  }
-
-  for (const p of photos) {
-    startNewPageIfNeeded();
-
-    const col = photoIndexOnPage % cols;
-    const row = Math.floor(photoIndexOnPage / cols);
-
-    const x = doc.page.margins.left + col * (cellW + gap);
-    const yBase = doc.y + row * (cellH + gap);
-
-    // Bild in "contain" (nicht verzerren)
-    // Wir rendern auf eine moderate Breite, damit PDF klein bleibt.
-    const imgBuf = await sharp(p.filePath)
-      .rotate()
-      .resize({
-        width: Math.floor(cellW * 1.2), // etwas Reserve
-        height: Math.floor(cellH * 1.2),
-        fit: "inside",
-        withoutEnlargement: true
-      })
-      .jpeg({ quality: 72 }) // PDF klein halten
-      .toBuffer();
-
-    // Bild platzieren
-    doc.image(imgBuf, x, yBase, { fit: [cellW, cellH], align: "center", valign: "center" });
-
-    // Dateiname darunter
-    doc.fontSize(8).fillColor("#333").text(p.fileName, x, yBase + cellH + 4, {
-      width: cellW,
-      align: "center"
-    });
-    doc.fillColor("#000");
-
-    photoIndexOnPage += 1;
-
-    // Wenn 3 Bilder in einer Reihe fertig sind, Cursor nicht verschieben lassen – wir arbeiten mit yBase.
-    // Am Ende der 2 Reihen setzen wir doc.y passend.
-    if (photoIndexOnPage % 6 === 0) {
+      doc.fontSize(12).text("Fotos (Fortsetzung):", { underline: true });
       doc.moveDown(0.5);
     }
+
+    const r = Math.floor(pos / cols);
+    const c = pos % cols;
+
+    const x = doc.page.margins.left + c * (cellW + gap);
+    const y = doc.y + r * (cellH + gap);
+
+    const buf = await toPdfJpegBuffer(imgPath, imgMaxW, imgMaxH);
+    doc.image(buf, x, y, { fit: [imgMaxW, imgMaxH], align: "center", valign: "center" });
+
+    const base = path.basename(imgPath);
+    doc.fontSize(9).fillColor("#000").text(base, x, y + imgMaxH + 2, {
+      width: cellW,
+      align: "center",
+    });
+
+    i++;
+  }
+
+  if (images.length === 0) {
+    doc.fontSize(12).text("— (keine Fotos) —");
   }
 
   doc.end();
@@ -110,5 +152,5 @@ export async function buildPdfA3Landscape({ title, items, outPath }) {
     stream.on("error", reject);
   });
 
-  return outPath;
+  return { outPath, imageCount: images.length, textCount: texts.length };
 }
