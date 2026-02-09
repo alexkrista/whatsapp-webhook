@@ -1,354 +1,512 @@
-// server.js  (ESM)
-import express from "express";
+// server.js (ESM)
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
+import express from "express";
 import fetch from "node-fetch";
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc.js";
-import timezone from "dayjs/plugin/timezone.js";
-import multer from "multer";
 import nodemailer from "nodemailer";
-
-import { buildDailyPdfs, buildPdfForSiteToday } from "./pdf.js";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import dayjs from "dayjs";
+import { buildPdfA3Landscape } from "./pdf.js";
 
 const app = express();
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "25mb" }));
 
-// ---------- ENV ----------
+// =====================
+// ENV
+// =====================
 const PORT = process.env.PORT || 10000;
-const DATA_DIR = process.env.DATA_DIR || "/var/data";
+
+// WhatsApp
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || "";
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
-const TZ = process.env.TZ || "Europe/Vienna";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // optional (für Antworten)
+const GRAPH_VERSION = process.env.GRAPH_VERSION || "v22.0";
 
-const STATE_DIR = path.join(DATA_DIR, "_state");
-const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
+// Storage
+const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const STATE_FILE = path.join(DATA_DIR, "_state", "last_code_by_sender.json");
 
-const CODE_TTL_MIN = Number(process.env.CODE_TTL_MIN || "10"); // 10 Minuten
-const ASK_TEXT = process.env.ASK_TEXT || "Bitte Baustellennummer mit # vorab senden";
-
-// Mail (Brevo)
-const MAIL_HOST = process.env.MAIL_HOST || "smtp-relay.brevo.com";
-const MAIL_PORT = Number(process.env.MAIL_PORT || "587");
-const MAIL_USER = process.env.MAIL_USER || "";
-const MAIL_PASS = process.env.MAIL_PASS || "";
+// Mail (Brevo SMTP)
+const SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO = process.env.MAIL_TO || "";
 
-// ---------- Helpers ----------
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
+// Admin
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
+
+// Regeln
+const UNKNOWN_REPLY_TEXT = "Bitte Baustellennummer mit # vorab senden";
+const INACTIVITY_MINUTES = Number(process.env.INACTIVITY_MINUTES || 10);
+
+// =====================
+// State helpers
+// =====================
+async function ensureDir(p) {
+  await fs.promises.mkdir(p, { recursive: true });
 }
 
-function safeReadJson(file, fallback) {
+async function loadState() {
   try {
-    if (!fs.existsSync(file)) return fallback;
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    const txt = await fs.promises.readFile(STATE_FILE, "utf8");
+    return JSON.parse(txt);
   } catch {
-    return fallback;
+    return { lastCodeBySender: {}, lastActivityByCode: {}, lastAutoPdfAt: {}, lastDailyRunDate: "" };
   }
 }
 
-function safeWriteJson(file, obj) {
-  ensureDir(path.dirname(file));
-  fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+async function saveState(state) {
+  await ensureDir(path.dirname(STATE_FILE));
+  await fs.promises.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
-function nowTz() {
-  return dayjs().tz(TZ);
+function todayFolder() {
+  return dayjs().format("YYYY-MM-DD");
 }
 
-function todayStr() {
-  return nowTz().format("YYYY-MM-DD");
+function tsNow() {
+  return Math.floor(Date.now() / 1000);
 }
 
-function extractSiteCode(text) {
-  // findet #260016 (6-stellig) oder allgemein # + digits
-  const m = String(text || "").match(/#(\d{3,})/);
+function sanitizeCode(code) {
+  return String(code || "").replace(/[^0-9A-Za-z_-]/g, "").slice(0, 32);
+}
+
+function parseCodeFromText(text) {
+  if (!text) return null;
+  const m = text.match(/#([0-9]{3,12})/);
   return m ? m[1] : null;
 }
 
 function isPdfCommand(text) {
-  const t = String(text || "").trim().toLowerCase();
-  return t === "pdf" || t.startsWith("pdf ");
+  if (!text) return false;
+  const t = text.trim().toLowerCase();
+  return t === "pdf" || t === "/pdf" || t === "bericht" || t === "/bericht";
 }
 
-function parsePdfCommand(text) {
-  // "pdf" oder "pdf #260016"
-  const t = String(text || "").trim();
-  const code = extractSiteCode(t);
-  return { code };
-}
+// =====================
+// WhatsApp send helper
+// =====================
+async function sendWhatsAppText(toWaId, body) {
+  if (!PHONE_NUMBER_ID || !WHATSAPP_TOKEN) {
+    console.log("sendWhatsAppText skipped (missing PHONE_NUMBER_ID or WHATSAPP_TOKEN)");
+    return;
+  }
 
-function getState() {
-  return safeReadJson(STATE_FILE, {});
-}
-
-function setLastCode(sender, code) {
-  const st = getState();
-  st[sender] = { code, ts: Date.now() };
-  safeWriteJson(STATE_FILE, st);
-}
-
-function getLastCode(sender) {
-  const st = getState();
-  return st[sender] || null;
-}
-
-function pickCodeForSender(sender) {
-  const entry = getLastCode(sender);
-  if (!entry) return null;
-  const ageMin = (Date.now() - entry.ts) / 60000;
-  if (ageMin <= CODE_TTL_MIN) return entry.code;
-  return null;
-}
-
-function saveText(site, sender, text) {
-  const dir = path.join(DATA_DIR, site, todayStr());
-  ensureDir(dir);
-  const file = path.join(dir, "log.jsonl");
-  const line = JSON.stringify({
-    ts: nowTz().toISOString(),
-    type: "text",
-    sender,
-    text,
-  });
-  fs.appendFileSync(file, line + "\n");
-  console.log(`✅ saved text for #${site} -> ${file}`);
-}
-
-async function downloadToFile(url, outPath) {
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-  });
-  if (!res.ok) throw new Error(`download failed ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  ensureDir(path.dirname(outPath));
-  fs.writeFileSync(outPath, buf);
-}
-
-async function fetchMediaUrl(mediaId) {
-  const res = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-  });
-  const j = await res.json();
-  if (!j.url) throw new Error("no media url in response");
-  return j.url;
-}
-
-function saveMetaLine(site, obj) {
-  const dir = path.join(DATA_DIR, site);
-  ensureDir(dir);
-  const file = path.join(dir, `${todayStr()}.jsonl`);
-  fs.appendFileSync(file, JSON.stringify(obj) + "\n");
-  console.log(`✅ saved message for #${site} -> ${file}`);
-}
-
-// WhatsApp send text
-async function waSendText(to, body) {
-  if (!PHONE_NUMBER_ID || !WHATSAPP_TOKEN) return;
+  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: "whatsapp",
-    to,
+    to: toWaId,
     type: "text",
-    text: { body },
+    text: { body }
   };
-  const res = await fetch(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, {
+
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload)
   });
-  const j = await res.json();
-  if (!res.ok) console.log("waSendText error:", j);
+
+  const data = await res.text();
+  if (!res.ok) {
+    console.log("WhatsApp send failed:", res.status, data);
+  } else {
+    console.log("WhatsApp send OK:", data);
+  }
 }
 
-// Mailer
-function getMailer() {
-  if (!MAIL_HOST || !MAIL_USER || !MAIL_PASS || !MAIL_FROM || !MAIL_TO) return null;
+// =====================
+// Media download
+// =====================
+async function downloadWhatsAppMedia(mediaId) {
+  if (!WHATSAPP_TOKEN) throw new Error("Missing WHATSAPP_TOKEN");
+  const metaUrl = `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
+  });
+  const meta = await metaRes.json();
+  if (!metaRes.ok) throw new Error(`Media meta error: ${metaRes.status} ${JSON.stringify(meta)}`);
+
+  const fileUrl = meta.url;
+  const mime = meta.mime_type || "application/octet-stream";
+
+  const fileRes = await fetch(fileUrl, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
+  });
+  if (!fileRes.ok) throw new Error(`Media download error: ${fileRes.status}`);
+
+  const buf = Buffer.from(await fileRes.arrayBuffer());
+  return { buf, mime };
+}
+
+function extFromMime(mime) {
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  if (mime === "application/pdf") return "pdf";
+  if (mime?.includes("audio")) return "ogg";
+  return "bin";
+}
+
+// =====================
+// Logging per Baustelle
+// =====================
+async function appendLog(code, lineObj) {
+  const codeDir = path.join(DATA_DIR, code);
+  const dayDir = path.join(codeDir, todayFolder());
+  await ensureDir(dayDir);
+
+  const logFile = path.join(dayDir, "log.jsonl");
+  await fs.promises.appendFile(logFile, JSON.stringify(lineObj) + "\n", "utf8");
+  return { dayDir, logFile };
+}
+
+async function listItemsForCodeToday(code) {
+  const dayDir = path.join(DATA_DIR, code, todayFolder());
+  const logFile = path.join(dayDir, "log.jsonl");
+  let lines = [];
+  try {
+    const txt = await fs.promises.readFile(logFile, "utf8");
+    lines = txt.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return { dayDir, items: [] };
+  }
+
+  // Convert
+  const items = lines.map((x) => {
+    if (x.kind === "text") {
+      return { type: "text", when: x.when, from: x.from, text: x.text };
+    }
+    if (x.kind === "image") {
+      return { type: "image", when: x.when, from: x.from, fileName: x.fileName, filePath: x.filePath };
+    }
+    return null;
+  }).filter(Boolean);
+
+  return { dayDir, items };
+}
+
+// =====================
+// Mail
+// =====================
+function mailTransport() {
   return nodemailer.createTransport({
-    host: MAIL_HOST,
-    port: MAIL_PORT,
+    host: SMTP_HOST,
+    port: SMTP_PORT,
     secure: false,
-    auth: { user: MAIL_USER, pass: MAIL_PASS },
+    auth: { user: SMTP_USER, pass: SMTP_PASS }
   });
 }
 
-async function mailPdf(site, pdfPath) {
-  const tr = getMailer();
-  if (!tr) throw new Error("Mailer not configured (MAIL_* env missing)");
-  const subject = `Baustellenprotokoll #${site} – ${todayStr()}`;
-  const text = `Anbei das Baustellenprotokoll für #${site} (${todayStr()}).`;
+async function sendMailWithPdf({ subject, text, pdfPath }) {
+  if (!SMTP_USER || !SMTP_PASS || !MAIL_FROM || !MAIL_TO) {
+    console.log("Mail skipped (missing SMTP_USER/SMTP_PASS/MAIL_FROM/MAIL_TO)");
+    return;
+  }
 
-  await tr.sendMail({
+  const transporter = mailTransport();
+  await transporter.sendMail({
     from: MAIL_FROM,
     to: MAIL_TO,
     subject,
     text,
-    attachments: [{ filename: `Baustellenprotokoll_${site}_${todayStr()}.pdf`, path: pdfPath }],
+    attachments: [
+      {
+        filename: path.basename(pdfPath),
+        path: pdfPath
+      }
+    ]
   });
 }
 
-// ---------- Routes ----------
+// =====================
+// PDF generation
+// =====================
+async function generateAndMailPdfForCodeToday(code, reason = "manual") {
+  const { dayDir, items } = await listItemsForCodeToday(code);
+  if (!items.length) {
+    console.log(`No items for code #${code} today -> skip PDF`);
+    return null;
+  }
 
-// Verify (Meta)
+  const pdfName = `Baustellenprotokoll_${code}_${todayFolder()}.pdf`;
+  const pdfPath = path.join(dayDir, pdfName);
+
+  await buildPdfA3Landscape({
+    title: `Baustellenprotokoll #${code} (${todayFolder()})`,
+    items,
+    outPath: pdfPath
+  });
+
+  await sendMailWithPdf({
+    subject: `Baustellenprotokoll #${code} – ${todayFolder()}`,
+    text: `Automatisch erstellt (${reason}).`,
+    pdfPath
+  });
+
+  console.log(`✅ PDF created+mailed for #${code} -> ${pdfPath}`);
+  return pdfPath;
+}
+
+// =====================
+// Webhook routes
+// =====================
+app.get("/", (req, res) => res.status(200).send("webhook läuft"));
+
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  if (mode === "subscribe" && token === VERIFY_TOKEN) return res.status(200).send(challenge);
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
   return res.sendStatus(403);
 });
 
-// Incoming
 app.post("/webhook", async (req, res) => {
   try {
     const body = req.body;
-    if (body.object !== "whatsapp_business_account") return res.sendStatus(200);
+    // WhatsApp payload
+    const entry = body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+    const messages = value?.messages || [];
+    const contacts = value?.contacts || [];
 
-    for (const entry of body.entry || []) {
-      for (const change of entry.changes || []) {
-        const v = change.value;
-        if (!v?.messages?.length) continue;
-
-        for (const msg of v.messages) {
-          const sender = msg.from; // wa_id
-          const type = msg.type;
-
-          // TEXT
-          if (type === "text") {
-            const text = msg.text?.body || "";
-            const code = extractSiteCode(text);
-
-            // PDF command?
-            if (isPdfCommand(text)) {
-              const { code: explicit } = parsePdfCommand(text);
-              const useCode = explicit || pickCodeForSender(sender);
-
-              if (!useCode) {
-                await waSendText(sender, ASK_TEXT);
-                continue;
-              }
-
-              // build PDF for TODAY for that site
-              const pdfPath = await buildPdfForSiteToday({
-                dataDir: DATA_DIR,
-                site: useCode,
-                tz: TZ,
-              });
-
-              // mail it
-              await mailPdf(useCode, pdfPath);
-
-              await waSendText(sender, `PDF wird per E-Mail gesendet für #${useCode}.`);
-              continue;
-            }
-
-            // Baustellencode?
-            if (code) {
-              setLastCode(sender, code);
-              saveText(code, sender, text);
-              saveMetaLine(code, { ts: nowTz().toISOString(), kind: "in_text", sender, text });
-              await waSendText(sender, `OK – Baustelle #${code} ist gesetzt. Du kannst jetzt Fotos senden.`);
-            } else {
-              // normal text: wenn ein gültiger Code im Fenster aktiv ist -> der Baustelle zuordnen
-              const active = pickCodeForSender(sender);
-              const site = active || "unknown";
-              saveText(site, sender, text);
-              saveMetaLine(site, { ts: nowTz().toISOString(), kind: "text", sender, text });
-
-              if (!active) await waSendText(sender, ASK_TEXT);
-            }
-          }
-
-          // IMAGE / DOCUMENT / VIDEO / AUDIO
-          if (["image", "document", "video", "audio"].includes(type)) {
-            const active = pickCodeForSender(sender);
-            const site = active || "unknown";
-
-            const media = msg[type];
-            const mediaId = media?.id;
-            const mime = media?.mime_type || "";
-
-            const dir = path.join(DATA_DIR, site, todayStr());
-            ensureDir(dir);
-
-            // filename
-            const extFromMime = (m) => {
-              if (m.includes("jpeg")) return "jpg";
-              if (m.includes("png")) return "png";
-              if (m.includes("pdf")) return "pdf";
-              if (m.includes("mp4")) return "mp4";
-              if (m.includes("ogg")) return "ogg";
-              return "bin";
-            };
-            const ext = extFromMime(mime);
-            const name = `${msg.timestamp || Math.floor(Date.now() / 1000)}_${crypto.randomBytes(4).toString("hex")}.${ext}`;
-            const outPath = path.join(dir, name);
-
-            if (mediaId) {
-              const url = await fetchMediaUrl(mediaId);
-              await downloadToFile(url, outPath);
-              console.log(`✅ saved ${type} for #${site} -> ${outPath}`);
-              saveMetaLine(site, { ts: nowTz().toISOString(), kind: type, sender, outPath, mime });
-            } else {
-              console.log("⚠️ no media id");
-            }
-
-            if (!active) await waSendText(sender, ASK_TEXT);
-          }
-        }
-      }
+    if (!messages.length) {
+      return res.sendStatus(200);
     }
 
-    res.sendStatus(200);
+    const msg = messages[0];
+    const from = msg.from; // wa_id
+    const when = dayjs.unix(Number(msg.timestamp || tsNow())).format("YYYY-MM-DD HH:mm:ss");
+    const msgType = msg.type;
+
+    const state = await loadState();
+
+    // 1) Text?
+    if (msgType === "text") {
+      const text = msg.text?.body || "";
+
+      // PDF command?
+      if (isPdfCommand(text)) {
+        const code = state.lastCodeBySender[from] || "unknown";
+        if (code === "unknown") {
+          await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+        } else {
+          await generateAndMailPdfForCodeToday(code, "whatsapp-command");
+          await sendWhatsAppText(from, `PDF wird erstellt und per Mail gesendet für #${code}.`);
+        }
+        return res.sendStatus(200);
+      }
+
+      // Baustellencode setzen?
+      const codeFound = parseCodeFromText(text);
+      if (codeFound) {
+        const code = sanitizeCode(codeFound);
+        state.lastCodeBySender[from] = code;
+        state.lastActivityByCode[code] = Date.now();
+        await saveState(state);
+
+        await appendLog(code, { kind: "text", when, from, text });
+        console.log(`✅ saved text for #${code} -> ${path.join(DATA_DIR, code, todayFolder(), "log.jsonl")}`);
+        return res.sendStatus(200);
+      }
+
+      // normaler Text -> in aktuell aktiver Baustelle loggen (oder unknown)
+      const activeCode = state.lastCodeBySender[from] || "unknown";
+      state.lastActivityByCode[activeCode] = Date.now();
+      await saveState(state);
+
+      await appendLog(activeCode, { kind: "text", when, from, text });
+      console.log(`✅ saved text for #${activeCode} -> ${path.join(DATA_DIR, activeCode, todayFolder(), "log.jsonl")}`);
+
+      if (activeCode === "unknown") {
+        await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+      }
+
+      return res.sendStatus(200);
+    }
+
+    // 2) Image?
+    if (msgType === "image") {
+      const activeCode = state.lastCodeBySender[from] || "unknown";
+      state.lastActivityByCode[activeCode] = Date.now();
+      await saveState(state);
+
+      const mediaId = msg.image?.id;
+      const caption = msg.image?.caption || "";
+      if (!mediaId) throw new Error("image.id missing");
+
+      const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+      const ext = extFromMime(mime);
+
+      const codeDir = path.join(DATA_DIR, activeCode);
+      const dayDir = path.join(codeDir, todayFolder());
+      await ensureDir(dayDir);
+
+      const fileName = `${msg.timestamp || tsNow()}_${mediaId}.${ext}`;
+      const filePath = path.join(dayDir, fileName);
+      await fs.promises.writeFile(filePath, buf);
+
+      await appendLog(activeCode, {
+        kind: "image",
+        when,
+        from,
+        caption,
+        fileName,
+        filePath
+      });
+
+      console.log(`✅ saved image for #${activeCode} -> ${filePath}`);
+
+      if (activeCode === "unknown") {
+        await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+      }
+
+      return res.sendStatus(200);
+    }
+
+    // 3) Andere Typen (optional loggen)
+    const activeCode = state.lastCodeBySender[from] || "unknown";
+    state.lastActivityByCode[activeCode] = Date.now();
+    await saveState(state);
+
+    await appendLog(activeCode, { kind: "text", when, from, text: `[${msgType}]` });
+    if (activeCode === "unknown") {
+      await sendWhatsAppText(from, UNKNOWN_REPLY_TEXT);
+    }
+
+    return res.sendStatus(200);
   } catch (e) {
-    console.error("webhook error", e);
-    res.sendStatus(200);
+    console.error("Webhook error:", e);
+    return res.sendStatus(200); // WhatsApp mag 200
   }
 });
 
-// Health
-app.get("/", (req, res) => res.send("webhook läuft"));
+// =====================
+// Admin routes
+// =====================
+function checkAdmin(req) {
+  if (!ADMIN_KEY) return true; // wenn du kein ADMIN_KEY setzt, offen (nicht empfohlen)
+  const key = req.query.key || req.headers["x-admin-key"];
+  return key === ADMIN_KEY;
+}
 
-// Admin: daily PDFs at once
 app.get("/admin/run-daily", async (req, res) => {
-  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.sendStatus(403);
+  if (!checkAdmin(req)) return res.status(403).send("forbidden");
   try {
-    const result = await buildDailyPdfs({ dataDir: DATA_DIR, tz: TZ, mailFn: mailPdf });
-    res.json({ ok: true, ...result });
+    await runDaily("admin");
+    res.status(200).send("ok");
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    console.error(e);
+    res.status(500).send(String(e));
   }
 });
 
-// Admin: one site now (optional)
-app.get("/admin/run-site", async (req, res) => {
-  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.sendStatus(403);
-  const site = String(req.query.site || "");
-  if (!site) return res.status(400).send("missing site");
+app.get("/admin/run-code", async (req, res) => {
+  if (!checkAdmin(req)) return res.status(403).send("forbidden");
+  const code = sanitizeCode(req.query.code || "");
+  if (!code) return res.status(400).send("missing code");
   try {
-    const pdfPath = await buildPdfForSiteToday({ dataDir: DATA_DIR, site, tz: TZ });
-    await mailPdf(site, pdfPath);
-    res.json({ ok: true, site, pdfPath });
+    const p = await generateAndMailPdfForCodeToday(code, "admin");
+    res.status(200).send(p ? "ok" : "no data");
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    console.error(e);
+    res.status(500).send(String(e));
   }
 });
 
-ensureDir(DATA_DIR);
-ensureDir(STATE_DIR);
+// =====================
+// Schedulers
+// =====================
+async function runDaily(reason = "daily") {
+  const state = await loadState();
+  const today = todayFolder();
+  if (state.lastDailyRunDate === today && reason === "daily") return;
 
-console.log(`DATA_DIR=${DATA_DIR}`);
-console.log(`STATE_FILE=${STATE_FILE}`);
-console.log(`PHONE_NUMBER_ID set: ${!!PHONE_NUMBER_ID}`);
+  // alle Codes durchgehen
+  const codes = new Set(Object.values(state.lastCodeBySender || {}).filter(Boolean));
+  codes.delete("unknown");
 
-app.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
+  for (const code of codes) {
+    await generateAndMailPdfForCodeToday(code, reason);
+  }
+
+  state.lastDailyRunDate = today;
+  await saveState(state);
+}
+
+async function runInactivityAutoPdfs() {
+  const state = await loadState();
+  const now = Date.now();
+
+  const codes = Object.keys(state.lastActivityByCode || {});
+  for (const code of codes) {
+    if (!code || code === "unknown") continue;
+
+    const last = Number(state.lastActivityByCode[code] || 0);
+    if (!last) continue;
+
+    const mins = (now - last) / 60000;
+    if (mins < INACTIVITY_MINUTES) continue;
+
+    const key = `${code}:${todayFolder()}`;
+    const lastAuto = Number(state.lastAutoPdfAt?.[key] || 0);
+
+    // nur einmal pro Baustelle/Tag automatisch senden
+    if (lastAuto) continue;
+
+    await generateAndMailPdfForCodeToday(code, `auto-${INACTIVITY_MINUTES}min`);
+    state.lastAutoPdfAt = state.lastAutoPdfAt || {};
+    state.lastAutoPdfAt[key] = now;
+    await saveState(state);
+  }
+}
+
+function msUntilNext22() {
+  // Nutzt Server-Localtime. Empfehlung: in Render ENV setzen: TZ=Europe/Vienna
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(22, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+function scheduleDaily22() {
+  setTimeout(async () => {
+    try {
+      await runDaily("daily");
+    } catch (e) {
+      console.error("Daily run failed:", e);
+    }
+    scheduleDaily22();
+  }, msUntilNext22());
+}
+
+// Inactivity check alle 60s
+setInterval(() => {
+  runInactivityAutoPdfs().catch((e) => console.error("auto pdf error:", e));
+}, 60 * 1000);
+
+// Daily 22:00
+scheduleDaily22();
+
+// =====================
+// Startup
+// =====================
+(async () => {
+  await ensureDir(DATA_DIR);
+  await ensureDir(path.join(DATA_DIR, "_state"));
+  console.log("Server läuft auf Port", PORT);
+  console.log("DATA_DIR=", DATA_DIR);
+  console.log("STATE_FILE=", STATE_FILE);
+  console.log("PHONE_NUMBER_ID set:", Boolean(PHONE_NUMBER_ID));
+})();
+
+app.listen(PORT, () => {
+  console.log("==> Your service is live 🚀");
+});
