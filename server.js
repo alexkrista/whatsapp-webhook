@@ -11,13 +11,44 @@ const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
 
-// ✅ Merker: letzter Baustellencode pro Absender – gilt BIS zum nächsten Code
-// key = wa_id (Telefonnummer als String), value = { code, setAt }
+// ✅ Persistenter Merker (auf Disk)
+const STATE_DIR = path.join(DATA_DIR, "_state");
+const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
+
+// ✅ Unassigned Ordner statt "unknown"
+const UNASSIGNED_DIRNAME = "_unassigned";
+
+// Merker im RAM (wird beim Start aus STATE_FILE geladen)
 const LAST_CODE_BY_SENDER = new Map();
 
 // ---------- Helpers ----------
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
+}
+
+function loadState() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return;
+    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    const obj = JSON.parse(raw);
+    for (const [sender, v] of Object.entries(obj)) {
+      if (v?.code) LAST_CODE_BY_SENDER.set(sender, v);
+    }
+    console.log(`✅ state loaded: ${LAST_CODE_BY_SENDER.size} senders`);
+  } catch (e) {
+    console.log("⚠️ state load failed (ignored):", e.message);
+  }
+}
+
+function saveState() {
+  try {
+    ensureDir(STATE_DIR);
+    const obj = {};
+    for (const [sender, v] of LAST_CODE_BY_SENDER.entries()) obj[sender] = v;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2), "utf8");
+  } catch (e) {
+    console.log("⚠️ state save failed (ignored):", e.message);
+  }
 }
 
 function ymdFromTsSeconds(tsSeconds) {
@@ -29,7 +60,6 @@ function ymdFromTsSeconds(tsSeconds) {
 }
 
 function extractCode(text) {
-  // #260016 oder allgemein # + Ziffern
   const m = (text || "").match(/#(\d{3,})\b/);
   return m ? m[1] : null;
 }
@@ -52,6 +82,10 @@ function extFromMime(mime) {
     "application/pdf": ".pdf",
   };
   return map[mime] || "";
+}
+
+function safeName(name) {
+  return String(name || "").replace(/[^\w.\-]+/g, "_").slice(0, 160);
 }
 
 async function graphGetJson(url) {
@@ -82,13 +116,12 @@ async function downloadWhatsAppMedia(mediaId) {
   const meta = await graphGetJson(`https://graph.facebook.com/v22.0/${mediaId}`);
   if (!meta.url) throw new Error("No media url from Meta");
   const buffer = await graphDownloadBuffer(meta.url);
-  return { buffer, mimeType: meta.mime_type || "", fileSize: meta.file_size || null };
+  return { buffer, mimeType: meta.mime_type || "" };
 }
 
 // ---------- Routes ----------
 app.get("/", (req, res) => res.status(200).send("webhook läuft ✅"));
 
-// Meta Verify
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -100,9 +133,7 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// Incoming Webhook
 app.post("/webhook", async (req, res) => {
-  // sofort antworten
   res.sendStatus(200);
 
   try {
@@ -123,28 +154,29 @@ app.post("/webhook", async (req, res) => {
       const ts = msg.timestamp ? Number(msg.timestamp) : Math.floor(Date.now() / 1000);
       const day = ymdFromTsSeconds(ts);
 
-      // Text / Caption (für Code-Erkennung)
+      // Text/Caption, damit #CODE auch in Bild-Caption erkannt wird
       const text =
         msg.type === "text"
           ? (msg.text?.body || "")
           : (msg.image?.caption || msg.video?.caption || msg.document?.caption || "");
 
-      // ✅ Code setzen, wenn vorhanden – sonst letzten Code verwenden
+      // ✅ Code setzen, wenn vorhanden (und persistieren)
       const newCode = extractCode(text);
       if (newCode) {
         LAST_CODE_BY_SENDER.set(from, { code: newCode, setAt: Date.now() });
+        saveState();
       }
 
+      // ✅ aktuellen Code bestimmen (bis zum nächsten Code)
       const current = LAST_CODE_BY_SENDER.get(from);
-      const code = current?.code || "unknown";
+      // wenn noch nie ein Code gesetzt wurde → in _unassigned
+      const code = current?.code || UNASSIGNED_DIRNAME;
 
-      // Zielordner
       const dayDir = path.join(DATA_DIR, code, day);
       ensureDir(dayDir);
 
       const logPath = path.join(dayDir, "log.jsonl");
 
-      // Log record
       appendJsonl(logPath, {
         kind: "message",
         ts,
@@ -153,31 +185,28 @@ app.post("/webhook", async (req, res) => {
         msgId: msg.id || null,
         type: msg.type,
         text: text || null,
+        assigned_code: code,
       });
 
-      // Medien
+      // Medien speichern (image/document/audio/video/sticker)
       const mediaTypes = ["image", "document", "audio", "video", "sticker"];
       if (mediaTypes.includes(msg.type)) {
         const mediaObj = msg[msg.type];
         const mediaId = mediaObj?.id;
 
         if (!mediaId) {
-          appendJsonl(logPath, {
-            kind: "media_error",
-            ts,
-            type: msg.type,
-            error: "No media id found",
-          });
+          appendJsonl(logPath, { kind: "media_error", ts, type: msg.type, error: "No media id found" });
           continue;
         }
 
         try {
           const { buffer, mimeType } = await downloadWhatsAppMedia(mediaId);
           const ext = extFromMime(mimeType) || "";
+
           const filename =
             msg.type === "document" && mediaObj?.filename
-              ? String(mediaObj.filename).replace(/[^\w.\-]+/g, "_")
-              : `${ts}_${mediaId}${ext}`;
+              ? safeName(mediaObj.filename)
+              : `${ts}_${from}_${mediaId}${ext}`;
 
           const outPath = path.join(dayDir, filename);
           fs.writeFileSync(outPath, buffer);
@@ -191,11 +220,7 @@ app.post("/webhook", async (req, res) => {
             file: filename,
           });
 
-          if (msg.type === "image") {
-            console.log(`✅ saved image for #${code} -> ${outPath}`);
-          } else {
-            console.log(`✅ saved ${msg.type} for #${code} -> ${outPath}`);
-          }
+          console.log(`✅ saved ${msg.type} for #${code} -> ${outPath}`);
         } catch (e) {
           appendJsonl(logPath, {
             kind: "media_error",
@@ -208,7 +233,6 @@ app.post("/webhook", async (req, res) => {
         }
       }
 
-      // Nur für Text extra Logzeile wie gewohnt
       if (msg.type === "text") {
         console.log(`✅ saved message for #${code} -> ${logPath}`);
       }
@@ -218,7 +242,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Optional: Debug – zuletzt gesetzte Codes ansehen
+// Debug: zuletzt gesetzte Codes
 app.get("/admin/last", (req, res) => {
   const out = {};
   for (const [sender, v] of LAST_CODE_BY_SENDER.entries()) out[sender] = v;
@@ -226,7 +250,11 @@ app.get("/admin/last", (req, res) => {
 });
 
 // Start
+ensureDir(DATA_DIR);
+loadState();
+
 app.listen(PORT, () => {
   console.log(`Server läuft auf Port ${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
+  console.log(`STATE_FILE=${STATE_FILE}`);
 });
