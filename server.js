@@ -1,151 +1,165 @@
-const express = require("express");
-const fs = require("fs");
-const path = require("path");
+// server.js  (ESM)
+import express from "express";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import fetch from "node-fetch";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import multer from "multer";
+import nodemailer from "nodemailer";
+
+import { buildDailyPdfs, buildPdfForSiteToday } from "./pdf.js";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const app = express();
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "20mb" }));
 
-// ENV
+// ---------- ENV ----------
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // für Auto-Antwort
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || "";
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
+const TZ = process.env.TZ || "Europe/Vienna";
 
-// Persistenter Merker (auf Disk)
 const STATE_DIR = path.join(DATA_DIR, "_state");
 const STATE_FILE = path.join(STATE_DIR, "last_code_by_sender.json");
 
-// Unassigned Ordner statt "unknown"
-const UNASSIGNED_DIRNAME = "_unassigned";
+const CODE_TTL_MIN = Number(process.env.CODE_TTL_MIN || "10"); // 10 Minuten
+const ASK_TEXT = process.env.ASK_TEXT || "Bitte Baustellennummer mit # vorab senden";
 
-// Text der Auto-Antwort (dein Wunsch)
-const UNASSIGNED_REPLY_TEXT = "Bitte Baustellennummer mit # vorab senden";
+// Mail (Brevo)
+const MAIL_HOST = process.env.MAIL_HOST || "smtp-relay.brevo.com";
+const MAIL_PORT = Number(process.env.MAIL_PORT || "587");
+const MAIL_USER = process.env.MAIL_USER || "";
+const MAIL_PASS = process.env.MAIL_PASS || "";
+const MAIL_FROM = process.env.MAIL_FROM || "";
+const MAIL_TO = process.env.MAIL_TO || "";
 
-// Merker im RAM
-const LAST_CODE_BY_SENDER = new Map(); // sender -> { code, setAt }
-const LAST_REPLY_BY_SENDER_DAY = new Map(); // sender -> "YYYY-MM-DD" (Anti-Spam)
+// ---------- Helpers ----------
+function ensureDir(p) {
+  fs.mkdirSync(p, { recursive: true });
+}
 
-// -------- Helpers --------
-function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
-
-function loadState() {
+function safeReadJson(file, fallback) {
   try {
-    if (!fs.existsSync(STATE_FILE)) return;
-    const raw = fs.readFileSync(STATE_FILE, "utf8");
-    const obj = JSON.parse(raw);
-
-    for (const [sender, v] of Object.entries(obj)) {
-      if (v?.code) LAST_CODE_BY_SENDER.set(sender, v);
-      if (v?.lastReplyDay) LAST_REPLY_BY_SENDER_DAY.set(sender, v.lastReplyDay);
-    }
-    console.log(`✅ state loaded: ${LAST_CODE_BY_SENDER.size} senders`);
-  } catch (e) {
-    console.log("⚠️ state load failed (ignored):", e.message);
+    if (!fs.existsSync(file)) return fallback;
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
   }
 }
 
-function saveState() {
-  try {
-    ensureDir(STATE_DIR);
-    const obj = {};
-    const allSenders = new Set([
-      ...LAST_CODE_BY_SENDER.keys(),
-      ...LAST_REPLY_BY_SENDER_DAY.keys(),
-    ]);
-
-    for (const sender of allSenders) {
-      const codeObj = LAST_CODE_BY_SENDER.get(sender);
-      const lastReplyDay = LAST_REPLY_BY_SENDER_DAY.get(sender);
-      obj[sender] = {
-        ...(codeObj || {}),
-        ...(lastReplyDay ? { lastReplyDay } : {}),
-      };
-    }
-    fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2), "utf8");
-  } catch (e) {
-    console.log("⚠️ state save failed (ignored):", e.message);
-  }
+function safeWriteJson(file, obj) {
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2));
 }
 
-function ymdFromTsSeconds(tsSeconds) {
-  const d = tsSeconds ? new Date(Number(tsSeconds) * 1000) : new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function nowTz() {
+  return dayjs().tz(TZ);
 }
 
-function extractCode(text) {
-  const m = (text || "").match(/#(\d{3,})\b/);
+function todayStr() {
+  return nowTz().format("YYYY-MM-DD");
+}
+
+function extractSiteCode(text) {
+  // findet #260016 (6-stellig) oder allgemein # + digits
+  const m = String(text || "").match(/#(\d{3,})/);
   return m ? m[1] : null;
 }
 
-function appendJsonl(filePath, obj) {
-  ensureDir(path.dirname(filePath));
-  fs.appendFileSync(filePath, JSON.stringify(obj) + "\n", "utf8");
+function isPdfCommand(text) {
+  const t = String(text || "").trim().toLowerCase();
+  return t === "pdf" || t.startsWith("pdf ");
 }
 
-function extFromMime(mime) {
-  if (!mime) return "";
-  const map = {
-    "image/jpeg": ".jpg",
-    "image/jpg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "audio/ogg": ".ogg",
-    "audio/mpeg": ".mp3",
-    "video/mp4": ".mp4",
-    "application/pdf": ".pdf",
-  };
-  return map[mime] || "";
+function parsePdfCommand(text) {
+  // "pdf" oder "pdf #260016"
+  const t = String(text || "").trim();
+  const code = extractSiteCode(t);
+  return { code };
 }
 
-function safeName(name) {
-  return String(name || "").replace(/[^\w.\-]+/g, "_").slice(0, 160);
+function getState() {
+  return safeReadJson(STATE_FILE, {});
 }
 
-async function graphGetJson(url) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Graph GET failed ${res.status}: ${txt}`);
-  }
-  return res.json();
+function setLastCode(sender, code) {
+  const st = getState();
+  st[sender] = { code, ts: Date.now() };
+  safeWriteJson(STATE_FILE, st);
 }
 
-async function graphDownloadBuffer(url) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Download failed ${res.status}: ${txt}`);
-  }
-  const ab = await res.arrayBuffer();
-  return Buffer.from(ab);
+function getLastCode(sender) {
+  const st = getState();
+  return st[sender] || null;
 }
 
-async function downloadWhatsAppMedia(mediaId) {
-  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
-  const meta = await graphGetJson(`https://graph.facebook.com/v22.0/${mediaId}`);
-  if (!meta.url) throw new Error("No media url from Meta");
-  const buffer = await graphDownloadBuffer(meta.url);
-  return { buffer, mimeType: meta.mime_type || "" };
+function pickCodeForSender(sender) {
+  const entry = getLastCode(sender);
+  if (!entry) return null;
+  const ageMin = (Date.now() - entry.ts) / 60000;
+  if (ageMin <= CODE_TTL_MIN) return entry.code;
+  return null;
 }
 
-// ✅ WhatsApp Auto-Antwort senden (Text)
-async function sendWhatsAppText(to, text) {
-  if (!PHONE_NUMBER_ID) throw new Error("PHONE_NUMBER_ID missing");
-  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
+function saveText(site, sender, text) {
+  const dir = path.join(DATA_DIR, site, todayStr());
+  ensureDir(dir);
+  const file = path.join(dir, "log.jsonl");
+  const line = JSON.stringify({
+    ts: nowTz().toISOString(),
+    type: "text",
+    sender,
+    text,
+  });
+  fs.appendFileSync(file, line + "\n");
+  console.log(`✅ saved text for #${site} -> ${file}`);
+}
 
-  const url = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
+async function downloadToFile(url, outPath) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`download failed ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  ensureDir(path.dirname(outPath));
+  fs.writeFileSync(outPath, buf);
+}
+
+async function fetchMediaUrl(mediaId) {
+  const res = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+  });
+  const j = await res.json();
+  if (!j.url) throw new Error("no media url in response");
+  return j.url;
+}
+
+function saveMetaLine(site, obj) {
+  const dir = path.join(DATA_DIR, site);
+  ensureDir(dir);
+  const file = path.join(dir, `${todayStr()}.jsonl`);
+  fs.appendFileSync(file, JSON.stringify(obj) + "\n");
+  console.log(`✅ saved message for #${site} -> ${file}`);
+}
+
+// WhatsApp send text
+async function waSendText(to, body) {
+  if (!PHONE_NUMBER_ID || !WHATSAPP_TOKEN) return;
   const payload = {
     messaging_product: "whatsapp",
     to,
     type: "text",
-    text: { body: text },
+    text: { body },
   };
-
-  const res = await fetch(url, {
+  const res = await fetch(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
@@ -153,182 +167,188 @@ async function sendWhatsAppText(to, text) {
     },
     body: JSON.stringify(payload),
   });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`send message failed ${res.status}: ${txt}`);
-  }
-  return res.json();
+  const j = await res.json();
+  if (!res.ok) console.log("waSendText error:", j);
 }
 
-// ✅ Hinweis ins Log
-function writeUnassignedHint(logPath, from) {
-  appendJsonl(logPath, {
-    kind: "system_hint",
-    ts: Math.floor(Date.now() / 1000),
-    from,
-    message: UNASSIGNED_REPLY_TEXT,
+// Mailer
+function getMailer() {
+  if (!MAIL_HOST || !MAIL_USER || !MAIL_PASS || !MAIL_FROM || !MAIL_TO) return null;
+  return nodemailer.createTransport({
+    host: MAIL_HOST,
+    port: MAIL_PORT,
+    secure: false,
+    auth: { user: MAIL_USER, pass: MAIL_PASS },
   });
 }
 
-// -------- Routes --------
-app.get("/", (req, res) => res.status(200).send("webhook läuft ✅"));
+async function mailPdf(site, pdfPath) {
+  const tr = getMailer();
+  if (!tr) throw new Error("Mailer not configured (MAIL_* env missing)");
+  const subject = `Baustellenprotokoll #${site} – ${todayStr()}`;
+  const text = `Anbei das Baustellenprotokoll für #${site} (${todayStr()}).`;
 
+  await tr.sendMail({
+    from: MAIL_FROM,
+    to: MAIL_TO,
+    subject,
+    text,
+    attachments: [{ filename: `Baustellenprotokoll_${site}_${todayStr()}.pdf`, path: pdfPath }],
+  });
+}
+
+// ---------- Routes ----------
+
+// Verify (Meta)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  if (mode === "subscribe" && token && token === VERIFY_TOKEN) return res.status(200).send(challenge);
+  if (mode === "subscribe" && token === VERIFY_TOKEN) return res.status(200).send(challenge);
   return res.sendStatus(403);
 });
 
+// Incoming
 app.post("/webhook", async (req, res) => {
-  res.sendStatus(200);
-
   try {
-    const payload = req.body;
-    const entry = payload?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
+    const body = req.body;
+    if (body.object !== "whatsapp_business_account") return res.sendStatus(200);
 
-    const messages = value?.messages || [];
-    const contacts = value?.contacts || [];
-    const contactName = contacts?.[0]?.profile?.name || null;
+    for (const entry of body.entry || []) {
+      for (const change of entry.changes || []) {
+        const v = change.value;
+        if (!v?.messages?.length) continue;
 
-    if (!messages.length) return;
+        for (const msg of v.messages) {
+          const sender = msg.from; // wa_id
+          const type = msg.type;
 
-    for (const msg of messages) {
-      const from = msg.from || "unknown_sender";
-      const ts = msg.timestamp ? Number(msg.timestamp) : Math.floor(Date.now() / 1000);
-      const day = ymdFromTsSeconds(ts);
+          // TEXT
+          if (type === "text") {
+            const text = msg.text?.body || "";
+            const code = extractSiteCode(text);
 
-      const text =
-        msg.type === "text"
-          ? (msg.text?.body || "")
-          : (msg.image?.caption || msg.video?.caption || msg.document?.caption || "");
+            // PDF command?
+            if (isPdfCommand(text)) {
+              const { code: explicit } = parsePdfCommand(text);
+              const useCode = explicit || pickCodeForSender(sender);
 
-      // Code setzen, wenn vorhanden
-      const newCode = extractCode(text);
-      if (newCode) {
-        LAST_CODE_BY_SENDER.set(from, { code: newCode, setAt: Date.now() });
-        saveState();
-      }
+              if (!useCode) {
+                await waSendText(sender, ASK_TEXT);
+                continue;
+              }
 
-      const current = LAST_CODE_BY_SENDER.get(from);
-      const code = current?.code || UNASSIGNED_DIRNAME;
+              // build PDF for TODAY for that site
+              const pdfPath = await buildPdfForSiteToday({
+                dataDir: DATA_DIR,
+                site: useCode,
+                tz: TZ,
+              });
 
-      const dayDir = path.join(DATA_DIR, code, day);
-      ensureDir(dayDir);
+              // mail it
+              await mailPdf(useCode, pdfPath);
 
-      const logPath = path.join(dayDir, "log.jsonl");
+              await waSendText(sender, `PDF wird per E-Mail gesendet für #${useCode}.`);
+              continue;
+            }
 
-      // ✅ Wenn unassigned: Log-Hinweis + WhatsApp Auto-Antwort (max 1x/Tag)
-      if (code === UNASSIGNED_DIRNAME) {
-        writeUnassignedHint(logPath, from);
+            // Baustellencode?
+            if (code) {
+              setLastCode(sender, code);
+              saveText(code, sender, text);
+              saveMetaLine(code, { ts: nowTz().toISOString(), kind: "in_text", sender, text });
+              await waSendText(sender, `OK – Baustelle #${code} ist gesetzt. Du kannst jetzt Fotos senden.`);
+            } else {
+              // normal text: wenn ein gültiger Code im Fenster aktiv ist -> der Baustelle zuordnen
+              const active = pickCodeForSender(sender);
+              const site = active || "unknown";
+              saveText(site, sender, text);
+              saveMetaLine(site, { ts: nowTz().toISOString(), kind: "text", sender, text });
 
-        const lastReplyDay = LAST_REPLY_BY_SENDER_DAY.get(from);
-        if (lastReplyDay !== day) {
-          try {
-            await sendWhatsAppText(from, UNASSIGNED_REPLY_TEXT);
-            LAST_REPLY_BY_SENDER_DAY.set(from, day);
-            saveState();
+              if (!active) await waSendText(sender, ASK_TEXT);
+            }
+          }
 
-            appendJsonl(logPath, {
-              kind: "auto_reply_sent",
-              ts: Math.floor(Date.now() / 1000),
-              to: from,
-              text: UNASSIGNED_REPLY_TEXT,
-            });
+          // IMAGE / DOCUMENT / VIDEO / AUDIO
+          if (["image", "document", "video", "audio"].includes(type)) {
+            const active = pickCodeForSender(sender);
+            const site = active || "unknown";
 
-            console.log(`📩 auto-reply sent to ${from} (unassigned)`);
-          } catch (e) {
-            appendJsonl(logPath, {
-              kind: "auto_reply_error",
-              ts: Math.floor(Date.now() / 1000),
-              to: from,
-              error: String(e?.message || e),
-            });
-            console.log(`❌ auto-reply failed: ${e?.message || e}`);
+            const media = msg[type];
+            const mediaId = media?.id;
+            const mime = media?.mime_type || "";
+
+            const dir = path.join(DATA_DIR, site, todayStr());
+            ensureDir(dir);
+
+            // filename
+            const extFromMime = (m) => {
+              if (m.includes("jpeg")) return "jpg";
+              if (m.includes("png")) return "png";
+              if (m.includes("pdf")) return "pdf";
+              if (m.includes("mp4")) return "mp4";
+              if (m.includes("ogg")) return "ogg";
+              return "bin";
+            };
+            const ext = extFromMime(mime);
+            const name = `${msg.timestamp || Math.floor(Date.now() / 1000)}_${crypto.randomBytes(4).toString("hex")}.${ext}`;
+            const outPath = path.join(dir, name);
+
+            if (mediaId) {
+              const url = await fetchMediaUrl(mediaId);
+              await downloadToFile(url, outPath);
+              console.log(`✅ saved ${type} for #${site} -> ${outPath}`);
+              saveMetaLine(site, { ts: nowTz().toISOString(), kind: type, sender, outPath, mime });
+            } else {
+              console.log("⚠️ no media id");
+            }
+
+            if (!active) await waSendText(sender, ASK_TEXT);
           }
         }
       }
-
-      appendJsonl(logPath, {
-        kind: "message",
-        ts,
-        from,
-        contactName,
-        msgId: msg.id || null,
-        type: msg.type,
-        text: text || null,
-        assigned_code: code,
-      });
-
-      // Medien speichern
-      const mediaTypes = ["image", "document", "audio", "video", "sticker"];
-      if (mediaTypes.includes(msg.type)) {
-        const mediaObj = msg[msg.type];
-        const mediaId = mediaObj?.id;
-
-        if (!mediaId) {
-          appendJsonl(logPath, { kind: "media_error", ts, type: msg.type, error: "No media id found" });
-          continue;
-        }
-
-        try {
-          const { buffer, mimeType } = await downloadWhatsAppMedia(mediaId);
-          const ext = extFromMime(mimeType) || "";
-
-          const filename =
-            msg.type === "document" && mediaObj?.filename
-              ? safeName(mediaObj.filename)
-              : `${ts}_${from}_${mediaId}${ext}`;
-
-          const outPath = path.join(dayDir, filename);
-          fs.writeFileSync(outPath, buffer);
-
-          appendJsonl(logPath, {
-            kind: "media_saved",
-            ts,
-            type: msg.type,
-            mediaId,
-            mimeType,
-            file: filename,
-          });
-
-          console.log(`✅ saved ${msg.type} for #${code} -> ${outPath}`);
-        } catch (e) {
-          appendJsonl(logPath, {
-            kind: "media_error",
-            ts,
-            type: msg.type,
-            mediaId,
-            error: String(e?.message || e),
-          });
-          console.log(`❌ media download failed for #${code}: ${e?.message || e}`);
-        }
-      }
-
-      if (msg.type === "text") console.log(`✅ saved message for #${code} -> ${logPath}`);
     }
-  } catch (err) {
-    console.error("❌ webhook handler error:", err);
+
+    res.sendStatus(200);
+  } catch (e) {
+    console.error("webhook error", e);
+    res.sendStatus(200);
   }
 });
 
-app.get("/admin/last", (req, res) => {
-  const out = {};
-  for (const [sender, v] of LAST_CODE_BY_SENDER.entries()) out[sender] = v;
-  res.json(out);
+// Health
+app.get("/", (req, res) => res.send("webhook läuft"));
+
+// Admin: daily PDFs at once
+app.get("/admin/run-daily", async (req, res) => {
+  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.sendStatus(403);
+  try {
+    const result = await buildDailyPdfs({ dataDir: DATA_DIR, tz: TZ, mailFn: mailPdf });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
 });
 
-// Start
+// Admin: one site now (optional)
+app.get("/admin/run-site", async (req, res) => {
+  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.sendStatus(403);
+  const site = String(req.query.site || "");
+  if (!site) return res.status(400).send("missing site");
+  try {
+    const pdfPath = await buildPdfForSiteToday({ dataDir: DATA_DIR, site, tz: TZ });
+    await mailPdf(site, pdfPath);
+    res.json({ ok: true, site, pdfPath });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 ensureDir(DATA_DIR);
-loadState();
+ensureDir(STATE_DIR);
 
-app.listen(PORT, () => {
-  console.log(`Server läuft auf Port ${PORT}`);
-  console.log(`DATA_DIR=${DATA_DIR}`);
-  console.log(`STATE_FILE=${STATE_FILE}`);
-  console.log(`PHONE_NUMBER_ID set: ${!!PHONE_NUMBER_ID}`);
-});
+console.log(`DATA_DIR=${DATA_DIR}`);
+console.log(`STATE_FILE=${STATE_FILE}`);
+console.log(`PHONE_NUMBER_ID set: ${!!PHONE_NUMBER_ID}`);
+
+app.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
