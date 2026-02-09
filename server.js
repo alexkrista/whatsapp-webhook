@@ -1,13 +1,14 @@
-// server.js (CommonJS) – WhatsApp Webhook + Media speichern + Tages-PDF (Textseite + Fotoseiten)
-// + Mailversand via SMTP (SendGrid funktioniert bei dir)
-// PDF: A3 quer, 6 Fotos pro Seite (3x2), unter jedem Foto: Zeitstempel + Dateiname
-// Textseite: Zeitstempel + Text (chronologisch)
+// server.js (CommonJS) – WhatsApp Webhook + Media speichern + PDF (Textseite + Fotoseiten)
+// Trigger: Wenn du in WhatsApp "pdf" schreibst, wird für die Baustelle ein PDF erstellt + per Mail gesendet.
+// - Baustellencode: #260016 (nur Nummern nach #)
+// - Option B: Wenn du einmal #260016 geschickt hast, werden folgende Fotos ohne # automatisch dieser Baustelle zugeordnet (4h TTL)
+// - PDF: A3 quer, Deckblatt, Textseite(n) mit Zeitstempel, Fotoseiten (6 pro Seite) mit Zeitstempel + Dateiname
+// - Mail: SMTP (bei dir SendGrid), Empfänger MAIL_TO_DEFAULT (oder per Admin Endpoint)
 //
 // Render ENV (mindestens):
 // DATA_DIR=/var/data
 // VERIFY_TOKEN=...
 // WHATSAPP_TOKEN=...
-// PHONE_NUMBER_ID=1026421043884083
 // ADMIN_TOKEN=... (für /admin/*)
 // SMTP_HOST=smtp.sendgrid.net
 // SMTP_PORT=587
@@ -15,6 +16,9 @@
 // SMTP_PASS=<SENDGRID_API_KEY>
 // MAIL_FROM=<verifizierter Sender bei SendGrid>
 // MAIL_TO_DEFAULT=alex@krista.at
+// Optional:
+// PDF_ALLOWED_FROM=436643203577 (oder mehrere: "4366...,4366...") -> wer darf per WhatsApp "pdf" auslösen
+// PDF_IGNORE_UNKNOWN=1 -> unknown/_unassigned nicht mailen im Daily-Run
 
 const express = require("express");
 const fs = require("fs");
@@ -30,11 +34,11 @@ const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // optional (für senden später)
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || ""; // unbedingt setzen!
+// Admin protection
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
-// SMTP (SendGrid)
+// SMTP (SendGrid recommended)
 const SMTP_HOST = process.env.SMTP_HOST || "";
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_USER = process.env.SMTP_USER || "";
@@ -43,20 +47,20 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 
+const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || ""; // comma separated WhatsApp wa_id(s)
+const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
+
 // ===================== App =====================
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Baustellen-Merker (Option B) =====================
-// Damit Foto/Audio ohne Caption nicht "unknown" wird:
-// Letzte Baustelle pro Absender 4 Stunden merken.
 const LAST_SITE_BY_SENDER = {}; // { wa_id: { siteCode, tsMs } }
 const SITE_TTL_MS = 4 * 60 * 60 * 1000;
 
 function rememberSite(sender, siteCode) {
   LAST_SITE_BY_SENDER[sender] = { siteCode, tsMs: Date.now() };
 }
-
 function recallSite(sender) {
   const rec = LAST_SITE_BY_SENDER[sender];
   if (!rec) return null;
@@ -68,43 +72,71 @@ function recallSite(sender) {
 function ensureDirSync(p) {
   fs.mkdirSync(p, { recursive: true });
 }
-
 async function ensureDir(p) {
   await fsp.mkdir(p, { recursive: true });
 }
-
+async function appendJsonl(filePath, obj) {
+  await ensureDir(path.dirname(filePath));
+  await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
+}
 function todayISO(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
-
 function isoDateFromWhatsAppTs(tsSeconds) {
   const n = Number(tsSeconds || 0);
   const d = n ? new Date(n * 1000) : new Date();
   return todayISO(d);
 }
-
 function parseSiteCodeFromText(text) {
-  // #260016 -> 260016 (min. 3 digits, damit auch andere Codes gehen)
   const m = String(text || "").match(/#(\d{3,})\b/);
   return m ? m[1] : null;
 }
-
 function parseCaptionTextFromMessage(msg) {
-  // Text (type=text) oder Caption bei image/video
   if (msg.type === "text") return msg.text?.body || "";
   if (msg.type === "image") return msg.image?.caption || "";
   if (msg.type === "video") return msg.video?.caption || "";
   return "";
 }
-
-async function appendJsonl(filePath, obj) {
-  await ensureDir(path.dirname(filePath));
-  await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
+function stampDE(tsSeconds) {
+  const n = Number(tsSeconds || 0);
+  const d = n ? new Date(n * 1000) : null;
+  if (!d) return "";
+  return d.toLocaleString("de-AT", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function stampDEFromFilename(fname) {
+  const m = String(fname).match(/^(\d{10})_/);
+  if (!m) return "";
+  return stampDE(m[1]);
+}
+function isPdfCommand(text) {
+  const t = String(text || "").trim().toLowerCase();
+  return /\bpdf\b/.test(t);
+}
+function isAllowedPdfSender(sender) {
+  if (!PDF_ALLOWED_FROM.trim()) return true; // if not set: allow everyone (not recommended)
+  const allowed = PDF_ALLOWED_FROM.split(",").map(s => s.trim()).filter(Boolean);
+  return allowed.includes(String(sender || "").trim());
+}
+function requireAdmin(req, res) {
+  if (!ADMIN_TOKEN) return true; // if not set: unprotected (not recommended)
+  const tok = req.headers["x-admin-token"] || req.query.token || "";
+  if (tok !== ADMIN_TOKEN) {
+    res.status(403).send("Forbidden");
+    return false;
+  }
+  return true;
 }
 
+// ===================== HTTP helpers =====================
 async function fetchJson(url, opts = {}) {
   const r = await fetch(url, opts);
   if (!r.ok) {
@@ -113,7 +145,6 @@ async function fetchJson(url, opts = {}) {
   }
   return await r.json();
 }
-
 async function fetchBuffer(url, opts = {}) {
   const r = await fetch(url, opts);
   if (!r.ok) {
@@ -124,51 +155,15 @@ async function fetchBuffer(url, opts = {}) {
   return Buffer.from(ab);
 }
 
-function requireAdmin(req, res) {
-  if (!ADMIN_TOKEN) {
-    // Wenn du das hier nicht willst: ADMIN_TOKEN in Render setzen!
-    return true;
-  }
-  const tok = req.headers["x-admin-token"] || req.query.token || "";
-  if (tok !== ADMIN_TOKEN) {
-    res.status(403).send("Forbidden");
-    return false;
-  }
-  return true;
-}
-
-function stampDE(tsSeconds) {
-  const n = Number(tsSeconds || 0);
-  const d = n ? new Date(n * 1000) : null;
-  if (!d) return "";
-  // 09.02.2026, 20:14
-  return d.toLocaleString("de-AT", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function stampDEFromFilename(fname) {
-  // Dateiname: 1770570392_<mediaId>.jpg  (10-stellige Unix-Sekunden vorne)
-  const m = String(fname).match(/^(\d{10})_/);
-  if (!m) return "";
-  return stampDE(m[1]);
-}
-
 // ===================== WhatsApp Media Download =====================
 async function downloadWhatsAppMedia(mediaId, outPath) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
 
-  // 1) Meta liefert URL + mime_type
   const meta = await fetchJson(`https://graph.facebook.com/v22.0/${mediaId}`, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
   });
   if (!meta?.url) throw new Error("No media url from Graph");
 
-  // 2) Bytes holen
   const buf = await fetchBuffer(meta.url, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
   });
@@ -183,32 +178,28 @@ function makeMailer() {
   return nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
-    secure: false, // STARTTLS für 587
+    secure: false, // STARTTLS for 587
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
 }
-
 async function sendMailWithAttachment({ to, subject, text, filePath }) {
-  // Mail-Fehler sollen nie den Server killen
   try {
     if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !MAIL_FROM) {
       throw new Error("SMTP env missing (SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM)");
     }
-    const mailer = makeMailer();
     const buf = await fsp.readFile(filePath);
+    const mailer = makeMailer();
     const info = await mailer.sendMail({
       from: MAIL_FROM,
       to,
       subject,
       text,
-      attachments: [
-        { filename: path.basename(filePath), content: buf, contentType: "application/pdf" },
-      ],
+      attachments: [{ filename: path.basename(filePath), content: buf, contentType: "application/pdf" }],
     });
     return info;
   } catch (e) {
     console.error("❌ Mail send failed:", e?.message || e);
-    return null;
+    return null; // never crash
   }
 }
 
@@ -220,24 +211,19 @@ async function listImages(dayDir) {
     .sort()
     .map((f) => ({ name: f, path: path.join(dayDir, f) }));
 }
-
 async function readJsonLines(filePath) {
   if (!fs.existsSync(filePath)) return [];
   const content = await fsp.readFile(filePath, "utf8");
   const lines = content.split("\n").filter(Boolean);
   const items = [];
   for (const line of lines) {
-    try {
-      items.push(JSON.parse(line));
-    } catch {
-      // ignore bad line
-    }
+    try { items.push(JSON.parse(line)); } catch {}
   }
   return items;
 }
 
 async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
-  // A3 landscape points: 420mm x 297mm -> 1190.55 x 841.89
+  // A3 landscape points
   const PAGE_W = 1190.55;
   const PAGE_H = 841.89;
 
@@ -247,10 +233,9 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
 
   const logPath = path.join(dayDir, "log.jsonl");
   const logs = await readJsonLines(logPath);
-
   const images = await listImages(dayDir);
 
-  // ---------- Cover ----------
+  // ---- Cover ----
   {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
     page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
@@ -260,16 +245,11 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     page.drawText(`Fotos: ${images.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
 
     page.drawText("Format: A3 quer | 6 Fotos pro Seite | Zeitstempel + Dateiname", {
-      x: 60,
-      y: 80,
-      size: 12,
-      font,
-      color: rgb(0.3, 0.3, 0.3),
+      x: 60, y: 80, size: 12, font, color: rgb(0.3, 0.3, 0.3),
     });
   }
 
-  // ---------- Text page(s) ----------
-  // Wir holen echte Textmeldungen aus raw.text.body und verwenden WhatsApp timestamp
+  // ---- Text page(s) ----
   const textItems = logs
     .map((l) => {
       const raw = l?.raw;
@@ -286,7 +266,6 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
 
     const drawHeader = (headline) => {
       page.drawText(headline, { x: 60, y: PAGE_H - 80, size: 20, font: fontBold });
-      // Linie
       page.drawLine({
         start: { x: 60, y: PAGE_H - 92 },
         end: { x: PAGE_W - 60, y: PAGE_H - 92 },
@@ -312,10 +291,9 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     }
   }
 
-  // ---------- Photos: 6 per page (3x2) ----------
+  // ---- Photos: 6 per page (3x2) ----
   if (images.length) {
-    const cols = 3,
-      rows = 2;
+    const cols = 3, rows = 2;
     const margin = 40;
     const gutter = 18;
     const cellW = (PAGE_W - margin * 2 - gutter * (cols - 1)) / cols;
@@ -332,31 +310,23 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
         const x0 = margin + col * (cellW + gutter);
         const yTop = PAGE_H - margin - row * (cellH + gutter);
 
-        const captionH = 28; // Platz für Timestamp + Filename
+        const captionH = 28;
         const targetW = Math.floor(cellW);
         const targetH = Math.floor(cellH - captionH);
 
         const fname = chunk[j].name;
         const imgPath = chunk[j].path;
 
-        // Komprimieren/skalieren -> PDF klein
         let imgBuf = await fsp.readFile(imgPath);
         try {
           imgBuf = await sharp(imgBuf)
             .resize({ width: targetW, height: targetH, fit: "inside" })
             .jpeg({ quality: 72 })
             .toBuffer();
-        } catch {
-          // wenn sharp ausfällt, mit original versuchen
-        }
+        } catch {}
 
-        // Embed
         let img;
-        try {
-          img = await pdf.embedJpg(imgBuf);
-        } catch {
-          img = await pdf.embedPng(imgBuf);
-        }
+        try { img = await pdf.embedJpg(imgBuf); } catch { img = await pdf.embedPng(imgBuf); }
 
         const w0 = img.width;
         const h0 = img.height;
@@ -369,7 +339,6 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
 
         page.drawImage(img, { x, y, width: drawW, height: drawH });
 
-        // Caption: Zeitstempel aus Dateiname + Dateiname
         const stamp = stampDEFromFilename(fname);
         const caption = stamp ? `${stamp}  |  ${fname}` : fname;
 
@@ -388,6 +357,29 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
   await ensureDir(path.dirname(outPdfPath));
   await fsp.writeFile(outPdfPath, bytes);
   return { pages: pdf.getPageCount(), bytes: bytes.length };
+}
+
+// ===================== PDF Trigger from WhatsApp ("pdf") =====================
+async function triggerPdfForJobDay({ jobId, date, to }) {
+  const dayDir = path.join(DATA_DIR, jobId, date);
+  if (!fs.existsSync(dayDir)) {
+    throw new Error(`No data dir for #${jobId} at ${date}`);
+  }
+
+  const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
+  const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
+
+  const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+  const body = `PDF per WhatsApp-Befehl erstellt.\nBaustelle: #${jobId}\nDatum: ${date}\nSeiten: ${built.pages}\n`;
+
+  const sent = await sendMailWithAttachment({
+    to,
+    subject,
+    text: body,
+    filePath: outPdf,
+  });
+
+  return { outPdf, built, mailed: !!sent, messageId: sent?.messageId || null };
 }
 
 // ===================== Routes =====================
@@ -409,7 +401,7 @@ app.get("/webhook", (req, res) => {
 
 // Incoming WhatsApp
 app.post("/webhook", async (req, res) => {
-  // Meta will schnell 200
+  // Meta wants quick 200
   res.sendStatus(200);
 
   try {
@@ -428,7 +420,7 @@ app.post("/webhook", async (req, res) => {
       const textOrCaption = parseCaptionTextFromMessage(msg);
       let siteCode = parseSiteCodeFromText(textOrCaption);
 
-      // Option B: merken/holen
+      // Option B: remember / recall
       if (siteCode) rememberSite(sender, siteCode);
       else siteCode = recallSite(sender) || "unknown";
 
@@ -467,13 +459,48 @@ app.post("/webhook", async (req, res) => {
       } else if (msg.type === "text") {
         console.log(`✅ saved text for #${siteCode} -> ${logPath}`);
       }
+
+      // ✅ Trigger: WhatsApp Text enthält "pdf"
+      if (msg.type === "text" && isPdfCommand(textOrCaption)) {
+        if (!isAllowedPdfSender(sender)) {
+          console.log(`⛔ pdf command blocked (sender ${sender} not allowed)`);
+          continue;
+        }
+
+        // Baustelle bestimmen: bevorzugt #Code im Text, sonst gemerkte Baustelle
+        let jobId = parseSiteCodeFromText(textOrCaption) || siteCode;
+
+        if (!jobId || jobId === "unknown") {
+          console.log("⚠️ pdf command: jobId unknown (schreibe z.B. '#260016 pdf')");
+          continue;
+        }
+
+        // optional: unknown unterdrücken
+        if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) {
+          console.log("⚠️ pdf command ignored for unknown/_unassigned");
+          continue;
+        }
+
+        const to = MAIL_TO_DEFAULT;
+        if (!to) {
+          console.log("⚠️ pdf command: MAIL_TO_DEFAULT missing");
+          continue;
+        }
+
+        try {
+          const result = await triggerPdfForJobDay({ jobId, date, to });
+          console.log(`📨 pdf command: sent #${jobId} ${date} -> ${to} (${result.built.pages} pages)`);
+        } catch (e) {
+          console.error("❌ pdf command failed:", e?.message || e);
+        }
+      }
     }
   } catch (e) {
     console.error("❌ webhook error:", e?.message || e);
   }
 });
 
-// Admin: Testmail
+// ===================== Admin endpoints =====================
 app.get("/admin/test-mail", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -495,7 +522,7 @@ app.get("/admin/test-mail", async (req, res) => {
   }
 });
 
-// Admin: Run daily (PDF + Mail) – GET /admin/run-daily?token=...&date=YYYY-MM-DD&to=...
+// Daily run (PDF + Mail) – GET /admin/run-daily?token=...&date=YYYY-MM-DD&to=...
 app.get("/admin/run-daily", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -508,6 +535,8 @@ app.get("/admin/run-daily", async (req, res) => {
     const results = [];
 
     for (const jobId of jobIds) {
+      if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
+
       const dayDir = path.join(DATA_DIR, jobId, date);
       if (!fs.existsSync(dayDir)) continue;
 
@@ -548,6 +577,7 @@ console.log("DATA_DIR=", DATA_DIR);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
 console.log("ADMIN_TOKEN set:", !!ADMIN_TOKEN);
+console.log("PDF_ALLOWED_FROM=", PDF_ALLOWED_FROM || "(not set => allow all)");
 
 app.listen(PORT, () => {
   console.log(`✅ Server läuft auf Port ${PORT}`);
