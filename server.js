@@ -1,497 +1,597 @@
-/**
- * WhatsApp -> Log (Text/Media/Audio) -> PDF -> Email
- * - Data dir: /var/data (Render Disk) or env DATA_DIR
- * - Trigger: send "pdf" in WhatsApp chat
- * - Output: PDF with one item per page (text/image/audio) incl. timestamp
- */
+// server.js (CommonJS) – WhatsApp Webhook + Media speichern + PDF (Text/Fotos/PDFs) + Audio-Transkription
+// Trigger: WhatsApp Text enthält "pdf" -> Protokoll-PDF erstellen + mailen
+//
+// NEU:
+// - Audio (Sprachnachricht) wird transkribiert (OpenAI /v1/audio/transcriptions) und als Textseite ins Protokoll übernommen.
+// - PDF (WhatsApp Document mime application/pdf) wird gespeichert und die 1. Seite wird in das Protokoll eingebettet.
+//
+// ENV (zusätzlich):
+// OPENAI_API_KEY=...
+// OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe  (optional)
+// OPENAI_TRANSCRIBE_LANG=de                  (optional)
 
 const express = require("express");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const crypto = require("crypto");
-const PDFDocument = require("pdfkit");
 const nodemailer = require("nodemailer");
+const sharp = require("sharp");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
-const app = express();
-app.use(express.json({ limit: "25mb" }));
-
-// -------------------- ENV --------------------
+// ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || ""; // Meta Graph token
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || ""; // optional, only needed for sending WA messages
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
 
-// SMTP (or SendGrid SMTP)
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
 const SMTP_HOST = process.env.SMTP_HOST || "";
-const SMTP_PORT = Number(process.env.SMTP_PORT || "587");
-const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
+const MAIL_FROM = process.env.MAIL_FROM || "";
+const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 
-const MAIL_FROM = process.env.MAIL_FROM || SMTP_USER || "no-reply@example.com";
-const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || ""; // you set: alex@krista.at or farben.krista@gmx.at
+// OpenAI transcription
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
+const OPENAI_TRANSCRIBE_LANG = process.env.OPENAI_TRANSCRIBE_LANG || "de";
 
-// Optional: When you want to allowlist senders, etc.
-const ADMIN_KEY = process.env.ADMIN_KEY || ""; // optional
+// Optional allowlist for "pdf" trigger
+const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
+const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
-// -------------------- Helpers --------------------
-function nowIso() {
-  return new Date().toISOString();
+// ===================== App =====================
+const app = express();
+app.use(express.json({ limit: "25mb" }));
+
+// ===================== Baustellen-Merker (Option B) =====================
+const LAST_SITE_BY_SENDER = {}; // { wa_id: { siteCode, tsMs } }
+const SITE_TTL_MS = 4 * 60 * 60 * 1000;
+
+function rememberSite(sender, siteCode) {
+  LAST_SITE_BY_SENDER[sender] = { siteCode, tsMs: Date.now() };
 }
-function dateYMD(d = new Date()) {
+function recallSite(sender) {
+  const rec = LAST_SITE_BY_SENDER[sender];
+  if (!rec) return null;
+  if (Date.now() - rec.tsMs > SITE_TTL_MS) return null;
+  return rec.siteCode;
+}
+
+// ===================== Helpers =====================
+function ensureDirSync(p) {
+  fs.mkdirSync(p, { recursive: true });
+}
+async function ensureDir(p) {
+  await fsp.mkdir(p, { recursive: true });
+}
+async function appendJsonl(filePath, obj) {
+  await ensureDir(path.dirname(filePath));
+  await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
+}
+function todayISO(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
-function timeHM(d = new Date()) {
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
+function isoDateFromWhatsAppTs(tsSeconds) {
+  const n = Number(tsSeconds || 0);
+  const d = n ? new Date(n * 1000) : new Date();
+  return todayISO(d);
 }
-function safeName(s) {
-  return String(s || "")
-    .replace(/[^\w.\- ]+/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 180);
-}
-function ensureDir(p) {
-  return fsp.mkdir(p, { recursive: true });
-}
-function sha1(s) {
-  return crypto.createHash("sha1").update(String(s)).digest("hex");
-}
-function tsFromWhatsApp(ts) {
-  // WA timestamp is string seconds since epoch
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return new Date();
-  return new Date(n * 1000);
-}
-function itemId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-async function appendJsonl(filePath, obj) {
-  await ensureDir(path.dirname(filePath));
-  await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
-}
-
-async function readJsonl(filePath) {
-  try {
-    const txt = await fsp.readFile(filePath, "utf8");
-    return txt
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((l) => JSON.parse(l));
-  } catch (e) {
-    return [];
-  }
-}
-
-function getChatIdFromText(body) {
-  // Expected formats: "#260016 ..." or "260016 ..." or just "pdf" (then unknown)
-  const m = String(body || "").match(/#?(\d{3,})/);
+function parseSiteCodeFromText(text) {
+  const m = String(text || "").match(/#(\d{3,})\b/);
   return m ? m[1] : null;
 }
-
-function normalizeChatId(chatId) {
-  return chatId ? String(chatId) : "unknown";
+function parseCaptionTextFromMessage(msg) {
+  if (msg.type === "text") return msg.text?.body || "";
+  if (msg.type === "image") return msg.image?.caption || "";
+  if (msg.type === "video") return msg.video?.caption || "";
+  return "";
+}
+function stampDE(tsSeconds) {
+  const n = Number(tsSeconds || 0);
+  const d = n ? new Date(n * 1000) : null;
+  if (!d) return "";
+  return d.toLocaleString("de-AT", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function stampDEFromFilename(fname) {
+  const m = String(fname).match(/^(\d{10})_/);
+  if (!m) return "";
+  return stampDE(m[1]);
+}
+function isPdfCommand(text) {
+  const t = String(text || "").trim().toLowerCase();
+  return /\bpdf\b/.test(t);
+}
+function isAllowedPdfSender(sender) {
+  if (!PDF_ALLOWED_FROM.trim()) return true;
+  const allowed = PDF_ALLOWED_FROM.split(",").map((s) => s.trim()).filter(Boolean);
+  return allowed.includes(String(sender || "").trim());
+}
+function requireAdmin(req, res) {
+  if (!ADMIN_TOKEN) return true;
+  const tok = req.headers["x-admin-token"] || req.query.token || "";
+  if (tok !== ADMIN_TOKEN) {
+    res.status(403).send("Forbidden");
+    return false;
+  }
+  return true;
 }
 
-function getDayDir(chatId, day) {
-  return path.join(DATA_DIR, normalizeChatId(chatId), day);
+// ===================== HTTP helpers =====================
+async function fetchJson(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status} ${r.statusText} for ${url}: ${t}`);
+  }
+  return await r.json();
+}
+async function fetchBuffer(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status} ${r.statusText} for ${url}: ${t}`);
+  }
+  const ab = await r.arrayBuffer();
+  return Buffer.from(ab);
 }
 
-function getLogPath(chatId, day) {
-  return path.join(getDayDir(chatId, day), "log.jsonl");
-}
-
+// ===================== WhatsApp Media Download =====================
 async function downloadWhatsAppMedia(mediaId) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
 
-  // 1) get media URL from Graph API
-  const meta1 = await fetch(`https://graph.facebook.com/v22.0/${encodeURIComponent(mediaId)}`, {
+  const meta = await fetchJson(`https://graph.facebook.com/v22.0/${mediaId}`, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
   });
-  if (!meta1.ok) {
-    const t = await meta1.text().catch(() => "");
-    throw new Error(`Media meta fetch failed (${meta1.status}): ${t}`);
-  }
-  const j = await meta1.json();
-  if (!j || !j.url) throw new Error("Media URL missing from Graph response");
+  if (!meta?.url) throw new Error("No media url from Graph");
 
-  // 2) download binary using the returned URL
-  const meta2 = await fetch(j.url, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-  if (!meta2.ok) {
-    const t = await meta2.text().catch(() => "");
-    throw new Error(`Media download failed (${meta2.status}): ${t}`);
-  }
-  const buf = Buffer.from(await meta2.arrayBuffer());
-  const mime = j.mime_type || meta2.headers.get("content-type") || "application/octet-stream";
-  return { buf, mime, size: buf.length };
+  const buf = await fetchBuffer(meta.url, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+  });
+
+  return { buf, mime: meta.mime_type || "application/octet-stream" };
 }
 
-function mimeToExt(mime) {
-  const m = String(mime || "").toLowerCase();
-  if (m.includes("jpeg")) return ".jpg";
-  if (m.includes("jpg")) return ".jpg";
-  if (m.includes("png")) return ".png";
-  if (m.includes("pdf")) return ".pdf";
-  if (m.includes("ogg")) return ".ogg";
-  if (m.includes("audio")) return ".audio";
-  if (m.includes("mp4")) return ".mp4";
-  return ".bin";
+// ===================== OpenAI Transcription =====================
+async function transcribeAudio({ audioBuffer, filename = "audio.ogg" }) {
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+
+  const form = new FormData();
+  // Node 18+ supports Blob/FormData
+  const blob = new Blob([audioBuffer], { type: "audio/ogg" });
+  form.append("file", blob, filename);
+  form.append("model", OPENAI_TRANSCRIBE_MODEL);
+  if (OPENAI_TRANSCRIBE_LANG) form.append("language", OPENAI_TRANSCRIBE_LANG);
+
+  const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: form,
+  });
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`OpenAI transcription failed (${r.status}): ${t}`);
+  }
+  const j = await r.json();
+  // docs: response includes "text"
+  return j.text || "";
 }
 
-function buildMailTransport() {
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    throw new Error("SMTP settings missing. Set SMTP_HOST/SMTP_USER/SMTP_PASS (and PORT).");
-  }
+// ===================== Mail (SMTP) =====================
+function makeMailer() {
   return nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
-    secure: SMTP_SECURE,
+    secure: false,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
 }
+async function sendMailWithAttachment({ to, subject, text, filePath }) {
+  try {
+    if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !MAIL_FROM) {
+      throw new Error("SMTP env missing (SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM)");
+    }
+    const buf = await fsp.readFile(filePath);
+    const mailer = makeMailer();
+    const info = await mailer.sendMail({
+      from: MAIL_FROM,
+      to,
+      subject,
+      text,
+      attachments: [{ filename: path.basename(filePath), content: buf, contentType: "application/pdf" }],
+    });
+    return info;
+  } catch (e) {
+    console.error("❌ Mail send failed:", e?.message || e);
+    return null;
+  }
+}
 
-// -------------------- PDF builder --------------------
-async function buildPdfForDay(chatId, day) {
-  const dayDir = getDayDir(chatId, day);
-  const logPath = getLogPath(chatId, day);
-  const items = await readJsonl(logPath);
+// ===================== PDF Build (A3 quer) =====================
+async function listFiles(dayDir) {
+  const files = await fsp.readdir(dayDir).catch(() => []);
+  return files.slice().sort();
+}
+async function readJsonLines(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  const content = await fsp.readFile(filePath, "utf8");
+  const lines = content.split("\n").filter(Boolean);
+  const items = [];
+  for (const line of lines) {
+    try { items.push(JSON.parse(line)); } catch {}
+  }
+  return items;
+}
 
-  // Sort chronologically
-  items.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
+  const PAGE_W = 1190.55; // A3 landscape
+  const PAGE_H = 841.89;
 
-  if (items.length === 0) {
-    throw new Error(`No items found for ${chatId} ${day}`);
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const logPath = path.join(dayDir, "log.jsonl");
+  const logs = await readJsonLines(logPath);
+
+  // Sort by timestamp if present
+  logs.sort((a, b) => (a.raw?.timestamp ? Number(a.raw.timestamp) : 0) - (b.raw?.timestamp ? Number(b.raw.timestamp) : 0));
+
+  const imageFiles = (await listFiles(dayDir)).filter(f => /\.(jpg|jpeg|png)$/i.test(f));
+
+  // ---- Cover ----
+  {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
+    page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
+    page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 180, size: 16, font });
+    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 210, size: 16, font });
+    page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
+    page.drawText("Text, Fotos, PDFs & Sprachnachrichten (Transkript)", {
+      x: 60, y: 80, size: 12, font, color: rgb(0.3,0.3,0.3),
+    });
   }
 
-  await ensureDir(dayDir);
-  const pdfPath = path.join(dayDir, `${day}.pdf`);
+  // ---- Per-entry pages (Text / Audio transcript / PDF page 1) ----
+  for (const entry of logs) {
+    const raw = entry.raw || {};
+    const ts = raw.timestamp ? Number(raw.timestamp) : null;
+    const stamp = ts ? stampDE(ts) : "";
 
-  const doc = new PDFDocument({
-    size: "A4",
-    margin: 48,
-    autoFirstPage: false,
-  });
-
-  const ws = fs.createWriteStream(pdfPath);
-  doc.pipe(ws);
-
-  const header = (title) => {
-    doc.fontSize(14).text(title, { align: "left" });
-    doc.moveDown(0.25);
-    doc.fontSize(10).fillColor("#444").text(`Chat: #${chatId}   Datum: ${day}`, { align: "left" });
-    doc.moveDown(1);
-    doc.fillColor("#000");
-  };
-
-  for (const it of items) {
-    const d = new Date(it.ts || Date.now());
-    const stamp = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(
-      d.getSeconds()
-    ).padStart(2, "0")}`;
-
-    if (it.type === "text") {
-      doc.addPage();
-      header("Text");
-      doc.fontSize(11).fillColor("#000").text(`[${stamp}]`, { continued: true });
-      doc.fillColor("#111").text(`  ${it.text || ""}`);
+    // TEXT
+    if (entry.type === "text" && raw.text?.body) {
+      const page = pdf.addPage([PAGE_W, PAGE_H]);
+      page.drawText("Text", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
+      page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font, color: rgb(0.2,0.2,0.2) });
+      page.drawText(raw.text.body, { x: 60, y: PAGE_H - 160, size: 14, font, maxWidth: PAGE_W - 120 });
       continue;
     }
 
-    if (it.type === "image") {
-      doc.addPage();
-      header("Foto");
-      doc.fontSize(11).fillColor("#000").text(`[${stamp}]  ${it.filename || ""}`);
-      doc.moveDown(0.5);
+    // AUDIO (transcript)
+    if (entry.type === "audio_transcript" && entry.transcript) {
+      const page = pdf.addPage([PAGE_W, PAGE_H]);
+      page.drawText("Sprachnachricht (Transkript)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
+      page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font, color: rgb(0.2,0.2,0.2) });
+      page.drawText(entry.transcript, { x: 60, y: PAGE_H - 160, size: 14, font, maxWidth: PAGE_W - 120 });
+      continue;
+    }
 
-      const abs = path.join(dayDir, it.fileRel || "");
-      try {
-        // Fit image into page area
-        const maxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-        const maxH = doc.page.height - doc.page.margins.top - doc.page.margins.bottom - 80;
-        doc.image(abs, doc.page.margins.left, doc.y, { fit: [maxW, maxH], align: "center", valign: "center" });
-      } catch (e) {
-        doc.moveDown(1);
-        doc.fillColor("red").text(`Bild konnte nicht geladen werden: ${it.fileRel || ""}`);
-        doc.fillColor("#000");
+    // PDF (embed first page)
+    if (entry.type === "pdf" && entry.file) {
+      const pdfFilePath = path.join(dayDir, entry.file);
+      if (fs.existsSync(pdfFilePath)) {
+        try {
+          const srcBytes = await fsp.readFile(pdfFilePath);
+          const srcPdf = await PDFDocument.load(srcBytes);
+          const [srcPage] = await pdf.copyPages(srcPdf, [0]); // first page
+          pdf.addPage(srcPage);
+
+          // Add a small header overlay (timestamp + filename) on the copied page
+          const last = pdf.getPages()[pdf.getPages().length - 1];
+          last.drawRectangle({ x: 40, y: PAGE_H - 70, width: PAGE_W - 80, height: 40, color: rgb(1,1,1), opacity: 0.8 });
+          last.drawText(`PDF: ${entry.file}`, { x: 60, y: PAGE_H - 55, size: 12, font, color: rgb(0,0,0) });
+          if (stamp) last.drawText(stamp, { x: PAGE_W - 260, y: PAGE_H - 55, size: 12, font, color: rgb(0,0,0) });
+        } catch (e) {
+          const page = pdf.addPage([PAGE_W, PAGE_H]);
+          page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
+          page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font });
+          page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 160, size: 12, font, maxWidth: PAGE_W - 120 });
+        }
       }
       continue;
     }
-
-    if (it.type === "audio") {
-      doc.addPage();
-      header("Sprachnachricht");
-      doc.fontSize(11).fillColor("#000").text(`[${stamp}]  ${it.filename || ""}`);
-      doc.moveDown(1);
-      doc.fontSize(11).fillColor("#111").text("Audio wurde gespeichert, aber noch nicht transkribiert.");
-      if (it.fileRel) {
-        doc.moveDown(0.5);
-        doc.fontSize(10).fillColor("#444").text(`Datei: ${it.fileRel}`);
-      }
-      doc.fillColor("#000");
-      continue;
-    }
-
-    // fallback
-    doc.addPage();
-    header("Eintrag");
-    doc.fontSize(11).text(`[${stamp}]  ${it.type || "unknown"}`);
-    doc.moveDown(0.5);
-    doc.fontSize(10).fillColor("#444").text(JSON.stringify(it, null, 2));
-    doc.fillColor("#000");
   }
 
-  doc.end();
+  // ---- Photos: 6 per page (3x2) ----
+  if (imageFiles.length) {
+    const cols = 3, rows = 2;
+    const margin = 40;
+    const gutter = 18;
+    const cellW = (PAGE_W - margin * 2 - gutter * (cols - 1)) / cols;
+    const cellH = (PAGE_H - margin * 2 - gutter * (rows - 1)) / rows;
 
-  await new Promise((res, rej) => {
-    ws.on("finish", res);
-    ws.on("error", rej);
-  });
+    for (let i = 0; i < imageFiles.length; i += 6) {
+      const page = pdf.addPage([PAGE_W, PAGE_H]);
+      const chunk = imageFiles.slice(i, i + 6);
 
-  return pdfPath;
+      for (let j = 0; j < chunk.length; j++) {
+        const col = j % cols;
+        const row = Math.floor(j / cols);
+
+        const x0 = margin + col * (cellW + gutter);
+        const yTop = PAGE_H - margin - row * (cellH + gutter);
+
+        const captionH = 28;
+        const targetW = Math.floor(cellW);
+        const targetH = Math.floor(cellH - captionH);
+
+        const fname = chunk[j];
+        const imgPath = path.join(dayDir, fname);
+
+        let imgBuf = await fsp.readFile(imgPath);
+        try {
+          imgBuf = await sharp(imgBuf)
+            .resize({ width: targetW, height: targetH, fit: "inside" })
+            .jpeg({ quality: 72 })
+            .toBuffer();
+        } catch {}
+
+        let img;
+        try { img = await pdf.embedJpg(imgBuf); } catch { img = await pdf.embedPng(imgBuf); }
+
+        const w0 = img.width;
+        const h0 = img.height;
+        const scale = Math.min(targetW / w0, targetH / h0);
+        const drawW = w0 * scale;
+        const drawH = h0 * scale;
+
+        const x = x0 + (targetW - drawW) / 2;
+        const y = (yTop - captionH) - drawH;
+
+        page.drawImage(img, { x, y, width: drawW, height: drawH });
+
+        const stamp = stampDEFromFilename(fname);
+        const caption = stamp ? `${stamp}  |  ${fname}` : fname;
+
+        page.drawText(caption, { x: x0, y: yTop - captionH + 8, size: 10, font, color: rgb(0.2,0.2,0.2) });
+      }
+    }
+  }
+
+  const bytes = await pdf.save();
+  await ensureDir(path.dirname(outPdfPath));
+  await fsp.writeFile(outPdfPath, bytes);
+  return { pages: pdf.getPageCount(), bytes: bytes.length };
 }
 
-// -------------------- Email sender --------------------
-async function sendPdfMail({ to, subject, text, pdfPath }) {
-  const transport = buildMailTransport();
-  const info = await transport.sendMail({
-    from: MAIL_FROM,
-    to,
-    subject,
-    text,
-    attachments: [{ filename: path.basename(pdfPath), path: pdfPath }],
-  });
-  return info;
+// ===================== PDF trigger =====================
+async function triggerPdfForJobDay({ jobId, date, to }) {
+  const dayDir = path.join(DATA_DIR, jobId, date);
+  if (!fs.existsSync(dayDir)) throw new Error(`No data dir for #${jobId} at ${date}`);
+
+  const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
+  const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
+
+  const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+  const body = `PDF per WhatsApp-Befehl erstellt.\nBaustelle: #${jobId}\nDatum: ${date}\nSeiten: ${built.pages}\n`;
+
+  const sent = await sendMailWithAttachment({ to, subject, text: body, filePath: outPdf });
+  return { outPdf, built, mailed: !!sent, messageId: sent?.messageId || null };
 }
 
-// -------------------- Routes --------------------
+// ===================== Routes =====================
+app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
+app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
-// Health
-app.get("/", (req, res) => res.status(200).send("webhook läuft"));
-
-// Meta webhook verify (GET)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
+  if (mode === "subscribe" && token && token === VERIFY_TOKEN) return res.status(200).send(String(challenge));
   return res.sendStatus(403);
 });
 
-// WhatsApp events (POST)
+// Incoming WhatsApp
 app.post("/webhook", async (req, res) => {
-  // respond quickly
   res.sendStatus(200);
 
   try {
-    const body = req.body;
-    if (!body || body.object !== "whatsapp_business_account") return;
+    const body = req.body || {};
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const msgs = value?.messages || [];
+    if (!Array.isArray(msgs) || msgs.length === 0) return;
 
-    const entries = body.entry || [];
-    for (const entry of entries) {
-      const changes = entry.changes || [];
-      for (const change of changes) {
-        const value = change.value || {};
-        const field = change.field;
+    for (const msg of msgs) {
+      const sender = msg.from || "unknown_sender";
+      const tsSec = msg.timestamp || null;
+      const date = isoDateFromWhatsAppTs(tsSec);
 
-        if (field !== "messages") continue;
+      const textOrCaption = parseCaptionTextFromMessage(msg);
+      let siteCode = parseSiteCodeFromText(textOrCaption);
 
-        const messages = value.messages || [];
-        const contacts = value.contacts || [];
-        const contactName = contacts[0]?.profile?.name || "";
-        const waId = contacts[0]?.wa_id || messages[0]?.from || "";
+      if (siteCode) rememberSite(sender, siteCode);
+      else siteCode = recallSite(sender) || "unknown";
 
-        for (const msg of messages) {
-          const tsDate = tsFromWhatsApp(msg.timestamp);
-          const ts = tsDate.getTime();
-          const day = dateYMD(tsDate);
+      const dayDir = path.join(DATA_DIR, siteCode, date);
+      ensureDirSync(dayDir);
 
-          // ChatId from message text if present, else fallback to waId
-          let chatId = "unknown";
+      const logPath = path.join(dayDir, "log.jsonl");
 
-          // ---- TEXT ----
-          if (msg.type === "text") {
-            const txt = msg.text?.body || "";
-            const extracted = getChatIdFromText(txt);
-            chatId = normalizeChatId(extracted || waId || "unknown");
+      // ---- Save base entry ----
+      await appendJsonl(logPath, {
+        at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
+        from: sender,
+        type: msg.type,
+        text: textOrCaption || "",
+        raw: msg,
+      });
 
-            const logPath = getLogPath(chatId, day);
-            await appendJsonl(logPath, {
-              type: "text",
-              ts,
-              from: waId,
-              contactName,
-              text: txt,
-              waMessageId: msg.id,
-            });
+      // ---- Media handling ----
+      if (msg.type === "image" && msg.image?.id) {
+        const mediaId = msg.image.id;
+        const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+        const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}.jpg`;
+        await fsp.writeFile(path.join(dayDir, filename), buf);
+        console.log(`✅ saved image for #${siteCode} -> ${filename}`);
+      }
 
-            // trigger pdf if message is exactly "pdf" (case-insensitive) or starts with "pdf "
-            const tnorm = txt.trim().toLowerCase();
-            const isPdfTrigger = tnorm === "pdf" || tnorm.startsWith("pdf ");
-            if (isPdfTrigger) {
-              // allow to override recipient via "pdf mail=alex@krista.at" etc (optional)
-              // but we keep it simple: use env or ?to parameter via admin route
-              const to = MAIL_TO_DEFAULT;
-              if (!to) {
-                await appendJsonl(logPath, {
-                  type: "system",
-                  ts: Date.now(),
-                  level: "warn",
-                  message: "MAIL_TO_DEFAULT missing (set env) - PDF not emailed",
-                });
-                return;
-              }
+      if (msg.type === "document" && msg.document?.id) {
+        const mediaId = msg.document.id;
+        const { buf, mime } = await downloadWhatsAppMedia(mediaId);
 
-              const pdfPath = await buildPdfForDay(chatId, day);
-              const subject = `Baustellenprotokoll #${chatId} ${day}`;
-              const mailText =
-                `Automatisch erzeugtes Protokoll\n\nChat: #${chatId}\nDatum: ${day}\n` +
-                `Erstellt: ${nowIso()}\n`;
+        const isPdf = String(mime).toLowerCase().includes("pdf");
+        const ext = isPdf ? ".pdf" : ".bin";
+        const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}${ext}`;
+        await fsp.writeFile(path.join(dayDir, filename), buf);
 
-              const info = await sendPdfMail({ to, subject, text: mailText, pdfPath });
-              await appendJsonl(logPath, {
-                type: "system",
-                ts: Date.now(),
-                level: "info",
-                message: `MAIL sent -> ${to}`,
-                messageId: info?.messageId || null,
-                pdf: path.basename(pdfPath),
-              });
-            }
-
-            continue;
-          }
-
-          // ---- IMAGE / AUDIO / DOCUMENT ----
-          // WhatsApp sends media_id for media
-          // We store media and log entry; chatId derived from waId (unless you already used #... earlier that day)
-          chatId = normalizeChatId(waId || "unknown");
-          const logPath = getLogPath(chatId, day);
-
-          // Determine media id & type
-          let mediaId = null;
-          let kind = msg.type;
-
-          if (msg.type === "image") mediaId = msg.image?.id;
-          if (msg.type === "audio") mediaId = msg.audio?.id;
-          if (msg.type === "document") mediaId = msg.document?.id;
-          if (msg.type === "video") mediaId = msg.video?.id;
-
-          if (!mediaId) {
-            await appendJsonl(logPath, {
-              type: "system",
-              ts: Date.now(),
-              level: "warn",
-              message: `Unsupported or missing media id for type=${msg.type}`,
-              waMessageId: msg.id,
-            });
-            continue;
-          }
-
-          let dl;
-          try {
-            dl = await downloadWhatsAppMedia(mediaId);
-          } catch (e) {
-            await appendJsonl(logPath, {
-              type: "system",
-              ts: Date.now(),
-              level: "error",
-              message: `Media download failed: ${String(e.message || e)}`,
-              waMessageId: msg.id,
-              mediaId,
-            });
-            continue;
-          }
-
-          const ext = mimeToExt(dl.mime);
-          const fnameBase = safeName(`${Math.floor(ts / 1000)}_${mediaId}`);
-          const filename = `${fnameBase}${ext}`;
-
-          const dayDir = getDayDir(chatId, day);
-          await ensureDir(dayDir);
-
-          const absFile = path.join(dayDir, filename);
-          await fsp.writeFile(absFile, dl.buf);
-
-          let typeForPdf = "file";
-          if (msg.type === "image") typeForPdf = "image";
-          if (msg.type === "audio") typeForPdf = "audio";
-
+        if (isPdf) {
+          // Add an additional log record for PDF embedding
           await appendJsonl(logPath, {
-            type: typeForPdf,
-            ts,
-            from: waId,
-            contactName,
-            mime: dl.mime,
-            size: dl.size,
-            filename,
-            fileRel: filename,
-            waMessageId: msg.id,
-            mediaId,
-            originalType: kind,
+            at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
+            from: sender,
+            type: "pdf",
+            file: filename,
+            raw: msg,
           });
+        }
+        console.log(`✅ saved document for #${siteCode} -> ${filename}`);
+      }
+
+      if (msg.type === "audio" && msg.audio?.id) {
+        const mediaId = msg.audio.id;
+        const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+        const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}.ogg`;
+        await fsp.writeFile(path.join(dayDir, filename), buf);
+        console.log(`✅ saved audio for #${siteCode} -> ${filename}`);
+
+        // Transcribe
+        if (OPENAI_API_KEY) {
+          try {
+            const transcript = await transcribeAudio({ audioBuffer: buf, filename });
+            await appendJsonl(logPath, {
+              at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
+              from: sender,
+              type: "audio_transcript",
+              transcript,
+              file: filename,
+              raw: msg,
+            });
+            console.log(`✅ transcribed audio for #${siteCode}`);
+          } catch (e) {
+            console.error("❌ transcription failed:", e?.message || e);
+          }
+        }
+      }
+
+      // ---- Trigger PDF ----
+      if (msg.type === "text" && isPdfCommand(textOrCaption)) {
+        if (!isAllowedPdfSender(sender)) {
+          console.log(`⛔ pdf command blocked (sender ${sender} not allowed)`);
+          continue;
+        }
+
+        let jobId = parseSiteCodeFromText(textOrCaption) || siteCode;
+        if (!jobId || jobId === "unknown") {
+          console.log("⚠️ pdf command: jobId unknown (schreibe '#260016 pdf')");
+          continue;
+        }
+        if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
+
+        const to = MAIL_TO_DEFAULT;
+        if (!to) {
+          console.log("⚠️ pdf command: MAIL_TO_DEFAULT missing");
+          continue;
+        }
+
+        try {
+          const result = await triggerPdfForJobDay({ jobId, date, to });
+          console.log(`📨 pdf command: sent #${jobId} ${date} -> ${to} (${result.built.pages} pages)`);
+        } catch (e) {
+          console.error("❌ pdf command failed:", e?.message || e);
         }
       }
     }
-  } catch (err) {
-    // We already sent 200 to Meta; just log
-    console.error("Webhook processing error:", err);
-  }
-});
-
-// Download PDF directly
-app.get("/pdf/:chatId/:day", async (req, res) => {
-  try {
-    const chatId = normalizeChatId(req.params.chatId);
-    const day = safeName(req.params.day);
-    const pdfPath = path.join(getDayDir(chatId, day), `${day}.pdf`);
-    await fsp.access(pdfPath);
-    res.setHeader("Content-Type", "application/pdf");
-    res.sendFile(pdfPath);
   } catch (e) {
-    res.status(404).send("PDF not found. Trigger it by sending 'pdf' in WhatsApp.");
+    console.error("❌ webhook error:", e?.message || e);
   }
 });
 
-// Admin: build+mail today for a chatId (optional)
-app.get("/admin/run-daily", async (req, res) => {
+// Admin: test mail
+app.get("/admin/test-mail", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const to = req.query.to || MAIL_TO_DEFAULT;
+  if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
   try {
-    if (ADMIN_KEY && req.query.key !== ADMIN_KEY) return res.status(403).send("Forbidden");
+    const mailer = makeMailer();
+    const info = await mailer.sendMail({
+      from: MAIL_FROM,
+      to,
+      subject: "Testmail (SMTP)",
+      text: "Wenn du das liest, passt SMTP ✅",
+    });
+    res.json({ ok: true, messageId: info.messageId });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
-    const chatId = normalizeChatId(req.query.chatId || "unknown");
-    const day = req.query.day ? safeName(req.query.day) : dateYMD(new Date());
+// Admin: manual run daily
+app.get("/admin/run-daily", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const date = req.query.date || todayISO();
     const to = req.query.to || MAIL_TO_DEFAULT;
-
     if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
 
-    const pdfPath = await buildPdfForDay(chatId, day);
-    const subject = `Baustellenprotokoll #${chatId} ${day}`;
-    const info = await sendPdfMail({
-      to,
-      subject,
-      text: `Automatisch erzeugtes Protokoll\nChat: #${chatId}\nDatum: ${day}\n`,
-      pdfPath,
-    });
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const results = [];
 
-    res.json({ ok: true, to, pdf: `/pdf/${chatId}/${day}`, messageId: info?.messageId || null });
+    for (const jobId of jobIds) {
+      if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
+
+      const dayDir = path.join(DATA_DIR, jobId, date);
+      if (!fs.existsSync(dayDir)) continue;
+
+      const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
+      const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
+
+      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+      const text = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
+
+      const sent = await sendMailWithAttachment({ to, subject, text, filePath: outPdf });
+      results.push({ jobId, date, pdf: outPdf, pages: built.pages, mailed: !!sent });
+
+      console.log(`📧 sent ${jobId} ${date} -> ${to} (${built.pages} pages)`);
+    }
+
+    res.json({ ok: true, date, to, count: results.length, results });
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e.message || e) });
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server läuft auf Port ${PORT}`);
-  console.log(`DATA_DIR=${DATA_DIR}`);
-});
+app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
+
+console.log("Starting…");
+console.log("DATA_DIR=", DATA_DIR);
+console.log("MAIL_FROM=", MAIL_FROM);
+console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
+console.log("OPENAI_API_KEY set:", !!OPENAI_API_KEY);
+app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT}`));
