@@ -916,6 +916,41 @@ app.get("/admin/run-daily", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+// Admin: check logo file
+app.get("/admin/check-logo", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const logoPath = process.env.LOGO_PATH || "assets/krista-logo.png";
+    const abs = path.isAbsolute(logoPath) ? logoPath : path.join(process.cwd(), logoPath);
+
+    const st = await fsp.stat(abs);
+    const ext = path.extname(abs).toLowerCase();
+
+    // quick signature check for PNG
+    const head = await fsp.readFile(abs);
+    const isPng =
+      head.length >= 8 &&
+      head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+
+    res.json({
+      ok: true,
+      logoPath,
+      resolvedPath: abs,
+      sizeBytes: st.size,
+      extension: ext,
+      isPngSignature: isPng,
+      note: isPng ? "PNG erkannt ✅" : "Nicht-PNG oder PNG-Signatur fehlt (empfohlen: PNG)",
+    });
+  } catch (e) {
+    res.status(404).json({
+      ok: false,
+      error: String(e?.message || e),
+      hint: "Lege die Datei ins Repo z.B. assets/krista-logo.png und setze LOGO_PATH=assets/krista-logo.png",
+    });
+  }
+});
+
 
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
