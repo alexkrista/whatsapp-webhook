@@ -1,12 +1,13 @@
-// server.js (CommonJS) – Baustellenprotokoll FINAL
+// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
 // ✅ Layout A: Text + Transkripte seitenfüllend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
-// ✅ Deckblatt mit Logo (krista.at) optional
+// ✅ Deckblatt mit Logo (optional)
 // ✅ Kopf-/Fußzeile: Baustellennummer + Datum + Seitenzahl
 // ✅ Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
 //    + Fallback liest auch alte Struktur: /var/data/<job>/<YYYY-MM-DD>/...
 // ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
+// ✅ Admin: /admin/run-daily (Cron), /admin/test-mail, /admin/check-logo, /admin/ui + API + PDF View
 //
 // Render ENV (wichtig):
 // DATA_DIR=/var/data
@@ -29,10 +30,10 @@
 // OPENAI_TEXT_MODEL=gpt-4o-mini
 //
 // Logo optional:
-// LOGO_PATH=assets/krista-logo.png   (PNG empfohlen)
+// LOGO_PATH=krista-logo.png   (oder assets/krista-logo.png)
 //
 // Optional Trigger-Allowlist:
-// PDF_ALLOWED_FROM=436643203577,43....
+// PDF_ALLOWED_FROM=4366...,43...
 // PDF_IGNORE_UNKNOWN=1
 
 const express = require("express");
@@ -45,6 +46,8 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
+
+// Static files for Admin UI
 app.use("/public", express.static("public"));
 
 // ===================== ENV =====================
@@ -64,7 +67,8 @@ const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+const OPENAI_TRANSCRIBE_MODEL =
+  process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const OPENAI_TRANSCRIBE_LANG = process.env.OPENAI_TRANSCRIBE_LANG || "de";
 const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || "gpt-4o-mini";
 
@@ -73,7 +77,7 @@ const LOGO_PATH = process.env.LOGO_PATH || "assets/krista-logo.png";
 const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
-// ===================== Baustellen-Merker (Option B) =====================
+// ===================== Baustellen-Merker =====================
 const LAST_SITE_BY_SENDER = {}; // { wa_id: { siteCode, tsMs } }
 const SITE_TTL_MS = 4 * 60 * 60 * 1000;
 
@@ -155,7 +159,7 @@ function requireAdmin(req, res) {
   return true;
 }
 
-// ===================== NEW folder structure (YYYY/MM/DD) + fallback to old =====================
+// ===================== Folder structure (NEW + fallback) =====================
 function dayDirNew(jobId, dateStr) {
   const [Y, M, D] = String(dateStr).split("-");
   return path.join(DATA_DIR, String(jobId), Y, M, D);
@@ -168,7 +172,7 @@ function resolveExistingDayDir(jobId, dateStr) {
   if (fs.existsSync(n)) return n;
   const o = dayDirOld(jobId, dateStr);
   if (fs.existsSync(o)) return o;
-  return n; // default for writing
+  return n; // default if none exists yet
 }
 function resolveDayDirForWrite(jobId, dateStr) {
   return dayDirNew(jobId, dateStr); // always write to new structure
@@ -209,7 +213,7 @@ async function downloadWhatsAppMedia(mediaId) {
   return { buf, mime: meta.mime_type || "application/octet-stream" };
 }
 
-// ===================== OpenAI: Transcription + "clean polish" =====================
+// ===================== OpenAI: Transcription + clean polish =====================
 async function transcribeAudio({ audioBuffer, filename = "audio.ogg", mimeType = "audio/ogg" }) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
 
@@ -236,6 +240,7 @@ async function transcribeAudio({ audioBuffer, filename = "audio.ogg", mimeType =
 function extractResponsesText(json) {
   if (!json) return "";
   if (typeof json.output_text === "string") return json.output_text;
+
   const out = json.output;
   if (Array.isArray(out)) {
     const parts = [];
@@ -243,8 +248,7 @@ function extractResponsesText(json) {
       const content = item?.content;
       if (!Array.isArray(content)) continue;
       for (const c of content) {
-        if (c?.type === "output_text" && typeof c.text === "string") parts.push(c.text);
-        if (c?.type === "text" && typeof c.text === "string") parts.push(c.text);
+        if (typeof c?.text === "string") parts.push(c.text);
       }
     }
     return parts.join("").trim();
@@ -253,8 +257,7 @@ function extractResponsesText(json) {
 }
 
 async function polishGermanTranscript(rawText) {
-  // optional: if no key, just return raw
-  if (!OPENAI_API_KEY) return rawText;
+  if (!OPENAI_API_KEY) return String(rawText || "");
 
   const payload = {
     model: OPENAI_TEXT_MODEL,
@@ -263,9 +266,9 @@ async function polishGermanTranscript(rawText) {
         role: "system",
         content:
           "Du bist Baustellen-Protokollant. Formuliere das folgende Transkript in sauberem, sachlichem Hochdeutsch, sinngemäß, kurz und präzise. " +
-          "Keine erfundenen Details. Entferne Füllwörter. Wenn sinnvoll, verwende kurze Sätze. Keine Emojis."
+          "Keine erfundenen Details. Entferne Füllwörter. Wenn sinnvoll, verwende kurze Sätze. Keine Emojis.",
       },
-      { role: "user", content: String(rawText || "") }
+      { role: "user", content: String(rawText || "") },
     ],
   };
 
@@ -328,7 +331,9 @@ async function readJsonLines(filePath) {
   const lines = content.split("\n").filter(Boolean);
   const items = [];
   for (const line of lines) {
-    try { items.push(JSON.parse(line)); } catch {}
+    try {
+      items.push(JSON.parse(line));
+    } catch {}
   }
   return items;
 }
@@ -357,10 +362,12 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  // logo optional
+  // Logo optional
   let logoImg = null;
   try {
-    const logoBytes = await fsp.readFile(LOGO_PATH);
+    const logoBytes = await fsp.readFile(
+      path.isAbsolute(LOGO_PATH) ? LOGO_PATH : path.join(process.cwd(), LOGO_PATH)
+    );
     logoImg = await pdf.embedPng(logoBytes);
   } catch {
     logoImg = null;
@@ -378,9 +385,7 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
   const files = await listFiles(dayDir);
   const imageFiles = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f));
 
-  // helper header/footer (applied at end when total pages known)
   function drawHeaderFooter(page, pageNo, totalPages) {
-    // header
     page.drawText(`#${jobId}  |  ${date}`, {
       x: 60,
       y: PAGE_H - 40,
@@ -395,7 +400,6 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
       color: rgb(0.9, 0.9, 0.9),
     });
 
-    // footer
     const footer = `Seite ${pageNo} / ${totalPages}`;
     page.drawLine({
       start: { x: 60, y: 44 },
@@ -412,10 +416,9 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     });
   }
 
-  // ---------- Cover ----------
+  // Cover
   {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
-
     page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
     page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
     page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 180, size: 16, font });
@@ -443,42 +446,33 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     }
   }
 
-  // ---------- TEXT SECTION (seitenfüllend) ----------
+  // TEXT SECTION
   const textLines = [];
-
   for (const entry of logs) {
     const raw = entry.raw || {};
-    const ts = raw.timestamp ? Number(raw.timestamp) : null;
-    const stamp = ts ? stampDE(ts) : "";
+    const stamp = raw.timestamp ? stampDE(raw.timestamp) : "";
 
     if (entry.type === "text" && raw.text?.body) {
       const body = String(raw.text.body).trim();
       if (body) textLines.push(`${stamp}  ${body}`);
-      continue;
     }
-
     if (entry.type === "audio_transcript" && entry.transcript) {
       textLines.push(`${stamp}  Sprachnachricht: ${String(entry.transcript).trim()}`);
-      continue;
     }
-
     if (entry.type === "transcription_failed") {
       const msg = entry.error ? ` (Fehler: ${entry.error})` : "";
       textLines.push(`${stamp}  Sprachnachricht: Transkription fehlgeschlagen${msg}`);
-      continue;
     }
   }
 
   if (textLines.length) {
     const left = 60;
     const right = 60;
-    const top = 95;     // etwas Platz für Header
-    const bottom = 70;  // Platz für Footer
+    const top = 95;
+    const bottom = 70;
 
     const fontSize = 12;
     const lineH = 16;
-
-    // Wrap-Heuristik
     const maxChars = 150;
 
     let page = pdf.addPage([PAGE_W, PAGE_H]);
@@ -525,7 +519,7 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     }
   }
 
-  // ---------- PDF SECTION (embed page 1 of WhatsApp PDFs) ----------
+  // PDF SECTION (embed first page of WhatsApp PDFs)
   for (const entry of logs) {
     if (entry.type !== "pdf" || !entry.file) continue;
     const pdfFilePath = path.join(dayDir, entry.file);
@@ -540,7 +534,6 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
       const stamp = entry.raw?.timestamp ? stampDE(entry.raw.timestamp) : "";
       const last = pdf.getPages()[pdf.getPages().length - 1];
 
-      // overlay header block
       last.drawRectangle({
         x: 40,
         y: PAGE_H - 90,
@@ -568,14 +561,20 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     } catch (e) {
       const page = pdf.addPage([PAGE_W, PAGE_H]);
       page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
-      page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 130, size: 12, font, maxWidth: PAGE_W - 120 });
+      page.drawText(String(e?.message || e), {
+        x: 60,
+        y: PAGE_H - 130,
+        size: 12,
+        font,
+        maxWidth: PAGE_W - 120,
+      });
     }
   }
 
-  // ---------- PHOTOS SECTION: 6 per page (3x2) ----------
+  // PHOTOS SECTION: 6 per page (3x2)
   if (imageFiles.length) {
-    const cols = 3,
-      rows = 2;
+    const cols = 3;
+    const rows = 2;
     const margin = 40;
     const gutter = 18;
     const cellW = (PAGE_W - margin * 2 - gutter * (cols - 1)) / cols;
@@ -585,7 +584,6 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
       const page = pdf.addPage([PAGE_W, PAGE_H]);
       const chunk = imageFiles.slice(i, i + 6);
 
-      // section title
       page.drawText("Fotos", { x: 60, y: PAGE_H - 70, size: 18, font: fontBold });
       page.drawLine({
         start: { x: 60, y: PAGE_H - 78 },
@@ -670,14 +668,15 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
   const subject = `Baustellenprotokoll #${jobId} – ${date}`;
-  const body = `PDF per WhatsApp-Befehl erstellt.\nBaustelle: #${jobId}\nDatum: ${date}\nSeiten: ${built.pages}\n`;
+  const body = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
 
   const sent = await sendMailWithAttachment({ to, subject, text: body, filePath: outPdf });
   return { outPdf, built, mailed: !!sent, messageId: sent?.messageId || null };
 }
 
-// ===================== Routes =====================
+// ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
+
 app.get("/health", (req, res) =>
   res.json({
     ok: true,
@@ -685,10 +684,11 @@ app.get("/health", (req, res) =>
     openai_key: !!OPENAI_API_KEY,
     transcribe_model: OPENAI_TRANSCRIBE_MODEL,
     text_model: OPENAI_TEXT_MODEL,
+    logo_path: LOGO_PATH,
   })
 );
 
-// Webhook Verify
+// ===================== WhatsApp Verify =====================
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -697,7 +697,7 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// Incoming WhatsApp
+// ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
@@ -725,7 +725,7 @@ app.post("/webhook", async (req, res) => {
 
       const logPath = path.join(dayDir, "log.jsonl");
 
-      // Base log
+      // Base log (always)
       await appendJsonl(logPath, {
         at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
         from: sender,
@@ -784,7 +784,6 @@ app.post("/webhook", async (req, res) => {
           const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}.ogg`;
           await fsp.writeFile(path.join(dayDir, filename), buf);
 
-          // always log "saved"
           await appendJsonl(logPath, {
             at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
             from: sender,
@@ -805,7 +804,7 @@ app.post("/webhook", async (req, res) => {
               let transcriptClean = transcriptRaw;
               try {
                 transcriptClean = await polishGermanTranscript(transcriptRaw);
-              } catch (e) {
+              } catch {
                 transcriptClean = transcriptRaw;
               }
 
@@ -841,7 +840,7 @@ app.post("/webhook", async (req, res) => {
         }
       }
 
-      // TRIGGER PDF
+      // TRIGGER PDF via WhatsApp "pdf"
       if (msg.type === "text" && isPdfCommand(textOrCaption)) {
         if (!isAllowedPdfSender(sender)) continue;
 
@@ -864,7 +863,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Admin: test mail
+// ===================== Admin: test mail =====================
 app.get("/admin/test-mail", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const to = req.query.to || MAIL_TO_DEFAULT;
@@ -883,41 +882,7 @@ app.get("/admin/test-mail", async (req, res) => {
   }
 });
 
-// Admin: daily run (für Render Cron um 22:00)
-app.get("/admin/run-daily", async (req, res) => {
-  if (!requireAdmin(req, res)) return;
-
-  try {
-    const date = req.query.date || todayISO();
-    const to = req.query.to || MAIL_TO_DEFAULT;
-    if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
-
-    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
-    const results = [];
-
-    for (const jobId of jobIds) {
-      if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
-
-      // find day dir (new or old)
-      const dayDir = resolveExistingDayDir(jobId, date);
-      if (!fs.existsSync(dayDir)) continue;
-
-      const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
-      const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
-
-      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
-      const text = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
-
-      const sent = await sendMailWithAttachment({ to, subject, text, filePath: outPdf });
-      results.push({ jobId, date, pages: built.pages, mailed: !!sent });
-    }
-
-    res.json({ ok: true, date, to, count: results.length, results });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
-});
-// Admin: check logo file
+// ===================== Admin: check logo =====================
 app.get("/admin/check-logo", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -928,7 +893,6 @@ app.get("/admin/check-logo", async (req, res) => {
     const st = await fsp.stat(abs);
     const ext = path.extname(abs).toLowerCase();
 
-    // quick signature check for PNG
     const head = await fsp.readFile(abs);
     const isPng =
       head.length >= 8 &&
@@ -947,26 +911,65 @@ app.get("/admin/check-logo", async (req, res) => {
     res.status(404).json({
       ok: false,
       error: String(e?.message || e),
-      hint: "Lege die Datei ins Repo z.B. assets/krista-logo.png und setze LOGO_PATH=assets/krista-logo.png",
+      hint: "Lege die Datei ins Repo z.B. krista-logo.png oder assets/krista-logo.png und setze LOGO_PATH passend",
     });
   }
 });
-// Admin UI (HTML)
+
+// ===================== Admin: daily run (Cron) =====================
+app.get("/admin/run-daily", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const date = req.query.date || todayISO();
+    const to = req.query.to || MAIL_TO_DEFAULT;
+    if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
+
+    const onlyJob = req.query.jobId ? String(req.query.jobId) : null;
+
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const results = [];
+
+    for (const jobId of jobIds) {
+      if (onlyJob && jobId !== onlyJob) continue;
+      if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
+
+      const dayDir = resolveExistingDayDir(jobId, date);
+      if (!fs.existsSync(dayDir)) continue;
+
+      const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
+      const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
+
+      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+      const text = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
+
+      const sent = await sendMailWithAttachment({ to, subject, text, filePath: outPdf });
+      results.push({ jobId, date, pages: built.pages, mailed: !!sent });
+    }
+
+    res.json({ ok: true, date, to, count: results.length, results });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// ===================== Admin UI + API + PDF =====================
+
+// Admin UI (serves /public/admin.html)
 app.get("/admin/ui", (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.sendFile(path.join(process.cwd(), "public", "admin.html"));
 });
 
-// Helper: list day folders for a job (new YYYY/MM/DD + old YYYY-MM-DD)
 async function listDaysForJob(jobId) {
   const base = path.join(DATA_DIR, String(jobId));
   if (!fs.existsSync(base)) return [];
 
   const days = new Set();
+  const entries = await fsp.readdir(base).catch(() => []);
 
   // NEW: YYYY/MM/DD
-  const years = await fsp.readdir(base).catch(() => []);
-  for (const y of years) {
+  for (const y of entries) {
     if (!/^\d{4}$/.test(y)) continue;
     const yPath = path.join(base, y);
     const months = await fsp.readdir(yPath).catch(() => []);
@@ -981,8 +984,8 @@ async function listDaysForJob(jobId) {
     }
   }
 
-  // OLD: YYYY-MM-DD folders directly under /job
-  for (const x of years) {
+  // OLD: YYYY-MM-DD directly under /job
+  for (const x of entries) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(x)) days.add(x);
   }
 
@@ -991,24 +994,27 @@ async function listDaysForJob(jobId) {
 
 async function readLogStats(dayDir) {
   const logPath = path.join(dayDir, "log.jsonl");
-  let items = 0, images = 0, audio = 0, pdfs = 0;
-  if (!fs.existsSync(logPath)) return { items, images, audio, pdfs };
+  let items = 0,
+    images = 0,
+    audio = 0,
+    pdfs = 0;
 
-  const txt = await fsp.readFile(logPath, "utf8").catch(() => "");
-  const lines = txt.split("\n").filter(Boolean);
-  items = lines.length;
+  if (fs.existsSync(logPath)) {
+    const txt = await fsp.readFile(logPath, "utf8").catch(() => "");
+    const lines = txt.split("\n").filter(Boolean);
+    items = lines.length;
 
-  for (const line of lines) {
-    try {
-      const j = JSON.parse(line);
-      if (j.type === "audio_saved" || j.type === "audio_transcript") audio++;
-      if (j.type === "pdf") pdfs++;
-    } catch {}
+    for (const line of lines) {
+      try {
+        const j = JSON.parse(line);
+        if (j.type === "audio_saved" || j.type === "audio_transcript") audio++;
+        if (j.type === "pdf") pdfs++;
+      } catch {}
+    }
   }
 
-  // media files
   const files = await fsp.readdir(dayDir).catch(() => []);
-  images = files.filter(f => /\.(jpg|jpeg|png)$/i.test(f)).length;
+  images = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f)).length;
 
   return { items, images, audio, pdfs };
 }
@@ -1020,8 +1026,8 @@ app.get("/admin/api/jobs", async (req, res) => {
   try {
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
-      .filter(j => j && j !== "unknown" && j !== "_unassigned") // standardmäßig ausblenden
-      .filter(j => fs.existsSync(path.join(DATA_DIR, j)));
+      .filter((j) => j && j !== "unknown" && j !== "_unassigned")
+      .filter((j) => fs.existsSync(path.join(DATA_DIR, j)));
 
     const jobs = [];
     for (const jobId of filtered) {
@@ -1045,8 +1051,7 @@ app.get("/admin/api/jobs", async (req, res) => {
       });
     }
 
-    // sort by latestDay desc
-    jobs.sort((a,b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
+    jobs.sort((a, b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
     res.json({ ok: true, jobs });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -1095,7 +1100,6 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
     if (!fs.existsSync(dayDir)) return res.status(404).send("Day not found");
 
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
-
     if (!fs.existsSync(pdfPath)) {
       await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
     }
@@ -1107,23 +1111,10 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
   }
 });
 
-
-// Admin UI
-app.get("/admin/ui", ...)
-
-// Admin API jobs
-app.get("/admin/api/jobs", ...)
-
-// Admin API days
-app.get("/admin/api/job/:jobId/days", ...)
-
-// Admin API day detail
-app.get("/admin/api/job/:jobId/day/:day", ...)
-
-// Admin PDF serve
-app.get("/admin/pdf/:jobId/:day", ...
+// ===================== 404 handler (LAST) =====================
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
+// ===================== Start =====================
 console.log("Starting…");
 console.log("DATA_DIR=", DATA_DIR);
 console.log("MAIL_FROM=", MAIL_FROM);
