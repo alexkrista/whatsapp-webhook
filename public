@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Baustellenprotokoll – Übersicht</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;line-height:1.3}
+    header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;min-width:260px}
+    button,a.btn{padding:10px 12px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;text-decoration:none;color:#111;display:inline-block}
+    button.primary{background:#111;color:#fff;border-color:#111}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+    .card{border:1px solid #e5e5e5;border-radius:14px;padding:14px}
+    .muted{color:#666;font-size:13px}
+    .list{display:flex;flex-direction:column;gap:10px;max-height:70vh;overflow:auto}
+    .row{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid #eee;border-radius:12px;padding:10px}
+    .row strong{font-size:15px}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{font-size:12px;border:1px solid #eee;border-radius:999px;padding:4px 8px;color:#333;background:#fafafa}
+    select{padding:10px 12px;border:1px solid #ccc;border-radius:10px}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:12px;padding:12px;overflow:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <h2 style="margin:0">Baustellenprotokoll – Übersicht</h2>
+    <span class="muted" id="status">—</span>
+  </header>
+
+  <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <input id="token" placeholder="Admin Token (oder ?token=…)" />
+    <button class="primary" id="load">Laden</button>
+    <input id="search" placeholder="Suche #260016 …" />
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin:0 0 10px 0">Projekte</h3>
+      <div class="list" id="jobs"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px 0">Details</h3>
+      <div id="details" class="muted">Wähle links ein Projekt.</div>
+      <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <select id="daySelect" disabled></select>
+        <button id="openPdf" disabled>PDF öffnen</button>
+        <button id="runPdf" disabled>PDF + Mail jetzt</button>
+      </div>
+      <div style="margin-top:12px;">
+        <pre id="raw"></pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const qs = new URLSearchParams(location.search);
+  const tokenInput = document.getElementById('token');
+  tokenInput.value = qs.get('token') || '';
+
+  const statusEl = document.getElementById('status');
+  const jobsEl = document.getElementById('jobs');
+  const detailsEl = document.getElementById('details');
+  const rawEl = document.getElementById('raw');
+  const daySelect = document.getElementById('daySelect');
+  const openPdfBtn = document.getElementById('openPdf');
+  const runPdfBtn = document.getElementById('runPdf');
+  const searchEl = document.getElementById('search');
+
+  let allJobs = [];
+  let selectedJob = null;
+
+  function apiUrl(path) {
+    const t = tokenInput.value.trim();
+    const u = new URL(path, location.origin);
+    if (t) u.searchParams.set('token', t);
+    return u.toString();
+  }
+
+  async function loadJobs() {
+    statusEl.textContent = 'Lade…';
+    jobsEl.innerHTML = '';
+    detailsEl.textContent = '—';
+    rawEl.textContent = '';
+    daySelect.innerHTML = '';
+    daySelect.disabled = true;
+    openPdfBtn.disabled = true;
+    runPdfBtn.disabled = true;
+    selectedJob = null;
+
+    const r = await fetch(apiUrl('/admin/api/jobs'));
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'API error');
+
+    allJobs = j.jobs || [];
+    statusEl.textContent = `OK – ${allJobs.length} Projekte`;
+
+    renderJobs();
+  }
+
+  function renderJobs() {
+    const q = searchEl.value.trim().toLowerCase();
+    const filtered = allJobs.filter(x => x.jobId.toLowerCase().includes(q));
+
+    jobsEl.innerHTML = '';
+    for (const job of filtered) {
+      const div = document.createElement('div');
+      div.className = 'row';
+      div.innerHTML = `
+        <div>
+          <strong>#${job.jobId}</strong><div class="muted">${job.latestDay ? ('Letzter Tag: ' + job.latestDay) : '—'}</div>
+        </div>
+        <div class="chips">
+          <span class="chip">${job.daysCount} Tage</span>
+          <span class="chip">${job.itemsLastDay} Einträge (letzter Tag)</span>
+          <span class="chip">${job.imagesLastDay} Fotos</span>
+          <span class="chip">${job.audioLastDay} Audio</span>
+          <span class="chip">${job.pdfsLastDay} PDFs</span>
+        </div>
+      `;
+      div.style.cursor = 'pointer';
+      div.onclick = () => selectJob(job.jobId);
+      jobsEl.appendChild(div);
+    }
+  }
+
+  async function selectJob(jobId) {
+    selectedJob = jobId;
+    detailsEl.textContent = `#${jobId} – lade Tage…`;
+    rawEl.textContent = '';
+    daySelect.disabled = true;
+    openPdfBtn.disabled = true;
+    runPdfBtn.disabled = true;
+
+    const r = await fetch(apiUrl(`/admin/api/job/${encodeURIComponent(jobId)}/days`));
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'API error');
+
+    const days = j.days || [];
+    daySelect.innerHTML = '';
+    for (const d of days) {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      daySelect.appendChild(opt);
+    }
+    daySelect.disabled = days.length === 0;
+    openPdfBtn.disabled = days.length === 0;
+    runPdfBtn.disabled = days.length === 0;
+
+    detailsEl.innerHTML = `<div><strong>#${jobId}</strong></div><div class="muted">Wähle einen Tag.</div>`;
+    rawEl.textContent = JSON.stringify(j, null, 2);
+
+    daySelect.onchange = async () => {
+      const day = daySelect.value;
+      const r2 = await fetch(apiUrl(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}`));
+      const j2 = await r2.json();
+      rawEl.textContent = JSON.stringify(j2, null, 2);
+    };
+
+    // auto load first day
+    if (days[0]) {
+      daySelect.value = days[0];
+      daySelect.dispatchEvent(new Event('change'));
+    }
+
+    openPdfBtn.onclick = () => {
+      const day = daySelect.value;
+      window.open(apiUrl(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`), '_blank');
+    };
+
+    runPdfBtn.onclick = async () => {
+      const day = daySelect.value;
+      const r3 = await fetch(apiUrl(`/admin/run-daily?date=${encodeURIComponent(day)}&jobId=${encodeURIComponent(jobId)}`));
+      const j3 = await r3.json().catch(() => ({}));
+      rawEl.textContent = JSON.stringify(j3, null, 2);
+      alert('Run ausgelöst. (Siehe JSON unten / Mail kommt je nach SMTP)');
+    };
+  }
+
+  document.getElementById('load').onclick = () => loadJobs().catch(e => statusEl.textContent = 'Fehler: ' + e.message);
+  searchEl.oninput = () => renderJobs();
+
+  // auto load if token in URL
+  if (tokenInput.value.trim()) {
+    loadJobs().catch(e => statusEl.textContent = 'Fehler: ' + e.message);
+  }
+</script>
+</body>
+</html>
