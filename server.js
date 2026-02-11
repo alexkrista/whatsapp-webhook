@@ -1113,6 +1113,63 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
 
 // ===================== 404 handler (LAST) =====================
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
+// Admin: list jobs
+app.get("/admin/list-jobs", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobs = [];
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+
+    for (const jobId of jobIds) {
+      if (jobId.startsWith(".")) continue;
+
+      const jobDir = path.join(DATA_DIR, jobId);
+      const stat = await fsp.stat(jobDir).catch(() => null);
+      if (!stat || !stat.isDirectory()) continue;
+
+      const days = await fsp.readdir(jobDir).catch(() => []);
+      const validDays = [];
+
+      for (const d of days) {
+        const dayDir = path.join(jobDir, d);
+        const s = await fsp.stat(dayDir).catch(() => null);
+        if (s && s.isDirectory()) validDays.push(d);
+      }
+
+      validDays.sort().reverse();
+
+      let items = 0, images = 0, audio = 0;
+
+      if (validDays.length > 0) {
+        const latestDir = path.join(jobDir, validDays[0]);
+        const files = await fsp.readdir(latestDir).catch(() => []);
+
+        for (const f of files) {
+          if (f.endsWith(".jsonl")) items++;
+          if (f.match(/\.(jpg|jpeg|png)$/i)) images++;
+          if (f.match(/\.(mp3|ogg|m4a|wav)$/i)) audio++;
+        }
+      }
+
+      jobs.push({
+        jobId,
+        daysCount: validDays.length,
+        latestDay: validDays[0] || null,
+        itemsLastDay: items,
+        imagesLastDay: images,
+        audioLastDay: audio,
+      });
+    }
+
+    jobs.sort((a, b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
+
+    res.json({ ok: true, jobs });
+
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
 
 // ===================== Start =====================
 console.log("Starting…");
