@@ -1108,6 +1108,20 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
 });
 
 
+// Admin UI
+app.get("/admin/ui", ...)
+
+// Admin API jobs
+app.get("/admin/api/jobs", ...)
+
+// Admin API days
+app.get("/admin/api/job/:jobId/days", ...)
+
+// Admin API day detail
+app.get("/admin/api/job/:jobId/day/:day", ...)
+
+// Admin PDF serve
+app.get("/admin/pdf/:jobId/:day", ...
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
 console.log("Starting…");
