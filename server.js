@@ -45,6 +45,7 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
+app.use("/public", express.static("public"));
 
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
@@ -948,6 +949,161 @@ app.get("/admin/check-logo", async (req, res) => {
       error: String(e?.message || e),
       hint: "Lege die Datei ins Repo z.B. assets/krista-logo.png und setze LOGO_PATH=assets/krista-logo.png",
     });
+  }
+});
+// Admin UI (HTML)
+app.get("/admin/ui", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.sendFile(path.join(process.cwd(), "public", "admin.html"));
+});
+
+// Helper: list day folders for a job (new YYYY/MM/DD + old YYYY-MM-DD)
+async function listDaysForJob(jobId) {
+  const base = path.join(DATA_DIR, String(jobId));
+  if (!fs.existsSync(base)) return [];
+
+  const days = new Set();
+
+  // NEW: YYYY/MM/DD
+  const years = await fsp.readdir(base).catch(() => []);
+  for (const y of years) {
+    if (!/^\d{4}$/.test(y)) continue;
+    const yPath = path.join(base, y);
+    const months = await fsp.readdir(yPath).catch(() => []);
+    for (const m of months) {
+      if (!/^\d{2}$/.test(m)) continue;
+      const mPath = path.join(yPath, m);
+      const ds = await fsp.readdir(mPath).catch(() => []);
+      for (const d of ds) {
+        if (!/^\d{2}$/.test(d)) continue;
+        days.add(`${y}-${m}-${d}`);
+      }
+    }
+  }
+
+  // OLD: YYYY-MM-DD folders directly under /job
+  for (const x of years) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) days.add(x);
+  }
+
+  return Array.from(days).sort().reverse();
+}
+
+async function readLogStats(dayDir) {
+  const logPath = path.join(dayDir, "log.jsonl");
+  let items = 0, images = 0, audio = 0, pdfs = 0;
+  if (!fs.existsSync(logPath)) return { items, images, audio, pdfs };
+
+  const txt = await fsp.readFile(logPath, "utf8").catch(() => "");
+  const lines = txt.split("\n").filter(Boolean);
+  items = lines.length;
+
+  for (const line of lines) {
+    try {
+      const j = JSON.parse(line);
+      if (j.type === "audio_saved" || j.type === "audio_transcript") audio++;
+      if (j.type === "pdf") pdfs++;
+    } catch {}
+  }
+
+  // media files
+  const files = await fsp.readdir(dayDir).catch(() => []);
+  images = files.filter(f => /\.(jpg|jpeg|png)$/i.test(f)).length;
+
+  return { items, images, audio, pdfs };
+}
+
+// Admin API: list jobs
+app.get("/admin/api/jobs", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const filtered = jobIds
+      .filter(j => j && j !== "unknown" && j !== "_unassigned") // standardmäßig ausblenden
+      .filter(j => fs.existsSync(path.join(DATA_DIR, j)));
+
+    const jobs = [];
+    for (const jobId of filtered) {
+      const days = await listDaysForJob(jobId);
+      const latestDay = days[0] || null;
+      let stats = { items: 0, images: 0, audio: 0, pdfs: 0 };
+
+      if (latestDay) {
+        const dayDir = resolveExistingDayDir(jobId, latestDay);
+        if (fs.existsSync(dayDir)) stats = await readLogStats(dayDir);
+      }
+
+      jobs.push({
+        jobId,
+        daysCount: days.length,
+        latestDay,
+        itemsLastDay: stats.items,
+        imagesLastDay: stats.images,
+        audioLastDay: stats.audio,
+        pdfsLastDay: stats.pdfs,
+      });
+    }
+
+    // sort by latestDay desc
+    jobs.sort((a,b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
+    res.json({ ok: true, jobs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: days for job
+app.get("/admin/api/job/:jobId/days", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    const days = await listDaysForJob(jobId);
+    res.json({ ok: true, jobId, days });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: stats for a day
+app.get("/admin/api/job/:jobId/day/:day", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+
+    const stats = await readLogStats(dayDir);
+    res.json({ ok: true, jobId, day, dayDir, stats });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin: serve PDF (build if missing)
+app.get("/admin/pdf/:jobId/:day", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).send("Day not found");
+
+    const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
+
+    if (!fs.existsSync(pdfPath)) {
+      await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    return res.sendFile(pdfPath);
+  } catch (e) {
+    res.status(500).send(String(e?.message || e));
   }
 });
 
