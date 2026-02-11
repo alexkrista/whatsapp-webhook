@@ -1114,7 +1114,7 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
 // ===================== 404 handler (LAST) =====================
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 // Admin: list jobs
-app.get("/admin/list-jobs", async (req, res) => {
+app.get("/api/admin/list-jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   try {
