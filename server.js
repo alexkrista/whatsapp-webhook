@@ -1,14 +1,22 @@
-// server.js (CommonJS) – WhatsApp Webhook + Media speichern + PDF (Text/Fotos/PDFs) + Audio-Transkription
-// Trigger: WhatsApp Text enthält "pdf" -> Protokoll-PDF erstellen + mailen
-//
-// NEU:
-// - Audio (Sprachnachricht) wird transkribiert (OpenAI /v1/audio/transcriptions) und als Textseite ins Protokoll übernommen.
-// - PDF (WhatsApp Document mime application/pdf) wird gespeichert und die 1. Seite wird in das Protokoll eingebettet.
+// server.js (CommonJS)
+// Layout A: Text + Audio-Transkripte seitenfüllend, danach Fotos (6 pro Seite), PDFs optional eingebettet (Seite 1)
+// Trigger: WhatsApp Text enthält "pdf" -> Tagesprotokoll bauen + mailen
 //
 // ENV (zusätzlich):
 // OPENAI_API_KEY=...
-// OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe  (optional)
-// OPENAI_TRANSCRIBE_LANG=de                  (optional)
+// optional: OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+// optional: OPENAI_TRANSCRIBE_LANG=de
+//
+// SMTP (SendGrid):
+// SMTP_HOST=smtp.sendgrid.net
+// SMTP_PORT=587
+// SMTP_USER=apikey
+// SMTP_PASS=<SENDGRID_API_KEY>
+// MAIL_FROM=<verifizierter Sender (krista.at)>
+// MAIL_TO_DEFAULT=alex@krista.at
+//
+// Storage:
+// DATA_DIR=/var/data
 
 const express = require("express");
 const fs = require("fs");
@@ -34,13 +42,12 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 
-// OpenAI transcription
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
 const OPENAI_TRANSCRIBE_LANG = process.env.OPENAI_TRANSCRIBE_LANG || "de";
 
-// Optional allowlist for "pdf" trigger
-const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
+// optional allowlist for triggering "pdf"
+const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || ""; // comma-separated wa_ids
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
 // ===================== App =====================
@@ -165,21 +172,18 @@ async function downloadWhatsAppMedia(mediaId) {
 }
 
 // ===================== OpenAI Transcription =====================
-async function transcribeAudio({ audioBuffer, filename = "audio.ogg" }) {
+async function transcribeAudio({ audioBuffer, filename = "audio.ogg", mimeType = "audio/ogg" }) {
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
 
   const form = new FormData();
-  // Node 18+ supports Blob/FormData
-  const blob = new Blob([audioBuffer], { type: "audio/ogg" });
+  const blob = new Blob([audioBuffer], { type: mimeType });
   form.append("file", blob, filename);
   form.append("model", OPENAI_TRANSCRIBE_MODEL);
   if (OPENAI_TRANSCRIBE_LANG) form.append("language", OPENAI_TRANSCRIBE_LANG);
 
   const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
     body: form,
   });
 
@@ -188,7 +192,6 @@ async function transcribeAudio({ audioBuffer, filename = "audio.ogg" }) {
     throw new Error(`OpenAI transcription failed (${r.status}): ${t}`);
   }
   const j = await r.json();
-  // docs: response includes "text"
   return j.text || "";
 }
 
@@ -222,10 +225,9 @@ async function sendMailWithAttachment({ to, subject, text, filePath }) {
   }
 }
 
-// ===================== PDF Build (A3 quer) =====================
+// ===================== PDF Build (Layout A) =====================
 async function listFiles(dayDir) {
-  const files = await fsp.readdir(dayDir).catch(() => []);
-  return files.slice().sort();
+  return (await fsp.readdir(dayDir).catch(() => [])).slice().sort();
 }
 async function readJsonLines(filePath) {
   if (!fs.existsSync(filePath)) return [];
@@ -236,6 +238,24 @@ async function readJsonLines(filePath) {
     try { items.push(JSON.parse(line)); } catch {}
   }
   return items;
+}
+
+function wrapText(text, maxChars) {
+  // simple word wrap by character count (good enough for PDF drawing)
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (next.length > maxChars) {
+      if (line) lines.push(line);
+      line = w;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
@@ -249,12 +269,13 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
   const logPath = path.join(dayDir, "log.jsonl");
   const logs = await readJsonLines(logPath);
 
-  // Sort by timestamp if present
+  // Sort by WA timestamp (seconds)
   logs.sort((a, b) => (a.raw?.timestamp ? Number(a.raw.timestamp) : 0) - (b.raw?.timestamp ? Number(b.raw.timestamp) : 0));
 
-  const imageFiles = (await listFiles(dayDir)).filter(f => /\.(jpg|jpeg|png)$/i.test(f));
+  const files = await listFiles(dayDir);
+  const imageFiles = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f));
 
-  // ---- Cover ----
+  // ---------- Cover ----------
   {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
     page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
@@ -262,62 +283,124 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 180, size: 16, font });
     page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 210, size: 16, font });
     page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
-    page.drawText("Text, Fotos, PDFs & Sprachnachrichten (Transkript)", {
-      x: 60, y: 80, size: 12, font, color: rgb(0.3,0.3,0.3),
+    page.drawText("Layout: Text/Transkripte seitenfüllend, danach Fotos (6 pro Seite)", {
+      x: 60, y: 80, size: 12, font, color: rgb(0.3, 0.3, 0.3),
     });
   }
 
-  // ---- Per-entry pages (Text / Audio transcript / PDF page 1) ----
+  // ---------- TEXT SECTION (seitenfüllend) ----------
+  // Collect all textual content: text messages + audio transcripts + transcription_failed hints
+  const textLines = [];
+
   for (const entry of logs) {
     const raw = entry.raw || {};
     const ts = raw.timestamp ? Number(raw.timestamp) : null;
     const stamp = ts ? stampDE(ts) : "";
 
-    // TEXT
+    // normal text
     if (entry.type === "text" && raw.text?.body) {
-      const page = pdf.addPage([PAGE_W, PAGE_H]);
-      page.drawText("Text", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
-      page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font, color: rgb(0.2,0.2,0.2) });
-      page.drawText(raw.text.body, { x: 60, y: PAGE_H - 160, size: 14, font, maxWidth: PAGE_W - 120 });
+      textLines.push(`${stamp}  TEXT: ${raw.text.body}`);
       continue;
     }
 
-    // AUDIO (transcript)
+    // transcript
     if (entry.type === "audio_transcript" && entry.transcript) {
-      const page = pdf.addPage([PAGE_W, PAGE_H]);
-      page.drawText("Sprachnachricht (Transkript)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
-      page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font, color: rgb(0.2,0.2,0.2) });
-      page.drawText(entry.transcript, { x: 60, y: PAGE_H - 160, size: 14, font, maxWidth: PAGE_W - 120 });
+      textLines.push(`${stamp}  AUDIO: ${entry.transcript}`);
       continue;
     }
 
-    // PDF (embed first page)
-    if (entry.type === "pdf" && entry.file) {
-      const pdfFilePath = path.join(dayDir, entry.file);
-      if (fs.existsSync(pdfFilePath)) {
-        try {
-          const srcBytes = await fsp.readFile(pdfFilePath);
-          const srcPdf = await PDFDocument.load(srcBytes);
-          const [srcPage] = await pdf.copyPages(srcPdf, [0]); // first page
-          pdf.addPage(srcPage);
-
-          // Add a small header overlay (timestamp + filename) on the copied page
-          const last = pdf.getPages()[pdf.getPages().length - 1];
-          last.drawRectangle({ x: 40, y: PAGE_H - 70, width: PAGE_W - 80, height: 40, color: rgb(1,1,1), opacity: 0.8 });
-          last.drawText(`PDF: ${entry.file}`, { x: 60, y: PAGE_H - 55, size: 12, font, color: rgb(0,0,0) });
-          if (stamp) last.drawText(stamp, { x: PAGE_W - 260, y: PAGE_H - 55, size: 12, font, color: rgb(0,0,0) });
-        } catch (e) {
-          const page = pdf.addPage([PAGE_W, PAGE_H]);
-          page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
-          page.drawText(stamp, { x: 60, y: PAGE_H - 110, size: 12, font });
-          page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 160, size: 12, font, maxWidth: PAGE_W - 120 });
-        }
-      }
+    // transcription failed
+    if (entry.type === "transcription_failed") {
+      const msg = entry.error ? ` (Fehler: ${entry.error})` : "";
+      textLines.push(`${stamp}  AUDIO: Transkription fehlgeschlagen${msg}`);
       continue;
     }
   }
 
-  // ---- Photos: 6 per page (3x2) ----
+  if (textLines.length) {
+    // create pages and fill them
+    const left = 60;
+    const right = 60;
+    const top = 90;
+    const bottom = 70;
+
+    const fontSize = 12;
+    const lineH = 16;
+
+    // max chars heuristic for wrapping
+    const maxChars = 140;
+
+    let page = pdf.addPage([PAGE_W, PAGE_H]);
+
+    const drawHeader = (title) => {
+      page.drawText(title, { x: left, y: PAGE_H - 60, size: 18, font: fontBold });
+      page.drawLine({
+        start: { x: left, y: PAGE_H - 70 },
+        end: { x: PAGE_W - right, y: PAGE_H - 70 },
+        thickness: 1,
+        color: rgb(0.85, 0.85, 0.85),
+      });
+    };
+
+    drawHeader("Text / Notizen / Transkripte");
+    let y = PAGE_H - top;
+
+    for (const block of textLines) {
+      const wrapped = wrapText(block, maxChars);
+
+      for (const line of wrapped) {
+        if (y < bottom) {
+          page = pdf.addPage([PAGE_W, PAGE_H]);
+          drawHeader("Text / Notizen / Transkripte (Fortsetzung)");
+          y = PAGE_H - top;
+        }
+        page.drawText(line, {
+          x: left,
+          y,
+          size: fontSize,
+          font,
+          maxWidth: PAGE_W - left - right,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+        y -= lineH;
+      }
+
+      // spacing between blocks
+      y -= 6;
+      if (y < bottom) {
+        page = pdf.addPage([PAGE_W, PAGE_H]);
+        drawHeader("Text / Notizen / Transkripte (Fortsetzung)");
+        y = PAGE_H - top;
+      }
+    }
+  }
+
+  // ---------- PDF SECTION (embed 1st page of WhatsApp PDFs) ----------
+  // Any log entry with type "pdf" will be embedded (first page)
+  for (const entry of logs) {
+    if (entry.type !== "pdf" || !entry.file) continue;
+    const pdfFilePath = path.join(dayDir, entry.file);
+    if (!fs.existsSync(pdfFilePath)) continue;
+
+    try {
+      const srcBytes = await fsp.readFile(pdfFilePath);
+      const srcPdf = await PDFDocument.load(srcBytes);
+      const [srcPage] = await pdf.copyPages(srcPdf, [0]);
+      pdf.addPage(srcPage);
+
+      const stamp = entry.raw?.timestamp ? stampDE(entry.raw.timestamp) : "";
+      const last = pdf.getPages()[pdf.getPages().length - 1];
+      last.drawRectangle({ x: 40, y: PAGE_H - 70, width: PAGE_W - 80, height: 40, color: rgb(1, 1, 1), opacity: 0.85 });
+      last.drawText(`PDF: ${entry.file}`, { x: 60, y: PAGE_H - 55, size: 12, font, color: rgb(0, 0, 0) });
+      if (stamp) last.drawText(stamp, { x: PAGE_W - 260, y: PAGE_H - 55, size: 12, font, color: rgb(0, 0, 0) });
+    } catch (e) {
+      const page = pdf.addPage([PAGE_W, PAGE_H]);
+      page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
+      page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 130, size: 12, font, maxWidth: PAGE_W - 120 });
+    }
+  }
+
+  // ---------- PHOTOS SECTION: 6 per page (3x2) ----------
   if (imageFiles.length) {
     const cols = 3, rows = 2;
     const margin = 40;
@@ -329,12 +412,21 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
       const page = pdf.addPage([PAGE_W, PAGE_H]);
       const chunk = imageFiles.slice(i, i + 6);
 
+      // Header
+      page.drawText("Fotos", { x: 60, y: PAGE_H - 60, size: 18, font: fontBold });
+      page.drawLine({
+        start: { x: 60, y: PAGE_H - 70 },
+        end: { x: PAGE_W - 60, y: PAGE_H - 70 },
+        thickness: 1,
+        color: rgb(0.85, 0.85, 0.85),
+      });
+
       for (let j = 0; j < chunk.length; j++) {
         const col = j % cols;
         const row = Math.floor(j / cols);
 
         const x0 = margin + col * (cellW + gutter);
-        const yTop = PAGE_H - margin - row * (cellH + gutter);
+        const yTop = PAGE_H - 90 - row * (cellH + gutter);
 
         const captionH = 28;
         const targetW = Math.floor(cellW);
@@ -368,7 +460,7 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
         const stamp = stampDEFromFilename(fname);
         const caption = stamp ? `${stamp}  |  ${fname}` : fname;
 
-        page.drawText(caption, { x: x0, y: yTop - captionH + 8, size: 10, font, color: rgb(0.2,0.2,0.2) });
+        page.drawText(caption, { x: x0, y: yTop - captionH + 8, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
       }
     }
   }
@@ -396,7 +488,7 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
 
 // ===================== Routes =====================
 app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
-app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString(), openai_key: !!OPENAI_API_KEY }));
 
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -434,7 +526,7 @@ app.post("/webhook", async (req, res) => {
 
       const logPath = path.join(dayDir, "log.jsonl");
 
-      // ---- Save base entry ----
+      // Base log
       await appendJsonl(logPath, {
         at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
         from: sender,
@@ -443,26 +535,23 @@ app.post("/webhook", async (req, res) => {
         raw: msg,
       });
 
-      // ---- Media handling ----
+      // IMAGE
       if (msg.type === "image" && msg.image?.id) {
         const mediaId = msg.image.id;
-        const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+        const { buf } = await downloadWhatsAppMedia(mediaId);
         const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}.jpg`;
         await fsp.writeFile(path.join(dayDir, filename), buf);
-        console.log(`✅ saved image for #${siteCode} -> ${filename}`);
       }
 
+      // DOCUMENT (PDF)
       if (msg.type === "document" && msg.document?.id) {
         const mediaId = msg.document.id;
         const { buf, mime } = await downloadWhatsAppMedia(mediaId);
-
         const isPdf = String(mime).toLowerCase().includes("pdf");
-        const ext = isPdf ? ".pdf" : ".bin";
-        const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}${ext}`;
+        const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}${isPdf ? ".pdf" : ".bin"}`;
         await fsp.writeFile(path.join(dayDir, filename), buf);
 
         if (isPdf) {
-          // Add an additional log record for PDF embedding
           await appendJsonl(logPath, {
             at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
             from: sender,
@@ -471,20 +560,25 @@ app.post("/webhook", async (req, res) => {
             raw: msg,
           });
         }
-        console.log(`✅ saved document for #${siteCode} -> ${filename}`);
       }
 
-      if (msg.type === "audio" && msg.audio?.id) {
+      // AUDIO (robust: some payloads still have msg.audio)
+      const isAudio = msg.type === "audio" || (msg.audio && msg.audio.id);
+      if (isAudio && msg.audio?.id) {
         const mediaId = msg.audio.id;
         const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+
         const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}.ogg`;
         await fsp.writeFile(path.join(dayDir, filename), buf);
-        console.log(`✅ saved audio for #${siteCode} -> ${filename}`);
 
-        // Transcribe
         if (OPENAI_API_KEY) {
           try {
-            const transcript = await transcribeAudio({ audioBuffer: buf, filename });
+            const transcript = await transcribeAudio({
+              audioBuffer: buf,
+              filename,
+              mimeType: mime || "audio/ogg",
+            });
+
             await appendJsonl(logPath, {
               at: new Date(Number(tsSec || 0) * 1000 || Date.now()).toISOString(),
               from: sender,
@@ -493,36 +587,42 @@ app.post("/webhook", async (req, res) => {
               file: filename,
               raw: msg,
             });
-            console.log(`✅ transcribed audio for #${siteCode}`);
           } catch (e) {
+            await appendJsonl(logPath, {
+              at: new Date().toISOString(),
+              from: sender,
+              type: "transcription_failed",
+              error: String(e?.message || e),
+              file: filename,
+              raw: msg,
+            });
             console.error("❌ transcription failed:", e?.message || e);
           }
+        } else {
+          await appendJsonl(logPath, {
+            at: new Date().toISOString(),
+            from: sender,
+            type: "transcription_failed",
+            error: "OPENAI_API_KEY missing",
+            file: filename,
+            raw: msg,
+          });
         }
       }
 
-      // ---- Trigger PDF ----
+      // TRIGGER PDF
       if (msg.type === "text" && isPdfCommand(textOrCaption)) {
-        if (!isAllowedPdfSender(sender)) {
-          console.log(`⛔ pdf command blocked (sender ${sender} not allowed)`);
-          continue;
-        }
+        if (!isAllowedPdfSender(sender)) continue;
 
         let jobId = parseSiteCodeFromText(textOrCaption) || siteCode;
-        if (!jobId || jobId === "unknown") {
-          console.log("⚠️ pdf command: jobId unknown (schreibe '#260016 pdf')");
-          continue;
-        }
+        if (!jobId || jobId === "unknown") continue;
         if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
 
         const to = MAIL_TO_DEFAULT;
-        if (!to) {
-          console.log("⚠️ pdf command: MAIL_TO_DEFAULT missing");
-          continue;
-        }
+        if (!to) continue;
 
         try {
-          const result = await triggerPdfForJobDay({ jobId, date, to });
-          console.log(`📨 pdf command: sent #${jobId} ${date} -> ${to} (${result.built.pages} pages)`);
+          await triggerPdfForJobDay({ jobId, date, to });
         } catch (e) {
           console.error("❌ pdf command failed:", e?.message || e);
         }
@@ -533,7 +633,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Admin: test mail
+// Admin endpoints
 app.get("/admin/test-mail", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const to = req.query.to || MAIL_TO_DEFAULT;
@@ -552,7 +652,6 @@ app.get("/admin/test-mail", async (req, res) => {
   }
 });
 
-// Admin: manual run daily
 app.get("/admin/run-daily", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -576,9 +675,7 @@ app.get("/admin/run-daily", async (req, res) => {
       const text = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
 
       const sent = await sendMailWithAttachment({ to, subject, text, filePath: outPdf });
-      results.push({ jobId, date, pdf: outPdf, pages: built.pages, mailed: !!sent });
-
-      console.log(`📧 sent ${jobId} ${date} -> ${to} (${built.pages} pages)`);
+      results.push({ jobId, date, pages: built.pages, mailed: !!sent });
     }
 
     res.json({ ok: true, date, to, count: results.length, results });
@@ -594,4 +691,5 @@ console.log("DATA_DIR=", DATA_DIR);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
 console.log("OPENAI_API_KEY set:", !!OPENAI_API_KEY);
+
 app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT}`));
