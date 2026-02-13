@@ -606,13 +606,28 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
         const fname = chunk[j];
         const imgPath = path.join(dayDir, fname);
 
-        let imgBuf = await fsp.readFile(imgPath);
-        try {
-          imgBuf = await sharp(imgBuf)
-            .resize({ width: targetW, height: targetH, fit: "inside" })
-            .jpeg({ quality: 72 })
-            .toBuffer();
-        } catch {}
+let imgBuf = await fsp.readFile(imgPath);
+
+try {
+  const JPEG_QUALITY = Number(process.env.JPEG_QUALITY || 90);
+  const MAX_IMG_PX = Number(process.env.MAX_IMG_PX || 2400);
+
+  imgBuf = await sharp(imgBuf)
+    .rotate()
+    .resize({
+      width: MAX_IMG_PX,
+      height: MAX_IMG_PX,
+      fit: "inside",
+      withoutEnlargement: true
+    })
+    .jpeg({
+      quality: JPEG_QUALITY,
+      mozjpeg: true,
+      chromaSubsampling: "4:4:4"
+    })
+    .toBuffer();
+} catch {}
+
 
         let img;
         try {
