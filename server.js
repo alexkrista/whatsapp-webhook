@@ -518,58 +518,123 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
       }
     }
   }
+// PDF SECTION: alle Seiten einbinden, 6 Seiten pro A3-Seite (3x2)
+for (const entry of logs) {
+  if (entry.type !== "pdf" || !entry.file) continue;
 
-  // PDF SECTION (embed first page of WhatsApp PDFs)
-  for (const entry of logs) {
-    if (entry.type !== "pdf" || !entry.file) continue;
-    const pdfFilePath = path.join(dayDir, entry.file);
-    if (!fs.existsSync(pdfFilePath)) continue;
+  const pdfFilePath = path.join(dayDir, entry.file);
+  if (!fs.existsSync(pdfFilePath)) continue;
 
-    try {
-      const srcBytes = await fsp.readFile(pdfFilePath);
-      const srcPdf = await PDFDocument.load(srcBytes);
-      const [srcPage] = await pdf.copyPages(srcPdf, [0]);
-      pdf.addPage(srcPage);
+  try {
+    const srcBytes = await fsp.readFile(pdfFilePath);
+    const srcPdf = await PDFDocument.load(srcBytes);
+    const pageCount = srcPdf.getPageCount();
 
-      const stamp = entry.raw?.timestamp ? stampDE(entry.raw.timestamp) : "";
-      const last = pdf.getPages()[pdf.getPages().length - 1];
+    const cols = 3;
+    const rows = 2;
+    const margin = 40;
+    const gutter = 18;
 
-      last.drawRectangle({
-        x: 40,
-        y: PAGE_H - 90,
-        width: PAGE_W - 80,
-        height: 55,
-        color: rgb(1, 1, 1),
-        opacity: 0.85,
-      });
-      last.drawText(`PDF aus WhatsApp: ${entry.file}`, {
+    const titleH = 40;      // oben Titelbereich
+    const captionH = 18;    // pro Kachel Caption
+    const gridTop = 95;     // Abstand von oben (unter Headerlinie)
+    const gridBottom = 70;  // Abstand unten (über Footerlinie)
+
+    const usableW = PAGE_W - margin * 2 - gutter * (cols - 1);
+    const usableH = (PAGE_H - gridTop - gridBottom) - gutter * (rows - 1);
+
+    const cellW = usableW / cols;
+    const cellH = usableH / rows;
+
+    const stamp = entry.raw?.timestamp ? stampDE(entry.raw.timestamp) : "";
+
+    // Seiten in 6er-Blöcken einbetten
+    for (let start = 0; start < pageCount; start += 6) {
+      const idxs = [];
+      for (let k = start; k < Math.min(start + 6, pageCount); k++) idxs.push(k);
+
+      // embedPdf kann mehrere Seiten auf einmal einbetten
+      const embeddedPages = await pdf.embedPdf(srcBytes, idxs);
+
+      const page = pdf.addPage([PAGE_W, PAGE_H]);
+
+      // Titel
+      page.drawText(`PDF: ${entry.file} (${pageCount} Seiten)`, {
         x: 60,
         y: PAGE_H - 70,
-        size: 12,
-        font,
-        color: rgb(0, 0, 0),
+        size: 18,
+        font: fontBold,
       });
-      if (stamp) {
-        last.drawText(stamp, {
-          x: PAGE_W - 60 - 200,
-          y: PAGE_H - 70,
-          size: 12,
+
+      page.drawLine({
+        start: { x: 60, y: PAGE_H - 78 },
+        end: { x: PAGE_W - 60, y: PAGE_H - 78 },
+        thickness: 1,
+        color: rgb(0.85, 0.85, 0.85),
+      });
+
+      // 6-up Grid
+      for (let j = 0; j < embeddedPages.length; j++) {
+        const col = j % cols;
+        const row = Math.floor(j / cols);
+
+        const x0 = margin + col * (cellW + gutter);
+        const yTop = PAGE_H - gridTop - row * (cellH + gutter);
+
+        const targetW = Math.floor(cellW);
+        const targetH = Math.floor(cellH - captionH);
+
+        const ep = embeddedPages[j];
+
+        // scale to fit
+        const scale = Math.min(targetW / ep.width, targetH / ep.height);
+        const drawW = ep.width * scale;
+        const drawH = ep.height * scale;
+
+        const x = x0 + (targetW - drawW) / 2;
+        const y = yTop - captionH - drawH;
+
+        // draw embedded PDF page
+        page.drawPage(ep, { x, y, width: drawW, height: drawH });
+
+        // Caption: Timestamp + Dateiname + Seitennummer
+        const pageNo = idxs[j] + 1;
+        const cap = `${stamp ? stamp + "  |  " : ""}${entry.file}  |  Seite ${pageNo}/${pageCount}`;
+
+        page.drawText(cap, {
+          x: x0,
+          y: yTop - captionH + 4,
+          size: 10,
           font,
-          color: rgb(0, 0, 0),
+          color: rgb(0.2, 0.2, 0.2),
+          maxWidth: targetW,
+        });
+
+        // optional: dünner Rahmen
+        page.drawRectangle({
+          x: x0,
+          y: yTop - captionH - targetH,
+          width: targetW,
+          height: targetH + captionH,
+          borderWidth: 1,
+          borderColor: rgb(0.92, 0.92, 0.92),
         });
       }
-    } catch (e) {
-      const page = pdf.addPage([PAGE_W, PAGE_H]);
-      page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
-      page.drawText(String(e?.message || e), {
-        x: 60,
-        y: PAGE_H - 130,
-        size: 12,
-        font,
-        maxWidth: PAGE_W - 120,
-      });
     }
+  } catch (e) {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    page.drawText("PDF (Fehler beim Einbetten)", { x: 60, y: PAGE_H - 80, size: 18, font: fontBold });
+    page.drawText(String(e?.message || e), {
+      x: 60,
+      y: PAGE_H - 130,
+      size: 12,
+      font,
+      maxWidth: PAGE_W - 120,
+    });
   }
+}
+
+
 
   // PHOTOS SECTION: 6 per page (3x2)
   if (imageFiles.length) {
