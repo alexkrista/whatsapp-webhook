@@ -5,34 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Baustellenprotokolle – Admin</title>
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#1b1b1b; background:#f5f3ef; }
-    body { margin:0; }
-    header { background:#111; color:white; padding:22px 28px; }
-    h1 { margin:0; font-size:26px; }
-    main { max-width:1180px; margin:0 auto; padding:24px; }
-    .bar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:18px; }
-    input, button { font:inherit; padding:10px 12px; border-radius:10px; border:1px solid #ccc; }
-    input { min-width:280px; flex:1; }
-    button { background:#111; color:white; cursor:pointer; border-color:#111; }
-    button.secondary { background:white; color:#111; }
-    button:disabled { opacity:.55; cursor:wait; }
-    .hint { color:#666; font-size:14px; margin:8px 0 18px; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap:14px; }
-    .card { background:white; border-radius:16px; box-shadow:0 2px 14px rgba(0,0,0,.07); padding:16px; }
-    .job { font-weight:750; font-size:22px; }
-    .meta { color:#666; font-size:14px; line-height:1.55; margin-top:8px; }
-    .days { margin-top:14px; border-top:1px solid #eee; padding-top:10px; display:none; }
-    .day { padding:10px 0; border-bottom:1px solid #eee; }
-    .day:last-child { border-bottom:0; }
-    .daytop { display:flex; justify-content:space-between; gap:10px; align-items:center; }
-    .date { font-weight:700; }
-    .stats { color:#555; font-size:13px; margin:6px 0 10px; }
-    .actions { display:flex; gap:8px; flex-wrap:wrap; }
-    a.action { text-decoration:none; color:white; background:#111; padding:8px 10px; border-radius:9px; font-size:14px; display:inline-block; }
-    a.action.secondary { color:#111; background:#eee; }
-    .loading, .error { padding:16px; background:white; border-radius:14px; }
-    .error { color:#9b1c1c; }
-    footer { color:#777; text-align:center; padding:30px; font-size:13px; }
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;background:#f5f3ef}body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}main{max-width:1180px;margin:0 auto;padding:24px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px}input,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button:disabled{opacity:.55;cursor:wait}.hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.job{font-weight:750;font-size:22px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:10px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:700}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}footer{color:#777;text-align:center;padding:30px;font-size:13px}
   </style>
 </head>
 <body>
@@ -42,7 +15,7 @@
       <input id="search" placeholder="Baustellennummer suchen, z. B. 260016" />
       <button id="reload">Aktualisieren</button>
     </div>
-    <div class="hint">PDFs werden beim Öffnen automatisch erzeugt, falls sie noch nicht vorhanden sind. Die E-Mail enthält künftig nur noch den Link.</div>
+    <div class="hint">Klick auf „Tage anzeigen“, dann kannst du je Tag das PDF öffnen. Falls es noch nicht existiert, erzeugt der Server es automatisch.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
   <footer>Krista Baustellenprotokoll</footer>
@@ -50,29 +23,24 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const token = qs.get('token') || '';
-const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-const tokenJoin = (url) => url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
 let jobs = [];
 
-async function api(url, opts = {}) {
-  const r = await fetch(tokenJoin(url), opts);
-  if (!r.ok) throw new Error(await r.text());
+function tokenJoin(url){
+  return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
+}
+async function api(url){
+  const r = await fetch(tokenJoin(url));
+  if(!r.ok) throw new Error(await r.text());
   return r.json();
 }
-
-function fmtMB(bytes) {
-  if (!bytes) return '';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-}
-
-function render() {
+function render(){
   const app = document.getElementById('app');
   const q = document.getElementById('search').value.trim().toLowerCase();
   const list = jobs.filter(j => !q || String(j.jobId).toLowerCase().includes(q));
-  if (!list.length) { app.className='loading'; app.textContent='Keine Baustellen gefunden.'; return; }
-  app.className = 'grid';
-  app.innerHTML = list.map(j => `
-    <section class="card" data-job="${j.jobId}">
+  if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;}
+  app.className='grid';
+  app.innerHTML=list.map(j=>`
+    <section class="card">
       <div class="job">#${j.jobId}</div>
       <div class="meta">
         letzter Tag: ${j.latestDay || '-'}<br>
@@ -81,66 +49,46 @@ function render() {
       </div>
       <p><button class="secondary" onclick="toggleDays('${j.jobId}', this)">Tage anzeigen</button></p>
       <div class="days" id="days-${j.jobId}"></div>
-    </section>
-  `).join('');
+    </section>`).join('');
 }
-
-async function loadJobs() {
-  const app = document.getElementById('app');
-  app.className = 'loading';
-  app.textContent = 'Lade Baustellen …';
-  try {
-    const data = await api('/admin/api/jobs');
-    jobs = data.jobs || [];
-    render();
-  } catch (e) {
-    app.className = 'error';
-    app.textContent = 'Fehler beim Laden: ' + e.message;
-  }
+async function loadJobs(){
+  const app=document.getElementById('app');
+  app.className='loading';app.textContent='Lade Baustellen …';
+  try{const data=await api('/admin/api/jobs');jobs=data.jobs||[];render();}
+  catch(e){app.className='error';app.textContent='Fehler beim Laden: '+e.message;}
 }
+async function toggleDays(jobId, btn){
+  const box=document.getElementById('days-'+jobId);
+  if(box.style.display==='block'){box.style.display='none';btn.textContent='Tage anzeigen';return;}
+  btn.disabled=true;btn.textContent='Lade …';box.innerHTML='<div class="hint">Lade Tage …</div>';box.style.display='block';
+  try{
+    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/days`);
+    const days=data.days || [];
+    if(!days.length){box.innerHTML='<div class="hint">Keine Tage gefunden.</div>';return;}
 
-async function toggleDays(jobId, btn) {
-  const box = document.getElementById('days-' + jobId);
-  if (box.style.display === 'block') { box.style.display = 'none'; btn.textContent = 'Tage anzeigen'; return; }
-  btn.disabled = true; btn.textContent = 'Lade …';
-  try {
-    const data = await api(`/admin/api/job/${encodeURIComponent(jobId)}/days`);
-    const days = data.detailed || [];
-    box.innerHTML = days.length ? days.map(d => {
-      const view = tokenJoin(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(d.day)}`);
-      const down = tokenJoin(`/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(d.day)}`);
-      const build = tokenJoin(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(d.day)}/build`);
-      return `
+    const html=[];
+    for(const day of days){
+      let stats={items:0,images:0,audio:0,pdfs:0};
+      try{
+        const detail=await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}`);
+        stats=detail.stats || stats;
+      }catch(e){}
+      const pdfUrl=tokenJoin(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`);
+      html.push(`
         <div class="day">
-          <div class="daytop"><span class="date">${d.day}</span><span>${d.pdfExists ? 'PDF vorhanden' : 'PDF wird bei Bedarf erzeugt'}</span></div>
-          <div class="stats">🖼 ${d.stats.images || 0} Fotos · 📄 ${d.stats.pdfs || 0} PDFs · 🎤 ${d.stats.audio || 0} Audio · ${fmtMB(d.sizeBytes)}</div>
+          <div class="date">${day}</div>
+          <div class="stats">🖼 ${stats.images||0} Fotos · 📄 ${stats.pdfs||0} PDFs · 🎤 ${stats.audio||0} Audio · ${stats.items||0} Einträge</div>
           <div class="actions">
-            <a class="action" target="_blank" href="${view}">PDF öffnen</a>
-            <a class="action secondary" href="${down}">Download</a>
-            <a class="action secondary" href="#" onclick="buildPdf('${build}', this);return false;">Neu erzeugen</a>
+            <a class="action" target="_blank" href="${pdfUrl}">PDF öffnen</a>
+            <a class="action secondary" href="${pdfUrl}" download>Download</a>
           </div>
-        </div>`;
-    }).join('') : '<div class="hint">Keine Tage gefunden.</div>';
-    box.style.display = 'block'; btn.textContent = 'Tage ausblenden';
-  } catch (e) {
-    box.innerHTML = '<div class="error">Fehler: ' + e.message + '</div>';
-    box.style.display = 'block'; btn.textContent = 'Tage ausblenden';
-  } finally { btn.disabled = false; }
+        </div>`);
+    }
+    box.innerHTML=html.join('');
+    btn.textContent='Tage ausblenden';
+  }catch(e){box.innerHTML='<div class="error">Fehler: '+e.message+'</div>';btn.textContent='Tage ausblenden';}
+  finally{btn.disabled=false;}
 }
-
-async function buildPdf(url, el) {
-  const old = el.textContent;
-  el.textContent = 'Erzeuge …';
-  try {
-    await fetch(url, { method:'POST' }).then(async r => { if(!r.ok) throw new Error(await r.text()); return r.json(); });
-    el.textContent = 'Fertig ✓';
-    setTimeout(() => { el.textContent = old; loadJobs(); }, 900);
-  } catch (e) {
-    alert('Fehler beim Erzeugen: ' + e.message);
-    el.textContent = old;
-  }
-}
-
 document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
 loadJobs();
