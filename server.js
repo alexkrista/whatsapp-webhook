@@ -53,6 +53,7 @@ app.use("/public", express.static("public"));
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
@@ -319,6 +320,30 @@ async function sendMailWithAttachment({ to, subject, text, filePath }) {
     console.error("❌ Mail send failed:", e?.message || e);
     return null;
   }
+}
+
+async function sendMailWithLink({ to, subject, text }) {
+  try {
+    if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !MAIL_FROM) {
+      throw new Error("SMTP env missing (SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM)");
+    }
+    const mailer = makeMailer();
+    const info = await mailer.sendMail({
+      from: MAIL_FROM,
+      to,
+      subject,
+      text,
+    });
+    return info;
+  } catch (e) {
+    console.error("❌ Mail send failed:", e?.message || e);
+    return null;
+  }
+}
+
+function pdfUrlFor(jobId, date) {
+  const tokenPart = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
+  return `${PUBLIC_BASE_URL}/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${tokenPart}`;
 }
 
 // ===================== PDF Build (Layout A + Logo + Header/Footer) =====================
@@ -674,8 +699,8 @@ for (const entry of logs) {
 let imgBuf = await fsp.readFile(imgPath);
 
 try {
-  const JPEG_QUALITY = Number(process.env.JPEG_QUALITY || 90);
-  const MAX_IMG_PX = Number(process.env.MAX_IMG_PX || 2400);
+  const JPEG_QUALITY = Number(process.env.JPEG_QUALITY || 75);
+  const MAX_IMG_PX = Number(process.env.MAX_IMG_PX || 1800);
 
   imgBuf = await sharp(imgBuf)
     .rotate()
@@ -746,16 +771,27 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
 
   const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
+  const url = pdfUrlFor(jobId, date);
 
   const subject = `Baustellenprotokoll #${jobId} – ${date}`;
-  const body = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
+  const body =
+`Baustellenprotokoll #${jobId} wurde erstellt.
 
-  const sent = await sendMailWithAttachment({ to, subject, text: body, filePath: outPdf });
-  return { outPdf, built, mailed: !!sent, messageId: sent?.messageId || null };
+Datum: ${date}
+Seiten: ${built.pages}
+Größe: ${(built.bytes / 1024 / 1024).toFixed(1)} MB
+
+PDF öffnen / herunterladen:
+${url}
+`;
+
+  const sent = await sendMailWithLink({ to, subject, text: body });
+  return { outPdf, built, pdfUrl: url, mailed: !!sent, messageId: sent?.messageId || null };
 }
 
 // ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
+app.get("/admin", (req, res) => res.redirect("/admin/ui" + (req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "")));
 
 app.get("/health", (req, res) =>
   res.json({
@@ -1191,8 +1227,6 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
   }
 });
 
-// ===================== 404 handler (LAST) =====================
-app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 // Admin: list jobs
 app.get("/api/admin/list-jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -1251,9 +1285,13 @@ app.get("/api/admin/list-jobs", async (req, res) => {
   }
 });
 
+// ===================== 404 handler (LAST) =====================
+app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
+
 // ===================== Start =====================
 console.log("Starting…");
 console.log("DATA_DIR=", DATA_DIR);
+console.log("PUBLIC_BASE_URL=", PUBLIC_BASE_URL);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
 console.log("OPENAI_API_KEY set:", !!OPENAI_API_KEY);
