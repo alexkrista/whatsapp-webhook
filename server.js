@@ -7,13 +7,15 @@
 // ✅ Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
 //    + Fallback liest auch alte Struktur: /var/data/<job>/<YYYY-MM-DD>/...
 // ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
-// ✅ Admin: /admin/run-daily (Cron), /admin/test-mail, /admin/check-logo, /admin/ui + API + PDF View
+// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download
+// ✅ Mailversand NEU: PDF bleibt am Server, Mail enthält nur Download-Link (kein großer Anhang)
 //
 // Render ENV (wichtig):
 // DATA_DIR=/var/data
 // VERIFY_TOKEN=...
 // WHATSAPP_TOKEN=...
 // ADMIN_TOKEN=...
+// PUBLIC_BASE_URL=https://protokoll.krista.at
 //
 // SMTP (SendGrid):
 // SMTP_HOST=smtp.sendgrid.net
@@ -53,7 +55,6 @@ app.use("/public", express.static("public"));
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
-const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
@@ -66,6 +67,7 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_TRANSCRIBE_MODEL =
@@ -158,6 +160,18 @@ function requireAdmin(req, res) {
     return false;
   }
   return true;
+}
+
+function fileSizeMB(bytes) {
+  return `${(Number(bytes || 0) / 1024 / 1024).toFixed(1)} MB`;
+}
+function pdfUrlFor(jobId, date) {
+  const token = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
+  return `${PUBLIC_BASE_URL}/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${token}`;
+}
+function pdfDownloadUrlFor(jobId, date) {
+  const token = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
+  return `${PUBLIC_BASE_URL}/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${token}`;
 }
 
 // ===================== Folder structure (NEW + fallback) =====================
@@ -322,28 +336,18 @@ async function sendMailWithAttachment({ to, subject, text, filePath }) {
   }
 }
 
-async function sendMailWithLink({ to, subject, text }) {
+async function sendMailWithLink({ to, subject, text, html }) {
   try {
     if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !MAIL_FROM) {
       throw new Error("SMTP env missing (SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM)");
     }
     const mailer = makeMailer();
-    const info = await mailer.sendMail({
-      from: MAIL_FROM,
-      to,
-      subject,
-      text,
-    });
+    const info = await mailer.sendMail({ from: MAIL_FROM, to, subject, text, html });
     return info;
   } catch (e) {
     console.error("❌ Mail send failed:", e?.message || e);
     return null;
   }
-}
-
-function pdfUrlFor(jobId, date) {
-  const tokenPart = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
-  return `${PUBLIC_BASE_URL}/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${tokenPart}`;
 }
 
 // ===================== PDF Build (Layout A + Logo + Header/Footer) =====================
@@ -771,27 +775,36 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
 
   const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
-  const url = pdfUrlFor(jobId, date);
 
+  const viewUrl = pdfUrlFor(jobId, date);
+  const downloadUrl = pdfDownloadUrlFor(jobId, date);
   const subject = `Baustellenprotokoll #${jobId} – ${date}`;
   const body =
 `Baustellenprotokoll #${jobId} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
-Größe: ${(built.bytes / 1024 / 1024).toFixed(1)} MB
+Größe: ${fileSizeMB(built.bytes)}
 
-PDF öffnen / herunterladen:
-${url}
+PDF öffnen:
+${viewUrl}
+
+PDF herunterladen:
+${downloadUrl}
 `;
+  const html = `
+    <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+    <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
+    <p><a href="${viewUrl}">PDF öffnen</a></p>
+    <p><a href="${downloadUrl}">PDF herunterladen</a></p>
+  `;
 
-  const sent = await sendMailWithLink({ to, subject, text: body });
-  return { outPdf, built, pdfUrl: url, mailed: !!sent, messageId: sent?.messageId || null };
+  const sent = await sendMailWithLink({ to, subject, text: body, html });
+  return { outPdf, built, pdfUrl: viewUrl, downloadUrl, mailed: !!sent, messageId: sent?.messageId || null };
 }
 
 // ===================== Base Routes =====================
-app.get("/", (req, res) => res.type("text").send("webhook läuft ✅"));
-app.get("/admin", (req, res) => res.redirect("/admin/ui" + (req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "")));
+app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
 
 app.get("/health", (req, res) =>
   res.json({
@@ -801,6 +814,7 @@ app.get("/health", (req, res) =>
     transcribe_model: OPENAI_TRANSCRIBE_MODEL,
     text_model: OPENAI_TEXT_MODEL,
     logo_path: LOGO_PATH,
+    public_base_url: PUBLIC_BASE_URL,
   })
 );
 
@@ -1057,10 +1071,30 @@ app.get("/admin/run-daily", async (req, res) => {
       const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
       const subject = `Baustellenprotokoll #${jobId} – ${date}`;
-      const text = `Im Anhang: Baustellenprotokoll #${jobId} (${date}).\nSeiten: ${built.pages}\n`;
+      const viewUrl = pdfUrlFor(jobId, date);
+      const downloadUrl = pdfDownloadUrlFor(jobId, date);
+      const text =
+`Baustellenprotokoll #${jobId} wurde erstellt.
 
-      const sent = await sendMailWithAttachment({ to, subject, text, filePath: outPdf });
-      results.push({ jobId, date, pages: built.pages, mailed: !!sent });
+Datum: ${date}
+Seiten: ${built.pages}
+Größe: ${fileSizeMB(built.bytes)}
+
+PDF öffnen:
+${viewUrl}
+
+PDF herunterladen:
+${downloadUrl}
+`;
+      const html = `
+        <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+        <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
+        <p><a href="${viewUrl}">PDF öffnen</a></p>
+        <p><a href="${downloadUrl}">PDF herunterladen</a></p>
+      `;
+
+      const sent = await sendMailWithLink({ to, subject, text, html });
+      results.push({ jobId, date, pages: built.pages, sizeBytes: built.bytes, pdfUrl: viewUrl, mailed: !!sent });
     }
 
     res.json({ ok: true, date, to, count: results.length, results });
@@ -1070,6 +1104,12 @@ app.get("/admin/run-daily", async (req, res) => {
 });
 
 // ===================== Admin UI + API + PDF =====================
+
+// Admin UI
+app.get("/admin", (req, res) => {
+  const token = req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "";
+  res.redirect(`/admin/ui${token}`);
+});
 
 // Admin UI (serves /public/admin.html)
 app.get("/admin/ui", (req, res) => {
@@ -1181,7 +1221,16 @@ app.get("/admin/api/job/:jobId/days", async (req, res) => {
   try {
     const jobId = String(req.params.jobId);
     const days = await listDaysForJob(jobId);
-    res.json({ ok: true, jobId, days });
+    const detailed = [];
+    for (const day of days) {
+      const dayDir = resolveExistingDayDir(jobId, day);
+      const stats = fs.existsSync(dayDir) ? await readLogStats(dayDir) : { items: 0, images: 0, audio: 0, pdfs: 0 };
+      const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
+      const pdfExists = fs.existsSync(pdfPath);
+      const sizeBytes = pdfExists ? (await fsp.stat(pdfPath).catch(() => ({ size: 0 }))).size : 0;
+      detailed.push({ day, stats, pdfExists, sizeBytes, viewUrl: `/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`, downloadUrl: `/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}` });
+    }
+    res.json({ ok: true, jobId, days, detailed });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -1227,63 +1276,46 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
   }
 });
 
-// Admin: list jobs
-app.get("/api/admin/list-jobs", async (req, res) => {
+// Admin: download PDF with filename (build if missing)
+app.get("/admin/download/:jobId/:day", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   try {
-    const jobs = [];
-    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).send("Day not found");
 
-    for (const jobId of jobIds) {
-      if (jobId.startsWith(".")) continue;
+    const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
+    if (!fs.existsSync(pdfPath)) await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
 
-      const jobDir = path.join(DATA_DIR, jobId);
-      const stat = await fsp.stat(jobDir).catch(() => null);
-      if (!stat || !stat.isDirectory()) continue;
-
-      const days = await fsp.readdir(jobDir).catch(() => []);
-      const validDays = [];
-
-      for (const d of days) {
-        const dayDir = path.join(jobDir, d);
-        const s = await fsp.stat(dayDir).catch(() => null);
-        if (s && s.isDirectory()) validDays.push(d);
-      }
-
-      validDays.sort().reverse();
-
-      let items = 0, images = 0, audio = 0;
-
-      if (validDays.length > 0) {
-        const latestDir = path.join(jobDir, validDays[0]);
-        const files = await fsp.readdir(latestDir).catch(() => []);
-
-        for (const f of files) {
-          if (f.endsWith(".jsonl")) items++;
-          if (f.match(/\.(jpg|jpeg|png)$/i)) images++;
-          if (f.match(/\.(mp3|ogg|m4a|wav)$/i)) audio++;
-        }
-      }
-
-      jobs.push({
-        jobId,
-        daysCount: validDays.length,
-        latestDay: validDays[0] || null,
-        itemsLastDay: items,
-        imagesLastDay: images,
-        audioLastDay: audio,
-      });
-    }
-
-    jobs.sort((a, b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
-
-    res.json({ ok: true, jobs });
-
+    res.download(pdfPath, path.basename(pdfPath));
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e.message || e) });
+    res.status(500).send(String(e?.message || e));
   }
 });
+
+// Admin API: generate PDF now
+app.post("/admin/api/job/:jobId/day/:day/build", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+
+    const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
+    const built = await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
+    res.json({ ok: true, jobId, day, pages: built.pages, sizeBytes: built.bytes, viewUrl: `/admin/pdf/${jobId}/${day}`, downloadUrl: `/admin/download/${jobId}/${day}` });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Legacy compatibility
+app.get("/api/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
+app.get("/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
 
 // ===================== 404 handler (LAST) =====================
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
@@ -1291,9 +1323,9 @@ app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}
 // ===================== Start =====================
 console.log("Starting…");
 console.log("DATA_DIR=", DATA_DIR);
-console.log("PUBLIC_BASE_URL=", PUBLIC_BASE_URL);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
+console.log("PUBLIC_BASE_URL=", PUBLIC_BASE_URL);
 console.log("OPENAI_API_KEY set:", !!OPENAI_API_KEY);
 console.log("TRANSCRIBE_MODEL:", OPENAI_TRANSCRIBE_MODEL);
 console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
