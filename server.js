@@ -413,6 +413,8 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
 
   const files = await listFiles(dayDir);
   const imageFiles = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f));
+  const jobMeta = await readJobMeta(jobId);
+  const jobDisplayName = jobMeta.name || "";
 
   function drawHeaderFooter(page, pageNo, totalPages) {
     page.drawText(`#${jobId}  |  ${date}`, {
@@ -450,9 +452,10 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
     page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
     page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
-    page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 180, size: 16, font });
-    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 210, size: 16, font });
-    page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
+    if (jobDisplayName) page.drawText(jobDisplayName, { x: 60, y: PAGE_H - 170, size: 20, font: fontBold, maxWidth: PAGE_W - 420 });
+    page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 205, size: 16, font });
+    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 235, size: 16, font });
+    page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 265, size: 16, font });
 
     page.drawText("Layout: Text/Transkripte seitenfüllend, danach Fotos (6 pro Seite)", {
       x: 60,
@@ -1117,6 +1120,79 @@ app.get("/admin/ui", (req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "admin.html"));
 });
 
+
+function isSafeJobId(jobId) {
+  return /^[A-Za-z0-9_-]+$/.test(String(jobId || ""));
+}
+function isSafeDay(day) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(day || ""));
+}
+function metaPathForJob(jobId) {
+  return path.join(DATA_DIR, String(jobId), ".meta.json");
+}
+async function readJobMeta(jobId) {
+  try {
+    const p = metaPathForJob(jobId);
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "" };
+    const meta = JSON.parse(await fsp.readFile(p, "utf8"));
+    return {
+      name: String(meta.name || "").trim(),
+      favorite: !!meta.favorite,
+      notes: String(meta.notes || "").trim(),
+      updatedAt: meta.updatedAt || null,
+    };
+  } catch {
+    return { name: "", favorite: false, notes: "" };
+  }
+}
+async function writeJobMeta(jobId, patch) {
+  if (!isSafeJobId(jobId)) throw new Error("Invalid jobId");
+  const existing = await readJobMeta(jobId);
+  const next = {
+    ...existing,
+    ...patch,
+    name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
+    notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
+    favorite: !!(patch.favorite ?? existing.favorite),
+    updatedAt: new Date().toISOString(),
+  };
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  await fsp.writeFile(metaPathForJob(jobId), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+function sanitizeFileNamePart(s) {
+  return String(s || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 _.-]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Baustellenprotokoll";
+}
+async function dirSizeBytes(dir) {
+  let total = 0;
+  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const full = path.join(dir, ent.name);
+    try {
+      if (ent.isDirectory()) total += await dirSizeBytes(full);
+      else if (ent.isFile()) total += (await fsp.stat(full)).size;
+    } catch {}
+  }
+  return total;
+}
+async function removeEmptyParentsAfterDay(jobId, day) {
+  const [Y, M] = String(day).split("-");
+  const monthDir = path.join(DATA_DIR, String(jobId), Y, M);
+  const yearDir = path.join(DATA_DIR, String(jobId), Y);
+  for (const dir of [monthDir, yearDir]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      if (entries.length === 0) await fsp.rmdir(dir);
+    } catch {}
+  }
+}
+
 async function listDaysForJob(jobId) {
   const base = path.join(DATA_DIR, String(jobId));
   if (!fs.existsSync(base)) return [];
@@ -1182,7 +1258,7 @@ app.get("/admin/api/jobs", async (req, res) => {
   try {
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
-      .filter((j) => j && j !== "unknown" && j !== "_unassigned")
+      .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
       .filter((j) => fs.existsSync(path.join(DATA_DIR, j)));
 
     const jobs = [];
@@ -1190,14 +1266,29 @@ app.get("/admin/api/jobs", async (req, res) => {
       const days = await listDaysForJob(jobId);
       const latestDay = days[0] || null;
       let stats = { items: 0, images: 0, audio: 0, pdfs: 0 };
+      let totalStats = { items: 0, images: 0, audio: 0, pdfs: 0 };
 
-      if (latestDay) {
-        const dayDir = resolveExistingDayDir(jobId, latestDay);
-        if (fs.existsSync(dayDir)) stats = await readLogStats(dayDir);
+      for (const day of days) {
+        const dayDir = resolveExistingDayDir(jobId, day);
+        if (!fs.existsSync(dayDir)) continue;
+        const s = await readLogStats(dayDir);
+        totalStats.items += s.items;
+        totalStats.images += s.images;
+        totalStats.audio += s.audio;
+        totalStats.pdfs += s.pdfs;
+        if (day === latestDay) stats = s;
       }
+
+      const meta = await readJobMeta(jobId);
+      const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
 
       jobs.push({
         jobId,
+        name: meta.name || "",
+        notes: meta.notes || "",
+        favorite: !!meta.favorite,
+        sizeBytes,
+        totalStats,
         daysCount: days.length,
         latestDay,
         itemsLastDay: stats.items,
@@ -1207,8 +1298,73 @@ app.get("/admin/api/jobs", async (req, res) => {
       });
     }
 
-    jobs.sort((a, b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
+    jobs.sort((a, b) => {
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+      return (b.latestDay || "").localeCompare(a.latestDay || "");
+    });
     res.json({ ok: true, jobs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: read/update metadata
+app.get("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    res.json({ ok: true, jobId, meta: await readJobMeta(jobId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.put("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const meta = await writeJobMeta(jobId, {
+      name: req.body?.name,
+      notes: req.body?.notes,
+      favorite: req.body?.favorite,
+    });
+    res.json({ ok: true, jobId, meta });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: delete a single day
+app.delete("/admin/api/job/:jobId/day/:day", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+    const sizeBytes = await dirSizeBytes(dayDir);
+    await fsp.rm(dayDir, { recursive: true, force: true });
+    await removeEmptyParentsAfterDay(jobId, day);
+    res.json({ ok: true, jobId, day, deletedBytes: sizeBytes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: delete full job
+app.delete("/admin/api/job/:jobId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const jobDir = path.join(DATA_DIR, jobId);
+    if (!fs.existsSync(jobDir)) return res.status(404).json({ ok: false, error: "Job not found" });
+    const sizeBytes = await dirSizeBytes(jobDir);
+    await fsp.rm(jobDir, { recursive: true, force: true });
+    res.json({ ok: true, jobId, deletedBytes: sizeBytes });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -1289,7 +1445,9 @@ app.get("/admin/download/:jobId/:day", async (req, res) => {
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
     if (!fs.existsSync(pdfPath)) await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
 
-    res.download(pdfPath, path.basename(pdfPath));
+    const meta = await readJobMeta(jobId);
+    const base = meta.name ? sanitizeFileNamePart(meta.name) : `Baustellenprotokoll_${jobId}`;
+    res.download(pdfPath, `${base}_${day}.pdf`);
   } catch (e) {
     res.status(500).send(String(e?.message || e));
   }
