@@ -7,7 +7,7 @@
 // ✅ Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
 //    + Fallback liest auch alte Struktur: /var/data/<job>/<YYYY-MM-DD>/...
 // ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
-// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download
+// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download + Löschen/Umbenennen/Zusammenführen
 // ✅ Mailversand NEU: PDF bleibt am Server, Mail enthält nur Download-Link (kein großer Anhang)
 //
 // Render ENV (wichtig):
@@ -1220,6 +1220,70 @@ async function deleteGeneratedPdfsForJob(jobId) {
   return deleted;
 }
 
+
+async function mergeDirectoryContents(srcDir, destDir) {
+  await ensureDir(destDir);
+  const entries = await fsp.readdir(srcDir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const src = path.join(srcDir, ent.name);
+    const dest = path.join(destDir, ent.name);
+
+    if (ent.isDirectory()) {
+      await mergeDirectoryContents(src, dest);
+      await fsp.rm(src, { recursive: true, force: true }).catch(() => {});
+      continue;
+    }
+
+    if (!ent.isFile()) continue;
+
+    if (!fs.existsSync(dest)) {
+      await fsp.rename(src, dest).catch(async () => {
+        await fsp.copyFile(src, dest);
+        await fsp.unlink(src).catch(() => {});
+      });
+      continue;
+    }
+
+    // log.jsonl wird zusammengeführt; dadurch bleiben alle Einträge chronologisch auswertbar.
+    if (ent.name === "log.jsonl") {
+      const add = await fsp.readFile(src, "utf8").catch(() => "");
+      if (add) await fsp.appendFile(dest, add.endsWith("\n") ? add : add + "\n", "utf8").catch(() => {});
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // .meta.json: Ziel-Meta bleibt führend. Falls Ziel keinen Namen hat, übernehmen wir den Quell-Namen.
+    if (ent.name === ".meta.json") {
+      try {
+        const targetMeta = JSON.parse(await fsp.readFile(dest, "utf8"));
+        const sourceMeta = JSON.parse(await fsp.readFile(src, "utf8"));
+        if (!String(targetMeta.name || "").trim() && String(sourceMeta.name || "").trim()) {
+          targetMeta.name = String(sourceMeta.name || "").trim();
+          targetMeta.updatedAt = new Date().toISOString();
+          await fsp.writeFile(dest, JSON.stringify(targetMeta, null, 2), "utf8");
+        }
+      } catch {}
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // Bei Namenskollision Originale nicht überschreiben.
+    const ext = path.extname(ent.name);
+    const base = path.basename(ent.name, ext);
+    let candidate;
+    let n = 1;
+    do {
+      candidate = path.join(destDir, `${base}_merged_${n}${ext}`);
+      n++;
+    } while (fs.existsSync(candidate));
+
+    await fsp.rename(src, candidate).catch(async () => {
+      await fsp.copyFile(src, candidate);
+      await fsp.unlink(src).catch(() => {});
+    });
+  }
+}
+
 async function protocolDownloadName(jobId, day) {
   const meta = await readJobMeta(jobId);
   const name = meta.name ? sanitizeFileNamePart(meta.name) : "Baustellenprotokoll";
@@ -1366,6 +1430,54 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+
+// Admin API: Baustellennummer ändern (Ordner umbenennen)
+app.post("/admin/api/job/:jobId/rename", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const oldJobId = String(req.params.jobId);
+    const newJobId = String(req.body?.newJobId || "").trim();
+    if (!isSafeJobId(oldJobId) || !isSafeJobId(newJobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (oldJobId === newJobId) return res.json({ ok: true, oldJobId, newJobId, unchanged: true });
+
+    const oldDir = path.join(DATA_DIR, oldJobId);
+    const newDir = path.join(DATA_DIR, newJobId);
+    if (!fs.existsSync(oldDir)) return res.status(404).json({ ok: false, error: "Source job not found" });
+    if (fs.existsSync(newDir)) return res.status(409).json({ ok: false, error: "Diese Baustellennummer existiert bereits. Bitte Zusammenführen verwenden." });
+
+    await fsp.rename(oldDir, newDir);
+    const deletedGeneratedPdfs = await deleteGeneratedPdfsForJob(newJobId);
+    res.json({ ok: true, oldJobId, newJobId, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: Baustellen zusammenführen (Quelle in Ziel verschieben)
+app.post("/admin/api/job/:jobId/merge", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const sourceJobId = String(req.params.jobId);
+    const targetJobId = String(req.body?.targetJobId || "").trim();
+    if (!isSafeJobId(sourceJobId) || !isSafeJobId(targetJobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (sourceJobId === targetJobId) return res.status(400).json({ ok: false, error: "Quelle und Ziel sind gleich" });
+
+    const sourceDir = path.join(DATA_DIR, sourceJobId);
+    const targetDir = path.join(DATA_DIR, targetJobId);
+    if (!fs.existsSync(sourceDir)) return res.status(404).json({ ok: false, error: "Source job not found" });
+    await ensureDir(targetDir);
+
+    const sourceSizeBytes = await dirSizeBytes(sourceDir);
+    await mergeDirectoryContents(sourceDir, targetDir);
+    await fsp.rm(sourceDir, { recursive: true, force: true }).catch(() => {});
+    const deletedGeneratedPdfs = await deleteGeneratedPdfsForJob(targetJobId);
+
+    res.json({ ok: true, sourceJobId, targetJobId, movedBytes: sourceSizeBytes, deletedGeneratedPdfs });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
