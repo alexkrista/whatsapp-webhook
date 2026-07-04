@@ -14,7 +14,7 @@
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenakte</h1><div class="sub">Version 2.1 – Namen, Suche, Favoriten und Löschen</div></header>
+  <header><h1>Krista Baustellenakte</h1><div class="sub">Version 2.2 – Nummer ändern, Zusammenführen, Suche, Favoriten und Löschen</div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
@@ -64,15 +64,25 @@ function render(){
       </div>
       <p class="actions">
         <button class="secondary" onclick="toggleDays('${esc(j.jobId)}', this)">Tage anzeigen</button>
-        <button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Name ändern</button>
+        <button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button>
         <button class="danger" onclick="deleteJob('${esc(j.jobId)}')">Baustelle löschen</button>
       </p>
       <div class="edit" id="edit-${esc(j.jobId)}">
+        <label>Baustellennummer ändern</label>
+        <input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}" placeholder="z. B. 26072" />
+        <div class="small">Ändert den kompletten Baustellenordner. Wenn die Zielnummer schon existiert, bitte „Zusammenführen“ verwenden.</div>
+        <p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p>
+
         <label>Baustellenname</label>
         <input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}" placeholder="z. B. Neubau Müller Dornbirn" />
         <label>Notiz optional</label>
         <textarea id="notes-${esc(j.jobId)}" placeholder="interne Notiz">${esc(j.notes||'')}</textarea>
-        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
+        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Name/Notiz speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
+
+        <label>Mit anderer Baustelle zusammenführen</label>
+        <input id="merge-${esc(j.jobId)}" placeholder="Zielnummer, z. B. 26072" />
+        <div class="small">Verschiebt alle Daten dieser Baustelle in die Zielnummer. Die aktuelle Baustelle verschwindet danach.</div>
+        <p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p>
       </div>
       <div class="days" id="days-${esc(j.jobId)}"></div>
     </section>`).join('');
@@ -89,6 +99,30 @@ async function saveMeta(jobId){
   const notes=document.getElementById('notes-'+jobId).value;
   await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,notes,favorite:j?.favorite||false})});
   await loadJobs();
+}
+
+async function renameJob(jobId){
+  const newJobId = (document.getElementById('newid-'+jobId).value || '').trim();
+  if(!newJobId || newJobId === String(jobId)) { alert('Keine neue Baustellennummer eingegeben.'); return; }
+  if(!/^[A-Za-z0-9_-]+$/.test(newJobId)) { alert('Bitte nur Zahlen, Buchstaben, _ oder - verwenden.'); return; }
+  if(!confirm(`Baustellennummer ändern?\n\n#${jobId} → #${newJobId}\n\nAlle Daten werden verschoben. Bereits erzeugte Protokoll-PDFs werden neu erstellt.`)) return;
+  try{
+    const r = await api(`/admin/api/job/${encodeURIComponent(jobId)}/rename`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({newJobId})});
+    alert(`Baustelle wurde umbenannt: #${r.oldJobId} → #${r.newJobId}`);
+    await loadJobs();
+  }catch(e){ alert('Umbenennen fehlgeschlagen: '+e.message); }
+}
+async function mergeJob(jobId){
+  const targetJobId = (document.getElementById('merge-'+jobId).value || '').trim();
+  if(!targetJobId || targetJobId === String(jobId)) { alert('Bitte eine andere Zielnummer eingeben.'); return; }
+  if(!/^[A-Za-z0-9_-]+$/.test(targetJobId)) { alert('Bitte nur Zahlen, Buchstaben, _ oder - verwenden.'); return; }
+  const txt = prompt(`Baustelle #${jobId} mit #${targetJobId} zusammenführen?\n\nAlle Fotos, Audios, PDFs und Einträge werden in #${targetJobId} verschoben.\n#${jobId} wird danach gelöscht.\n\nZur Sicherheit bitte ZUSAMMEN eingeben:`);
+  if(txt !== 'ZUSAMMEN') { if(txt !== null) alert('Nicht zusammengeführt.'); return; }
+  try{
+    const r = await api(`/admin/api/job/${encodeURIComponent(jobId)}/merge`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targetJobId})});
+    alert(`Zusammengeführt: #${r.sourceJobId} → #${r.targetJobId}`);
+    await loadJobs();
+  }catch(e){ alert('Zusammenführen fehlgeschlagen: '+e.message); }
 }
 async function toggleFavorite(jobId){
   const j=jobs.find(x=>String(x.jobId)===String(jobId)); if(!j) return;
