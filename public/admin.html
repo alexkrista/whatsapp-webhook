@@ -3,282 +3,147 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Baustellenprotokoll – Admin</title>
+  <title>Baustellenprotokolle – Admin</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-    h1 { margin: 0 0 16px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
-    input, button { padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
-    button { cursor: pointer; background: #111; color: #fff; border-color:#111; }
-    button.secondary { background:#fff; color:#111; border-color:#ccc; }
-    button.danger { background:#b00020; border-color:#b00020; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; text-align:left; }
-    .muted { color:#666; font-size: 13px; }
-    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#f1f1f1; font-size: 12px; }
-    .ok { color: #0a7a0a; }
-    .err { color: #b00020; white-space: pre-wrap; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#1b1b1b; background:#f5f3ef; }
+    body { margin:0; }
+    header { background:#111; color:white; padding:22px 28px; }
+    h1 { margin:0; font-size:26px; }
+    main { max-width:1180px; margin:0 auto; padding:24px; }
+    .bar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:18px; }
+    input, button { font:inherit; padding:10px 12px; border-radius:10px; border:1px solid #ccc; }
+    input { min-width:280px; flex:1; }
+    button { background:#111; color:white; cursor:pointer; border-color:#111; }
+    button.secondary { background:white; color:#111; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .hint { color:#666; font-size:14px; margin:8px 0 18px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap:14px; }
+    .card { background:white; border-radius:16px; box-shadow:0 2px 14px rgba(0,0,0,.07); padding:16px; }
+    .job { font-weight:750; font-size:22px; }
+    .meta { color:#666; font-size:14px; line-height:1.55; margin-top:8px; }
+    .days { margin-top:14px; border-top:1px solid #eee; padding-top:10px; display:none; }
+    .day { padding:10px 0; border-bottom:1px solid #eee; }
+    .day:last-child { border-bottom:0; }
+    .daytop { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .date { font-weight:700; }
+    .stats { color:#555; font-size:13px; margin:6px 0 10px; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; }
-    .right { margin-left:auto; }
+    a.action { text-decoration:none; color:white; background:#111; padding:8px 10px; border-radius:9px; font-size:14px; display:inline-block; }
+    a.action.secondary { color:#111; background:#eee; }
+    .loading, .error { padding:16px; background:white; border-radius:14px; }
+    .error { color:#9b1c1c; }
+    footer { color:#777; text-align:center; padding:30px; font-size:13px; }
   </style>
 </head>
 <body>
-  <h1>Admin</h1>
-  <div class="muted">Projektübersicht + Löschen (Job/Tag). Token wird nur im Browser gespeichert.</div>
-
-  <div class="card">
-    <div class="row">
-      <label class="muted">ADMIN Token:</label>
-      <input id="token" type="password" placeholder="ADMIN_TOKEN" style="min-width:280px" />
-      <button class="secondary" id="saveToken">Speichern</button>
-      <button id="loadJobs">Liste laden</button>
-      <span class="right muted" id="baseUrl"></span>
+  <header><h1>Baustellenprotokolle</h1></header>
+  <main>
+    <div class="bar">
+      <input id="search" placeholder="Baustellennummer suchen, z. B. 260016" />
+      <button id="reload">Aktualisieren</button>
     </div>
-    <div class="muted" style="margin-top:8px">
-      Endpoints: <span class="mono">/admin/list-jobs</span>, <span class="mono">/admin/delete-job</span>, <span class="mono">/admin/delete-day</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin:0 0 10px;">Schnell-Löschen</h3>
-    <div class="row">
-      <input id="jobInput" placeholder="job (z.B. 260016)" />
-      <input id="dateInput" placeholder="date (YYYY-MM-DD)" />
-      <button class="danger" id="deleteDayBtn">Tag löschen</button>
-      <button class="danger" id="deleteJobBtn">Job löschen</button>
-    </div>
-    <div class="muted" style="margin-top:8px">
-      ⚠️ Löschen ist endgültig (Ordner wird entfernt).
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="row">
-      <h3 style="margin:0;">Jobs</h3>
-      <span class="right muted" id="count"></span>
-    </div>
-    <div id="jobsWrap" class="muted">Noch keine Daten geladen.</div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin:0 0 10px;">Status</h3>
-    <div id="status" class="mono"></div>
-  </div>
+    <div class="hint">PDFs werden beim Öffnen automatisch erzeugt, falls sie noch nicht vorhanden sind. Die E-Mail enthält künftig nur noch den Link.</div>
+    <div id="app" class="loading">Lade Baustellen …</div>
+  </main>
+  <footer>Krista Baustellenprotokoll</footer>
 
 <script>
-  const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const token = qs.get('token') || '';
+const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+const tokenJoin = (url) => url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
+let jobs = [];
 
-  const statusEl = $("status");
-  function logStatus(msg, isErr=false) {
-    const p = document.createElement("div");
-    p.className = isErr ? "err" : "ok";
-    p.textContent = msg;
-    statusEl.prepend(p);
+async function api(url, opts = {}) {
+  const r = await fetch(tokenJoin(url), opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function fmtMB(bytes) {
+  if (!bytes) return '';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function render() {
+  const app = document.getElementById('app');
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const list = jobs.filter(j => !q || String(j.jobId).toLowerCase().includes(q));
+  if (!list.length) { app.className='loading'; app.textContent='Keine Baustellen gefunden.'; return; }
+  app.className = 'grid';
+  app.innerHTML = list.map(j => `
+    <section class="card" data-job="${j.jobId}">
+      <div class="job">#${j.jobId}</div>
+      <div class="meta">
+        letzter Tag: ${j.latestDay || '-'}<br>
+        Tage: ${j.daysCount || 0}<br>
+        letzter Tag: 🖼 ${j.imagesLastDay || 0} &nbsp; 📄 ${j.pdfsLastDay || 0} &nbsp; 🎤 ${j.audioLastDay || 0}
+      </div>
+      <p><button class="secondary" onclick="toggleDays('${j.jobId}', this)">Tage anzeigen</button></p>
+      <div class="days" id="days-${j.jobId}"></div>
+    </section>
+  `).join('');
+}
+
+async function loadJobs() {
+  const app = document.getElementById('app');
+  app.className = 'loading';
+  app.textContent = 'Lade Baustellen …';
+  try {
+    const data = await api('/admin/api/jobs');
+    jobs = data.jobs || [];
+    render();
+  } catch (e) {
+    app.className = 'error';
+    app.textContent = 'Fehler beim Laden: ' + e.message;
   }
+}
 
-  function getToken() {
-    return $("token").value.trim();
-  }
-
-  function setBaseUrl() {
-    $("baseUrl").textContent = location.origin;
-  }
-
-  function saveToken() {
-    localStorage.setItem("ADMIN_TOKEN", $("token").value);
-    logStatus("✅ Token gespeichert");
-  }
-
-  function loadToken() {
-    const t = localStorage.getItem("ADMIN_TOKEN") || "";
-    $("token").value = t;
-  }
-
-  async function apiGet(path, params={}) {
-    const url = new URL(location.origin + path);
-    Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-    const res = await fetch(url.toString(), { method: "GET" });
-    const text = await res.text();
-    let json;
-    try { json = JSON.parse(text); } catch { json = null; }
-    if (!res.ok) throw new Error(json?.error || text || ("HTTP " + res.status));
-    return json ?? text;
-  }
-
-  async function apiDelete(path, params={}) {
-    const url = new URL(location.origin + path);
-    Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-    const res = await fetch(url.toString(), { method: "DELETE" });
-    const text = await res.text();
-    let json;
-    try { json = JSON.parse(text); } catch { json = null; }
-    if (!res.ok) throw new Error(json?.error || text || ("HTTP " + res.status));
-    return json ?? text;
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  function renderJobs(jobs) {
-    if (!Array.isArray(jobs) || jobs.length === 0) {
-      $("jobsWrap").innerHTML = "<div class='muted'>Keine Jobs gefunden.</div>";
-      $("count").textContent = "";
-      return;
-    }
-
-    $("count").textContent = jobs.length + " Jobs";
-
-    const rows = jobs.map(j => {
-      const jobId = escapeHtml(j.jobId);
-      const latestDay = escapeHtml(j.latestDay || "");
-      const items = j.itemsLastDay ?? 0;
-      const imgs = j.imagesLastDay ?? 0;
-      const aud  = j.audioLastDay ?? 0;
-
+async function toggleDays(jobId, btn) {
+  const box = document.getElementById('days-' + jobId);
+  if (box.style.display === 'block') { box.style.display = 'none'; btn.textContent = 'Tage anzeigen'; return; }
+  btn.disabled = true; btn.textContent = 'Lade …';
+  try {
+    const data = await api(`/admin/api/job/${encodeURIComponent(jobId)}/days`);
+    const days = data.detailed || [];
+    box.innerHTML = days.length ? days.map(d => {
+      const view = tokenJoin(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(d.day)}`);
+      const down = tokenJoin(`/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(d.day)}`);
+      const build = tokenJoin(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(d.day)}/build`);
       return `
-        <tr>
-          <td><b>#${jobId}</b><div class="muted">latest: ${latestDay || "-"}</div></td>
-          <td>
-            <span class="pill">items ${items}</span>
-            <span class="pill">img ${imgs}</span>
-            <span class="pill">audio ${aud}</span>
-          </td>
-          <td class="actions">
-            <button class="secondary" data-fill-job="${jobId}" data-fill-date="${latestDay}">in Felder</button>
-            <button class="danger" data-del-day="${jobId}" data-day="${latestDay}">Tag löschen</button>
-            <button class="danger" data-del-job="${jobId}">Job löschen</button>
-          </td>
-        </tr>
-      `;
-    }).join("");
+        <div class="day">
+          <div class="daytop"><span class="date">${d.day}</span><span>${d.pdfExists ? 'PDF vorhanden' : 'PDF wird bei Bedarf erzeugt'}</span></div>
+          <div class="stats">🖼 ${d.stats.images || 0} Fotos · 📄 ${d.stats.pdfs || 0} PDFs · 🎤 ${d.stats.audio || 0} Audio · ${fmtMB(d.sizeBytes)}</div>
+          <div class="actions">
+            <a class="action" target="_blank" href="${view}">PDF öffnen</a>
+            <a class="action secondary" href="${down}">Download</a>
+            <a class="action secondary" href="#" onclick="buildPdf('${build}', this);return false;">Neu erzeugen</a>
+          </div>
+        </div>`;
+    }).join('') : '<div class="hint">Keine Tage gefunden.</div>';
+    box.style.display = 'block'; btn.textContent = 'Tage ausblenden';
+  } catch (e) {
+    box.innerHTML = '<div class="error">Fehler: ' + e.message + '</div>';
+    box.style.display = 'block'; btn.textContent = 'Tage ausblenden';
+  } finally { btn.disabled = false; }
+}
 
-    $("jobsWrap").innerHTML = `
-      <table>
-        <thead>
-          <tr>
-            <th>Job</th>
-            <th>Letzter Tag</th>
-            <th>Aktionen</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
-
-    // wire buttons
-    $("jobsWrap").querySelectorAll("button").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const token = getToken();
-        if (!token) return logStatus("❌ ADMIN_TOKEN fehlt", true);
-
-        // fill
-        if (btn.dataset.fillJob) {
-          $("jobInput").value = btn.dataset.fillJob;
-          $("dateInput").value = btn.dataset.fillDate || "";
-          return;
-        }
-
-        // delete day
-        if (btn.dataset.delDay) {
-          const job = btn.dataset.delDay;
-          const date = btn.dataset.day;
-          if (!date) return logStatus("❌ Kein latestDay vorhanden – bitte Datum manuell eingeben", true);
-
-          const ok = confirm(`Wirklich löschen?\nJob: ${job}\nTag: ${date}\n\nDas ist endgültig.`);
-          if (!ok) return;
-
-          try {
-            const out = await apiDelete("/admin/delete-day", { token, job, date });
-            logStatus("✅ Tag gelöscht: " + JSON.stringify(out));
-            await loadJobs();
-          } catch (e) {
-            logStatus("❌ " + e.message, true);
-          }
-          return;
-        }
-
-        // delete job
-        if (btn.dataset.delJob) {
-          const job = btn.dataset.delJob;
-
-          const ok = confirm(`Wirklich JOB löschen?\nJob: ${job}\n\nAlle Tage/Dateien werden entfernt. Endgültig!`);
-          if (!ok) return;
-
-          try {
-            const out = await apiDelete("/admin/delete-job", { token, job });
-            logStatus("✅ Job gelöscht: " + JSON.stringify(out));
-            await loadJobs();
-          } catch (e) {
-            logStatus("❌ " + e.message, true);
-          }
-          return;
-        }
-      });
-    });
+async function buildPdf(url, el) {
+  const old = el.textContent;
+  el.textContent = 'Erzeuge …';
+  try {
+    await fetch(url, { method:'POST' }).then(async r => { if(!r.ok) throw new Error(await r.text()); return r.json(); });
+    el.textContent = 'Fertig ✓';
+    setTimeout(() => { el.textContent = old; loadJobs(); }, 900);
+  } catch (e) {
+    alert('Fehler beim Erzeugen: ' + e.message);
+    el.textContent = old;
   }
+}
 
-  async function loadJobs() {
-    const token = getToken();
-    if (!token) return logStatus("❌ ADMIN_TOKEN fehlt", true);
-
-    try {
-      const data = await apiGet("/admin/list-jobs", { token });
-      renderJobs(data.jobs || []);
-      logStatus("✅ Liste aktualisiert");
-    } catch (e) {
-      logStatus("❌ " + e.message, true);
-    }
-  }
-
-  async function deleteDayQuick() {
-    const token = getToken();
-    const job = $("jobInput").value.trim();
-    const date = $("dateInput").value.trim();
-    if (!token) return logStatus("❌ ADMIN_TOKEN fehlt", true);
-    if (!job || !date) return logStatus("❌ Bitte job UND date eingeben", true);
-
-    const ok = confirm(`Wirklich löschen?\nJob: ${job}\nTag: ${date}\n\nEndgültig.`);
-    if (!ok) return;
-
-    try {
-      const out = await apiDelete("/admin/delete-day", { token, job, date });
-      logStatus("✅ Tag gelöscht: " + JSON.stringify(out));
-      await loadJobs();
-    } catch (e) {
-      logStatus("❌ " + e.message, true);
-    }
-  }
-
-  async function deleteJobQuick() {
-    const token = getToken();
-    const job = $("jobInput").value.trim();
-    if (!token) return logStatus("❌ ADMIN_TOKEN fehlt", true);
-    if (!job) return logStatus("❌ Bitte job eingeben", true);
-
-    const ok = confirm(`Wirklich JOB löschen?\nJob: ${job}\n\nALLE Daten weg. Endgültig!`);
-    if (!ok) return;
-
-    try {
-      const out = await apiDelete("/admin/delete-job", { token, job });
-      logStatus("✅ Job gelöscht: " + JSON.stringify(out));
-      await loadJobs();
-    } catch (e) {
-      logStatus("❌ " + e.message, true);
-    }
-  }
-
-  // init
-  setBaseUrl();
-  loadToken();
-
-  $("saveToken").addEventListener("click", saveToken);
-  $("loadJobs").addEventListener("click", loadJobs);
-  $("deleteDayBtn").addEventListener("click", deleteDayQuick);
-  $("deleteJobBtn").addEventListener("click", deleteJobQuick);
+document.getElementById('reload').addEventListener('click', loadJobs);
+document.getElementById('search').addEventListener('input', render);
+loadJobs();
 </script>
 </body>
 </html>
