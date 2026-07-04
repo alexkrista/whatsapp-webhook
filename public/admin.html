@@ -3,19 +3,24 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Baustellenprotokolle – Admin</title>
+  <title>Krista Baustellenakte – Admin</title>
   <style>
-    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;background:#f5f3ef}body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}main{max-width:1180px;margin:0 auto;padding:24px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px}input,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button:disabled{opacity:.55;cursor:wait}.hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.job{font-weight:750;font-size:22px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:10px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:700}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}footer{color:#777;text-align:center;padding:30px;font-size:13px}
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;background:#f5f3ef}
+    body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}.sub{opacity:.75;margin-top:4px}
+    main{max-width:1220px;margin:0 auto;padding:24px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+    input,textarea,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}textarea{width:100%;min-height:80px;box-sizing:border-box}
+    button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button.danger{background:#9b1c1c;border-color:#9b1c1c}button.ghost{background:#eee;color:#111;border-color:#eee}button:disabled{opacity:.55;cursor:wait}
+    .hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.jobline{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}.job{font-weight:800;font-size:22px}.name{font-size:16px;margin-top:3px;color:#333}.fav{font-size:24px;line-height:1;background:transparent;color:#d19500;border:0;padding:2px 4px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:12px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:750}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}.edit{display:none;margin-top:12px;padding-top:12px;border-top:1px solid #eee}.edit label{display:block;color:#555;font-size:13px;margin:10px 0 4px}.small{font-size:12px;color:#777}.pill{display:inline-block;background:#eee;border-radius:999px;padding:4px 8px;margin-top:6px}footer{color:#777;text-align:center;padding:30px;font-size:13px}
   </style>
 </head>
 <body>
-  <header><h1>Baustellenprotokolle</h1></header>
+  <header><h1>Krista Baustellenakte</h1><div class="sub">Version 2.1 – Namen, Suche, Favoriten und Löschen</div></header>
   <main>
     <div class="bar">
-      <input id="search" placeholder="Baustellennummer suchen, z. B. 260016" />
+      <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
       <button id="reload">Aktualisieren</button>
     </div>
-    <div class="hint">Klick auf „Tage anzeigen“, dann kannst du je Tag das PDF öffnen. Falls es noch nicht existiert, erzeugt der Server es automatisch.</div>
+    <div class="hint">PDFs werden weiterhin automatisch erzeugt. Löschen entfernt Daten endgültig vom Server – bitte mit Bedacht verwenden.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
   <footer>Krista Baustellenprotokoll</footer>
@@ -24,38 +29,71 @@
 const qs = new URLSearchParams(location.search);
 const token = qs.get('token') || '';
 let jobs = [];
-
-function tokenJoin(url){
-  return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : '');
+function tokenJoin(url){ return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''); }
+async function api(url, opts={}){
+  const r = await fetch(tokenJoin(url), opts);
+  const text = await r.text();
+  let data = null; try{ data = text ? JSON.parse(text) : null; }catch{}
+  if(!r.ok) throw new Error((data && data.error) || text || r.statusText);
+  return data;
 }
-async function api(url){
-  const r = await fetch(tokenJoin(url));
-  if(!r.ok) throw new Error(await r.text());
-  return r.json();
-}
+function esc(s){return String(s ?? '').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function bytes(n){n=Number(n||0); if(n<1024) return n+' B'; if(n<1024*1024) return (n/1024).toFixed(1)+' KB'; if(n<1024*1024*1024) return (n/1024/1024).toFixed(1)+' MB'; return (n/1024/1024/1024).toFixed(2)+' GB';}
+function jobTitle(j){ return j.name ? `#${j.jobId} · ${j.name}` : `#${j.jobId}`; }
 function render(){
   const app = document.getElementById('app');
   const q = document.getElementById('search').value.trim().toLowerCase();
-  const list = jobs.filter(j => !q || String(j.jobId).toLowerCase().includes(q));
+  const list = jobs.filter(j => !q || String(j.jobId).toLowerCase().includes(q) || String(j.name||'').toLowerCase().includes(q));
   if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;}
   app.className='grid';
   app.innerHTML=list.map(j=>`
-    <section class="card">
-      <div class="job">#${j.jobId}</div>
-      <div class="meta">
-        letzter Tag: ${j.latestDay || '-'}<br>
-        Tage: ${j.daysCount || 0}<br>
-        letzter Tag: 🖼 ${j.imagesLastDay || 0} &nbsp; 📄 ${j.pdfsLastDay || 0} &nbsp; 🎤 ${j.audioLastDay || 0}
+    <section class="card" id="job-${esc(j.jobId)}">
+      <div class="jobline">
+        <div>
+          <div class="job">#${esc(j.jobId)}</div>
+          <div class="name">${j.name ? esc(j.name) : '<span class="small">kein Name vergeben</span>'}</div>
+        </div>
+        <button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite ? '★' : '☆'}</button>
       </div>
-      <p><button class="secondary" onclick="toggleDays('${j.jobId}', this)">Tage anzeigen</button></p>
-      <div class="days" id="days-${j.jobId}"></div>
+      <div class="meta">
+        letzter Tag: ${esc(j.latestDay || '-')}<br>
+        Tage: ${j.daysCount || 0}<br>
+        gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br>
+        letzter Tag: 🖼 ${j.imagesLastDay || 0} · 📄 ${j.pdfsLastDay || 0} · 🎤 ${j.audioLastDay || 0}<br>
+        <span class="pill">💾 ${bytes(j.sizeBytes)}</span>
+      </div>
+      <p class="actions">
+        <button class="secondary" onclick="toggleDays('${esc(j.jobId)}', this)">Tage anzeigen</button>
+        <button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Name ändern</button>
+        <button class="danger" onclick="deleteJob('${esc(j.jobId)}')">Baustelle löschen</button>
+      </p>
+      <div class="edit" id="edit-${esc(j.jobId)}">
+        <label>Baustellenname</label>
+        <input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}" placeholder="z. B. Neubau Müller Dornbirn" />
+        <label>Notiz optional</label>
+        <textarea id="notes-${esc(j.jobId)}" placeholder="interne Notiz">${esc(j.notes||'')}</textarea>
+        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
+      </div>
+      <div class="days" id="days-${esc(j.jobId)}"></div>
     </section>`).join('');
 }
 async function loadJobs(){
-  const app=document.getElementById('app');
-  app.className='loading';app.textContent='Lade Baustellen …';
-  try{const data=await api('/admin/api/jobs');jobs=data.jobs||[];render();}
-  catch(e){app.className='error';app.textContent='Fehler beim Laden: '+e.message;}
+  const app=document.getElementById('app'); app.className='loading'; app.textContent='Lade Baustellen …';
+  try{const data=await api('/admin/api/jobs'); jobs=data.jobs||[]; render();}
+  catch(e){app.className='error'; app.textContent='Fehler beim Laden: '+e.message;}
+}
+function toggleEdit(jobId){ const box=document.getElementById('edit-'+jobId); box.style.display = box.style.display==='block' ? 'none':'block'; }
+async function saveMeta(jobId){
+  const j = jobs.find(x=>String(x.jobId)===String(jobId));
+  const name=document.getElementById('name-'+jobId).value;
+  const notes=document.getElementById('notes-'+jobId).value;
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,notes,favorite:j?.favorite||false})});
+  await loadJobs();
+}
+async function toggleFavorite(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId)); if(!j) return;
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:j.name||'',notes:j.notes||'',favorite:!j.favorite})});
+  await loadJobs();
 }
 async function toggleDays(jobId, btn){
   const box=document.getElementById('days-'+jobId);
@@ -63,31 +101,38 @@ async function toggleDays(jobId, btn){
   btn.disabled=true;btn.textContent='Lade …';box.innerHTML='<div class="hint">Lade Tage …</div>';box.style.display='block';
   try{
     const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/days`);
-    const days=data.days || [];
-    if(!days.length){box.innerHTML='<div class="hint">Keine Tage gefunden.</div>';return;}
-
-    const html=[];
-    for(const day of days){
-      let stats={items:0,images:0,audio:0,pdfs:0};
-      try{
-        const detail=await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}`);
-        stats=detail.stats || stats;
-      }catch(e){}
+    const detailed=data.detailed || [];
+    if(!detailed.length){box.innerHTML='<div class="hint">Keine Tage gefunden.</div>';return;}
+    box.innerHTML=detailed.map(d=>{
+      const day=d.day; const stats=d.stats||{};
       const pdfUrl=tokenJoin(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`);
-      html.push(`
-        <div class="day">
-          <div class="date">${day}</div>
-          <div class="stats">🖼 ${stats.images||0} Fotos · 📄 ${stats.pdfs||0} PDFs · 🎤 ${stats.audio||0} Audio · ${stats.items||0} Einträge</div>
+      const dlUrl=tokenJoin(`/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`);
+      return `<div class="day" id="day-${esc(jobId)}-${esc(day)}">
+          <div class="date">${esc(day)}</div>
+          <div class="stats">🖼 ${stats.images||0} Fotos · 📄 ${stats.pdfs||0} PDFs · 🎤 ${stats.audio||0} Audio · ${stats.items||0} Einträge · PDF: ${d.pdfExists ? bytes(d.sizeBytes) : 'wird bei Öffnen erzeugt'}</div>
           <div class="actions">
             <a class="action" target="_blank" href="${pdfUrl}">PDF öffnen</a>
-            <a class="action secondary" href="${pdfUrl}" download>Download</a>
+            <a class="action secondary" href="${dlUrl}">Download</a>
+            <button class="danger" onclick="deleteDay('${esc(jobId)}','${esc(day)}')">Tag löschen</button>
           </div>
-        </div>`);
-    }
-    box.innerHTML=html.join('');
+        </div>`;
+    }).join('');
     btn.textContent='Tage ausblenden';
-  }catch(e){box.innerHTML='<div class="error">Fehler: '+e.message+'</div>';btn.textContent='Tage ausblenden';}
+  }catch(e){box.innerHTML='<div class="error">Fehler: '+esc(e.message)+'</div>';btn.textContent='Tage ausblenden';}
   finally{btn.disabled=false;}
+}
+async function deleteDay(jobId, day){
+  if(!confirm(`Tag ${day} bei Baustelle #${jobId} wirklich löschen?\n\nAlle Fotos, Audios, PDFs und Einträge dieses Tages werden endgültig gelöscht.`)) return;
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}`, {method:'DELETE'});
+  await loadJobs();
+}
+async function deleteJob(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId));
+  const title=jobTitle(j||{jobId});
+  const typed=prompt(`Gesamte Baustelle ${title} wirklich löschen?\n\nDas löscht ALLE Tage, Fotos, Audios, PDFs und Protokolle endgültig.\n\nZur Sicherheit bitte die Baustellennummer eingeben:`);
+  if(typed !== String(jobId)) { if(typed !== null) alert('Nicht gelöscht – Nummer war nicht korrekt.'); return; }
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}`, {method:'DELETE'});
+  await loadJobs();
 }
 document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
