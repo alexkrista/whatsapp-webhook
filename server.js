@@ -417,12 +417,14 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
   const jobDisplayName = jobMeta.name || "";
 
   function drawHeaderFooter(page, pageNo, totalPages) {
-    page.drawText(`#${jobId}  |  ${date}`, {
+    const headerText = jobDisplayName ? `#${jobId}  |  ${jobDisplayName}  |  ${date}` : `#${jobId}  |  ${date}`;
+    page.drawText(headerText, {
       x: 60,
       y: PAGE_H - 40,
       size: 11,
       font,
       color: rgb(0.2, 0.2, 0.2),
+      maxWidth: PAGE_W - 120,
     });
     page.drawLine({
       start: { x: 60, y: PAGE_H - 48 },
@@ -779,11 +781,13 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
   const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
+  const meta = await readJobMeta(jobId);
+  const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
   const viewUrl = pdfUrlFor(jobId, date);
   const downloadUrl = pdfDownloadUrlFor(jobId, date);
-  const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+  const subject = `Baustellenprotokoll ${title} – ${date}`;
   const body =
-`Baustellenprotokoll #${jobId} wurde erstellt.
+`Baustellenprotokoll ${title} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
@@ -796,7 +800,7 @@ PDF herunterladen:
 ${downloadUrl}
 `;
   const html = `
-    <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+    <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
     <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
     <p><a href="${viewUrl}">PDF öffnen</a></p>
     <p><a href="${downloadUrl}">PDF herunterladen</a></p>
@@ -1073,11 +1077,13 @@ app.get("/admin/run-daily", async (req, res) => {
       const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
       const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
-      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+      const meta = await readJobMeta(jobId);
+      const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
+      const subject = `Baustellenprotokoll ${title} – ${date}`;
       const viewUrl = pdfUrlFor(jobId, date);
       const downloadUrl = pdfDownloadUrlFor(jobId, date);
       const text =
-`Baustellenprotokoll #${jobId} wurde erstellt.
+`Baustellenprotokoll ${title} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
@@ -1090,7 +1096,7 @@ PDF herunterladen:
 ${downloadUrl}
 `;
       const html = `
-        <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+        <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
         <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
         <p><a href="${viewUrl}">PDF öffnen</a></p>
         <p><a href="${downloadUrl}">PDF herunterladen</a></p>
@@ -1191,6 +1197,33 @@ async function removeEmptyParentsAfterDay(jobId, day) {
       if (entries.length === 0) await fsp.rmdir(dir);
     } catch {}
   }
+}
+
+async function deleteGeneratedPdfsForJob(jobId) {
+  // Wenn der Baustellenname geändert wird, löschen wir nur die automatisch erzeugten
+  // Protokoll-PDFs. Originale WhatsApp-PDFs bleiben erhalten. Beim nächsten Öffnen
+  // wird das Protokoll mit dem aktuellen Namen neu erzeugt.
+  const base = path.join(DATA_DIR, String(jobId));
+  if (!fs.existsSync(base)) return 0;
+  let deleted = 0;
+  async function walk(dir) {
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) await walk(full);
+      else if (ent.isFile() && /^Baustellenprotokoll_.*\.pdf$/i.test(ent.name)) {
+        try { await fsp.unlink(full); deleted++; } catch {}
+      }
+    }
+  }
+  await walk(base);
+  return deleted;
+}
+
+async function protocolDownloadName(jobId, day) {
+  const meta = await readJobMeta(jobId);
+  const name = meta.name ? sanitizeFileNamePart(meta.name) : "Baustellenprotokoll";
+  return `${jobId} - ${name} - ${day}.pdf`;
 }
 
 async function listDaysForJob(jobId) {
@@ -1325,12 +1358,14 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
   try {
     const jobId = String(req.params.jobId);
     if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const before = await readJobMeta(jobId);
     const meta = await writeJobMeta(jobId, {
       name: req.body?.name,
       notes: req.body?.notes,
       favorite: req.body?.favorite,
     });
-    res.json({ ok: true, jobId, meta });
+    const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
+    res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -1421,11 +1456,12 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
     if (!fs.existsSync(dayDir)) return res.status(404).send("Day not found");
 
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
-    if (!fs.existsSync(pdfPath)) {
+    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
       await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
     }
 
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${await protocolDownloadName(jobId, day)}"`);
     return res.sendFile(pdfPath);
   } catch (e) {
     res.status(500).send(String(e?.message || e));
@@ -1445,9 +1481,7 @@ app.get("/admin/download/:jobId/:day", async (req, res) => {
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
     if (!fs.existsSync(pdfPath)) await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
 
-    const meta = await readJobMeta(jobId);
-    const base = meta.name ? sanitizeFileNamePart(meta.name) : `Baustellenprotokoll_${jobId}`;
-    res.download(pdfPath, `${base}_${day}.pdf`);
+    res.download(pdfPath, await protocolDownloadName(jobId, day));
   } catch (e) {
     res.status(500).send(String(e?.message || e));
   }
