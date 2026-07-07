@@ -7,9 +7,9 @@
 // ✅ Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
 //    + Fallback liest auch alte Struktur: /var/data/<job>/<YYYY-MM-DD>/...
 // ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
-// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download
+// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download + Akte + Löschen/Umbenennen/Zusammenführen
 // ✅ Mailversand NEU: PDF bleibt am Server, Mail enthält nur Download-Link (kein großer Anhang)
-// ✅ Hashtags NEU: #26072 oder sprechend wie #Raika-Alberschwende
+// ✅ @ und # Kennung: @26072, #26072, @Raika-Alberschwende, #Raika-Alberschwende
 //
 // Render ENV (wichtig):
 // DATA_DIR=/var/data
@@ -131,9 +131,9 @@ function normalizeSiteCode(raw) {
 }
 
 function parseSiteCodeFromText(text) {
-  // Erlaubt nach @ oder # Zahlen UND sprechende Kennungen:
-  // @26072, @Raika-Alberschwende, #SVS_Feldkirch, #Bad-OG
-  // Erlaubte Zeichen: Buchstaben, Zahlen, Minus, Unterstrich. Kein Beistrich/Leerzeichen.
+  // Erlaubt @ und #:
+  // @26072, #26072, @Raika-Alberschwende, #SVS_Feldkirch, @Bad-OG
+  // Erlaubte Zeichen: Buchstaben, Zahlen, Minus, Unterstrich.
   // Wichtig: E-Mail-Adressen wie alex@krista.at werden NICHT als Baustelle erkannt.
   const s = String(text || "");
   const re = /(^|[\s(])([@#])([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?=\s|$|[.,;:!?)]|\])/gu;
@@ -448,14 +448,18 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
 
   const files = await listFiles(dayDir);
   const imageFiles = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f));
+  const jobMeta = await readJobMeta(jobId);
+  const jobDisplayName = jobMeta.name || "";
 
   function drawHeaderFooter(page, pageNo, totalPages) {
-    page.drawText(`#${jobId}  |  ${date}`, {
+    const headerText = jobDisplayName ? `#${jobId}  |  ${jobDisplayName}  |  ${date}` : `#${jobId}  |  ${date}`;
+    page.drawText(headerText, {
       x: 60,
       y: PAGE_H - 40,
       size: 11,
       font,
       color: rgb(0.2, 0.2, 0.2),
+      maxWidth: PAGE_W - 120,
     });
     page.drawLine({
       start: { x: 60, y: PAGE_H - 48 },
@@ -485,9 +489,10 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
     page.drawText("Baustellenprotokoll", { x: 60, y: PAGE_H - 90, size: 38, font: fontBold });
     page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
-    page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 180, size: 16, font });
-    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 210, size: 16, font });
-    page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 240, size: 16, font });
+    if (jobDisplayName) page.drawText(jobDisplayName, { x: 60, y: PAGE_H - 170, size: 20, font: fontBold, maxWidth: PAGE_W - 420 });
+    page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 205, size: 16, font });
+    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 235, size: 16, font });
+    page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 265, size: 16, font });
 
     page.drawText("Layout: Text/Transkripte seitenfüllend, danach Fotos (6 pro Seite)", {
       x: 60,
@@ -803,6 +808,147 @@ try {
   return { pages: total, bytes: bytes.length };
 }
 
+
+// ===================== Baustellenakte PDF =====================
+async function buildAkteForJob(jobId, outPdfPath) {
+  const PAGE_W = 1190.55; // A3 landscape
+  const PAGE_H = 841.89;
+
+  const days = (await listDaysForJob(jobId)).slice().sort(); // chronologisch
+  if (!days.length) throw new Error(`Keine Tage für #${jobId} gefunden`);
+
+  const meta = await readJobMeta(jobId);
+  const title = meta.name ? `${meta.name}` : `#${jobId}`;
+
+  const akte = await PDFDocument.create();
+  const font = await akte.embedFont(StandardFonts.Helvetica);
+  const fontBold = await akte.embedFont(StandardFonts.HelveticaBold);
+
+  // Logo optional
+  let logoImg = null;
+  try {
+    const logoBytes = await fsp.readFile(
+      path.isAbsolute(LOGO_PATH) ? LOGO_PATH : path.join(process.cwd(), LOGO_PATH)
+    );
+    logoImg = await akte.embedPng(logoBytes);
+  } catch {
+    logoImg = null;
+  }
+
+  // Deckblatt
+  {
+    const page = akte.addPage([PAGE_W, PAGE_H]);
+    page.drawText("Baustellenakte", { x: 60, y: PAGE_H - 90, size: 42, font: fontBold });
+    page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 145, size: 24, font: fontBold });
+    if (meta.name) page.drawText(meta.name, { x: 60, y: PAGE_H - 180, size: 24, font: fontBold, maxWidth: PAGE_W - 420 });
+    page.drawText(`Zeitraum: ${days[0]} bis ${days[days.length - 1]}`, { x: 60, y: PAGE_H - 230, size: 16, font });
+    page.drawText(`Bautage: ${days.length}`, { x: 60, y: PAGE_H - 260, size: 16, font });
+    page.drawText(`Erstellt: ${new Date().toLocaleString("de-AT")}`, { x: 60, y: PAGE_H - 290, size: 12, font });
+
+    if (logoImg) {
+      const logoW = 260;
+      const scale = logoW / logoImg.width;
+      const logoH = logoImg.height * scale;
+      page.drawImage(logoImg, {
+        x: PAGE_W - 60 - logoW,
+        y: PAGE_H - 60 - logoH,
+        width: logoW,
+        height: logoH,
+      });
+    }
+  }
+
+  // Einfaches Inhaltsverzeichnis
+  {
+    let page = akte.addPage([PAGE_W, PAGE_H]);
+    page.drawText("Inhaltsverzeichnis", { x: 60, y: PAGE_H - 80, size: 28, font: fontBold });
+    let y = PAGE_H - 125;
+    for (const day of days) {
+      if (y < 70) {
+        page = akte.addPage([PAGE_W, PAGE_H]);
+        page.drawText("Inhaltsverzeichnis (Fortsetzung)", { x: 60, y: PAGE_H - 80, size: 24, font: fontBold });
+        y = PAGE_H - 125;
+      }
+      page.drawText(day, { x: 80, y, size: 14, font });
+      y -= 22;
+    }
+  }
+
+  for (const day of days) {
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) continue;
+
+    // Trennseite je Tag
+    {
+      const page = akte.addPage([PAGE_W, PAGE_H]);
+      page.drawLine({
+        start: { x: 60, y: PAGE_H / 2 + 55 },
+        end: { x: PAGE_W - 60, y: PAGE_H / 2 + 55 },
+        thickness: 1,
+        color: rgb(0.75, 0.75, 0.75),
+      });
+      page.drawText(day, { x: 60, y: PAGE_H / 2, size: 42, font: fontBold });
+      page.drawText(title, { x: 60, y: PAGE_H / 2 - 40, size: 18, font, maxWidth: PAGE_W - 120 });
+      page.drawLine({
+        start: { x: 60, y: PAGE_H / 2 - 70 },
+        end: { x: PAGE_W - 60, y: PAGE_H / 2 - 70 },
+        thickness: 1,
+        color: rgb(0.75, 0.75, 0.75),
+      });
+    }
+
+    const dayPdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
+    if (!fs.existsSync(dayPdfPath)) {
+      await buildPdfForJobDay(jobId, day, dayDir, dayPdfPath);
+    }
+
+    try {
+      const srcBytes = await fsp.readFile(dayPdfPath);
+      const srcPdf = await PDFDocument.load(srcBytes);
+      const copied = await akte.copyPages(srcPdf, srcPdf.getPageIndices());
+      copied.forEach((p) => akte.addPage(p));
+    } catch (e) {
+      const page = akte.addPage([PAGE_W, PAGE_H]);
+      page.drawText(`Fehler beim Einfügen des Tagesprotokolls ${day}`, { x: 60, y: PAGE_H - 90, size: 18, font: fontBold });
+      page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 130, size: 12, font, maxWidth: PAGE_W - 120 });
+    }
+  }
+
+  // Seitenzahlen
+  const pages = akte.getPages();
+  const total = pages.length;
+  for (let i = 0; i < total; i++) {
+    const p = pages[i];
+    p.drawText(`#${jobId} | ${meta.name || "Baustellenakte"}`, {
+      x: 60,
+      y: PAGE_H - 35,
+      size: 9,
+      font,
+      color: rgb(0.25, 0.25, 0.25),
+      maxWidth: PAGE_W - 220,
+    });
+    p.drawText(`Seite ${i + 1} / ${total}`, {
+      x: PAGE_W - 170,
+      y: 25,
+      size: 9,
+      font,
+      color: rgb(0.25, 0.25, 0.25),
+    });
+  }
+
+  const bytes = await akte.save();
+  await ensureDir(path.dirname(outPdfPath));
+  await fsp.writeFile(outPdfPath, bytes);
+  return { pages: total, bytes: bytes.length, days: days.length };
+}
+
+async function akteDownloadName(jobId) {
+  const meta = await readJobMeta(jobId);
+  const name = meta.name ? sanitizeFileNamePart(meta.name) : "Baustellenakte";
+  return `${jobId} - ${name} - Baustellenakte.pdf`;
+}
+
+
 // ===================== Trigger PDF =====================
 async function triggerPdfForJobDay({ jobId, date, to }) {
   const dayDir = resolveExistingDayDir(jobId, date);
@@ -811,11 +957,13 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
   const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
+  const meta = await readJobMeta(jobId);
+  const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
   const viewUrl = pdfUrlFor(jobId, date);
   const downloadUrl = pdfDownloadUrlFor(jobId, date);
-  const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+  const subject = `Baustellenprotokoll ${title} – ${date}`;
   const body =
-`Baustellenprotokoll #${jobId} wurde erstellt.
+`Baustellenprotokoll ${title} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
@@ -828,7 +976,7 @@ PDF herunterladen:
 ${downloadUrl}
 `;
   const html = `
-    <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+    <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
     <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
     <p><a href="${viewUrl}">PDF öffnen</a></p>
     <p><a href="${downloadUrl}">PDF herunterladen</a></p>
@@ -1105,11 +1253,13 @@ app.get("/admin/run-daily", async (req, res) => {
       const outPdf = path.join(dayDir, `Baustellenprotokoll_${jobId}_${date}.pdf`);
       const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
-      const subject = `Baustellenprotokoll #${jobId} – ${date}`;
+      const meta = await readJobMeta(jobId);
+      const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
+      const subject = `Baustellenprotokoll ${title} – ${date}`;
       const viewUrl = pdfUrlFor(jobId, date);
       const downloadUrl = pdfDownloadUrlFor(jobId, date);
       const text =
-`Baustellenprotokoll #${jobId} wurde erstellt.
+`Baustellenprotokoll ${title} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
@@ -1122,7 +1272,7 @@ PDF herunterladen:
 ${downloadUrl}
 `;
       const html = `
-        <p>Baustellenprotokoll <b>#${jobId}</b> wurde erstellt.</p>
+        <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
         <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
         <p><a href="${viewUrl}">PDF öffnen</a></p>
         <p><a href="${downloadUrl}">PDF herunterladen</a></p>
@@ -1151,6 +1301,170 @@ app.get("/admin/ui", (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.sendFile(path.join(process.cwd(), "public", "admin.html"));
 });
+
+
+function isSafeJobId(jobId) {
+  return /^[A-Za-z0-9_-]+$/.test(String(jobId || ""));
+}
+function isSafeDay(day) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(day || ""));
+}
+function metaPathForJob(jobId) {
+  return path.join(DATA_DIR, String(jobId), ".meta.json");
+}
+async function readJobMeta(jobId) {
+  try {
+    const p = metaPathForJob(jobId);
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "" };
+    const meta = JSON.parse(await fsp.readFile(p, "utf8"));
+    return {
+      name: String(meta.name || "").trim(),
+      favorite: !!meta.favorite,
+      notes: String(meta.notes || "").trim(),
+      updatedAt: meta.updatedAt || null,
+    };
+  } catch {
+    return { name: "", favorite: false, notes: "" };
+  }
+}
+async function writeJobMeta(jobId, patch) {
+  if (!isSafeJobId(jobId)) throw new Error("Invalid jobId");
+  const existing = await readJobMeta(jobId);
+  const next = {
+    ...existing,
+    ...patch,
+    name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
+    notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
+    favorite: !!(patch.favorite ?? existing.favorite),
+    updatedAt: new Date().toISOString(),
+  };
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  await fsp.writeFile(metaPathForJob(jobId), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+function sanitizeFileNamePart(s) {
+  return String(s || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 _.-]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Baustellenprotokoll";
+}
+async function dirSizeBytes(dir) {
+  let total = 0;
+  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const full = path.join(dir, ent.name);
+    try {
+      if (ent.isDirectory()) total += await dirSizeBytes(full);
+      else if (ent.isFile()) total += (await fsp.stat(full)).size;
+    } catch {}
+  }
+  return total;
+}
+async function removeEmptyParentsAfterDay(jobId, day) {
+  const [Y, M] = String(day).split("-");
+  const monthDir = path.join(DATA_DIR, String(jobId), Y, M);
+  const yearDir = path.join(DATA_DIR, String(jobId), Y);
+  for (const dir of [monthDir, yearDir]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      if (entries.length === 0) await fsp.rmdir(dir);
+    } catch {}
+  }
+}
+
+async function deleteGeneratedPdfsForJob(jobId) {
+  // Wenn der Baustellenname geändert wird, löschen wir nur die automatisch erzeugten
+  // Protokoll-PDFs. Originale WhatsApp-PDFs bleiben erhalten. Beim nächsten Öffnen
+  // wird das Protokoll mit dem aktuellen Namen neu erzeugt.
+  const base = path.join(DATA_DIR, String(jobId));
+  if (!fs.existsSync(base)) return 0;
+  let deleted = 0;
+  async function walk(dir) {
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) await walk(full);
+      else if (ent.isFile() && /^Baustellenprotokoll_.*\.pdf$/i.test(ent.name)) {
+        try { await fsp.unlink(full); deleted++; } catch {}
+      }
+    }
+  }
+  await walk(base);
+  return deleted;
+}
+
+
+async function mergeDirectoryContents(srcDir, destDir) {
+  await ensureDir(destDir);
+  const entries = await fsp.readdir(srcDir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const src = path.join(srcDir, ent.name);
+    const dest = path.join(destDir, ent.name);
+
+    if (ent.isDirectory()) {
+      await mergeDirectoryContents(src, dest);
+      await fsp.rm(src, { recursive: true, force: true }).catch(() => {});
+      continue;
+    }
+
+    if (!ent.isFile()) continue;
+
+    if (!fs.existsSync(dest)) {
+      await fsp.rename(src, dest).catch(async () => {
+        await fsp.copyFile(src, dest);
+        await fsp.unlink(src).catch(() => {});
+      });
+      continue;
+    }
+
+    // log.jsonl wird zusammengeführt; dadurch bleiben alle Einträge chronologisch auswertbar.
+    if (ent.name === "log.jsonl") {
+      const add = await fsp.readFile(src, "utf8").catch(() => "");
+      if (add) await fsp.appendFile(dest, add.endsWith("\n") ? add : add + "\n", "utf8").catch(() => {});
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // .meta.json: Ziel-Meta bleibt führend. Falls Ziel keinen Namen hat, übernehmen wir den Quell-Namen.
+    if (ent.name === ".meta.json") {
+      try {
+        const targetMeta = JSON.parse(await fsp.readFile(dest, "utf8"));
+        const sourceMeta = JSON.parse(await fsp.readFile(src, "utf8"));
+        if (!String(targetMeta.name || "").trim() && String(sourceMeta.name || "").trim()) {
+          targetMeta.name = String(sourceMeta.name || "").trim();
+          targetMeta.updatedAt = new Date().toISOString();
+          await fsp.writeFile(dest, JSON.stringify(targetMeta, null, 2), "utf8");
+        }
+      } catch {}
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // Bei Namenskollision Originale nicht überschreiben.
+    const ext = path.extname(ent.name);
+    const base = path.basename(ent.name, ext);
+    let candidate;
+    let n = 1;
+    do {
+      candidate = path.join(destDir, `${base}_merged_${n}${ext}`);
+      n++;
+    } while (fs.existsSync(candidate));
+
+    await fsp.rename(src, candidate).catch(async () => {
+      await fsp.copyFile(src, candidate);
+      await fsp.unlink(src).catch(() => {});
+    });
+  }
+}
+
+async function protocolDownloadName(jobId, day) {
+  const meta = await readJobMeta(jobId);
+  const name = meta.name ? sanitizeFileNamePart(meta.name) : "Baustellenprotokoll";
+  return `${jobId} - ${name} - ${day}.pdf`;
+}
 
 async function listDaysForJob(jobId) {
   const base = path.join(DATA_DIR, String(jobId));
@@ -1217,7 +1531,7 @@ app.get("/admin/api/jobs", async (req, res) => {
   try {
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
-      .filter((j) => j && j !== "unknown" && j !== "_unassigned")
+      .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
       .filter((j) => fs.existsSync(path.join(DATA_DIR, j)));
 
     const jobs = [];
@@ -1225,14 +1539,29 @@ app.get("/admin/api/jobs", async (req, res) => {
       const days = await listDaysForJob(jobId);
       const latestDay = days[0] || null;
       let stats = { items: 0, images: 0, audio: 0, pdfs: 0 };
+      let totalStats = { items: 0, images: 0, audio: 0, pdfs: 0 };
 
-      if (latestDay) {
-        const dayDir = resolveExistingDayDir(jobId, latestDay);
-        if (fs.existsSync(dayDir)) stats = await readLogStats(dayDir);
+      for (const day of days) {
+        const dayDir = resolveExistingDayDir(jobId, day);
+        if (!fs.existsSync(dayDir)) continue;
+        const s = await readLogStats(dayDir);
+        totalStats.items += s.items;
+        totalStats.images += s.images;
+        totalStats.audio += s.audio;
+        totalStats.pdfs += s.pdfs;
+        if (day === latestDay) stats = s;
       }
+
+      const meta = await readJobMeta(jobId);
+      const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
 
       jobs.push({
         jobId,
+        name: meta.name || "",
+        notes: meta.notes || "",
+        favorite: !!meta.favorite,
+        sizeBytes,
+        totalStats,
         daysCount: days.length,
         latestDay,
         itemsLastDay: stats.items,
@@ -1242,8 +1571,123 @@ app.get("/admin/api/jobs", async (req, res) => {
       });
     }
 
-    jobs.sort((a, b) => (b.latestDay || "").localeCompare(a.latestDay || ""));
+    jobs.sort((a, b) => {
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+      return (b.latestDay || "").localeCompare(a.latestDay || "");
+    });
     res.json({ ok: true, jobs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: read/update metadata
+app.get("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    res.json({ ok: true, jobId, meta: await readJobMeta(jobId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.put("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const before = await readJobMeta(jobId);
+    const meta = await writeJobMeta(jobId, {
+      name: req.body?.name,
+      notes: req.body?.notes,
+      favorite: req.body?.favorite,
+    });
+    const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
+    res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+
+// Admin API: Baustellennummer ändern (Ordner umbenennen)
+app.post("/admin/api/job/:jobId/rename", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const oldJobId = String(req.params.jobId);
+    const newJobId = String(req.body?.newJobId || "").trim();
+    if (!isSafeJobId(oldJobId) || !isSafeJobId(newJobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (oldJobId === newJobId) return res.json({ ok: true, oldJobId, newJobId, unchanged: true });
+
+    const oldDir = path.join(DATA_DIR, oldJobId);
+    const newDir = path.join(DATA_DIR, newJobId);
+    if (!fs.existsSync(oldDir)) return res.status(404).json({ ok: false, error: "Source job not found" });
+    if (fs.existsSync(newDir)) return res.status(409).json({ ok: false, error: "Diese Baustellennummer existiert bereits. Bitte Zusammenführen verwenden." });
+
+    await fsp.rename(oldDir, newDir);
+    const deletedGeneratedPdfs = await deleteGeneratedPdfsForJob(newJobId);
+    res.json({ ok: true, oldJobId, newJobId, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: Baustellen zusammenführen (Quelle in Ziel verschieben)
+app.post("/admin/api/job/:jobId/merge", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const sourceJobId = String(req.params.jobId);
+    const targetJobId = String(req.body?.targetJobId || "").trim();
+    if (!isSafeJobId(sourceJobId) || !isSafeJobId(targetJobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (sourceJobId === targetJobId) return res.status(400).json({ ok: false, error: "Quelle und Ziel sind gleich" });
+
+    const sourceDir = path.join(DATA_DIR, sourceJobId);
+    const targetDir = path.join(DATA_DIR, targetJobId);
+    if (!fs.existsSync(sourceDir)) return res.status(404).json({ ok: false, error: "Source job not found" });
+    await ensureDir(targetDir);
+
+    const sourceSizeBytes = await dirSizeBytes(sourceDir);
+    await mergeDirectoryContents(sourceDir, targetDir);
+    await fsp.rm(sourceDir, { recursive: true, force: true }).catch(() => {});
+    const deletedGeneratedPdfs = await deleteGeneratedPdfsForJob(targetJobId);
+
+    res.json({ ok: true, sourceJobId, targetJobId, movedBytes: sourceSizeBytes, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: delete a single day
+app.delete("/admin/api/job/:jobId/day/:day", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+    const sizeBytes = await dirSizeBytes(dayDir);
+    await fsp.rm(dayDir, { recursive: true, force: true });
+    await removeEmptyParentsAfterDay(jobId, day);
+    res.json({ ok: true, jobId, day, deletedBytes: sizeBytes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: delete full job
+app.delete("/admin/api/job/:jobId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const jobDir = path.join(DATA_DIR, jobId);
+    if (!fs.existsSync(jobDir)) return res.status(404).json({ ok: false, error: "Job not found" });
+    const sizeBytes = await dirSizeBytes(jobDir);
+    await fsp.rm(jobDir, { recursive: true, force: true });
+    res.json({ ok: true, jobId, deletedBytes: sizeBytes });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -1300,11 +1744,12 @@ app.get("/admin/pdf/:jobId/:day", async (req, res) => {
     if (!fs.existsSync(dayDir)) return res.status(404).send("Day not found");
 
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
-    if (!fs.existsSync(pdfPath)) {
+    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
       await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
     }
 
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${await protocolDownloadName(jobId, day)}"`);
     return res.sendFile(pdfPath);
   } catch (e) {
     res.status(500).send(String(e?.message || e));
@@ -1324,7 +1769,7 @@ app.get("/admin/download/:jobId/:day", async (req, res) => {
     const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
     if (!fs.existsSync(pdfPath)) await buildPdfForJobDay(jobId, day, dayDir, pdfPath);
 
-    res.download(pdfPath, path.basename(pdfPath));
+    res.download(pdfPath, await protocolDownloadName(jobId, day));
   } catch (e) {
     res.status(500).send(String(e?.message || e));
   }
@@ -1347,6 +1792,54 @@ app.post("/admin/api/job/:jobId/day/:day/build", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+
+
+// Admin: serve Baustellenakte (build if missing/rebuild=1)
+app.get("/admin/akte/:jobId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).send("Invalid jobId");
+
+    const jobDir = path.join(DATA_DIR, jobId);
+    if (!fs.existsSync(jobDir)) return res.status(404).send("Job not found");
+
+    const pdfPath = path.join(jobDir, `Baustellenakte_${jobId}.pdf`);
+    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
+      await buildAkteForJob(jobId, pdfPath);
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${await akteDownloadName(jobId)}"`);
+    return res.sendFile(pdfPath);
+  } catch (e) {
+    res.status(500).send(String(e?.message || e));
+  }
+});
+
+// Admin: download Baustellenakte
+app.get("/admin/download-akte/:jobId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).send("Invalid jobId");
+
+    const jobDir = path.join(DATA_DIR, jobId);
+    if (!fs.existsSync(jobDir)) return res.status(404).send("Job not found");
+
+    const pdfPath = path.join(jobDir, `Baustellenakte_${jobId}.pdf`);
+    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
+      await buildAkteForJob(jobId, pdfPath);
+    }
+
+    res.download(pdfPath, await akteDownloadName(jobId));
+  } catch (e) {
+    res.status(500).send(String(e?.message || e));
+  }
+});
+
 
 // Legacy compatibility
 app.get("/api/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
