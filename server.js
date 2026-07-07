@@ -120,7 +120,7 @@ function isoDateFromWhatsAppTs(tsSeconds) {
 function normalizeSiteCode(raw) {
   return String(raw || "")
     .trim()
-    .replace(/^#+/, "")
+    .replace(/^[@#]+/, "")
     .replace(/ä/g, "ae")
     .replace(/ö/g, "oe")
     .replace(/ü/g, "ue")
@@ -131,13 +131,29 @@ function normalizeSiteCode(raw) {
 }
 
 function parseSiteCodeFromText(text) {
-  // Erlaubt nach # jetzt Zahlen UND sprechende Kennungen:
-  // #26072, #Raika-Alberschwende, #SVS_Feldkirch, #Bad-OG
+  // Erlaubt nach @ oder # Zahlen UND sprechende Kennungen:
+  // @26072, @Raika-Alberschwende, #SVS_Feldkirch, #Bad-OG
   // Erlaubte Zeichen: Buchstaben, Zahlen, Minus, Unterstrich. Kein Beistrich/Leerzeichen.
-  const m = String(text || "").match(/#([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?=\s|$|[.,;:!?)]|\])/u);
-  if (!m) return null;
-  const code = normalizeSiteCode(m[1]);
-  return /^[A-Za-z0-9_-]{2,80}$/.test(code) ? code : null;
+  // Wichtig: E-Mail-Adressen wie alex@krista.at werden NICHT als Baustelle erkannt.
+  const s = String(text || "");
+  const re = /(^|[\s(])([@#])([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?=\s|$|[.,;:!?)]|\])/gu;
+
+  for (const m of s.matchAll(re)) {
+    const marker = m[2];
+    const rawCode = m[3];
+    const end = m.index + m[0].length;
+    const after = s.slice(end);
+
+    // Schutz vor E-Mail-Adressen mit Abstand, z.B. "alex @krista.at"
+    if (marker === "@" && after.startsWith(".") && /^[A-Za-z]{2,10}\b/.test(after.slice(1))) {
+      continue;
+    }
+
+    const code = normalizeSiteCode(rawCode);
+    if (/^[A-Za-z0-9_-]{2,80}$/.test(code)) return code;
+  }
+
+  return null;
 }
 function parseCaptionTextFromMessage(msg) {
   if (msg.type === "text") return msg.text?.body || "";
