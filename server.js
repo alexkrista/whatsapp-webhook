@@ -810,6 +810,24 @@ try {
 
 
 // ===================== Baustellenakte PDF =====================
+function formatDateLongDE(dateStr) {
+  try {
+    const d = new Date(String(dateStr) + "T12:00:00");
+    return d.toLocaleDateString("de-AT", { weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" });
+  } catch {
+    return String(dateStr || "");
+  }
+}
+
+function shortDateDE(dateStr) {
+  try {
+    const d = new Date(String(dateStr) + "T12:00:00");
+    return d.toLocaleDateString("de-AT", { year: "numeric", month: "2-digit", day: "2-digit" });
+  } catch {
+    return String(dateStr || "");
+  }
+}
+
 async function buildAkteForJob(jobId, outPdfPath) {
   const PAGE_W = 1190.55; // A3 landscape
   const PAGE_H = 841.89;
@@ -819,6 +837,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
 
   const meta = await readJobMeta(jobId);
   const title = meta.name ? `${meta.name}` : `#${jobId}`;
+  const generatedAt = new Date().toLocaleString("de-AT");
 
   const akte = await PDFDocument.create();
   const font = await akte.embedFont(StandardFonts.Helvetica);
@@ -835,98 +854,200 @@ async function buildAkteForJob(jobId, outPdfPath) {
     logoImg = null;
   }
 
-  // Deckblatt
-  {
-    const page = akte.addPage([PAGE_W, PAGE_H]);
-    page.drawText("Baustellenakte", { x: 60, y: PAGE_H - 90, size: 42, font: fontBold });
-    page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 145, size: 24, font: fontBold });
-    if (meta.name) page.drawText(meta.name, { x: 60, y: PAGE_H - 180, size: 24, font: fontBold, maxWidth: PAGE_W - 420 });
-    page.drawText(`Zeitraum: ${days[0]} bis ${days[days.length - 1]}`, { x: 60, y: PAGE_H - 230, size: 16, font });
-    page.drawText(`Bautage: ${days.length}`, { x: 60, y: PAGE_H - 260, size: 16, font });
-    page.drawText(`Erstellt: ${new Date().toLocaleString("de-AT")}`, { x: 60, y: PAGE_H - 290, size: 12, font });
-
-    if (logoImg) {
-      const logoW = 260;
-      const scale = logoW / logoImg.width;
-      const logoH = logoImg.height * scale;
-      page.drawImage(logoImg, {
-        x: PAGE_W - 60 - logoW,
-        y: PAGE_H - 60 - logoH,
-        width: logoW,
-        height: logoH,
-      });
-    }
-  }
-
-  // Einfaches Inhaltsverzeichnis
-  {
-    let page = akte.addPage([PAGE_W, PAGE_H]);
-    page.drawText("Inhaltsverzeichnis", { x: 60, y: PAGE_H - 80, size: 28, font: fontBold });
-    let y = PAGE_H - 125;
-    for (const day of days) {
-      if (y < 70) {
-        page = akte.addPage([PAGE_W, PAGE_H]);
-        page.drawText("Inhaltsverzeichnis (Fortsetzung)", { x: 60, y: PAGE_H - 80, size: 24, font: fontBold });
-        y = PAGE_H - 125;
-      }
-      page.drawText(day, { x: 80, y, size: 14, font });
-      y -= 22;
-    }
-  }
+  // Tagesdaten vorbereiten: Tages-PDFs erzeugen, Seiten zählen, Statistiken sammeln
+  const dayInfos = [];
+  const totalStats = { items: 0, images: 0, audio: 0, pdfs: 0 };
 
   for (const day of days) {
     const dayDir = resolveExistingDayDir(jobId, day);
     if (!fs.existsSync(dayDir)) continue;
 
-    // Trennseite je Tag
-    {
-      const page = akte.addPage([PAGE_W, PAGE_H]);
-      page.drawLine({
-        start: { x: 60, y: PAGE_H / 2 + 55 },
-        end: { x: PAGE_W - 60, y: PAGE_H / 2 + 55 },
-        thickness: 1,
-        color: rgb(0.75, 0.75, 0.75),
-      });
-      page.drawText(day, { x: 60, y: PAGE_H / 2, size: 42, font: fontBold });
-      page.drawText(title, { x: 60, y: PAGE_H / 2 - 40, size: 18, font, maxWidth: PAGE_W - 120 });
-      page.drawLine({
-        start: { x: 60, y: PAGE_H / 2 - 70 },
-        end: { x: PAGE_W - 60, y: PAGE_H / 2 - 70 },
-        thickness: 1,
-        color: rgb(0.75, 0.75, 0.75),
-      });
-    }
+    const stats = await readLogStats(dayDir);
+    totalStats.items += stats.items;
+    totalStats.images += stats.images;
+    totalStats.audio += stats.audio;
+    totalStats.pdfs += stats.pdfs;
 
     const dayPdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
     if (!fs.existsSync(dayPdfPath)) {
       await buildPdfForJobDay(jobId, day, dayDir, dayPdfPath);
     }
 
+    let pageCount = 0;
     try {
       const srcBytes = await fsp.readFile(dayPdfPath);
+      const srcPdf = await PDFDocument.load(srcBytes);
+      pageCount = srcPdf.getPageCount();
+    } catch {
+      pageCount = 1; // Fehlerseite
+    }
+
+    dayInfos.push({ day, dayDir, stats, dayPdfPath, pageCount });
+  }
+
+  if (!dayInfos.length) throw new Error(`Keine lesbaren Bautage für #${jobId} gefunden`);
+
+  // Inhaltsverzeichnis-Seiten berechnen
+  const tocRowsPerPage = 26;
+  const tocPages = Math.max(1, Math.ceil(dayInfos.length / tocRowsPerPage));
+
+  let nextPageNo = 1 + tocPages + 1; // Deckblatt + Inhaltsverzeichnis + erste Trennseite
+  for (const info of dayInfos) {
+    info.startPage = nextPageNo;
+    info.protocolStartPage = nextPageNo + 1;
+    nextPageNo += 1 + info.pageCount; // Trennseite + Tagesprotokoll
+  }
+  const summaryStartPage = nextPageNo;
+
+  function drawLogo(page) {
+    if (!logoImg) return;
+    const logoW = 260;
+    const scale = logoW / logoImg.width;
+    const logoH = logoImg.height * scale;
+    page.drawImage(logoImg, {
+      x: PAGE_W - 60 - logoW,
+      y: PAGE_H - 60 - logoH,
+      width: logoW,
+      height: logoH,
+    });
+  }
+
+  function drawRule(page, y, shade = 0.82) {
+    page.drawLine({
+      start: { x: 60, y },
+      end: { x: PAGE_W - 60, y },
+      thickness: 1,
+      color: rgb(shade, shade, shade),
+    });
+  }
+
+  // Deckblatt
+  {
+    const page = akte.addPage([PAGE_W, PAGE_H]);
+    page.drawText("KRISTA BAUSTELLENAKTE", { x: 60, y: PAGE_H - 90, size: 34, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+    drawRule(page, PAGE_H - 112, 0.72);
+
+    page.drawText(title, { x: 60, y: PAGE_H - 175, size: 36, font: fontBold, maxWidth: PAGE_W - 430 });
+    page.drawText(`Baustellennummer: #${jobId}`, { x: 60, y: PAGE_H - 225, size: 18, font });
+    page.drawText(`Zeitraum: ${shortDateDE(dayInfos[0].day)} bis ${shortDateDE(dayInfos[dayInfos.length - 1].day)}`, { x: 60, y: PAGE_H - 255, size: 18, font });
+    page.drawText(`Erstellt: ${generatedAt}`, { x: 60, y: PAGE_H - 285, size: 14, font, color: rgb(0.25, 0.25, 0.25) });
+
+    const boxY = PAGE_H - 390;
+    const colW = 245;
+    const boxH = 86;
+    const cards = [
+      ["Bautage", String(dayInfos.length)],
+      ["Fotos", String(totalStats.images)],
+      ["Dokumente", String(totalStats.pdfs)],
+      ["Audio", String(totalStats.audio)],
+    ];
+    for (let i = 0; i < cards.length; i++) {
+      const x = 60 + i * (colW + 20);
+      page.drawRectangle({ x, y: boxY, width: colW, height: boxH, borderWidth: 1, borderColor: rgb(0.85,0.85,0.85) });
+      page.drawText(cards[i][1], { x: x + 18, y: boxY + 42, size: 28, font: fontBold });
+      page.drawText(cards[i][0], { x: x + 18, y: boxY + 18, size: 12, font, color: rgb(0.35,0.35,0.35) });
+    }
+
+    page.drawText("Diese Akte fasst alle Tagesprotokolle dieser Baustelle chronologisch zusammen.", {
+      x: 60, y: 105, size: 13, font, color: rgb(0.28,0.28,0.28), maxWidth: PAGE_W - 120,
+    });
+    drawLogo(page);
+  }
+
+  // Inhaltsverzeichnis mit Seitenzahlen
+  for (let p = 0; p < tocPages; p++) {
+    const page = akte.addPage([PAGE_W, PAGE_H]);
+    page.drawText(p === 0 ? "Inhaltsverzeichnis" : "Inhaltsverzeichnis (Fortsetzung)", {
+      x: 60, y: PAGE_H - 80, size: 28, font: fontBold,
+    });
+    drawRule(page, PAGE_H - 98, 0.82);
+
+    let y = PAGE_H - 135;
+    const start = p * tocRowsPerPage;
+    const end = Math.min(dayInfos.length, start + tocRowsPerPage);
+    for (let i = start; i < end; i++) {
+      const info = dayInfos[i];
+      const rowNo = i + 1;
+      const label = `${String(rowNo).padStart(2, "0")}.  ${shortDateDE(info.day)}  ·  ${info.stats.images} Fotos  ·  ${info.stats.pdfs} PDF  ·  ${info.stats.audio} Audio`;
+      page.drawText(label, { x: 80, y, size: 13, font, maxWidth: PAGE_W - 230 });
+      page.drawText(`Seite ${info.startPage}`, { x: PAGE_W - 175, y, size: 13, font });
+      page.drawLine({ start: { x: 80, y: y - 7 }, end: { x: PAGE_W - 80, y: y - 7 }, thickness: 0.5, color: rgb(0.92,0.92,0.92) });
+      y -= 24;
+    }
+  }
+
+  // Tagesabschnitte
+  for (let idx = 0; idx < dayInfos.length; idx++) {
+    const info = dayInfos[idx];
+
+    // Trennseite je Bautag
+    {
+      const page = akte.addPage([PAGE_W, PAGE_H]);
+      const center = PAGE_H / 2;
+      drawRule(page, center + 105, 0.72);
+      page.drawText(`Bautag ${idx + 1} von ${dayInfos.length}`, { x: 60, y: center + 55, size: 18, font, color: rgb(0.3,0.3,0.3) });
+      page.drawText(formatDateLongDE(info.day), { x: 60, y: center, size: 42, font: fontBold, maxWidth: PAGE_W - 120 });
+      page.drawText(title, { x: 60, y: center - 45, size: 18, font, maxWidth: PAGE_W - 120 });
+      drawRule(page, center - 75, 0.72);
+      page.drawText(`${info.stats.images} Fotos  ·  ${info.stats.pdfs} PDF  ·  ${info.stats.audio} Audio  ·  ${info.stats.items} Einträge`, {
+        x: 60, y: center - 118, size: 14, font, color: rgb(0.25,0.25,0.25),
+      });
+    }
+
+    try {
+      const srcBytes = await fsp.readFile(info.dayPdfPath);
       const srcPdf = await PDFDocument.load(srcBytes);
       const copied = await akte.copyPages(srcPdf, srcPdf.getPageIndices());
       copied.forEach((p) => akte.addPage(p));
     } catch (e) {
       const page = akte.addPage([PAGE_W, PAGE_H]);
-      page.drawText(`Fehler beim Einfügen des Tagesprotokolls ${day}`, { x: 60, y: PAGE_H - 90, size: 18, font: fontBold });
+      page.drawText(`Fehler beim Einfügen des Tagesprotokolls ${info.day}`, { x: 60, y: PAGE_H - 90, size: 18, font: fontBold });
       page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 130, size: 12, font, maxWidth: PAGE_W - 120 });
     }
   }
 
-  // Seitenzahlen
+  // Abschlussseite / Gesamtübersicht
+  {
+    const page = akte.addPage([PAGE_W, PAGE_H]);
+    page.drawText("Gesamtübersicht", { x: 60, y: PAGE_H - 90, size: 32, font: fontBold });
+    drawRule(page, PAGE_H - 110, 0.82);
+    page.drawText(title, { x: 60, y: PAGE_H - 150, size: 20, font: fontBold, maxWidth: PAGE_W - 120 });
+
+    const rows = [
+      ["Bautage", String(dayInfos.length)],
+      ["Einträge", String(totalStats.items)],
+      ["Fotos", String(totalStats.images)],
+      ["Dokumente/PDF", String(totalStats.pdfs)],
+      ["Audio/Transkripte", String(totalStats.audio)],
+      ["Erste Dokumentation", shortDateDE(dayInfos[0].day)],
+      ["Letzte Dokumentation", shortDateDE(dayInfos[dayInfos.length - 1].day)],
+    ];
+
+    let y = PAGE_H - 210;
+    for (const [k, v] of rows) {
+      page.drawText(k, { x: 80, y, size: 15, font, color: rgb(0.25,0.25,0.25) });
+      page.drawText(v, { x: 330, y, size: 15, font: fontBold });
+      y -= 30;
+    }
+
+    page.drawText("Ende der Baustellenakte", { x: 60, y: 90, size: 14, font, color: rgb(0.35,0.35,0.35) });
+    drawLogo(page);
+  }
+
+  // Kopf-/Fußzeilen und Seitenzahlen
   const pages = akte.getPages();
   const total = pages.length;
   for (let i = 0; i < total; i++) {
     const p = pages[i];
-    p.drawText(`#${jobId} | ${meta.name || "Baustellenakte"}`, {
+    p.drawText(`Krista Baustellenakte  |  #${jobId}  |  ${meta.name || "ohne Name"}`, {
       x: 60,
       y: PAGE_H - 35,
       size: 9,
       font,
       color: rgb(0.25, 0.25, 0.25),
-      maxWidth: PAGE_W - 220,
+      maxWidth: PAGE_W - 245,
     });
+    p.drawLine({ start: { x: 60, y: PAGE_H - 43 }, end: { x: PAGE_W - 60, y: PAGE_H - 43 }, thickness: 0.5, color: rgb(0.9,0.9,0.9) });
     p.drawText(`Seite ${i + 1} / ${total}`, {
       x: PAGE_W - 170,
       y: 25,
@@ -939,7 +1060,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
   const bytes = await akte.save();
   await ensureDir(path.dirname(outPdfPath));
   await fsp.writeFile(outPdfPath, bytes);
-  return { pages: total, bytes: bytes.length, days: days.length };
+  return { pages: total, bytes: bytes.length, days: dayInfos.length, stats: totalStats, summaryStartPage };
 }
 
 async function akteDownloadName(jobId) {
@@ -1806,9 +1927,7 @@ app.get("/admin/akte/:jobId", async (req, res) => {
     if (!fs.existsSync(jobDir)) return res.status(404).send("Job not found");
 
     const pdfPath = path.join(jobDir, `Baustellenakte_${jobId}.pdf`);
-    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
-      await buildAkteForJob(jobId, pdfPath);
-    }
+    await buildAkteForJob(jobId, pdfPath);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${await akteDownloadName(jobId)}"`);
@@ -1830,9 +1949,7 @@ app.get("/admin/download-akte/:jobId", async (req, res) => {
     if (!fs.existsSync(jobDir)) return res.status(404).send("Job not found");
 
     const pdfPath = path.join(jobDir, `Baustellenakte_${jobId}.pdf`);
-    if (!fs.existsSync(pdfPath) || String(req.query.rebuild || "") === "1") {
-      await buildAkteForJob(jobId, pdfPath);
-    }
+    await buildAkteForJob(jobId, pdfPath);
 
     res.download(pdfPath, await akteDownloadName(jobId));
   } catch (e) {
