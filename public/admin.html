@@ -14,13 +14,13 @@
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenakte</h1><div class="sub">Version 2.2 – Nummer ändern, Zusammenführen, Suche, Favoriten und Löschen</div></header>
+  <header><h1>Krista Baustellenakte</h1><div class="sub">Version 3.0 – Baustellenakte Etappe 1</div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
       <button id="reload">Aktualisieren</button>
     </div>
-    <div class="hint">PDFs werden weiterhin automatisch erzeugt. Löschen entfernt Daten endgültig vom Server – bitte mit Bedacht verwenden.</div>
+    <div class="hint">Neu: Pro Baustelle kann jetzt zusätzlich eine Gesamtakte erzeugt werden. Tagesprotokolle bleiben unverändert.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
   <footer>Krista Baustellenprotokoll</footer>
@@ -64,6 +64,8 @@ function render(){
       </div>
       <p class="actions">
         <button class="secondary" onclick="toggleDays('${esc(j.jobId)}', this)">Tage anzeigen</button>
+        <a class="action" target="_blank" href="${tokenJoin('/admin/akte/' + encodeURIComponent(j.jobId))}">📘 Akte öffnen</a>
+        <a class="action secondary" href="${tokenJoin('/admin/download-akte/' + encodeURIComponent(j.jobId))}">Akte Download</a>
         <button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button>
         <button class="danger" onclick="deleteJob('${esc(j.jobId)}')">Baustelle löschen</button>
       </p>
