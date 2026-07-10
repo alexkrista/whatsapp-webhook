@@ -1962,6 +1962,109 @@ app.get("/admin/download-akte/:jobId", async (req, res) => {
 app.get("/api/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
 app.get("/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
 
+
+// ===================== Tageserfassung / Regie 3.2.0 =====================
+function regiePathForDay(jobId, day) {
+  return path.join(resolveExistingDayDir(jobId, day), "regie.json");
+}
+
+function emptyRegie(jobId, day) {
+  const now = new Date().toISOString();
+  return {
+    version: "3.2.0",
+    jobId: String(jobId),
+    day: String(day),
+    status: "Entwurf",
+    employees: [],
+    customerText: "",
+    internalNote: "",
+    materials: [],
+    specialMaterial: "",
+    materialTomorrow: { needed: false, text: "" },
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function cleanEmployee(e) {
+  const totalHours = Number(e?.totalHours || 0);
+  const regieHours = Math.min(Number(e?.regieHours || 0), totalHours || Number(e?.regieHours || 0));
+  return {
+    name: String(e?.name || "").trim().slice(0, 100),
+    from: String(e?.from || "").trim().slice(0, 5),
+    to: String(e?.to || "").trim().slice(0, 5),
+    breakMinutes: Math.max(0, Number(e?.breakMinutes || 0)),
+    totalHours: Math.max(0, totalHours),
+    regieHours: Math.max(0, regieHours),
+    regieDescription: String(e?.regieDescription || "").trim().slice(0, 1000)
+  };
+}
+
+function cleanMaterial(m) {
+  return {
+    name: String(m?.name || "").trim().slice(0, 180),
+    quantity: String(m?.quantity || "").trim().slice(0, 40),
+    unit: String(m?.unit || "").trim().slice(0, 40)
+  };
+}
+
+app.get("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+    const p = regiePathForDay(jobId, day);
+    if (!fs.existsSync(p)) return res.json({ ok: true, exists: false, regie: emptyRegie(jobId, day) });
+    const regie = JSON.parse(await fsp.readFile(p, "utf8"));
+    return res.json({ ok: true, exists: true, regie });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    const day = String(req.params.day);
+    if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
+    const dayDir = resolveExistingDayDir(jobId, day);
+    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+
+    const p = regiePathForDay(jobId, day);
+    let old = emptyRegie(jobId, day);
+    if (fs.existsSync(p)) {
+      try { old = JSON.parse(await fsp.readFile(p, "utf8")); } catch {}
+    }
+    const now = new Date().toISOString();
+    const body = req.body || {};
+    const regie = {
+      version: "3.2.0",
+      jobId,
+      day,
+      status: ["Entwurf", "Geprüft", "Freigegeben", "Abgerechnet"].includes(body.status) ? body.status : "Entwurf",
+      employees: Array.isArray(body.employees) ? body.employees.map(cleanEmployee).filter(e => e.name) : [],
+      customerText: String(body.customerText || "").trim().slice(0, 12000),
+      internalNote: String(body.internalNote || "").trim().slice(0, 12000),
+      materials: Array.isArray(body.materials) ? body.materials.map(cleanMaterial).filter(m => m.name) : [],
+      specialMaterial: String(body.specialMaterial || "").trim().slice(0, 4000),
+      materialTomorrow: {
+        needed: !!body.materialTomorrow?.needed,
+        text: String(body.materialTomorrow?.text || "").trim().slice(0, 4000)
+      },
+      createdAt: old.createdAt || now,
+      updatedAt: now
+    };
+    await fsp.writeFile(p, JSON.stringify(regie, null, 2), "utf8");
+    res.json({ ok: true, regie });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 // ===================== 404 handler (LAST) =====================
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
