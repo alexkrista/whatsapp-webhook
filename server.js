@@ -50,6 +50,12 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
+// ===================== Version =====================
+const APP_VERSION = "3.2.0b";
+const APP_BUILD = "0002";
+const APP_STATUS = "Stable";
+const APP_BUILD_DATE = "2026-07-10";
+
 // Static files for Admin UI
 app.use("/public", express.static("public"));
 
@@ -1119,6 +1125,10 @@ app.get("/health", (req, res) =>
     text_model: OPENAI_TEXT_MODEL,
     logo_path: LOGO_PATH,
     public_base_url: PUBLIC_BASE_URL,
+    version: APP_VERSION,
+    build: APP_BUILD,
+    status: APP_STATUS,
+    build_date: APP_BUILD_DATE,
   })
 );
 
@@ -1963,6 +1973,125 @@ app.get("/api/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs
 app.get("/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`));
 
 
+
+// ===================== Version / Stammdaten 3.2.0b =====================
+app.get("/admin/api/version", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ ok: true, version: APP_VERSION, build: APP_BUILD, status: APP_STATUS, date: APP_BUILD_DATE });
+});
+
+function systemDataDir() {
+  return path.join(DATA_DIR, "_system");
+}
+function employeesPath() {
+  return path.join(systemDataDir(), "employees.json");
+}
+function employeeIdFromName(name) {
+  const base = String(name || "employee")
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "employee";
+  return `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+function cleanEmployeeMaster(e, existingId = "") {
+  const name = String(e?.name || "").trim().slice(0, 120);
+  return {
+    id: String(e?.id || existingId || employeeIdFromName(name)).trim().slice(0, 80),
+    name,
+    shortCode: String(e?.shortCode || "").trim().slice(0, 20),
+    phone: String(e?.phone || "").trim().slice(0, 40),
+    role: String(e?.role || "Maler").trim().slice(0, 80),
+    team: String(e?.team || "").trim().slice(0, 80),
+    specialties: Array.isArray(e?.specialties)
+      ? e.specialties.map(x => String(x || "").trim()).filter(Boolean).slice(0, 30)
+      : String(e?.specialties || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 30),
+    foreman: !!e?.foreman,
+    canManageTeam: !!e?.canManageTeam,
+    active: e?.active !== false,
+    standardStart: String(e?.standardStart || "07:00").trim().slice(0, 5),
+    standardEnd: String(e?.standardEnd || "16:30").trim().slice(0, 5),
+    standardBreakMinutes: Math.max(0, Number(e?.standardBreakMinutes ?? 30)),
+    updatedAt: new Date().toISOString()
+  };
+}
+async function readEmployees() {
+  const p = employeesPath();
+  if (!fs.existsSync(p)) return [];
+  try {
+    const data = JSON.parse(await fsp.readFile(p, "utf8"));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+async function writeEmployees(items) {
+  await ensureDir(systemDataDir());
+  const sorted = items.slice().sort((a, b) => {
+    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""), "de");
+  });
+  await fsp.writeFile(employeesPath(), JSON.stringify(sorted, null, 2), "utf8");
+  return sorted;
+}
+
+app.get("/admin/api/employees", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const employees = await readEmployees();
+    res.json({ ok: true, employees });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.post("/admin/api/employees", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const employees = await readEmployees();
+    const employee = cleanEmployeeMaster(req.body || {});
+    if (!employee.name) return res.status(400).json({ ok: false, error: "Name fehlt" });
+    employees.push(employee);
+    await writeEmployees(employees);
+    res.json({ ok: true, employee });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.put("/admin/api/employees/:employeeId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const id = String(req.params.employeeId || "");
+    const employees = await readEmployees();
+    const idx = employees.findIndex(e => String(e.id) === id);
+    if (idx < 0) return res.status(404).json({ ok: false, error: "Mitarbeiter nicht gefunden" });
+    const createdAt = employees[idx].createdAt || null;
+    const employee = cleanEmployeeMaster({ ...employees[idx], ...(req.body || {}), id }, id);
+    if (!employee.name) return res.status(400).json({ ok: false, error: "Name fehlt" });
+    if (createdAt) employee.createdAt = createdAt;
+    employees[idx] = employee;
+    await writeEmployees(employees);
+    res.json({ ok: true, employee });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.delete("/admin/api/employees/:employeeId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const id = String(req.params.employeeId || "");
+    const employees = await readEmployees();
+    const idx = employees.findIndex(e => String(e.id) === id);
+    if (idx < 0) return res.status(404).json({ ok: false, error: "Mitarbeiter nicht gefunden" });
+    // Sicherer als endgültiges Löschen: deaktivieren, damit alte Tageserfassungen nachvollziehbar bleiben.
+    employees[idx] = { ...employees[idx], active: false, updatedAt: new Date().toISOString() };
+    await writeEmployees(employees);
+    res.json({ ok: true, employee: employees[idx] });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 // ===================== Tageserfassung / Regie 3.2.0 =====================
 function regiePathForDay(jobId, day) {
   return path.join(resolveExistingDayDir(jobId, day), "regie.json");
@@ -1990,6 +2119,7 @@ function cleanEmployee(e) {
   const totalHours = Number(e?.totalHours || 0);
   const regieHours = Math.min(Number(e?.regieHours || 0), totalHours || Number(e?.regieHours || 0));
   return {
+    employeeId: String(e?.employeeId || "").trim().slice(0, 80),
     name: String(e?.name || "").trim().slice(0, 100),
     from: String(e?.from || "").trim().slice(0, 5),
     to: String(e?.to || "").trim().slice(0, 5),
@@ -2069,7 +2199,7 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
 // ===================== Start =====================
-console.log("Starting…");
+console.log(`Starting Krista ${APP_VERSION} Build ${APP_BUILD} (${APP_STATUS})…`);
 console.log("DATA_DIR=", DATA_DIR);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
