@@ -19,11 +19,11 @@
 
     .employee-modal{position:fixed;inset:5vh 5vw;background:#fff;border-radius:18px;box-shadow:0 16px 60px rgba(0,0,0,.3);z-index:61;display:none;overflow:auto}
     .employee-modal-head{position:sticky;top:0;background:#111;color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;z-index:3}
-    .employee-modal-body{padding:20px}.employee-table{width:100%;border-collapse:collapse}.employee-table th,.employee-table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}.employee-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;background:#f7f7f7;padding:14px;border-radius:14px;margin-bottom:18px}.employee-form input,.employee-form select{min-width:0;width:100%;box-sizing:border-box}.employee-form .full{grid-column:1/-1}.emp-select{min-width:0;width:100%;box-sizing:border-box;padding:10px 8px;border-radius:10px;border:1px solid #ccc;background:#fff}
+    .employee-modal-body{padding:20px}.employee-table{width:100%;border-collapse:collapse}.employee-table th,.employee-table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}.employee-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;background:#f7f7f7;padding:14px;border-radius:14px;margin-bottom:18px}.employee-form input,.employee-form select{min-width:0;width:100%;box-sizing:border-box}.employee-form .full{grid-column:1/-1}.employee-flags{grid-column:1/-1;display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:#fff;padding:10px 12px;border-radius:10px;border:1px solid #e3e3e3}.employee-flags .checkline{margin:0;font-weight:600}.model-summary{grid-column:1/-1;background:#fff;border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;color:#444;line-height:1.5}.emp-select{min-width:0;width:100%;box-sizing:border-box;padding:10px 8px;border-radius:10px;border:1px solid #ccc;background:#fff}
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.2.0b</span> · Build <span id="appBuild">0002</span> · <span id="appStatus">Stable</span></div></header>
+  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.2.0c</span> · Build <span id="appBuild">0003</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
@@ -63,25 +63,27 @@
         <div><label>Telefon/WhatsApp</label><input id="empPhone" placeholder="+43 …"></div>
         <div><label>Rolle</label><input id="empRole" value="Maler" placeholder="Maler, Lehrling, Büro"></div>
         <div><label>Team</label><input id="empTeam" placeholder="Team 1"></div>
-        <div><label>Standard von</label><input id="empStdStart" type="time" value="07:00"></div>
-        <div><label>Standard bis</label><input id="empStdEnd" type="time" value="16:30"></div>
-        <div><label>Pause Min.</label><input id="empStdBreak" type="number" value="30" min="0"></div>
+        <div><label>Arbeitszeitmodell</label><select id="empWorktimeModel" class="wide"></select></div>
         <div class="full"><label>Schwerpunkte/Qualifikationen (mit Beistrich)</label><input id="empSpecialties" placeholder="Fugenlos, Tapete, Airless, Hebebühne"></div>
-        <label class="checkline"><input id="empForeman" type="checkbox"> Vorarbeiter</label>
-        <label class="checkline"><input id="empCanManage" type="checkbox"> darf Team erfassen</label>
-        <label class="checkline"><input id="empActive" type="checkbox" checked> aktiv</label>
+        <div id="worktimeModelSummary" class="model-summary">Arbeitszeitmodell wird geladen …</div>
+        <div class="employee-flags">
+          <label class="checkline"><input id="empForeman" type="checkbox"> Vorarbeiter</label>
+          <label class="checkline"><input id="empCanManage" type="checkbox"> darf Team erfassen</label>
+          <label class="checkline"><input id="empActive" type="checkbox" checked> Aktiv</label>
+        </div>
         <div class="full actions"><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button><button class="secondary" onclick="resetEmployeeForm()">Neu/Zurücksetzen</button></div>
       </div>
       <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
     </div>
   </section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.2.0b</span> · Build <span id="footerBuild">0002</span></footer>
+  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.2.0c</span> · Build <span id="footerBuild">0003</span></footer>
 
 <script>
 const qs = new URLSearchParams(location.search);
 const token = qs.get('token') || '';
 let jobs = [];
 let employeeMasters = [];
+let worktimeModels = [];
 function tokenJoin(url){ return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''); }
 async function api(url, opts={}){
   const r = await fetch(tokenJoin(url), opts);
@@ -235,6 +237,31 @@ function calcHours(row){
   let mins=(th*60+tm)-(fh*60+fm)-pause; if(mins<0) mins+=1440;
   row.querySelector('.emp-total').value=Math.max(0,mins/60).toFixed(2);
 }
+function worktimeModelById(id){ return worktimeModels.find(m=>String(m.id)===String(id)) || worktimeModels[0] || null; }
+function worktimeRuleForDate(modelId,dateStr){
+  const model=worktimeModelById(modelId); if(!model||!dateStr)return null;
+  const d=new Date(String(dateStr)+'T12:00:00'); if(Number.isNaN(d.getTime()))return null;
+  const month=d.getMonth()+1, weekday=d.getDay();
+  const season=(model.seasons||[]).find(s=>(s.months||[]).includes(month));
+  const rule=season?.weekdays?.[String(weekday)] || {free:true,from:'',to:'',lunchBreakMinutes:0,otherBreakMinutes:0,targetHours:0};
+  return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',breakMinutes:Number(rule.lunchBreakMinutes||0)+Number(rule.otherBreakMinutes||0),targetHours:Number(rule.targetHours||0)};
+}
+function renderWorktimeModelSelect(selected='krista-standard'){
+  const el=document.getElementById('empWorktimeModel'); if(!el)return;
+  el.innerHTML=worktimeModels.map(m=>`<option value="${h(m.id)}" ${String(m.id)===String(selected)?'selected':''}>${h(m.name)}</option>`).join('');
+  updateWorktimeModelSummary();
+}
+function updateWorktimeModelSummary(){
+  const model=worktimeModelById(document.getElementById('empWorktimeModel')?.value);
+  const box=document.getElementById('worktimeModelSummary'); if(!box||!model)return;
+  box.innerHTML=`<strong>${h(model.name)}</strong><br>Jänner–März: Mo–Do 07:00–17:00, 45 Min. Pause, Freitag frei.<br>April–Dezember: Mo–Do 07:00–17:00, 45 Min. Pause; Freitag 07:00–14:15, 15 Min. Pause.`;
+}
+async function loadWorktimeModels(){
+  const data=await api('/admin/api/worktime-models'); worktimeModels=data.models||[];
+  renderWorktimeModelSelect(document.getElementById('empWorktimeModel')?.value||'krista-standard');
+  return worktimeModels;
+}
+
 function employeeOptions(selectedId='', selectedName=''){
   const active=employeeMasters.filter(e=>e.active!==false);
   let html='<option value="">– auswählen –</option>';
@@ -250,9 +277,9 @@ function addEmployee(e={}){
   const master=employeeMasters.find(x=>String(x.id)===String(e.employeeId)) || employeeMasters.find(x=>x.name===e.name);
   const div=document.createElement('div'); div.className='row';
   div.innerHTML=`<div><label>Mitarbeiter</label><select class="emp-master emp-select">${employeeOptions(e.employeeId,e.name)}</select><input class="emp-name" type="hidden" value="${h(e.name)}"></div>
-  <div><label>Von</label><input type="time" class="emp-from" value="${h(e.from || master?.standardStart || '')}"></div>
-  <div><label>Bis</label><input type="time" class="emp-to" value="${h(e.to || master?.standardEnd || '')}"></div>
-  <div><label>Pause Min.</label><input type="number" min="0" class="emp-break" value="${Number(e.breakMinutes ?? master?.standardBreakMinutes ?? 0)}"></div>
+  <div><label>Von</label><input type="time" class="emp-from" value="${h(e.from || worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.from || '')}"></div>
+  <div><label>Bis</label><input type="time" class="emp-to" value="${h(e.to || worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.to || '')}"></div>
+  <div><label>Pause Min.</label><input type="number" min="0" class="emp-break" value="${Number(e.breakMinutes ?? worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.breakMinutes ?? 0)}"></div>
   <div><label>Gesamt Std.</label><input type="number" step="0.25" min="0" class="emp-total" value="${Number(e.totalHours||0)}"></div>
   <div><label>Regie Std.</label><input type="number" step="0.25" min="0" class="emp-regie" value="${Number(e.regieHours||0)}"></div>
   <button class="danger" title="Entfernen" onclick="this.parentElement.remove()">×</button>
@@ -262,9 +289,11 @@ function addEmployee(e={}){
     const m=employeeMasters.find(x=>String(x.id)===String(select.value));
     div.querySelector('.emp-name').value=m?.name||'';
     if(m){
-      if(!div.querySelector('.emp-from').value) div.querySelector('.emp-from').value=m.standardStart||'';
-      if(!div.querySelector('.emp-to').value) div.querySelector('.emp-to').value=m.standardEnd||'';
-      if(!div.querySelector('.emp-break').value) div.querySelector('.emp-break').value=Number(m.standardBreakMinutes||0);
+      const rule=worktimeRuleForDate(m.worktimeModelId,currentRegie.day);
+      div.querySelector('.emp-from').value=rule?.free?'':(rule?.from||'');
+      div.querySelector('.emp-to').value=rule?.free?'':(rule?.to||'');
+      div.querySelector('.emp-break').value=Number(rule?.breakMinutes||0);
+      div.querySelector('.emp-total').value=Number(rule?.targetHours||0).toFixed(2);
       calcHours(div);
     }
   });
@@ -280,6 +309,7 @@ function addMaterial(m={}){
 }
 function toggleTomorrow(){document.getElementById('materialTomorrowText').style.display=document.getElementById('materialTomorrowNeeded').checked?'block':'none';}
 async function openRegie(jobId,day){
+  if(!worktimeModels.length) await loadWorktimeModels();
   if(!employeeMasters.length) await loadEmployeeMasters();
   currentRegie={jobId,day}; document.getElementById('regieTitle').textContent=`#${jobId} · ${day}`;
   document.getElementById('drawerBackdrop').style.display='block'; document.getElementById('regieDrawer').style.display='block';
@@ -309,11 +339,11 @@ async function saveRegie(){
 async function loadVersion(){
   try{
     const v=await api('/admin/api/version');
-    document.getElementById('appVersion').textContent=v.version||'3.2.0b';
-    document.getElementById('appBuild').textContent=v.build||'0002';
+    document.getElementById('appVersion').textContent=v.version||'3.2.0c';
+    document.getElementById('appBuild').textContent=v.build||'0003';
     document.getElementById('appStatus').textContent=v.status||'Stable';
-    document.getElementById('footerVersion').textContent=v.version||'3.2.0b';
-    document.getElementById('footerBuild').textContent=v.build||'0002';
+    document.getElementById('footerVersion').textContent=v.version||'3.2.0c';
+    document.getElementById('footerBuild').textContent=v.build||'0003';
   }catch{}
 }
 async function loadEmployeeMasters(){
@@ -326,15 +356,15 @@ function openEmployees(){
 }
 function closeEmployees(){document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
 function resetEmployeeForm(){
-  document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; document.getElementById('empStdStart').value='07:00'; document.getElementById('empStdEnd').value='16:30'; document.getElementById('empStdBreak').value='30'; document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true;
+  document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; renderWorktimeModelSelect('krista-standard'); document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true;
 }
 function editEmployeeMaster(id){
   const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
-  document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; document.getElementById('empStdStart').value=e.standardStart||'07:00'; document.getElementById('empStdEnd').value=e.standardEnd||'16:30'; document.getElementById('empStdBreak').value=Number(e.standardBreakMinutes||0); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('employeeModal').scrollTo({top:0,behavior:'smooth'});
+  document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; renderWorktimeModelSelect(e.worktimeModelId||'krista-standard'); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('employeeModal').scrollTo({top:0,behavior:'smooth'});
 }
 async function saveEmployeeMaster(){
   const id=document.getElementById('empEditId').value;
-  const body={name:document.getElementById('empName').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,standardStart:document.getElementById('empStdStart').value,standardEnd:document.getElementById('empStdEnd').value,standardBreakMinutes:Number(document.getElementById('empStdBreak').value||0),specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked};
+  const body={name:document.getElementById('empName').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,worktimeModelId:document.getElementById('empWorktimeModel').value,specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked};
   if(!body.name.trim()){alert('Bitte einen Namen eingeben.');return;}
   try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetEmployeeForm();await loadEmployeesView();}
   catch(e){alert('Speichern fehlgeschlagen: '+e.message);}
@@ -349,14 +379,15 @@ async function loadEmployeesView(){
     await loadEmployeeMasters();
     if(!employeeMasters.length){box.textContent='Noch keine Mitarbeiter angelegt.';return;}
     box.className='';
-    box.innerHTML=`<table class="employee-table"><thead><tr><th>Name</th><th>Rolle/Team</th><th>Qualifikationen</th><th>Status</th><th></th></tr></thead><tbody>${employeeMasters.map(e=>`<tr><td><strong>${h(e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span></td><td>${h((e.specialties||[]).join(', '))}${e.foreman?'<br><span class="pill">Vorarbeiter</span>':''}${e.canManageTeam?'<span class="pill">Team erfassen</span>':''}</td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML=`<table class="employee-table"><thead><tr><th>Name</th><th>Rolle/Team</th><th>Qualifikationen</th><th>Status</th><th></th></tr></thead><tbody>${employeeMasters.map(e=>`<tr><td><strong>${h(e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${h((e.specialties||[]).join(', '))}${e.foreman?'<br><span class="pill">Vorarbeiter</span>':''}${e.canManageTeam?'<span class="pill">Team erfassen</span>':''}</td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`).join('')}</tbody></table>`;
   }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
 }
 
 document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
+document.getElementById('empWorktimeModel').addEventListener('change',updateWorktimeModelSummary);
 loadVersion();
-loadEmployeeMasters().catch(()=>{});
+loadWorktimeModels().then(()=>loadEmployeeMasters()).catch(()=>{});
 loadJobs();
 </script>
 </body>
