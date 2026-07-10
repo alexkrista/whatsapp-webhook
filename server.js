@@ -51,8 +51,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.2.0b";
-const APP_BUILD = "0002";
+const APP_VERSION = "3.2.0c";
+const APP_BUILD = "0003";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-10";
 
@@ -1974,7 +1974,7 @@ app.get("/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${re
 
 
 
-// ===================== Version / Stammdaten 3.2.0b =====================
+// ===================== Version / Stammdaten 3.2.0c =====================
 app.get("/admin/api/version", (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ ok: true, version: APP_VERSION, build: APP_BUILD, status: APP_STATUS, date: APP_BUILD_DATE });
@@ -1985,6 +1985,67 @@ function systemDataDir() {
 }
 function employeesPath() {
   return path.join(systemDataDir(), "employees.json");
+}
+function worktimeModelsPath() {
+  return path.join(systemDataDir(), "worktime-models.json");
+}
+const DEFAULT_WORKTIME_MODELS = [
+  {
+    id: "krista-standard",
+    name: "Krista Standard",
+    active: true,
+    description: "Jänner bis März Freitag frei; April bis Dezember Freitag 07:00–14:15. Montag bis Donnerstag ganzjährig 07:00–17:00.",
+    seasons: [
+      {
+        id: "winter", name: "Winter", months: [1,2,3],
+        weekdays: {
+          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "5": { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0 }
+        }
+      },
+      {
+        id: "april-december", name: "April bis Dezember", months: [4,5,6,7,8,9,10,11,12],
+        weekdays: {
+          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
+          "5": { from: "07:00", to: "14:15", lunchBreakMinutes: 0, otherBreakMinutes: 15, targetHours: 7.0 }
+        }
+      }
+    ]
+  }
+];
+async function readWorktimeModels() {
+  const p = worktimeModelsPath();
+  if (!fs.existsSync(p)) {
+    await ensureDir(systemDataDir());
+    await fsp.writeFile(p, JSON.stringify(DEFAULT_WORKTIME_MODELS, null, 2), "utf8");
+    return DEFAULT_WORKTIME_MODELS;
+  }
+  try {
+    const data = JSON.parse(await fsp.readFile(p, "utf8"));
+    return Array.isArray(data) && data.length ? data : DEFAULT_WORKTIME_MODELS;
+  } catch {
+    return DEFAULT_WORKTIME_MODELS;
+  }
+}
+function scheduleForDate(model, dateStr) {
+  const d = new Date(String(dateStr) + "T12:00:00");
+  if (Number.isNaN(d.getTime())) return null;
+  const month = d.getMonth() + 1;
+  const weekday = d.getDay(); // 0 So, 1 Mo ... 5 Fr
+  const season = (model?.seasons || []).find(s => (s.months || []).includes(month));
+  const rule = season?.weekdays?.[String(weekday)] || { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0 };
+  return {
+    modelId: model?.id || "", modelName: model?.name || "", seasonId: season?.id || "", seasonName: season?.name || "",
+    weekday, free: !!rule.free, from: rule.from || "", to: rule.to || "",
+    lunchBreakMinutes: Number(rule.lunchBreakMinutes || 0), otherBreakMinutes: Number(rule.otherBreakMinutes || 0),
+    breakMinutes: Number(rule.lunchBreakMinutes || 0) + Number(rule.otherBreakMinutes || 0), targetHours: Number(rule.targetHours || 0)
+  };
 }
 function employeeIdFromName(name) {
   const base = String(name || "employee")
@@ -2007,9 +2068,11 @@ function cleanEmployeeMaster(e, existingId = "") {
     foreman: !!e?.foreman,
     canManageTeam: !!e?.canManageTeam,
     active: e?.active !== false,
-    standardStart: String(e?.standardStart || "07:00").trim().slice(0, 5),
-    standardEnd: String(e?.standardEnd || "16:30").trim().slice(0, 5),
-    standardBreakMinutes: Math.max(0, Number(e?.standardBreakMinutes ?? 30)),
+    worktimeModelId: String(e?.worktimeModelId || "krista-standard").trim().slice(0, 80),
+    // Legacy-Felder bleiben lesbar, werden aber nicht mehr als Stammdaten bearbeitet.
+    standardStart: String(e?.standardStart || "").trim().slice(0, 5),
+    standardEnd: String(e?.standardEnd || "").trim().slice(0, 5),
+    standardBreakMinutes: Math.max(0, Number(e?.standardBreakMinutes ?? 0)),
     updatedAt: new Date().toISOString()
   };
 }
@@ -2032,6 +2095,29 @@ async function writeEmployees(items) {
   await fsp.writeFile(employeesPath(), JSON.stringify(sorted, null, 2), "utf8");
   return sorted;
 }
+
+app.get("/admin/api/worktime-models", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const models = await readWorktimeModels();
+    res.json({ ok: true, models });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.get("/admin/api/worktime-models/:modelId/schedule", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const date = String(req.query.date || todayISO());
+    const models = await readWorktimeModels();
+    const model = models.find(m => String(m.id) === String(req.params.modelId));
+    if (!model) return res.status(404).json({ ok: false, error: "Arbeitszeitmodell nicht gefunden" });
+    res.json({ ok: true, schedule: scheduleForDate(model, date) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
 app.get("/admin/api/employees", async (req, res) => {
   if (!requireAdmin(req, res)) return;
