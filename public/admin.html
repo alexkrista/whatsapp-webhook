@@ -11,6 +11,11 @@
     input,textarea,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}textarea{width:100%;min-height:80px;box-sizing:border-box}
     button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button.danger{background:#9b1c1c;border-color:#9b1c1c}button.ghost{background:#eee;color:#111;border-color:#eee}button:disabled{opacity:.55;cursor:wait}
     .hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.jobline{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}.job{font-weight:800;font-size:22px}.name{font-size:16px;margin-top:3px;color:#333}.fav{font-size:24px;line-height:1;background:transparent;color:#d19500;border:0;padding:2px 4px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:12px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:750}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}.edit{display:none;margin-top:12px;padding-top:12px;border-top:1px solid #eee}.edit label{display:block;color:#555;font-size:13px;margin:10px 0 4px}.small{font-size:12px;color:#777}.pill{display:inline-block;background:#eee;border-radius:999px;padding:4px 8px;margin-top:6px}footer{color:#777;text-align:center;padding:30px;font-size:13px}
+
+    .drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);display:none;z-index:40}
+    .drawer{position:fixed;right:0;top:0;bottom:0;width:min(760px,96vw);background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.2);z-index:41;display:none;overflow:auto}
+    .drawer-head{position:sticky;top:0;background:#111;color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;z-index:2}
+    .drawer-body{padding:20px}.section{border:1px solid #e4e4e4;border-radius:14px;padding:14px;margin:14px 0}.section h3{margin:0 0 12px}.row{display:grid;grid-template-columns:1.5fr repeat(5,1fr) auto;gap:8px;align-items:end;margin-bottom:9px}.row input{min-width:0;width:100%;box-sizing:border-box}.row label{font-size:11px;color:#666}.material-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin-bottom:8px}.wide{width:100%;box-sizing:border-box}.drawer textarea{min-height:110px}.closebtn{background:transparent;border:0;font-size:24px;padding:0 5px}.savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid #ddd;padding:14px 20px;display:flex;gap:10px;justify-content:flex-end}.statusmsg{margin-right:auto;color:#2d6a2d;padding:9px}.checkline{display:flex;align-items:center;gap:8px;margin:8px 0}.checkline input{min-width:auto;flex:none}
   </style>
 </head>
 <body>
@@ -23,6 +28,25 @@
     <div class="hint">Neu: Pro Baustelle kann jetzt zusätzlich eine Gesamtakte erzeugt werden. Tagesprotokolle bleiben unverändert.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop" onclick="closeRegie()"></div>
+  <aside id="regieDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head"><div><strong>📝 Tageserfassung</strong><div id="regieTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeRegie()">×</button></div>
+    <div class="drawer-body">
+      <label>Status</label>
+      <select id="regieStatus" class="wide"><option>Entwurf</option><option>Geprüft</option><option>Freigegeben</option><option>Abgerechnet</option></select>
+
+      <div class="section"><h3>👷 Mitarbeiter und Zeiten</h3><div id="employeeRows"></div><button class="secondary" onclick="addEmployee()">+ Mitarbeiter</button><div class="small">Gesamtzeit und Regiezeit werden pro Mitarbeiter getrennt erfasst.</div></div>
+
+      <div class="section"><h3>📝 Leistungsbeschreibung für den Kunden</h3><textarea id="customerText" placeholder="Welche Arbeiten wurden ausgeführt?"></textarea></div>
+      <div class="section"><h3>🔒 Interne Notiz</h3><textarea id="internalNote" placeholder="Nur intern sichtbar"></textarea></div>
+
+      <div class="section"><h3>📦 Material</h3><div id="materialRows"></div><button class="secondary" onclick="addMaterial()">+ Material</button><label>Sondermaterial</label><textarea id="specialMaterial" placeholder="Material, das noch nicht in der Materialliste enthalten ist"></textarea></div>
+
+      <div class="section"><h3>📦 Material für morgen</h3><label class="checkline"><input type="checkbox" id="materialTomorrowNeeded" onchange="toggleTomorrow()"> Ja, Material wird morgen benötigt</label><textarea id="materialTomorrowText" placeholder="Was und wie viel?" style="display:none"></textarea></div>
+    </div>
+    <div class="savebar"><span id="regieMsg" class="statusmsg"></span><button class="secondary" onclick="closeRegie()">Schließen</button><button onclick="saveRegie()">💾 Speichern</button></div>
+  </aside>
   <footer>Krista Baustellenprotokoll</footer>
 
 <script>
@@ -149,6 +173,7 @@ async function toggleDays(jobId, btn){
           <div class="actions">
             <a class="action" target="_blank" href="${pdfUrl}">PDF öffnen</a>
             <a class="action secondary" href="${dlUrl}">Download</a>
+            <button class="secondary" onclick="openRegie('${esc(jobId)}','${esc(day)}')">📝 Tageserfassung</button>
             <button class="danger" onclick="deleteDay('${esc(jobId)}','${esc(day)}')">Tag löschen</button>
           </div>
         </div>`;
@@ -170,6 +195,63 @@ async function deleteJob(jobId){
   await api(`/admin/api/job/${encodeURIComponent(jobId)}`, {method:'DELETE'});
   await loadJobs();
 }
+
+let currentRegie = {jobId:null, day:null};
+function h(v){ return esc(v ?? ''); }
+function calcHours(row){
+  const from=row.querySelector('.emp-from').value, to=row.querySelector('.emp-to').value;
+  const pause=Number(row.querySelector('.emp-break').value||0);
+  if(!from||!to) return;
+  const [fh,fm]=from.split(':').map(Number), [th,tm]=to.split(':').map(Number);
+  let mins=(th*60+tm)-(fh*60+fm)-pause; if(mins<0) mins+=1440;
+  row.querySelector('.emp-total').value=Math.max(0,mins/60).toFixed(2);
+}
+function addEmployee(e={}){
+  const box=document.getElementById('employeeRows');
+  const div=document.createElement('div'); div.className='row';
+  div.innerHTML=`<div><label>Name</label><input class="emp-name" value="${h(e.name)}" placeholder="Mitarbeiter"></div>
+  <div><label>Von</label><input type="time" class="emp-from" value="${h(e.from)}"></div>
+  <div><label>Bis</label><input type="time" class="emp-to" value="${h(e.to)}"></div>
+  <div><label>Pause Min.</label><input type="number" min="0" class="emp-break" value="${Number(e.breakMinutes||0)}"></div>
+  <div><label>Gesamt Std.</label><input type="number" step="0.25" min="0" class="emp-total" value="${Number(e.totalHours||0)}"></div>
+  <div><label>Regie Std.</label><input type="number" step="0.25" min="0" class="emp-regie" value="${Number(e.regieHours||0)}"></div>
+  <button class="danger" title="Entfernen" onclick="this.parentElement.remove()">×</button>
+  <div style="grid-column:1/-1"><label>Regie-Beschreibung optional</label><input class="emp-regie-desc wide" value="${h(e.regieDescription)}" placeholder="Nur falls Regie vorhanden"></div>`;
+  div.querySelectorAll('.emp-from,.emp-to,.emp-break').forEach(x=>x.addEventListener('change',()=>calcHours(div)));
+  box.appendChild(div);
+}
+function addMaterial(m={}){
+  const box=document.getElementById('materialRows');
+  const div=document.createElement('div'); div.className='material-row';
+  div.innerHTML=`<input class="mat-name" value="${h(m.name)}" placeholder="Material"><input class="mat-qty" value="${h(m.quantity)}" placeholder="Menge"><input class="mat-unit" value="${h(m.unit)}" placeholder="Einheit"><button class="danger" onclick="this.parentElement.remove()">×</button>`;
+  box.appendChild(div);
+}
+function toggleTomorrow(){document.getElementById('materialTomorrowText').style.display=document.getElementById('materialTomorrowNeeded').checked?'block':'none';}
+async function openRegie(jobId,day){
+  currentRegie={jobId,day}; document.getElementById('regieTitle').textContent=`#${jobId} · ${day}`;
+  document.getElementById('drawerBackdrop').style.display='block'; document.getElementById('regieDrawer').style.display='block';
+  document.getElementById('regieMsg').textContent='Lade …';
+  try{
+    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}/regie`); const r=data.regie||{};
+    document.getElementById('regieStatus').value=r.status||'Entwurf';
+    document.getElementById('customerText').value=r.customerText||''; document.getElementById('internalNote').value=r.internalNote||'';
+    document.getElementById('specialMaterial').value=r.specialMaterial||'';
+    document.getElementById('materialTomorrowNeeded').checked=!!r.materialTomorrow?.needed; document.getElementById('materialTomorrowText').value=r.materialTomorrow?.text||''; toggleTomorrow();
+    document.getElementById('employeeRows').innerHTML=''; (r.employees||[]).forEach(addEmployee); if(!(r.employees||[]).length) addEmployee();
+    document.getElementById('materialRows').innerHTML=''; (r.materials||[]).forEach(addMaterial); if(!(r.materials||[]).length) addMaterial();
+    document.getElementById('regieMsg').textContent=data.exists?'Gespeicherte Erfassung geladen':'Neue Erfassung';
+  }catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
+}
+function closeRegie(){document.getElementById('drawerBackdrop').style.display='none';document.getElementById('regieDrawer').style.display='none';}
+async function saveRegie(){
+  const employees=[...document.querySelectorAll('#employeeRows .row')].map(r=>({name:r.querySelector('.emp-name').value,from:r.querySelector('.emp-from').value,to:r.querySelector('.emp-to').value,breakMinutes:Number(r.querySelector('.emp-break').value||0),totalHours:Number(r.querySelector('.emp-total').value||0),regieHours:Number(r.querySelector('.emp-regie').value||0),regieDescription:r.querySelector('.emp-regie-desc').value})).filter(e=>e.name.trim());
+  const materials=[...document.querySelectorAll('#materialRows .material-row')].map(r=>({name:r.querySelector('.mat-name').value,quantity:r.querySelector('.mat-qty').value,unit:r.querySelector('.mat-unit').value})).filter(m=>m.name.trim());
+  const body={status:document.getElementById('regieStatus').value,employees,customerText:document.getElementById('customerText').value,internalNote:document.getElementById('internalNote').value,materials,specialMaterial:document.getElementById('specialMaterial').value,materialTomorrow:{needed:document.getElementById('materialTomorrowNeeded').checked,text:document.getElementById('materialTomorrowText').value}};
+  document.getElementById('regieMsg').textContent='Speichere …';
+  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent='✅ Gespeichert';}
+  catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
+}
+
 document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
 loadJobs();
