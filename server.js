@@ -52,7 +52,7 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.3.2";
-const APP_BUILD = "0007";
+const APP_BUILD = "0007-R3";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-14";
 
@@ -2079,7 +2079,7 @@ function cleanVehicle(v={}, id="") { return {
   make: String(v.make||"").trim().slice(0,60), model: String(v.model||"").trim().slice(0,60), year: Math.max(0,Number(v.year||0)),
   inspectionUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.inspectionUntil||""))?String(v.inspectionUntil):"",
   insuranceType: ["Haftpflicht","Vollkasko"].includes(String(v.insuranceType||"")) ? String(v.insuranceType) : "", insuranceUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.insuranceUntil||""))?String(v.insuranceUntil):"",
-  leasingRate: Math.max(0,Number(v.leasingRate||0)), kmPerYear: Math.max(0,Number(v.kmPerYear||0)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
+  leasingRate: Math.max(0,Number(v.leasingRate||0)), kmPerYear: Math.max(0,Number(v.kmPerYear||0)), kmRate: Math.max(0,Number(v.kmRate??0.52)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
   registrationImage: String(v.registrationImage||"").startsWith("data:image/") ? String(v.registrationImage).slice(0,1800000) : "",
   updatedAt: new Date().toISOString()
 }; }
@@ -2141,14 +2141,16 @@ async function calculationSummary(year = new Date().getFullYear()) {
   }, 0);
   const vehicles = await readJsonArrayFile(vehiclesPath());
   const vehicleLeasingAnnual = vehicles.reduce((sum, v) => sum + Number(v.leasingRate || 0) * 12, 0);
-  company.overhead.vehicles = vehicleLeasingAnnual;
+  const vehicleMileageAnnual = vehicles.reduce((sum, v) => sum + Number(v.kmPerYear || 0) * Number(v.kmRate ?? 0.52), 0);
+  const vehicleCostsAnnual = vehicleLeasingAnnual + vehicleMileageAnnual;
+  company.overhead.vehicles = vehicleCostsAnnual;
   const overheadTotal = Object.values(company.overhead || {}).reduce((sum, v) => sum + Number(v || 0), 0);
   const overheadRate = productiveHours > 0 ? overheadTotal / productiveHours : 0;
   const averageSalaryCostRate = productiveHours > 0 ? annualSalaryCosts / productiveHours : 0;
   const averageFullCostRate = averageSalaryCostRate + overheadRate;
   const currentBillingRate = averageFullCostRate * (1 + (Number(company.profitMarkupPercent || 0) + Number(company.contingencyPercent || 0)) / 100);
   return {
-    company, year, productiveHours, annualSalaryCosts, vehicleLeasingAnnual, overheadTotal, overheadRate,
+    company, year, productiveHours, annualSalaryCosts, vehicleLeasingAnnual, vehicleMileageAnnual, vehicleCostsAnnual, overheadTotal, overheadRate,
     averageSalaryCostRate, averageFullCostRate, currentBillingRate,
     employees: employeeCalcs.map(x => ({ ...x.employee, calculation: employeeCalculation(x.employee, overheadRate, year, company.productiveHoursPerFullTimeYear) }))
   };
