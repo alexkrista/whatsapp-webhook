@@ -51,10 +51,10 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.2.0c";
-const APP_BUILD = "0003";
+const APP_VERSION = "3.2.0d";
+const APP_BUILD = "0004";
 const APP_STATUS = "Stable";
-const APP_BUILD_DATE = "2026-07-10";
+const APP_BUILD_DATE = "2026-07-14";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -1446,16 +1446,17 @@ function metaPathForJob(jobId) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "" };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", billingRate: 0 };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
+      billingRate: Math.max(0, Number(meta.billingRate || 0)),
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "" };
+    return { name: "", favorite: false, notes: "", billingRate: 0 };
   }
 }
 async function writeJobMeta(jobId, patch) {
@@ -1467,6 +1468,7 @@ async function writeJobMeta(jobId, patch) {
     name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
+    billingRate: Math.max(0, Number(patch.billingRate ?? existing.billingRate ?? 0)),
     updatedAt: new Date().toISOString(),
   };
   await ensureDir(path.join(DATA_DIR, String(jobId)));
@@ -1691,6 +1693,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         name: meta.name || "",
         notes: meta.notes || "",
         favorite: !!meta.favorite,
+        billingRate: Number(meta.billingRate || 0),
         sizeBytes,
         totalStats,
         daysCount: days.length,
@@ -1734,6 +1737,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       name: req.body?.name,
       notes: req.body?.notes,
       favorite: req.body?.favorite,
+      billingRate: req.body?.billingRate,
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
@@ -1974,10 +1978,21 @@ app.get("/admin/list-jobs", (req, res) => res.redirect(307, `/admin/api/jobs${re
 
 
 
-// ===================== Version / Stammdaten 3.2.0c =====================
+// ===================== Version / Betrieb & Kalkulation 3.2.0d =====================
 app.get("/admin/api/version", (req, res) => {
   if (!requireAdmin(req, res)) return;
   res.json({ ok: true, version: APP_VERSION, build: APP_BUILD, status: APP_STATUS, date: APP_BUILD_DATE });
+});
+
+app.get("/admin/api/company", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try { res.json({ ok: true, ...(await calculationSummary(Number(req.query.year || new Date().getFullYear()))) }); }
+  catch (e) { res.status(500).json({ ok: false, error: String(e?.message || e) }); }
+});
+app.put("/admin/api/company", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try { await writeCompany(req.body || {}); res.json({ ok: true, ...(await calculationSummary(Number(req.query.year || new Date().getFullYear()))) }); }
+  catch (e) { res.status(500).json({ ok: false, error: String(e?.message || e) }); }
 });
 
 function systemDataDir() {
@@ -1989,6 +2004,55 @@ function employeesPath() {
 function worktimeModelsPath() {
   return path.join(systemDataDir(), "worktime-models.json");
 }
+function companyPath() {
+  return path.join(systemDataDir(), "company.json");
+}
+const DEFAULT_COMPANY = {
+  name: "Farben Krista GmbH & Co KG",
+  productiveHoursPerFullTimeYear: 1650,
+  overhead: { rent: 0, office: 0, vehicles: 0, insurance: 0, itPhone: 0, energy: 0, machines: 0, finance: 0, taxAdvisor: 0, advertising: 0, other: 0 },
+  updatedAt: null
+};
+function cleanCompany(c = {}) {
+  const src = c.overhead || {};
+  const overhead = {};
+  for (const key of Object.keys(DEFAULT_COMPANY.overhead)) overhead[key] = Math.max(0, Number(src[key] || 0));
+  return {
+    name: String(c.name || DEFAULT_COMPANY.name).trim().slice(0, 160),
+    productiveHoursPerFullTimeYear: Math.max(1, Number(c.productiveHoursPerFullTimeYear || 1650)),
+    overhead, updatedAt: new Date().toISOString()
+  };
+}
+async function readCompany() {
+  const p = companyPath();
+  if (!fs.existsSync(p)) { await ensureDir(systemDataDir()); const c = cleanCompany(DEFAULT_COMPANY); await fsp.writeFile(p, JSON.stringify(c, null, 2), "utf8"); return c; }
+  try { return cleanCompany(JSON.parse(await fsp.readFile(p, "utf8"))); } catch { return cleanCompany(DEFAULT_COMPANY); }
+}
+async function writeCompany(c) { const clean = cleanCompany(c); await ensureDir(systemDataDir()); await fsp.writeFile(companyPath(), JSON.stringify(clean, null, 2), "utf8"); return clean; }
+function overlapFractionForYear(employee, year) {
+  const ys = new Date(`${year}-01-01T12:00:00`), ye = new Date(`${year}-12-31T12:00:00`);
+  let start = employee.employmentStart ? new Date(employee.employmentStart + "T12:00:00") : ys;
+  let end = employee.employmentEnd ? new Date(employee.employmentEnd + "T12:00:00") : ye;
+  if (Number.isNaN(start.getTime())) start = ys; if (Number.isNaN(end.getTime())) end = ye;
+  start = start < ys ? ys : start; end = end > ye ? ye : end;
+  if (end < start) return 0;
+  const days = Math.floor((end - start) / 86400000) + 1;
+  const daysInYear = Math.floor((ye - ys) / 86400000) + 1;
+  return days / daysInYear;
+}
+function employeeCalculation(employee, overheadRate = 0, year = new Date().getFullYear(), hoursPerFullTime = 1650) {
+  const productiveHours = employee.active === false ? 0 : hoursPerFullTime * (Number(employee.employmentPercent || 0) / 100) * overlapFractionForYear(employee, year);
+  const salaryCostRate = Number(employee.grossMonthlySalary || 0) * 18 / 1650;
+  return { productiveHours, salaryCostRate, fullCostRate: salaryCostRate + overheadRate };
+}
+async function calculationSummary(year = new Date().getFullYear()) {
+  const company = await readCompany(), employees = await readEmployees();
+  const productiveHours = employees.reduce((sum, e) => sum + employeeCalculation(e, 0, year, company.productiveHoursPerFullTimeYear).productiveHours, 0);
+  const overheadTotal = Object.values(company.overhead || {}).reduce((sum, v) => sum + Number(v || 0), 0);
+  const overheadRate = productiveHours > 0 ? overheadTotal / productiveHours : 0;
+  return { company, year, productiveHours, overheadTotal, overheadRate, employees: employees.map(e => ({ ...e, calculation: employeeCalculation(e, overheadRate, year, company.productiveHoursPerFullTimeYear) })) };
+}
+
 const DEFAULT_WORKTIME_MODELS = [
   {
     id: "krista-standard",
@@ -2069,6 +2133,10 @@ function cleanEmployeeMaster(e, existingId = "") {
     canManageTeam: !!e?.canManageTeam,
     active: e?.active !== false,
     worktimeModelId: String(e?.worktimeModelId || "krista-standard").trim().slice(0, 80),
+    grossMonthlySalary: Math.max(0, Number(e?.grossMonthlySalary || 0)),
+    employmentPercent: Math.min(100, Math.max(0, Number(e?.employmentPercent ?? 100))),
+    employmentStart: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentStart || "")) ? String(e.employmentStart) : "",
+    employmentEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentEnd || "")) ? String(e.employmentEnd) : "",
     // Legacy-Felder bleiben lesbar, werden aber nicht mehr als Stammdaten bearbeitet.
     standardStart: String(e?.standardStart || "").trim().slice(0, 5),
     standardEnd: String(e?.standardEnd || "").trim().slice(0, 5),
@@ -2122,8 +2190,8 @@ app.get("/admin/api/worktime-models/:modelId/schedule", async (req, res) => {
 app.get("/admin/api/employees", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const employees = await readEmployees();
-    res.json({ ok: true, employees });
+    const summary = await calculationSummary(Number(req.query.year || new Date().getFullYear()));
+    res.json({ ok: true, employees: summary.employees, overheadRate: summary.overheadRate, productiveHours: summary.productiveHours });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
