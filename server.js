@@ -2078,8 +2078,8 @@ function cleanVehicle(v={}, id="") { return {
   label: String(v.label||"").trim().slice(0,100), plate: String(v.plate||"").trim().slice(0,30),
   make: String(v.make||"").trim().slice(0,60), model: String(v.model||"").trim().slice(0,60), year: Math.max(0,Number(v.year||0)),
   inspectionUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.inspectionUntil||""))?String(v.inspectionUntil):"",
-  insuranceType: String(v.insuranceType||"").trim().slice(0,80), insuranceUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.insuranceUntil||""))?String(v.insuranceUntil):"",
-  leasingRate: Math.max(0,Number(v.leasingRate||0)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
+  insuranceType: ["Haftpflicht","Vollkasko"].includes(String(v.insuranceType||"")) ? String(v.insuranceType) : "", insuranceUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.insuranceUntil||""))?String(v.insuranceUntil):"",
+  leasingRate: Math.max(0,Number(v.leasingRate||0)), kmPerYear: Math.max(0,Number(v.kmPerYear||0)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
   registrationImage: String(v.registrationImage||"").startsWith("data:image/") ? String(v.registrationImage).slice(0,1800000) : "",
   updatedAt: new Date().toISOString()
 }; }
@@ -2139,13 +2139,16 @@ async function calculationSummary(year = new Date().getFullYear()) {
     const employment = Number(x.employee.employmentPercent || 0) / 100;
     return sum + Number(x.employee.grossMonthlySalary || 0) * 18 * employment * fraction;
   }, 0);
+  const vehicles = await readJsonArrayFile(vehiclesPath());
+  const vehicleLeasingAnnual = vehicles.reduce((sum, v) => sum + Number(v.leasingRate || 0) * 12, 0);
+  company.overhead.vehicles = vehicleLeasingAnnual;
   const overheadTotal = Object.values(company.overhead || {}).reduce((sum, v) => sum + Number(v || 0), 0);
   const overheadRate = productiveHours > 0 ? overheadTotal / productiveHours : 0;
   const averageSalaryCostRate = productiveHours > 0 ? annualSalaryCosts / productiveHours : 0;
   const averageFullCostRate = averageSalaryCostRate + overheadRate;
   const currentBillingRate = averageFullCostRate * (1 + (Number(company.profitMarkupPercent || 0) + Number(company.contingencyPercent || 0)) / 100);
   return {
-    company, year, productiveHours, annualSalaryCosts, overheadTotal, overheadRate,
+    company, year, productiveHours, annualSalaryCosts, vehicleLeasingAnnual, overheadTotal, overheadRate,
     averageSalaryCostRate, averageFullCostRate, currentBillingRate,
     employees: employeeCalcs.map(x => ({ ...x.employee, calculation: employeeCalculation(x.employee, overheadRate, year, company.productiveHoursPerFullTimeYear) }))
   };
@@ -2237,8 +2240,10 @@ function cleanEmployeeMaster(e, existingId = "") {
     employmentEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentEnd || "")) ? String(e.employmentEnd) : "",
     birthDate: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.birthDate || "")) ? String(e.birthDate) : "",
     drivingLicenseLastCheck: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.drivingLicenseLastCheck || "")) ? String(e.drivingLicenseLastCheck) : "",
-    drivingLicenseImage: String(e?.drivingLicenseImage || "").startsWith("data:image/") ? String(e.drivingLicenseImage).slice(0, 3500000) : "",
-    passportImage: String(e?.passportImage || "").startsWith("data:image/") ? String(e.passportImage).slice(0, 3500000) : "",
+    drivingLicenseFrontImage: String(e?.drivingLicenseFrontImage || e?.drivingLicenseImage || "").startsWith("data:image/") ? String(e.drivingLicenseFrontImage || e.drivingLicenseImage).slice(0, 3500000) : "",
+    drivingLicenseBackImage: String(e?.drivingLicenseBackImage || "").startsWith("data:image/") ? String(e.drivingLicenseBackImage).slice(0, 3500000) : "",
+    passportPage1Image: String(e?.passportPage1Image || e?.passportImage || "").startsWith("data:image/") ? String(e.passportPage1Image || e.passportImage).slice(0, 3500000) : "",
+    passportPage2Image: String(e?.passportPage2Image || "").startsWith("data:image/") ? String(e.passportPage2Image).slice(0, 3500000) : "",
     passportExpiry: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.passportExpiry || "")) ? String(e.passportExpiry) : "",
     clothingSizes: {
       tshirt: String(e?.clothingSizes?.tshirt || "").trim().slice(0, 12),
