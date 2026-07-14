@@ -1,7 +1,7 @@
 {
-  "version": "3.3.0",
-  "build": "0005",
+  "version": "3.3.1",
+  "build": "0006",
   "status": "Stable",
   "date": "2026-07-14",
-  "name": "Baustellenkalkulation"
+  "name": "Kalkulation & Mitarbeiter vollständig"
 }
