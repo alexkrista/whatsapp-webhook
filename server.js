@@ -51,8 +51,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.2.0d";
-const APP_BUILD = "0004";
+const APP_VERSION = "3.3.0";
+const APP_BUILD = "0005";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-14";
 
@@ -1446,17 +1446,21 @@ function metaPathForJob(jobId) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", billingRate: 0 };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
       billingRate: Math.max(0, Number(meta.billingRate || 0)),
+      contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
+      externalServices: Math.max(0, Number(meta.externalServices || 0)),
+      materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
+      plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", billingRate: 0 };
+    return { name: "", favorite: false, notes: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
   }
 }
 async function writeJobMeta(jobId, patch) {
@@ -1469,6 +1473,10 @@ async function writeJobMeta(jobId, patch) {
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
     billingRate: Math.max(0, Number(patch.billingRate ?? existing.billingRate ?? 0)),
+    contractAmount: Math.max(0, Number(patch.contractAmount ?? existing.contractAmount ?? 0)),
+    externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
+    materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
+    plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
     updatedAt: new Date().toISOString(),
   };
   await ensureDir(path.join(DATA_DIR, String(jobId)));
@@ -1657,11 +1665,52 @@ async function readLogStats(dayDir) {
   return { items, images, audio, pdfs };
 }
 
+async function summarizeJobHours(jobId) {
+  const days = await listDaysForJob(jobId);
+  let actualHours = 0;
+  let actualRegieHours = 0;
+  for (const day of days) {
+    const p = regiePathForDay(jobId, day);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const regie = JSON.parse(await fsp.readFile(p, "utf8"));
+      for (const employee of Array.isArray(regie.employees) ? regie.employees : []) {
+        actualHours += Math.max(0, Number(employee.totalHours || 0));
+        actualRegieHours += Math.max(0, Number(employee.regieHours || 0));
+      }
+    } catch {}
+  }
+  return { actualHours, actualRegieHours };
+}
+
+function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
+  const contractAmount = Math.max(0, Number(meta.contractAmount || 0));
+  const externalServices = Math.max(0, Number(meta.externalServices || 0));
+  const kristaAmount = Math.max(0, contractAmount - externalServices);
+  const materialPercent = Math.min(100, Math.max(0, Number(meta.materialPercent || 0)));
+  const materialAmount = kristaAmount * materialPercent / 100;
+  const laborAmount = Math.max(0, kristaAmount - materialAmount);
+  const billingRate = Math.max(0, Number(meta.billingRate || defaultBillingRate || 0));
+  const calculatedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const actualHours = Math.max(0, Number(hours.actualHours || 0));
+  const actualRegieHours = Math.max(0, Number(hours.actualRegieHours || 0));
+  const orderHours = Math.max(0, actualHours - actualRegieHours);
+  return {
+    contractAmount, externalServices, kristaAmount, materialPercent, materialAmount,
+    laborAmount, billingRate, calculatedHours, actualHours, actualRegieHours, orderHours,
+    remainingOrderHours: calculatedHours - orderHours,
+    progressPercent: calculatedHours > 0 ? orderHours / calculatedHours * 100 : 0,
+    plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
+    remainingRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)) - actualRegieHours
+  };
+}
+
 // Admin API: list jobs
 app.get("/admin/api/jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   try {
+    const company = await readCompany();
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
       .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
@@ -1686,6 +1735,8 @@ app.get("/admin/api/jobs", async (req, res) => {
       }
 
       const meta = await readJobMeta(jobId);
+      const hours = await summarizeJobHours(jobId);
+      const calculation = calculateJobBudget(meta, company.defaultBillingRate, hours);
       const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
 
       jobs.push({
@@ -1694,6 +1745,11 @@ app.get("/admin/api/jobs", async (req, res) => {
         notes: meta.notes || "",
         favorite: !!meta.favorite,
         billingRate: Number(meta.billingRate || 0),
+        contractAmount: Number(meta.contractAmount || 0),
+        externalServices: Number(meta.externalServices || 0),
+        materialPercent: Number(meta.materialPercent || 0),
+        plannedRegieHours: Number(meta.plannedRegieHours || 0),
+        calculation,
         sizeBytes,
         totalStats,
         daysCount: days.length,
@@ -1738,6 +1794,10 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       notes: req.body?.notes,
       favorite: req.body?.favorite,
       billingRate: req.body?.billingRate,
+      contractAmount: req.body?.contractAmount,
+      externalServices: req.body?.externalServices,
+      materialPercent: req.body?.materialPercent,
+      plannedRegieHours: req.body?.plannedRegieHours,
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
@@ -2010,6 +2070,7 @@ function companyPath() {
 const DEFAULT_COMPANY = {
   name: "Farben Krista GmbH & Co KG",
   productiveHoursPerFullTimeYear: 1650,
+  defaultBillingRate: 0,
   overhead: { rent: 0, office: 0, vehicles: 0, insurance: 0, itPhone: 0, energy: 0, machines: 0, finance: 0, taxAdvisor: 0, advertising: 0, other: 0 },
   updatedAt: null
 };
@@ -2020,6 +2081,7 @@ function cleanCompany(c = {}) {
   return {
     name: String(c.name || DEFAULT_COMPANY.name).trim().slice(0, 160),
     productiveHoursPerFullTimeYear: Math.max(1, Number(c.productiveHoursPerFullTimeYear || 1650)),
+    defaultBillingRate: Math.max(0, Number(c.defaultBillingRate || 0)),
     overhead, updatedAt: new Date().toISOString()
   };
 }
