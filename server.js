@@ -51,8 +51,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.3.0";
-const APP_BUILD = "0005";
+const APP_VERSION = "3.3.1";
+const APP_BUILD = "0006";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-14";
 
@@ -1710,7 +1710,8 @@ app.get("/admin/api/jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   try {
-    const company = await readCompany();
+    const companySummary = await calculationSummary();
+    const company = companySummary.company;
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
       .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
@@ -1736,7 +1737,7 @@ app.get("/admin/api/jobs", async (req, res) => {
 
       const meta = await readJobMeta(jobId);
       const hours = await summarizeJobHours(jobId);
-      const calculation = calculateJobBudget(meta, company.defaultBillingRate, hours);
+      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
       const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
 
       jobs.push({
@@ -2108,11 +2109,25 @@ function employeeCalculation(employee, overheadRate = 0, year = new Date().getFu
   return { productiveHours, salaryCostRate, fullCostRate: salaryCostRate + overheadRate };
 }
 async function calculationSummary(year = new Date().getFullYear()) {
-  const company = await readCompany(), employees = await readEmployees();
-  const productiveHours = employees.reduce((sum, e) => sum + employeeCalculation(e, 0, year, company.productiveHoursPerFullTimeYear).productiveHours, 0);
+  const company = await readCompany();
+  const employees = await readEmployees();
+  const employeeCalcs = employees.map(e => ({ employee: e, calculation: employeeCalculation(e, 0, year, company.productiveHoursPerFullTimeYear) }));
+  const productiveHours = employeeCalcs.reduce((sum, x) => sum + x.calculation.productiveHours, 0);
+  const annualSalaryCosts = employeeCalcs.reduce((sum, x) => {
+    if (x.employee.active === false) return sum;
+    const fraction = overlapFractionForYear(x.employee, year);
+    const employment = Number(x.employee.employmentPercent || 0) / 100;
+    return sum + Number(x.employee.grossMonthlySalary || 0) * 18 * employment * fraction;
+  }, 0);
   const overheadTotal = Object.values(company.overhead || {}).reduce((sum, v) => sum + Number(v || 0), 0);
   const overheadRate = productiveHours > 0 ? overheadTotal / productiveHours : 0;
-  return { company, year, productiveHours, overheadTotal, overheadRate, employees: employees.map(e => ({ ...e, calculation: employeeCalculation(e, overheadRate, year, company.productiveHoursPerFullTimeYear) })) };
+  const averageSalaryCostRate = productiveHours > 0 ? annualSalaryCosts / productiveHours : 0;
+  const currentBillingRate = averageSalaryCostRate + overheadRate;
+  return {
+    company, year, productiveHours, annualSalaryCosts, overheadTotal, overheadRate,
+    averageSalaryCostRate, currentBillingRate,
+    employees: employeeCalcs.map(x => ({ ...x.employee, calculation: employeeCalculation(x.employee, overheadRate, year, company.productiveHoursPerFullTimeYear) }))
+  };
 }
 
 const DEFAULT_WORKTIME_MODELS = [
@@ -2199,6 +2214,11 @@ function cleanEmployeeMaster(e, existingId = "") {
     employmentPercent: Math.min(100, Math.max(0, Number(e?.employmentPercent ?? 100))),
     employmentStart: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentStart || "")) ? String(e.employmentStart) : "",
     employmentEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentEnd || "")) ? String(e.employmentEnd) : "",
+    birthDate: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.birthDate || "")) ? String(e.birthDate) : "",
+    drivingLicenseLastCheck: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.drivingLicenseLastCheck || "")) ? String(e.drivingLicenseLastCheck) : "",
+    drivingLicenseImage: String(e?.drivingLicenseImage || "").startsWith("data:image/") ? String(e.drivingLicenseImage).slice(0, 3500000) : "",
+    passportImage: String(e?.passportImage || "").startsWith("data:image/") ? String(e.passportImage).slice(0, 3500000) : "",
+    passportExpiry: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.passportExpiry || "")) ? String(e.passportExpiry) : "",
     // Legacy-Felder bleiben lesbar, werden aber nicht mehr als Stammdaten bearbeitet.
     standardStart: String(e?.standardStart || "").trim().slice(0, 5),
     standardEnd: String(e?.standardEnd || "").trim().slice(0, 5),
@@ -2253,7 +2273,25 @@ app.get("/admin/api/employees", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const summary = await calculationSummary(Number(req.query.year || new Date().getFullYear()));
-    res.json({ ok: true, employees: summary.employees, overheadRate: summary.overheadRate, productiveHours: summary.productiveHours });
+    const today = new Date();
+    const employees = summary.employees.map(e => {
+      let nextDrivingLicenseCheck = "";
+      let drivingLicenseCheckDue = false;
+      if (e.drivingLicenseLastCheck) {
+        const d = new Date(e.drivingLicenseLastCheck + "T12:00:00");
+        d.setMonth(d.getMonth() + 6);
+        nextDrivingLicenseCheck = todayISO(d);
+        drivingLicenseCheckDue = d <= today;
+      }
+      let anniversaryYears = 0;
+      if (e.employmentStart) {
+        const start = new Date(e.employmentStart + "T12:00:00");
+        anniversaryYears = Math.max(0, today.getFullYear() - start.getFullYear() -
+          ((today.getMonth() < start.getMonth() || (today.getMonth() === start.getMonth() && today.getDate() < start.getDate())) ? 1 : 0));
+      }
+      return { ...e, nextDrivingLicenseCheck, drivingLicenseCheckDue, anniversaryYears };
+    });
+    res.json({ ok: true, employees, overheadRate: summary.overheadRate, productiveHours: summary.productiveHours, currentBillingRate: summary.currentBillingRate });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
