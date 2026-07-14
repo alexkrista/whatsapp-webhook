@@ -20,10 +20,11 @@
     .employee-modal{position:fixed;inset:5vh 5vw;background:#fff;border-radius:18px;box-shadow:0 16px 60px rgba(0,0,0,.3);z-index:61;display:none;overflow:auto}
     .employee-modal-head{position:sticky;top:0;background:#111;color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;z-index:3}
     .employee-modal-body{padding:20px}.employee-table{width:100%;border-collapse:collapse}.employee-table th,.employee-table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}.employee-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;background:#f7f7f7;padding:14px;border-radius:14px;margin-bottom:18px}.employee-form input,.employee-form select{min-width:0;width:100%;box-sizing:border-box}.employee-form .full{grid-column:1/-1}.employee-flags{grid-column:1/-1;display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:#fff;padding:10px 12px;border-radius:10px;border:1px solid #e3e3e3}.employee-flags .checkline{margin:0;font-weight:600}.model-summary{grid-column:1/-1;background:#fff;border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;color:#444;line-height:1.5}.emp-select{min-width:0;width:100%;box-sizing:border-box;padding:10px 8px;border-radius:10px;border:1px solid #ccc;background:#fff}
+    .calcbox{background:#f7f7f7;border:1px solid #e3e3e3;border-radius:12px;padding:12px;margin-top:12px}.calcgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:7px 14px}.calcgrid .value{text-align:right;font-weight:700}.calcgrid .total{border-top:1px solid #ccc;padding-top:7px;margin-top:3px}.progress{height:10px;background:#ddd;border-radius:999px;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:#111}.negative{color:#9b1c1c}.positive{color:#2d6a2d}
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.2.0d</span> · Build <span id="appBuild">0004</span> · <span id="appStatus">Stable</span></div></header>
+  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.3.0</span> · Build <span id="appBuild">0005</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
@@ -88,6 +89,7 @@
       <div class="employee-form">
         <div class="full"><label>Firmenname</label><input id="companyName"></div>
         <div><label>Produktive Stunden je 100%-MA/Jahr</label><input id="companyBaseHours" type="number" value="1650" readonly></div>
+        <div><label>Standard-Verrechnungssatz €/Std.</label><input id="companyDefaultBillingRate" type="number" min="0" step="0.01"></div>
         <div><label>Berechnete produktive Stunden gesamt</label><input id="companyProductiveHours" readonly></div>
         <div><label>Gemeinkosten gesamt/Jahr</label><input id="companyOverheadTotal" readonly></div>
         <div><label>Gemeinkostensatz €/Std.</label><input id="companyOverheadRate" readonly></div>
@@ -107,7 +109,7 @@
       <div class="hint">Produktive Stunden = 1.650 × Beschäftigungsgrad × Beschäftigungsdauer aller aktiven Mitarbeiter.</div>
     </div>
   </section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.2.0d</span> · Build <span id="footerBuild">0004</span></footer>
+  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.3.0</span> · Build <span id="footerBuild">0005</span></footer>
 
 <script>
 const qs = new URLSearchParams(location.search);
@@ -165,9 +167,21 @@ function render(){
         <input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}" placeholder="z. B. Neubau Müller Dornbirn" />
         <label>Notiz optional</label>
         <textarea id="notes-${esc(j.jobId)}" placeholder="interne Notiz">${esc(j.notes||'')}</textarea>
-        <label>Verrechnungssatz Regie €/Std.</label>
-        <input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.billingRate||0)}" />
-        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Name/Notiz speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
+        <div class="calcbox">
+          <strong>💰 Baustellenkalkulation</strong>
+          <label>Auftragssumme netto €</label>
+          <input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
+          <label>Fremdleistungen / Gerüst etc. €</label>
+          <input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
+          <label>Materialanteil %</label>
+          <input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
+          <label>Verrechnungssatz €/Std. <span class="small">(Standard übernommen, überschreibbar)</span></label>
+          <input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
+          <label>Geplante Regiestunden</label>
+          <input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
+          <div id="calc-${esc(j.jobId)}"></div>
+        </div>
+        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Baustelle & Kalkulation speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
 
         <label>Mit anderer Baustelle zusammenführen</label>
         <input id="merge-${esc(j.jobId)}" placeholder="Zielnummer, z. B. 26072" />
@@ -176,6 +190,7 @@ function render(){
       </div>
       <div class="days" id="days-${esc(j.jobId)}"></div>
     </section>`).join('');
+  list.forEach(j=>updateJobCalc(String(j.jobId)));
 }
 async function loadJobs(){
   const app=document.getElementById('app'); app.className='loading'; app.textContent='Lade Baustellen …';
@@ -188,8 +203,39 @@ async function saveMeta(jobId){
   const name=document.getElementById('name-'+jobId).value;
   const notes=document.getElementById('notes-'+jobId).value;
   const billingRate=Number(document.getElementById('billing-'+jobId).value||0);
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,notes,billingRate,favorite:j?.favorite||false})});
+  const contractAmount=Number(document.getElementById('contract-'+jobId).value||0);
+  const externalServices=Number(document.getElementById('external-'+jobId).value||0);
+  const materialPercent=Number(document.getElementById('materialpct-'+jobId).value||0);
+  const plannedRegieHours=Number(document.getElementById('plannedregie-'+jobId).value||0);
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,notes,billingRate,contractAmount,externalServices,materialPercent,plannedRegieHours,favorite:j?.favorite||false})});
   await loadJobs();
+}
+
+function updateJobCalc(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId));
+  const box=document.getElementById('calc-'+jobId); if(!j||!box)return;
+  const contract=Number(document.getElementById('contract-'+jobId)?.value||0);
+  const external=Number(document.getElementById('external-'+jobId)?.value||0);
+  const materialPct=Math.min(100,Math.max(0,Number(document.getElementById('materialpct-'+jobId)?.value||0)));
+  const rate=Number(document.getElementById('billing-'+jobId)?.value||0);
+  const plannedRegie=Number(document.getElementById('plannedregie-'+jobId)?.value||0);
+  const krista=Math.max(0,contract-external), material=krista*materialPct/100, labor=Math.max(0,krista-material), planned=rate>0?labor/rate:0;
+  const actual=Number(j.calculation?.actualHours||0), actualRegie=Number(j.calculation?.actualRegieHours||0), orderHours=Math.max(0,actual-actualRegie), remaining=planned-orderHours, regieRemaining=plannedRegie-actualRegie, progress=planned>0?orderHours/planned*100:0;
+  const pct=Math.max(0,Math.min(100,progress));
+  box.innerHTML=`<div class="calcgrid">
+    <div>Auftragssumme</div><div class="value">${money(contract)}</div>
+    <div>− Fremdleistungen</div><div class="value">${money(external)}</div>
+    <div class="total"><strong>Auftragssumme KRISTA</strong></div><div class="value total">${money(krista)}</div>
+    <div>− Material ${num(materialPct)} %</div><div class="value">${money(material)}</div>
+    <div class="total"><strong>Auftragssumme Arbeitsleistung</strong></div><div class="value total">${money(labor)}</div>
+    <div>÷ Verrechnungssatz</div><div class="value">${money(rate)} / Std.</div>
+    <div class="total"><strong>Kalkulierte Arbeitsstunden</strong></div><div class="value total"><strong>${num(planned)} Std.</strong></div>
+    <div>Geleistete Auftragsstunden</div><div class="value">${num(orderHours)} Std.</div>
+    <div>Reststunden Auftrag</div><div class="value ${remaining<0?'negative':'positive'}">${num(remaining)} Std.</div>
+    <div>Geplante Regiestunden</div><div class="value">${num(plannedRegie)} Std.</div>
+    <div>Erfasste Regiestunden</div><div class="value">${num(actualRegie)} Std.</div>
+    <div>Rest Regie / Nachtrag</div><div class="value ${regieRemaining<0?'negative':'positive'}">${num(regieRemaining)} Std.</div>
+  </div><div class="small" style="margin-top:8px">Stundenfortschritt Auftrag: ${num(progress)} %</div><div class="progress"><span style="width:${pct}%"></span></div>`;
 }
 
 async function renameJob(jobId){
@@ -373,11 +419,11 @@ async function saveRegie(){
 async function loadVersion(){
   try{
     const v=await api('/admin/api/version');
-    document.getElementById('appVersion').textContent=v.version||'3.2.0d';
-    document.getElementById('appBuild').textContent=v.build||'0004';
+    document.getElementById('appVersion').textContent=v.version||'3.3.0';
+    document.getElementById('appBuild').textContent=v.build||'0005';
     document.getElementById('appStatus').textContent=v.status||'Stable';
-    document.getElementById('footerVersion').textContent=v.version||'3.2.0d';
-    document.getElementById('footerBuild').textContent=v.build||'0004';
+    document.getElementById('footerVersion').textContent=v.version||'3.3.0';
+    document.getElementById('footerBuild').textContent=v.build||'0005';
   }catch{}
 }
 function money(v){return Number(v||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
@@ -385,8 +431,8 @@ function num(v){return Number(v||0).toLocaleString('de-AT',{minimumFractionDigit
 async function openCompany(){document.getElementById('companyBackdrop').style.display='block';document.getElementById('companyModal').style.display='block';await loadCompany();}
 function closeCompany(){document.getElementById('companyBackdrop').style.display='none';document.getElementById('companyModal').style.display='none';}
 const ohMap={rent:'ohRent',office:'ohOffice',vehicles:'ohVehicles',insurance:'ohInsurance',itPhone:'ohItPhone',energy:'ohEnergy',machines:'ohMachines',finance:'ohFinance',taxAdvisor:'ohTaxAdvisor',advertising:'ohAdvertising',other:'ohOther'};
-async function loadCompany(){const d=await api('/admin/api/company');const c=d.company||{};document.getElementById('companyName').value=c.name||'';document.getElementById('companyBaseHours').value=c.productiveHoursPerFullTimeYear||1650;for(const [k,id] of Object.entries(ohMap))document.getElementById(id).value=Number(c.overhead?.[k]||0);document.getElementById('companyProductiveHours').value=num(d.productiveHours);document.getElementById('companyOverheadTotal').value=money(d.overheadTotal);document.getElementById('companyOverheadRate').value=money(d.overheadRate);}
-async function saveCompany(){const overhead={};for(const [k,id] of Object.entries(ohMap))overhead[k]=Number(document.getElementById(id).value||0);await api('/admin/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('companyName').value,productiveHoursPerFullTimeYear:1650,overhead})});await loadCompany();await loadEmployeeMasters();await loadEmployeesView();alert('Betriebsdaten gespeichert.');}
+async function loadCompany(){const d=await api('/admin/api/company');const c=d.company||{};document.getElementById('companyName').value=c.name||'';document.getElementById('companyBaseHours').value=c.productiveHoursPerFullTimeYear||1650;document.getElementById('companyDefaultBillingRate').value=Number(c.defaultBillingRate||0);for(const [k,id] of Object.entries(ohMap))document.getElementById(id).value=Number(c.overhead?.[k]||0);document.getElementById('companyProductiveHours').value=num(d.productiveHours);document.getElementById('companyOverheadTotal').value=money(d.overheadTotal);document.getElementById('companyOverheadRate').value=money(d.overheadRate);}
+async function saveCompany(){const overhead={};for(const [k,id] of Object.entries(ohMap))overhead[k]=Number(document.getElementById(id).value||0);await api('/admin/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('companyName').value,productiveHoursPerFullTimeYear:1650,defaultBillingRate:Number(document.getElementById('companyDefaultBillingRate').value||0),overhead})});await loadCompany();await loadEmployeeMasters();await loadEmployeesView();alert('Betriebsdaten gespeichert.');}
 async function loadEmployeeMasters(){
   const data=await api('/admin/api/employees'); employeeMasters=data.employees||[]; return employeeMasters;
 }
