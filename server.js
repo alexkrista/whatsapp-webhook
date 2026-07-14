@@ -51,8 +51,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.3.1";
-const APP_BUILD = "0006";
+const APP_VERSION = "3.3.2";
+const APP_BUILD = "0007";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-14";
 
@@ -2068,10 +2068,28 @@ function worktimeModelsPath() {
 function companyPath() {
   return path.join(systemDataDir(), "company.json");
 }
+function vehiclesPath() { return path.join(systemDataDir(), "vehicles.json"); }
+function ideasPath() { return path.join(systemDataDir(), "ideas.json"); }
+async function readJsonArrayFile(file) { try { const d=JSON.parse(await fsp.readFile(file,"utf8")); return Array.isArray(d)?d:[]; } catch { return []; } }
+async function writeJsonArrayFile(file, rows) { await ensureDir(systemDataDir()); await fsp.writeFile(file, JSON.stringify(rows,null,2), "utf8"); }
+function uid(prefix="id") { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`; }
+function cleanVehicle(v={}, id="") { return {
+  id: String(id || v.id || uid("vehicle")).slice(0,80),
+  label: String(v.label||"").trim().slice(0,100), plate: String(v.plate||"").trim().slice(0,30),
+  make: String(v.make||"").trim().slice(0,60), model: String(v.model||"").trim().slice(0,60), year: Math.max(0,Number(v.year||0)),
+  inspectionUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.inspectionUntil||""))?String(v.inspectionUntil):"",
+  insuranceType: String(v.insuranceType||"").trim().slice(0,80), insuranceUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.insuranceUntil||""))?String(v.insuranceUntil):"",
+  leasingRate: Math.max(0,Number(v.leasingRate||0)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
+  registrationImage: String(v.registrationImage||"").startsWith("data:image/") ? String(v.registrationImage).slice(0,1800000) : "",
+  updatedAt: new Date().toISOString()
+}; }
+function cleanIdea(v={}, id="") { return { id:String(id||v.id||uid("idea")).slice(0,80), title:String(v.title||"").trim().slice(0,160), note:String(v.note||"").trim().slice(0,2000), status:["offen","geplant","umgesetzt"].includes(v.status)?v.status:"offen", updatedAt:new Date().toISOString() }; }
 const DEFAULT_COMPANY = {
   name: "Farben Krista GmbH & Co KG",
   productiveHoursPerFullTimeYear: 1650,
   defaultBillingRate: 0,
+  profitMarkupPercent: 10,
+  contingencyPercent: 5,
   overhead: { rent: 0, office: 0, vehicles: 0, insurance: 0, itPhone: 0, energy: 0, machines: 0, finance: 0, taxAdvisor: 0, advertising: 0, other: 0 },
   updatedAt: null
 };
@@ -2083,6 +2101,8 @@ function cleanCompany(c = {}) {
     name: String(c.name || DEFAULT_COMPANY.name).trim().slice(0, 160),
     productiveHoursPerFullTimeYear: Math.max(1, Number(c.productiveHoursPerFullTimeYear || 1650)),
     defaultBillingRate: Math.max(0, Number(c.defaultBillingRate || 0)),
+    profitMarkupPercent: Math.max(0, Number(c.profitMarkupPercent ?? 10)),
+    contingencyPercent: Math.max(0, Number(c.contingencyPercent ?? 5)),
     overhead, updatedAt: new Date().toISOString()
   };
 }
@@ -2122,10 +2142,11 @@ async function calculationSummary(year = new Date().getFullYear()) {
   const overheadTotal = Object.values(company.overhead || {}).reduce((sum, v) => sum + Number(v || 0), 0);
   const overheadRate = productiveHours > 0 ? overheadTotal / productiveHours : 0;
   const averageSalaryCostRate = productiveHours > 0 ? annualSalaryCosts / productiveHours : 0;
-  const currentBillingRate = averageSalaryCostRate + overheadRate;
+  const averageFullCostRate = averageSalaryCostRate + overheadRate;
+  const currentBillingRate = averageFullCostRate * (1 + (Number(company.profitMarkupPercent || 0) + Number(company.contingencyPercent || 0)) / 100);
   return {
     company, year, productiveHours, annualSalaryCosts, overheadTotal, overheadRate,
-    averageSalaryCostRate, currentBillingRate,
+    averageSalaryCostRate, averageFullCostRate, currentBillingRate,
     employees: employeeCalcs.map(x => ({ ...x.employee, calculation: employeeCalculation(x.employee, overheadRate, year, company.productiveHoursPerFullTimeYear) }))
   };
 }
@@ -2219,6 +2240,22 @@ function cleanEmployeeMaster(e, existingId = "") {
     drivingLicenseImage: String(e?.drivingLicenseImage || "").startsWith("data:image/") ? String(e.drivingLicenseImage).slice(0, 3500000) : "",
     passportImage: String(e?.passportImage || "").startsWith("data:image/") ? String(e.passportImage).slice(0, 3500000) : "",
     passportExpiry: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.passportExpiry || "")) ? String(e.passportExpiry) : "",
+    clothingSizes: {
+      tshirt: String(e?.clothingSizes?.tshirt || "").trim().slice(0, 12),
+      polo: String(e?.clothingSizes?.polo || "").trim().slice(0, 12),
+      pullover: String(e?.clothingSizes?.pullover || "").trim().slice(0, 12),
+      jacket: String(e?.clothingSizes?.jacket || "").trim().slice(0, 12),
+      trousers: String(e?.clothingSizes?.trousers || "").trim().slice(0, 12),
+      shoes: String(e?.clothingSizes?.shoes || "").trim().slice(0, 12),
+      gloves: String(e?.clothingSizes?.gloves || "").trim().slice(0, 12)
+    },
+    clothingIssues: Array.isArray(e?.clothingIssues) ? e.clothingIssues.slice(-100).map(x => ({
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(x?.date || "")) ? String(x.date) : "",
+      item: String(x?.item || "").trim().slice(0, 80),
+      size: String(x?.size || "").trim().slice(0, 20),
+      quantity: Math.max(0, Number(x?.quantity || 0)),
+      note: String(x?.note || "").trim().slice(0, 200)
+    })).filter(x => x.item) : [],
     // Legacy-Felder bleiben lesbar, werden aber nicht mehr als Stammdaten bearbeitet.
     standardStart: String(e?.standardStart || "").trim().slice(0, 5),
     standardEnd: String(e?.standardEnd || "").trim().slice(0, 5),
@@ -2245,6 +2282,15 @@ async function writeEmployees(items) {
   await fsp.writeFile(employeesPath(), JSON.stringify(sorted, null, 2), "utf8");
   return sorted;
 }
+
+app.get("/admin/api/vehicles", async (req,res)=>{ if(!requireAdmin(req,res))return; res.json({ok:true,vehicles:await readJsonArrayFile(vehiclesPath())}); });
+app.post("/admin/api/vehicles", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(vehiclesPath()); const row=cleanVehicle(req.body||{}); if(!row.label&&!row.plate)return res.status(400).json({ok:false,error:"Bezeichnung oder Kennzeichen fehlt"}); rows.push(row); await writeJsonArrayFile(vehiclesPath(),rows); res.json({ok:true,vehicle:row}); });
+app.put("/admin/api/vehicles/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(vehiclesPath()); const i=rows.findIndex(x=>String(x.id)===String(req.params.id)); if(i<0)return res.status(404).json({ok:false,error:"Fahrzeug nicht gefunden"}); rows[i]=cleanVehicle({...rows[i],...(req.body||{})},req.params.id); await writeJsonArrayFile(vehiclesPath(),rows); res.json({ok:true,vehicle:rows[i]}); });
+app.delete("/admin/api/vehicles/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; let rows=await readJsonArrayFile(vehiclesPath()); rows=rows.filter(x=>String(x.id)!==String(req.params.id)); await writeJsonArrayFile(vehiclesPath(),rows); res.json({ok:true}); });
+app.get("/admin/api/ideas", async (req,res)=>{ if(!requireAdmin(req,res))return; res.json({ok:true,ideas:await readJsonArrayFile(ideasPath())}); });
+app.post("/admin/api/ideas", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(ideasPath()); const row=cleanIdea(req.body||{}); if(!row.title)return res.status(400).json({ok:false,error:"Titel fehlt"}); rows.unshift(row); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true,idea:row}); });
+app.put("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(ideasPath()); const i=rows.findIndex(x=>String(x.id)===String(req.params.id)); if(i<0)return res.status(404).json({ok:false,error:"Idee nicht gefunden"}); rows[i]=cleanIdea({...rows[i],...(req.body||{})},req.params.id); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true,idea:rows[i]}); });
+app.delete("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; let rows=await readJsonArrayFile(ideasPath()); rows=rows.filter(x=>String(x.id)!==String(req.params.id)); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true}); });
 
 app.get("/admin/api/worktime-models", async (req, res) => {
   if (!requireAdmin(req, res)) return;
