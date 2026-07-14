@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Krista Baustellenakte – Admin</title>
+  <title>KRISTA Baustellenmanager – Admin</title>
   <style>
     :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;background:#f5f3ef}
     body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}.sub{opacity:.75;margin-top:4px}
@@ -25,14 +25,22 @@
     .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
     .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .readonly-highlight{background:#fffbe8;font-weight:800}
+    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}
+    .card{position:relative;padding:20px 20px 58px}.card .actions.primary-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.card .actions.primary-actions>*{min-height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
+    .trash-mini{position:absolute;right:14px;bottom:12px;background:transparent!important;border:0!important;color:#9b1c1c!important;font-size:20px;padding:5px!important;min-width:auto!important}
+    .company-stack{max-width:760px;margin:0 auto}.company-stack .fieldline{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,260px);gap:18px;align-items:center;padding:9px 0;border-bottom:1px solid #eee}.company-stack label{font-weight:650}.company-stack input{min-width:0;width:100%;text-align:right;box-sizing:border-box}.company-stack .summaryline{font-weight:800}.company-stack .billing-highlight{background:#dff4df;border:2px solid #4d8f50;font-size:20px;font-weight:900}.company-stack h3{margin:24px 0 8px}
+    .employee-sizes{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
+    .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.modal-grid input,.modal-grid select,.modal-grid textarea{width:100%;min-width:0;box-sizing:border-box}.list-card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:14px;margin:10px 0}.due{color:#9b1c1c;font-weight:800}
+    @media(max-width:760px){.company-stack .fieldline{grid-template-columns:1fr}.company-stack input{text-align:left}.card .actions.primary-actions{grid-template-columns:1fr 1fr}}
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.3.1</span> · Build <span id="appBuild">0006</span> · <span id="appStatus">Stable</span></div></header>
+  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.3.2</span> · Build <span id="appBuild">0007</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
-      <button id="reload">Aktualisieren</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
+      <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
+      <button id="reload">Aktualisieren</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
@@ -81,6 +89,7 @@
           <div><label>Führerschein als JPG</label><input id="empDrivingLicenseFile" type="file" accept="image/jpeg,image/png"><img id="empDrivingLicensePreview" class="doc-preview" style="display:none"></div>
           <div><label>Pass als JPG</label><input id="empPassportFile" type="file" accept="image/jpeg,image/png"><img id="empPassportPreview" class="doc-preview" style="display:none"></div>
         </div>
+        <div class="employee-sizes"><div class="full"><strong>📏 Arbeitskleidungsgrößen</strong></div><div><label>T-Shirt</label><input id="empSizeTshirt"></div><div><label>Poloshirt</label><input id="empSizePolo"></div><div><label>Pullover</label><input id="empSizePullover"></div><div><label>Jacke</label><input id="empSizeJacket"></div><div><label>Hose</label><input id="empSizeTrousers"></div><div><label>Schuhe</label><input id="empSizeShoes"></div><div><label>Handschuhe</label><input id="empSizeGloves"></div></div>
         <div class="full"><label>Schwerpunkte/Qualifikationen (mit Beistrich)</label><input id="empSpecialties" placeholder="Fugenlos, Tapete, Airless, Hebebühne"></div>
         <div id="worktimeModelSummary" class="model-summary">Arbeitszeitmodell wird geladen …</div>
         <div class="employee-flags">
@@ -97,32 +106,19 @@
   <div id="companyBackdrop" class="drawer-backdrop" onclick="closeCompany()" style="z-index:64"></div>
   <section id="companyModal" class="employee-modal" aria-hidden="true" style="z-index:65">
     <div class="employee-modal-head"><div><strong>⚙️ Betrieb & Gemeinkosten</strong><div class="small" style="color:#ddd">Jahreswerte – Gemeinkostensatz wird automatisch berechnet</div></div><button class="closebtn" onclick="closeCompany()">×</button></div>
-    <div class="employee-modal-body">
-      <div class="employee-form">
-        <div class="full"><label>Firmenname</label><input id="companyName"></div>
-        <div><label>Produktive Stunden je 100%-MA/Jahr</label><input id="companyBaseHours" type="number" value="1650" readonly></div>
-        <div><label>Berechnete produktive Stunden gesamt</label><input id="companyProductiveHours" readonly></div>
-        <div><label>Ø Lohnkostensatz €/Std.</label><input id="companyAverageSalaryRate" readonly></div>
-        <div><label>Aktueller Verrechnungssatz €/Std.</label><input id="companyCurrentBillingRate" class="readonly-highlight" readonly></div>
-        <div><label>Gemeinkosten gesamt/Jahr</label><input id="companyOverheadTotal" readonly></div>
-        <div><label>Gemeinkostensatz €/Std.</label><input id="companyOverheadRate" readonly></div>
-        <div><label>Miete/Jahr €</label><input id="ohRent" type="number" step="0.01"></div>
-        <div><label>Büro/Jahr €</label><input id="ohOffice" type="number" step="0.01"></div>
-        <div><label>Fahrzeuge/Jahr €</label><input id="ohVehicles" type="number" step="0.01"></div>
-        <div><label>Versicherungen/Jahr €</label><input id="ohInsurance" type="number" step="0.01"></div>
-        <div><label>IT & Telefon/Jahr €</label><input id="ohItPhone" type="number" step="0.01"></div>
-        <div><label>Energie/Jahr €</label><input id="ohEnergy" type="number" step="0.01"></div>
-        <div><label>Maschinen/Jahr €</label><input id="ohMachines" type="number" step="0.01"></div>
-        <div><label>Finanzierung/Jahr €</label><input id="ohFinance" type="number" step="0.01"></div>
-        <div><label>Steuerberater/Jahr €</label><input id="ohTaxAdvisor" type="number" step="0.01"></div>
-        <div><label>Werbung/Jahr €</label><input id="ohAdvertising" type="number" step="0.01"></div>
-        <div><label>Sonstige/Jahr €</label><input id="ohOther" type="number" step="0.01"></div>
-        <div class="full actions"><button onclick="saveCompany()">💾 Betrieb speichern</button></div>
-      </div>
-      <div class="hint">Produktive Stunden = 1.650 × Beschäftigungsgrad × Beschäftigungsdauer aller aktiven Mitarbeiter.</div>
-    </div>
+    <div class="employee-modal-body"><div class="company-stack">
+      <div class="fieldline"><label>Firmenname</label><input id="companyName"></div>
+      <h3>Jährliche Gemeinkosten</h3>
+      <div class="fieldline"><label>Miete</label><input id="ohRent" type="number" step="0.01"></div><div class="fieldline"><label>Büro</label><input id="ohOffice" type="number" step="0.01"></div><div class="fieldline"><label>Fahrzeuge</label><input id="ohVehicles" type="number" step="0.01"></div><div class="fieldline"><label>Versicherungen</label><input id="ohInsurance" type="number" step="0.01"></div><div class="fieldline"><label>IT & Telefon</label><input id="ohItPhone" type="number" step="0.01"></div><div class="fieldline"><label>Energie</label><input id="ohEnergy" type="number" step="0.01"></div><div class="fieldline"><label>Maschinen</label><input id="ohMachines" type="number" step="0.01"></div><div class="fieldline"><label>Finanzierung</label><input id="ohFinance" type="number" step="0.01"></div><div class="fieldline"><label>Steuerberater</label><input id="ohTaxAdvisor" type="number" step="0.01"></div><div class="fieldline"><label>Werbung</label><input id="ohAdvertising" type="number" step="0.01"></div><div class="fieldline"><label>Sonstige</label><input id="ohOther" type="number" step="0.01"></div>
+      <h3>Automatische Stundenkalkulation</h3>
+      <div class="fieldline summaryline"><label>Gemeinkosten gesamt/Jahr</label><input id="companyOverheadTotal" readonly></div><div class="fieldline"><label>Produktive Stunden je 100%-MA/Jahr</label><input id="companyBaseHours" value="1650" readonly></div><div class="fieldline summaryline"><label>Produktive Stunden gesamt</label><input id="companyProductiveHours" readonly></div><div class="fieldline"><label>Gemeinkostensatz €/Std.</label><input id="companyOverheadRate" readonly></div><div class="fieldline"><label>Ø Lohnkostensatz €/Std.</label><input id="companyAverageSalaryRate" readonly></div><div class="fieldline summaryline"><label>Mittlerer Vollkostensatz €/Std.</label><input id="companyAverageFullCostRate" readonly></div><div class="fieldline"><label>Gewinnzuschlag %</label><input id="companyProfitMarkup" type="number" min="0" step="0.1"></div><div class="fieldline"><label>Haftungs-/Risikozuschlag %</label><input id="companyContingency" type="number" min="0" step="0.1"></div><div class="fieldline"><label>Verkaufspreis / aktueller Verrechnungssatz</label><input id="companyCurrentBillingRate" class="billing-highlight" readonly></div>
+      <div class="actions" style="justify-content:flex-end;margin-top:20px"><button onclick="saveCompany()">💾 Betrieb speichern</button></div>
+      <div class="hint">Der aktuelle Verrechnungssatz wird aus Lohnkosten, Gemeinkosten sowie Gewinn- und Risikozuschlag automatisch berechnet.</div>
+    </div></div>
   </section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.3.1</span> · Build <span id="footerBuild">0006</span></footer>
+  <div id="vehicleBackdrop" class="drawer-backdrop" onclick="closeVehicles()" style="z-index:70"></div><section id="vehicleModal" class="employee-modal" style="z-index:71"><div class="employee-modal-head"><strong>🚐 Fahrzeuge</strong><button class="closebtn" onclick="closeVehicles()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="vehicleId"><div><label>Bezeichnung</label><input id="vehicleLabel" placeholder="Bus 1"></div><div><label>Kennzeichen</label><input id="vehiclePlate"></div><div><label>Marke</label><input id="vehicleMake"></div><div><label>Modell</label><input id="vehicleModel"></div><div><label>Baujahr</label><input id="vehicleYear" type="number"></div><div><label>Pickerl bis</label><input id="vehicleInspection" type="date"></div><div><label>Versicherung (Typ)</label><input id="vehicleInsuranceType"></div><div><label>Versicherung bis</label><input id="vehicleInsuranceUntil" type="date"></div><div><label>Leasingrate/Monat €</label><input id="vehicleLeasingRate" type="number" step="0.01"></div><div><label>Leasing bis</label><input id="vehicleLeasingUntil" type="date"></div><div><label>Zulassung fotografieren</label><input id="vehicleRegistrationFile" type="file" accept="image/*" capture="environment"><img id="vehicleRegistrationPreview" class="doc-preview" style="display:none"></div><div class="full actions"><button onclick="saveVehicle()">💾 Fahrzeug speichern</button><button class="secondary" onclick="resetVehicleForm()">Neu</button></div></div><div id="vehicleList"></div></div></section>
+  <div id="ideaBackdrop" class="drawer-backdrop" onclick="closeIdeas()" style="z-index:74"></div><section id="ideaModal" class="employee-modal" style="z-index:75"><div class="employee-modal-head"><strong>💡 Ideen & Wünsche</strong><button class="closebtn" onclick="closeIdeas()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="ideaId"><div><label>Titel</label><input id="ideaTitle"></div><div><label>Status</label><select id="ideaStatus"><option value="offen">offen</option><option value="geplant">geplant</option><option value="umgesetzt">umgesetzt</option></select></div><div class="full"><label>Beschreibung</label><textarea id="ideaNote"></textarea></div><div class="full actions"><button onclick="saveIdea()">💾 Idee speichern</button><button class="secondary" onclick="resetIdeaForm()">Neu</button></div></div><div id="ideaList"></div></div></section>
+  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.3.2</span> · Build <span id="footerBuild">0007</span></footer>
 
 <script>
 const qs = new URLSearchParams(location.search);
@@ -142,68 +138,12 @@ function esc(s){return String(s ?? '').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'
 function bytes(n){n=Number(n||0); if(n<1024) return n+' B'; if(n<1024*1024) return (n/1024).toFixed(1)+' KB'; if(n<1024*1024*1024) return (n/1024/1024).toFixed(1)+' MB'; return (n/1024/1024/1024).toFixed(2)+' GB';}
 function jobTitle(j){ return j.name ? `#${j.jobId} · ${j.name}` : `#${j.jobId}`; }
 function render(){
-  const app = document.getElementById('app');
-  const q = document.getElementById('search').value.trim().toLowerCase();
-  const list = jobs.filter(j => !q || String(j.jobId).toLowerCase().includes(q) || String(j.name||'').toLowerCase().includes(q));
-  if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;}
-  app.className='grid';
-  app.innerHTML=list.map(j=>`
-    <section class="card" id="job-${esc(j.jobId)}">
-      <div class="jobline">
-        <div>
-          <div class="job">#${esc(j.jobId)}</div>
-          <div class="name">${j.name ? esc(j.name) : '<span class="small">kein Name vergeben</span>'}</div>
-        </div>
-        <button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite ? '★' : '☆'}</button>
-      </div>
-      <div class="meta">
-        letzter Tag: ${esc(j.latestDay || '-')}<br>
-        Tage: ${j.daysCount || 0}<br>
-        gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br>
-        letzter Tag: 🖼 ${j.imagesLastDay || 0} · 📄 ${j.pdfsLastDay || 0} · 🎤 ${j.audioLastDay || 0}<br>
-        <span class="pill">💾 ${bytes(j.sizeBytes)}</span>
-      </div>
-      <div class="job-summary" id="summary-${esc(j.jobId)}"></div>
-      <p class="actions">
-        <button class="secondary" onclick="toggleDays('${esc(j.jobId)}', this)">Tage anzeigen</button>
-        <a class="action" target="_blank" href="${tokenJoin('/admin/akte/' + encodeURIComponent(j.jobId))}">📘 Akte öffnen</a>
-        <a class="action secondary" href="${tokenJoin('/admin/download-akte/' + encodeURIComponent(j.jobId))}">Akte Download</a>
-        <button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button>
-        <button class="danger" onclick="deleteJob('${esc(j.jobId)}')">Baustelle löschen</button>
-      </p>
-      <div class="edit" id="edit-${esc(j.jobId)}">
-        <label>Baustellennummer ändern</label>
-        <input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}" placeholder="z. B. 26072" />
-        <div class="small">Ändert den kompletten Baustellenordner. Wenn die Zielnummer schon existiert, bitte „Zusammenführen“ verwenden.</div>
-        <p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p>
-
-        <label>Baustellenname</label>
-        <input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}" placeholder="z. B. Neubau Müller Dornbirn" />
-        <label>Notiz optional</label>
-        <textarea id="notes-${esc(j.jobId)}" placeholder="interne Notiz">${esc(j.notes||'')}</textarea>
-        <div class="calcbox">
-          <strong>💰 Baustellenkalkulation</strong>
-          <label>Auftragssumme netto €</label>
-          <input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
-          <label>Fremdleistungen / Gerüst etc. €</label>
-          <input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
-          <label>Materialanteil %</label>
-          <input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
-          <label>Verrechnungssatz €/Std. <span class="small">(Standard übernommen, überschreibbar)</span></label>
-          <input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
-          <label>Geplante Regiestunden</label>
-          <input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')" />
-          <div id="calc-${esc(j.jobId)}"></div>
-        </div>
-        <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Baustelle & Kalkulation speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Abbrechen</button></p>
-
-        <label>Mit anderer Baustelle zusammenführen</label>
-        <input id="merge-${esc(j.jobId)}" placeholder="Zielnummer, z. B. 26072" />
-        <div class="small">Verschiebt alle Daten dieser Baustelle in die Zielnummer. Die aktuelle Baustelle verschwindet danach.</div>
-        <p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p>
-      </div>
-      <div class="days" id="days-${esc(j.jobId)}"></div>
-    </section>`).join('');
+  const app=document.getElementById('app'); const q=document.getElementById('search').value.trim().toLowerCase(); const sort=document.getElementById('sortJobs')?.value||'newest';
+  let list=jobs.filter(j=>!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q));
+  const cmpText=(a,b)=>String(a||'').localeCompare(String(b||''),'de',{numeric:true,sensitivity:'base'});
+  list=[...list].sort((a,b)=>sort==='oldest'?cmpText(a.latestDay,b.latestDay):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(b.latestDay,a.latestDay));
+  if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;} app.className='grid';
+  app.innerHTML=list.map(j=>`<section class="card" id="job-${esc(j.jobId)}"><div class="jobline"><div><div class="job">#${esc(j.jobId)}</div><div class="name">${j.name?esc(j.name):'<span class="small">kein Name vergeben</span>'}</div></div><button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite?'★':'☆'}</button></div><div class="meta">letzter Tag: ${esc(j.latestDay||'-')}<br>Tage: ${j.daysCount||0}<br>gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br><span class="pill">💾 ${bytes(j.sizeBytes)}</span></div><div class="job-summary" id="summary-${esc(j.jobId)}"></div><div class="actions primary-actions"><button class="secondary" onclick="toggleDays('${esc(j.jobId)}',this)">Tage</button><a class="action" target="_blank" href="${tokenJoin('/admin/akte/'+encodeURIComponent(j.jobId))}">Akte öffnen</a><a class="action secondary" href="${tokenJoin('/admin/download-akte/'+encodeURIComponent(j.jobId))}">PDF</a><button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button></div><button class="trash-mini" title="Baustelle löschen" onclick="deleteJob('${esc(j.jobId)}')">🗑️</button><div class="edit" id="edit-${esc(j.jobId)}"><label>Baustellennummer ändern</label><input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}"><p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p><label>Baustellenname</label><input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}"><label>Notiz</label><textarea id="notes-${esc(j.jobId)}">${esc(j.notes||'')}</textarea><div class="calcbox"><strong>💰 Stundenkalkulation</strong><label>Auftragssumme netto €</label><input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Fremdleistungen / Gerüst etc. €</label><input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Materialanteil %</label><input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Aktueller Verrechnungssatz €/Std. <span class="small">automatisch übernommen, überschreibbar</span></label><input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Geplante Regiestunden</label><input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><div id="calc-${esc(j.jobId)}"></div></div><p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Schließen</button></p><label>Mit anderer Baustelle zusammenführen</label><input id="merge-${esc(j.jobId)}" placeholder="Zielnummer"><p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p></div><div class="days" id="days-${esc(j.jobId)}"></div></section>`).join('');
   list.forEach(j=>{updateJobCalc(String(j.jobId));updateJobSummary(String(j.jobId));});
 }
 async function loadJobs(){
@@ -469,11 +409,14 @@ async function loadCompany(){
   document.getElementById('companyAverageSalaryRate').value=money(d.averageSalaryCostRate);
   document.getElementById('companyOverheadTotal').value=money(d.overheadTotal);
   document.getElementById('companyOverheadRate').value=money(d.overheadRate);
+  document.getElementById('companyAverageFullCostRate').value=money(d.averageFullCostRate);
+  document.getElementById('companyProfitMarkup').value=Number(c.profitMarkupPercent??10);
+  document.getElementById('companyContingency').value=Number(c.contingencyPercent??5);
   document.getElementById('companyCurrentBillingRate').value=money(d.currentBillingRate);
 }
 async function saveCompany(){
   const overhead={}; for(const [k,id] of Object.entries(ohMap))overhead[k]=Number(document.getElementById(id).value||0);
-  await api('/admin/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('companyName').value,productiveHoursPerFullTimeYear:1650,overhead})});
+  await api('/admin/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('companyName').value,productiveHoursPerFullTimeYear:1650,profitMarkupPercent:Number(document.getElementById('companyProfitMarkup').value||0),contingencyPercent:Number(document.getElementById('companyContingency').value||0),overhead})});
   await loadCompany(); await loadEmployeeMasters(); await loadEmployeesView(); await loadJobs();
   alert('Betriebsdaten gespeichert und aktueller Verrechnungssatz neu berechnet.');
 }
@@ -489,14 +432,12 @@ function closeEmployees(){document.getElementById('employeeBackdrop').style.disp
 let employeeDrivingLicenseImage='';
 let employeePassportImage='';
 function setPreview(id,data){const img=document.getElementById(id);img.src=data||'';img.style.display=data?'block':'none';}
-function readEmployeeImage(input,target){
-  const file=input.files?.[0];if(!file)return;
-  if(file.size>2500000){alert('Bitte Bild auf maximal 2,5 MB verkleinern.');input.value='';return;}
-  const reader=new FileReader();reader.onload=()=>{if(target==='license'){employeeDrivingLicenseImage=reader.result;setPreview('empDrivingLicensePreview',reader.result);}else{employeePassportImage=reader.result;setPreview('empPassportPreview',reader.result);}};reader.readAsDataURL(file);
-}
+async function optimizeImageFile(file,maxPx=1400,quality=.82){const url=URL.createObjectURL(file);try{const img=await new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=fail;i.src=url});const scale=Math.min(1,maxPx/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',quality);}finally{URL.revokeObjectURL(url);}}
+async function readEmployeeImage(input,target){const file=input.files?.[0];if(!file)return;try{const data=await optimizeImageFile(file,1400,.82);if(target==='license'){employeeDrivingLicenseImage=data;setPreview('empDrivingLicensePreview',data);}else{employeePassportImage=data;setPreview('empPassportPreview',data);}}catch(e){alert('Bild konnte nicht verarbeitet werden: '+e.message);input.value='';}}
 function resetEmployeeForm(){
   document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; renderWorktimeModelSelect('krista-standard'); document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true; document.getElementById('empGrossSalary').value=''; document.getElementById('empEmploymentPercent').value='100'; document.getElementById('empEmploymentStart').value=''; document.getElementById('empEmploymentEnd').value=''; document.getElementById('empBirthDate').value='';
   document.getElementById('empDrivingLicenseLastCheck').value=''; document.getElementById('empPassportExpiry').value='';
+  ['Tshirt','Polo','Pullover','Jacket','Trousers','Shoes','Gloves'].forEach(x=>document.getElementById('empSize'+x).value='');
   document.getElementById('empDrivingLicenseFile').value=''; document.getElementById('empPassportFile').value='';
   employeeDrivingLicenseImage=''; employeePassportImage=''; setPreview('empDrivingLicensePreview',''); setPreview('empPassportPreview','');
 }
@@ -504,6 +445,7 @@ function editEmployeeMaster(id){
   const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
   document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; renderWorktimeModelSelect(e.worktimeModelId||'krista-standard'); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('empGrossSalary').value=e.grossMonthlySalary||''; document.getElementById('empEmploymentPercent').value=e.employmentPercent??100; document.getElementById('empEmploymentStart').value=e.employmentStart||''; document.getElementById('empEmploymentEnd').value=e.employmentEnd||''; document.getElementById('empBirthDate').value=e.birthDate||'';
   document.getElementById('empDrivingLicenseLastCheck').value=e.drivingLicenseLastCheck||''; document.getElementById('empPassportExpiry').value=e.passportExpiry||'';
+  const sz=e.clothingSizes||{}; document.getElementById('empSizeTshirt').value=sz.tshirt||'';document.getElementById('empSizePolo').value=sz.polo||'';document.getElementById('empSizePullover').value=sz.pullover||'';document.getElementById('empSizeJacket').value=sz.jacket||'';document.getElementById('empSizeTrousers').value=sz.trousers||'';document.getElementById('empSizeShoes').value=sz.shoes||'';document.getElementById('empSizeGloves').value=sz.gloves||'';
   employeeDrivingLicenseImage=e.drivingLicenseImage||''; employeePassportImage=e.passportImage||'';
   setPreview('empDrivingLicensePreview',employeeDrivingLicenseImage); setPreview('empPassportPreview',employeePassportImage);
   document.getElementById('empDrivingLicenseFile').value=''; document.getElementById('empPassportFile').value='';
@@ -513,7 +455,7 @@ async function saveEmployeeMaster(){
   const id=document.getElementById('empEditId').value;
   const body={name:document.getElementById('empName').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,worktimeModelId:document.getElementById('empWorktimeModel').value,specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked,grossMonthlySalary:Number(document.getElementById('empGrossSalary').value||0),employmentPercent:Number(document.getElementById('empEmploymentPercent').value||0),employmentStart:document.getElementById('empEmploymentStart').value,employmentEnd:document.getElementById('empEmploymentEnd').value,birthDate:document.getElementById('empBirthDate').value,
   drivingLicenseLastCheck:document.getElementById('empDrivingLicenseLastCheck').value,passportExpiry:document.getElementById('empPassportExpiry').value,
-  drivingLicenseImage:employeeDrivingLicenseImage,passportImage:employeePassportImage};
+  drivingLicenseImage:employeeDrivingLicenseImage,passportImage:employeePassportImage,clothingSizes:{tshirt:document.getElementById('empSizeTshirt').value,polo:document.getElementById('empSizePolo').value,pullover:document.getElementById('empSizePullover').value,jacket:document.getElementById('empSizeJacket').value,trousers:document.getElementById('empSizeTrousers').value,shoes:document.getElementById('empSizeShoes').value,gloves:document.getElementById('empSizeGloves').value}};
   if(!body.name.trim()){alert('Bitte einen Namen eingeben.');return;}
   try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetEmployeeForm();await loadEmployeesView();}
   catch(e){alert('Speichern fehlgeschlagen: '+e.message);}
@@ -547,15 +489,27 @@ async function loadEmployeesView(){
       const birthday=e.birthDate?new Date(e.birthDate+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit'}):'–';
       const ann=Number(e.anniversaryYears||0);
       const license=e.drivingLicenseLastCheck?`Kontrolle ${h(e.drivingLicenseLastCheck)}<br>Nächste ${h(e.nextDrivingLicenseCheck||'–')} ${e.drivingLicenseCheckDue?'<strong class="negative">FÄLLIG</strong>':''}`:'keine Führerscheinkontrolle';
-      return `<tr><td><strong>${h(e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${Number(e.employmentPercent??100).toFixed(0)} %<br><span class="small">${h(e.employmentStart||'kein Eintritt')} – ${h(e.employmentEnd||'offen')}</span></td><td><span class="small">Brutto ${money(e.grossMonthlySalary)}<br>Lohn ${money(e.calculation?.salaryCostRate)}/h<br>Voll ${money(e.calculation?.fullCostRate)}/h<br>${num(e.calculation?.productiveHours)} Std./Jahr</span></td><td><span class="small">🎂 ${birthday}<br>🏆 ${ann} Jahre<br>🚗 ${license}<br>🪪 Pass ${h(e.passportExpiry||'–')}<br>${e.drivingLicenseImage?'✅ Führerscheinbild':'❌ Führerscheinbild'} · ${e.passportImage?'✅ Passbild':'❌ Passbild'}</span></td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`}).join('')}</tbody></table>`;
+      return `<tr><td><strong>${h(e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${Number(e.employmentPercent??100).toFixed(0)} %<br><span class="small">${h(e.employmentStart||'kein Eintritt')} – ${h(e.employmentEnd||'offen')}</span></td><td><span class="small">Brutto ${money(e.grossMonthlySalary)}<br>Lohn ${money(e.calculation?.salaryCostRate)}/h<br>Voll ${money(e.calculation?.fullCostRate)}/h<br>${num(e.calculation?.productiveHours)} Std./Jahr</span></td><td><span class="small">🎂 ${birthday}<br>🏆 ${ann} Jahre<br>🚗 ${license}<br>🪪 Pass ${h(e.passportExpiry||'–')}<br>👕 ${h(Object.values(e.clothingSizes||{}).filter(Boolean).join(' · ')||'Größen fehlen')}<br>${e.drivingLicenseImage?'✅ Führerscheinbild':'❌ Führerscheinbild'} · ${e.passportImage?'✅ Passbild':'❌ Passbild'}</span></td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`}).join('')}</tbody></table>`;
   }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
 }
 
+let vehicles=[],vehicleRegistrationImage='';
+function openVehicles(){document.getElementById('vehicleBackdrop').style.display='block';document.getElementById('vehicleModal').style.display='block';loadVehicles();} function closeVehicles(){document.getElementById('vehicleBackdrop').style.display='none';document.getElementById('vehicleModal').style.display='none';}
+function resetVehicleForm(){['vehicleId','vehicleLabel','vehiclePlate','vehicleMake','vehicleModel','vehicleYear','vehicleInspection','vehicleInsuranceType','vehicleInsuranceUntil','vehicleLeasingRate','vehicleLeasingUntil'].forEach(id=>document.getElementById(id).value='');vehicleRegistrationImage='';setPreview('vehicleRegistrationPreview','');document.getElementById('vehicleRegistrationFile').value='';}
+async function loadVehicles(){const d=await api('/admin/api/vehicles');vehicles=d.vehicles||[];const today=new Date();document.getElementById('vehicleList').innerHTML=vehicles.map(v=>{const due=v.inspectionUntil&&new Date(v.inspectionUntil+'T12:00:00')<new Date(today.getTime()+60*86400000);return `<div class="list-card"><strong>${h(v.label||v.plate)}</strong> · ${h(v.plate)}<br><span class="small">${h(v.make)} ${h(v.model)} ${v.year||''}<br><span class="${due?'due':''}">Pickerl bis ${h(v.inspectionUntil||'–')}</span> · Versicherung ${h(v.insuranceType||'–')} bis ${h(v.insuranceUntil||'–')}<br>Leasing ${money(v.leasingRate)}/Monat bis ${h(v.leasingUntil||'–')}</span><div class="actions"><button class="secondary" onclick="editVehicle('${h(v.id)}')">Bearbeiten</button><button class="danger" onclick="deleteVehicle('${h(v.id)}')">Löschen</button></div></div>`}).join('')||'<div class="hint">Noch keine Fahrzeuge angelegt.</div>';}
+function editVehicle(id){const v=vehicles.find(x=>x.id===id);if(!v)return;document.getElementById('vehicleId').value=v.id;document.getElementById('vehicleLabel').value=v.label||'';document.getElementById('vehiclePlate').value=v.plate||'';document.getElementById('vehicleMake').value=v.make||'';document.getElementById('vehicleModel').value=v.model||'';document.getElementById('vehicleYear').value=v.year||'';document.getElementById('vehicleInspection').value=v.inspectionUntil||'';document.getElementById('vehicleInsuranceType').value=v.insuranceType||'';document.getElementById('vehicleInsuranceUntil').value=v.insuranceUntil||'';document.getElementById('vehicleLeasingRate').value=v.leasingRate||'';document.getElementById('vehicleLeasingUntil').value=v.leasingUntil||'';vehicleRegistrationImage=v.registrationImage||'';setPreview('vehicleRegistrationPreview',vehicleRegistrationImage);}
+async function saveVehicle(){const id=document.getElementById('vehicleId').value;const body={label:document.getElementById('vehicleLabel').value,plate:document.getElementById('vehiclePlate').value,make:document.getElementById('vehicleMake').value,model:document.getElementById('vehicleModel').value,year:Number(document.getElementById('vehicleYear').value||0),inspectionUntil:document.getElementById('vehicleInspection').value,insuranceType:document.getElementById('vehicleInsuranceType').value,insuranceUntil:document.getElementById('vehicleInsuranceUntil').value,leasingRate:Number(document.getElementById('vehicleLeasingRate').value||0),leasingUntil:document.getElementById('vehicleLeasingUntil').value,registrationImage:vehicleRegistrationImage};await api(id?`/admin/api/vehicles/${encodeURIComponent(id)}`:'/admin/api/vehicles',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetVehicleForm();loadVehicles();}
+async function deleteVehicle(id){if(confirm('Fahrzeug löschen?')){await api('/admin/api/vehicles/'+encodeURIComponent(id),{method:'DELETE'});loadVehicles();}}
+let ideas=[];function openIdeas(){document.getElementById('ideaBackdrop').style.display='block';document.getElementById('ideaModal').style.display='block';loadIdeas();}function closeIdeas(){document.getElementById('ideaBackdrop').style.display='none';document.getElementById('ideaModal').style.display='none';}function resetIdeaForm(){['ideaId','ideaTitle','ideaNote'].forEach(id=>document.getElementById(id).value='');document.getElementById('ideaStatus').value='offen';}
+async function loadIdeas(){const d=await api('/admin/api/ideas');ideas=d.ideas||[];document.getElementById('ideaList').innerHTML=ideas.map(v=>`<div class="list-card"><strong>${h(v.title)}</strong> <span class="pill">${h(v.status)}</span><p>${h(v.note)}</p><div class="actions"><button class="secondary" onclick="editIdea('${h(v.id)}')">Bearbeiten</button><button class="danger" onclick="deleteIdea('${h(v.id)}')">Löschen</button></div></div>`).join('')||'<div class="hint">Noch keine Ideen erfasst.</div>';}
+function editIdea(id){const v=ideas.find(x=>x.id===id);if(!v)return;document.getElementById('ideaId').value=v.id;document.getElementById('ideaTitle').value=v.title||'';document.getElementById('ideaNote').value=v.note||'';document.getElementById('ideaStatus').value=v.status||'offen';}async function saveIdea(){const id=document.getElementById('ideaId').value;const body={title:document.getElementById('ideaTitle').value,note:document.getElementById('ideaNote').value,status:document.getElementById('ideaStatus').value};await api(id?`/admin/api/ideas/${encodeURIComponent(id)}`:'/admin/api/ideas',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetIdeaForm();loadIdeas();}async function deleteIdea(id){if(confirm('Idee löschen?')){await api('/admin/api/ideas/'+encodeURIComponent(id),{method:'DELETE'});loadIdeas();}}
 document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
+document.getElementById('sortJobs').addEventListener('change',render);
 document.getElementById('empWorktimeModel').addEventListener('change',updateWorktimeModelSummary);
 document.getElementById('empDrivingLicenseFile').addEventListener('change',e=>readEmployeeImage(e.target,'license'));
 document.getElementById('empPassportFile').addEventListener('change',e=>readEmployeeImage(e.target,'passport'));
+document.getElementById('vehicleRegistrationFile').addEventListener('change',async e=>{const f=e.target.files?.[0];if(f){vehicleRegistrationImage=await optimizeImageFile(f,1400,.82);setPreview('vehicleRegistrationPreview',vehicleRegistrationImage);}});
 loadVersion();
 loadWorktimeModels().then(()=>loadEmployeeMasters()).catch(()=>{});
 loadJobs();
