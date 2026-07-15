@@ -31,38 +31,50 @@
     .company-stack{max-width:760px;margin:0 auto}.company-stack .fieldline{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,260px);gap:18px;align-items:center;padding:9px 0;border-bottom:1px solid #eee}.company-stack label{font-weight:650}.company-stack input{min-width:0;width:100%;text-align:right;box-sizing:border-box}.company-stack .summaryline{font-weight:800}.company-stack .billing-highlight{background:#dff4df;border:2px solid #4d8f50;font-size:20px;font-weight:900}.company-stack h3{margin:24px 0 8px}
     .employee-sizes{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.modal-grid input,.modal-grid select,.modal-grid textarea{width:100%;min-width:0;box-sizing:border-box}.list-card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:14px;margin:10px 0}.due{color:#9b1c1c;font-weight:800}
-    @media(max-width:760px){.company-stack .fieldline{grid-template-columns:1fr}.company-stack input{text-align:left}.card .actions.primary-actions{grid-template-columns:1fr 1fr}}
+    .rapport-launch{position:fixed;inset:12vh auto auto 50%;transform:translateX(-50%);width:min(560px,92vw);background:#fff;border-radius:18px;box-shadow:0 18px 70px rgba(0,0,0,.34);z-index:81;display:none}.rapport-launch .body{padding:22px}.rapport-launch label{display:block;font-weight:700;margin:12px 0 5px}.rapport-launch select,.rapport-launch input{width:100%;box-sizing:border-box;min-width:0}.rapport-only-hide{display:none!important}.rapport-banner{background:#eef7ee;border:1px solid #b9d8b9;border-radius:12px;padding:12px;margin-bottom:12px}.rapport-primary{background:#24733b!important;border-color:#24733b!important;font-weight:800}.rapport-hours-mode .row{grid-template-columns:1.5fr repeat(4,1fr) auto}.rapport-hours-mode .emp-regie-wrap,.rapport-hours-mode .emp-regie-desc-wrap{display:none!important}
+    @media(max-width:760px){.company-stack .fieldline{grid-template-columns:1fr}.company-stack input{text-align:left}.card .actions.primary-actions{grid-template-columns:1fr 1fr}.rapport-hours-mode .row{grid-template-columns:1fr 1fr}.rapport-hours-mode .row>div:first-child{grid-column:1/-1}}
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.3.2</span> · Build <span id="appBuild">0007-R3</span> · <span id="appStatus">Stable</span></div></header>
+  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008a</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
       <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
-      <button id="reload">Aktualisieren</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
+      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button id="reload">Aktualisieren</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
 
+  <div id="rapportLaunchBackdrop" class="drawer-backdrop" onclick="closeRapportLauncher()" style="z-index:80"></div>
+  <section id="rapportLaunch" class="rapport-launch" aria-hidden="true">
+    <div class="employee-modal-head"><div><strong>📋 Tagesrapport starten</strong><div class="small" style="color:#ddd">Baustelle und Datum wählen</div></div><button class="closebtn" onclick="closeRapportLauncher()">×</button></div>
+    <div class="body">
+      <label>Baustelle</label><select id="rapportJob" class="wide"></select>
+      <label>Datum</label><input id="rapportDay" type="date">
+      <div class="actions" style="margin-top:18px;justify-content:flex-end"><button class="secondary" onclick="closeRapportLauncher()">Abbrechen</button><button class="rapport-primary" onclick="startRapport()">Tagesrapport öffnen</button></div>
+    </div>
+  </section>
+
   <div id="drawerBackdrop" class="drawer-backdrop" onclick="closeRegie()"></div>
   <aside id="regieDrawer" class="drawer" aria-hidden="true">
-    <div class="drawer-head"><div><strong>📝 Tageserfassung</strong><div id="regieTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeRegie()">×</button></div>
-    <div class="drawer-body">
-      <label>Status</label>
-      <select id="regieStatus" class="wide"><option>Entwurf</option><option>Geprüft</option><option>Freigegeben</option><option>Abgerechnet</option></select>
+    <div class="drawer-head"><div><strong id="regieHeading">📝 Tageserfassung</strong><div id="regieTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeRegie()">×</button></div>
+    <div class="drawer-body" id="regieBody">
+      <div id="rapportBanner" class="rapport-banner" style="display:none"><strong>FIRST DAY</strong><br><span class="small">Mitarbeiter und Arbeitszeiten erfassen. Material, Fotos und Regie folgen in den nächsten Schritten.</span></div>
+      <div id="regieStatusBlock"><label>Status</label>
+      <select id="regieStatus" class="wide"><option>Entwurf</option><option>Geprüft</option><option>Freigegeben</option><option>Abgerechnet</option></select></div>
 
       <div class="section"><h3>👷 Mitarbeiter und Zeiten</h3><div id="employeeRows"></div><button class="secondary" onclick="addEmployee()">+ Mitarbeiter</button><div class="small">Gesamtzeit und Regiezeit werden pro Mitarbeiter getrennt erfasst.</div></div>
 
-      <div class="section"><h3>📝 Leistungsbeschreibung für den Kunden</h3><textarea id="customerText" placeholder="Welche Arbeiten wurden ausgeführt?"></textarea></div>
-      <div class="section"><h3>🔒 Interne Notiz</h3><textarea id="internalNote" placeholder="Nur intern sichtbar"></textarea></div>
+      <div class="section rapport-advanced"><h3>📝 Leistungsbeschreibung für den Kunden</h3><textarea id="customerText" placeholder="Welche Arbeiten wurden ausgeführt?"></textarea></div>
+      <div class="section rapport-advanced"><h3>🔒 Interne Notiz</h3><textarea id="internalNote" placeholder="Nur intern sichtbar"></textarea></div>
 
-      <div class="section"><h3>📦 Material</h3><div id="materialRows"></div><button class="secondary" onclick="addMaterial()">+ Material</button><label>Sondermaterial</label><textarea id="specialMaterial" placeholder="Material, das noch nicht in der Materialliste enthalten ist"></textarea></div>
+      <div class="section rapport-advanced"><h3>📦 Material</h3><div id="materialRows"></div><button class="secondary" onclick="addMaterial()">+ Material</button><label>Sondermaterial</label><textarea id="specialMaterial" placeholder="Material, das noch nicht in der Materialliste enthalten ist"></textarea></div>
 
-      <div class="section"><h3>📦 Material für morgen</h3><label class="checkline"><input type="checkbox" id="materialTomorrowNeeded" onchange="toggleTomorrow()"> Ja, Material wird morgen benötigt</label><textarea id="materialTomorrowText" placeholder="Was und wie viel?" style="display:none"></textarea></div>
+      <div class="section rapport-advanced"><h3>📦 Material für morgen</h3><label class="checkline"><input type="checkbox" id="materialTomorrowNeeded" onchange="toggleTomorrow()"> Ja, Material wird morgen benötigt</label><textarea id="materialTomorrowText" placeholder="Was und wie viel?" style="display:none"></textarea></div>
     </div>
-    <div class="savebar"><span id="regieMsg" class="statusmsg"></span><button class="secondary" onclick="closeRegie()">Schließen</button><button onclick="saveRegie()">💾 Speichern</button></div>
+    <div class="savebar"><span id="regieMsg" class="statusmsg"></span><button class="secondary" onclick="closeRegie()">Schließen</button><button id="regieSaveButton" onclick="saveRegie()">💾 Speichern</button></div>
   </aside>
 
   <div id="employeeBackdrop" class="drawer-backdrop" onclick="closeEmployees()" style="z-index:60"></div>
@@ -150,7 +162,7 @@
     </div><div id="vehicleList" style="margin-top:22px"></div></div>
   </section>
   <div id="ideaBackdrop" class="drawer-backdrop" onclick="closeIdeas()" style="z-index:74"></div><section id="ideaModal" class="employee-modal" style="z-index:75"><div class="employee-modal-head"><strong>💡 Ideen & Wünsche</strong><button class="closebtn" onclick="closeIdeas()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="ideaId"><div><label>Titel</label><input id="ideaTitle"></div><div><label>Status</label><select id="ideaStatus"><option value="offen">offen</option><option value="geplant">geplant</option><option value="umgesetzt">umgesetzt</option></select></div><div class="full"><label>Beschreibung</label><textarea id="ideaNote"></textarea></div><div class="full actions"><button onclick="saveIdea()">💾 Idee speichern</button><button class="secondary" onclick="resetIdeaForm()">Neu</button></div></div><div id="ideaList"></div></div></section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.3.2</span> · Build <span id="footerBuild">0007-R3</span></footer>
+  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.4.0</span> · Build <span id="footerBuild">0008a</span></footer>
 
 <script>
 const qs = new URLSearchParams(location.search);
@@ -362,9 +374,9 @@ function addEmployee(e={}){
   <div><label>Bis</label><input type="time" class="emp-to" value="${h(e.to || worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.to || '')}"></div>
   <div><label>Pause Min.</label><input type="number" min="0" class="emp-break" value="${Number(e.breakMinutes ?? worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.breakMinutes ?? 0)}"></div>
   <div><label>Gesamt Std.</label><input type="number" step="0.25" min="0" class="emp-total" value="${Number(e.totalHours||0)}"></div>
-  <div><label>Regie Std.</label><input type="number" step="0.25" min="0" class="emp-regie" value="${Number(e.regieHours||0)}"></div>
+  <div class="emp-regie-wrap"><label>Regie Std.</label><input type="number" step="0.25" min="0" class="emp-regie" value="${Number(e.regieHours||0)}"></div>
   <button class="danger" title="Entfernen" onclick="this.parentElement.remove()">×</button>
-  <div style="grid-column:1/-1"><label>Regie-Beschreibung optional</label><input class="emp-regie-desc wide" value="${h(e.regieDescription)}" placeholder="Nur falls Regie vorhanden"></div>`;
+  <div class="emp-regie-desc-wrap" style="grid-column:1/-1"><label>Regie-Beschreibung optional</label><input class="emp-regie-desc wide" value="${h(e.regieDescription)}" placeholder="Nur falls Regie vorhanden"></div>`;
   const select=div.querySelector('.emp-master');
   select.addEventListener('change',()=>{
     const m=employeeMasters.find(x=>String(x.id)===String(select.value));
@@ -389,11 +401,32 @@ function addMaterial(m={}){
   box.appendChild(div);
 }
 function toggleTomorrow(){document.getElementById('materialTomorrowText').style.display=document.getElementById('materialTomorrowNeeded').checked?'block':'none';}
-async function openRegie(jobId,day){
+let rapportHoursMode=false;
+function todayLocalISO(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
+function openRapportLauncher(){
+  const sel=document.getElementById('rapportJob');
+  sel.innerHTML=jobs.map(j=>`<option value="${h(j.jobId)}">#${h(j.jobId)}${j.name?' · '+h(j.name):''}</option>`).join('');
+  document.getElementById('rapportDay').value=todayLocalISO();
+  document.getElementById('rapportLaunchBackdrop').style.display='block';document.getElementById('rapportLaunch').style.display='block';
+}
+function closeRapportLauncher(){document.getElementById('rapportLaunchBackdrop').style.display='none';document.getElementById('rapportLaunch').style.display='none';}
+async function startRapport(){const jobId=document.getElementById('rapportJob').value,day=document.getElementById('rapportDay').value;if(!jobId||!day)return;closeRapportLauncher();rapportHoursMode=true;await openRegie(jobId,day,true);}
+function applyRapportMode(){
+  const advanced=[...document.querySelectorAll('#regieDrawer .rapport-advanced')];
+  advanced.forEach(el=>el.classList.toggle('rapport-only-hide',rapportHoursMode));
+  document.getElementById('regieStatusBlock').classList.toggle('rapport-only-hide',rapportHoursMode);
+  document.getElementById('rapportBanner').style.display=rapportHoursMode?'block':'none';
+  document.getElementById('regieBody').classList.toggle('rapport-hours-mode',rapportHoursMode);
+  document.getElementById('regieHeading').textContent=rapportHoursMode?'📋 Tagesrapport – Stunden':'📝 Tageserfassung';
+  document.getElementById('regieSaveButton').textContent=rapportHoursMode?'✅ Stunden speichern':'💾 Speichern';
+}
+
+async function openRegie(jobId,day,fromRapport=false){
   if(!worktimeModels.length) await loadWorktimeModels();
   if(!employeeMasters.length) await loadEmployeeMasters();
   currentRegie={jobId,day}; document.getElementById('regieTitle').textContent=`#${jobId} · ${day}`;
   document.getElementById('drawerBackdrop').style.display='block'; document.getElementById('regieDrawer').style.display='block';
+  applyRapportMode();
   document.getElementById('regieMsg').textContent='Lade …';
   try{
     const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}/regie`); const r=data.regie||{};
@@ -412,7 +445,7 @@ async function saveRegie(){
   const materials=[...document.querySelectorAll('#materialRows .material-row')].map(r=>({name:r.querySelector('.mat-name').value,quantity:r.querySelector('.mat-qty').value,unit:r.querySelector('.mat-unit').value})).filter(m=>m.name.trim());
   const body={status:document.getElementById('regieStatus').value,employees,customerText:document.getElementById('customerText').value,internalNote:document.getElementById('internalNote').value,materials,specialMaterial:document.getElementById('specialMaterial').value,materialTomorrow:{needed:document.getElementById('materialTomorrowNeeded').checked,text:document.getElementById('materialTomorrowText').value}};
   document.getElementById('regieMsg').textContent='Speichere …';
-  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent='✅ Gespeichert';}
+  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent=rapportHoursMode?'✅ Stunden gespeichert':'✅ Gespeichert';loadJobs();}
   catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
 }
 
