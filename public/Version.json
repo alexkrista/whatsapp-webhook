@@ -1,7 +1,7 @@
 {
-  "version": "3.3.2",
-  "build": "0007-R3",
-  "status": "Stable",
+  "version": "3.4.0",
+  "build": "0008a",
+  "status": "Prototype",
   "date": "2026-07-14",
-  "name": "SHAKEN Revision 3 – Fahrzeugkosten"
+  "name": "FIRST DAY – Tagesrapport Stunden"
 }
