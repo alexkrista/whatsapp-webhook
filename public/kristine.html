@@ -1,1 +1,152 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kristine – Alpha 1</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#202020;background:#f3f1ec}
+*{box-sizing:border-box}body{margin:0}header{background:#111;color:#fff;padding:20px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
+h1{margin:0;font-size:26px}.sub{opacity:.72;font-size:13px;margin-top:3px}main{max-width:1400px;margin:auto;padding:20px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}button,input,select,textarea{font:inherit;border:1px solid #ccc;border-radius:10px;padding:10px 12px}
+button{background:#111;color:#fff;cursor:pointer}button.secondary{background:#fff;color:#111}button.green{background:#27713d;border-color:#27713d}button.danger{background:#9d2525;border-color:#9d2525}
+.tab{display:none}.tab.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 15px rgba(0,0,0,.07)}.card h2,.card h3{margin-top:0}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.formgrid .full{grid-column:1/-1}
+label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textarea{width:100%;min-width:0}textarea{min-height:70px}
+.week{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;overflow:auto;padding-bottom:5px}.daycol{background:#ebe8e1;border-radius:14px;padding:10px;min-height:260px}
+.dayhead{font-weight:800;margin-bottom:8px;position:sticky;top:0}.assignment{background:#fff;border-left:5px solid #27713d;border-radius:10px;padding:10px;margin:8px 0;box-shadow:0 1px 6px rgba(0,0,0,.07)}
+.assignment strong{display:block}.small{font-size:12px;color:#707070}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chatwrap{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:16px}.phone{background:#e9e4db;border-radius:28px;padding:12px;box-shadow:0 12px 40px rgba(0,0,0,.14)}
+.chat{height:540px;background:#efeae2;border-radius:20px;padding:14px;overflow:auto}.bubble{max-width:86%;padding:10px 12px;border-radius:12px;margin:8px 0;white-space:pre-wrap}
+.bot{background:#fff}.user{background:#d7f5c7;margin-left:auto}.quick{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.quick button{font-size:13px;padding:7px 9px;background:#fff;color:#155b2b;border-color:#8ab99a}
+.sendrow{display:flex;gap:8px;margin-top:10px}.sendrow input{flex:1}.statebox{background:#f7f7f7;border-radius:12px;padding:12px;margin-bottom:12px}
+.status{display:inline-block;padding:5px 9px;border-radius:999px;background:#eee;font-size:12px;font-weight:800}.working{background:#d9f1df;color:#145829}.pause{background:#fff0c7;color:#795400}.finished_day{background:#e5e5e5}
+.table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}
+@media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Kristine</h1><div class="sub">Alpha 1 · Der Mitarbeiter kommuniziert. Kristine organisiert.</div></div>
+  <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
+</header>
+<main>
+<nav>
+  <button onclick="showTab('planning')">📅 Wochenplanung</button>
+  <button onclick="showTab('chat')">💬 Kristine-Chat</button>
+  <button onclick="showTab('control')">🧾 Leitstand</button>
+  <button onclick="showTab('tasks')">📌 Aufgaben</button>
+  <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
+</nav>
 
+<section id="planning" class="tab active">
+  <div class="notice">Erste testbare Planung: Baustelle + Mitarbeiter + Zeitraum werden einmal erfasst. Daraus entstehen Wochenansicht, Mitarbeiter-Chat und Leitstand.</div>
+  <div class="grid">
+    <div class="card">
+      <h3>Baustellenkarte einteilen</h3>
+      <div class="formgrid">
+        <div><label>Datum</label><input id="aDate" type="date"></div>
+        <div><label>Baustellennummer</label><input id="aJobId" placeholder="260016"></div>
+        <div><label>Baustelle</label><input id="aJobName" placeholder="Müller"></div>
+        <div><label>Ort</label><input id="aCity" placeholder="Feldkirch"></div>
+        <div><label>Mitarbeiter-ID</label><input id="aEmployeeId" placeholder="alex"></div>
+        <div><label>Mitarbeiter</label><input id="aEmployeeName" placeholder="Alex"></div>
+        <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
+        <div><label>Bis</label><input id="aTo" type="time" value="17:00"></div>
+        <div><label>Fahrzeug</label><input id="aVehicle" placeholder="Bus 2"></div>
+        <div class="full"><label>Adresse</label><input id="aAddress" placeholder="Straße, PLZ Ort"></div>
+        <div class="full"><label>Hinweis</label><input id="aNote" placeholder="z. B. Schlüssel beim Bauherrn"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addAssignment()">+ Einteilen</button><button class="secondary" onclick="saveAssignments()">Planung speichern</button></div>
+    </div>
+    <div class="card">
+      <h3>Testdaten</h3>
+      <p class="small">Für den ersten Dialog reichen zwei Einteilungen für denselben Mitarbeiter am selben Tag.</p>
+      <button class="secondary" onclick="seedDemo()">Demo-Tag für Alex anlegen</button>
+      <button class="danger" onclick="clearPlanning()">Planung leeren</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Wochenansicht – Baustellenkarten</h3><div id="week" class="week"></div></div>
+</section>
+
+<section id="chat" class="tab">
+  <div class="chatwrap">
+    <div class="card">
+      <h3>Mitarbeiter auswählen</h3>
+      <label>Mitarbeiter-ID</label><input id="chatEmployeeId" value="alex">
+      <label style="margin-top:8px">Name</label><input id="chatEmployeeName" value="Alex">
+      <label style="margin-top:8px">Datum</label><input id="chatDate" type="date">
+      <div class="actions"><button onclick="beginConversation()">Gespräch beginnen</button><button class="secondary" onclick="resetState()">Tag zurücksetzen</button></div>
+      <div id="currentState" class="statebox" style="margin-top:12px">Noch kein Status geladen.</div>
+      <p class="small">Natürliche Kurzmeldungen: Start, Pause, Mittag, Weiter, Fertig, Status, Erledigt.</p>
+    </div>
+    <div class="phone">
+      <div id="chatMessages" class="chat"></div>
+      <div id="quickButtons" class="quick"></div>
+      <div class="sendrow"><input id="chatInput" placeholder="z. B. Start" onkeydown="if(event.key==='Enter')sendMessage()"><button class="green" onclick="sendMessage()">Senden</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="control" class="tab">
+  <div class="card"><h3>Leitstand heute</h3><div id="controlList"></div></div>
+</section>
+
+<section id="tasks" class="tab">
+  <div class="grid">
+    <div class="card">
+      <h3>Aufgabe verteilen</h3>
+      <div class="formgrid">
+        <div class="full"><label>Aufgabe</label><input id="tTitle" placeholder="Rückruf Müller / Ausbesserung Sockel"></div>
+        <div><label>Mitarbeiter-ID</label><input id="tAssigneeId" placeholder="alex"></div>
+        <div><label>Name</label><input id="tAssigneeName" placeholder="Alex"></div>
+        <div><label>Baustellennummer optional</label><input id="tJobId"></div>
+        <div><label>Baustelle optional</label><input id="tJobName"></div>
+        <div><label>Fällig</label><input id="tDueDate" type="date"></div>
+        <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="Wenn Alex wieder bei Müller ist"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
+    </div>
+    <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
+  </div>
+</section>
+</main>
+
+<script>
+const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
+let data={assignments:[],states:{},tasks:[],today:''};
+function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
+async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
+function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
+async function loadAll(){data=await api('/kristine/api/bootstrap');document.getElementById('aDate').value=data.today;document.getElementById('chatDate').value=data.today;document.getElementById('tDueDate').value=data.today;renderWeek();renderControl();renderTasks()}
+function weekDays(){const d=new Date((document.getElementById('aDate').value||data.today)+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
+function renderWeek(){const days=weekDays();document.getElementById('week').innerHTML=days.map(day=>`<div class="daycol"><div class="dayhead">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>${data.assignments.filter(a=>a.date===day).map(a=>`<div class="assignment"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions"><button class="danger" onclick="removeAssignment('${a.id}')">×</button></div></div>`).join('')||'<span class="small">frei</span>'}</div>`).join('')}
+function addAssignment(){data.assignments.push({id:id(),date:aDate.value,jobId:aJobId.value.trim(),jobName:aJobName.value.trim(),city:aCity.value.trim(),address:aAddress.value.trim(),employeeId:aEmployeeId.value.trim(),employeeName:aEmployeeName.value.trim(),vehicle:aVehicle.value.trim(),from:aFrom.value,to:aTo.value,note:aNote.value.trim()});renderWeek()}
+function removeAssignment(x){data.assignments=data.assignments.filter(a=>a.id!==x);renderWeek()}
+async function saveAssignments(){const r=await api('/kristine/api/assignments',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignments:data.assignments})});data.assignments=r.assignments;renderWeek();renderControl();alert('Planung gespeichert.')}
+function seedDemo(){const d=aDate.value||data.today;data.assignments=data.assignments.filter(a=>!(a.date===d&&a.employeeId==='alex'));data.assignments.push({id:id(),date:d,jobId:'260016',jobName:'Müller',city:'Feldkirch',address:'Feldkircherstraße 12, 6800 Feldkirch',employeeId:'alex',employeeName:'Alex',vehicle:'Bus 2',from:'07:00',to:'12:00',note:''},{id:id(),date:d,jobId:'260021',jobName:'Huber',city:'Rankweil',address:'Bahnhofstraße 3, 6830 Rankweil',employeeId:'alex',employeeName:'Alex',vehicle:'Bus 2',from:'13:00',to:'17:00',note:''});renderWeek()}
+function clearPlanning(){if(confirm('Planung wirklich leeren?')){data.assignments=[];renderWeek()}}
+function addBubble(text,who){const d=document.createElement('div');d.className='bubble '+who;d.textContent=text;chatMessages.appendChild(d);chatMessages.scrollTop=chatMessages.scrollHeight}
+function setQuick(buttons=[]){quickButtons.innerHTML=buttons.map(b=>`<button onclick="quickSend('${esc(b)}')">${esc(b)}</button>`).join('')}
+function quickSend(text){chatInput.value=text;sendMessage()}
+function renderState(state){if(!state){currentState.textContent='Noch kein Status.';return}currentState.innerHTML=`<strong>${esc(state.employeeName)}</strong><br><span class="status ${esc(state.mode)}">${esc(state.mode)}</span><br><span class="small">${(state.timeline||[]).length} Ereignisse heute</span>`}
+async function beginConversation(){chatMessages.innerHTML='';setQuick([]);await postMessage('Hallo')}
+async function sendMessage(){const text=chatInput.value.trim();if(!text)return;chatInput.value='';addBubble(text,'user');await postMessage(text,true)}
+async function postMessage(text,alreadyShown=false){if(!alreadyShown&&text!=='Hallo')addBubble(text,'user');const r=await api('/kristine/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:chatEmployeeId.value.trim(),employeeName:chatEmployeeName.value.trim(),date:chatDate.value,text})});addBubble(r.reply,'bot');setQuick(r.buttons||[]);renderState(r.state);await loadSilent()}
+async function resetState(){await api('/kristine/api/reset-state/'+encodeURIComponent(chatEmployeeId.value.trim()),{method:'POST'});chatMessages.innerHTML='';setQuick([]);currentState.textContent='Tag wurde zurückgesetzt.';await loadSilent()}
+async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks()}
+function renderControl(){const today=chatDate.value||data.today;const employees=[...new Map(data.assignments.filter(a=>a.date===today).map(a=>[a.employeeId,a])).values()];controlList.innerHTML=employees.length?`<table class="table"><thead><tr><th>Mitarbeiter</th><th>Plan</th><th>Status</th><th>Letzte Aktion</th></tr></thead><tbody>${employees.map(a=>{const s=data.states[a.employeeId];const last=s?.timeline?.at(-1);return `<tr><td><strong>${esc(a.employeeName)}</strong></td><td>${data.assignments.filter(x=>x.date===today&&x.employeeId===a.employeeId).map(x=>`${esc(x.from)}–${esc(x.to)} ${esc(x.jobName)}`).join('<br>')}</td><td><span class="status ${esc(s?.mode||'idle')}">${esc(s?.mode||'offen')}</span></td><td>${last?esc(last.detail):'–'}</td></tr>`}).join('')}</tbody></table>`:'<span class="small">Für heute ist noch niemand eingeteilt.</span>'}
+function addTask(){data.tasks.push({id:id(),title:tTitle.value.trim(),assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),dueDate:tDueDate.value,reminder:tReminder.value.trim(),status:'open',createdAt:new Date().toISOString()});renderTasks()}
+function renderTasks(){taskList.innerHTML=data.tasks.length?data.tasks.map(t=>`<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(t.dueDate||'–')} · ${esc(t.status)}</span><div class="actions"><button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`).join(''):'<span class="small">Keine Aufgaben.</span>'}
+function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks()}
+async function saveTasks(){const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});data.tasks=r.tasks;renderTasks();alert('Aufgaben gespeichert.')}
+document.getElementById('adminLink').href=url('/admin/ui');
+loadAll().catch(e=>alert(e.message));
+</script>
+</body>
+</html>
