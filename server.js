@@ -51,8 +51,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.3.2";
-const APP_BUILD = "0007-R3";
+const APP_VERSION = "3.4.0";
+const APP_BUILD = "0008a";
 const APP_STATUS = "Stable";
 const APP_BUILD_DATE = "2026-07-14";
 
@@ -2452,7 +2452,7 @@ app.get("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
     const day = String(req.params.day);
     if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
     const dayDir = resolveExistingDayDir(jobId, day);
-    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+    if (!fs.existsSync(dayDir)) return res.json({ ok: true, exists: false, regie: emptyRegie(jobId, day) });
     const p = regiePathForDay(jobId, day);
     if (!fs.existsSync(p)) return res.json({ ok: true, exists: false, regie: emptyRegie(jobId, day) });
     const regie = JSON.parse(await fsp.readFile(p, "utf8"));
@@ -2468,10 +2468,10 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
     const jobId = String(req.params.jobId);
     const day = String(req.params.day);
     if (!isSafeJobId(jobId) || !isSafeDay(day)) return res.status(400).json({ ok: false, error: "Invalid jobId/day" });
-    const dayDir = resolveExistingDayDir(jobId, day);
-    if (!fs.existsSync(dayDir)) return res.status(404).json({ ok: false, error: "Day not found" });
+    const dayDir = resolveDayDirForWrite(jobId, day);
+    await ensureDir(dayDir);
 
-    const p = regiePathForDay(jobId, day);
+    const p = path.join(dayDir, "regie.json");
     let old = emptyRegie(jobId, day);
     if (fs.existsSync(p)) {
       try { old = JSON.parse(await fsp.readFile(p, "utf8")); } catch {}
