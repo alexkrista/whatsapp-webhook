@@ -52,8 +52,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.4.0";
-const APP_BUILD = "0008a";
-const APP_STATUS = "Stable";
+const APP_BUILD = "0008b";
+const APP_STATUS = "Prototype";
 const APP_BUILD_DATE = "2026-07-14";
 
 // Static files for Admin UI
@@ -1446,12 +1446,20 @@ function metaPathForJob(jobId) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
+      status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
+      street: String(meta.street || "").trim(),
+      houseNumber: String(meta.houseNumber || "").trim(),
+      postalCode: String(meta.postalCode || "").trim(),
+      city: String(meta.city || "").trim(),
+      addressExtra: String(meta.addressExtra || "").trim(),
+      contactName: String(meta.contactName || "").trim(),
+      contactPhone: String(meta.contactPhone || "").trim(),
       billingRate: Math.max(0, Number(meta.billingRate || 0)),
       contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
@@ -1460,9 +1468,33 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
   }
 }
+function historyPathForJob(jobId) {
+  return path.join(DATA_DIR, String(jobId), ".history.jsonl");
+}
+async function appendJobHistory(jobId, event) {
+  if (!isSafeJobId(jobId)) return;
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  await appendJsonl(historyPathForJob(jobId), {
+    at: new Date().toISOString(),
+    type: String(event?.type || "event"),
+    title: String(event?.title || "").slice(0, 180),
+    detail: String(event?.detail || "").slice(0, 2000),
+    source: String(event?.source || "system").slice(0, 80),
+    data: event?.data && typeof event.data === "object" ? event.data : undefined
+  });
+}
+async function readJobHistory(jobId, limit = 250) {
+  const p = historyPathForJob(jobId);
+  if (!fs.existsSync(p)) return [];
+  const lines = (await fsp.readFile(p, "utf8")).split("\n").filter(Boolean);
+  return lines.slice(-Math.max(1, Math.min(1000, Number(limit || 250)))).reverse().map(line => {
+    try { return JSON.parse(line); } catch { return null; }
+  }).filter(Boolean);
+}
+
 async function writeJobMeta(jobId, patch) {
   if (!isSafeJobId(jobId)) throw new Error("Invalid jobId");
   const existing = await readJobMeta(jobId);
@@ -1472,6 +1504,14 @@ async function writeJobMeta(jobId, patch) {
     name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
+    status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
+    street: String(patch.street ?? existing.street ?? "").trim().slice(0, 140),
+    houseNumber: String(patch.houseNumber ?? existing.houseNumber ?? "").trim().slice(0, 40),
+    postalCode: String(patch.postalCode ?? existing.postalCode ?? "").trim().slice(0, 20),
+    city: String(patch.city ?? existing.city ?? "").trim().slice(0, 100),
+    addressExtra: String(patch.addressExtra ?? existing.addressExtra ?? "").trim().slice(0, 300),
+    contactName: String(patch.contactName ?? existing.contactName ?? "").trim().slice(0, 120),
+    contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
     billingRate: Math.max(0, Number(patch.billingRate ?? existing.billingRate ?? 0)),
     contractAmount: Math.max(0, Number(patch.contractAmount ?? existing.contractAmount ?? 0)),
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
@@ -1745,6 +1785,14 @@ app.get("/admin/api/jobs", async (req, res) => {
         name: meta.name || "",
         notes: meta.notes || "",
         favorite: !!meta.favorite,
+        status: meta.status || "Angebot",
+        street: meta.street || "",
+        houseNumber: meta.houseNumber || "",
+        postalCode: meta.postalCode || "",
+        city: meta.city || "",
+        addressExtra: meta.addressExtra || "",
+        contactName: meta.contactName || "",
+        contactPhone: meta.contactPhone || "",
         billingRate: Number(meta.billingRate || 0),
         contractAmount: Number(meta.contractAmount || 0),
         externalServices: Number(meta.externalServices || 0),
@@ -1794,6 +1842,14 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       name: req.body?.name,
       notes: req.body?.notes,
       favorite: req.body?.favorite,
+      status: req.body?.status,
+      street: req.body?.street,
+      houseNumber: req.body?.houseNumber,
+      postalCode: req.body?.postalCode,
+      city: req.body?.city,
+      addressExtra: req.body?.addressExtra,
+      contactName: req.body?.contactName,
+      contactPhone: req.body?.contactPhone,
       billingRate: req.body?.billingRate,
       contractAmount: req.body?.contractAmount,
       externalServices: req.body?.externalServices,
@@ -1801,12 +1857,36 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       plannedRegieHours: req.body?.plannedRegieHours,
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
+    const changed = [];
+    for (const key of ["name","status","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
+      if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
+    }
+    if (changed.length) {
+      await appendJobHistory(jobId, {
+        type: "job_meta_updated",
+        title: "Baustellendaten aktualisiert",
+        detail: changed.join(", "),
+        source: "admin",
+        data: { changed }
+      });
+    }
     res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
+
+app.get("/admin/api/job/:jobId/history", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    res.json({ ok: true, jobId, events: await readJobHistory(jobId, req.query.limit || 250) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
 // Admin API: Baustellennummer ändern (Ordner umbenennen)
 app.post("/admin/api/job/:jobId/rename", async (req, res) => {
@@ -2496,6 +2576,14 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
       updatedAt: now
     };
     await fsp.writeFile(p, JSON.stringify(regie, null, 2), "utf8");
+    const totalHours = regie.employees.reduce((sum, employee) => sum + Number(employee.totalHours || 0), 0);
+    await appendJobHistory(jobId, {
+      type: "day_report_saved",
+      title: "Tagesrapport gespeichert",
+      detail: `${day} · ${regie.employees.length} Mitarbeiter · ${totalHours.toFixed(2)} Std.`,
+      source: "admin",
+      data: { day, employeeCount: regie.employees.length, totalHours }
+    });
     res.json({ ok: true, regie });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
