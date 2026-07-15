@@ -1,655 +1,573 @@
-<!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>KRISTA Baustellenmanager – Admin</title>
-  <style>
-    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;background:#f5f3ef}
-    body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}.sub{opacity:.75;margin-top:4px}
-    main{max-width:1220px;margin:0 auto;padding:24px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
-    input,textarea,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}textarea{width:100%;min-height:80px;box-sizing:border-box}
-    button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button.danger{background:#9b1c1c;border-color:#9b1c1c}button.ghost{background:#eee;color:#111;border-color:#eee}button:disabled{opacity:.55;cursor:wait}
-    .hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.jobline{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}.job{font-weight:800;font-size:22px}.name{font-size:16px;margin-top:3px;color:#333}.fav{font-size:24px;line-height:1;background:transparent;color:#d19500;border:0;padding:2px 4px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:12px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:750}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}.edit{display:none;margin-top:12px;padding-top:12px;border-top:1px solid #eee}.edit label{display:block;color:#555;font-size:13px;margin:10px 0 4px}.small{font-size:12px;color:#777}.pill{display:inline-block;background:#eee;border-radius:999px;padding:4px 8px;margin-top:6px}footer{color:#777;text-align:center;padding:30px;font-size:13px}
 
-    .drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);display:none;z-index:40}
-    .drawer{position:fixed;right:0;top:0;bottom:0;width:min(760px,96vw);background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.2);z-index:41;display:none;overflow:auto}
-    .drawer-head{position:sticky;top:0;background:#111;color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;z-index:2}
-    .drawer-body{padding:20px}.section{border:1px solid #e4e4e4;border-radius:14px;padding:14px;margin:14px 0}.section h3{margin:0 0 12px}.row{display:grid;grid-template-columns:1.5fr repeat(5,1fr) auto;gap:8px;align-items:end;margin-bottom:9px}.row input{min-width:0;width:100%;box-sizing:border-box}.row label{font-size:11px;color:#666}.material-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin-bottom:8px}.wide{width:100%;box-sizing:border-box}.drawer textarea{min-height:110px}.closebtn{background:transparent;border:0;font-size:24px;padding:0 5px}.savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid #ddd;padding:14px 20px;display:flex;gap:10px;justify-content:flex-end}.statusmsg{margin-right:auto;color:#2d6a2d;padding:9px}.checkline{display:flex;align-items:center;gap:8px;margin:8px 0}.checkline input{min-width:auto;flex:none}
+"use strict";
 
-    .employee-modal{position:fixed;inset:5vh 5vw;background:#fff;border-radius:18px;box-shadow:0 16px 60px rgba(0,0,0,.3);z-index:61;display:none;overflow:auto}
-    .employee-modal-head{position:sticky;top:0;background:#111;color:#fff;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;z-index:3}
-    .employee-modal-body{padding:20px}.employee-table{width:100%;border-collapse:collapse}.employee-table th,.employee-table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}.employee-form{display:grid;grid-template-columns:1fr;gap:10px;background:#f7f7f7;padding:14px;border-radius:14px;margin-bottom:18px}.employee-form>div:not(.full):not(.employee-docs):not(.employee-sizes):not(.employee-flags):not(.model-summary){display:grid;grid-template-columns:minmax(210px,34%) 1fr;gap:14px;align-items:center}.employee-form>div>label{margin:0}.vehicle-stack{max-width:860px}.vehicle-stack h3{margin:22px 0 8px}.doc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.doc-box{background:#fff;border:1px solid #ddd;border-radius:12px;padding:12px}.doc-box label{display:block;font-weight:650;margin-bottom:7px}.employee-form input,.employee-form select{min-width:0;width:100%;box-sizing:border-box}.employee-form .full{grid-column:1/-1}.employee-flags{grid-column:1/-1;display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:#fff;padding:10px 12px;border-radius:10px;border:1px solid #e3e3e3}.employee-flags .checkline{margin:0;font-weight:600}.model-summary{grid-column:1/-1;background:#fff;border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;color:#444;line-height:1.5}.emp-select{min-width:0;width:100%;box-sizing:border-box;padding:10px 8px;border-radius:10px;border:1px solid #ccc;background:#fff}
-    .calcbox{background:#f7f7f7;border:1px solid #e3e3e3;border-radius:12px;padding:12px;margin-top:12px}.calcgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:7px 14px}.calcgrid .value{text-align:right;font-weight:700}.calcgrid .total{border-top:1px solid #ccc;padding-top:7px;margin-top:3px}.progress{height:10px;background:#ddd;border-radius:999px;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:#111}.negative{color:#9b1c1c}.positive{color:#2d6a2d}.warning{color:#9a5b00}
-    .job-summary{margin-top:12px;border-top:1px solid #eee;padding-top:10px}
-    .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
-    .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
-    .readonly-highlight{background:#fffbe8;font-weight:800}
-    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}.reload-icon{width:42px;height:42px;padding:0;border-radius:50%;font-size:22px;display:inline-flex;align-items:center;justify-content:center}.status-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;margin-top:8px;background:#eee}.job-address{margin-top:8px;line-height:1.45}.nav-link{display:inline-flex;align-items:center;gap:5px;margin-top:6px;text-decoration:none;font-weight:750;color:#17662f}.history-list{max-height:58vh;overflow:auto}.history-entry{padding:12px 0;border-bottom:1px solid #eee}.history-entry:last-child{border-bottom:0}.history-time{font-size:12px;color:#777}.rapport-launch{width:min(760px,96vw)!important}.rapport-launch #rapportJob{font-size:18px;padding:14px;min-height:54px}
-    .card{position:relative;padding:20px 20px 58px}.card .actions.primary-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.card .actions.primary-actions>*{min-height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
-    .trash-mini{position:absolute;right:14px;bottom:12px;background:transparent!important;border:0!important;color:#9b1c1c!important;font-size:20px;padding:5px!important;min-width:auto!important}
-    .company-stack{max-width:760px;margin:0 auto}.company-stack .fieldline{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,260px);gap:18px;align-items:center;padding:9px 0;border-bottom:1px solid #eee}.company-stack label{font-weight:650}.company-stack input{min-width:0;width:100%;text-align:right;box-sizing:border-box}.company-stack .summaryline{font-weight:800}.company-stack .billing-highlight{background:#dff4df;border:2px solid #4d8f50;font-size:20px;font-weight:900}.company-stack h3{margin:24px 0 8px}
-    .employee-sizes{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
-    .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.modal-grid input,.modal-grid select,.modal-grid textarea{width:100%;min-width:0;box-sizing:border-box}.list-card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:14px;margin:10px 0}.due{color:#9b1c1c;font-weight:800}
-    .rapport-launch{position:fixed;inset:12vh auto auto 50%;transform:translateX(-50%);width:min(560px,92vw);background:#fff;border-radius:18px;box-shadow:0 18px 70px rgba(0,0,0,.34);z-index:81;display:none}.rapport-launch .body{padding:22px}.rapport-launch label{display:block;font-weight:700;margin:12px 0 5px}.rapport-launch select,.rapport-launch input{width:100%;box-sizing:border-box;min-width:0}.rapport-only-hide{display:none!important}.rapport-banner{background:#eef7ee;border:1px solid #b9d8b9;border-radius:12px;padding:12px;margin-bottom:12px}.rapport-primary{background:#24733b!important;border-color:#24733b!important;font-weight:800}.rapport-hours-mode .row{grid-template-columns:1.5fr repeat(4,1fr) auto}.rapport-hours-mode .emp-regie-wrap,.rapport-hours-mode .emp-regie-desc-wrap{display:none!important}
-    @media(max-width:760px){.company-stack .fieldline{grid-template-columns:1fr}.company-stack input{text-align:left}.card .actions.primary-actions{grid-template-columns:1fr 1fr}.rapport-hours-mode .row{grid-template-columns:1fr 1fr}.rapport-hours-mode .row>div:first-child{grid-column:1/-1}}
-  </style>
-</head>
-<body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008b</span> · <span id="appStatus">Stable</span></div></header>
-  <main>
-    <div class="bar">
-      <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
-      <button id="reload" class="reload-icon" title="Aktualisieren" aria-label="Aktualisieren">↻</button>
-      <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
-      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
-    </div>
-    <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
-    <div id="app" class="loading">Lade Baustellen …</div>
-  </main>
+const fs = require("fs");
+const fsp = require("fs/promises");
+const path = require("path");
 
-  <div id="rapportLaunchBackdrop" class="drawer-backdrop" onclick="closeRapportLauncher()" style="z-index:80"></div>
-  <section id="rapportLaunch" class="rapport-launch" aria-hidden="true">
-    <div class="employee-modal-head"><div><strong>📋 Tagesrapport starten</strong><div class="small" style="color:#ddd">Baustelle und Datum wählen</div></div><button class="closebtn" onclick="closeRapportLauncher()">×</button></div>
-    <div class="body">
-      <label>Baustelle</label><select id="rapportJob" class="wide"></select>
-      <label>Datum</label><input id="rapportDay" type="date">
-      <div class="actions" style="margin-top:18px;justify-content:flex-end"><button class="secondary" onclick="closeRapportLauncher()">Abbrechen</button><button class="rapport-primary" onclick="startRapport()">Tagesrapport öffnen</button></div>
-    </div>
-  </section>
+function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
+  const ROOT = path.join(dataDir, "_kristine");
+  const ASSIGNMENTS = path.join(ROOT, "assignments.json");
+  const STATES = path.join(ROOT, "states.json");
+  const TASKS = path.join(ROOT, "tasks.json");
+  const EVENTS = path.join(ROOT, "events.jsonl");
 
-  <div id="drawerBackdrop" class="drawer-backdrop" onclick="closeRegie()"></div>
-  <aside id="regieDrawer" class="drawer" aria-hidden="true">
-    <div class="drawer-head"><div><strong id="regieHeading">📝 Tageserfassung</strong><div id="regieTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeRegie()">×</button></div>
-    <div class="drawer-body" id="regieBody">
-      <div id="rapportBanner" class="rapport-banner" style="display:none"><strong>FIRST DAY</strong><br><span class="small">Mitarbeiter und Arbeitszeiten erfassen. Material, Fotos und Regie folgen in den nächsten Schritten.</span></div>
-      <div id="regieStatusBlock"><label>Status</label>
-      <select id="regieStatus" class="wide"><option>Entwurf</option><option>Geprüft</option><option>Freigegeben</option><option>Abgerechnet</option></select></div>
-
-      <div class="section"><h3>👷 Mitarbeiter und Zeiten</h3><div id="employeeRows"></div><button class="secondary" onclick="addEmployee()">+ Mitarbeiter</button><div class="small">Gesamtzeit und Regiezeit werden pro Mitarbeiter getrennt erfasst.</div></div>
-
-      <div class="section rapport-advanced"><h3>📝 Leistungsbeschreibung für den Kunden</h3><textarea id="customerText" placeholder="Welche Arbeiten wurden ausgeführt?"></textarea></div>
-      <div class="section rapport-advanced"><h3>🔒 Interne Notiz</h3><textarea id="internalNote" placeholder="Nur intern sichtbar"></textarea></div>
-
-      <div class="section rapport-advanced"><h3>📦 Material</h3><div id="materialRows"></div><button class="secondary" onclick="addMaterial()">+ Material</button><label>Sondermaterial</label><textarea id="specialMaterial" placeholder="Material, das noch nicht in der Materialliste enthalten ist"></textarea></div>
-
-      <div class="section rapport-advanced"><h3>📦 Material für morgen</h3><label class="checkline"><input type="checkbox" id="materialTomorrowNeeded" onchange="toggleTomorrow()"> Ja, Material wird morgen benötigt</label><textarea id="materialTomorrowText" placeholder="Was und wie viel?" style="display:none"></textarea></div>
-    </div>
-    <div class="savebar"><span id="regieMsg" class="statusmsg"></span><button class="secondary" onclick="closeRegie()">Schließen</button><button id="regieSaveButton" onclick="saveRegie()">💾 Speichern</button></div>
-  </aside>
-
-  <div id="employeeBackdrop" class="drawer-backdrop" onclick="closeEmployees()" style="z-index:60"></div>
-  <section id="employeeModal" class="employee-modal" aria-hidden="true">
-    <div class="employee-modal-head"><div><strong>👷 Mitarbeiter-Stammdaten</strong><div class="small" style="color:#ddd">Für Tageserfassung, Teams und spätere Einteilung</div></div><button class="closebtn" onclick="closeEmployees()">×</button></div>
-    <div class="employee-modal-body">
-      <div id="personalNotices" class="section"><h3>🎂 Geburtstage & 🏆 Jubiläen</h3><div class="small">Wird nach dem Laden der Mitarbeiter aktualisiert.</div></div>
-      <div class="employee-form">
-        <input type="hidden" id="empEditId">
-        <div><label>Name</label><input id="empName" placeholder="z. B. Mario"></div>
-        <div><label>Kürzel</label><input id="empShort" placeholder="MA"></div>
-        <div><label>Telefon/WhatsApp</label><input id="empPhone" placeholder="+43 …"></div>
-        <div><label>Rolle</label><input id="empRole" value="Maler" placeholder="Maler, Lehrling, Büro"></div>
-        <div><label>Team</label><input id="empTeam" placeholder="Team 1"></div>
-        <div><label>Arbeitszeitmodell</label><select id="empWorktimeModel" class="wide"></select></div>
-        <div><label>Monatslohn brutto €</label><input id="empGrossSalary" type="number" min="0" step="0.01"></div>
-        <div><label>Beschäftigung %</label><input id="empEmploymentPercent" type="number" min="0" max="100" step="1" value="100"></div>
-        <div><label>Eintritt</label><input id="empEmploymentStart" type="date"></div>
-        <div><label>Austritt optional</label><input id="empEmploymentEnd" type="date"></div>
-        <div><label>Geburtsdatum</label><input id="empBirthDate" type="date"></div>
-        <div><label>Letzte Führerscheinkontrolle</label><input id="empDrivingLicenseLastCheck" type="date"></div>
-        <div><label>Pass gültig bis</label><input id="empPassportExpiry" type="date"></div>
-        <div class="employee-docs full">
-          <strong>📄 Dokumente</strong>
-          <div class="doc-grid">
-            <div class="doc-box"><label>Führerschein Vorderseite</label><input id="empDrivingLicenseFrontFile" type="file" accept="image/*" capture="environment"><img id="empDrivingLicenseFrontPreview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Führerschein Rückseite</label><input id="empDrivingLicenseBackFile" type="file" accept="image/*" capture="environment"><img id="empDrivingLicenseBackPreview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Pass Seite 1</label><input id="empPassportPage1File" type="file" accept="image/*" capture="environment"><img id="empPassportPage1Preview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Pass Seite 2</label><input id="empPassportPage2File" type="file" accept="image/*" capture="environment"><img id="empPassportPage2Preview" class="doc-preview" style="display:none"></div>
-          </div>
-        </div>
-        <div class="employee-sizes"><div class="full"><strong>📏 Arbeitskleidungsgrößen</strong></div><div><label>T-Shirt</label><input id="empSizeTshirt"></div><div><label>Poloshirt</label><input id="empSizePolo"></div><div><label>Pullover</label><input id="empSizePullover"></div><div><label>Jacke</label><input id="empSizeJacket"></div><div><label>Hose</label><input id="empSizeTrousers"></div><div><label>Schuhe</label><input id="empSizeShoes"></div><div><label>Handschuhe</label><input id="empSizeGloves"></div></div>
-        <div class="full"><label>Schwerpunkte/Qualifikationen (mit Beistrich)</label><input id="empSpecialties" placeholder="Fugenlos, Tapete, Airless, Hebebühne"></div>
-        <div id="worktimeModelSummary" class="model-summary">Arbeitszeitmodell wird geladen …</div>
-        <div class="employee-flags">
-          <label class="checkline"><input id="empForeman" type="checkbox"> Vorarbeiter</label>
-          <label class="checkline"><input id="empCanManage" type="checkbox"> darf Team erfassen</label>
-          <label class="checkline"><input id="empActive" type="checkbox" checked> Aktiv</label>
-        </div>
-        <div class="full actions"><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button><button class="secondary" onclick="resetEmployeeForm()">Neu/Zurücksetzen</button></div>
-      </div>
-      <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
-    </div>
-  </section>
-
-  <div id="companyBackdrop" class="drawer-backdrop" onclick="closeCompany()" style="z-index:64"></div>
-  <section id="companyModal" class="employee-modal" aria-hidden="true" style="z-index:65">
-    <div class="employee-modal-head"><div><strong>⚙️ Betrieb & Gemeinkosten</strong><div class="small" style="color:#ddd">Jahreswerte – Gemeinkostensatz wird automatisch berechnet</div></div><button class="closebtn" onclick="closeCompany()">×</button></div>
-    <div class="employee-modal-body"><div class="company-stack">
-      <div class="fieldline"><label>Firmenname</label><input id="companyName"></div>
-      <h3>Jährliche Gemeinkosten</h3>
-      <div class="fieldline"><label>Miete</label><input id="ohRent" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Büro</label><input id="ohOffice" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Fahrzeugkosten/Jahr (km + Leasing, automatisch)</label><input id="ohVehicles" readonly></div><div class="fieldline"><label>Versicherungen</label><input id="ohInsurance" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>IT & Telefon</label><input id="ohItPhone" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Energie</label><input id="ohEnergy" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Maschinen</label><input id="ohMachines" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Finanzierung</label><input id="ohFinance" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Steuerberater</label><input id="ohTaxAdvisor" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Werbung</label><input id="ohAdvertising" type="text" inputmode="decimal" class="money-input"></div><div class="fieldline"><label>Sonstige</label><input id="ohOther" type="text" inputmode="decimal" class="money-input"></div>
-      <h3>Automatische Stundenkalkulation</h3>
-      <div class="fieldline summaryline"><label>Gemeinkosten gesamt/Jahr</label><input id="companyOverheadTotal" readonly></div><div class="fieldline"><label>Produktive Stunden je 100%-MA/Jahr</label><input id="companyBaseHours" value="1650" readonly></div><div class="fieldline summaryline"><label>Produktive Stunden gesamt</label><input id="companyProductiveHours" readonly></div><div class="fieldline"><label>Gemeinkostensatz €/Std.</label><input id="companyOverheadRate" readonly></div><div class="fieldline"><label>Ø Lohnkostensatz €/Std.</label><input id="companyAverageSalaryRate" readonly></div><div class="fieldline summaryline"><label>Mittlerer Vollkostensatz €/Std.</label><input id="companyAverageFullCostRate" readonly></div><div class="fieldline"><label>Gewinnzuschlag %</label><input id="companyProfitMarkup" type="number" min="0" step="0.1"></div><div class="fieldline"><label>Haftungs-/Risikozuschlag %</label><input id="companyContingency" type="number" min="0" step="0.1"></div><div class="fieldline"><label>Verkaufspreis / aktueller Verrechnungssatz</label><input id="companyCurrentBillingRate" class="billing-highlight" readonly></div>
-      <div class="actions" style="justify-content:flex-end;margin-top:20px"><button onclick="saveCompany()">💾 Betrieb speichern</button></div>
-      <div class="hint">Der aktuelle Verrechnungssatz wird aus Lohnkosten, Gemeinkosten sowie Gewinn- und Risikozuschlag automatisch berechnet.</div>
-    </div></div>
-  </section>
-  <div id="vehicleBackdrop" class="drawer-backdrop" onclick="closeVehicles()" style="z-index:70"></div>
-  <section id="vehicleModal" class="employee-modal" style="z-index:71">
-    <div class="employee-modal-head"><strong>🚐 Fahrzeuge</strong><button class="closebtn" onclick="closeVehicles()">×</button></div>
-    <div class="employee-modal-body"><div class="company-stack vehicle-stack">
-      <input type="hidden" id="vehicleId">
-      <h3>Stammdaten</h3>
-      <div class="fieldline"><label>Bezeichnung</label><input id="vehicleLabel" placeholder="Bus 1"></div>
-      <div class="fieldline"><label>Kennzeichen</label><input id="vehiclePlate"></div>
-      <div class="fieldline"><label>Marke</label><input id="vehicleMake"></div>
-      <div class="fieldline"><label>Modell</label><input id="vehicleModel"></div>
-      <div class="fieldline"><label>Baujahr</label><input id="vehicleYear" type="number"></div>
-      <h3>Kosten & Nutzung</h3>
-      <div class="fieldline"><label>Leasingrate / Monat</label><input id="vehicleLeasingRate" type="number" step="0.01"></div>
-      <div class="fieldline"><label>Kilometer / Jahr</label><input id="vehicleKmPerYear" type="number" step="1"></div>
-      <div class="fieldline"><label>Kilometersatz</label><input id="vehicleKmRate" type="number" min="0" step="0.01" value="0.52"></div>
-      <div class="fieldline summaryline"><label>Kilometerkosten / Jahr</label><input id="vehicleMileageYear" readonly></div>
-      <div class="fieldline summaryline"><label>Leasingkosten / Jahr</label><input id="vehicleLeasingYear" readonly></div>
-      <div class="fieldline summaryline"><label>Fahrzeugkosten / Jahr gesamt</label><input id="vehicleTotalYear" readonly></div>
-      <h3>Versicherung & Fristen</h3>
-      <div class="fieldline"><label>Versicherung</label><select id="vehicleInsuranceType"><option value="">– auswählen –</option><option value="Haftpflicht">Haftpflicht</option><option value="Vollkasko">Vollkasko</option></select></div>
-      <div class="fieldline"><label>Pickerl bis</label><input id="vehicleInspection" type="date"></div>
-      <div class="fieldline"><label>Versicherung bis</label><input id="vehicleInsuranceUntil" type="date"></div>
-      <div class="fieldline"><label>Leasing bis</label><input id="vehicleLeasingUntil" type="date"></div>
-      <h3>Dokument</h3>
-      <div class="fieldline"><label>Zulassung fotografieren</label><div><input id="vehicleRegistrationFile" type="file" accept="image/*" capture="environment"><img id="vehicleRegistrationPreview" class="doc-preview" style="display:none"></div></div>
-      <div class="actions" style="justify-content:flex-end;margin-top:20px"><button class="secondary" onclick="resetVehicleForm()">Neu</button><button onclick="saveVehicle()">💾 Fahrzeug speichern</button></div>
-    </div><div id="vehicleList" style="margin-top:22px"></div></div>
-  </section>
-  <div id="ideaBackdrop" class="drawer-backdrop" onclick="closeIdeas()" style="z-index:74"></div><section id="ideaModal" class="employee-modal" style="z-index:75"><div class="employee-modal-head"><strong>💡 Ideen & Wünsche</strong><button class="closebtn" onclick="closeIdeas()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="ideaId"><div><label>Titel</label><input id="ideaTitle"></div><div><label>Status</label><select id="ideaStatus"><option value="offen">offen</option><option value="geplant">geplant</option><option value="umgesetzt">umgesetzt</option></select></div><div class="full"><label>Beschreibung</label><textarea id="ideaNote"></textarea></div><div class="full actions"><button onclick="saveIdea()">💾 Idee speichern</button><button class="secondary" onclick="resetIdeaForm()">Neu</button></div></div><div id="ideaList"></div></div></section>
-  <div id="historyBackdrop" class="drawer-backdrop" onclick="closeHistory()" style="z-index:76"></div>
-  <section id="historyModal" class="employee-modal" style="z-index:77">
-    <div class="employee-modal-head"><div><strong>📜 Historisches Baustellentagebuch</strong><div id="historyTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeHistory()">×</button></div>
-    <div class="employee-modal-body"><div id="historyList" class="history-list loading">Lade Einträge …</div></div>
-  </section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.4.0</span> · Build <span id="footerBuild">0008b</span></footer>
-
-<script>
-const qs = new URLSearchParams(location.search);
-const token = qs.get('token') || '';
-let jobs = [];
-let employeeMasters = [];
-let worktimeModels = [];
-function tokenJoin(url){ return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''); }
-async function api(url, opts={}){
-  const r = await fetch(tokenJoin(url), opts);
-  const text = await r.text();
-  let data = null; try{ data = text ? JSON.parse(text) : null; }catch{}
-  if(!r.ok) throw new Error((data && data.error) || text || r.statusText);
-  return data;
-}
-function esc(s){return String(s ?? '').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function bytes(n){n=Number(n||0); if(n<1024) return n+' B'; if(n<1024*1024) return (n/1024).toFixed(1)+' KB'; if(n<1024*1024*1024) return (n/1024/1024).toFixed(1)+' MB'; return (n/1024/1024/1024).toFixed(2)+' GB';}
-function jobTitle(j){ return j.name ? `#${j.jobId} · ${j.name}` : `#${j.jobId}`; }
-function statusClass(status){
-  return status==='Laufend'?'positive':status==='Fertig – nicht abgerechnet'?'warning':status==='Geschlossen'?'small':'';
-}
-function fullAddress(j){
-  return [j.street, j.houseNumber, [j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-}
-function mapsUrl(j){
-  const address=fullAddress(j); return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):'';
-}
-function render(){
-  const app=document.getElementById('app'); const q=document.getElementById('search').value.trim().toLowerCase(); const sort=document.getElementById('sortJobs')?.value||'newest';
-  let list=jobs.filter(j=>!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q)||fullAddress(j).toLowerCase().includes(q));
-  const cmpText=(a,b)=>String(a||'').localeCompare(String(b||''),'de',{numeric:true,sensitivity:'base'});
-  list=[...list].sort((a,b)=>sort==='oldest'?cmpText(a.latestDay,b.latestDay):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(b.latestDay,a.latestDay));
-  if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;} app.className='grid';
-  app.innerHTML=list.map(j=>{
-    const address=fullAddress(j), nav=mapsUrl(j);
-    return `<section class="card" id="job-${esc(j.jobId)}"><div class="jobline"><div><div class="job">#${esc(j.jobId)}</div><div class="name">${j.name?esc(j.name):'<span class="small">kein Name vergeben</span>'}</div><span class="status-pill ${statusClass(j.status)}">${esc(j.status||'Angebot')}</span></div><button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite?'★':'☆'}</button></div>
-    ${address?`<div class="job-address">📍 ${esc(address)}${j.addressExtra?`<br><span class="small">${esc(j.addressExtra)}</span>`:''}${nav?`<br><a class="nav-link" target="_blank" href="${nav}">Navigation starten ↗</a>`:''}</div>`:''}
-    ${(j.contactName||j.contactPhone)?`<div class="meta">👤 ${esc(j.contactName||'–')}${j.contactPhone?` · <a href="tel:${esc(j.contactPhone)}">${esc(j.contactPhone)}</a>`:''}</div>`:''}
-    <div class="meta">letzter Tag: ${esc(j.latestDay||'-')}<br>Tage: ${j.daysCount||0}<br>gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br><span class="pill">💾 ${bytes(j.sizeBytes)}</span></div><div class="job-summary" id="summary-${esc(j.jobId)}"></div>
-    <div class="actions primary-actions"><button class="secondary" onclick="toggleDays('${esc(j.jobId)}',this)">Tage</button><a class="action" target="_blank" href="${tokenJoin('/admin/akte/'+encodeURIComponent(j.jobId))}">Akte öffnen</a><button class="secondary" onclick="openHistory('${esc(j.jobId)}')">Tagebuch</button><button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button></div>
-    <button class="trash-mini" title="Baustelle löschen" onclick="deleteJob('${esc(j.jobId)}')">🗑️</button>
-    <div class="edit" id="edit-${esc(j.jobId)}">
-      <label>Baustellennummer ändern</label><input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}"><p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p>
-      <label>Baustellenname</label><input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}">
-      <label>Status</label><select id="status-${esc(j.jobId)}" class="wide"><option ${j.status==='Angebot'?'selected':''}>Angebot</option><option ${j.status==='Auftrag'?'selected':''}>Auftrag</option><option ${j.status==='Laufend'?'selected':''}>Laufend</option><option ${j.status==='Fertig – nicht abgerechnet'?'selected':''}>Fertig – nicht abgerechnet</option><option ${j.status==='Geschlossen'?'selected':''}>Geschlossen</option></select>
-      <label>Straße</label><input id="street-${esc(j.jobId)}" value="${esc(j.street||'')}">
-      <label>Hausnummer</label><input id="house-${esc(j.jobId)}" value="${esc(j.houseNumber||'')}">
-      <label>PLZ</label><input id="postal-${esc(j.jobId)}" value="${esc(j.postalCode||'')}">
-      <label>Ort</label><input id="city-${esc(j.jobId)}" value="${esc(j.city||'')}">
-      <label>Adresszusatz / Zufahrt</label><input id="addressextra-${esc(j.jobId)}" value="${esc(j.addressExtra||'')}">
-      <label>Ansprechpartner vor Ort</label><input id="contact-${esc(j.jobId)}" value="${esc(j.contactName||'')}">
-      <label>Telefon</label><input id="contactphone-${esc(j.jobId)}" value="${esc(j.contactPhone||'')}">
-      <label>Notiz</label><textarea id="notes-${esc(j.jobId)}">${esc(j.notes||'')}</textarea>
-      <div class="calcbox"><strong>💰 Stundenkalkulation</strong><label>Auftragssumme netto €</label><input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Fremdleistungen / Gerüst etc. €</label><input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Materialanteil %</label><input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Aktueller Verrechnungssatz €/Std. <span class="small">automatisch übernommen, überschreibbar</span></label><input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Geplante Regiestunden</label><input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><div id="calc-${esc(j.jobId)}"></div></div>
-      <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Schließen</button></p>
-      <label>Mit anderer Baustelle zusammenführen</label><input id="merge-${esc(j.jobId)}" placeholder="Zielnummer"><p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p>
-    </div><div class="days" id="days-${esc(j.jobId)}"></div></section>`;
-  }).join('');
-  list.forEach(j=>{updateJobCalc(String(j.jobId));updateJobSummary(String(j.jobId));});
-}
-async function loadJobs(){
-  const app=document.getElementById('app'); app.className='loading'; app.textContent='Lade Baustellen …';
-  try{const data=await api('/admin/api/jobs'); jobs=data.jobs||[]; render();}
-  catch(e){app.className='error'; app.textContent='Fehler beim Laden: '+e.message;}
-}
-function toggleEdit(jobId){ const box=document.getElementById('edit-'+jobId); box.style.display = box.style.display==='block' ? 'none':'block'; }
-async function saveMeta(jobId){
-  const j = jobs.find(x=>String(x.jobId)===String(jobId));
-  const body={
-    name:document.getElementById('name-'+jobId).value,
-    notes:document.getElementById('notes-'+jobId).value,
-    status:document.getElementById('status-'+jobId).value,
-    street:document.getElementById('street-'+jobId).value,
-    houseNumber:document.getElementById('house-'+jobId).value,
-    postalCode:document.getElementById('postal-'+jobId).value,
-    city:document.getElementById('city-'+jobId).value,
-    addressExtra:document.getElementById('addressextra-'+jobId).value,
-    contactName:document.getElementById('contact-'+jobId).value,
-    contactPhone:document.getElementById('contactphone-'+jobId).value,
-    billingRate:Number(document.getElementById('billing-'+jobId).value||0),
-    contractAmount:Number(document.getElementById('contract-'+jobId).value||0),
-    externalServices:Number(document.getElementById('external-'+jobId).value||0),
-    materialPercent:Number(document.getElementById('materialpct-'+jobId).value||0),
-    plannedRegieHours:Number(document.getElementById('plannedregie-'+jobId).value||0),
-    favorite:j?.favorite||false
-  };
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  await loadJobs();
-}
-
-
-function updateJobSummary(jobId){
-  const j=jobs.find(x=>String(x.jobId)===String(jobId));
-  const box=document.getElementById('summary-'+jobId); if(!j||!box)return;
-  const c=j.calculation||{};
-  if(!Number(c.contractAmount||0)){box.innerHTML='<span class="small">Noch keine Auftragskalkulation hinterlegt.</span>';return;}
-  const remaining=Number(c.remainingOrderHours||0), progress=Number(c.progressPercent||0);
-  box.innerHTML=`<div class="calcgrid">
-    <div>Kalkulierte Stunden</div><div class="value">${num(c.calculatedHours)} Std.</div>
-    <div>Geleistete Auftragsstunden</div><div class="value">${num(c.orderHours)} Std.</div>
-    <div>Reststunden</div><div class="value ${remaining<0?'negative':'positive'}">${num(remaining)} Std.</div>
-    <div>Regie geplant / erfasst</div><div class="value">${num(c.plannedRegieHours)} / ${num(c.actualRegieHours)} Std.</div>
-  </div><div class="progress"><span style="width:${Math.max(0,Math.min(100,progress))}%"></span></div>
-  <div class="small">${num(progress)} % des Auftragsstundenbudgets verbraucht · Satz ${money(c.billingRate)}/Std.</div>`;
-}
-
-function updateJobCalc(jobId){
-  const j=jobs.find(x=>String(x.jobId)===String(jobId));
-  const box=document.getElementById('calc-'+jobId); if(!j||!box)return;
-  const contract=Number(document.getElementById('contract-'+jobId)?.value||0);
-  const external=Number(document.getElementById('external-'+jobId)?.value||0);
-  const materialPct=Math.min(100,Math.max(0,Number(document.getElementById('materialpct-'+jobId)?.value||0)));
-  const rate=Number(document.getElementById('billing-'+jobId)?.value||0);
-  const plannedRegie=Number(document.getElementById('plannedregie-'+jobId)?.value||0);
-  const krista=Math.max(0,contract-external), material=krista*materialPct/100, labor=Math.max(0,krista-material), planned=rate>0?labor/rate:0;
-  const actual=Number(j.calculation?.actualHours||0), actualRegie=Number(j.calculation?.actualRegieHours||0), orderHours=Math.max(0,actual-actualRegie), remaining=planned-orderHours, regieRemaining=plannedRegie-actualRegie, progress=planned>0?orderHours/planned*100:0;
-  const pct=Math.max(0,Math.min(100,progress));
-  box.innerHTML=`<div class="calcgrid">
-    <div>Auftragssumme</div><div class="value">${money(contract)}</div>
-    <div>− Fremdleistungen</div><div class="value">${money(external)}</div>
-    <div class="total"><strong>Auftragssumme KRISTA</strong></div><div class="value total">${money(krista)}</div>
-    <div>− Material ${num(materialPct)} %</div><div class="value">${money(material)}</div>
-    <div class="total"><strong>Auftragssumme Arbeitsleistung</strong></div><div class="value total">${money(labor)}</div>
-    <div>÷ Verrechnungssatz</div><div class="value">${money(rate)} / Std.</div>
-    <div class="total"><strong>Kalkulierte Arbeitsstunden</strong></div><div class="value total"><strong>${num(planned)} Std.</strong></div>
-    <div>Geleistete Auftragsstunden</div><div class="value">${num(orderHours)} Std.</div>
-    <div>Reststunden Auftrag</div><div class="value ${remaining<0?'negative':'positive'}">${num(remaining)} Std.</div>
-    <div>Geplante Regiestunden</div><div class="value">${num(plannedRegie)} Std.</div>
-    <div>Erfasste Regiestunden</div><div class="value">${num(actualRegie)} Std.</div>
-    <div>Rest Regie / Nachtrag</div><div class="value ${regieRemaining<0?'negative':'positive'}">${num(regieRemaining)} Std.</div>
-  </div><div class="small" style="margin-top:8px">Stundenfortschritt Auftrag: ${num(progress)} %</div><div class="progress"><span style="width:${pct}%"></span></div>`;
-}
-
-async function renameJob(jobId){
-  const newJobId = (document.getElementById('newid-'+jobId).value || '').trim();
-  if(!newJobId || newJobId === String(jobId)) { alert('Keine neue Baustellennummer eingegeben.'); return; }
-  if(!/^[A-Za-z0-9_-]+$/.test(newJobId)) { alert('Bitte nur Zahlen, Buchstaben, _ oder - verwenden.'); return; }
-  if(!confirm(`Baustellennummer ändern?\n\n#${jobId} → #${newJobId}\n\nAlle Daten werden verschoben. Bereits erzeugte Protokoll-PDFs werden neu erstellt.`)) return;
-  try{
-    const r = await api(`/admin/api/job/${encodeURIComponent(jobId)}/rename`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({newJobId})});
-    alert(`Baustelle wurde umbenannt: #${r.oldJobId} → #${r.newJobId}`);
-    await loadJobs();
-  }catch(e){ alert('Umbenennen fehlgeschlagen: '+e.message); }
-}
-async function mergeJob(jobId){
-  const targetJobId = (document.getElementById('merge-'+jobId).value || '').trim();
-  if(!targetJobId || targetJobId === String(jobId)) { alert('Bitte eine andere Zielnummer eingeben.'); return; }
-  if(!/^[A-Za-z0-9_-]+$/.test(targetJobId)) { alert('Bitte nur Zahlen, Buchstaben, _ oder - verwenden.'); return; }
-  const txt = prompt(`Baustelle #${jobId} mit #${targetJobId} zusammenführen?\n\nAlle Fotos, Audios, PDFs und Einträge werden in #${targetJobId} verschoben.\n#${jobId} wird danach gelöscht.\n\nZur Sicherheit bitte ZUSAMMEN eingeben:`);
-  if(txt !== 'ZUSAMMEN') { if(txt !== null) alert('Nicht zusammengeführt.'); return; }
-  try{
-    const r = await api(`/admin/api/job/${encodeURIComponent(jobId)}/merge`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targetJobId})});
-    alert(`Zusammengeführt: #${r.sourceJobId} → #${r.targetJobId}`);
-    await loadJobs();
-  }catch(e){ alert('Zusammenführen fehlgeschlagen: '+e.message); }
-}
-async function toggleFavorite(jobId){
-  const j=jobs.find(x=>String(x.jobId)===String(jobId)); if(!j) return;
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:j.name||'',notes:j.notes||'',favorite:!j.favorite})});
-  await loadJobs();
-}
-async function toggleDays(jobId, btn){
-  const box=document.getElementById('days-'+jobId);
-  if(box.style.display==='block'){box.style.display='none';btn.textContent='Tage anzeigen';return;}
-  btn.disabled=true;btn.textContent='Lade …';box.innerHTML='<div class="hint">Lade Tage …</div>';box.style.display='block';
-  try{
-    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/days`);
-    const detailed=data.detailed || [];
-    if(!detailed.length){box.innerHTML='<div class="hint">Keine Tage gefunden.</div>';return;}
-    box.innerHTML=detailed.map(d=>{
-      const day=d.day; const stats=d.stats||{};
-      const pdfUrl=tokenJoin(`/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`);
-      const dlUrl=tokenJoin(`/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`);
-      return `<div class="day" id="day-${esc(jobId)}-${esc(day)}">
-          <div class="date">${esc(day)}</div>
-          <div class="stats">🖼 ${stats.images||0} Fotos · 📄 ${stats.pdfs||0} PDFs · 🎤 ${stats.audio||0} Audio · ${stats.items||0} Einträge · PDF: ${d.pdfExists ? bytes(d.sizeBytes) : 'wird bei Öffnen erzeugt'}</div>
-          <div class="actions">
-            <a class="action" target="_blank" href="${pdfUrl}">PDF öffnen</a>
-            <a class="action secondary" href="${dlUrl}">Download</a>
-            <button class="secondary" onclick="openRegie('${esc(jobId)}','${esc(day)}')">📝 Tageserfassung</button>
-            <button class="danger" onclick="deleteDay('${esc(jobId)}','${esc(day)}')">Tag löschen</button>
-          </div>
-        </div>`;
-    }).join('');
-    btn.textContent='Tage ausblenden';
-  }catch(e){box.innerHTML='<div class="error">Fehler: '+esc(e.message)+'</div>';btn.textContent='Tage ausblenden';}
-  finally{btn.disabled=false;}
-}
-async function deleteDay(jobId, day){
-  if(!confirm(`Tag ${day} bei Baustelle #${jobId} wirklich löschen?\n\nAlle Fotos, Audios, PDFs und Einträge dieses Tages werden endgültig gelöscht.`)) return;
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}`, {method:'DELETE'});
-  await loadJobs();
-}
-async function deleteJob(jobId){
-  const j=jobs.find(x=>String(x.jobId)===String(jobId));
-  const title=jobTitle(j||{jobId});
-  const typed=prompt(`Gesamte Baustelle ${title} wirklich löschen?\n\nDas löscht ALLE Tage, Fotos, Audios, PDFs und Protokolle endgültig.\n\nZur Sicherheit bitte die Baustellennummer eingeben:`);
-  if(typed !== String(jobId)) { if(typed !== null) alert('Nicht gelöscht – Nummer war nicht korrekt.'); return; }
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}`, {method:'DELETE'});
-  await loadJobs();
-}
-
-async function openHistory(jobId){
-  const j=jobs.find(x=>String(x.jobId)===String(jobId));
-  document.getElementById('historyTitle').textContent=jobTitle(j||{jobId});
-  document.getElementById('historyBackdrop').style.display='block';
-  document.getElementById('historyModal').style.display='block';
-  const box=document.getElementById('historyList');box.className='history-list loading';box.textContent='Lade Einträge …';
-  try{
-    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/history`);
-    const events=data.events||[];
-    box.className='history-list';
-    box.innerHTML=events.length?events.map(e=>`<div class="history-entry"><div><strong>${esc(e.title||e.type)}</strong></div><div>${esc(e.detail||'')}</div><div class="history-time">${new Date(e.at).toLocaleString('de-AT')} · ${esc(e.source||'system')}</div></div>`).join(''):'<div class="hint">Noch keine protokollierten Ereignisse.</div>';
-  }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
-}
-function closeHistory(){document.getElementById('historyBackdrop').style.display='none';document.getElementById('historyModal').style.display='none';}
-
-let currentRegie = {jobId:null, day:null};
-function h(v){ return esc(v ?? ''); }
-function calcHours(row){
-  const from=row.querySelector('.emp-from').value, to=row.querySelector('.emp-to').value;
-  const pause=Number(row.querySelector('.emp-break').value||0);
-  if(!from||!to) return;
-  const [fh,fm]=from.split(':').map(Number), [th,tm]=to.split(':').map(Number);
-  let mins=(th*60+tm)-(fh*60+fm)-pause; if(mins<0) mins+=1440;
-  row.querySelector('.emp-total').value=Math.max(0,mins/60).toFixed(2);
-}
-function worktimeModelById(id){ return worktimeModels.find(m=>String(m.id)===String(id)) || worktimeModels[0] || null; }
-function worktimeRuleForDate(modelId,dateStr){
-  const model=worktimeModelById(modelId); if(!model||!dateStr)return null;
-  const d=new Date(String(dateStr)+'T12:00:00'); if(Number.isNaN(d.getTime()))return null;
-  const month=d.getMonth()+1, weekday=d.getDay();
-  const season=(model.seasons||[]).find(s=>(s.months||[]).includes(month));
-  const rule=season?.weekdays?.[String(weekday)] || {free:true,from:'',to:'',lunchBreakMinutes:0,otherBreakMinutes:0,targetHours:0};
-  return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',breakMinutes:Number(rule.lunchBreakMinutes||0)+Number(rule.otherBreakMinutes||0),targetHours:Number(rule.targetHours||0)};
-}
-function renderWorktimeModelSelect(selected='krista-standard'){
-  const el=document.getElementById('empWorktimeModel'); if(!el)return;
-  el.innerHTML=worktimeModels.map(m=>`<option value="${h(m.id)}" ${String(m.id)===String(selected)?'selected':''}>${h(m.name)}</option>`).join('');
-  updateWorktimeModelSummary();
-}
-function updateWorktimeModelSummary(){
-  const model=worktimeModelById(document.getElementById('empWorktimeModel')?.value);
-  const box=document.getElementById('worktimeModelSummary'); if(!box||!model)return;
-  box.innerHTML=`<strong>${h(model.name)}</strong><br>Jänner–März: Mo–Do 07:00–17:00, 45 Min. Pause, Freitag frei.<br>April–Dezember: Mo–Do 07:00–17:00, 45 Min. Pause; Freitag 07:00–14:15, 15 Min. Pause.`;
-}
-async function loadWorktimeModels(){
-  const data=await api('/admin/api/worktime-models'); worktimeModels=data.models||[];
-  renderWorktimeModelSelect(document.getElementById('empWorktimeModel')?.value||'krista-standard');
-  return worktimeModels;
-}
-
-function employeeOptions(selectedId='', selectedName=''){
-  const active=employeeMasters.filter(e=>e.active!==false);
-  let html='<option value="">– auswählen –</option>';
-  for(const e of active){
-    const selected=String(e.id)===String(selectedId) || (!selectedId && selectedName && e.name===selectedName) ? ' selected' : '';
-    html+=`<option value="${h(e.id)}" data-name="${h(e.name)}"${selected}>${h(e.name)}${e.team?' · '+h(e.team):''}</option>`;
+  async function ensureRoot() {
+    await fsp.mkdir(ROOT, { recursive: true });
   }
-  if(selectedName && !active.some(e=>e.name===selectedName)) html+=`<option value="" selected>${h(selectedName)} (alt/frei)</option>`;
-  return html;
-}
-function addEmployee(e={}){
-  const box=document.getElementById('employeeRows');
-  const master=employeeMasters.find(x=>String(x.id)===String(e.employeeId)) || employeeMasters.find(x=>x.name===e.name);
-  const div=document.createElement('div'); div.className='row';
-  div.innerHTML=`<div><label>Mitarbeiter</label><select class="emp-master emp-select">${employeeOptions(e.employeeId,e.name)}</select><input class="emp-name" type="hidden" value="${h(e.name)}"></div>
-  <div><label>Von</label><input type="time" class="emp-from" value="${h(e.from || worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.from || '')}"></div>
-  <div><label>Bis</label><input type="time" class="emp-to" value="${h(e.to || worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.to || '')}"></div>
-  <div><label>Pause Min.</label><input type="number" min="0" class="emp-break" value="${Number(e.breakMinutes ?? worktimeRuleForDate(master?.worktimeModelId,currentRegie.day)?.breakMinutes ?? 0)}"></div>
-  <div><label>Gesamt Std.</label><input type="number" step="0.25" min="0" class="emp-total" value="${Number(e.totalHours||0)}"></div>
-  <div class="emp-regie-wrap"><label>Regie Std.</label><input type="number" step="0.25" min="0" class="emp-regie" value="${Number(e.regieHours||0)}"></div>
-  <button class="danger" title="Entfernen" onclick="this.parentElement.remove()">×</button>
-  <div class="emp-regie-desc-wrap" style="grid-column:1/-1"><label>Regie-Beschreibung optional</label><input class="emp-regie-desc wide" value="${h(e.regieDescription)}" placeholder="Nur falls Regie vorhanden"></div>`;
-  const select=div.querySelector('.emp-master');
-  select.addEventListener('change',()=>{
-    const m=employeeMasters.find(x=>String(x.id)===String(select.value));
-    div.querySelector('.emp-name').value=m?.name||'';
-    if(m){
-      const rule=worktimeRuleForDate(m.worktimeModelId,currentRegie.day);
-      div.querySelector('.emp-from').value=rule?.free?'':(rule?.from||'');
-      div.querySelector('.emp-to').value=rule?.free?'':(rule?.to||'');
-      div.querySelector('.emp-break').value=Number(rule?.breakMinutes||0);
-      div.querySelector('.emp-total').value=Number(rule?.targetHours||0).toFixed(2);
-      calcHours(div);
+
+  async function readJson(file, fallback) {
+    try {
+      return JSON.parse(await fsp.readFile(file, "utf8"));
+    } catch {
+      return fallback;
+    }
+  }
+
+  async function writeJson(file, value) {
+    await ensureRoot();
+    await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+  }
+
+  async function appendEvent(event) {
+    await ensureRoot();
+    const line = JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n";
+    await fsp.appendFile(EVENTS, line, "utf8");
+  }
+
+  function localDateISO(d = new Date()) {
+    const off = d.getTimezoneOffset();
+    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+  }
+
+  function normalizeText(text) {
+    return String(text || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[.!?,;:]+/g, "")
+      .replace(/\s+/g, " ");
+  }
+
+  function detectIntent(text) {
+    const t = normalizeText(text);
+    if (/^(start|beginn|los|arbeitsbeginn|geht los|auf gehts)$/.test(t)) return "start";
+    if (/^(pause|kaffee|kaffeepause|kurze pause)$/.test(t)) return "pause";
+    if (/^(mittag|essen|mittagspause|mahlzeit)$/.test(t)) return "lunch";
+    if (/^(weiter|wieder da|geht weiter|pause fertig|los gehts)$/.test(t)) return "resume";
+    if (/^(fertig|feierabend|schluss|wir sind fertig|bin fertig)$/.test(t)) return "finish";
+    if (/^(ja|jup|passt|ok|okay|genau|👍)$/.test(t)) return "yes";
+    if (/^(nein|passt nicht|falsch|👎)$/.test(t)) return "no";
+    if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
+    if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
+    if (/\b(regie|zusatzarbeit|nachtrag)\b/.test(t)) return "regie";
+    if (/^(alles regie|komplett regie|alles)$/.test(t)) return "regie_all";
+    if (/^(aufteilen|teilweise|nur ein teil)$/.test(t)) return "regie_split";
+    if (/^(abbrechen|doch nicht)$/.test(t)) return "cancel";
+    return "message";
+  }
+
+  function parseHours(text) {
+    const m = String(text || "").replace(",", ".").match(/(\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n >= 0 && n <= 24 ? n : null;
+  }
+
+  function assignmentKey(a) {
+    return `${a.date}|${a.employeeId}|${a.from || ""}|${a.jobId || ""}`;
+  }
+
+  function sortedAssignments(items) {
+    return [...items].sort((a, b) =>
+      String(a.date).localeCompare(String(b.date)) ||
+      String(a.from || "").localeCompare(String(b.from || ""))
+    );
+  }
+
+  function assignmentsFor(items, employeeId, date) {
+    return sortedAssignments(items.filter(a =>
+      String(a.employeeId) === String(employeeId) &&
+      String(a.date) === String(date)
+    ));
+  }
+
+  function activeAssignment(dayAssignments, state) {
+    if (state?.activeAssignmentKey) {
+      const found = dayAssignments.find(a => assignmentKey(a) === state.activeAssignmentKey);
+      if (found) return found;
+    }
+    return dayAssignments[0] || null;
+  }
+
+  function nextAssignment(dayAssignments, current) {
+    if (!current) return dayAssignments[0] || null;
+    const idx = dayAssignments.findIndex(a => assignmentKey(a) === assignmentKey(current));
+    return idx >= 0 ? dayAssignments[idx + 1] || null : null;
+  }
+
+  function assignmentLabel(a) {
+    if (!a) return "keine Baustelle";
+    return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
+  }
+
+  function stateLabel(state) {
+    const map = {
+      idle: "noch nicht gestartet",
+      working: "arbeitet",
+      pause: "Pause",
+      lunch: "Mittagspause",
+      finished_site: "Baustelle fertig",
+      finished_day: "Feierabend",
+    };
+    return map[state?.mode] || map.idle;
+  }
+
+  async function getBootstrap() {
+    const [assignments, states, tasks] = await Promise.all([
+      readJson(ASSIGNMENTS, []),
+      readJson(STATES, {}),
+      readJson(TASKS, []),
+    ]);
+    return { assignments, states, tasks };
+  }
+
+  async function handleMessage({ employeeId, employeeName, text, date }) {
+    const today = date || localDateISO();
+    const [assignments, states, tasks] = await Promise.all([
+      readJson(ASSIGNMENTS, []),
+      readJson(STATES, {}),
+      readJson(TASKS, []),
+    ]);
+
+    const dayAssignments = assignmentsFor(assignments, employeeId, today);
+    const previous = states[employeeId] || {
+      employeeId,
+      employeeName: employeeName || employeeId,
+      mode: "idle",
+      activeAssignmentKey: dayAssignments[0] ? assignmentKey(dayAssignments[0]) : null,
+      pending: null,
+      timeline: [],
+    };
+    const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
+    const current = activeAssignment(dayAssignments, state);
+    const intent = detectIntent(text);
+    const now = new Date().toISOString();
+
+    const saveState = async () => {
+      states[employeeId] = state;
+      await writeJson(STATES, states);
+    };
+    const addTimeline = (type, detail, assignment = current) => {
+      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
+      state.timeline.push({
+        at: now,
+        type,
+        detail,
+        assignmentKey: assignment ? assignmentKey(assignment) : null,
+        jobId: assignment?.jobId || null,
+        jobName: assignment?.jobName || "",
+      });
+      state.timeline = state.timeline.slice(-200);
+    };
+
+    // Pending questions have priority.
+    if (state.pending?.type === "regie_mode") {
+      if (intent === "cancel") {
+        state.pending = null;
+        await saveState();
+        return { reply: "Passt, ich habe nichts als Regie vorgemerkt.", buttons: [], state };
+      }
+      if (intent === "regie_all") {
+        state.pending = null;
+        addTimeline("regie_reported", "Alle Stunden als Regie vorgemerkt", current);
+        await saveState();
+        await appendEvent({ type: "regie_reported", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || null, detail: "all" });
+        return { reply: "Alles klar. Ich habe alle Stunden dieser Baustelle als Regie vorgemerkt. Das Büro bekommt es zur Prüfung.", buttons: [], needsOfficeReview: true, state };
+      }
+      if (intent === "regie_split") {
+        state.pending = { type: "regie_hours", createdAt: now };
+        await saveState();
+        return { reply: "Wie viele Stunden davon sind Regie? Den Rest lasse ich als normale Auftragszeit stehen.", buttons: [], state };
+      }
+    }
+
+    if (state.pending?.type === "regie_hours") {
+      if (intent === "cancel") {
+        state.pending = null;
+        await saveState();
+        return { reply: "Passt, ich habe nichts als Regie vorgemerkt.", buttons: [], state };
+      }
+      const hours = parseHours(text);
+      if (hours === null) return { reply: "Bitte schreib nur die Regiestunden, zum Beispiel „2“ oder „2,5 Stunden“.", buttons: ["Abbrechen"], state };
+      state.pending = null;
+      addTimeline("regie_reported", `${hours.toFixed(2)} Std. Regie, Rest Auftrag`, current);
+      await saveState();
+      await appendEvent({ type: "regie_reported", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || null, detail: "split", regieHours: hours });
+      return { reply: `${hours.toLocaleString("de-AT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Stunden Regie sind vorgemerkt. Den Rest lasse ich als normale Auftragszeit stehen. Das Büro prüft kurz drüber.`, buttons: [], needsOfficeReview: true, state };
+    }
+
+    if (state.pending?.type === "confirm_assignment") {
+      if (intent === "yes") {
+        state.pending = null;
+        await saveState();
+        return {
+          reply: `Perfekt. Sag einfach „Start“, wenn ihr bei ${assignmentLabel(current)} beginnt.`,
+          buttons: ["Start", "Navigation"],
+          state,
+        };
+      }
+      if (intent === "no") {
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return {
+          reply: "Okay. Wo wurdest du stattdessen eingeteilt?",
+          buttons: [],
+          state,
+        };
+      }
+    }
+
+    if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
+      state.pending = null;
+      addTimeline("assignment_deviation", String(text), null);
+      await saveState();
+      await appendEvent({
+        type: "assignment_deviation",
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        detail: String(text),
+      });
+      return {
+        reply: `Danke, ich habe „${String(text).trim()}“ als abweichende Einteilung ans Büro gemeldet.`,
+        buttons: ["Start"],
+        needsOfficeReview: true,
+        state,
+      };
+    }
+
+    if (state.pending?.type === "finish_choice") {
+      if (intent === "yes" && state.pending.nextAssignmentKey) {
+        const next = dayAssignments.find(a => assignmentKey(a) === state.pending.nextAssignmentKey);
+        if (next) {
+          state.activeAssignmentKey = assignmentKey(next);
+          state.mode = "idle";
+          state.pending = null;
+          addTimeline("site_switch", `Wechsel zu ${assignmentLabel(next)}`, next);
+          await saveState();
+          await appendEvent({
+            type: "site_switch",
+            employeeId,
+            employeeName: state.employeeName,
+            date: today,
+            jobId: next.jobId,
+            detail: assignmentLabel(next),
+          });
+          return {
+            reply: `Passt. Nächste Baustelle: ${assignmentLabel(next)}${next.from ? ` ab ${next.from}` : ""}. Sag „Start“, wenn du dort beginnst.`,
+            buttons: ["Navigation", "Start"],
+            state,
+          };
+        }
+      }
+      if (intent === "finish" || /feierabend/.test(normalizeText(text)) || intent === "no") {
+        state.mode = "finished_day";
+        state.pending = null;
+        addTimeline("day_finished", "Feierabend", current);
+        await saveState();
+        await appendEvent({
+          type: "day_finished",
+          employeeId,
+          employeeName: state.employeeName,
+          date: today,
+          jobId: current?.jobId || null,
+        });
+        return {
+          reply: "Feierabend ist gespeichert. Danke und schönen Abend! 👋",
+          buttons: [],
+          state,
+        };
+      }
+    }
+
+    if (intent === "regie") {
+      if (!current) return { reply: "Ich finde gerade keine aktive Baustelle. Schreib mir bitte kurz, wo die Zusatzarbeit war.", buttons: [], state };
+      state.pending = { type: "regie_mode", createdAt: now };
+      await saveState();
+      return { reply: `Geht es bei ${assignmentLabel(current)} um alle Stunden als Regie oder nur um einen Teil?`, buttons: ["Alles Regie", "Aufteilen", "Abbrechen"], state };
+    }
+
+    if (intent === "status") {
+      if (!dayAssignments.length) {
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return {
+          reply: "Für heute finde ich noch keine Einteilung. Wo wurdest du eingeteilt?",
+          buttons: [],
+          state,
+        };
+      }
+      return {
+        reply: `Heute: ${dayAssignments.map(a => `${a.from || "ganztägig"}${a.to ? "–" + a.to : ""} ${assignmentLabel(a)}`).join(" · ")}. Aktueller Status: ${stateLabel(state)}.`,
+        buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Start"],
+        state,
+      };
+    }
+
+    if (intent === "start") {
+      if (!current) {
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return {
+          reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
+          buttons: [],
+          state,
+        };
+      }
+      state.mode = "working";
+      state.pending = null;
+      state.activeAssignmentKey = assignmentKey(current);
+      addTimeline("work_started", "Arbeitsbeginn", current);
+      await saveState();
+      await appendEvent({
+        type: "work_started",
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        jobId: current.jobId,
+      });
+      return {
+        reply: `Arbeitsbeginn bei ${assignmentLabel(current)} ist gespeichert. Gute Arbeit!`,
+        buttons: ["Pause", "Mittag", "Regie melden", "Fertig"],
+        state,
+      };
+    }
+
+    if (intent === "pause" || intent === "lunch") {
+      if (state.mode !== "working") {
+        return {
+          reply: "Deine Arbeitszeit läuft gerade nicht. Soll ich zuerst den Arbeitsbeginn speichern?",
+          buttons: ["Start"],
+          state,
+        };
+      }
+      state.mode = intent === "lunch" ? "lunch" : "pause";
+      addTimeline(intent === "lunch" ? "lunch_started" : "pause_started", intent === "lunch" ? "Mittagspause" : "Pause", current);
+      await saveState();
+      return {
+        reply: intent === "lunch" ? "Mittagspause begonnen. Mahlzeit! 🍽️" : "Pause begonnen. ☕",
+        buttons: ["Weiter"],
+        state,
+      };
+    }
+
+    if (intent === "resume") {
+      if (!["pause", "lunch"].includes(state.mode)) {
+        return {
+          reply: "Bei mir ist gerade keine Pause offen. Deine Arbeitszeit läuft weiter.",
+          buttons: ["Pause", "Regie melden", "Fertig"],
+          state,
+        };
+      }
+      state.mode = "working";
+      addTimeline("work_resumed", "Arbeit fortgesetzt", current);
+      await saveState();
+      return {
+        reply: "Weiter geht’s. Arbeitszeit läuft wieder.",
+        buttons: ["Pause", "Mittag", "Regie melden", "Fertig"],
+        state,
+      };
+    }
+
+    if (intent === "finish") {
+      if (!current) {
+        state.mode = "finished_day";
+        addTimeline("day_finished", "Feierabend ohne Einteilung", null);
+        await saveState();
+        return {
+          reply: "Feierabend ist gespeichert. Schönen Abend! 👋",
+          buttons: [],
+          state,
+        };
+      }
+      const next = nextAssignment(dayAssignments, current);
+      addTimeline("site_finished", `${assignmentLabel(current)} fertig`, current);
+      if (next) {
+        state.mode = "finished_site";
+        state.pending = {
+          type: "finish_choice",
+          nextAssignmentKey: assignmentKey(next),
+          createdAt: now,
+        };
+        await saveState();
+        return {
+          reply: `${assignmentLabel(current)} ist als fertig markiert. Geht’s jetzt weiter zu ${assignmentLabel(next)} oder hast du Feierabend?`,
+          buttons: [`Weiter zu ${next.jobName || "#" + next.jobId}`, "Feierabend"],
+          state,
+        };
+      }
+      state.mode = "finished_day";
+      state.pending = null;
+      addTimeline("day_finished", "Feierabend", current);
+      await saveState();
+      await appendEvent({
+        type: "day_finished",
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        jobId: current.jobId,
+      });
+      const openTasks = tasks.filter(t =>
+        String(t.assigneeId) === String(employeeId) &&
+        t.status !== "done" &&
+        (!t.jobId || String(t.jobId) === String(current.jobId))
+      );
+      return {
+        reply: `Feierabend ist gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
+        buttons: [],
+        state,
+      };
+    }
+
+    if (intent === "task_done") {
+      const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
+      if (!open) {
+        return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
+      }
+      open.status = "done";
+      open.completedAt = now;
+      await writeJson(TASKS, tasks);
+      await appendEvent({
+        type: "task_completed",
+        employeeId,
+        employeeName: state.employeeName,
+        taskId: open.id,
+        detail: open.title,
+      });
+      return {
+        reply: `Danke. „${open.title}“ ist als erledigt markiert.`,
+        buttons: [],
+        state,
+      };
+    }
+
+    // If this is the first contact of the day, confirm plan.
+    if (state.mode === "idle" && current && !state.pending) {
+      state.pending = { type: "confirm_assignment", createdAt: now };
+      await saveState();
+      return {
+        reply: `Hallo ${state.employeeName}. Du bist heute bei ${assignmentLabel(current)}${current.from ? ` von ${current.from}${current.to ? " bis " + current.to : ""}` : ""} eingeteilt. Passt das?`,
+        buttons: ["Ja", "Nein", "Navigation"],
+        state,
+      };
+    }
+
+    addTimeline("message", String(text), current);
+    await saveState();
+    await appendEvent({
+      type: "employee_message",
+      employeeId,
+      employeeName: state.employeeName,
+      date: today,
+      jobId: current?.jobId || null,
+      detail: String(text),
+    });
+    return {
+      reply: "Danke, ich habe deine Nachricht gespeichert. Für den Test verstehe ich bereits: Start, Pause, Mittag, Weiter, Fertig, Status und Erledigt.",
+      buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Status", "Start"],
+      state,
+    };
+  }
+
+  app.get("/kristine", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.sendFile(path.join(publicDir, "kristine.html"));
+  });
+
+  app.get("/kristine/api/bootstrap", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      res.json({ ok: true, ...(await getBootstrap()), today: localDateISO() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
-  div.querySelectorAll('.emp-from,.emp-to,.emp-break').forEach(x=>x.addEventListener('change',()=>calcHours(div)));
-  box.appendChild(div);
-  if(div.querySelector('.emp-from').value && div.querySelector('.emp-to').value && !Number(e.totalHours||0)) calcHours(div);
-}
-function addMaterial(m={}){
-  const box=document.getElementById('materialRows');
-  const div=document.createElement('div'); div.className='material-row';
-  div.innerHTML=`<input class="mat-name" value="${h(m.name)}" placeholder="Material"><input class="mat-qty" value="${h(m.quantity)}" placeholder="Menge"><input class="mat-unit" value="${h(m.unit)}" placeholder="Einheit"><button class="danger" onclick="this.parentElement.remove()">×</button>`;
-  box.appendChild(div);
-}
-function toggleTomorrow(){document.getElementById('materialTomorrowText').style.display=document.getElementById('materialTomorrowNeeded').checked?'block':'none';}
-let rapportHoursMode=false;
-function todayLocalISO(){const d=new Date();const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10);}
-function openRapportLauncher(){
-  const sel=document.getElementById('rapportJob');
-  sel.innerHTML=jobs.map(j=>`<option value="${h(j.jobId)}">#${h(j.jobId)}${j.name?' · '+h(j.name):''}</option>`).join('');
-  document.getElementById('rapportDay').value=todayLocalISO();
-  document.getElementById('rapportLaunchBackdrop').style.display='block';document.getElementById('rapportLaunch').style.display='block';
-}
-function closeRapportLauncher(){document.getElementById('rapportLaunchBackdrop').style.display='none';document.getElementById('rapportLaunch').style.display='none';}
-async function startRapport(){const jobId=document.getElementById('rapportJob').value,day=document.getElementById('rapportDay').value;if(!jobId||!day)return;closeRapportLauncher();rapportHoursMode=true;await openRegie(jobId,day,true);}
-function applyRapportMode(){
-  const advanced=[...document.querySelectorAll('#regieDrawer .rapport-advanced')];
-  advanced.forEach(el=>el.classList.toggle('rapport-only-hide',rapportHoursMode));
-  document.getElementById('regieStatusBlock').classList.toggle('rapport-only-hide',rapportHoursMode);
-  document.getElementById('rapportBanner').style.display=rapportHoursMode?'block':'none';
-  document.getElementById('regieBody').classList.toggle('rapport-hours-mode',rapportHoursMode);
-  document.getElementById('regieHeading').textContent=rapportHoursMode?'📋 Tagesrapport – Stunden':'📝 Tageserfassung';
-  document.getElementById('regieSaveButton').textContent=rapportHoursMode?'✅ Stunden speichern':'💾 Speichern';
-}
 
-async function openRegie(jobId,day,fromRapport=false){
-  if(!worktimeModels.length) await loadWorktimeModels();
-  if(!employeeMasters.length) await loadEmployeeMasters();
-  currentRegie={jobId,day}; document.getElementById('regieTitle').textContent=`#${jobId} · ${day}`;
-  document.getElementById('drawerBackdrop').style.display='block'; document.getElementById('regieDrawer').style.display='block';
-  applyRapportMode();
-  document.getElementById('regieMsg').textContent='Lade …';
-  try{
-    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/day/${encodeURIComponent(day)}/regie`); const r=data.regie||{};
-    document.getElementById('regieStatus').value=r.status||'Entwurf';
-    document.getElementById('customerText').value=r.customerText||''; document.getElementById('internalNote').value=r.internalNote||'';
-    document.getElementById('specialMaterial').value=r.specialMaterial||'';
-    document.getElementById('materialTomorrowNeeded').checked=!!r.materialTomorrow?.needed; document.getElementById('materialTomorrowText').value=r.materialTomorrow?.text||''; toggleTomorrow();
-    document.getElementById('employeeRows').innerHTML=''; (r.employees||[]).forEach(addEmployee); if(!(r.employees||[]).length) addEmployee();
-    document.getElementById('materialRows').innerHTML=''; (r.materials||[]).forEach(addMaterial); if(!(r.materials||[]).length) addMaterial();
-    document.getElementById('regieMsg').textContent=data.exists?'Gespeicherte Erfassung geladen':'Neue Erfassung';
-  }catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
-}
-function closeRegie(){document.getElementById('drawerBackdrop').style.display='none';document.getElementById('regieDrawer').style.display='none';}
-async function saveRegie(){
-  const employees=[...document.querySelectorAll('#employeeRows .row')].map(r=>({employeeId:r.querySelector('.emp-master').value,name:r.querySelector('.emp-name').value,from:r.querySelector('.emp-from').value,to:r.querySelector('.emp-to').value,breakMinutes:Number(r.querySelector('.emp-break').value||0),totalHours:Number(r.querySelector('.emp-total').value||0),regieHours:Number(r.querySelector('.emp-regie').value||0),regieDescription:r.querySelector('.emp-regie-desc').value})).filter(e=>e.name.trim());
-  const materials=[...document.querySelectorAll('#materialRows .material-row')].map(r=>({name:r.querySelector('.mat-name').value,quantity:r.querySelector('.mat-qty').value,unit:r.querySelector('.mat-unit').value})).filter(m=>m.name.trim());
-  const body={status:document.getElementById('regieStatus').value,employees,customerText:document.getElementById('customerText').value,internalNote:document.getElementById('internalNote').value,materials,specialMaterial:document.getElementById('specialMaterial').value,materialTomorrow:{needed:document.getElementById('materialTomorrowNeeded').checked,text:document.getElementById('materialTomorrowText').value}};
-  document.getElementById('regieMsg').textContent='Speichere …';
-  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent=rapportHoursMode?'✅ Stunden gespeichert':'✅ Gespeichert';await loadJobs();}
-  catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
-}
-
-
-async function loadVersion(){
-  try{
-    const v=await api('/admin/api/version');
-    document.getElementById('appVersion').textContent=v.version||'3.3.0';
-    document.getElementById('appBuild').textContent=v.build||'0008b';
-    document.getElementById('appStatus').textContent=v.status||'Stable';
-    document.getElementById('footerVersion').textContent=v.version||'3.3.0';
-    document.getElementById('footerBuild').textContent=v.build||'0008b';
-  }catch{}
-}
-function money(v){return Number(v||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
-function num(v){return Number(v||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function parseLocaleNumber(v){const t=String(v??'').replace(/\s/g,'').replace(/€/g,'').replace(/\./g,'').replace(',','.');const n=Number(t);return Number.isFinite(n)?n:0;}
-function bindMoneyInputs(){document.querySelectorAll('.money-input').forEach(el=>{el.addEventListener('focus',()=>{el.value=String(parseLocaleNumber(el.value)||'').replace('.',',')});el.addEventListener('blur',()=>{el.value=money(parseLocaleNumber(el.value))});});}
-async function openCompany(){document.getElementById('companyBackdrop').style.display='block';document.getElementById('companyModal').style.display='block';await loadCompany();}
-function closeCompany(){document.getElementById('companyBackdrop').style.display='none';document.getElementById('companyModal').style.display='none';}
-const ohMap={rent:'ohRent',office:'ohOffice',vehicles:'ohVehicles',insurance:'ohInsurance',itPhone:'ohItPhone',energy:'ohEnergy',machines:'ohMachines',finance:'ohFinance',taxAdvisor:'ohTaxAdvisor',advertising:'ohAdvertising',other:'ohOther'};
-async function loadCompany(){
-  const d=await api('/admin/api/company'); const c=d.company||{};
-  document.getElementById('companyName').value=c.name||'';
-  document.getElementById('companyBaseHours').value=c.productiveHoursPerFullTimeYear||1650;
-  for(const [k,id] of Object.entries(ohMap))document.getElementById(id).value=money(Number(c.overhead?.[k]||0));
-  document.getElementById('companyProductiveHours').value=num(d.productiveHours);
-  document.getElementById('companyAverageSalaryRate').value=money(d.averageSalaryCostRate);
-  document.getElementById('companyOverheadTotal').value=money(d.overheadTotal);
-  document.getElementById('companyOverheadRate').value=money(d.overheadRate);
-  document.getElementById('companyAverageFullCostRate').value=money(d.averageFullCostRate);
-  document.getElementById('companyProfitMarkup').value=Number(c.profitMarkupPercent??10);
-  document.getElementById('companyContingency').value=Number(c.contingencyPercent??5);
-  document.getElementById('companyCurrentBillingRate').value=money(d.currentBillingRate);
-}
-async function saveCompany(){
-  const overhead={}; for(const [k,id] of Object.entries(ohMap))overhead[k]=k==='vehicles'?0:parseLocaleNumber(document.getElementById(id).value);
-  await api('/admin/api/company',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('companyName').value,productiveHoursPerFullTimeYear:1650,profitMarkupPercent:Number(document.getElementById('companyProfitMarkup').value||0),contingencyPercent:Number(document.getElementById('companyContingency').value||0),overhead})});
-  await loadCompany(); await loadEmployeeMasters(); await loadEmployeesView(); await loadJobs();
-  alert('Betriebsdaten gespeichert und aktueller Verrechnungssatz neu berechnet.');
-}
-async function loadEmployeeMasters(){
-  const data=await api('/admin/api/employees'); employeeMasters=data.employees||[]; return employeeMasters;
-}
-function openEmployees(){
-  document.getElementById('employeeBackdrop').style.display='block';
-  document.getElementById('employeeModal').style.display='block';
-  loadEmployeesView();
-}
-function closeEmployees(){document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
-let employeeDrivingLicenseFrontImage='',employeeDrivingLicenseBackImage='',employeePassportPage1Image='',employeePassportPage2Image='';
-function setPreview(id,data){const img=document.getElementById(id);img.src=data||'';img.style.display=data?'block':'none';}
-async function optimizeImageFile(file,maxPx=1400,quality=.82){const url=URL.createObjectURL(file);try{const img=await new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=fail;i.src=url});const scale=Math.min(1,maxPx/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',quality);}finally{URL.revokeObjectURL(url);}}
-async function readEmployeeImage(input,target){const file=input.files?.[0];if(!file)return;try{const data=await optimizeImageFile(file,1400,.82);if(target==='licenseFront'){employeeDrivingLicenseFrontImage=data;setPreview('empDrivingLicenseFrontPreview',data);}else if(target==='licenseBack'){employeeDrivingLicenseBackImage=data;setPreview('empDrivingLicenseBackPreview',data);}else if(target==='passport1'){employeePassportPage1Image=data;setPreview('empPassportPage1Preview',data);}else{employeePassportPage2Image=data;setPreview('empPassportPage2Preview',data);}}catch(e){alert('Bild konnte nicht verarbeitet werden: '+e.message);input.value='';}}
-function resetEmployeeForm(){
-  document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; renderWorktimeModelSelect('krista-standard'); document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true; document.getElementById('empGrossSalary').value=''; document.getElementById('empEmploymentPercent').value='100'; document.getElementById('empEmploymentStart').value=''; document.getElementById('empEmploymentEnd').value=''; document.getElementById('empBirthDate').value='';
-  document.getElementById('empDrivingLicenseLastCheck').value=''; document.getElementById('empPassportExpiry').value='';
-  ['Tshirt','Polo','Pullover','Jacket','Trousers','Shoes','Gloves'].forEach(x=>document.getElementById('empSize'+x).value='');
-  ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
-  employeeDrivingLicenseFrontImage='';employeeDrivingLicenseBackImage='';employeePassportPage1Image='';employeePassportPage2Image='';setPreview('empDrivingLicenseFrontPreview','');setPreview('empDrivingLicenseBackPreview','');setPreview('empPassportPage1Preview','');setPreview('empPassportPage2Preview','');
-}
-function editEmployeeMaster(id){
-  const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
-  document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; renderWorktimeModelSelect(e.worktimeModelId||'krista-standard'); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('empGrossSalary').value=e.grossMonthlySalary||''; document.getElementById('empEmploymentPercent').value=e.employmentPercent??100; document.getElementById('empEmploymentStart').value=e.employmentStart||''; document.getElementById('empEmploymentEnd').value=e.employmentEnd||''; document.getElementById('empBirthDate').value=e.birthDate||'';
-  document.getElementById('empDrivingLicenseLastCheck').value=e.drivingLicenseLastCheck||''; document.getElementById('empPassportExpiry').value=e.passportExpiry||'';
-  const sz=e.clothingSizes||{}; document.getElementById('empSizeTshirt').value=sz.tshirt||'';document.getElementById('empSizePolo').value=sz.polo||'';document.getElementById('empSizePullover').value=sz.pullover||'';document.getElementById('empSizeJacket').value=sz.jacket||'';document.getElementById('empSizeTrousers').value=sz.trousers||'';document.getElementById('empSizeShoes').value=sz.shoes||'';document.getElementById('empSizeGloves').value=sz.gloves||'';
-  employeeDrivingLicenseFrontImage=e.drivingLicenseFrontImage||e.drivingLicenseImage||''; employeeDrivingLicenseBackImage=e.drivingLicenseBackImage||''; employeePassportPage1Image=e.passportPage1Image||e.passportImage||''; employeePassportPage2Image=e.passportPage2Image||'';
-  setPreview('empDrivingLicenseFrontPreview',employeeDrivingLicenseFrontImage);setPreview('empDrivingLicenseBackPreview',employeeDrivingLicenseBackImage);setPreview('empPassportPage1Preview',employeePassportPage1Image);setPreview('empPassportPage2Preview',employeePassportPage2Image);
-  ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('employeeModal').scrollTo({top:0,behavior:'smooth'});
-}
-async function saveEmployeeMaster(){
-  const id=document.getElementById('empEditId').value;
-  const body={name:document.getElementById('empName').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,worktimeModelId:document.getElementById('empWorktimeModel').value,specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked,grossMonthlySalary:Number(document.getElementById('empGrossSalary').value||0),employmentPercent:Number(document.getElementById('empEmploymentPercent').value||0),employmentStart:document.getElementById('empEmploymentStart').value,employmentEnd:document.getElementById('empEmploymentEnd').value,birthDate:document.getElementById('empBirthDate').value,
-  drivingLicenseLastCheck:document.getElementById('empDrivingLicenseLastCheck').value,passportExpiry:document.getElementById('empPassportExpiry').value,
-  drivingLicenseFrontImage:employeeDrivingLicenseFrontImage,drivingLicenseBackImage:employeeDrivingLicenseBackImage,passportPage1Image:employeePassportPage1Image,passportPage2Image:employeePassportPage2Image,clothingSizes:{tshirt:document.getElementById('empSizeTshirt').value,polo:document.getElementById('empSizePolo').value,pullover:document.getElementById('empSizePullover').value,jacket:document.getElementById('empSizeJacket').value,trousers:document.getElementById('empSizeTrousers').value,shoes:document.getElementById('empSizeShoes').value,gloves:document.getElementById('empSizeGloves').value}};
-  if(!body.name.trim()){alert('Bitte einen Namen eingeben.');return;}
-  try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetEmployeeForm();await loadEmployeesView();}
-  catch(e){alert('Speichern fehlgeschlagen: '+e.message);}
-}
-async function deactivateEmployee(id){
-  if(!confirm('Mitarbeiter deaktivieren? Alte Tageserfassungen bleiben erhalten.'))return;
-  await api(`/admin/api/employees/${encodeURIComponent(id)}`,{method:'DELETE'}); await loadEmployeesView();
-}
-function renderPersonalNotices(){
-  const box=document.getElementById('personalNotices'); if(!box)return;
-  const today=new Date(); const notices=[];
-  for(const e of employeeMasters.filter(x=>x.active!==false)){
-    if(e.birthDate){
-      const b=new Date(e.birthDate+'T12:00:00');
-      if(b.getMonth()===today.getMonth()&&b.getDate()===today.getDate()) notices.push(`🎂 Alles Gute zum Geburtstag, <strong>${h(e.name)}</strong>!`);
+  app.put("/kristine/api/assignments", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+      const clean = rows.map((a, index) => ({
+        id: String(a.id || `a_${Date.now()}_${index}`),
+        date: String(a.date || "").slice(0, 10),
+        jobId: String(a.jobId || "").slice(0, 80),
+        jobName: String(a.jobName || "").trim().slice(0, 140),
+        city: String(a.city || "").trim().slice(0, 100),
+        address: String(a.address || "").trim().slice(0, 300),
+        employeeId: String(a.employeeId || "").slice(0, 100),
+        employeeName: String(a.employeeName || "").trim().slice(0, 140),
+        vehicle: String(a.vehicle || "").trim().slice(0, 100),
+        from: String(a.from || "").slice(0, 5),
+        to: String(a.to || "").slice(0, 5),
+        note: String(a.note || "").trim().slice(0, 500),
+      })).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
+      await writeJson(ASSIGNMENTS, clean);
+      await appendEvent({ type: "planning_saved", detail: `${clean.length} Einteilungen gespeichert`, source: "office" });
+      res.json({ ok: true, assignments: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
-    if(e.employmentStart){
-      const st=new Date(e.employmentStart+'T12:00:00'); const years=Number(e.anniversaryYears||0);
-      if(years>0&&st.getMonth()===today.getMonth()&&st.getDate()===today.getDate()) notices.push(`🏆 Herzlichen Glückwunsch, <strong>${h(e.name)}</strong>, zum ${years}-jährigen Firmenjubiläum!`);
+  });
+
+  app.post("/kristine/api/message", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.body?.employeeId || "").trim();
+      const employeeName = String(req.body?.employeeName || employeeId).trim();
+      const text = String(req.body?.text || "").trim();
+      const date = String(req.body?.date || localDateISO()).slice(0, 10);
+      if (!employeeId || !text) return res.status(400).json({ ok: false, error: "employeeId und text erforderlich" });
+      res.json({ ok: true, ...(await handleMessage({ employeeId, employeeName, text, date })) });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
-  }
-  box.innerHTML=`<h3>🎂 Geburtstage & 🏆 Jubiläen</h3>${notices.length?notices.map(x=>`<div class="pill">${x}</div>`).join(' '):'<div class="small">Heute stehen keine Geburtstage oder Dienstjubiläen an.</div>'}`;
-}
-async function loadEmployeesView(){
-  const box=document.getElementById('employeeList'); box.className='loading'; box.textContent='Lade Mitarbeiter …';
-  try{
-    await loadEmployeeMasters(); renderPersonalNotices();
-    if(!employeeMasters.length){box.textContent='Noch keine Mitarbeiter angelegt.';return;}
-    box.className='';
-    box.innerHTML=`<table class="employee-table"><thead><tr><th>Name</th><th>Rolle/Team</th><th>Beschäftigung</th><th>Kalkulation</th><th>Personal & Dokumente</th><th>Status</th><th></th></tr></thead><tbody>${employeeMasters.map(e=>{
-      const birthday=e.birthDate?new Date(e.birthDate+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit'}):'–';
-      const ann=Number(e.anniversaryYears||0);
-      const license=e.drivingLicenseLastCheck?`Kontrolle ${h(e.drivingLicenseLastCheck)}<br>Nächste ${h(e.nextDrivingLicenseCheck||'–')} ${e.drivingLicenseCheckDue?'<strong class="negative">FÄLLIG</strong>':''}`:'keine Führerscheinkontrolle';
-      return `<tr><td><strong>${h(e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${Number(e.employmentPercent??100).toFixed(0)} %<br><span class="small">${h(e.employmentStart||'kein Eintritt')} – ${h(e.employmentEnd||'offen')}</span></td><td><span class="small">Brutto ${money(e.grossMonthlySalary)}<br>Lohn ${money(e.calculation?.salaryCostRate)}/h<br>Voll ${money(e.calculation?.fullCostRate)}/h<br>${num(e.calculation?.productiveHours)} Std./Jahr</span></td><td><span class="small">🎂 ${birthday}<br>🏆 ${ann} Jahre<br>🚗 ${license}<br>🪪 Pass ${h(e.passportExpiry||'–')}<br>👕 ${h(Object.values(e.clothingSizes||{}).filter(Boolean).join(' · ')||'Größen fehlen')}<br>${(e.drivingLicenseFrontImage||e.drivingLicenseImage)&&e.drivingLicenseBackImage?'✅ Führerschein komplett':'🟠 Führerschein unvollständig'} · ${(e.passportPage1Image||e.passportImage)&&e.passportPage2Image?'✅ Pass komplett':'🟠 Pass unvollständig'}</span></td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`}).join('')}</tbody></table>`;
-  }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
+  });
+
+  app.post("/kristine/api/reset-state/:employeeId", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const states = await readJson(STATES, {});
+      delete states[String(req.params.employeeId)];
+      await writeJson(STATES, states);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.put("/kristine/api/tasks", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
+      const clean = tasks.map((t, index) => ({
+        id: String(t.id || `t_${Date.now()}_${index}`),
+        title: String(t.title || "").trim().slice(0, 180),
+        assigneeId: String(t.assigneeId || "").slice(0, 100),
+        assigneeName: String(t.assigneeName || "").trim().slice(0, 140),
+        jobId: String(t.jobId || "").slice(0, 80),
+        jobName: String(t.jobName || "").trim().slice(0, 140),
+        dueDate: String(t.dueDate || "").slice(0, 10),
+        reminder: String(t.reminder || "").trim().slice(0, 300),
+        status: t.status === "done" ? "done" : "open",
+        createdAt: t.createdAt || new Date().toISOString(),
+        completedAt: t.completedAt || null,
+      })).filter(t => t.title);
+      await writeJson(TASKS, clean);
+      res.json({ ok: true, tasks: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
 }
 
-let vehicles=[],vehicleRegistrationImage='';
-function openVehicles(){document.getElementById('vehicleBackdrop').style.display='block';document.getElementById('vehicleModal').style.display='block';loadVehicles();} function closeVehicles(){document.getElementById('vehicleBackdrop').style.display='none';document.getElementById('vehicleModal').style.display='none';}
-function resetVehicleForm(){['vehicleId','vehicleLabel','vehiclePlate','vehicleMake','vehicleModel','vehicleYear','vehicleInspection','vehicleInsuranceType','vehicleInsuranceUntil','vehicleLeasingRate','vehicleKmPerYear','vehicleLeasingUntil'].forEach(id=>document.getElementById(id).value='');document.getElementById('vehicleKmRate').value='0.52';updateVehicleCosts();vehicleRegistrationImage='';setPreview('vehicleRegistrationPreview','');document.getElementById('vehicleRegistrationFile').value='';}
-function updateVehicleCosts(){const leasing=Number(document.getElementById('vehicleLeasingRate').value||0)*12;const mileage=Number(document.getElementById('vehicleKmPerYear').value||0)*Number(document.getElementById('vehicleKmRate').value||0);document.getElementById('vehicleMileageYear').value=money(mileage);document.getElementById('vehicleLeasingYear').value=money(leasing);document.getElementById('vehicleTotalYear').value=money(mileage+leasing);}
-async function loadVehicles(){const d=await api('/admin/api/vehicles');vehicles=d.vehicles||[];const today=new Date();document.getElementById('vehicleList').innerHTML=vehicles.map(v=>{const due=v.inspectionUntil&&new Date(v.inspectionUntil+'T12:00:00')<new Date(today.getTime()+60*86400000);return `<div class="list-card"><strong>${h(v.label||v.plate)}</strong> · ${h(v.plate)}<br><span class="small">${h(v.make)} ${h(v.model)} ${v.year||''}<br><span class="${due?'due':''}">Pickerl bis ${h(v.inspectionUntil||'–')}</span> · ${h(v.insuranceType||'–')} bis ${h(v.insuranceUntil||'–')}<br>${Number(v.kmPerYear||0).toLocaleString('de-AT')} km/Jahr × ${money(v.kmRate||0.52)}/km = ${money(Number(v.kmPerYear||0)*Number(v.kmRate||0.52))}<br>Leasing ${money(v.leasingRate)}/Monat = ${money(Number(v.leasingRate||0)*12)}/Jahr · bis ${h(v.leasingUntil||'–')}<br><strong>Fahrzeugkosten/Jahr ${money(Number(v.kmPerYear||0)*Number(v.kmRate||0.52)+Number(v.leasingRate||0)*12)}</strong></span><div class="actions"><button class="secondary" onclick="editVehicle('${h(v.id)}')">Bearbeiten</button><button class="danger" onclick="deleteVehicle('${h(v.id)}')">Löschen</button></div></div>`}).join('')||'<div class="hint">Noch keine Fahrzeuge angelegt.</div>';}
-function editVehicle(id){const v=vehicles.find(x=>x.id===id);if(!v)return;document.getElementById('vehicleId').value=v.id;document.getElementById('vehicleLabel').value=v.label||'';document.getElementById('vehiclePlate').value=v.plate||'';document.getElementById('vehicleMake').value=v.make||'';document.getElementById('vehicleModel').value=v.model||'';document.getElementById('vehicleYear').value=v.year||'';document.getElementById('vehicleInspection').value=v.inspectionUntil||'';document.getElementById('vehicleInsuranceType').value=v.insuranceType||'';document.getElementById('vehicleInsuranceUntil').value=v.insuranceUntil||'';document.getElementById('vehicleLeasingRate').value=v.leasingRate||'';document.getElementById('vehicleKmPerYear').value=v.kmPerYear||'';document.getElementById('vehicleKmRate').value=Number(v.kmRate??0.52);document.getElementById('vehicleLeasingUntil').value=v.leasingUntil||'';vehicleRegistrationImage=v.registrationImage||'';setPreview('vehicleRegistrationPreview',vehicleRegistrationImage);updateVehicleCosts();}
-async function saveVehicle(){const id=document.getElementById('vehicleId').value;const body={label:document.getElementById('vehicleLabel').value,plate:document.getElementById('vehiclePlate').value,make:document.getElementById('vehicleMake').value,model:document.getElementById('vehicleModel').value,year:Number(document.getElementById('vehicleYear').value||0),inspectionUntil:document.getElementById('vehicleInspection').value,insuranceType:document.getElementById('vehicleInsuranceType').value,insuranceUntil:document.getElementById('vehicleInsuranceUntil').value,leasingRate:Number(document.getElementById('vehicleLeasingRate').value||0),kmPerYear:Number(document.getElementById('vehicleKmPerYear').value||0),kmRate:Number(document.getElementById('vehicleKmRate').value||0.52),leasingUntil:document.getElementById('vehicleLeasingUntil').value,registrationImage:vehicleRegistrationImage};await api(id?`/admin/api/vehicles/${encodeURIComponent(id)}`:'/admin/api/vehicles',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetVehicleForm();loadVehicles();}
-async function deleteVehicle(id){if(confirm('Fahrzeug löschen?')){await api('/admin/api/vehicles/'+encodeURIComponent(id),{method:'DELETE'});loadVehicles();}}
-let ideas=[];function openIdeas(){document.getElementById('ideaBackdrop').style.display='block';document.getElementById('ideaModal').style.display='block';loadIdeas();}function closeIdeas(){document.getElementById('ideaBackdrop').style.display='none';document.getElementById('ideaModal').style.display='none';}function resetIdeaForm(){['ideaId','ideaTitle','ideaNote'].forEach(id=>document.getElementById(id).value='');document.getElementById('ideaStatus').value='offen';}
-async function loadIdeas(){const d=await api('/admin/api/ideas');ideas=d.ideas||[];document.getElementById('ideaList').innerHTML=ideas.map(v=>`<div class="list-card"><strong>${h(v.title)}</strong> <span class="pill">${h(v.status)}</span><p>${h(v.note)}</p><div class="actions"><button class="secondary" onclick="editIdea('${h(v.id)}')">Bearbeiten</button><button class="danger" onclick="deleteIdea('${h(v.id)}')">Löschen</button></div></div>`).join('')||'<div class="hint">Noch keine Ideen erfasst.</div>';}
-function editIdea(id){const v=ideas.find(x=>x.id===id);if(!v)return;document.getElementById('ideaId').value=v.id;document.getElementById('ideaTitle').value=v.title||'';document.getElementById('ideaNote').value=v.note||'';document.getElementById('ideaStatus').value=v.status||'offen';}async function saveIdea(){const id=document.getElementById('ideaId').value;const body={title:document.getElementById('ideaTitle').value,note:document.getElementById('ideaNote').value,status:document.getElementById('ideaStatus').value};await api(id?`/admin/api/ideas/${encodeURIComponent(id)}`:'/admin/api/ideas',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetIdeaForm();loadIdeas();}async function deleteIdea(id){if(confirm('Idee löschen?')){await api('/admin/api/ideas/'+encodeURIComponent(id),{method:'DELETE'});loadIdeas();}}
-document.getElementById('reload').addEventListener('click', loadJobs);
-document.getElementById('search').addEventListener('input', render);
-document.getElementById('sortJobs').addEventListener('change',render);
-document.getElementById('empWorktimeModel').addEventListener('change',updateWorktimeModelSummary);
-document.getElementById('empDrivingLicenseFrontFile').addEventListener('change',e=>readEmployeeImage(e.target,'licenseFront'));
-document.getElementById('empDrivingLicenseBackFile').addEventListener('change',e=>readEmployeeImage(e.target,'licenseBack'));
-document.getElementById('empPassportPage1File').addEventListener('change',e=>readEmployeeImage(e.target,'passport1'));
-document.getElementById('empPassportPage2File').addEventListener('change',e=>readEmployeeImage(e.target,'passport2'));
-['vehicleLeasingRate','vehicleKmPerYear','vehicleKmRate'].forEach(id=>document.getElementById(id).addEventListener('input',updateVehicleCosts));
-document.getElementById('vehicleRegistrationFile').addEventListener('change',async e=>{const f=e.target.files?.[0];if(f){vehicleRegistrationImage=await optimizeImageFile(f,1400,.82);setPreview('vehicleRegistrationPreview',vehicleRegistrationImage);}});
-bindMoneyInputs();
-loadVersion();
-loadWorktimeModels().then(()=>loadEmployeeMasters()).catch(()=>{});
-loadJobs();
-</script>
-</body>
-</html>
+module.exports = { registerKristine };
