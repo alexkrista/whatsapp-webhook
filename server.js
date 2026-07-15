@@ -46,15 +46,16 @@ const path = require("path");
 const nodemailer = require("nodemailer");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { registerKristine } = require("./kristine");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.4.0";
-const APP_BUILD = "0008b";
-const APP_STATUS = "Prototype";
-const APP_BUILD_DATE = "2026-07-14";
+const APP_VERSION = "3.4.1";
+const APP_BUILD = "0009-alpha1";
+const APP_STATUS = "Alpha";
+const APP_BUILD_DATE = "2026-07-15";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -1112,6 +1113,14 @@ ${downloadUrl}
   const sent = await sendMailWithLink({ to, subject, text: body, html });
   return { outPdf, built, pdfUrl: viewUrl, downloadUrl, mailed: !!sent, messageId: sent?.messageId || null };
 }
+
+
+// ===================== KRISTINE =====================
+registerKristine(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  publicDir: path.join(process.cwd(), "public"),
+});
 
 // ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
