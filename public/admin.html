@@ -25,7 +25,7 @@
     .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
     .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .readonly-highlight{background:#fffbe8;font-weight:800}
-    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}
+    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}.reload-icon{width:42px;height:42px;padding:0;border-radius:50%;font-size:22px;display:inline-flex;align-items:center;justify-content:center}.status-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;margin-top:8px;background:#eee}.job-address{margin-top:8px;line-height:1.45}.nav-link{display:inline-flex;align-items:center;gap:5px;margin-top:6px;text-decoration:none;font-weight:750;color:#17662f}.history-list{max-height:58vh;overflow:auto}.history-entry{padding:12px 0;border-bottom:1px solid #eee}.history-entry:last-child{border-bottom:0}.history-time{font-size:12px;color:#777}.rapport-launch{width:min(760px,96vw)!important}.rapport-launch #rapportJob{font-size:18px;padding:14px;min-height:54px}
     .card{position:relative;padding:20px 20px 58px}.card .actions.primary-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.card .actions.primary-actions>*{min-height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
     .trash-mini{position:absolute;right:14px;bottom:12px;background:transparent!important;border:0!important;color:#9b1c1c!important;font-size:20px;padding:5px!important;min-width:auto!important}
     .company-stack{max-width:760px;margin:0 auto}.company-stack .fieldline{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,260px);gap:18px;align-items:center;padding:9px 0;border-bottom:1px solid #eee}.company-stack label{font-weight:650}.company-stack input{min-width:0;width:100%;text-align:right;box-sizing:border-box}.company-stack .summaryline{font-weight:800}.company-stack .billing-highlight{background:#dff4df;border:2px solid #4d8f50;font-size:20px;font-weight:900}.company-stack h3{margin:24px 0 8px}
@@ -36,12 +36,13 @@
   </style>
 </head>
 <body>
-  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008a</span> · <span id="appStatus">Stable</span></div></header>
+  <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008b</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
+      <button id="reload" class="reload-icon" title="Aktualisieren" aria-label="Aktualisieren">↻</button>
       <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
-      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button id="reload">Aktualisieren</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
+      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
@@ -162,7 +163,12 @@
     </div><div id="vehicleList" style="margin-top:22px"></div></div>
   </section>
   <div id="ideaBackdrop" class="drawer-backdrop" onclick="closeIdeas()" style="z-index:74"></div><section id="ideaModal" class="employee-modal" style="z-index:75"><div class="employee-modal-head"><strong>💡 Ideen & Wünsche</strong><button class="closebtn" onclick="closeIdeas()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="ideaId"><div><label>Titel</label><input id="ideaTitle"></div><div><label>Status</label><select id="ideaStatus"><option value="offen">offen</option><option value="geplant">geplant</option><option value="umgesetzt">umgesetzt</option></select></div><div class="full"><label>Beschreibung</label><textarea id="ideaNote"></textarea></div><div class="full actions"><button onclick="saveIdea()">💾 Idee speichern</button><button class="secondary" onclick="resetIdeaForm()">Neu</button></div></div><div id="ideaList"></div></div></section>
-  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.4.0</span> · Build <span id="footerBuild">0008a</span></footer>
+  <div id="historyBackdrop" class="drawer-backdrop" onclick="closeHistory()" style="z-index:76"></div>
+  <section id="historyModal" class="employee-modal" style="z-index:77">
+    <div class="employee-modal-head"><div><strong>📜 Historisches Baustellentagebuch</strong><div id="historyTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeHistory()">×</button></div>
+    <div class="employee-modal-body"><div id="historyList" class="history-list loading">Lade Einträge …</div></div>
+  </section>
+  <footer>Krista Baustellenmanager · Version <span id="footerVersion">3.4.0</span> · Build <span id="footerBuild">0008b</span></footer>
 
 <script>
 const qs = new URLSearchParams(location.search);
@@ -181,13 +187,46 @@ async function api(url, opts={}){
 function esc(s){return String(s ?? '').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function bytes(n){n=Number(n||0); if(n<1024) return n+' B'; if(n<1024*1024) return (n/1024).toFixed(1)+' KB'; if(n<1024*1024*1024) return (n/1024/1024).toFixed(1)+' MB'; return (n/1024/1024/1024).toFixed(2)+' GB';}
 function jobTitle(j){ return j.name ? `#${j.jobId} · ${j.name}` : `#${j.jobId}`; }
+function statusClass(status){
+  return status==='Laufend'?'positive':status==='Fertig – nicht abgerechnet'?'warning':status==='Geschlossen'?'small':'';
+}
+function fullAddress(j){
+  return [j.street, j.houseNumber, [j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+}
+function mapsUrl(j){
+  const address=fullAddress(j); return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):'';
+}
 function render(){
   const app=document.getElementById('app'); const q=document.getElementById('search').value.trim().toLowerCase(); const sort=document.getElementById('sortJobs')?.value||'newest';
-  let list=jobs.filter(j=>!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q));
+  let list=jobs.filter(j=>!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q)||fullAddress(j).toLowerCase().includes(q));
   const cmpText=(a,b)=>String(a||'').localeCompare(String(b||''),'de',{numeric:true,sensitivity:'base'});
   list=[...list].sort((a,b)=>sort==='oldest'?cmpText(a.latestDay,b.latestDay):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(b.latestDay,a.latestDay));
   if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;} app.className='grid';
-  app.innerHTML=list.map(j=>`<section class="card" id="job-${esc(j.jobId)}"><div class="jobline"><div><div class="job">#${esc(j.jobId)}</div><div class="name">${j.name?esc(j.name):'<span class="small">kein Name vergeben</span>'}</div></div><button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite?'★':'☆'}</button></div><div class="meta">letzter Tag: ${esc(j.latestDay||'-')}<br>Tage: ${j.daysCount||0}<br>gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br><span class="pill">💾 ${bytes(j.sizeBytes)}</span></div><div class="job-summary" id="summary-${esc(j.jobId)}"></div><div class="actions primary-actions"><button class="secondary" onclick="toggleDays('${esc(j.jobId)}',this)">Tage</button><a class="action" target="_blank" href="${tokenJoin('/admin/akte/'+encodeURIComponent(j.jobId))}">Akte öffnen</a><a class="action secondary" href="${tokenJoin('/admin/download-akte/'+encodeURIComponent(j.jobId))}">PDF</a><button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button></div><button class="trash-mini" title="Baustelle löschen" onclick="deleteJob('${esc(j.jobId)}')">🗑️</button><div class="edit" id="edit-${esc(j.jobId)}"><label>Baustellennummer ändern</label><input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}"><p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p><label>Baustellenname</label><input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}"><label>Notiz</label><textarea id="notes-${esc(j.jobId)}">${esc(j.notes||'')}</textarea><div class="calcbox"><strong>💰 Stundenkalkulation</strong><label>Auftragssumme netto €</label><input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Fremdleistungen / Gerüst etc. €</label><input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Materialanteil %</label><input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Aktueller Verrechnungssatz €/Std. <span class="small">automatisch übernommen, überschreibbar</span></label><input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Geplante Regiestunden</label><input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><div id="calc-${esc(j.jobId)}"></div></div><p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Schließen</button></p><label>Mit anderer Baustelle zusammenführen</label><input id="merge-${esc(j.jobId)}" placeholder="Zielnummer"><p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p></div><div class="days" id="days-${esc(j.jobId)}"></div></section>`).join('');
+  app.innerHTML=list.map(j=>{
+    const address=fullAddress(j), nav=mapsUrl(j);
+    return `<section class="card" id="job-${esc(j.jobId)}"><div class="jobline"><div><div class="job">#${esc(j.jobId)}</div><div class="name">${j.name?esc(j.name):'<span class="small">kein Name vergeben</span>'}</div><span class="status-pill ${statusClass(j.status)}">${esc(j.status||'Angebot')}</span></div><button class="fav" title="Favorit" onclick="toggleFavorite('${esc(j.jobId)}')">${j.favorite?'★':'☆'}</button></div>
+    ${address?`<div class="job-address">📍 ${esc(address)}${j.addressExtra?`<br><span class="small">${esc(j.addressExtra)}</span>`:''}${nav?`<br><a class="nav-link" target="_blank" href="${nav}">Navigation starten ↗</a>`:''}</div>`:''}
+    ${(j.contactName||j.contactPhone)?`<div class="meta">👤 ${esc(j.contactName||'–')}${j.contactPhone?` · <a href="tel:${esc(j.contactPhone)}">${esc(j.contactPhone)}</a>`:''}</div>`:''}
+    <div class="meta">letzter Tag: ${esc(j.latestDay||'-')}<br>Tage: ${j.daysCount||0}<br>gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br><span class="pill">💾 ${bytes(j.sizeBytes)}</span></div><div class="job-summary" id="summary-${esc(j.jobId)}"></div>
+    <div class="actions primary-actions"><button class="secondary" onclick="toggleDays('${esc(j.jobId)}',this)">Tage</button><a class="action" target="_blank" href="${tokenJoin('/admin/akte/'+encodeURIComponent(j.jobId))}">Akte öffnen</a><button class="secondary" onclick="openHistory('${esc(j.jobId)}')">Tagebuch</button><button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button></div>
+    <button class="trash-mini" title="Baustelle löschen" onclick="deleteJob('${esc(j.jobId)}')">🗑️</button>
+    <div class="edit" id="edit-${esc(j.jobId)}">
+      <label>Baustellennummer ändern</label><input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}"><p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p>
+      <label>Baustellenname</label><input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}">
+      <label>Status</label><select id="status-${esc(j.jobId)}" class="wide"><option ${j.status==='Angebot'?'selected':''}>Angebot</option><option ${j.status==='Auftrag'?'selected':''}>Auftrag</option><option ${j.status==='Laufend'?'selected':''}>Laufend</option><option ${j.status==='Fertig – nicht abgerechnet'?'selected':''}>Fertig – nicht abgerechnet</option><option ${j.status==='Geschlossen'?'selected':''}>Geschlossen</option></select>
+      <label>Straße</label><input id="street-${esc(j.jobId)}" value="${esc(j.street||'')}">
+      <label>Hausnummer</label><input id="house-${esc(j.jobId)}" value="${esc(j.houseNumber||'')}">
+      <label>PLZ</label><input id="postal-${esc(j.jobId)}" value="${esc(j.postalCode||'')}">
+      <label>Ort</label><input id="city-${esc(j.jobId)}" value="${esc(j.city||'')}">
+      <label>Adresszusatz / Zufahrt</label><input id="addressextra-${esc(j.jobId)}" value="${esc(j.addressExtra||'')}">
+      <label>Ansprechpartner vor Ort</label><input id="contact-${esc(j.jobId)}" value="${esc(j.contactName||'')}">
+      <label>Telefon</label><input id="contactphone-${esc(j.jobId)}" value="${esc(j.contactPhone||'')}">
+      <label>Notiz</label><textarea id="notes-${esc(j.jobId)}">${esc(j.notes||'')}</textarea>
+      <div class="calcbox"><strong>💰 Stundenkalkulation</strong><label>Auftragssumme netto €</label><input id="contract-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.contractAmount||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Fremdleistungen / Gerüst etc. €</label><input id="external-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.externalServices||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Materialanteil %</label><input id="materialpct-${esc(j.jobId)}" type="number" min="0" max="100" step="0.1" value="${Number(j.materialPercent||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Aktueller Verrechnungssatz €/Std. <span class="small">automatisch übernommen, überschreibbar</span></label><input id="billing-${esc(j.jobId)}" type="number" min="0" step="0.01" value="${Number(j.calculation?.billingRate||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><label>Geplante Regiestunden</label><input id="plannedregie-${esc(j.jobId)}" type="number" min="0" step="0.25" value="${Number(j.plannedRegieHours||0)}" oninput="updateJobCalc('${esc(j.jobId)}')"><div id="calc-${esc(j.jobId)}"></div></div>
+      <p class="actions"><button onclick="saveMeta('${esc(j.jobId)}')">Speichern</button><button class="secondary" onclick="toggleEdit('${esc(j.jobId)}')">Schließen</button></p>
+      <label>Mit anderer Baustelle zusammenführen</label><input id="merge-${esc(j.jobId)}" placeholder="Zielnummer"><p class="actions"><button class="danger" onclick="mergeJob('${esc(j.jobId)}')">Zusammenführen</button></p>
+    </div><div class="days" id="days-${esc(j.jobId)}"></div></section>`;
+  }).join('');
   list.forEach(j=>{updateJobCalc(String(j.jobId));updateJobSummary(String(j.jobId));});
 }
 async function loadJobs(){
@@ -198,16 +237,28 @@ async function loadJobs(){
 function toggleEdit(jobId){ const box=document.getElementById('edit-'+jobId); box.style.display = box.style.display==='block' ? 'none':'block'; }
 async function saveMeta(jobId){
   const j = jobs.find(x=>String(x.jobId)===String(jobId));
-  const name=document.getElementById('name-'+jobId).value;
-  const notes=document.getElementById('notes-'+jobId).value;
-  const billingRate=Number(document.getElementById('billing-'+jobId).value||0);
-  const contractAmount=Number(document.getElementById('contract-'+jobId).value||0);
-  const externalServices=Number(document.getElementById('external-'+jobId).value||0);
-  const materialPercent=Number(document.getElementById('materialpct-'+jobId).value||0);
-  const plannedRegieHours=Number(document.getElementById('plannedregie-'+jobId).value||0);
-  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,notes,billingRate,contractAmount,externalServices,materialPercent,plannedRegieHours,favorite:j?.favorite||false})});
+  const body={
+    name:document.getElementById('name-'+jobId).value,
+    notes:document.getElementById('notes-'+jobId).value,
+    status:document.getElementById('status-'+jobId).value,
+    street:document.getElementById('street-'+jobId).value,
+    houseNumber:document.getElementById('house-'+jobId).value,
+    postalCode:document.getElementById('postal-'+jobId).value,
+    city:document.getElementById('city-'+jobId).value,
+    addressExtra:document.getElementById('addressextra-'+jobId).value,
+    contactName:document.getElementById('contact-'+jobId).value,
+    contactPhone:document.getElementById('contactphone-'+jobId).value,
+    billingRate:Number(document.getElementById('billing-'+jobId).value||0),
+    contractAmount:Number(document.getElementById('contract-'+jobId).value||0),
+    externalServices:Number(document.getElementById('external-'+jobId).value||0),
+    materialPercent:Number(document.getElementById('materialpct-'+jobId).value||0),
+    plannedRegieHours:Number(document.getElementById('plannedregie-'+jobId).value||0),
+    favorite:j?.favorite||false
+  };
+  await api(`/admin/api/job/${encodeURIComponent(jobId)}/meta`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   await loadJobs();
 }
+
 
 function updateJobSummary(jobId){
   const j=jobs.find(x=>String(x.jobId)===String(jobId));
@@ -319,6 +370,21 @@ async function deleteJob(jobId){
   await api(`/admin/api/job/${encodeURIComponent(jobId)}`, {method:'DELETE'});
   await loadJobs();
 }
+
+async function openHistory(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId));
+  document.getElementById('historyTitle').textContent=jobTitle(j||{jobId});
+  document.getElementById('historyBackdrop').style.display='block';
+  document.getElementById('historyModal').style.display='block';
+  const box=document.getElementById('historyList');box.className='history-list loading';box.textContent='Lade Einträge …';
+  try{
+    const data=await api(`/admin/api/job/${encodeURIComponent(jobId)}/history`);
+    const events=data.events||[];
+    box.className='history-list';
+    box.innerHTML=events.length?events.map(e=>`<div class="history-entry"><div><strong>${esc(e.title||e.type)}</strong></div><div>${esc(e.detail||'')}</div><div class="history-time">${new Date(e.at).toLocaleString('de-AT')} · ${esc(e.source||'system')}</div></div>`).join(''):'<div class="hint">Noch keine protokollierten Ereignisse.</div>';
+  }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
+}
+function closeHistory(){document.getElementById('historyBackdrop').style.display='none';document.getElementById('historyModal').style.display='none';}
 
 let currentRegie = {jobId:null, day:null};
 function h(v){ return esc(v ?? ''); }
@@ -445,7 +511,7 @@ async function saveRegie(){
   const materials=[...document.querySelectorAll('#materialRows .material-row')].map(r=>({name:r.querySelector('.mat-name').value,quantity:r.querySelector('.mat-qty').value,unit:r.querySelector('.mat-unit').value})).filter(m=>m.name.trim());
   const body={status:document.getElementById('regieStatus').value,employees,customerText:document.getElementById('customerText').value,internalNote:document.getElementById('internalNote').value,materials,specialMaterial:document.getElementById('specialMaterial').value,materialTomorrow:{needed:document.getElementById('materialTomorrowNeeded').checked,text:document.getElementById('materialTomorrowText').value}};
   document.getElementById('regieMsg').textContent='Speichere …';
-  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent=rapportHoursMode?'✅ Stunden gespeichert':'✅ Gespeichert';loadJobs();}
+  try{await api(`/admin/api/job/${encodeURIComponent(currentRegie.jobId)}/day/${encodeURIComponent(currentRegie.day)}/regie`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('regieMsg').textContent=rapportHoursMode?'✅ Stunden gespeichert':'✅ Gespeichert';await loadJobs();}
   catch(e){document.getElementById('regieMsg').textContent='Fehler: '+e.message;}
 }
 
@@ -454,10 +520,10 @@ async function loadVersion(){
   try{
     const v=await api('/admin/api/version');
     document.getElementById('appVersion').textContent=v.version||'3.3.0';
-    document.getElementById('appBuild').textContent=v.build||'0005';
+    document.getElementById('appBuild').textContent=v.build||'0008b';
     document.getElementById('appStatus').textContent=v.status||'Stable';
     document.getElementById('footerVersion').textContent=v.version||'3.3.0';
-    document.getElementById('footerBuild').textContent=v.build||'0005';
+    document.getElementById('footerBuild').textContent=v.build||'0008b';
   }catch{}
 }
 function money(v){return Number(v||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
