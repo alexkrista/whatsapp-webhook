@@ -23,13 +23,13 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .sendrow{display:flex;gap:8px;margin-top:10px}.sendrow input{flex:1}.statebox{background:#f7f7f7;border-radius:12px;padding:12px;margin-bottom:12px}
 .status{display:inline-block;padding:5px 9px;border-radius:999px;background:#eee;font-size:12px;font-weight:800}.working{background:#d9f1df;color:#145829}.pause{background:#fff0c7;color:#795400}.finished_day{background:#e5e5e5}
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
+.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Alpha 2 · Vorhandene Daten nutzen statt doppelt eingeben.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Alpha 4 · Klarer Leitstand, Regie und Navigation.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -77,7 +77,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <label style="margin-top:8px">Datum</label><input id="chatDate" type="date">
       <div class="actions"><button onclick="beginConversation()">Gespräch beginnen</button><button class="secondary" onclick="resetState()">Tag zurücksetzen</button></div>
       <div id="currentState" class="statebox" style="margin-top:12px">Noch kein Status geladen.</div>
-      <p class="small">Natürliche Kurzmeldungen: Start, Pause, Mittag, Weiter, Fertig, Status, Erledigt.</p>
+      <p class="small">Natürliche Kurzmeldungen: Start, Pause, Mittag, Weiter, Fertig, Regie, Status, Erledigt.</p>
     </div>
     <div class="phone">
       <div id="chatMessages" class="chat"></div>
@@ -97,13 +97,13 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <h3>Aufgabe verteilen</h3>
       <div class="formgrid">
         <div class="full"><label>Aufgabe</label><input id="tTitle" placeholder="Rückruf Müller / Ausbesserung Sockel"></div>
-        <div><label>Mitarbeiter-ID</label><input id="tAssigneeId" placeholder="alex"></div>
-        <div><label>Name</label><input id="tAssigneeName" placeholder="Alex"></div>
-        <div><label>Baustellennummer optional</label><input id="tJobId"></div>
-        <div><label>Baustelle optional</label><input id="tJobName"></div>
+        <div><label>Zuständig</label><select id="tAssigneeSelect" onchange="selectTaskAssignee()"><option value="">– Mitarbeiter oder Chef auswählen –</option></select></div>
+        <div><label>Baustelle optional</label><select id="tJobSelect" onchange="selectTaskJob()"><option value="">– keine Baustelle –</option></select></div>
         <div><label>Fällig</label><input id="tDueDate" type="date"></div>
-        <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="Wenn Alex wieder bei Müller ist"></div>
+        <div class="full"><label>Ausgewählte Zuordnung</label><div id="taskSelectionInfo" class="auto-box small">Noch keine Zuordnung ausgewählt.</div></div>
+        <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="z. B. erinnern, wenn Alex wieder bei Müller ist"></div>
       </div>
+      <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
       <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
     </div>
     <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
@@ -138,10 +138,28 @@ async function loadAll(){
   renderWeek();renderControl();renderTasks();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+function mapsUrl(address){return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):''}
 function renderMasterData(){
   aJobSelect.innerHTML='<option value="">– Baustelle auswählen –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');
   aVehicleSelect.innerHTML='<option value="">– kein Fahrzeug –</option>'+masterVehicles.map(v=>`<option value="${esc(v.label||v.plate)}">${esc(v.label||v.plate)}${v.plate&&v.label?' · '+esc(v.plate):''}</option>`).join('');
-  employeePicker.innerHTML=masterEmployees.length?masterEmployees.map(e=>`<label class="employee-chip"><input type="checkbox" class="aEmployeeCheck" value="${esc(e.id)}" data-name="${esc(e.name)}"><span>${esc(e.name)}</span></label>`).join(''):'<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';chatEmployeeSelect.innerHTML='<option value="">– Mitarbeiter auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');
+  employeePicker.innerHTML=masterEmployees.length?masterEmployees.map(e=>`<label class="employee-chip"><input type="checkbox" class="aEmployeeCheck" value="${esc(e.id)}" data-name="${esc(e.name)}"><span>${esc(e.name)}</span></label>`).join(''):'<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';chatEmployeeSelect.innerHTML='<option value="">– Mitarbeiter auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tAssigneeSelect.innerHTML='<option value="">– Mitarbeiter oder Chef auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tJobSelect.innerHTML='<option value="">– keine Baustelle –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');
+}
+function selectTaskAssignee(){
+  const o=tAssigneeSelect.selectedOptions[0];
+  tAssigneeId.value=tAssigneeSelect.value;
+  tAssigneeName.value=o?.dataset.name||'';
+  updateTaskSelectionInfo();
+}
+function selectTaskJob(){
+  const j=masterJobs.find(x=>String(x.jobId)===String(tJobSelect.value));
+  tJobId.value=j?String(j.jobId):'';
+  tJobName.value=j?(j.name||('#'+j.jobId)):'';
+  updateTaskSelectionInfo();
+}
+function updateTaskSelectionInfo(){
+  const employee=tAssigneeName.value||'niemand';
+  const j=masterJobs.find(x=>String(x.jobId)===String(tJobId.value));
+  taskSelectionInfo.innerHTML=`<strong>Zuständig:</strong> ${esc(employee)}<br><strong>Baustelle:</strong> ${j?`#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}`:'keine Baustelle'}${j&&jobAddress(j)?`<br><span class="small">${esc(jobAddress(j))}</span>`:''}`;
 }
 function selectChatEmployee(){const o=chatEmployeeSelect.selectedOptions[0];chatEmployeeId.value=chatEmployeeSelect.value;chatEmployeeName.value=o?.dataset.name||''}
 function selectJob(){
@@ -151,7 +169,7 @@ function selectJob(){
   selectedJobInfo.innerHTML=`<strong>#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}</strong><br>${esc(address||'Adresse noch nicht hinterlegt')}${j.contactName?`<br>👤 ${esc(j.contactName)}${j.contactPhone?' · '+esc(j.contactPhone):''}`:''}<br><span class="small">Status: ${esc(j.status||'Angebot')}</span>`;
 }
 function weekDays(){const d=new Date((document.getElementById('aDate').value||data.today)+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
-function renderWeek(){const days=weekDays();document.getElementById('week').innerHTML=days.map(day=>`<div class="daycol"><div class="dayhead">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>${data.assignments.filter(a=>a.date===day).map(a=>`<div class="assignment"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions"><button class="danger" onclick="removeAssignment('${a.id}')">×</button></div></div>`).join('')||'<span class="small">frei</span>'}</div>`).join('')}
+function renderWeek(){const days=weekDays();document.getElementById('week').innerHTML=days.map(day=>`<div class="daycol"><div class="dayhead">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>${data.assignments.filter(a=>a.date===day).map(a=>`<div class="assignment"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions">${a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="danger" onclick="removeAssignment('${a.id}')">×</button></div></div>`).join('')||'<span class="small">frei</span>'}</div>`).join('')}
 function addAssignment(){
   const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
   const selected=[...document.querySelectorAll('.aEmployeeCheck:checked')];
@@ -190,16 +208,65 @@ function seedDemo(){
 function clearPlanning(){if(confirm('Planung wirklich leeren?')){data.assignments=[];renderWeek()}}
 function addBubble(text,who){const d=document.createElement('div');d.className='bubble '+who;d.textContent=text;chatMessages.appendChild(d);chatMessages.scrollTop=chatMessages.scrollHeight}
 function setQuick(buttons=[]){quickButtons.innerHTML=buttons.map(b=>`<button onclick="quickSend('${esc(b)}')">${esc(b)}</button>`).join('')}
-function quickSend(text){chatInput.value=text;sendMessage()}
+function currentChatAssignment(){
+  const employeeId=chatEmployeeId.value.trim(), date=chatDate.value;
+  const rows=data.assignments.filter(a=>String(a.employeeId)===String(employeeId)&&a.date===date).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));
+  const state=data.states[employeeId];
+  if(state?.activeAssignmentKey){
+    const hit=rows.find(a=>`${a.date}|${a.employeeId}|${a.from||''}|${a.jobId||''}`===state.activeAssignmentKey);
+    if(hit)return hit;
+  }
+  return rows[0]||null;
+}
+function openNavigation(){
+  const a=currentChatAssignment();
+  if(!a?.address){alert('Bei dieser Baustelle ist noch keine Adresse hinterlegt.');return}
+  window.open(mapsUrl(a.address),'_blank');
+}
+function quickSend(text){if(text==='Navigation'){openNavigation();return}chatInput.value=text;sendMessage()}
 function renderState(state){if(!state){currentState.textContent='Noch kein Status.';return}currentState.innerHTML=`<strong>${esc(state.employeeName)}</strong><br><span class="status ${esc(state.mode)}">${esc(state.mode)}</span><br><span class="small">${(state.timeline||[]).length} Ereignisse heute</span>`}
 async function beginConversation(){chatMessages.innerHTML='';setQuick([]);await postMessage('Hallo')}
 async function sendMessage(){const text=chatInput.value.trim();if(!text)return;chatInput.value='';addBubble(text,'user');await postMessage(text,true)}
 async function postMessage(text,alreadyShown=false){if(!alreadyShown&&text!=='Hallo')addBubble(text,'user');const r=await api('/kristine/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:chatEmployeeId.value.trim(),employeeName:chatEmployeeName.value.trim(),date:chatDate.value,text})});addBubble(r.reply,'bot');setQuick(r.buttons||[]);renderState(r.state);await loadSilent()}
 async function resetState(){await api('/kristine/api/reset-state/'+encodeURIComponent(chatEmployeeId.value.trim()),{method:'POST'});chatMessages.innerHTML='';setQuick([]);currentState.textContent='Tag wurde zurückgesetzt.';await loadSilent()}
 async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks()}
-function renderControl(){const today=chatDate.value||data.today;const employees=[...new Map(data.assignments.filter(a=>a.date===today).map(a=>[a.employeeId,a])).values()];controlList.innerHTML=employees.length?`<table class="table"><thead><tr><th>Mitarbeiter</th><th>Plan</th><th>Status</th><th>Letzte Aktion</th></tr></thead><tbody>${employees.map(a=>{const s=data.states[a.employeeId];const last=s?.timeline?.at(-1);return `<tr><td><strong>${esc(a.employeeName)}</strong></td><td>${data.assignments.filter(x=>x.date===today&&x.employeeId===a.employeeId).map(x=>`${esc(x.from)}–${esc(x.to)} ${esc(x.jobName)}`).join('<br>')}</td><td><span class="status ${esc(s?.mode||'idle')}">${esc(s?.mode||'offen')}</span></td><td>${last?esc(last.detail):'–'}</td></tr>`}).join('')}</tbody></table>`:'<span class="small">Für heute ist noch niemand eingeteilt.</span>'}
-function addTask(){data.tasks.push({id:id(),title:tTitle.value.trim(),assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),dueDate:tDueDate.value,reminder:tReminder.value.trim(),status:'open',createdAt:new Date().toISOString()});renderTasks()}
-function renderTasks(){taskList.innerHTML=data.tasks.length?data.tasks.map(t=>`<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(t.dueDate||'–')} · ${esc(t.status)}</span><div class="actions"><button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`).join(''):'<span class="small">Keine Aufgaben.</span>'}
+function statusLabel(mode){
+  const labels={idle:'Noch nicht gestartet',working:'Arbeitet',pause:'Pause',lunch:'Mittagspause',finished_site:'Baustelle fertig',finished_day:'Feierabend'};
+  return labels[mode]||'Offen';
+}
+function latestRegie(state){
+  const items=(state?.timeline||[]).filter(x=>x.type==='regie_reported');
+  return items.length?items[items.length-1]:null;
+}
+function renderControl(){
+  const today=chatDate.value||data.today;
+  const employees=[...new Map(data.assignments.filter(a=>a.date===today).map(a=>[a.employeeId,a])).values()];
+  controlList.innerHTML=employees.length?`<table class="table"><thead><tr><th>Mitarbeiter</th><th>Plan</th><th>Status</th><th>Regie</th><th>Letzte Aktion</th></tr></thead><tbody>${employees.map(a=>{
+    const s=data.states[a.employeeId], last=s?.timeline?.at(-1), regie=latestRegie(s);
+    const plans=data.assignments.filter(x=>x.date===today&&x.employeeId===a.employeeId);
+    return `<tr><td><strong>${esc(a.employeeName)}</strong></td><td>${plans.map(x=>`${esc(x.from)}–${esc(x.to)} ${esc(x.jobName)}${x.address?` <a class="navbtn" target="_blank" href="${mapsUrl(x.address)}">📍 Navi</a>`:''}`).join('<br><br>')}</td><td><span class="status ${esc(s?.mode||'idle')}">${esc(statusLabel(s?.mode))}</span></td><td>${regie?`<span class="status pause">${esc(regie.detail)}</span>`:'–'}</td><td>${last?esc(last.detail):'–'}</td></tr>`
+  }).join('')}</tbody></table>`:'<span class="small">Für heute ist noch niemand eingeteilt.</span>'
+}
+function addTask(){
+  if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
+  if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
+  data.tasks.push({
+    id:id(),title:tTitle.value.trim(),
+    assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
+    jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
+    dueDate:tDueDate.value,reminder:tReminder.value.trim(),
+    status:'open',createdAt:new Date().toISOString()
+  });
+  tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
+  tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
+  updateTaskSelectionInfo();renderTasks();
+}
+function renderTasks(){
+  taskList.innerHTML=data.tasks.length?data.tasks.map(t=>{
+    const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
+    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(t.dueDate||'–')} · ${esc(t.status)}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
+  }).join(''):'<span class="small">Keine Aufgaben.</span>'
+}
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks()}
 async function saveTasks(){const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});data.tasks=r.tasks;renderTasks();alert('Aufgaben gespeichert.')}
 document.getElementById('adminLink').href=url('/admin/ui');
