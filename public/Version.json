@@ -1,7 +1,7 @@
 {
-  "version": "3.4.0",
-  "build": "0008a",
-  "status": "Prototype",
-  "date": "2026-07-14",
-  "name": "FIRST DAY – Tagesrapport Stunden"
+  "version": "3.4.1",
+  "build": "0009-alpha1",
+  "status": "Alpha",
+  "date": "2026-07-15",
+  "name": "KRISTINE Alpha 1 – Planung, Chat, Leitstand, Aufgaben"
 }
