@@ -53,8 +53,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.4.5";
-const APP_BUILD = "0013-chefmodus";
-const APP_STATUS = "Chefmodus";
+const APP_BUILD = "0013-whatsapp-live";
+const APP_STATUS = "WhatsApp Live Alpha";
 const APP_BUILD_DATE = "2026-07-15";
 
 // Static files for Admin UI
@@ -1116,7 +1116,7 @@ ${downloadUrl}
 
 
 // ===================== KRISTINE =====================
-registerKristine(app, {
+const kristine = registerKristine(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   publicDir: path.join(process.cwd(), "public"),
@@ -1150,6 +1150,97 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
+
+// ===================== WhatsApp → Kristine =====================
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function whatsappTextFromMessage(msg) {
+  if (msg?.type === "text") return String(msg.text?.body || "").trim();
+  if (msg?.type === "interactive") {
+    return String(
+      msg.interactive?.button_reply?.title ||
+      msg.interactive?.button_reply?.id ||
+      msg.interactive?.list_reply?.title ||
+      msg.interactive?.list_reply?.id ||
+      ""
+    ).trim();
+  }
+  return "";
+}
+
+async function employeeFromWhatsAppSender(sender) {
+  const wanted = normalizePhone(sender);
+  if (!wanted) return null;
+  const employees = await readEmployees();
+  return employees.find((employee) => {
+    const phone = normalizePhone(employee.phone);
+    if (!phone) return false;
+    // Meta liefert üblicherweise ohne führendes +. Auch lokale 0/0043-Schreibweisen tolerieren.
+    return phone === wanted || phone.endsWith(wanted) || wanted.endsWith(phone);
+  }) || null;
+}
+
+function cleanWhatsAppButtons(buttons) {
+  const source = Array.isArray(buttons) ? buttons : [];
+  return source.slice(0, 3).map((title, index) => {
+    const label = String(title || "").trim().slice(0, 20);
+    let id = `kristine_${index}`;
+    const lower = label.toLowerCase();
+    if (lower === "ja" || lower.includes("weiter zu")) id = "ja";
+    else if (lower === "nein") id = "nein";
+    else if (lower.includes("feierabend")) id = "feierabend";
+    else if (lower === "start") id = "start";
+    else if (lower === "pause") id = "pause";
+    else if (lower === "mittag") id = "mittag";
+    else if (lower === "weiter") id = "weiter";
+    else if (lower.includes("fertig")) id = "fertig";
+    else if (lower.includes("navigation")) id = "navigation";
+    return { id, title: label || `Option ${index + 1}` };
+  }).filter((button) => button.title);
+}
+
+async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [] }) {
+  if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
+  if (!phoneNumberId) throw new Error("WhatsApp phone_number_id missing in webhook metadata");
+
+  const cleanedButtons = cleanWhatsAppButtons(buttons);
+  const payload = cleanedButtons.length
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: String(to),
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: String(reply || "").slice(0, 1024) },
+          action: {
+            buttons: cleanedButtons.map((button) => ({
+              type: "reply",
+              reply: { id: button.id, title: button.title },
+            })),
+          },
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: String(to),
+        type: "text",
+        text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
+      };
+
+  return fetchJson(`https://graph.facebook.com/v22.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
@@ -1160,12 +1251,63 @@ app.post("/webhook", async (req, res) => {
     const changes = entry?.changes?.[0];
     const value = changes?.value;
     const msgs = value?.messages || [];
+    const phoneNumberId = value?.metadata?.phone_number_id || "";
     if (!Array.isArray(msgs) || msgs.length === 0) return;
 
     for (const msg of msgs) {
       const sender = msg.from || "unknown_sender";
       const tsSec = msg.timestamp || null;
       const date = isoDateFromWhatsAppTs(tsSec);
+
+      // Bekannte Mitarbeiter sprechen im Einzelchat direkt mit Kristine.
+      // Text und WhatsApp-Buttons verwenden exakt denselben Dialogkern wie der Simulator.
+      const kristineText = whatsappTextFromMessage(msg);
+      if (kristineText) {
+        const employee = await employeeFromWhatsAppSender(sender);
+        if (employee) {
+          try {
+            let normalizedInput = kristineText;
+            // Button-IDs/Titel in natürliche Kurzbefehle übersetzen.
+            const lower = normalizedInput.toLowerCase();
+            if (lower.startsWith("weiter zu ")) normalizedInput = "ja";
+            if (lower === "navigation") {
+              const assignments = await fsp.readFile(path.join(DATA_DIR, "_kristine", "assignments.json"), "utf8").then(JSON.parse).catch(() => []);
+              const todayRows = assignments.filter((a) => String(a.employeeId) === String(employee.id) && String(a.date) === String(date));
+              const active = todayRows.sort((a,b) => String(a.from||"").localeCompare(String(b.from||"")))[0];
+              const address = String(active?.address || "").trim();
+              const navigationReply = address
+                ? `Navigation zu ${active.jobName || "deiner Baustelle"}:
+https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+                : "Bei deiner aktuellen Baustelle ist noch keine Adresse hinterlegt.";
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: navigationReply });
+              continue;
+            }
+
+            const result = await kristine.handleMessage({
+              employeeId: employee.id,
+              employeeName: employee.name,
+              text: normalizedInput,
+              date,
+            });
+            await sendWhatsAppKristineReply({
+              phoneNumberId,
+              to: sender,
+              reply: result.reply,
+              buttons: result.buttons,
+            });
+          } catch (e) {
+            console.error("❌ Kristine WhatsApp failed:", e?.message || e);
+            try {
+              await sendWhatsAppKristineReply({
+                phoneNumberId,
+                to: sender,
+                reply: "Entschuldige, da hat bei mir gerade etwas nicht geklappt. Deine Nachricht ist angekommen – bitte versuche es gleich noch einmal.",
+              });
+            } catch {}
+          }
+          continue;
+        }
+      }
 
       const textOrCaption = parseCaptionTextFromMessage(msg);
       let siteCode = parseSiteCodeFromText(textOrCaption);
