@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kristine – Chefmodus</title>
+<title>Kristine – Alpha 1</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#202020;background:#f3f1ec}
 *{box-sizing:border-box}body{margin:0}header{background:#111;color:#fff;padding:20px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
@@ -23,18 +23,17 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .sendrow{display:flex;gap:8px;margin-top:10px}.sendrow input{flex:1}.statebox{background:#f7f7f7;border-radius:12px;padding:12px;margin-bottom:12px}
 .status{display:inline-block;padding:5px 9px;border-radius:999px;background:#eee;font-size:12px;font-weight:800}.working{background:#d9f1df;color:#145829}.pause{background:#fff0c7;color:#795400}.finished_day{background:#e5e5e5}
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}.chef-shell{max-width:760px;margin:0 auto}.chef-hero{background:#111;color:#fff;border-radius:20px;padding:22px;margin-bottom:14px}.chef-hero h2{margin:0 0 6px;font-size:28px}.chef-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.chef-kpi{background:rgba(255,255,255,.1);border-radius:14px;padding:12px;text-align:center}.chef-kpi strong{display:block;font-size:24px}.chef-actions{display:grid;gap:12px}.chef-action{width:100%;padding:16px 18px;font-size:18px;font-weight:800;text-align:left;border-radius:14px}.chef-action.all{background:#27713d;border-color:#27713d}.chef-action.partial{background:#b47a16;border-color:#b47a16}.chef-action.new{background:#2367a8;border-color:#2367a8}.chef-job{display:flex;gap:10px;align-items:flex-start;padding:12px;border-bottom:1px solid #eee}.chef-job input{width:auto;margin-top:5px}.chef-message{padding:14px;border-radius:12px;background:#fff3cf;margin-bottom:12px}.chef-message.good{background:#e2f4e6}.mobile-note{font-size:13px;color:#666}
+.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Chefmodus · Planung in drei Fingertipps.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Alpha 4 · Klarer Leitstand, Regie und Navigation.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
 <nav>
-  <button onclick="showTab('chef')">👑 Chefmodus</button>
   <button onclick="showTab('planning')">📅 Wochenplanung</button>
   <button onclick="showTab('chat')">💬 Kristine-Chat</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
@@ -42,36 +41,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
-<section id="chef" class="tab active">
-  <div class="chef-shell">
-    <div class="chef-hero">
-      <h2>Hallo Alexander 👋</h2>
-      <div id="chefHeadline">Ich schaue mir die Einteilung an …</div>
-      <div class="chef-kpis">
-        <div class="chef-kpi"><strong id="chefEmployees">–</strong><span>Mitarbeiter morgen</span></div>
-        <div class="chef-kpi"><strong id="chefJobs">–</strong><span>Baustellen morgen</span></div>
-        <div class="chef-kpi"><strong id="chefMissing">–</strong><span>noch offen</span></div>
-      </div>
-    </div>
-    <div id="chefReminder" class="chef-message" style="display:none"></div>
-    <div class="card">
-      <h3>Planung für morgen</h3>
-      <p id="chefSuggestion" class="mobile-note">Vorschlag wird geladen …</p>
-      <div class="chef-actions">
-        <button class="chef-action all" onclick="copyAllToday()">🟢 Alles wie heute</button>
-        <button class="chef-action partial" onclick="openPartialCopy()">🟡 Teilweise gleich</button>
-        <button class="chef-action new" onclick="showTab('planning')">🔵 Komplett anders</button>
-      </div>
-    </div>
-    <div id="chefPartial" class="card" style="display:none;margin-top:14px">
-      <h3>Welche Baustellen bleiben gleich?</h3>
-      <div id="chefJobChoices"></div>
-      <div class="actions"><button class="green" onclick="copySelectedToday()">Auswahl übernehmen</button><button class="secondary" onclick="chefPartial.style.display='none'">Abbrechen</button></div>
-    </div>
-  </div>
-</section>
-
-<section id="planning" class="tab">
+<section id="planning" class="tab active">
   <div class="notice">Baustellen, Mitarbeiter und Fahrzeuge kommen direkt aus dem bestehenden System. Daraus entstehen Wochenansicht, Mitarbeiter-Chat und Leitstand.</div>
   <div class="grid">
     <div class="card">
@@ -149,7 +119,7 @@ async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.t
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
-function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='chef')loadChef()}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
 async function loadAll(){
   const [k,j,e,v]=await Promise.all([
     api('/kristine/api/bootstrap'),
@@ -165,7 +135,7 @@ async function loadAll(){
   document.getElementById('chatDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;
   renderMasterData();
-  renderWeek();renderControl();renderTasks();await loadChef();
+  renderWeek();renderControl();renderTasks();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function mapsUrl(address){return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):''}
@@ -299,40 +269,6 @@ function renderTasks(){
 }
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks()}
 async function saveTasks(){const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});data.tasks=r.tasks;renderTasks();alert('Aufgaben gespeichert.')}
-let chefData=null;
-async function loadChef(){
-  try{
-    chefData=await api('/kristine/api/chef?date='+(data.today||iso(new Date())));
-    chefEmployees.textContent=`${chefData.tomorrowEmployeeCount}/${chefData.activeEmployeeCount||masterEmployees.length}`;
-    chefJobs.textContent=chefData.tomorrowJobs.length;
-    chefMissing.textContent=chefData.missingTomorrowCount;
-    const tomorrow=new Date(chefData.tomorrow+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit'});
-    chefHeadline.textContent=chefData.planningMissing?`Für ${tomorrow} ist noch nicht eingeteilt.`:`Die Planung für ${tomorrow} ist vorhanden.`;
-    chefSuggestion.textContent=chefData.planningMissing?`Heute sind ${chefData.todayJobs.length} Baustellen und ${chefData.todayEmployeeCount} Mitarbeiter eingeteilt. Ich kann das in einem Schritt für morgen übernehmen.`:`Morgen sind bereits ${chefData.tomorrowJobs.length} Baustellen mit ${chefData.tomorrowEmployeeCount} Mitarbeitern geplant.`;
-    chefReminder.style.display=(chefData.reminderDue15||chefData.reminderDue06)?'block':'none';
-    chefReminder.className='chef-message';
-    chefReminder.textContent=chefData.reminderDue15?'Hallo Alexander, es ist noch nicht für morgen eingeteilt. Deine Jungs können Kristine sonst nicht optimal nutzen.':chefData.reminderDue06?'Guten Morgen Alexander, für heute fehlt noch die Einteilung. Bitte kurz festlegen, wie die Mannschaft arbeitet.':'';
-  }catch(e){chefHeadline.textContent='Chefmodus konnte nicht geladen werden: '+e.message}
-}
-async function copyAllToday(){
-  if(!chefData)return;
-  if(!confirm('Alle heutigen Baustellen, Mitarbeiter, Zeiten und Fahrzeuge für morgen übernehmen?'))return;
-  const r=await api('/kristine/api/chef/copy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sourceDate:chefData.today,targetDate:chefData.tomorrow,mode:'all'})});
-  await loadAll();showTab('chef');alert(`${r.copied} Einteilungen für morgen übernommen.`)
-}
-function openPartialCopy(){
-  if(!chefData)return;
-  chefJobChoices.innerHTML=chefData.todayJobs.length?chefData.todayJobs.map(j=>`<label class="chef-job"><input type="checkbox" class="chefJobCheck" value="${esc(j.jobId)}" checked><span><strong>#${esc(j.jobId)} · ${esc(j.jobName)}</strong><span class="small">${esc(j.city||'')}${j.vehicle?' · '+esc(j.vehicle):''}</span></span></label>`).join(''):'<span class="small">Heute gibt es keine Planung zum Übernehmen.</span>';
-  chefPartial.style.display='block';chefPartial.scrollIntoView({behavior:'smooth'});
-}
-async function copySelectedToday(){
-  if(!chefData)return;
-  const jobIds=[...document.querySelectorAll('.chefJobCheck:checked')].map(x=>x.value);
-  if(!jobIds.length){alert('Bitte mindestens eine Baustelle auswählen.');return}
-  const r=await api('/kristine/api/chef/copy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sourceDate:chefData.today,targetDate:chefData.tomorrow,mode:'partial',jobIds})});
-  chefPartial.style.display='none';await loadAll();showTab('chef');alert(`${r.copied} Einteilungen teilweise übernommen.`)
-}
-
 document.getElementById('adminLink').href=url('/admin/ui');
 loadAll().catch(e=>alert(e.message));
 </script>
