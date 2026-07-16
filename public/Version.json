@@ -1,7 +1,7 @@
 {
-  "version": "3.4.1",
-  "build": "0009-alpha1",
-  "status": "Alpha",
-  "date": "2026-07-15",
-  "name": "KRISTINE Alpha 1 – Planung, Chat, Leitstand, Aufgaben"
+  "version": "3.4.5",
+  "build": "0013-chefmodus",
+  "status": "Chefmodus",
+  "date": "2026-07-16",
+  "name": "KRISTINE Chefmodus"
 }
