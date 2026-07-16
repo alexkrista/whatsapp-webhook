@@ -52,9 +52,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.4.4";
-const APP_BUILD = "0012-alpha4";
-const APP_STATUS = "Alpha 4";
+const APP_VERSION = "3.4.5";
+const APP_BUILD = "0013-chefmodus";
+const APP_STATUS = "Chefmodus";
 const APP_BUILD_DATE = "2026-07-15";
 
 // Static files for Admin UI
