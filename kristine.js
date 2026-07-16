@@ -40,37 +40,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
   }
 
-  function addDaysISO(dateStr, days) {
-    const d = new Date(String(dateStr) + "T12:00:00");
-    d.setDate(d.getDate() + Number(days || 0));
-    return localDateISO(d);
-  }
-
-  function chefSummary(assignments, employees, today = localDateISO()) {
-    const tomorrow = addDaysISO(today, 1);
-    const todayRows = assignments.filter(a => a.date === today);
-    const tomorrowRows = assignments.filter(a => a.date === tomorrow);
-    const activeEmployeeIds = new Set((employees || []).filter(e => e.active !== false).map(e => String(e.id)));
-    const todayEmployeeIds = new Set(todayRows.map(a => String(a.employeeId)));
-    const tomorrowEmployeeIds = new Set(tomorrowRows.map(a => String(a.employeeId)));
-    const todayJobs = [...new Map(todayRows.map(a => [String(a.jobId), a])).values()];
-    const tomorrowJobs = [...new Map(tomorrowRows.map(a => [String(a.jobId), a])).values()];
-    const missingTomorrow = [...activeEmployeeIds].filter(id => !tomorrowEmployeeIds.has(id));
-    const hour = new Date().getHours();
-    return {
-      today, tomorrow,
-      todayRows, tomorrowRows, todayJobs, tomorrowJobs,
-      todayEmployeeCount: todayEmployeeIds.size,
-      tomorrowEmployeeCount: tomorrowEmployeeIds.size,
-      activeEmployeeCount: activeEmployeeIds.size,
-      missingTomorrowCount: missingTomorrow.length,
-      missingTomorrowIds: missingTomorrow,
-      planningMissing: tomorrowRows.length === 0,
-      reminderDue15: hour >= 15 && tomorrowRows.length === 0,
-      reminderDue06: hour >= 6 && hour < 12 && todayRows.length === 0,
-    };
-  }
-
   function normalizeText(text) {
     return String(text || "")
       .trim()
@@ -471,42 +440,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     }
   });
 
-  app.get("/kristine/api/chef", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const assignments = await readJson(ASSIGNMENTS, []);
-      let employees = [];
-      try {
-        const employeesPath = path.join(dataDir, "_employees.json");
-        employees = await readJson(employeesPath, []);
-      } catch {}
-      const today = String(req.query.date || localDateISO()).slice(0, 10);
-      res.json({ ok: true, ...chefSummary(assignments, employees, today) });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.post("/kristine/api/chef/copy", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const sourceDate = String(req.body?.sourceDate || localDateISO()).slice(0, 10);
-      const targetDate = String(req.body?.targetDate || addDaysISO(sourceDate, 1)).slice(0, 10);
-      const selectedJobIds = Array.isArray(req.body?.jobIds) ? req.body.jobIds.map(String) : null;
-      const mode = String(req.body?.mode || "all");
-      const assignments = await readJson(ASSIGNMENTS, []);
-      const source = assignments.filter(a => a.date === sourceDate && (!selectedJobIds || selectedJobIds.includes(String(a.jobId))));
-      const keep = assignments.filter(a => a.date !== targetDate);
-      const copied = source.map((a, i) => ({ ...a, id: `a_${Date.now()}_${i}`, date: targetDate }));
-      const next = [...keep, ...copied];
-      await writeJson(ASSIGNMENTS, next);
-      await appendEvent({ type: "chef_planning_copied", source: "chef", detail: `${copied.length} Einteilungen ${sourceDate} → ${targetDate}`, data: { mode, sourceDate, targetDate, selectedJobIds } });
-      res.json({ ok: true, assignments: next, copied: copied.length, sourceDate, targetDate });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
   app.put("/kristine/api/assignments", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -582,6 +515,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
+
+  // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
+  return { handleMessage, localDateISO };
 }
 
 module.exports = { registerKristine };
