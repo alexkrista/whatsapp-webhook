@@ -9,7 +9,7 @@
     body{margin:0}header{background:#111;color:white;padding:22px 28px}h1{margin:0;font-size:26px}.sub{opacity:.75;margin-top:4px}
     main{max-width:1220px;margin:0 auto;padding:24px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
     input,textarea,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #ccc}input{min-width:280px;flex:1}textarea{width:100%;min-height:80px;box-sizing:border-box}
-    button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}button.danger{background:#9b1c1c;border-color:#9b1c1c}button.ghost{background:#eee;color:#111;border-color:#eee}button:disabled{opacity:.55;cursor:wait}
+    button{background:#111;color:white;cursor:pointer;border-color:#111}button.secondary{background:white;color:#111}.kristine-link{background:#24733b!important;color:#fff!important;border-color:#24733b!important;font-weight:800}.kristine-link:hover{background:#1d5f30!important;border-color:#1d5f30!important}button.danger{background:#9b1c1c;border-color:#9b1c1c}button.ghost{background:#eee;color:#111;border-color:#eee}button:disabled{opacity:.55;cursor:wait}
     .hint{color:#666;font-size:14px;margin:8px 0 18px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}.card{background:white;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px}.jobline{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}.job{font-weight:800;font-size:22px}.name{font-size:16px;margin-top:3px;color:#333}.fav{font-size:24px;line-height:1;background:transparent;color:#d19500;border:0;padding:2px 4px}.meta{color:#666;font-size:14px;line-height:1.55;margin-top:8px}.days{margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:none}.day{padding:12px 0;border-bottom:1px solid #eee}.day:last-child{border-bottom:0}.date{font-weight:750}.stats{color:#555;font-size:13px;margin:6px 0 10px}.actions{display:flex;gap:8px;flex-wrap:wrap}a.action{text-decoration:none;color:white;background:#111;padding:8px 10px;border-radius:9px;font-size:14px;display:inline-block}a.action.secondary{color:#111;background:#eee}.loading,.error{padding:16px;background:white;border-radius:14px}.error{color:#9b1c1c}.edit{display:none;margin-top:12px;padding-top:12px;border-top:1px solid #eee}.edit label{display:block;color:#555;font-size:13px;margin:10px 0 4px}.small{font-size:12px;color:#777}.pill{display:inline-block;background:#eee;border-radius:999px;padding:4px 8px;margin-top:6px}footer{color:#777;text-align:center;padding:30px;font-size:13px}
 
     .drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);display:none;z-index:40}
@@ -42,7 +42,7 @@
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
       <button id="reload" class="reload-icon" title="Aktualisieren" aria-label="Aktualisieren">↻</button>
       <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
-      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
+      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="kristine-link" onclick="openKristine()">🤖 Chefzentrale</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
     <div id="app" class="loading">Lade Baustellen …</div>
@@ -177,6 +177,7 @@ let jobs = [];
 let employeeMasters = [];
 let worktimeModels = [];
 function tokenJoin(url){ return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''); }
+function openKristine(){ window.location.href = tokenJoin('/kristine'); }
 async function api(url, opts={}){
   const r = await fetch(tokenJoin(url), opts);
   const text = await r.text();
