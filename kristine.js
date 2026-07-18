@@ -1050,7 +1050,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       krank: "Gute Besserung! Melde dich morgen oder sobald du wieder fit bist.",
       urlaub: "Viel Spaß! Bis bald.",
       arzt: "Bis bald! Pass auf dich auf.",
-      komme später: "Verstanden. Gib Bescheid, wenn du unterwegs bist!",
+      "komme später": "Verstanden. Gib Bescheid, wenn du unterwegs bist!",
     };
 
     return {
