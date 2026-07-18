@@ -142,14 +142,14 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     if (mode === STATE_MODES.UNANMELDBAR) {
       if (intent === "pause") {
         return {
-          reply: "Du hast noch nicht begonnen. Sag „Start", um anzufangen.",
+          reply: "Du hast noch nicht begonnen. Sag 'Start', um anzufangen.",
           buttons: ["Start"],
           state
         };
       }
       if (intent === "lunch") {
         return {
-          reply: "Du hast noch nicht begonnen. Sag „Start", um anzufangen.",
+          reply: "Du hast noch nicht begonnen. Sag 'Start', um anzufangen.",
           buttons: ["Start"],
           state
         };
@@ -163,7 +163,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       }
       if (intent === "resume") {
         return {
-          reply: "Du bist nicht in Pause. Sag „Start", um anzufangen.",
+          reply: "Du bist nicht in Pause. Sag 'Start', um anzufangen.",
           buttons: ["Start"],
           state
         };
@@ -172,7 +172,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
 
     if (mode === STATE_MODES.PAUSE && intent === "pause") {
       return {
-        reply: "Du bist bereits in Pause. Sag „Weiter", wenn es weitergeht.",
+        reply: "Du bist bereits in Pause. Sag 'Weiter', wenn es weitergeht.",
         buttons: ["Weiter", "Mittag"],
         state
       };
@@ -180,7 +180,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
 
     if (mode === STATE_MODES.MITTAG && intent === "lunch") {
       return {
-        reply: "Du bist bereits in der Mittagspause. Sag „Weiter", wenn es weitergeht.",
+        reply: "Du bist bereits in der Mittagspause. Sag 'Weiter', wenn es weitergeht.",
         buttons: ["Weiter"],
         state
       };
@@ -1050,7 +1050,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       krank: "Gute Besserung! Melde dich morgen oder sobald du wieder fit bist.",
       urlaub: "Viel Spaß! Bis bald.",
       arzt: "Bis bald! Pass auf dich auf.",
-      komme später: "Verstanden. Gib Bescheid, wenn du unterwegs bist!"
+      komme später: "Verstanden. Gib Bescheid, wenn du unterwegs bist!",
     };
 
     return {
