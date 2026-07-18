@@ -6,6 +6,106 @@ const fsp = require("fs/promises");
 const path = require("path");
 const cron = require("node-cron");
 
+// ===== HELPER: Österreichische Feiertage =====
+function getAustrianHolidays(year) {
+  const holidays = [];
+  
+  // Fixe Feiertage
+  holidays.push({ date: `${year}-01-01`, name: "Neujahr" });
+  holidays.push({ date: `${year}-01-06`, name: "Heilige Drei Könige" });
+  holidays.push({ date: `${year}-05-01`, name: "Staatsfeiertag" });
+  holidays.push({ date: `${year}-08-15`, name: "Mariä Himmelfahrt" });
+  holidays.push({ date: `${year}-10-26`, name: "Nationalfeiertag" });
+  holidays.push({ date: `${year}-11-01`, name: "Allerheiligen" });
+  holidays.push({ date: `${year}-12-08`, name: "Mariä Empfängnis" });
+  holidays.push({ date: `${year}-12-25`, name: "Christtag" });
+  holidays.push({ date: `${year}-12-26`, name: "Stefanitag" });
+  
+  // Ostern berechnen (Computus)
+  const easterDate = getEasterDate(year);
+  const easterTime = easterDate.getTime();
+  
+  // Ostermontag: Ostern + 1 Tag
+  const easterMonday = new Date(easterTime + 86400000);
+  holidays.push({ 
+    date: `${easterMonday.getFullYear()}-${String(easterMonday.getMonth() + 1).padStart(2, "0")}-${String(easterMonday.getDate()).padStart(2, "0")}`,
+    name: "Ostermontag"
+  });
+  
+  // Christi Himmelfahrt: Ostern + 39 Tage
+  const ascensionDay = new Date(easterTime + 39 * 86400000);
+  holidays.push({
+    date: `${ascensionDay.getFullYear()}-${String(ascensionDay.getMonth() + 1).padStart(2, "0")}-${String(ascensionDay.getDate()).padStart(2, "0")}`,
+    name: "Christi Himmelfahrt"
+  });
+  
+  // Pfingstmontag: Ostern + 50 Tage
+  const whitMondayDay = new Date(easterTime + 50 * 86400000);
+  holidays.push({
+    date: `${whitMondayDay.getFullYear()}-${String(whitMondayDay.getMonth() + 1).padStart(2, "0")}-${String(whitMondayDay.getDate()).padStart(2, "0")}`,
+    name: "Pfingstmontag"
+  });
+  
+  // Fronleichnam: Ostern + 60 Tage
+  const corpusChristiDay = new Date(easterTime + 60 * 86400000);
+  holidays.push({
+    date: `${corpusChristiDay.getFullYear()}-${String(corpusChristiDay.getMonth() + 1).padStart(2, "0")}-${String(corpusChristiDay.getDate()).padStart(2, "0")}`,
+    name: "Fronleichnam"
+  });
+  
+  return holidays.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function getEasterDate(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+// ===== HELPER: Standard-Zeitmodelle =====
+function getDefaultScheduleModels() {
+  return [
+    {
+      id: "sommer",
+      name: "Sommer (Krista)",
+      days: [
+        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Freitag", isWorkDay: true, from: "07:00", to: "14:15", pauseMinutes: 15, shouldHours: 7.8 },
+        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 }
+      ]
+    },
+    {
+      id: "winter",
+      name: "Winter",
+      days: [
+        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
+        { dayName: "Freitag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 }
+      ]
+    }
+  ];
+}
+
 function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp, chefPhoneNumber, phoneNumberId }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
@@ -1425,8 +1525,35 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   app.get("/kristine/api/holidays", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const holidays = await readJson(path.join(dataDir, "_kristine", "holidays.json"), []);
+      const holidaysFile = path.join(dataDir, "_kristine", "holidays.json");
+      let holidays = await readJson(holidaysFile, []);
+      
+      // Auto-Load: Wenn leer, lade österreichische Feiertage für 2026
+      if (holidays.length === 0) {
+        holidays = getAustrianHolidays(2026);
+        await writeJson(holidaysFile, holidays);
+      }
+      
       res.json({ ok: true, holidays });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/kristine/api/holidays/reload-austrian", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const holidaysFile = path.join(dataDir, "_kristine", "holidays.json");
+      const existing = await readJson(holidaysFile, []);
+      const year = req.body?.year || 2026;
+      const austrian = getAustrianHolidays(year);
+      
+      // Merge: Behalte nicht-österreichische Feiertage
+      const manual = existing.filter(h => !austrian.some(a => a.date === h.date));
+      const merged = [...austrian, ...manual].sort((a, b) => a.date.localeCompare(b.date));
+      
+      await writeJson(holidaysFile, merged);
+      res.json({ ok: true, holidays: merged });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -1478,7 +1605,15 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   app.get("/kristine/api/schedule-models", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const models = await readJson(path.join(dataDir, "_kristine", "schedule-models.json"), []);
+      const modelsFile = path.join(dataDir, "_kristine", "schedule-models.json");
+      let models = await readJson(modelsFile, []);
+      
+      // Auto-Load: Wenn leer, lade Standard-Modelle (Sommer/Winter)
+      if (models.length === 0) {
+        models = getDefaultScheduleModels();
+        await writeJson(modelsFile, models);
+      }
+      
       res.json({ ok: true, models });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -1492,9 +1627,15 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       const clean = models.map(m => ({
         id: String(m.id || Math.random().toString(36).slice(2)),
         name: String(m.name || "").trim().slice(0, 140),
-        hours: Number(m.hours) || 7.8,
-        description: String(m.description || "").trim().slice(0, 500)
-      })).filter(m => m.name);
+        days: Array.isArray(m.days) ? m.days.map(d => ({
+          dayName: String(d.dayName || "").slice(0, 50),
+          isWorkDay: Boolean(d.isWorkDay),
+          from: String(d.from || "").slice(0, 5),
+          to: String(d.to || "").slice(0, 5),
+          pauseMinutes: Number(d.pauseMinutes) || 0,
+          shouldHours: Number(d.shouldHours) || 0
+        })) : []
+      })).filter(m => m.name && m.days.length > 0);
       await writeJson(path.join(dataDir, "_kristine", "schedule-models.json"), clean);
       res.json({ ok: true, models: clean });
     } catch (e) {

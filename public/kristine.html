@@ -23,6 +23,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .sendrow{display:flex;gap:8px;margin-top:10px}.sendrow input{flex:1}.statebox{background:#f7f7f7;border-radius:12px;padding:12px;margin-bottom:12px}
 .status{display:inline-block;padding:5px 9px;border-radius:999px;background:#eee;font-size:12px;font-weight:800}.working{background:#d9f1df;color:#145829}.pause{background:#fff0c7;color:#795400}.finished_day{background:#e5e5e5}
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 </style>
@@ -119,7 +120,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
         <div><label>Datum</label><input id="hDate" type="date"></div>
         <div class="full"><label>Feiertag</label><input id="hName" placeholder="z. B. Neujahrstag, Weihnachten"></div>
       </div>
-      <div class="actions"><button class="green" onclick="addHoliday()">+ Feiertag</button></div>
+      <div class="actions"><button class="green" onclick="addHoliday()">+ Feiertag</button><button class="secondary" onclick="reloadAustrianHolidays()">🇦🇹 Österreichische Feiertage neu laden</button></div>
       <div id="holidayList" style="margin-top:12px"></div>
     </div>
     <div class="card">
@@ -134,13 +135,8 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     </div>
     <div class="card">
       <h3>⏰ Zeitmodelle</h3>
-      <div class="formgrid">
-        <div class="full"><label>Modellname</label><input id="smName" placeholder="z. B. Vollzeit Sommer, Teilzeit"></div>
-        <div><label>Sollstunden</label><input id="smHours" type="number" step="0.1" value="7.8" placeholder="7.8"></div>
-        <div class="full"><label>Beschreibung</label><input id="smDesc" placeholder="z. B. Montag-Freitag 07:00-17:00, Pause 12:00-13:00"></div>
-      </div>
-      <div class="actions"><button class="green" onclick="addScheduleModel()">+ Modell</button></div>
       <div id="scheduleModelList" style="margin-top:12px"></div>
+      <div class="actions"><button class="green" onclick="addScheduleModel()">+ Neues Zeitmodell</button></div>
     </div>
   </div>
 </section>
@@ -321,9 +317,12 @@ function addCompanyVacation(){if(!cvFrom.value||!cvTo.value){alert('Von und Bis 
 function renderCompanyVacations(){const el=document.getElementById('companyVacationList');el.innerHTML=data.companyVacations?.length?(data.companyVacations||[]).map(cv=>`<div class="assignment"><strong>${esc(cv.from)} bis ${esc(cv.to)}</strong><span>${esc(cv.reason)}</span><div class="actions"><button class="green" onclick="saveCompanyVacationsData()">💾 Speichern</button><button class="danger" onclick="removeCompanyVacation('${cv.from}')">×</button></div></div>`).join(''):'<span class="small">Kein Betriebsurlaub.</span>'}
 function removeCompanyVacation(f){data.companyVacations=data.companyVacations.filter(cv=>cv.from!==f);renderCompanyVacations()}
 async function saveCompanyVacationsData(){const r=await api('/kristine/api/company-vacations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vacations:data.companyVacations||[]})});data.companyVacations=r.vacations||[];renderCompanyVacations();alert('Betriebsurlaub gespeichert.')}
-// ===== SCHEDULE MODELS =====
-function addScheduleModel(){if(!smName.value.trim()){alert('Modellname erforderlich.');return}if(!smHours.value){alert('Sollstunden erforderlich.');return}data.scheduleModels=data.scheduleModels||[];data.scheduleModels.push({id:id(),name:smName.value.trim(),hours:parseFloat(smHours.value),description:smDesc.value.trim()});smName.value='';smHours.value='7.8';smDesc.value='';renderScheduleModels()}
-function renderScheduleModels(){const el=document.getElementById('scheduleModelList');el.innerHTML=data.scheduleModels?.length?(data.scheduleModels||[]).map(sm=>`<div class="assignment"><strong>${esc(sm.name)}</strong><span>${sm.hours}h</span><br><span class="small">${esc(sm.description)}</span><div class="actions"><button class="green" onclick="saveScheduleModelsData()">💾 Speichern</button><button class="danger" onclick="removeScheduleModel('${sm.id}')">×</button></div></div>`).join(''):'<span class="small">Keine Zeitmodelle.</span>'}
+async function reloadAustrianHolidays(){if(!confirm('Österreichische Feiertage neu laden? Manuell angelegte Feiertage bleiben erhalten.')){return}try{const r=await api('/kristine/api/holidays/reload-austrian',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({year:2026})});data.holidays=r.holidays||[];renderHolidays();alert('Österreichische Feiertage neu geladen!')}catch(e){alert('Fehler: '+e.message)}}
+// ===== SCHEDULE MODELS - Neue Struktur mit Days-Editor =====
+function addScheduleModel(){const modelId=id();const newModel={id:modelId,name:'Neues Modell',days:[{dayName:'Montag',isWorkDay:true,from:'07:00',to:'17:00',pauseMinutes:45,shouldHours:7.8},{dayName:'Dienstag',isWorkDay:true,from:'07:00',to:'17:00',pauseMinutes:45,shouldHours:7.8},{dayName:'Mittwoch',isWorkDay:true,from:'07:00',to:'17:00',pauseMinutes:45,shouldHours:7.8},{dayName:'Donnerstag',isWorkDay:true,from:'07:00',to:'17:00',pauseMinutes:45,shouldHours:7.8},{dayName:'Freitag',isWorkDay:true,from:'07:00',to:'14:15',pauseMinutes:15,shouldHours:7.8},{dayName:'Samstag',isWorkDay:false,from:'',to:'',pauseMinutes:0,shouldHours:0},{dayName:'Sonntag',isWorkDay:false,from:'',to:'',pauseMinutes:0,shouldHours:0}]};data.scheduleModels=data.scheduleModels||[];data.scheduleModels.push(newModel);renderScheduleModels()}
+function renderScheduleModels(){const el=document.getElementById('scheduleModelList');el.innerHTML=(data.scheduleModels||[]).map(sm=>{const tableRows=sm.days.map((d,idx)=>`<tr><td><strong>${esc(d.dayName)}</strong></td><td>${d.isWorkDay?'✓':'-'}</td><td><input type="time" value="${d.from}" onchange="updateScheduleDay('${sm.id}',${idx},'from',this.value)"></td><td><input type="time" value="${d.to}" onchange="updateScheduleDay('${sm.id}',${idx},'to',this.value)"></td><td><input type="number" style="width:60px" value="${d.pauseMinutes}" onchange="updateScheduleDay('${sm.id}',${idx},'pauseMinutes',parseInt(this.value))"></td><td><input type="number" step="0.1" style="width:60px" value="${d.shouldHours}" onchange="updateScheduleDay('${sm.id}',${idx},'shouldHours',parseFloat(this.value))"></td><td><input type="checkbox" ${d.isWorkDay?'checked':''} onchange="updateScheduleDay('${sm.id}',${idx},'isWorkDay',this.checked)"></td></tr>`).join('');return `<div class="card" style="margin-bottom:16px;border-left:4px solid #27713d"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>${esc(sm.name)}</strong><button class="secondary" style="width:auto;padding:5px 10px;font-size:12px" onclick="editScheduleModelName('${sm.id}')">Umbenennen</button></div><table class="table" style="font-size:12px"><thead><tr><th>Tag</th><th>Arbeit</th><th>Von</th><th>Bis</th><th>Pause (min)</th><th>Soll (h)</th><th>Tag?</th></tr></thead><tbody>${tableRows}</tbody></table><div class="actions"><button class="green" onclick="saveScheduleModelsData()">💾 Speichern</button><button class="danger" onclick="removeScheduleModel('${sm.id}')">× Löschen</button></div></div>`}).join('')||'<span class="small">Keine Zeitmodelle.</span>'}
+function editScheduleModelName(smId){const sm=data.scheduleModels.find(m=>m.id===smId);if(!sm)return;const newName=prompt('Modellname:',sm.name);if(newName && newName.trim()){sm.name=newName.trim();renderScheduleModels()}}
+function updateScheduleDay(smId,dayIdx,field,value){const sm=data.scheduleModels.find(m=>m.id===smId);if(!sm||!sm.days[dayIdx])return;sm.days[dayIdx][field]=value;renderScheduleModels()}
 function removeScheduleModel(id){data.scheduleModels=data.scheduleModels.filter(sm=>sm.id!==id);renderScheduleModels()}
 async function saveScheduleModelsData(){const r=await api('/kristine/api/schedule-models',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:data.scheduleModels||[]})});data.scheduleModels=r.models||[];renderScheduleModels();alert('Zeitmodelle gespeichert.')}
 document.getElementById('adminLink').href=url('/admin/ui');
