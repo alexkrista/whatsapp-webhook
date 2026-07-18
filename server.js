@@ -47,15 +47,16 @@ const nodemailer = require("nodemailer");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
+const { registerMorningStatus, clampStartTime } = require("./morning-status");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.4.5";
-const APP_BUILD = "0013-whatsapp-live";
+const APP_BUILD = "0014-protokoll-morgenstatus";
 const APP_STATUS = "WhatsApp Live Alpha";
-const APP_BUILD_DATE = "2026-07-15";
+const APP_BUILD_DATE = "2026-07-17";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -88,18 +89,42 @@ const LOGO_PATH = process.env.LOGO_PATH || "assets/krista-logo.png";
 const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
-// ===================== Baustellen-Merker =====================
-const LAST_SITE_BY_SENDER = {}; // { wa_id: { siteCode, tsMs } }
-const SITE_TTL_MS = 4 * 60 * 60 * 1000;
+// ===================== Baustellenprotokoll-Sitzungen =====================
+// Ein Protokoll beginnt ausschließlich mit @baustellenname am Nachrichtenanfang
+// und bleibt bis zum Befehl "pdf" aktiv. Die Sitzung wird zusätzlich auf Disk
+// gespeichert, damit ein Render-Neustart sie nicht verliert.
+const PROTOCOL_BY_SENDER = {}; // { wa_id: { siteCode, startedAt } }
+const LATE_TIME_PENDING = {};  // Mitarbeiter wartet auf ungefähre Ankunftszeit
 
-function rememberSite(sender, siteCode) {
-  LAST_SITE_BY_SENDER[sender] = { siteCode, tsMs: Date.now() };
+function protocolSessionsPath() {
+  return path.join(DATA_DIR, "_kristine", "protocol-sessions.json");
 }
-function recallSite(sender) {
-  const rec = LAST_SITE_BY_SENDER[sender];
-  if (!rec) return null;
-  if (Date.now() - rec.tsMs > SITE_TTL_MS) return null;
-  return rec.siteCode;
+async function loadProtocolSessions() {
+  try {
+    const rows = JSON.parse(await fsp.readFile(protocolSessionsPath(), "utf8"));
+    if (rows && typeof rows === "object") Object.assign(PROTOCOL_BY_SENDER, rows);
+  } catch {}
+}
+async function saveProtocolSessions() {
+  await ensureDir(path.dirname(protocolSessionsPath()));
+  await fsp.writeFile(protocolSessionsPath(), JSON.stringify(PROTOCOL_BY_SENDER, null, 2), "utf8");
+}
+async function startProtocol(sender, siteCode) {
+  PROTOCOL_BY_SENDER[sender] = { siteCode, startedAt: new Date().toISOString() };
+  await saveProtocolSessions();
+}
+async function stopProtocol(sender) {
+  delete PROTOCOL_BY_SENDER[sender];
+  await saveProtocolSessions();
+}
+function activeProtocol(sender) {
+  return PROTOCOL_BY_SENDER[sender]?.siteCode || null;
+}
+function parseProtocolStart(text) {
+  // Nur @ als erstes Zeichen. Erstes Token bis zum Leerzeichen ist der Name.
+  // Unterstrich und Bindestrich verbinden Bestandteile des Baustellennamens.
+  const match = String(text || "").trim().match(/^@([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?:\s|$)/u);
+  return match ? normalizeSiteCode(match[1]) : null;
 }
 
 // ===================== Helpers =====================
@@ -1259,16 +1284,87 @@ app.post("/webhook", async (req, res) => {
       const tsSec = msg.timestamp || null;
       const date = isoDateFromWhatsAppTs(tsSec);
 
-      // Bekannte Mitarbeiter sprechen im Einzelchat direkt mit Kristine.
-      // Text und WhatsApp-Buttons verwenden exakt denselben Dialogkern wie der Simulator.
+      const textOrCaption = parseCaptionTextFromMessage(msg);
+      const protocolStart = parseProtocolStart(textOrCaption);
+      let protocolSite = activeProtocol(sender);
+
+      // 1) @baustelle hat IMMER Vorrang vor dem normalen Mitarbeitermodus.
+      if (protocolStart) {
+        protocolSite = protocolStart;
+        await startProtocol(sender, protocolSite);
+        const jobRoot = path.join(DATA_DIR, protocolSite);
+        await ensureDir(jobRoot);
+        if (!fs.existsSync(metaPathForJob(protocolSite))) {
+          await writeJobMeta(protocolSite, { name: protocolSite.replace(/_/g, " "), status: "Laufend" });
+        }
+        try {
+          await sendWhatsAppKristineReply({
+            phoneNumberId,
+            to: sender,
+            reply: `📍 Baustellenprotokoll ${protocolSite} gestartet.\nAlle folgenden Texte, Fotos, Audios und Dokumente werden zugeordnet.\nMit pdf abschließen.`
+          });
+        } catch {}
+        // Eine reine Startzeile wird nicht als Protokolltext gespeichert.
+        if (msg.type === "text" && String(textOrCaption).trim() === `@${protocolStart}`) continue;
+      }
+
+      // 2) Im aktiven Protokollmodus wird "pdf" erzeugt und danach zurückgeschaltet.
+      if (protocolSite && msg.type === "text" && String(textOrCaption).trim().toLowerCase() === "pdf") {
+        if (!isAllowedPdfSender(sender)) continue;
+        try {
+          const result = await triggerPdfForJobDay({ jobId: protocolSite, date, to: MAIL_TO_DEFAULT });
+          await stopProtocol(sender);
+          await sendWhatsAppKristineReply({
+            phoneNumberId,
+            to: sender,
+            reply: `✅ PDF für ${protocolSite} erstellt.\nDer Protokollmodus ist beendet. Kristine ist wieder im Mitarbeitermodus.\n${result.downloadUrl || ""}`.trim()
+          });
+        } catch (e) {
+          console.error("❌ pdf command failed:", e?.message || e);
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `PDF konnte nicht erstellt werden: ${String(e?.message || e)}` }); } catch {}
+        }
+        continue;
+      }
+
+      // 3) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
       const kristineText = whatsappTextFromMessage(msg);
-      if (kristineText) {
+      if (!protocolSite && kristineText) {
         const employee = await employeeFromWhatsAppSender(sender);
         if (employee) {
           try {
             let normalizedInput = kristineText;
-            // Button-IDs/Titel in natürliche Kurzbefehle übersetzen.
             const lower = normalizedInput.toLowerCase();
+
+            // Dialog der 07:00-Erinnerung
+            if (lower === "komme später" || lower === "komme spaeter") {
+              LATE_TIME_PENDING[String(employee.id)] = date;
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Alles klar. Ab wann ungefähr? Bitte z. B. 07:30 oder 08:00 schreiben." });
+              continue;
+            }
+            if (LATE_TIME_PENDING[String(employee.id)] === date && /^([01]?\d|2[0-3]):[0-5]\d$/.test(normalizedInput)) {
+              const p = path.join(DATA_DIR, "_kristine", "late-notices.json");
+              const rows = await fsp.readFile(p, "utf8").then(JSON.parse).catch(() => []);
+              rows.push({ employeeId: employee.id, date, expectedTime: normalizedInput, updatedAt: new Date().toISOString() });
+              await ensureDir(path.dirname(p));
+              await fsp.writeFile(p, JSON.stringify(rows, null, 2), "utf8");
+              delete LATE_TIME_PENDING[String(employee.id)];
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `Danke. Späterer Arbeitsbeginn ca. ${normalizedInput} ist eingetragen.` });
+              continue;
+            }
+            if (lower === "heute nicht") {
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Was ist der Grund?", buttons: ["Krank", "Urlaub", "Zeitausgleich"] });
+              continue;
+            }
+            if (["krank", "urlaub", "zeitausgleich"].includes(lower)) {
+              const p = path.join(DATA_DIR, "_kristine", "absences.json");
+              const rows = await fsp.readFile(p, "utf8").then(JSON.parse).catch(() => []);
+              rows.push({ employeeId: employee.id, date, type: lower, hours: 7.8, updatedAt: new Date().toISOString() });
+              await ensureDir(path.dirname(p));
+              await fsp.writeFile(p, JSON.stringify(rows, null, 2), "utf8");
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `${normalizedInput} ist für heute mit 7,8 Sollstunden vorgemerkt. Das Büro kann den Eintrag kontrollieren.` });
+              continue;
+            }
+
             if (lower.startsWith("weiter zu ")) normalizedInput = "ja";
             if (lower === "navigation") {
               const assignments = await fsp.readFile(path.join(DATA_DIR, "_kristine", "assignments.json"), "utf8").then(JSON.parse).catch(() => []);
@@ -1276,44 +1372,25 @@ app.post("/webhook", async (req, res) => {
               const active = todayRows.sort((a,b) => String(a.from||"").localeCompare(String(b.from||"")))[0];
               const address = String(active?.address || "").trim();
               const navigationReply = address
-                ? `Navigation zu ${active.jobName || "deiner Baustelle"}:
-https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+                ? `Navigation zu ${active.jobName || "deiner Baustelle"}:\nhttps://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
                 : "Bei deiner aktuellen Baustelle ist noch keine Adresse hinterlegt.";
               await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: navigationReply });
               continue;
             }
 
-            const result = await kristine.handleMessage({
-              employeeId: employee.id,
-              employeeName: employee.name,
-              text: normalizedInput,
-              date,
-            });
-            await sendWhatsAppKristineReply({
-              phoneNumberId,
-              to: sender,
-              reply: result.reply,
-              buttons: result.buttons,
-            });
+            const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employee.name, text: normalizedInput, date });
+            await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: result.reply, buttons: result.buttons });
           } catch (e) {
             console.error("❌ Kristine WhatsApp failed:", e?.message || e);
-            try {
-              await sendWhatsAppKristineReply({
-                phoneNumberId,
-                to: sender,
-                reply: "Entschuldige, da hat bei mir gerade etwas nicht geklappt. Deine Nachricht ist angekommen – bitte versuche es gleich noch einmal.",
-              });
-            } catch {}
+            try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Entschuldige, da hat bei mir gerade etwas nicht geklappt. Bitte versuche es gleich noch einmal." }); } catch {}
           }
           continue;
         }
       }
 
-      const textOrCaption = parseCaptionTextFromMessage(msg);
-      let siteCode = parseSiteCodeFromText(textOrCaption);
-
-      if (siteCode) rememberSite(sender, siteCode);
-      else siteCode = recallSite(sender) || "unknown";
+      // Im Protokollmodus gilt ausschließlich die aktive @Baustelle.
+      // Außerhalb bleibt die alte #/@-Kompatibilität für unbekannte Absender erhalten.
+      let siteCode = protocolSite || parseSiteCodeFromText(textOrCaption) || "unknown";
 
       const dayDir = resolveDayDirForWrite(siteCode, date);
       ensureDirSync(dayDir);
@@ -1435,8 +1512,8 @@ https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
         }
       }
 
-      // TRIGGER PDF via WhatsApp "pdf"
-      if (msg.type === "text" && isPdfCommand(textOrCaption)) {
+      // Legacy-PDF-Trigger nur außerhalb einer aktiven Protokollsitzung.
+      if (!protocolSite && msg.type === "text" && isPdfCommand(textOrCaption)) {
         if (!isAllowedPdfSender(sender)) continue;
 
         let jobId = parseSiteCodeFromText(textOrCaption) || siteCode;
@@ -2736,6 +2813,34 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
       data: { day, employeeCount: regie.employees.length, totalHours }
     });
     res.json({ ok: true, regie });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// ===================== Morgenstatus 07:00 / 08:00 =====================
+let morningStatus = null;
+loadProtocolSessions().catch(console.error);
+registerMorningStatus({
+  dataDir: DATA_DIR,
+  readEmployees,
+  sendWhatsApp: sendWhatsAppKristineReply,
+  chefPhone: process.env.CHEF_PHONE || "",
+  phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+}).then((service) => {
+  morningStatus = service;
+  console.log("✅ KRISTA Morgenstatus aktiv");
+}).catch((error) => console.error("❌ Morgenstatus konnte nicht gestartet werden:", error));
+
+// Manueller Test für Admin, ohne auf 07:00/08:00 warten zu müssen.
+app.post("/admin/api/morning-status/test", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  if (!morningStatus) return res.status(503).json({ ok: false, error: "Morgenstatus noch nicht bereit" });
+  try {
+    const date = String(req.body?.date || req.query.date || todayISO());
+    const type = String(req.body?.type || req.query.type || "8");
+    const result = type === "7" ? await morningStatus.runSevenOClock(date, true) : await morningStatus.runEightOClock(date, true);
+    res.json({ ok: true, type, date, result });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
