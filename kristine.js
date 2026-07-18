@@ -672,12 +672,15 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
-    const today = date || localDateISO();
-    const [assignments, states, tasks] = await Promise.all([
-      readJson(ASSIGNMENTS, []),
-      readJson(STATES, {}),
-      readJson(TASKS, []),
-    ]);
+    try {
+      const today = date || localDateISO();
+      console.log(`[Kristine] handleMessage called: emp=${employeeId}, text="${text}"`);
+      const [assignments, states, tasks] = await Promise.all([
+        readJson(ASSIGNMENTS, []),
+        readJson(STATES, {}),
+        readJson(TASKS, []),
+      ]);
+      console.log(`[Kristine] Loaded data: ${assignments.length} assignments, ${Object.keys(states).length} states`);
 
     const dayAssignments = assignmentsFor(assignments, employeeId, today);
     const previous = states[employeeId] || {
@@ -1271,6 +1274,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Status", "Start"],
       state,
     };
+    } catch (e) {
+      console.error(`[Kristine] handleMessage Error for emp=${employeeId}:`, e?.message || e, e?.stack);
+      throw e;
+    }
   }
 
   // ===== MORNING REMINDERS ===== 
