@@ -77,3 +77,6 @@ Wenn er darüber nachdenken muss, wie KRISTA funktioniert, haben wir etwas falsc
 Software soll sich dem Betrieb anpassen.
 
 Nicht der Betrieb der Software.
+Kristine ist kein Chatbot.
+
+Kristine ist eine digitale Mitarbeiterin, die jederzeit weiß, was der Mitarbeiter gerade macht.

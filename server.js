@@ -89,6 +89,9 @@ const LOGO_PATH = process.env.LOGO_PATH || "assets/krista-logo.png";
 const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
+const CHEF_PHONE = process.env.CHEF_PHONE || "";
+const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || "";
+
 // ===================== Baustellenprotokoll-Sitzungen =====================
 // Ein Protokoll beginnt ausschließlich mit @baustellenname am Nachrichtenanfang
 // und bleibt bis zum Befehl "pdf" aktiv. Die Sitzung wird zusätzlich auf Disk
@@ -1141,11 +1144,7 @@ ${downloadUrl}
 
 
 // ===================== KRISTINE =====================
-const kristine = registerKristine(app, {
-  dataDir: DATA_DIR,
-  requireAdmin,
-  publicDir: path.join(process.cwd(), "public"),
-});
+let kristine = null;  // Wird später nach sendWhatsAppKristineReply initialisiert
 
 // ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
@@ -1265,6 +1264,16 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
     body: JSON.stringify(payload),
   });
 }
+
+// ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
+kristine = registerKristine(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  publicDir: path.join(process.cwd(), "public"),
+  sendWhatsApp: sendWhatsAppKristineReply,
+  chefPhoneNumber: CHEF_PHONE,
+  phoneNumberId: KRISTINE_PHONE_NUMBER_ID
+});
 
 // ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {

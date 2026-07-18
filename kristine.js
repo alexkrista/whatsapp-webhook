@@ -4,8 +4,9 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const cron = require("node-cron");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp, chefPhoneNumber, phoneNumberId }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -67,8 +68,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
 
   function clampOfficialStart(actualTime) {
     const actual = minutesFromHM(actualTime);
-    const official = minutesFromHM("07:00");
-    return actual !== null && actual < official ? "07:00" : actualTime;
+    const tolerance = minutesFromHM("07:05");  // Toleranzfenster bis 7:05 Uhr
+    return actual !== null && actual < tolerance ? "07:00" : actualTime;
   }
 
   async function appendTimeEvent(event) {
@@ -98,6 +99,111 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
     if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
     return "message";
+  }
+
+  // ===== STATE MACHINE KONSTANTEN =====
+  
+  const STATE_MODES = {
+    UNANMELDBAR: "unanmeldbar",     // Nicht angemeldet
+    ARBEITET: "arbeitet",           // Arbeitet
+    PAUSE: "pause",                 // In Pause
+    MITTAG: "mittag",               // In Mittagspause
+    WECHSEL: "wechsel",             // Baustellenwechsel
+    FEIERABEND: "feierabend"        // Feierabend
+  };
+
+  // Erlaubte Übergänge: welche Intents von welchem State aus möglich sind
+  const TRANSITIONS = {
+    [STATE_MODES.UNANMELDBAR]: ["start", "status", "message"],
+    [STATE_MODES.ARBEITET]: ["pause", "lunch", "finish", "status", "message", "task_done"],
+    [STATE_MODES.PAUSE]: ["resume", "lunch", "status", "message"],
+    [STATE_MODES.MITTAG]: ["resume", "status", "message"],
+    [STATE_MODES.WECHSEL]: ["finish", "status", "message"],
+    [STATE_MODES.FEIERABEND]: ["start", "status", "message"]
+  };
+
+  // Validierung: Ist ein Intent im aktuellen Zustand erlaubt?
+  function isValidTransition(mode, intent) {
+    const allowedIntents = TRANSITIONS[mode] || [];
+    return allowedIntents.includes(intent);
+  }
+
+  // Hinweismeldung für ungültige Transitionen
+  function rejectInvalidIntent(mode, intent, state, current) {
+    // "start" wenn bereits arbeitet
+    if (mode === STATE_MODES.ARBEITET && intent === "start") {
+      return {
+        reply: `Du arbeitest bereits seit ${state.lastStartActual || "heute"} auf ${current?.jobName || "einer Baustelle"}.`,
+        buttons: ["Pause", "Mittag", "Fertig"],
+        state
+      };
+    }
+
+    if (mode === STATE_MODES.UNANMELDBAR) {
+      if (intent === "pause") {
+        return {
+          reply: "Du hast noch nicht begonnen. Sag „Start", um anzufangen.",
+          buttons: ["Start"],
+          state
+        };
+      }
+      if (intent === "lunch") {
+        return {
+          reply: "Du hast noch nicht begonnen. Sag „Start", um anzufangen.",
+          buttons: ["Start"],
+          state
+        };
+      }
+      if (intent === "finish") {
+        return {
+          reply: "Du hast heute noch nicht gearbeitet. Schönen Feierabend! 👋",
+          buttons: [],
+          state
+        };
+      }
+      if (intent === "resume") {
+        return {
+          reply: "Du bist nicht in Pause. Sag „Start", um anzufangen.",
+          buttons: ["Start"],
+          state
+        };
+      }
+    }
+
+    if (mode === STATE_MODES.PAUSE && intent === "pause") {
+      return {
+        reply: "Du bist bereits in Pause. Sag „Weiter", wenn es weitergeht.",
+        buttons: ["Weiter", "Mittag"],
+        state
+      };
+    }
+
+    if (mode === STATE_MODES.MITTAG && intent === "lunch") {
+      return {
+        reply: "Du bist bereits in der Mittagspause. Sag „Weiter", wenn es weitergeht.",
+        buttons: ["Weiter"],
+        state
+      };
+    }
+
+    if (mode === STATE_MODES.FEIERABEND) {
+      if (["pause", "lunch", "finish"].includes(intent)) {
+        return {
+          reply: "Der Tag ist bereits beendet. Morgen geht's weiter!",
+          buttons: ["Start"],
+          state
+        };
+      }
+      if (intent === "resume") {
+        return {
+          reply: "Der Tag ist bereits beendet. Morgen geht's weiter!",
+          buttons: ["Start"],
+          state
+        };
+      }
+    }
+
+    return null; // Transition ist erlaubt
   }
 
   function assignmentKey(a) {
@@ -217,6 +323,19 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       finished_day: "Feierabend",
     };
     return map[state?.mode] || map.idle;
+  }
+
+  function getCurrentMode(legacyMode) {
+    // Mapping für alte Mode-Werte zu neuen STATE_MODES
+    const modeMap = {
+      "idle": STATE_MODES.UNANMELDBAR,
+      "working": STATE_MODES.ARBEITET,
+      "pause": STATE_MODES.PAUSE,
+      "lunch": STATE_MODES.MITTAG,
+      "finished_site": STATE_MODES.WECHSEL,
+      "finished_day": STATE_MODES.FEIERABEND
+    };
+    return modeMap[legacyMode] || STATE_MODES.UNANMELDBAR;
   }
 
   async function findBuildingSites() {
@@ -523,6 +642,17 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       };
     }
 
+    // ===== STATE MACHINE VALIDATION =====
+    // Prüfe ob der Intent im aktuellen Zustand erlaubt ist
+    const currentMode = getCurrentMode(state.mode);
+    const validTransition = isValidTransition(currentMode, intent);
+    if (!validTransition && !["message", "task_done"].includes(intent)) {
+      const rejection = rejectInvalidIntent(currentMode, intent, state, current);
+      if (rejection) {
+        return rejection;
+      }
+    }
+
     if (intent === "start") {
       if (!current) {
         state.pending = { type: "ask_actual_assignment", createdAt: now };
@@ -808,6 +938,281 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     };
   }
 
+  // ===== MORNING REMINDERS ===== 
+  // Automatische Erinnerung um 7:00 Uhr für nicht angemeldete Mitarbeiter
+  async function checkAndSendMorningReminders() {
+    const today = localDateISO();
+    const [assignments, states] = await Promise.all([
+      readJson(ASSIGNMENTS, []),
+      readJson(STATES, {}),
+    ]);
+
+    const reminders = [];
+
+    // Gruppen Assignments nach Mitarbeiter
+    const employeesWithAssignments = {};
+    for (const a of assignments) {
+      if (String(a.date) === String(today)) {
+        if (!employeesWithAssignments[a.employeeId]) {
+          employeesWithAssignments[a.employeeId] = {
+            employeeId: a.employeeId,
+            employeeName: a.employeeName || a.employeeId,
+            assignments: []
+          };
+        }
+        employeesWithAssignments[a.employeeId].assignments.push(a);
+      }
+    }
+
+    // Prüfe für jeden Mitarbeiter: Hat er gestartet?
+    for (const [employeeId, info] of Object.entries(employeesWithAssignments)) {
+      const state = states[employeeId];
+      
+      // "Gestartet" wenn state.mode === "working" ODER timeline hat "work_started"
+      const hasStarted = state?.mode === "working" || 
+        (state?.timeline && state.timeline.some(t => t.type === "work_started"));
+      
+      // Falls nicht gestartet, sende Erinnerung
+      if (!hasStarted) {
+        // Setze Pending State
+        if (!state) {
+          states[employeeId] = {
+            employeeId,
+            employeeName: info.employeeName,
+            mode: "idle",
+            pending: { type: "morning_reminder", createdAt: new Date().toISOString() },
+            timeline: [],
+          };
+        } else {
+          state.pending = { type: "morning_reminder", createdAt: new Date().toISOString() };
+        }
+
+        // Sammle Erinnerung mit Buttons
+        reminders.push({
+          employeeId,
+          employeeName: info.employeeName,
+          reply: `Guten Morgen ${info.employeeName}! 🌅\n\nStatus für heute:\n${info.assignments.map(a => `• ${a.jobName || ("#" + a.jobId)} ${a.from || "ganztägig"}`).join("\n")}\n\nBist du bereit? Oder gibt es ein Problem?`,
+          buttons: ["Vergessen", "Krank", "Urlaub", "Arzt", "komme später"]
+        });
+      }
+    }
+
+    // Speichere aktualisierte States
+    if (reminders.length > 0) {
+      await writeJson(STATES, states);
+    }
+
+    return reminders;
+  }
+
+  // Handler für die Reminder-Antworten
+  async function handleMorningReminderResponse(employeeId, intent) {
+    const [states] = await Promise.all([
+      readJson(STATES, {}),
+    ]);
+    
+    const state = states[employeeId];
+    if (!state || state.pending?.type !== "morning_reminder") {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const today = localDateISO();
+
+    // Map Intents zu Events
+    const responseMap = {
+      "vergessen": { type: "reminder_response", detail: "Vergessen", icon: "😬" },
+      "krank": { type: "absence", reason: "Krank", icon: "🤒" },
+      "urlaub": { type: "absence", reason: "Urlaub", icon: "🏖️" },
+      "arzt": { type: "absence", reason: "Arzt", icon: "🏥" },
+      "komme später": { type: "late_arrival", detail: "komme später", icon: "⏰" }
+    };
+
+    const response = responseMap[intent];
+    if (!response) return null;
+
+    state.pending = null;
+    await writeJson(STATES, states);
+
+    // Speichere als Event
+    await appendEvent({
+      type: response.type,
+      employeeId,
+      employeeName: state.employeeName,
+      date: today,
+      detail: response.detail || response.reason,
+      createdAt: now
+    });
+
+    // Rückgabe-Nachricht basierend auf Response
+    const replies = {
+      vergessen: "Kein Problem! Jederzeit bereit? Start!",
+      krank: "Gute Besserung! Melde dich morgen oder sobald du wieder fit bist.",
+      urlaub: "Viel Spaß! Bis bald.",
+      arzt: "Bis bald! Pass auf dich auf.",
+      komme später: "Verstanden. Gib Bescheid, wenn du unterwegs bist!"
+    };
+
+    return {
+      reply: `${response.icon} ${replies[intent]}`,
+      buttons: intent === "vergessen" ? ["Start"] : []
+    };
+  }
+
+  // ===== STATUS REPORT ===== 
+  // Statusbericht um 8 Uhr für den Chef
+  async function generateStatusReport() {
+    const today = localDateISO();
+    const [assignments, states, tasks] = await Promise.all([
+      readJson(ASSIGNMENTS, []),
+      readJson(STATES, {}),
+      readJson(TASKS, [])
+    ]);
+
+    const todayAssignments = assignments.filter(a => String(a.date) === String(today));
+    const reportLines = [];
+
+    reportLines.push(`📊 STATUSBERICHT ${today}`);
+    reportLines.push(`Erstellt: ${new Date().toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit', hour12: false })}`);
+    reportLines.push("");
+
+    // Gruppiere Mitarbeiter mit Aufgaben
+    const employeeMap = {};
+    for (const a of todayAssignments) {
+      if (!employeeMap[a.employeeId]) {
+        employeeMap[a.employeeId] = {
+          employeeId: a.employeeId,
+          employeeName: a.employeeName || a.employeeId,
+          assignments: [],
+          state: states[a.employeeId],
+          openTasks: []
+        };
+      }
+      employeeMap[a.employeeId].assignments.push(a);
+    }
+
+    // Offene Aufgaben pro Mitarbeiter
+    for (const t of tasks) {
+      if (t.status !== "done" && employeeMap[t.assigneeId]) {
+        employeeMap[t.assigneeId].openTasks.push(t);
+      }
+    }
+
+    // Lese TimeEvents für Regiearbeiten und Material
+    const timeEvents = await readJson(TIME_EVENTS, []);
+    const endDayEvents = timeEvents.filter(e => 
+      e.type === "ende" && 
+      String(e.date) === String(today)
+    );
+
+    // Regiearbeiten und Material Infos
+    const regieMap = {};
+    const materialMap = {};
+    for (const evt of endDayEvents) {
+      if (evt.employeeId) {
+        if (evt.hasRegie) regieMap[evt.employeeId] = true;
+        if (evt.hasMaterials) materialMap[evt.employeeId] = true;
+      }
+    }
+
+    // Events Datei lesen für Morning Reminder Responses
+    const absenceMap = {};
+    try {
+      const eventsContent = await fsp.readFile(EVENTS, 'utf8');
+      const eventLines = eventsContent.trim().split('\n').filter(l => l);
+      for (const line of eventLines) {
+        const evt = JSON.parse(line);
+        if (String(evt.date) === String(today)) {
+          if (evt.type === "absence" && evt.employeeId) {
+            absenceMap[evt.employeeId] = evt.reason || evt.detail;
+          } else if (evt.type === "late_arrival" && evt.employeeId) {
+            absenceMap[evt.employeeId] = "komme später";
+          }
+        }
+      }
+    } catch {
+      // Events Datei existiert noch nicht
+    }
+
+    // Status pro Mitarbeiter
+    let startedCount = 0;
+    let notStartedCount = 0;
+    let absentCount = 0;
+    let lateCount = 0;
+
+    reportLines.push("═══ MITARBEITER-STATUS ═══");
+    reportLines.push("");
+
+    for (const [, emp] of Object.entries(employeeMap)) {
+      const absence = absenceMap[emp.employeeId];
+      const state = emp.state;
+      const hasStarted = state?.mode === "working" || 
+        (state?.timeline && state.timeline.some(t => t.type === "work_started"));
+
+      let statusIcon = "⏳";
+      let statusText = "Nicht gestartet";
+
+      if (absence === "Krank" || absence === "Urlaub" || absence === "Arzt") {
+        statusIcon = absence === "Krank" ? "🤒" : (absence === "Urlaub" ? "🏖️" : "🏥");
+        statusText = absence;
+        absentCount++;
+      } else if (absence === "komme später") {
+        statusIcon = "⏰";
+        statusText = "komme später";
+        lateCount++;
+      } else if (hasStarted) {
+        statusIcon = "✅";
+        statusText = "Gestartet";
+        startedCount++;
+      } else {
+        notStartedCount++;
+      }
+
+      let empLine = `${statusIcon} ${emp.employeeName}`;
+
+      // Einteilung hinzufügen
+      if (emp.assignments.length > 0) {
+        const sites = emp.assignments.map(a => a.jobName || ("#" + a.jobId)).join(" / ");
+        empLine += ` → ${sites}`;
+      }
+
+      // Regie oder Material?
+      const extras = [];
+      if (regieMap[emp.employeeId]) extras.push("Regie");
+      if (materialMap[emp.employeeId]) extras.push("Material");
+      if (extras.length > 0) {
+        empLine += ` [${extras.join(", ")}]`;
+      }
+
+      reportLines.push(empLine);
+
+      // Offene Aufgaben
+      if (emp.openTasks.length > 0) {
+        for (const task of emp.openTasks) {
+          reportLines.push(`  ⊙ ${task.title}`);
+        }
+      }
+
+      reportLines.push("");
+    }
+
+    // Summary
+    reportLines.push("═══ ZUSAMMENFASSUNG ═══");
+    reportLines.push(`✅ Gestartet: ${startedCount}`);
+    reportLines.push(`⏳ Nicht gestartet: ${notStartedCount}`);
+    reportLines.push(`🚫 Abwesend: ${absentCount}`);
+    reportLines.push(`⏰ Komme später: ${lateCount}`);
+    reportLines.push("");
+
+    // Offene Aufgaben Summary
+    const totalOpenTasks = tasks.filter(t => t.status !== "done").length;
+    if (totalOpenTasks > 0) {
+      reportLines.push(`📋 Insgesamt offene Aufgaben: ${totalOpenTasks}`);
+    }
+
+    return reportLines.join("\n");
+  }
+
   app.get("/kristine", (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kristine.html"));
@@ -817,6 +1222,37 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     if (!requireAdmin(req, res)) return;
     try {
       res.json({ ok: true, ...(await getBootstrap()), today: localDateISO() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/kristine/api/send-morning-reminders", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reminders = await checkAndSendMorningReminders();
+      res.json({ 
+        ok: true, 
+        remindersCount: reminders.length,
+        reminders: reminders.map(r => ({
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          message: r.reply
+        }))
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/kristine/api/status-report", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const report = await generateStatusReport();
+      res.json({ 
+        ok: true,
+        report
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -897,6 +1333,60 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
+
+  // ===== SCHEDULER ===== 
+  // Um 7:00 Uhr: Morning Reminders versendet
+  if (sendWhatsApp && phoneNumberId) {
+    cron.schedule("0 7 * * *", async () => {
+      try {
+        console.log("🌅 [Kristine] Starte Morning Reminders (7:00 Uhr)");
+        const reminders = await checkAndSendMorningReminders();
+        
+        // Versendet Reminders via WhatsApp
+        for (const reminder of reminders) {
+          try {
+            // Hole Mitarbeiter-Nummer aus assignments
+            const assignments = await readJson(ASSIGNMENTS, []);
+            const empAssignment = assignments.find(a => String(a.employeeId) === String(reminder.employeeId));
+            
+            if (empAssignment?.whatsappNumber) {
+              await sendWhatsApp({
+                phoneNumberId,
+                to: empAssignment.whatsappNumber,
+                reply: reminder.reply,
+                buttons: reminder.buttons
+              });
+              console.log(`✅ Morning Reminder an ${reminder.employeeName} versendet`);
+            }
+          } catch (e) {
+            console.error(`❌ Morning Reminder an ${reminder.employeeName} fehlgeschlagen:`, e?.message || e);
+          }
+        }
+      } catch (e) {
+        console.error("❌ [Kristine] Morning Reminders Fehler:", e?.message || e);
+      }
+    }, { timezone: "Europe/Vienna" });
+  }
+
+  // Um 8:00 Uhr: Statusbericht an Chef
+  if (sendWhatsApp && phoneNumberId && chefPhoneNumber) {
+    cron.schedule("0 8 * * *", async () => {
+      try {
+        console.log("📊 [Kristine] Starte Statusbericht (8:00 Uhr)");
+        const report = await generateStatusReport();
+        
+        await sendWhatsApp({
+          phoneNumberId,
+          to: chefPhoneNumber,
+          reply: report,
+          buttons: []
+        });
+        console.log(`✅ Statusbericht an Chef versendet`);
+      } catch (e) {
+        console.error("❌ [Kristine] Statusbericht Fehler:", e?.message || e);
+      }
+    }, { timezone: "Europe/Vienna" });
+  }
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
   return { handleMessage, localDateISO };
