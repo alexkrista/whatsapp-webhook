@@ -243,74 +243,174 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
   }
 
-  function formatDaySummary(timeline) {
-    if (!Array.isArray(timeline) || timeline.length === 0) {
-      return "Keine Einträge heute.";
+  // Liest time-events nur für heutiges Datum + employeeId, baut Blöcke
+  async function buildDayBlocksFromTimeEvents(empId, date, currentTime) {
+    const timeEventsPath = path.join(dataDir, "_kristine", "time-events.jsonl");
+    let events = [];
+    try {
+      const content = await fs.promises.readFile(timeEventsPath, "utf8");
+      events = content
+        .split("\n")
+        .filter(l => l.trim())
+        .map(l => {
+          try { return JSON.parse(l); } catch { return null; }
+        })
+        .filter(e => e && String(e.employeeId) === String(empId) && e.date === date)
+        .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
+    } catch {}
+
+    if (events.length === 0) {
+      return { text: "Keine Einträge heute.", workMinutes: 0 };
+    }
+
+    // Validiere und filtere Zeitstempel
+    const validEvents = events.filter(e => e.at && /^\d{2}:\d{2}$/.test(e.at));
+    if (validEvents.length === 0) {
+      return { text: "Keine gültigen Zeiteinträge heute.", workMinutes: 0 };
     }
 
     const blocks = [];
-    let currentBlock = null;
+    let i = 0;
 
-    for (const entry of timeline) {
-      const type = entry.type;
+    while (i < validEvents.length) {
+      const ev = validEvents[i];
 
-      if (type === "work_started") {
-        if (currentBlock && currentBlock.type === "work") {
-          // Neuen Block starten
-          blocks.push(currentBlock);
-          currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+      if (["start", "weiter"].includes(ev.type)) {
+        const startTime = ev.at;
+        const jobName = ev.jobName || ev.jobId || "unbekannt";
+        
+        // Suche das Ende dieses Blocks
+        let endTime = null;
+        let endIdx = i + 1;
+        while (endIdx < validEvents.length) {
+          const nextEv = validEvents[endIdx];
+          if (["pause", "mittag", "ende"].includes(nextEv.type)) {
+            endTime = nextEv.at;
+            break;
+          }
+          if (nextEv.type === "start" && (nextEv.jobId !== ev.jobId || nextEv.jobName !== ev.jobName)) {
+            endTime = nextEv.at;
+            break;
+          }
+          endIdx++;
+        }
+
+        // Falls kein Ende gefunden, verwende currentTime
+        if (!endTime) {
+          endTime = currentTime;
+        }
+
+        blocks.push({
+          type: "work",
+          start: startTime,
+          end: endTime,
+          job: jobName
+        });
+
+        if (endTime === currentTime) {
+          i = validEvents.length; // Beende Loop, da wir ein offenes Block geschlossen haben
         } else {
-          if (currentBlock) blocks.push(currentBlock);
-          currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+          i = endIdx;
         }
-      } else if (type === "pause_started") {
-        if (currentBlock) {
-          currentBlock.endTime = entry.time;
-          blocks.push(currentBlock);
+      } else if (ev.type === "pause") {
+        const startTime = ev.at;
+        let endTime = null;
+        let endIdx = i + 1;
+        while (endIdx < validEvents.length) {
+          const nextEv = validEvents[endIdx];
+          if (nextEv.type === "weiter") {
+            endTime = nextEv.at;
+            break;
+          }
+          if (["mittag", "ende"].includes(nextEv.type)) {
+            endTime = nextEv.at;
+            break;
+          }
+          endIdx++;
         }
-        currentBlock = { type: "pause", startTime: entry.time, entries: [entry] };
-      } else if (type === "lunch_started") {
-        if (currentBlock) {
-          currentBlock.endTime = entry.time;
-          blocks.push(currentBlock);
+
+        if (!endTime) {
+          endTime = currentTime;
         }
-        currentBlock = { type: "lunch", startTime: entry.time, entries: [entry] };
-      } else if (type === "work_resumed") {
-        if (currentBlock) {
-          currentBlock.endTime = entry.time;
-          blocks.push(currentBlock);
+
+        blocks.push({
+          type: "pause",
+          start: startTime,
+          end: endTime,
+          job: null
+        });
+
+        i = endIdx || i + 1;
+      } else if (ev.type === "mittag") {
+        const startTime = ev.at;
+        let endTime = null;
+        let endIdx = i + 1;
+        while (endIdx < validEvents.length) {
+          const nextEv = validEvents[endIdx];
+          if (nextEv.type === "weiter") {
+            endTime = nextEv.at;
+            break;
+          }
+          if (["pause", "ende"].includes(nextEv.type)) {
+            endTime = nextEv.at;
+            break;
+          }
+          endIdx++;
         }
-        currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
-      } else if (type === "site_switch") {
-        if (currentBlock) {
-          currentBlock.endTime = entry.time;
-          blocks.push(currentBlock);
+
+        if (!endTime) {
+          endTime = currentTime;
         }
-        currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
-      } else if (currentBlock) {
-        currentBlock.entries.push(entry);
+
+        blocks.push({
+          type: "lunch",
+          start: startTime,
+          end: endTime,
+          job: null
+        });
+
+        i = endIdx || i + 1;
+      } else {
+        i++;
       }
     }
 
-    if (currentBlock) {
-      blocks.push(currentBlock);
-    }
+    // Zusammenfassung: Direkt aufeinanderfolgende "work" Blöcke mit gleicher Baustelle zusammenfassen
+    const mergedBlocks = [];
+    let lastBlock = null;
 
-    // Formatiere Blöcke
-    const lines = [];
     for (const block of blocks) {
-      const start = block.startTime || "?";
-      const end = block.endTime || "?";
+      if (lastBlock && block.type === "work" && lastBlock.type === "work" && block.job === lastBlock.job && block.start === lastBlock.end) {
+        // Mergen
+        lastBlock.end = block.end;
+      } else {
+        if (lastBlock) mergedBlocks.push(lastBlock);
+        lastBlock = block;
+      }
+    }
+    if (lastBlock) mergedBlocks.push(lastBlock);
+
+    // Berechne Netto-Arbeitszeit
+    let workMinutes = 0;
+    for (const block of mergedBlocks) {
       if (block.type === "work") {
-        lines.push(`${start}–${end} Arbeit · ${block.site}`);
-      } else if (block.type === "pause") {
-        lines.push(`${start}–${end} Pause`);
-      } else if (block.type === "lunch") {
-        lines.push(`${start}–${end} Mittag`);
+        const [sh, sm] = block.start.split(":").map(Number);
+        const [eh, em] = block.end.split(":").map(Number);
+        const mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins > 0) workMinutes += mins;
       }
     }
 
-    return lines.join("\n");
+    // Formatiere Output
+    const lines = mergedBlocks.map(b => {
+      const type = b.type === "work" ? `Arbeit · ${b.job}` : (b.type === "pause" ? "Pause" : "Mittag");
+      return `${b.start}–${b.end} ${type}`;
+    });
+
+    const workHours = (workMinutes / 60).toFixed(2);
+    const text = lines.join("\n") + `\n\nNetto-Arbeitszeit: ${workHours} h`;
+
+    return { text, workMinutes };
   }
 
   function stateLabel(state) {
@@ -787,8 +887,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         };
       }
       
-      // Neue Logik: Tagesübersicht anzeigen
-      const daySummary = formatDaySummary(state.timeline || []);
+      // Neue Logik: Tagesübersicht anzeigen mit buildDayBlocksFromTimeEvents
+      const daySummary = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
       state.pending = {
         type: "review_day_summary",
         createdAt: now,
@@ -796,7 +896,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       await saveState();
       return {
         reply: `Heute war:\n${daySummary}\n\nPasst das?`,
-        buttons: ["Passt", "Ändern", "Abbrechen"],
+        buttons: ["Passt"],
         state,
       };
     }
@@ -805,38 +905,25 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       state.pending = { type: "review_materials", createdAt: now };
       await saveState();
       return {
-        reply: "Hast du heute noch Material verwendet oder Fotos ergänzt?",
+        reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
         buttons: ["Ja", "Nein"],
         state,
       };
     }
 
-    if (state.pending?.type === "review_day_summary" && intent === "no") {
-      // "Ändern" oder "Abbrechen" Button → Pending beenden, zurück zu Arbeit
-      state.pending = null;
-      state.mode = "working";
+    if (state.pending?.type === "review_materials" && intent === "yes") {
+      const hasMaterials = true;
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
       await saveState();
       return {
-        reply: "Okay, dann weiter so. Was machst du als nächstes?",
-        buttons: ["Pause", "Mittag", "Fertig"],
+        reply: "Gab es heute Regiearbeiten?",
+        buttons: ["Ja", "Nein"],
         state,
       };
     }
 
-    if (state.pending?.type === "review_day_summary" && intent === "message") {
-      // Text-Input für "Ändern" Wünsche → noch nicht implementiert
-      state.pending = null;
-      state.mode = "working";
-      await saveState();
-      return {
-        reply: `Danke für den Hinweis: „${text}". Das merke ich mir. Weiter geht's!`,
-        buttons: ["Pause", "Mittag", "Fertig"],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_materials" && (intent === "yes" || intent === "no")) {
-      const hasMaterials = intent === "yes";
+    if (state.pending?.type === "review_materials" && intent === "no") {
+      const hasMaterials = false;
       state.pending = { type: "review_regie", createdAt: now, hasMaterials };
       await saveState();
       return {
@@ -847,7 +934,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     }
 
     if (state.pending?.type === "review_regie" && (intent === "yes" || intent === "no")) {
-      const hasRegie = intent === "yes";
+      const isRegie = intent === "yes";
       const hasMaterials = state.pending?.hasMaterials || false;
       
       state.mode = "finished_day";
@@ -864,7 +951,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         jobName: current?.jobName || "",
         createdAt: now,
         hasMaterials,
-        hasRegie,
+        isRegie,
       });
       await appendEvent({
         type: "day_finished",
@@ -874,7 +961,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         jobId: current?.jobId || null,
         time: actualTime,
         hasMaterials,
-        hasRegie,
+        isRegie,
       });
       const openTasks = tasks.filter(t =>
         String(t.assigneeId) === String(employeeId) &&
@@ -882,7 +969,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         (!t.jobId || String(t.jobId) === String(current?.jobId))
       );
       return {
-        reply: `Feierabend ist gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
+        reply: `Tag gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
         buttons: [],
         state,
       };
