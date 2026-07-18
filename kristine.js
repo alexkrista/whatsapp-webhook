@@ -1129,20 +1129,19 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       // Neue Logik: Tagesübersicht anzeigen mit buildDayBlocksFromTimeEvents
       const daySummary = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
       state.pending = {
-        type: "closing_day",
+        type: "review_day_summary",
         createdAt: now,
       };
-      state.mode = "closing_day";
       await saveState();
       return {
         reply: `Heute war:\n${daySummary.text}\n\nPasst das?`,
-        buttons: ["Passt", "Aendern", "Abbrechen"],
+        buttons: ["Passt"],
         state,
       };
     }
 
-    if (state.pending?.type === "closing_day" && intent === "yes") {
-      state.pending = { type: "closing_materials", createdAt: now };
+    if (state.pending?.type === "review_day_summary" && intent === "yes") {
+      state.pending = { type: "review_materials", createdAt: now };
       await saveState();
       return {
         reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
@@ -1151,30 +1150,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       };
     }
 
-    if (state.pending?.type === "closing_day" && intent === "cancel") {
-      state.mode = "arbeitet";
-      state.pending = null;
-      await saveState();
-      return {
-        reply: "Tagesabschluss abgebrochen. Weiter gehts!",
-        buttons: [],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "closing_day" && intent === "change") {
-      state.pending = { type: "ask_correction", createdAt: now };
-      await saveState();
-      return {
-        reply: "Welche Zeit oder Baustelle soll geaendert werden?",
-        buttons: [],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "closing_materials") {
-      const hasMaterials = intent === "yes";
-      state.pending = { type: "closing_regie", hasMaterials, createdAt: now };
+    if (state.pending?.type === "review_materials" && intent === "yes") {
+      const hasMaterials = true;
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
       await saveState();
       return {
         reply: "Gab es heute Regiearbeiten?",
@@ -1183,7 +1161,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       };
     }
 
-    if (state.pending?.type === "closing_regie") {
+    if (state.pending?.type === "review_materials" && intent === "no") {
+      const hasMaterials = false;
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
+      await saveState();
+      return {
+        reply: "Gab es heute Regiearbeiten?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_regie" && (intent === "yes" || intent === "no")) {
       const isRegie = intent === "yes";
       const hasMaterials = state.pending?.hasMaterials || false;
       
