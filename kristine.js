@@ -11,6 +11,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
   const STATES = path.join(ROOT, "states.json");
   const TASKS = path.join(ROOT, "tasks.json");
   const EVENTS = path.join(ROOT, "events.jsonl");
+  const TIME_EVENTS = path.join(ROOT, "time-events.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -35,9 +36,46 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     await fsp.appendFile(EVENTS, line, "utf8");
   }
 
+  function viennaParts(d = new Date()) {
+    const parts = new Intl.DateTimeFormat("de-AT", {
+      timeZone: "Europe/Vienna",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+    return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  }
+
   function localDateISO(d = new Date()) {
-    const off = d.getTimezoneOffset();
-    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+    const p = viennaParts(d);
+    return `${p.year}-${p.month}-${p.day}`;
+  }
+
+  function localTimeHM(d = new Date()) {
+    const p = viennaParts(d);
+    return `${p.hour}:${p.minute}`;
+  }
+
+  function minutesFromHM(value) {
+    const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  }
+
+  function clampOfficialStart(actualTime) {
+    const actual = minutesFromHM(actualTime);
+    const official = minutesFromHM("07:00");
+    return actual !== null && actual < official ? "07:00" : actualTime;
+  }
+
+  async function appendTimeEvent(event) {
+    const rows = await readJson(TIME_EVENTS, []);
+    rows.push(event);
+    // Genug Historie für Büroprüfung behalten, Datei aber begrenzen.
+    await writeJson(TIME_EVENTS, rows.slice(-20000));
   }
 
   function normalizeText(text) {
@@ -140,7 +178,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
     const current = activeAssignment(dayAssignments, state);
     const intent = detectIntent(text);
-    const now = new Date().toISOString();
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const actualTime = localTimeHM(nowDate);
 
     const saveState = async () => {
       states[employeeId] = state;
@@ -150,6 +190,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
       state.timeline.push({
         at: now,
+        time: actualTime,
         type,
         detail,
         assignmentKey: assignment ? assignmentKey(assignment) : null,
@@ -229,12 +270,23 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         state.pending = null;
         addTimeline("day_finished", "Feierabend", current);
         await saveState();
+        await appendTimeEvent({
+          employeeId,
+          employeeName: state.employeeName,
+          date: today,
+          type: "ende",
+          at: actualTime,
+          jobId: current?.jobId || null,
+          jobName: current?.jobName || "",
+          createdAt: now,
+        });
         await appendEvent({
           type: "day_finished",
           employeeId,
           employeeName: state.employeeName,
           date: today,
           jobId: current?.jobId || null,
+          time: actualTime,
         });
         return {
           reply: "Feierabend ist gespeichert. Danke und schönen Abend! 👋",
@@ -271,20 +323,40 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           state,
         };
       }
+      const bookedTime = clampOfficialStart(actualTime);
       state.mode = "working";
       state.pending = null;
       state.activeAssignmentKey = assignmentKey(current);
-      addTimeline("work_started", "Arbeitsbeginn", current);
+      state.lastStartActual = actualTime;
+      state.lastStartBooked = bookedTime;
+      addTimeline("work_started", `Arbeitsbeginn ${bookedTime}${bookedTime !== actualTime ? ` (gestempelt ${actualTime})` : ""}`, current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "start",
+        at: bookedTime,
+        actualAt: actualTime,
+        adjusted: bookedTime !== actualTime,
+        jobId: current.jobId,
+        jobName: current.jobName || "",
+        createdAt: now,
+      });
       await appendEvent({
         type: "work_started",
         employeeId,
         employeeName: state.employeeName,
         date: today,
         jobId: current.jobId,
+        actualTime,
+        bookedTime,
+        adjusted: bookedTime !== actualTime,
       });
       return {
-        reply: `Arbeitsbeginn bei ${assignmentLabel(current)} ist gespeichert. Gute Arbeit!`,
+        reply: bookedTime !== actualTime
+          ? `Arbeitsbeginn bei ${assignmentLabel(current)} ist gespeichert. Gemäß Betriebsregel wurde ${actualTime} auf 07:00 Uhr gesetzt. Gute Arbeit!`
+          : `Arbeitsbeginn bei ${assignmentLabel(current)} ist um ${bookedTime} gespeichert. Gute Arbeit!`,
         buttons: ["Pause", "Mittag", "Fertig"],
         state,
       };
@@ -301,6 +373,16 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       state.mode = intent === "lunch" ? "lunch" : "pause";
       addTimeline(intent === "lunch" ? "lunch_started" : "pause_started", intent === "lunch" ? "Mittagspause" : "Pause", current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: intent === "lunch" ? "mittag" : "pause",
+        at: actualTime,
+        jobId: current?.jobId || null,
+        jobName: current?.jobName || "",
+        createdAt: now,
+      });
       return {
         reply: intent === "lunch" ? "Mittagspause begonnen. Mahlzeit! 🍽️" : "Pause begonnen. ☕",
         buttons: ["Weiter"],
@@ -319,6 +401,16 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       state.mode = "working";
       addTimeline("work_resumed", "Arbeit fortgesetzt", current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "weiter",
+        at: actualTime,
+        jobId: current?.jobId || null,
+        jobName: current?.jobName || "",
+        createdAt: now,
+      });
       return {
         reply: "Weiter geht’s. Arbeitszeit läuft wieder.",
         buttons: ["Pause", "Mittag", "Fertig"],
@@ -331,6 +423,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         state.mode = "finished_day";
         addTimeline("day_finished", "Feierabend ohne Einteilung", null);
         await saveState();
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: null, createdAt: now });
         return {
           reply: "Feierabend ist gespeichert. Schönen Abend! 👋",
           buttons: [],
@@ -357,12 +450,23 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       state.pending = null;
       addTimeline("day_finished", "Feierabend", current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "ende",
+        at: actualTime,
+        jobId: current.jobId,
+        jobName: current.jobName || "",
+        createdAt: now,
+      });
       await appendEvent({
         type: "day_finished",
         employeeId,
         employeeName: state.employeeName,
         date: today,
         jobId: current.jobId,
+        time: actualTime,
       });
       const openTasks = tasks.filter(t =>
         String(t.assigneeId) === String(employeeId) &&
