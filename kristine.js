@@ -898,18 +898,21 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     }
 
     if (intent === "start") {
-      if (!current) {
-        state.pending = { type: "ask_actual_assignment", createdAt: now };
-        await saveState();
-        return {
-          reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
-          buttons: [],
-          state,
-        };
-      }
-      
-      // NEUE LOGIK: Prüfe aktuellen Zustand aus TimeEvents
-      const stateInfo = await getCurrentStateFromTimeEvents(employeeId, today);
+      try {
+        if (!current) {
+          state.pending = { type: "ask_actual_assignment", createdAt: now };
+          await saveState();
+          return {
+            reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
+            buttons: [],
+            state,
+          };
+        }
+        
+        // NEUE LOGIK: Prüfe aktuellen Zustand aus TimeEvents
+        console.log(`[Kristine] START: emp=${employeeId}, today=${today}`);
+        const stateInfo = await getCurrentStateFromTimeEvents(employeeId, today);
+        console.log(`[Kristine] START stateInfo:`, stateInfo);
       
       // Wenn bereits arbeitet - zurückweisen
       if (stateInfo.state === "working") {
@@ -970,6 +973,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         buttons: ["Pause", "Mittag", "Falsche Baustelle", "Fertig"],
         state,
       };
+      } catch (e) {
+        console.error(`[Kristine] START Error for emp=${employeeId}:`, e?.message || e);
+        throw e;
+      }
     }
 
     // ===== PAUSE-Intent =====
