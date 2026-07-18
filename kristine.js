@@ -132,34 +132,42 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return idx >= 0 ? dayAssignments[idx + 1] || null : null;
   }
 
-  function tryMatchAssignment(input, dayAssignments) {
-    if (!dayAssignments.length) return null;
-    
+  function findMatchingAssignments(input, allAssignments) {
     const normalized = normalizeText(input);
+    const matches = [];
     
-    // Versuche verschiedene Match-Strategien
-    for (const a of dayAssignments) {
+    // Deduplizierung: Speichere Matches als Set von jobId um Duplikate zu vermeiden
+    const seen = new Set();
+    
+    for (const a of allAssignments) {
+      if (seen.has(a.jobId)) continue;
+      
       const jobId = normalizeText(a.jobId);
       const jobName = normalizeText(a.jobName || "");
       const city = normalizeText(a.city || "");
       
       // Exakte Matches
       if (jobId === normalized || jobName === normalized || city === normalized) {
-        return a;
+        matches.push(a);
+        seen.add(a.jobId);
+        continue;
       }
       
       // Präfix-Matches (z.B. "ish" matches "ish_lochau")
       if (jobId.startsWith(normalized) || jobName.startsWith(normalized)) {
-        return a;
+        matches.push(a);
+        seen.add(a.jobId);
+        continue;
       }
       
       // Contains-Matches
       if (jobId.includes(normalized) || jobName.includes(normalized) || city.includes(normalized)) {
-        return a;
+        matches.push(a);
+        seen.add(a.jobId);
       }
     }
     
-    return null;
+    return matches;
   }
 
   function assignmentLabel(a) {
@@ -253,14 +261,36 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     }
 
     if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
-      state.pending = null;      
-      // Versuchen, eine Baustelle zu erkennen
-      const matched = tryMatchAssignment(text, dayAssignments);
+      state.pending = null;
       
-      if (matched) {
-        // Baustelle erkannt - speichern
-        state.activeAssignmentKey = assignmentKey(matched);
-        addTimeline("assignment_recognized", `Baustelle erkannt: ${assignmentLabel(matched)}`, matched);
+      // Versuchen, eine Baustelle zu erkennen (in ALLEN assignments, nicht nur heute)
+      const matches = findMatchingAssignments(text, assignments);
+      
+      if (matches.length === 1) {
+        // Genau eine Baustelle erkannt - neue Tageseinteilung erstellen und speichern
+        const matched = matches[0];
+        const newAssignment = {
+          id: String(`a_${Date.now()}_${Math.random().toString(36).slice(2)}`),
+          date: today,
+          jobId: matched.jobId,
+          jobName: matched.jobName || "",
+          city: matched.city || "",
+          address: matched.address || "",
+          employeeId: String(employeeId),
+          employeeName: state.employeeName,
+          vehicle: matched.vehicle || "",
+          from: "",
+          to: "",
+          note: `Vom Mitarbeiter erkannt: ${text}`,
+        };
+        
+        // Speichere neue Tageseinteilung
+        assignments.push(newAssignment);
+        await writeJson(ASSIGNMENTS, assignments);
+        
+        // Setze als aktive Einteilung
+        state.activeAssignmentKey = assignmentKey(newAssignment);
+        addTimeline("assignment_recognized", `Baustelle erkannt: ${assignmentLabel(newAssignment)}`, newAssignment);
         await saveState();
         await appendEvent({
           type: "assignment_recognized",
@@ -268,17 +298,30 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           employeeName: state.employeeName,
           date: today,
           jobId: matched.jobId,
-          detail: assignmentLabel(matched),
+          detail: assignmentLabel(newAssignment),
         });
         return {
-          reply: `Perfekt. Baustelle ${assignmentLabel(matched)} gespeichert. Sag einfach „Start", wenn du dort beginnst.`,
+          reply: `Perfekt. Baustelle ${assignmentLabel(newAssignment)} übernommen. Sag einfach „Start", wenn du dort beginnst.`,
           buttons: ["Start", "Navigation"],
           needsOfficeReview: true,
           state,
         };
       }
       
-      // Nicht erkannt - als Abweichung melden      addTimeline("assignment_deviation", String(text), null);
+      if (matches.length > 1) {
+        // Mehrere Baustellen passen - Auswahlliste später implementieren
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return {
+          reply: `Mehrere Baustellen passen. Welche meinst du: ${matches.map(m => assignmentLabel(m)).join(", ")}?`,
+          buttons: matches.slice(0, 3).map(m => m.jobName || `#${m.jobId}`),
+          needsOfficeReview: true,
+          state,
+        };
+      }
+      
+      // Nicht erkannt - als Abweichung melden
+      addTimeline("assignment_deviation", String(text), null);
       await saveState();
       await appendEvent({
         type: "assignment_deviation",
@@ -288,7 +331,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         detail: String(text),
       });
       return {
-        reply: `Danke, ich habe „${String(text).trim()}“ als abweichende Einteilung ans Büro gemeldet.`,
+        reply: `Baustelle nicht eindeutig erkannt. Ich habe „${String(text).trim()}" als Abweichung vorgemerkt.`,
         buttons: ["Start"],
         needsOfficeReview: true,
         state,
