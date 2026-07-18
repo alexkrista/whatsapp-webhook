@@ -1109,8 +1109,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
           state,
         };
       }
-      const next = null; // VERALTET: kein next-Wechsel mehr
-      if (false && next) { // VERALTET
+      const next = nextAssignment(dayAssignments, current);
+      addTimeline("site_finished", `${assignmentLabel(current)} fertig`, current);
+      if (next) {
         state.mode = "finished_site";
         state.pending = {
           type: "finish_choice",
@@ -1125,8 +1126,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         };
       }
       
-      // Tagesuebersicht anzeigen
-      const { text: daySummaryText } = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
+      // Neue Logik: Tagesübersicht anzeigen mit buildDayBlocksFromTimeEvents
+      const daySummary = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
       state.pending = {
         type: "closing_day",
         createdAt: now,
@@ -1134,13 +1135,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       state.mode = "closing_day";
       await saveState();
       return {
-        reply: `Heute war:\n\n${daySummaryText}\n\nPasst das?`,
+        reply: `Heute war:\n${daySummary.text}\n\nPasst das?`,
         buttons: ["Passt", "Aendern", "Abbrechen"],
         state,
       };
     }
-
-    // ===== Tagesabschluss Dialog =====
 
     // Phase 1: Passt / Abbrechen / Aendern
     if (state.pending?.type === "closing_day") {
@@ -1190,23 +1189,40 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     if (state.pending?.type === "closing_regie") {
       const isRegie = intent === "yes";
       const hasMaterials = state.pending?.hasMaterials || false;
-      state.mode = "idle";
+      
+      state.mode = "finished_day";
       state.pending = null;
       addTimeline("day_finished", "Feierabend", current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "ende",
+        at: actualTime,
+        jobId: current?.jobId || null,
+        jobName: current?.jobName || "",
+        createdAt: now,
+        hasMaterials,
+        isRegie,
+      });
       await appendEvent({
         type: "day_finished",
         employeeId,
         employeeName: state.employeeName,
         date: today,
         jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
         time: actualTime,
         hasMaterials,
-        hasRegie: isRegie,
+        isRegie,
       });
+      const openTasks = tasks.filter(t =>
+        String(t.assigneeId) === String(employeeId) &&
+        t.status !== "done" &&
+        (!t.jobId || String(t.jobId) === String(current?.jobId))
+      );
       return {
-        reply: "Tagesabschluss gespeichert. Schoenen Feierabend!",
+        reply: `Tagesabschluss gespeichert. Danke und schönen Abend! 👋`,
         buttons: [],
         state,
       };
