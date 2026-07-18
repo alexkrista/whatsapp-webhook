@@ -38,6 +38,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   <button onclick="showTab('chat')">💬 Kristine-Chat</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
+  <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
   <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
@@ -109,6 +110,40 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
   </div>
 </section>
+
+<section id="schedules" class="tab">
+  <div class="grid">
+    <div class="card">
+      <h3>🌍 Feiertage 2026</h3>
+      <div class="formgrid">
+        <div><label>Datum</label><input id="hDate" type="date"></div>
+        <div class="full"><label>Feiertag</label><input id="hName" placeholder="z. B. Neujahrstag, Weihnachten"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addHoliday()">+ Feiertag</button></div>
+      <div id="holidayList" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h3>🏢 Betriebsurlaub</h3>
+      <div class="formgrid">
+        <div><label>Von</label><input id="cvFrom" type="date"></div>
+        <div><label>Bis</label><input id="cvTo" type="date"></div>
+        <div class="full"><label>Grund</label><input id="cvReason" placeholder="z. B. Werksferien, Betriebsurlaub"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addCompanyVacation()">+ Betriebsurlaub</button></div>
+      <div id="companyVacationList" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h3>⏰ Zeitmodelle</h3>
+      <div class="formgrid">
+        <div class="full"><label>Modellname</label><input id="smName" placeholder="z. B. Vollzeit Sommer, Teilzeit"></div>
+        <div><label>Sollstunden</label><input id="smHours" type="number" step="0.1" value="7.8" placeholder="7.8"></div>
+        <div class="full"><label>Beschreibung</label><input id="smDesc" placeholder="z. B. Montag-Freitag 07:00-17:00, Pause 12:00-13:00"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addScheduleModel()">+ Modell</button></div>
+      <div id="scheduleModelList" style="margin-top:12px"></div>
+    </div>
+  </div>
+</section>
 </main>
 
 <script>
@@ -121,13 +156,19 @@ function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
 function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
 async function loadAll(){
-  const [k,j,e,v]=await Promise.all([
+  const [k,j,e,v,h,cv,sm]=await Promise.all([
     api('/kristine/api/bootstrap'),
     api('/admin/api/jobs'),
     api('/admin/api/employees'),
-    api('/admin/api/vehicles')
+    api('/admin/api/vehicles'),
+    api('/kristine/api/holidays').catch(()=>({holidays:[]})),
+    api('/kristine/api/company-vacations').catch(()=>({vacations:[]})),
+    api('/kristine/api/schedule-models').catch(()=>({models:[]}))
   ]);
   data=k;
+  data.holidays=h.holidays||[];
+  data.companyVacations=cv.vacations||[];
+  data.scheduleModels=sm.models||[];
   masterJobs=j.jobs||[];
   masterEmployees=(e.employees||[]).filter(x=>x.active!==false);
   masterVehicles=v.vehicles||[];
@@ -136,6 +177,7 @@ async function loadAll(){
   document.getElementById('tDueDate').value=data.today;
   renderMasterData();
   renderWeek();renderControl();renderTasks();
+  renderHolidays();renderCompanyVacations();renderScheduleModels();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function mapsUrl(address){return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):''}
@@ -269,6 +311,21 @@ function renderTasks(){
 }
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks()}
 async function saveTasks(){const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});data.tasks=r.tasks;renderTasks();alert('Aufgaben gespeichert.')}
+// ===== HOLIDAYS =====
+function addHoliday(){if(!hDate.value){alert('Datum erforderlich.');return}if(!hName.value.trim()){alert('Feiertag-Name erforderlich.');return}data.holidays=data.holidays||[];data.holidays.push({date:hDate.value,name:hName.value.trim()});hDate.value='';hName.value='';renderHolidays()}
+function renderHolidays(){const el=document.getElementById('holidayList');el.innerHTML=data.holidays?.length?(data.holidays||[]).map(h=>`<div class="assignment"><strong>${esc(h.date)}</strong><span>${esc(h.name)}</span><div class="actions"><button class="green" onclick="saveHolidaysData()">💾 Speichern</button><button class="danger" onclick="removeHoliday('${h.date}')">×</button></div></div>`).join(''):'<span class="small">Keine Feiertage.</span>'}
+function removeHoliday(d){data.holidays=data.holidays.filter(h=>h.date!==d);renderHolidays()}
+async function saveHolidaysData(){const r=await api('/kristine/api/holidays',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({holidays:data.holidays||[]})});data.holidays=r.holidays||[];renderHolidays();alert('Feiertage gespeichert.')}
+// ===== COMPANY VACATION =====
+function addCompanyVacation(){if(!cvFrom.value||!cvTo.value){alert('Von und Bis erforderlich.');return}data.companyVacations=data.companyVacations||[];data.companyVacations.push({from:cvFrom.value,to:cvTo.value,reason:cvReason.value.trim()});cvFrom.value='';cvTo.value='';cvReason.value='';renderCompanyVacations()}
+function renderCompanyVacations(){const el=document.getElementById('companyVacationList');el.innerHTML=data.companyVacations?.length?(data.companyVacations||[]).map(cv=>`<div class="assignment"><strong>${esc(cv.from)} bis ${esc(cv.to)}</strong><span>${esc(cv.reason)}</span><div class="actions"><button class="green" onclick="saveCompanyVacationsData()">💾 Speichern</button><button class="danger" onclick="removeCompanyVacation('${cv.from}')">×</button></div></div>`).join(''):'<span class="small">Kein Betriebsurlaub.</span>'}
+function removeCompanyVacation(f){data.companyVacations=data.companyVacations.filter(cv=>cv.from!==f);renderCompanyVacations()}
+async function saveCompanyVacationsData(){const r=await api('/kristine/api/company-vacations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vacations:data.companyVacations||[]})});data.companyVacations=r.vacations||[];renderCompanyVacations();alert('Betriebsurlaub gespeichert.')}
+// ===== SCHEDULE MODELS =====
+function addScheduleModel(){if(!smName.value.trim()){alert('Modellname erforderlich.');return}if(!smHours.value){alert('Sollstunden erforderlich.');return}data.scheduleModels=data.scheduleModels||[];data.scheduleModels.push({id:id(),name:smName.value.trim(),hours:parseFloat(smHours.value),description:smDesc.value.trim()});smName.value='';smHours.value='7.8';smDesc.value='';renderScheduleModels()}
+function renderScheduleModels(){const el=document.getElementById('scheduleModelList');el.innerHTML=data.scheduleModels?.length?(data.scheduleModels||[]).map(sm=>`<div class="assignment"><strong>${esc(sm.name)}</strong><span>${sm.hours}h</span><br><span class="small">${esc(sm.description)}</span><div class="actions"><button class="green" onclick="saveScheduleModelsData()">💾 Speichern</button><button class="danger" onclick="removeScheduleModel('${sm.id}')">×</button></div></div>`).join(''):'<span class="small">Keine Zeitmodelle.</span>'}
+function removeScheduleModel(id){data.scheduleModels=data.scheduleModels.filter(sm=>sm.id!==id);renderScheduleModels()}
+async function saveScheduleModelsData(){const r=await api('/kristine/api/schedule-models',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:data.scheduleModels||[]})});data.scheduleModels=r.models||[];renderScheduleModels();alert('Zeitmodelle gespeichert.')}
 document.getElementById('adminLink').href=url('/admin/ui');
 loadAll().catch(e=>alert(e.message));
 </script>

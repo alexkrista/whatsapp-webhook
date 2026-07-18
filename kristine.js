@@ -1334,18 +1334,123 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     }
   });
 
-  // ===== SCHEDULER ===== 
-  // Um 7:00 Uhr: Morning Reminders versendet
+  // ===== HOLIDAYS =====
+  app.get("/kristine/api/holidays", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const holidays = await readJson(path.join(dataDir, "_kristine", "holidays.json"), []);
+      res.json({ ok: true, holidays });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.put("/kristine/api/holidays", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const holidays = Array.isArray(req.body?.holidays) ? req.body.holidays : [];
+      const clean = holidays.map(h => ({
+        date: String(h.date || "").slice(0, 10),
+        name: String(h.name || "").trim().slice(0, 140)
+      })).filter(h => h.date && h.name).sort((a, b) => a.date.localeCompare(b.date));
+      await writeJson(path.join(dataDir, "_kristine", "holidays.json"), clean);
+      res.json({ ok: true, holidays: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // ===== COMPANY VACATIONS =====
+  app.get("/kristine/api/company-vacations", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const vacations = await readJson(path.join(dataDir, "_kristine", "company-vacations.json"), []);
+      res.json({ ok: true, vacations });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.put("/kristine/api/company-vacations", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const vacations = Array.isArray(req.body?.vacations) ? req.body.vacations : [];
+      const clean = vacations.map(v => ({
+        from: String(v.from || "").slice(0, 10),
+        to: String(v.to || "").slice(0, 10),
+        reason: String(v.reason || "").trim().slice(0, 300)
+      })).filter(v => v.from && v.to).sort((a, b) => a.from.localeCompare(b.from));
+      await writeJson(path.join(dataDir, "_kristine", "company-vacations.json"), clean);
+      res.json({ ok: true, vacations: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // ===== SCHEDULE MODELS =====
+  app.get("/kristine/api/schedule-models", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const models = await readJson(path.join(dataDir, "_kristine", "schedule-models.json"), []);
+      res.json({ ok: true, models });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.put("/kristine/api/schedule-models", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const models = Array.isArray(req.body?.models) ? req.body.models : [];
+      const clean = models.map(m => ({
+        id: String(m.id || Math.random().toString(36).slice(2)),
+        name: String(m.name || "").trim().slice(0, 140),
+        hours: Number(m.hours) || 7.8,
+        description: String(m.description || "").trim().slice(0, 500)
+      })).filter(m => m.name);
+      await writeJson(path.join(dataDir, "_kristine", "schedule-models.json"), clean);
+      res.json({ ok: true, models: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // ===== SCHEDULER =====
+  // Prüfe ob heute ein Tag ist, wo die Scheduler laufen sollen (nicht Sa/So/Feiertag/Betriebsurlaub)
+  async function shouldRunScheduler(date = localDateISO()) {
+    const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay(); // 0=So, 6=Sa
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      console.log(`⏭️  [Kristine] Skip Scheduler: ${date} ist Wochenende`);
+      return false;
+    }
+
+    const holidays = await readJson(path.join(dataDir, "_kristine", "holidays.json"), []);
+    if (holidays.some(h => h.date === date)) {
+      console.log(`⏭️  [Kristine] Skip Scheduler: ${date} ist Feiertag`);
+      return false;
+    }
+
+    const vacations = await readJson(path.join(dataDir, "_kristine", "company-vacations.json"), []);
+    if (vacations.some(v => date >= v.from && date <= v.to)) {
+      console.log(`⏭️  [Kristine] Skip Scheduler: ${date} ist Betriebsurlaub`);
+      return false;
+    }
+
+    return true;
+  }
+
+  // 7:00 AM: Morning Reminders
   if (sendWhatsApp && phoneNumberId) {
     cron.schedule("0 7 * * *", async () => {
       try {
+        const today = localDateISO();
+        if (!(await shouldRunScheduler(today))) return;
+
         console.log("🌅 [Kristine] Starte Morning Reminders (7:00 Uhr)");
         const reminders = await checkAndSendMorningReminders();
         
-        // Versendet Reminders via WhatsApp
         for (const reminder of reminders) {
           try {
-            // Hole Mitarbeiter-Nummer aus assignments
             const assignments = await readJson(ASSIGNMENTS, []);
             const empAssignment = assignments.find(a => String(a.employeeId) === String(reminder.employeeId));
             
@@ -1368,10 +1473,13 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     }, { timezone: "Europe/Vienna" });
   }
 
-  // Um 8:00 Uhr: Statusbericht an Chef
+  // 8:00 AM: Status Report an Chef
   if (sendWhatsApp && phoneNumberId && chefPhoneNumber) {
     cron.schedule("0 8 * * *", async () => {
       try {
+        const today = localDateISO();
+        if (!(await shouldRunScheduler(today))) return;
+
         console.log("📊 [Kristine] Starte Statusbericht (8:00 Uhr)");
         const report = await generateStatusReport();
         
@@ -1381,7 +1489,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
           reply: report,
           buttons: []
         });
-        console.log(`✅ Statusbericht an Chef versendet`);
+        console.log(`✅ Statusbericht an Chef (${chefPhoneNumber}) versendet`);
       } catch (e) {
         console.error("❌ [Kristine] Statusbericht Fehler:", e?.message || e);
       }
