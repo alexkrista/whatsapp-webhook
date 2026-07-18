@@ -1864,6 +1864,5 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
   return { handleMessage, localDateISO };
 }
-}
 
 module.exports = { registerKristine };
