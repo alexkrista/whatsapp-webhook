@@ -137,6 +137,76 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
   }
 
+  function formatDaySummary(timeline) {
+    if (!Array.isArray(timeline) || timeline.length === 0) {
+      return "Keine Einträge heute.";
+    }
+
+    const blocks = [];
+    let currentBlock = null;
+
+    for (const entry of timeline) {
+      const type = entry.type;
+
+      if (type === "work_started") {
+        if (currentBlock && currentBlock.type === "work") {
+          // Neuen Block starten
+          blocks.push(currentBlock);
+          currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+        } else {
+          if (currentBlock) blocks.push(currentBlock);
+          currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+        }
+      } else if (type === "pause_started") {
+        if (currentBlock) {
+          currentBlock.endTime = entry.time;
+          blocks.push(currentBlock);
+        }
+        currentBlock = { type: "pause", startTime: entry.time, entries: [entry] };
+      } else if (type === "lunch_started") {
+        if (currentBlock) {
+          currentBlock.endTime = entry.time;
+          blocks.push(currentBlock);
+        }
+        currentBlock = { type: "lunch", startTime: entry.time, entries: [entry] };
+      } else if (type === "work_resumed") {
+        if (currentBlock) {
+          currentBlock.endTime = entry.time;
+          blocks.push(currentBlock);
+        }
+        currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+      } else if (type === "site_switch") {
+        if (currentBlock) {
+          currentBlock.endTime = entry.time;
+          blocks.push(currentBlock);
+        }
+        currentBlock = { type: "work", startTime: entry.time, site: entry.jobName || "#" + entry.jobId, entries: [entry] };
+      } else if (currentBlock) {
+        currentBlock.entries.push(entry);
+      }
+    }
+
+    if (currentBlock) {
+      blocks.push(currentBlock);
+    }
+
+    // Formatiere Blöcke
+    const lines = [];
+    for (const block of blocks) {
+      const start = block.startTime || "?";
+      const end = block.endTime || "?";
+      if (block.type === "work") {
+        lines.push(`${start}–${end} Arbeit · ${block.site}`);
+      } else if (block.type === "pause") {
+        lines.push(`${start}–${end} Pause`);
+      } else if (block.type === "lunch") {
+        lines.push(`${start}–${end} Mittag`);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
   function stateLabel(state) {
     const map = {
       idle: "noch nicht gestartet",
@@ -586,6 +656,70 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           state,
         };
       }
+      
+      // Neue Logik: Tagesübersicht anzeigen
+      const daySummary = formatDaySummary(state.timeline || []);
+      state.pending = {
+        type: "review_day_summary",
+        createdAt: now,
+      };
+      await saveState();
+      return {
+        reply: `Heute war:\n${daySummary}\n\nPasst das?`,
+        buttons: ["Passt", "Ändern", "Abbrechen"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_day_summary" && intent === "yes") {
+      state.pending = { type: "review_materials", createdAt: now };
+      await saveState();
+      return {
+        reply: "Hast du heute noch Material verwendet oder Fotos ergänzt?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_day_summary" && intent === "no") {
+      // "Ändern" oder "Abbrechen" Button → Pending beenden, zurück zu Arbeit
+      state.pending = null;
+      state.mode = "working";
+      await saveState();
+      return {
+        reply: "Okay, dann weiter so. Was machst du als nächstes?",
+        buttons: ["Pause", "Mittag", "Fertig"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_day_summary" && intent === "message") {
+      // Text-Input für "Ändern" Wünsche → noch nicht implementiert
+      state.pending = null;
+      state.mode = "working";
+      await saveState();
+      return {
+        reply: `Danke für den Hinweis: „${text}". Das merke ich mir. Weiter geht's!`,
+        buttons: ["Pause", "Mittag", "Fertig"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_materials" && (intent === "yes" || intent === "no")) {
+      const hasMaterials = intent === "yes";
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
+      await saveState();
+      return {
+        reply: "Gab es heute Regiearbeiten?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_regie" && (intent === "yes" || intent === "no")) {
+      const hasRegie = intent === "yes";
+      const hasMaterials = state.pending?.hasMaterials || false;
+      
       state.mode = "finished_day";
       state.pending = null;
       addTimeline("day_finished", "Feierabend", current);
@@ -596,22 +730,26 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         date: today,
         type: "ende",
         at: actualTime,
-        jobId: current.jobId,
-        jobName: current.jobName || "",
+        jobId: current?.jobId || null,
+        jobName: current?.jobName || "",
         createdAt: now,
+        hasMaterials,
+        hasRegie,
       });
       await appendEvent({
         type: "day_finished",
         employeeId,
         employeeName: state.employeeName,
         date: today,
-        jobId: current.jobId,
+        jobId: current?.jobId || null,
         time: actualTime,
+        hasMaterials,
+        hasRegie,
       });
       const openTasks = tasks.filter(t =>
         String(t.assigneeId) === String(employeeId) &&
         t.status !== "done" &&
-        (!t.jobId || String(t.jobId) === String(current.jobId))
+        (!t.jobId || String(t.jobId) === String(current?.jobId))
       );
       return {
         reply: `Feierabend ist gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
