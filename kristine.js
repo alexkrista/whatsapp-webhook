@@ -349,10 +349,16 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   // ===== STATE DETERMINATION FROM TIME-EVENTS =====
   // Bestimmt den aktuellen Zustand aus heutigen Time-Events des Mitarbeiters
   async function getCurrentStateFromTimeEvents(empId, date) {
+    const timeEventsPath = path.join(dataDir, "_kristine", "time-events.jsonl");
     let events = [];
     try {
-      const allEvents = await readJson(TIME_EVENTS, []);
-      events = allEvents
+      const content = await fs.promises.readFile(timeEventsPath, "utf8");
+      events = content
+        .split("\n")
+        .filter(l => l.trim())
+        .map(l => {
+          try { return JSON.parse(l); } catch { return null; }
+        })
         .filter(e => e && String(e.employeeId) === String(empId) && e.date === date && e.at && /^\d{2}:\d{2}$/.test(e.at))
         .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
     } catch {}
@@ -395,10 +401,16 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
 
   // Liest time-events nur für heutiges Datum + employeeId, baut Blöcke
   async function buildDayBlocksFromTimeEvents(empId, date, currentTime) {
+    const timeEventsPath = path.join(dataDir, "_kristine", "time-events.jsonl");
     let events = [];
     try {
-      const allEvents = await readJson(TIME_EVENTS, []);
-      events = allEvents
+      const content = await fs.promises.readFile(timeEventsPath, "utf8");
+      events = content
+        .split("\n")
+        .filter(l => l.trim())
+        .map(l => {
+          try { return JSON.parse(l); } catch { return null; }
+        })
         .filter(e => e && String(e.employeeId) === String(empId) && e.date === date)
         .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
     } catch {}
@@ -672,15 +684,12 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
-    try {
-      const today = date || localDateISO();
-      console.log(`[Kristine] handleMessage called: emp=${employeeId}, text="${text}"`);
-      const [assignments, states, tasks] = await Promise.all([
-        readJson(ASSIGNMENTS, []),
-        readJson(STATES, {}),
-        readJson(TASKS, []),
-      ]);
-      console.log(`[Kristine] Loaded data: ${assignments.length} assignments, ${Object.keys(states).length} states`);
+    const today = date || localDateISO();
+    const [assignments, states, tasks] = await Promise.all([
+      readJson(ASSIGNMENTS, []),
+      readJson(STATES, {}),
+      readJson(TASKS, []),
+    ]);
 
     const dayAssignments = assignmentsFor(assignments, employeeId, today);
     const previous = states[employeeId] || {
@@ -901,21 +910,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
     }
 
     if (intent === "start") {
-      try {
-        if (!current) {
-          state.pending = { type: "ask_actual_assignment", createdAt: now };
-          await saveState();
-          return {
-            reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
-            buttons: [],
-            state,
-          };
-        }
-        
-        // NEUE LOGIK: Prüfe aktuellen Zustand aus TimeEvents
-        console.log(`[Kristine] START: emp=${employeeId}, today=${today}`);
-        const stateInfo = await getCurrentStateFromTimeEvents(employeeId, today);
-        console.log(`[Kristine] START stateInfo:`, stateInfo);
+      if (!current) {
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return {
+          reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
+          buttons: [],
+          state,
+        };
+      }
+      
+      // NEUE LOGIK: Prüfe aktuellen Zustand aus TimeEvents
+      const stateInfo = await getCurrentStateFromTimeEvents(employeeId, today);
       
       // Wenn bereits arbeitet - zurückweisen
       if (stateInfo.state === "working") {
@@ -976,10 +982,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         buttons: ["Pause", "Mittag", "Falsche Baustelle", "Fertig"],
         state,
       };
-      } catch (e) {
-        console.error(`[Kristine] START Error for emp=${employeeId}:`, e?.message || e);
-        throw e;
-      }
     }
 
     // ===== PAUSE-Intent =====
@@ -1139,39 +1141,37 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       };
     }
 
-    // Phase 1: Passt / Abbrechen / Aendern
-    if (state.pending?.type === "closing_day") {
-      if (intent === "yes") {
-        state.pending = { type: "closing_materials", createdAt: now };
-        await saveState();
-        return {
-          reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
-          buttons: ["Ja", "Nein"],
-          state,
-        };
-      }
-      if (intent === "cancel") {
-        state.mode = "arbeitet";
-        state.pending = null;
-        await saveState();
-        return {
-          reply: "Tagesabschluss abgebrochen. Weiter gehts!",
-          buttons: [],
-          state,
-        };
-      }
-      if (intent === "change") {
-        state.pending = { type: "ask_correction", createdAt: now };
-        await saveState();
-        return {
-          reply: "Welche Zeit oder Baustelle soll geaendert werden?",
-          buttons: [],
-          state,
-        };
-      }
+    if (state.pending?.type === "closing_day" && intent === "yes") {
+      state.pending = { type: "closing_materials", createdAt: now };
+      await saveState();
+      return {
+        reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
     }
 
-    // Phase 2: Material / Fotos
+    if (state.pending?.type === "closing_day" && intent === "cancel") {
+      state.mode = "arbeitet";
+      state.pending = null;
+      await saveState();
+      return {
+        reply: "Tagesabschluss abgebrochen. Weiter gehts!",
+        buttons: [],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "closing_day" && intent === "change") {
+      state.pending = { type: "ask_correction", createdAt: now };
+      await saveState();
+      return {
+        reply: "Welche Zeit oder Baustelle soll geaendert werden?",
+        buttons: [],
+        state,
+      };
+    }
+
     if (state.pending?.type === "closing_materials") {
       const hasMaterials = intent === "yes";
       state.pending = { type: "closing_regie", hasMaterials, createdAt: now };
@@ -1183,7 +1183,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       };
     }
 
-    // Phase 3: Regie + speichern
     if (state.pending?.type === "closing_regie") {
       const isRegie = intent === "yes";
       const hasMaterials = state.pending?.hasMaterials || false;
@@ -1220,7 +1219,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         (!t.jobId || String(t.jobId) === String(current?.jobId))
       );
       return {
-        reply: `Tagesabschluss gespeichert. Danke und schönen Abend! 👋`,
+        reply: `Tag gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
         buttons: [],
         state,
       };
@@ -1274,10 +1273,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Status", "Start"],
       state,
     };
-    } catch (e) {
-      console.error(`[Kristine] handleMessage Error for emp=${employeeId}:`, e?.message || e, e?.stack);
-      throw e;
-    }
   }
 
   // ===== MORNING REMINDERS ===== 
