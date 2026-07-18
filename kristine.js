@@ -349,16 +349,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
   // ===== STATE DETERMINATION FROM TIME-EVENTS =====
   // Bestimmt den aktuellen Zustand aus heutigen Time-Events des Mitarbeiters
   async function getCurrentStateFromTimeEvents(empId, date) {
-    const timeEventsPath = path.join(dataDir, "_kristine", "time-events.jsonl");
     let events = [];
     try {
-      const content = await fs.promises.readFile(timeEventsPath, "utf8");
-      events = content
-        .split("\n")
-        .filter(l => l.trim())
-        .map(l => {
-          try { return JSON.parse(l); } catch { return null; }
-        })
+      const allEvents = await readJson(TIME_EVENTS, []);
+      events = allEvents
         .filter(e => e && String(e.employeeId) === String(empId) && e.date === date && e.at && /^\d{2}:\d{2}$/.test(e.at))
         .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
     } catch {}
@@ -401,16 +395,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
 
   // Liest time-events nur für heutiges Datum + employeeId, baut Blöcke
   async function buildDayBlocksFromTimeEvents(empId, date, currentTime) {
-    const timeEventsPath = path.join(dataDir, "_kristine", "time-events.jsonl");
     let events = [];
     try {
-      const content = await fs.promises.readFile(timeEventsPath, "utf8");
-      events = content
-        .split("\n")
-        .filter(l => l.trim())
-        .map(l => {
-          try { return JSON.parse(l); } catch { return null; }
-        })
+      const allEvents = await readJson(TIME_EVENTS, []);
+      events = allEvents
         .filter(e => e && String(e.employeeId) === String(empId) && e.date === date)
         .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
     } catch {}
