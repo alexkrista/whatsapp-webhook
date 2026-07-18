@@ -132,44 +132,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return idx >= 0 ? dayAssignments[idx + 1] || null : null;
   }
 
-  function findMatchingAssignments(input, allAssignments) {
-    const normalized = normalizeText(input);
-    const matches = [];
-    
-    // Deduplizierung: Speichere Matches als Set von jobId um Duplikate zu vermeiden
-    const seen = new Set();
-    
-    for (const a of allAssignments) {
-      if (seen.has(a.jobId)) continue;
-      
-      const jobId = normalizeText(a.jobId);
-      const jobName = normalizeText(a.jobName || "");
-      const city = normalizeText(a.city || "");
-      
-      // Exakte Matches
-      if (jobId === normalized || jobName === normalized || city === normalized) {
-        matches.push(a);
-        seen.add(a.jobId);
-        continue;
-      }
-      
-      // Präfix-Matches (z.B. "ish" matches "ish_lochau")
-      if (jobId.startsWith(normalized) || jobName.startsWith(normalized)) {
-        matches.push(a);
-        seen.add(a.jobId);
-        continue;
-      }
-      
-      // Contains-Matches
-      if (jobId.includes(normalized) || jobName.includes(normalized) || city.includes(normalized)) {
-        matches.push(a);
-        seen.add(a.jobId);
-      }
-    }
-    
-    return matches;
-  }
-
   function assignmentLabel(a) {
     if (!a) return "keine Baustelle";
     return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
@@ -185,6 +147,86 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       finished_day: "Feierabend",
     };
     return map[state?.mode] || map.idle;
+  }
+
+  async function findBuildingSites() {
+    try {
+      const entries = await fsp.readdir(dataDir, { withFileTypes: true });
+      const sites = [];
+      
+      for (const entry of entries) {
+        // Ignoriere Systemordner
+        if (entry.isDirectory() && !entry.name.startsWith("_")) {
+          const siteId = entry.name;
+          const metaPath = path.join(dataDir, siteId, ".meta.json");
+          
+          let siteName = siteId;
+          let siteCity = "";
+          
+          // Versuche .meta.json zu lesen
+          try {
+            const meta = await readJson(metaPath, null);
+            if (meta?.name) siteName = meta.name;
+            if (meta?.city) siteCity = meta.city;
+          } catch {
+            // .meta.json existiert nicht, nutze nur siteId
+          }
+          
+          sites.push({
+            siteId,
+            name: siteName,
+            city: siteCity,
+          });
+        }
+      }
+      
+      return sites;
+    } catch {
+      return [];
+    }
+  }
+
+  async function findMatchingBuildingSites(input, buildingSites) {
+    const normalized = normalizeText(input);
+    
+    // Sammle Matches nach Priorität und dedupliziere nach siteId
+    const exactMatchesBySiteId = {};    // siteId -> site
+    const prefixMatchesBySiteId = {};   // siteId -> site
+    const containsMatchesBySiteId = {}; // siteId -> site
+    
+    for (const site of buildingSites) {
+      const siteIdNorm = normalizeText(site.siteId);
+      const nameNorm = normalizeText(site.name);
+      const cityNorm = normalizeText(site.city);
+      
+      // Exakte Matches (höchste Priorität): siteId, name oder city
+      if (siteIdNorm === normalized || nameNorm === normalized || cityNorm === normalized) {
+        if (!exactMatchesBySiteId[site.siteId]) {
+          exactMatchesBySiteId[site.siteId] = site;
+        }
+      }
+      // Präfix-Matches (mittlere Priorität): siteId oder name beginnt mit Eingabe
+      else if (siteIdNorm.startsWith(normalized) || nameNorm.startsWith(normalized)) {
+        if (!prefixMatchesBySiteId[site.siteId]) {
+          prefixMatchesBySiteId[site.siteId] = site;
+        }
+      }
+      // Contains-Matches (niedrigste Priorität): siteId, name oder city enthält Eingabe
+      else if (siteIdNorm.includes(normalized) || nameNorm.includes(normalized) || cityNorm.includes(normalized)) {
+        if (!containsMatchesBySiteId[site.siteId]) {
+          containsMatchesBySiteId[site.siteId] = site;
+        }
+      }
+    }
+    
+    // Rückgabe mit Priorität: Nutze nur die beste Ebene
+    if (Object.keys(exactMatchesBySiteId).length > 0) {
+      return Object.values(exactMatchesBySiteId);
+    }
+    if (Object.keys(prefixMatchesBySiteId).length > 0) {
+      return Object.values(prefixMatchesBySiteId);
+    }
+    return Object.values(containsMatchesBySiteId);
   }
 
   async function getBootstrap() {
@@ -263,8 +305,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
       state.pending = null;
       
-      // Versuchen, eine Baustelle zu erkennen (in ALLEN assignments, nicht nur heute)
-      const matches = findMatchingAssignments(text, assignments);
+      // Suche in allen Baustellen im System (nicht nur in Mitarbeiter-Einteilungen)
+      const buildingSites = await findBuildingSites();
+      const matches = await findMatchingBuildingSites(text, buildingSites);
       
       if (matches.length === 1) {
         // Genau eine Baustelle erkannt - neue Tageseinteilung erstellen und speichern
@@ -272,13 +315,13 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         const newAssignment = {
           id: String(`a_${Date.now()}_${Math.random().toString(36).slice(2)}`),
           date: today,
-          jobId: matched.jobId,
-          jobName: matched.jobName || "",
+          jobId: matched.siteId,
+          jobName: matched.name || "",
           city: matched.city || "",
-          address: matched.address || "",
+          address: "",
           employeeId: String(employeeId),
           employeeName: state.employeeName,
-          vehicle: matched.vehicle || "",
+          vehicle: "",
           from: "",
           to: "",
           note: `Vom Mitarbeiter erkannt: ${text}`,
@@ -297,7 +340,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           employeeId,
           employeeName: state.employeeName,
           date: today,
-          jobId: matched.jobId,
+          jobId: matched.siteId,
           detail: assignmentLabel(newAssignment),
         });
         return {
@@ -309,12 +352,12 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       }
       
       if (matches.length > 1) {
-        // Mehrere Baustellen passen - Auswahlliste später implementieren
+        // Mehrere Baustellen passen - Auswahlliste anbieten
         state.pending = { type: "ask_actual_assignment", createdAt: now };
         await saveState();
         return {
-          reply: `Mehrere Baustellen passen. Welche meinst du: ${matches.map(m => assignmentLabel(m)).join(", ")}?`,
-          buttons: matches.slice(0, 3).map(m => m.jobName || `#${m.jobId}`),
+          reply: `Mehrere Baustellen passen. Welche meinst du: ${matches.map(m => `${m.name || m.siteId}${m.city ? " (" + m.city + ")" : ""}`).join(", ")}?`,
+          buttons: matches.slice(0, 3).map(m => m.name || m.siteId),
           needsOfficeReview: true,
           state,
         };
@@ -331,7 +374,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         detail: String(text),
       });
       return {
-        reply: `Baustelle nicht eindeutig erkannt. Ich habe „${String(text).trim()}" als Abweichung vorgemerkt.`,
+        reply: `Baustelle nicht erkannt. Ich habe „${String(text).trim()}" als Abweichung vorgemerkt.`,
         buttons: ["Start"],
         needsOfficeReview: true,
         state,
