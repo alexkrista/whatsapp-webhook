@@ -1109,8 +1109,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
           state,
         };
       }
-      const next = null; // VERALTET: kein next-Wechsel mehr
-      if (false && next) { // VERALTET
+      const next = nextAssignment(dayAssignments, current);
+      addTimeline("site_finished", `${assignmentLabel(current)} fertig`, current);
+      if (next) {
         state.mode = "finished_site";
         state.pending = {
           type: "finish_choice",
@@ -1125,59 +1126,33 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
         };
       }
       
-      // Tagesuebersicht anzeigen
-      const { text: daySummaryText } = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
+      // Neue Logik: Tagesübersicht anzeigen mit buildDayBlocksFromTimeEvents
+      const daySummary = await buildDayBlocksFromTimeEvents(employeeId, today, actualTime);
       state.pending = {
-        type: "closing_day",
+        type: "review_day_summary",
         createdAt: now,
       };
-      state.mode = "closing_day";
       await saveState();
       return {
-        reply: `Heute war:\n\n${daySummaryText}\n\nPasst das?`,
-        buttons: ["Passt", "Aendern", "Abbrechen"],
+        reply: `Heute war:\n${daySummary}\n\nPasst das?`,
+        buttons: ["Passt"],
         state,
       };
     }
 
-    // ===== Tagesabschluss Dialog =====
-
-    // Phase 1: Passt / Abbrechen / Aendern
-    if (state.pending?.type === "closing_day") {
-      if (intent === "yes") {
-        state.pending = { type: "closing_materials", createdAt: now };
-        await saveState();
-        return {
-          reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
-          buttons: ["Ja", "Nein"],
-          state,
-        };
-      }
-      if (intent === "cancel") {
-        state.mode = "arbeitet";
-        state.pending = null;
-        await saveState();
-        return {
-          reply: "Tagesabschluss abgebrochen. Weiter gehts!",
-          buttons: [],
-          state,
-        };
-      }
-      if (intent === "change") {
-        state.pending = { type: "ask_correction", createdAt: now };
-        await saveState();
-        return {
-          reply: "Welche Zeit oder Baustelle soll geaendert werden?",
-          buttons: [],
-          state,
-        };
-      }
+    if (state.pending?.type === "review_day_summary" && intent === "yes") {
+      state.pending = { type: "review_materials", createdAt: now };
+      await saveState();
+      return {
+        reply: "Hast du heute noch Material verwendet oder Fotos ergaenzt?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
     }
 
-    // Phase 2: Material / Fotos
-    if (state.pending?.type === "closing_materials") {
-      const hasMaterials = intent === "yes";
-      state.pending = { type: "closing_regie", hasMaterials, createdAt: now };
+    if (state.pending?.type === "review_materials" && intent === "yes") {
+      const hasMaterials = true;
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
       await saveState();
       return {
         reply: "Gab es heute Regiearbeiten?",
@@ -1186,27 +1161,54 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, sendWhatsApp,
       };
     }
 
-    // Phase 3: Regie + speichern
-    if (state.pending?.type === "closing_regie") {
+    if (state.pending?.type === "review_materials" && intent === "no") {
+      const hasMaterials = false;
+      state.pending = { type: "review_regie", createdAt: now, hasMaterials };
+      await saveState();
+      return {
+        reply: "Gab es heute Regiearbeiten?",
+        buttons: ["Ja", "Nein"],
+        state,
+      };
+    }
+
+    if (state.pending?.type === "review_regie" && (intent === "yes" || intent === "no")) {
       const isRegie = intent === "yes";
       const hasMaterials = state.pending?.hasMaterials || false;
-      state.mode = "idle";
+      
+      state.mode = "finished_day";
       state.pending = null;
       addTimeline("day_finished", "Feierabend", current);
       await saveState();
+      await appendTimeEvent({
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "ende",
+        at: actualTime,
+        jobId: current?.jobId || null,
+        jobName: current?.jobName || "",
+        createdAt: now,
+        hasMaterials,
+        isRegie,
+      });
       await appendEvent({
         type: "day_finished",
         employeeId,
         employeeName: state.employeeName,
         date: today,
         jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
         time: actualTime,
         hasMaterials,
-        hasRegie: isRegie,
+        isRegie,
       });
+      const openTasks = tasks.filter(t =>
+        String(t.assigneeId) === String(employeeId) &&
+        t.status !== "done" &&
+        (!t.jobId || String(t.jobId) === String(current?.jobId))
+      );
       return {
-        reply: "Tagesabschluss gespeichert. Schoenen Feierabend!",
+        reply: `Tag gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
         buttons: [],
         state,
       };
