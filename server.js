@@ -1222,6 +1222,9 @@ function cleanWhatsAppButtons(buttons) {
     else if (lower.includes("fertig")) id = "fertig";
     else if (lower.includes("navigation")) id = "navigation";
     else if (lower.includes("baustelle wechseln") || lower === "wechseln") id = "baustelle_wechseln";
+    else if (lower === "passt") id = "passt";
+    else if (lower === "ändern" || lower === "aendern") id = "aendern";
+    else if (lower === "abbrechen") id = "abbrechen";
     return { id, title: label || `Option ${index + 1}` };
   }).filter((button) => button.title);
 }
@@ -1362,7 +1365,66 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // 3) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
+      // 3) Medien im laufenden Tagesabschluss (Material, Fotos, Regie)
+      if (!protocolSite && ["image", "audio", "voice"].includes(msg.type)) {
+        const employee = await employeeFromWhatsAppSender(sender);
+        if (employee) {
+          try {
+            const pending = await kristine.getPendingState(employee.id);
+            const acceptsMedia = ["collect_material", "collect_photos", "collect_regie"].includes(pending?.type);
+            if (acceptsMedia) {
+              const mediaId = msg.image?.id || msg.audio?.id || msg.voice?.id || null;
+              if (mediaId) {
+                const { buf, mime } = await downloadWhatsAppMedia(mediaId);
+                const safeEmployee = String(employee.id).replace(/[^A-Za-z0-9_-]/g, "_");
+                const reviewDir = path.join(DATA_DIR, "_kristine", "review-media", date, safeEmployee);
+                await ensureDir(reviewDir);
+                const isImage = msg.type === "image";
+                const ext = isImage ? ".jpg" : ".ogg";
+                const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}${ext}`;
+                const fullPath = path.join(reviewDir, filename);
+                await fsp.writeFile(fullPath, buf);
+
+                let transcript = "";
+                if (!isImage && OPENAI_API_KEY) {
+                  try {
+                    transcript = await transcribeAudio({
+                      audioBuffer: buf,
+                      filename,
+                      mimeType: mime || "audio/ogg",
+                    });
+                    try { transcript = await polishGermanTranscript(transcript); } catch {}
+                  } catch (e) {
+                    console.error("❌ Tagesabschluss-Audio konnte nicht transkribiert werden:", e?.message || e);
+                  }
+                }
+
+                const result = await kristine.handleMedia({
+                  employeeId: employee.id,
+                  employeeName: employee.name,
+                  date,
+                  mediaType: isImage ? "image" : "audio",
+                  file: path.relative(DATA_DIR, fullPath).replace(/\\/g, "/"),
+                  transcript,
+                });
+                if (result?.handled) {
+                  await sendWhatsAppKristineReply({
+                    phoneNumberId,
+                    to: sender,
+                    reply: result.reply,
+                    buttons: result.buttons,
+                  });
+                  continue;
+                }
+              }
+            }
+          } catch (e) {
+            console.error("❌ Kristine Tagesabschluss-Medium fehlgeschlagen:", e?.message || e);
+          }
+        }
+      }
+
+      // 4) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
       const kristineText = whatsappTextFromMessage(msg);
       if (!protocolSite && kristineText) {
         const employee = await employeeFromWhatsAppSender(sender);
