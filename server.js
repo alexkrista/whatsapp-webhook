@@ -1208,7 +1208,7 @@ async function employeeFromWhatsAppSender(sender) {
 
 function cleanWhatsAppButtons(buttons) {
   const source = Array.isArray(buttons) ? buttons : [];
-  return source.slice(0, 3).map((title, index) => {
+  return source.slice(0, 10).map((title, index) => {
     const label = String(title || "").trim().slice(0, 20);
     let id = `kristine_${index}`;
     const lower = label.toLowerCase();
@@ -1221,6 +1221,7 @@ function cleanWhatsAppButtons(buttons) {
     else if (lower === "weiter") id = "weiter";
     else if (lower.includes("fertig")) id = "fertig";
     else if (lower.includes("navigation")) id = "navigation";
+    else if (lower.includes("baustelle wechseln") || lower === "wechseln") id = "baustelle_wechseln";
     return { id, title: label || `Option ${index + 1}` };
   }).filter((button) => button.title);
 }
@@ -1230,30 +1231,56 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   if (!phoneNumberId) throw new Error("WhatsApp phone_number_id missing in webhook metadata");
 
   const cleanedButtons = cleanWhatsAppButtons(buttons);
-  const payload = cleanedButtons.length
-    ? {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: String(to),
-        type: "interactive",
-        interactive: {
-          type: "button",
-          body: { text: String(reply || "").slice(0, 1024) },
-          action: {
-            buttons: cleanedButtons.map((button) => ({
-              type: "reply",
-              reply: { id: button.id, title: button.title },
+  let payload;
+  if (cleanedButtons.length > 3) {
+    // WhatsApp erlaubt höchstens drei direkte Antwortbuttons. Bei vier oder mehr
+    // Aktionen verwenden wir deshalb eine kompakte Auswahlliste.
+    payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: String(to),
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: String(reply || "").slice(0, 1024) },
+        action: {
+          button: "Aktion wählen",
+          sections: [{
+            title: "Arbeitszeit",
+            rows: cleanedButtons.map((button) => ({
+              id: button.id,
+              title: button.title,
             })),
-          },
+          }],
         },
-      }
-    : {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: String(to),
-        type: "text",
-        text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
-      };
+      },
+    };
+  } else if (cleanedButtons.length) {
+    payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: String(to),
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: String(reply || "").slice(0, 1024) },
+        action: {
+          buttons: cleanedButtons.map((button) => ({
+            type: "reply",
+            reply: { id: button.id, title: button.title },
+          })),
+        },
+      },
+    };
+  } else {
+    payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: String(to),
+      type: "text",
+      text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
+    };
+  }
 
   return fetchJson(`https://graph.facebook.com/v22.0/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: "POST",
