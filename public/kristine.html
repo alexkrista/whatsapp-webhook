@@ -30,7 +30,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 .planning-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.planning-heading h3{min-width:220px;text-align:center}.planning-arrow{width:42px;min-width:42px;padding:8px 10px}.planning-today{width:auto;padding:8px 12px}@media(max-width:700px){.planning-heading{width:100%;justify-content:center}.planning-heading h3{order:-1;width:100%;min-width:0}.planning-today{min-width:78px}}
 
-.planning-summary{display:inline-flex;align-items:center;gap:6px;background:#eef7ee;color:#145829;border:1px solid #b8d4bc;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;margin-left:6px}.planning-summary.warn{background:#fff2cf;color:#765300;border-color:#efd28b}.planning-summary.full{background:#d9f1df;color:#145829}.dropzone{transition:box-shadow .15s ease,background .15s ease}.dropzone.dragover{box-shadow:inset 0 0 0 3px #27713d;background:#e5f2e7}.assignment[draggable="true"],.monthitem[draggable="true"]{cursor:grab}.assignment.dragging,.monthitem.dragging{opacity:.45}.copybtn{background:#fff;color:#111;border-color:#ccc;padding:7px 9px}.monthitem .mini-actions{display:flex;gap:4px;margin-top:5px}.monthitem .mini-actions button{padding:3px 6px;border-radius:6px;font-size:11px}.dayhead-count{float:right}.planning-hint{font-size:12px;color:#666;margin-top:8px}
+.planning-summary{display:inline-flex;align-items:center;gap:6px;background:#eef7ee;color:#145829;border:1px solid #b8d4bc;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;margin-left:6px}.planning-summary.warn{background:#fff2cf;color:#765300;border-color:#efd28b}.planning-summary.full{background:#d9f1df;color:#145829}.assignment.type-urlaub,.monthitem.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.assignment.type-arzt,.monthitem.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.assignment.type-krank,.monthitem.type-krank{border-left-color:#c53b3b;background:#fff0f0}.assignment.type-aufraeumen,.monthitem.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.assignment.type-werkstatt,.monthitem.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.cardtype-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;border-radius:999px;padding:3px 7px;background:rgba(255,255,255,.8);margin-bottom:4px}.hours-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:800;color:#333;background:#f4f4f4;border-radius:999px;padding:3px 7px;margin-left:4px}.dropzone{transition:box-shadow .15s ease,background .15s ease}.dropzone.dragover{box-shadow:inset 0 0 0 3px #27713d;background:#e5f2e7}.assignment[draggable="true"],.monthitem[draggable="true"]{cursor:grab}.assignment.dragging,.monthitem.dragging{opacity:.45}.copybtn{background:#fff;color:#111;border-color:#ccc;padding:7px 9px}.monthitem .mini-actions{display:flex;gap:4px;margin-top:5px}.monthitem .mini-actions button{padding:3px 6px;border-radius:6px;font-size:11px}.dayhead-count{float:right}.planning-hint{font-size:12px;color:#666;margin-top:8px}
 </style>
 </head>
 <body>
@@ -55,10 +55,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <h3>Baustellenkarte einteilen</h3>
       <div class="formgrid">
         <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning()"></div>
-        <div class="full"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
+        <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="arzt">🩺 Arzt</option><option value="krank">🔴 Krank</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option></select></div>
+        <div class="full" id="jobPickerRow"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
         <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
         <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
         <div><label>Bis</label><input id="aTo" type="time" value="17:00"></div>
+        <div><label>Stunden</label><input id="aHours" type="number" min="0" max="24" step="0.1" value="7.8"></div>
         <div><label>Fahrzeug</label><select id="aVehicleSelect"><option value="">– kein Fahrzeug –</option></select></div>
         <div class="full"><label>Mitarbeiter</label><div id="employeePicker" class="employee-picker"><span class="small">Mitarbeiter werden geladen …</span></div></div>
         <div class="full"><label>Hinweis</label><input id="aNote" placeholder="z. B. Schlüssel beim Chef"></div>
@@ -226,16 +228,34 @@ function selectJob(){
   const address=jobAddress(j);
   selectedJobInfo.innerHTML=`<strong>#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}</strong><br>${esc(address||'Adresse noch nicht hinterlegt')}${j.contactName?`<br>👤 ${esc(j.contactName)}${j.contactPhone?' · '+esc(j.contactPhone):''}`:''}<br><span class="small">Status: ${esc(j.status||'Angebot')}</span>`;
 }
+function selectCardType(){
+  const type=document.getElementById('aCardType').value||'site';
+  const special=type!=='site';
+  document.getElementById('jobPickerRow').style.display=special?'none':'';
+  document.getElementById('selectedJobInfo').textContent=special?`${cardMeta({cardType:type}).icon} ${cardMeta({cardType:type}).label}-Karte: Mitarbeiter, Zeit und Stunden auswählen.`:'Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.';
+  if(special){aJobSelect.value='';aVehicleSelect.value='';}
+  if(['urlaub','krank'].includes(type)){aFrom.value='07:00';aTo.value='17:00';aHours.value='7.8';}
+}
+
 function selectedPlanningDate(){return document.getElementById('aDate').value||data.today}
 function isoWeekNumber(value){const d=new Date((typeof value==='string'?value:iso(value))+'T12:00:00');const utc=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1));return Math.ceil((((utc-yearStart)/86400000)+1)/7)}
 function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
+const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},arzt:{label:'Arzt',icon:'🩺'},krank:{label:'Krank',icon:'🔴'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'}};
+function cardTypeOf(a){return a.cardType||'site'}
+function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
+function cardHours(a){const explicit=Number(a.hours);if(Number.isFinite(explicit)&&explicit>=0)return explicit;const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);return 0}
+function formatHours(value){return Number(value||0).toLocaleString('de-AT',{minimumFractionDigits:1,maximumFractionDigits:2})+' h'}
 function plannedEmployeeCount(date){return new Set(data.assignments.filter(a=>a.date===date).map(a=>String(a.employeeId))).size}
-function planningSummary(date,short=false){const count=plannedEmployeeCount(date),total=masterEmployees.length;const cls=count>=total&&total?'full':'warn';return `<span class="planning-summary ${cls}" title="${count} von ${total} aktiven Mitarbeitern eingeplant">👷 ${count}/${total} MA${short?'':''}</span>`}
+function plannedHoursForDate(date){return data.assignments.filter(a=>a.date===date).reduce((sum,a)=>sum+cardHours(a),0)}
+function planningSummary(date,short=false){const count=plannedEmployeeCount(date),total=masterEmployees.length,hours=plannedHoursForDate(date);const cls=count>=total&&total?'full':'warn';return `<span class="planning-summary ${cls}" title="${count} von ${total} aktiven Mitarbeitern eingeplant · ${formatHours(hours)} geplant">👷 ${count}/${total} MA · ⏱ ${formatHours(hours)}</span>`}
 function assignmentCard(a,compact=false){
-  const sameJobCount=new Set(data.assignments.filter(x=>x.date===a.date&&String(x.jobId)===String(a.jobId)).map(x=>String(x.employeeId))).size;
+  const type=cardTypeOf(a),meta=cardMeta(a),special=type!=='site';
+  const sameJobCount=special?new Set(data.assignments.filter(x=>x.date===a.date&&cardTypeOf(x)===type).map(x=>String(x.employeeId))).size:new Set(data.assignments.filter(x=>x.date===a.date&&String(x.jobId)===String(a.jobId)&&cardTypeOf(x)==='site').map(x=>String(x.employeeId))).size;
+  const title=special?`${meta.icon} ${meta.label}`:`#${esc(a.jobId)} · ${esc(a.jobName)}`;
+  const info=special?`${sameJobCount} MA mit ${esc(meta.label)}`:`${sameJobCount} MA auf dieser Baustelle`;
   const drag=`draggable="true" data-assignment-id="${esc(a.id)}" ondragstart="dragAssignmentStart(event,'${a.id}')" ondragend="dragAssignmentEnd(event)"`;
-  if(compact)return `<div class="monthitem" ${drag}><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')}</div><div class="small">${sameJobCount} MA auf Baustelle</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
-  return `<div class="assignment" ${drag}><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''} · ${sameJobCount} MA auf dieser Baustelle</span><div class="actions">${a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
+  if(compact)return `<div class="monthitem type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')} <span class="hours-badge">⏱ ${formatHours(cardHours(a))}</span></div><div class="small">${info}</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
+  return `<div class="assignment type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)} <span class="hours-badge">⏱ ${formatHours(cardHours(a))}</span></span><br><span class="small">${special?esc(a.note||meta.label):esc(a.city)+(a.vehicle?' · '+esc(a.vehicle):'')} · ${info}</span><div class="actions">${!special&&a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
 }
 let draggedAssignmentId=null;
 function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentId;event.currentTarget.classList.add('dragging');event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('text/plain',assignmentId)}
@@ -274,16 +294,21 @@ function renderPlanning(){updatePlanningButtons();const target=document.getEleme
   const days=weekDays();const weekCount=new Set(data.assignments.filter(a=>days.includes(a.date)).map(a=>String(a.employeeId))).size;title.innerHTML='Wochenplanung – KW '+isoWeekNumber(days[0])+' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit'})+' bis '+new Date(days[4]+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'})+` <span class="planning-summary ${weekCount>=masterEmployees.length&&masterEmployees.length?'full':'warn'}">👷 ${weekCount}/${masterEmployees.length} MA diese Woche</span>`;target.innerHTML=`<div class="week">${days.map(day=>`<div class="daycol dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningDrop(event,'${day}')"><div class="dayhead">KW ${isoWeekNumber(day)} · ${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<span class="dayhead-count">${planningSummary(day,true)}</span></div>${data.assignments.filter(a=>a.date===day).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||''))).map(a=>assignmentCard(a)).join('')||'<span class="small">frei · Karte hierher ziehen</span>'}</div>`).join('')}</div><div class="planning-hint">Karte ziehen = verschieben · Strg/Alt beim Ziehen = kopieren · ⧉ = morgen / Restwoche / nächste Woche / Datum</div>`}
 function renderWeek(){renderPlanning()}
 function addAssignment(){
+  const type=document.getElementById('aCardType').value||'site';
+  const special=type!=='site';
   const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
   const selected=[...document.querySelectorAll('.aEmployeeCheck:checked')];
-  if(!j){alert('Bitte eine Baustelle auswählen.');return}
+  if(!special&&!j){alert('Bitte eine Baustelle auswählen.');return}
   if(!selected.length){alert('Bitte mindestens einen Mitarbeiter auswählen.');return}
-  const vehicle=aVehicleSelect.value;
+  const vehicle=special?'':aVehicleSelect.value;
+  const meta=CARD_TYPES[type]||CARD_TYPES.site;
+  const hours=Math.max(0,Number(document.getElementById('aHours').value||0));
   for(const el of selected){
     data.assignments.push({
-      id:id(),date:aDate.value,jobId:String(j.jobId),jobName:j.name||('#'+j.jobId),
-      city:j.city||'',address:jobAddress(j),employeeId:el.value,employeeName:el.dataset.name||el.value,
-      vehicle,from:aFrom.value,to:aTo.value,note:aNote.value.trim()
+      id:id(),date:aDate.value,cardType:type,
+      jobId:special?`__${type}__`:String(j.jobId),jobName:special?meta.label:(j.name||('#'+j.jobId)),
+      city:special?'':(j.city||''),address:special?'':jobAddress(j),employeeId:el.value,employeeName:el.dataset.name||el.value,
+      vehicle,from:aFrom.value,to:aTo.value,hours,note:aNote.value.trim()||meta.label
     });
   }
   document.querySelectorAll('.aEmployeeCheck').forEach(x=>x.checked=false);
