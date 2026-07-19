@@ -1061,6 +1061,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         from: String(a.from || "").slice(0, 5),
         to: String(a.to || "").slice(0, 5),
         note: String(a.note || "").trim().slice(0, 500),
+        cardType: ["site", "urlaub", "arzt", "krank", "aufraeumen", "werkstatt"].includes(String(a.cardType || "site")) ? String(a.cardType || "site") : "site",
+        hours: Math.max(0, Math.min(24, Number(a.hours || 0))),
       })).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
       await writeJson(ASSIGNMENTS, clean);
       await appendEvent({ type: "planning_saved", detail: `${clean.length} Einteilungen gespeichert`, source: "office" });
