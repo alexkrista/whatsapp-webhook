@@ -14,7 +14,7 @@ button{background:#111;color:#fff;cursor:pointer}button.secondary{background:#ff
 .card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 15px rgba(0,0,0,.07)}.card h2,.card h3{margin-top:0}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.formgrid .full{grid-column:1/-1}
 label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textarea{width:100%;min-width:0}textarea{min-height:70px}
-.week{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;overflow:auto;padding-bottom:5px}.daycol{background:#ebe8e1;border-radius:14px;padding:10px;min-height:260px}
+.week{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;overflow:auto;padding-bottom:5px}.daycol{background:#ebe8e1;border-radius:14px;padding:10px;min-height:260px}.dayview{background:#ebe8e1;border-radius:14px;padding:12px;min-height:220px}.monthgrid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:8px;overflow:auto}.monthday{background:#f4f2ed;border:1px solid #e2ded5;border-radius:12px;padding:8px;min-height:120px}.monthday.outside{opacity:.42}.monthdate{font-weight:800;margin-bottom:6px}.monthitem{background:#fff;border-left:4px solid #27713d;border-radius:8px;padding:6px;margin:5px 0;font-size:12px}.monthhead{font-size:12px;font-weight:800;text-align:center;color:#666;padding:4px}
 .dayhead{font-weight:800;margin-bottom:8px;position:sticky;top:0}.assignment{background:#fff;border-left:5px solid #27713d;border-radius:10px;padding:10px;margin:8px 0;box-shadow:0 1px 6px rgba(0,0,0,.07)}
 .assignment strong{display:block}.small{font-size:12px;color:#707070}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .chatwrap{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:16px}.phone{background:#e9e4db;border-radius:28px;padding:12px;box-shadow:0 12px 40px rgba(0,0,0,.14)}
@@ -35,7 +35,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </header>
 <main>
 <nav>
-  <button onclick="showTab('planning')">📅 Wochenplanung</button>
+  <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('chat')">💬 Kristine-Chat</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
@@ -49,7 +49,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     <div class="card">
       <h3>Baustellenkarte einteilen</h3>
       <div class="formgrid">
-        <div><label>Datum</label><input id="aDate" type="date"></div>
+        <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning()"></div>
         <div class="full"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
         <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
         <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
@@ -67,7 +67,17 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button class="danger" onclick="clearPlanning()">Planung leeren</button>
     </div>
   </div>
-  <div class="card" style="margin-top:14px"><h3>Wochenansicht – Baustellenkarten</h3><div id="week" class="week"></div></div>
+  <div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 id="planningTitle" style="margin:0">Wochenansicht – Baustellenkarten</h3>
+      <div class="actions" style="margin:0">
+        <button id="viewDayBtn" class="secondary" onclick="setPlanningView('day')">Tag</button>
+        <button id="viewWeekBtn" onclick="setPlanningView('week')">Woche</button>
+        <button id="viewMonthBtn" class="secondary" onclick="setPlanningView('month')">Monat</button>
+      </div>
+    </div>
+    <div id="planningView" style="margin-top:12px"></div>
+  </div>
 </section>
 
 <section id="chat" class="tab">
@@ -144,7 +154,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
-let data={assignments:[],states:{},tasks:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[];
+let data={assignments:[],states:{},tasks:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[];let planningView='week';
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -206,8 +216,20 @@ function selectJob(){
   const address=jobAddress(j);
   selectedJobInfo.innerHTML=`<strong>#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}</strong><br>${esc(address||'Adresse noch nicht hinterlegt')}${j.contactName?`<br>👤 ${esc(j.contactName)}${j.contactPhone?' · '+esc(j.contactPhone):''}`:''}<br><span class="small">Status: ${esc(j.status||'Angebot')}</span>`;
 }
-function weekDays(){const d=new Date((document.getElementById('aDate').value||data.today)+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
-function renderWeek(){const days=weekDays();document.getElementById('week').innerHTML=days.map(day=>`<div class="daycol"><div class="dayhead">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>${data.assignments.filter(a=>a.date===day).map(a=>`<div class="assignment"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions">${a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="danger" onclick="removeAssignment('${a.id}')">×</button></div></div>`).join('')||'<span class="small">frei</span>'}</div>`).join('')}
+function selectedPlanningDate(){return document.getElementById('aDate').value||data.today}
+function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
+function assignmentCard(a,compact=false){return `<div class="${compact?'monthitem':'assignment'}"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong>${compact?'':`<span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions">${a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="danger" onclick="removeAssignment('${a.id}')">×</button></div>`}${compact?`<div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')}</div>`:''}</div>`}
+function setPlanningView(view){planningView=view;renderPlanning()}
+function updatePlanningButtons(){for(const view of ['day','week','month']){const b=document.getElementById('view'+view[0].toUpperCase()+view.slice(1)+'Btn');if(b)b.className=view===planningView?'':'secondary'}}
+function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
+  if(planningView==='day'){
+    const day=selectedPlanningDate();const rows=data.assignments.filter(a=>a.date===day).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));title.textContent='Tagesplanung – '+new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'});target.innerHTML=`<div class="dayview">${rows.map(a=>assignmentCard(a)).join('')||'<span class="small">Für diesen Tag ist noch niemand eingeteilt.</span>'}</div>`;return;
+  }
+  if(planningView==='month'){
+    const base=new Date(selectedPlanningDate()+'T12:00:00');const year=base.getFullYear(),month=base.getMonth();title.textContent='Monatsplanung – '+base.toLocaleDateString('de-AT',{month:'long',year:'numeric'});const first=new Date(year,month,1,12);const offset=(first.getDay()+6)%7;const gridStart=new Date(year,month,1-offset,12);const heads=['Mo','Di','Mi','Do','Fr','Sa','So'].map(x=>`<div class="monthhead">${x}</div>`).join('');const days=Array.from({length:42},(_,i)=>{const d=new Date(gridStart);d.setDate(gridStart.getDate()+i);const ds=iso(d);const rows=data.assignments.filter(a=>a.date===ds).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="monthday ${d.getMonth()===month?'':'outside'}"><div class="monthdate">${d.getDate()}</div>${rows.map(a=>assignmentCard(a,true)).join('')}</div>`}).join('');target.innerHTML=`<div class="monthgrid">${heads}${days}</div>`;return;
+  }
+  const days=weekDays();title.textContent='Wochenplanung – '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit'})+' bis '+new Date(days[4]+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'});target.innerHTML=`<div class="week">${days.map(day=>`<div class="daycol"><div class="dayhead">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>${data.assignments.filter(a=>a.date===day).map(a=>assignmentCard(a)).join('')||'<span class="small">frei</span>'}</div>`).join('')}</div>`}
+function renderWeek(){renderPlanning()}
 function addAssignment(){
   const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
   const selected=[...document.querySelectorAll('.aEmployeeCheck:checked')];
