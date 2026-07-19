@@ -68,10 +68,19 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <div class="actions"><button class="green" onclick="addAssignment()">+ Einteilen</button><button class="secondary" onclick="saveAssignments()">Planung speichern</button></div>
     </div>
     <div class="card">
-      <h3>Testdaten</h3>
-      <p class="small">Für den ersten Dialog reichen zwei Einteilungen für denselben Mitarbeiter am selben Tag.</p>
-      <button class="secondary" onclick="seedDemo()">Demo-Tag mit vorhandenen Daten anlegen</button>
-      <button class="danger" onclick="clearPlanning()">Planung leeren</button>
+      <h3>Abwesenheiten & Betrieb</h3>
+      <div class="system-cards">
+        <button class="secondary" style="width:100%;text-align:left">🔵 Urlaub <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🔴 Krank <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🩺 Arzt <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🧹 Aufräumen <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🔧 Werkstatt <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🎓 Schulung <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🚚 Material holen <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">📦 Lager <span style="float:right">0,0 h</span></button>
+        <button class="secondary" style="width:100%;text-align:left">🤝 Besprechung <span style="float:right">0,0 h</span></button>
+      </div>
+      <p class="small" style="margin-top:10px">Nächster Schritt: Karten verhalten sich wie Baustellenkarten und können direkt eingeteilt werden.</p>
     </div>
   </div>
   <div class="card" style="margin-top:14px">
