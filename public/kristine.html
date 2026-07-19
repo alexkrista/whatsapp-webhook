@@ -25,7 +25,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
-.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:17px;font-weight:800}.control-site{font-size:13px;color:#555;margin-top:3px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:flex;justify-content:space-between;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 
 .planning-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.planning-heading h3{min-width:220px;text-align:center}.planning-arrow{width:42px;min-width:42px;padding:8px 10px}.planning-today{width:auto;padding:8px 12px}@media(max-width:700px){.planning-heading{width:100%;justify-content:center}.planning-heading h3{order:-1;width:100%;min-width:0}.planning-today{min-width:78px}}
@@ -360,6 +360,16 @@ function employeeDaySegments(employeeId,today,state){
   return segments;
 }
 function formatAxisHM(minutes){const h=Math.floor(minutes/60),m=minutes%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`}
+function renderAxisLabels(dayStart,dayEnd){
+  const span=Math.max(60,dayEnd-dayStart);
+  const count=span<=10*60?6:span<=15*60?6:7;
+  const labels=[];
+  for(let i=0;i<count;i++){
+    const m=Math.round((dayStart+(span*i/(count-1)))/30)*30;
+    labels.push(`<span style="text-align:${i===0?'left':i===count-1?'right':'center'}">${formatAxisHM(m)}</span>`);
+  }
+  return `<div class="daybar-labels" style="grid-template-columns:repeat(${count},1fr)">${labels.join('')}</div>`;
+}
 function renderDayBar(segments,dayStart,dayEnd){
   const total=Math.max(60,dayEnd-dayStart);
   let cursor=dayStart,html='';
@@ -380,13 +390,29 @@ function renderDayBar(segments,dayStart,dayEnd){
 function renderControl(){
   const today=chatDate.value||data.today;
   const planned=data.assignments.filter(a=>a.date===today);
-  const employeeMap=new Map(planned.map(a=>[String(a.employeeId),a]));
+  const employeeMap=new Map();
+
+  // Im Leitstand immer alle aktiven Mitarbeiter anzeigen – auch ohne Planung oder Status.
+  masterEmployees.forEach(e=>employeeMap.set(String(e.id),{
+    employeeId:String(e.id),employeeName:e.name||String(e.id),jobName:'Keine Baustelle'
+  }));
+  planned.forEach(a=>{
+    const key=String(a.employeeId);
+    if(!employeeMap.has(key))employeeMap.set(key,a);
+  });
   Object.values(data.states||{}).forEach(s=>{
     if(!s?.employeeId)return;
     const key=String(s.employeeId);
-    if(!employeeMap.has(key)) employeeMap.set(key,{employeeId:s.employeeId,employeeName:s.employeeName||s.employeeId,jobName:'Keine Planung'});
+    if(!employeeMap.has(key)) employeeMap.set(key,{employeeId:s.employeeId,employeeName:s.employeeName||s.employeeId,jobName:'Keine Baustelle'});
   });
-  const employees=[...employeeMap.values()];
+
+  const rank={working:1,pause:2,lunch:3,idle:4,finished_site:5,finished_day:6};
+  const employees=[...employeeMap.values()].sort((a,b)=>{
+    const sa=data.states[a.employeeId]?.mode||'idle';
+    const sb=data.states[b.employeeId]?.mode||'idle';
+    return (rank[sa]||99)-(rank[sb]||99)||String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de');
+  });
+
   const unknownCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='assignment_deviation').length,0);
   const regieCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,0);
   const openTaskCount=(data.tasks||[]).filter(t=>t.status!=='done').length;
@@ -396,23 +422,26 @@ function renderControl(){
   if(openTaskCount)alerts.push(`📌 ${openTaskCount} offene Aufgabe${openTaskCount===1?'':'n'}`);
   controlAlerts.style.display=alerts.length?'block':'none';
   controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br>${alerts.join(' · ')}`:'';
-  if(!employees.length){controlList.innerHTML='<span class="small">Für heute ist noch niemand eingeteilt.</span>';return}
+  if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
+
   controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
     const s=data.states[a.employeeId]||{mode:'idle'};
-    const last=s?.timeline?.at(-1),regie=latestRegie(s);
+    const meaningful=(s?.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type));
+    const last=meaningful.at(-1),regie=latestRegie(s);
     const plans=planned.filter(x=>String(x.employeeId)===String(a.employeeId));
     const segments=employeeDaySegments(a.employeeId,today,s);
     const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
     const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
     const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+    const lastWork=[...segments].reverse().find(x=>x.type==='work');
+    const siteName=currentPlan?.jobName||lastWork?.jobName||'Nicht eingeteilt';
     const dayStart=7*60;
     const plannedEnd=Math.max(17*60,...plans.map(x=>hmToMinutes(x.to)||0));
     const lastEvent=Math.max(0,...segments.map(x=>x.to||0));
     const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
     const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
-    const mid=Math.round((dayStart+dayEnd)/120)*60;
     const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
-    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(currentPlan?.jobName||'Keine Baustelle')}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap"><div class="daybar-labels"><span>${formatAxisHM(dayStart)}</span><span>${formatAxisHM(mid)}</span><span>${formatAxisHM(dayEnd)}</span></div><div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>Netto: <strong>${durationText(workMinutes)}</strong></span><span>Pause: <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
   }).join('')}</div>`;
 }
 
