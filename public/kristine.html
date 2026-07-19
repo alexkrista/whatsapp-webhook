@@ -25,6 +25,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
+.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:17px;font-weight:800}.control-site{font-size:13px;color:#555;margin-top:3px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:flex;justify-content:space-between;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
@@ -154,7 +155,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
-let data={assignments:[],states:{},tasks:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[];let planningView='week';
+let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[];let planningView='week';
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -298,15 +299,76 @@ function latestRegie(state){
   const items=(state?.timeline||[]).filter(x=>x.type==='regie_reported');
   return items.length?items[items.length-1]:null;
 }
+function hmToMinutes(value){
+  const m=String(value||'').match(/^(\d{1,2}):(\d{2})$/);
+  return m?Number(m[1])*60+Number(m[2]):null;
+}
+function currentViennaMinutes(){
+  const parts=new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+  return Number(p.hour)*60+Number(p.minute);
+}
+function durationText(minutes){
+  const n=Math.max(0,Math.round(Number(minutes||0)));
+  return `${Math.floor(n/60)} h ${String(n%60).padStart(2,'0')} min`;
+}
+function employeeDaySegments(employeeId,today,state){
+  const rows=(data.timeEvents||[])
+    .filter(x=>String(x.employeeId)===String(employeeId)&&String(x.date)===String(today))
+    .map((x,i)=>({...x,_i:i,_m:hmToMinutes(x.at)}))
+    .filter(x=>x._m!==null)
+    .sort((a,b)=>a._m-b._m||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||a._i-b._i);
+  const segments=[];
+  for(let i=0;i<rows.length;i++){
+    const e=rows[i];
+    let type=null;
+    if(e.type==='start'||e.type==='weiter')type='work';
+    else if(e.type==='pause')type='pause';
+    else if(e.type==='mittag')type='lunch';
+    if(!type)continue;
+    let end=rows[i+1]?rows[i+1]._m:null;
+    if(end===null && ['working','pause','lunch'].includes(state?.mode)) end=currentViennaMinutes();
+    if(end===null||end<e._m)continue;
+    const seg={type,from:e._m,to:end,fromText:e.at,toText:`${String(Math.floor(end/60)).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`,jobId:e.jobId||'',jobName:e.jobName||''};
+    const prev=segments.at(-1);
+    if(prev&&prev.type===seg.type&&prev.to===seg.from&&(type!=='work'||String(prev.jobId||prev.jobName)===String(seg.jobId||seg.jobName))){prev.to=seg.to;prev.toText=seg.toText}else segments.push(seg);
+  }
+  return segments;
+}
+function renderDayBar(segments){
+  const dayStart=7*60,dayEnd=17*60,total=dayEnd-dayStart;
+  let cursor=dayStart,html='';
+  for(const seg of segments){
+    const from=Math.max(dayStart,Math.min(dayEnd,seg.from));
+    const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
+    if(to<=from)continue;
+    if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
+    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':'seg-lunch';
+    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':'Mittag'}`;
+    html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
+    cursor=Math.max(cursor,to);
+  }
+  if(cursor<dayEnd)html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
+  return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
+}
 function renderControl(){
   const today=chatDate.value||data.today;
-  const employees=[...new Map(data.assignments.filter(a=>a.date===today).map(a=>[a.employeeId,a])).values()];
-  controlList.innerHTML=employees.length?`<table class="table"><thead><tr><th>Mitarbeiter</th><th>Plan</th><th>Status</th><th>Regie</th><th>Letzte Aktion</th></tr></thead><tbody>${employees.map(a=>{
-    const s=data.states[a.employeeId], last=s?.timeline?.at(-1), regie=latestRegie(s);
-    const plans=data.assignments.filter(x=>x.date===today&&x.employeeId===a.employeeId);
-    return `<tr><td><strong>${esc(a.employeeName)}</strong></td><td>${plans.map(x=>`${esc(x.from)}–${esc(x.to)} ${esc(x.jobName)}${x.address?` <a class="navbtn" target="_blank" href="${mapsUrl(x.address)}">📍 Navi</a>`:''}`).join('<br><br>')}</td><td><span class="status ${esc(s?.mode||'idle')}">${esc(statusLabel(s?.mode))}</span></td><td>${regie?`<span class="status pause">${esc(regie.detail)}</span>`:'–'}</td><td>${last?esc(last.detail):'–'}</td></tr>`
-  }).join('')}</tbody></table>`:'<span class="small">Für heute ist noch niemand eingeteilt.</span>'
+  const planned=data.assignments.filter(a=>a.date===today);
+  const employees=[...new Map(planned.map(a=>[String(a.employeeId),a])).values()];
+  if(!employees.length){controlList.innerHTML='<span class="small">Für heute ist noch niemand eingeteilt.</span>';return}
+  controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
+    const s=data.states[a.employeeId]||{mode:'idle'};
+    const last=s?.timeline?.at(-1),regie=latestRegie(s);
+    const plans=planned.filter(x=>String(x.employeeId)===String(a.employeeId));
+    const segments=employeeDaySegments(a.employeeId,today,s);
+    const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
+    const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
+    const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+    const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
+    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(currentPlan?.jobName||'Keine Baustelle')}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap"><div class="daybar-labels"><span>07:00</span><span>12:00</span><span>17:00</span></div><div class="daybar">${renderDayBar(segments)}</div></div><div class="control-meta"><span>Netto: <strong>${durationText(workMinutes)}</strong></span><span>Pause: <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+  }).join('')}</div>`;
 }
+
 function addTask(){
   if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
   if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
