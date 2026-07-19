@@ -1,3 +1,21 @@
+# Phase 1.03 – Tagesabschluss
+
+## Neu
+
+- `Fertig` beendet den offenen Arbeits-, Pausen- oder Mittagsblock und zeigt eine kompakte Tagesübersicht.
+- Zeitblöcke werden aus den heutigen `time-events.json`-Einträgen des Mitarbeiters gebildet.
+- Abschlussdialog: `Passt` → Material/Fotos → Regie → Feierabend.
+- `Ändern` nimmt eine Korrekturmeldung für Chef/Büro auf.
+- `Abbrechen` entfernt den vorläufigen Ende-Eintrag und setzt die Arbeitszeit fort.
+- Keine offenen Zeiten, kein `[object Object]` und keine fremden Mitarbeiterdaten in der Übersicht.
+
+## Test
+
+- [x] Start → Pause → Weiter → Fertig
+- [x] Passt → Nein Material/Fotos → Nein Regie
+- [x] Syntaxprüfung `kristine.js`
+- [x] Syntaxprüfung `server.js`
+
 # Build 0014.1 – Fehlerkorrektur Mitarbeitermodus
 
 ## Behoben
@@ -24,3 +42,37 @@
 - Der anschließende Befehl `Start` beginnt auf dieser Baustelle.
 - Die wiederholte Frage „Wo wurdest du eingeteilt?“ wird verhindert.
 - Bei einer abweichenden Baustelle erhält der **Chef** eine WhatsApp-Nachricht.
+# P1.04 – Material, Fotos und Regie-Vormerkung
+
+## Neu
+- Material und Baustellenfotos werden im Tagesabschluss getrennt abgefragt.
+- Material kann per Text, Sprachnachricht oder Foto erfasst werden.
+- Mehrere Materialeinträge sind möglich; Abschluss mit „fertig“.
+- Mehrere Baustellenfotos können hochgeladen werden; Abschluss mit „fertig“.
+- Regie bleibt eine Vormerkung und kann kurz per Text oder Sprache beschrieben werden.
+- Medien werden unter `_kristine/review-media` gespeichert; Einträge unter `day-review-entries.json`.
+
+## Nicht verändert
+- Baustellensuche
+- Start, Pause, Mittag und Weiter
+- Baustellenwechsel
+- Tagesübersicht vor der Bestätigung
+
+## P2.02c – Planung RC1 (2026-07-19)
+
+### Neu
+- Planungskarten lassen sich in Tag-, Wochen- und Monatsansicht per Drag & Drop auf einen anderen Tag verschieben.
+- Mit Strg/Alt beim Ziehen wird eine Karte kopiert statt verschoben.
+- Kopierbutton je Karte: morgen, restliche Werktage, nächste Woche oder frei wählbares Datum.
+- Anzeige der eingeplanten aktiven Mitarbeiter als `x/y MA` pro Tag und für die sichtbare Woche.
+- Anzeige der Mitarbeiterzahl je Baustelle und Tag.
+- Drag & Drop und Kopieren speichern die Planung automatisch.
+
+### Geändert
+- `public/kristine.html`
+- `docs/CHANGELOG.md`
+
+### Nicht geändert
+- WhatsApp-/Kristine-Dialoglogik
+- Leitstand
+- Server- und Datenstruktur
