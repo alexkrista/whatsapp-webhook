@@ -108,7 +108,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </section>
 
 <section id="control" class="tab">
-  <div class="card"><h3>Leitstand heute</h3><div id="controlList"></div></div>
+  <div class="card"><h3>Leitstand heute</h3><div id="controlAlerts" class="notice" style="display:none;margin-bottom:12px"></div><div id="controlList"></div></div>
 </section>
 
 <section id="tasks" class="tab">
@@ -380,7 +380,22 @@ function renderDayBar(segments,dayStart,dayEnd){
 function renderControl(){
   const today=chatDate.value||data.today;
   const planned=data.assignments.filter(a=>a.date===today);
-  const employees=[...new Map(planned.map(a=>[String(a.employeeId),a])).values()];
+  const employeeMap=new Map(planned.map(a=>[String(a.employeeId),a]));
+  Object.values(data.states||{}).forEach(s=>{
+    if(!s?.employeeId)return;
+    const key=String(s.employeeId);
+    if(!employeeMap.has(key)) employeeMap.set(key,{employeeId:s.employeeId,employeeName:s.employeeName||s.employeeId,jobName:'Keine Planung'});
+  });
+  const employees=[...employeeMap.values()];
+  const unknownCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='assignment_deviation').length,0);
+  const regieCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,0);
+  const openTaskCount=(data.tasks||[]).filter(t=>t.status!=='done').length;
+  const alerts=[];
+  if(unknownCount)alerts.push(`🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}`);
+  if(regieCount)alerts.push(`📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}`);
+  if(openTaskCount)alerts.push(`📌 ${openTaskCount} offene Aufgabe${openTaskCount===1?'':'n'}`);
+  controlAlerts.style.display=alerts.length?'block':'none';
+  controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br>${alerts.join(' · ')}`:'';
   if(!employees.length){controlList.innerHTML='<span class="small">Für heute ist noch niemand eingeteilt.</span>';return}
   controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
     const s=data.states[a.employeeId]||{mode:'idle'};
@@ -443,6 +458,7 @@ function removeScheduleModel(id){data.scheduleModels=data.scheduleModels.filter(
 async function saveScheduleModelsData(){const r=await api('/kristine/api/schedule-models',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:data.scheduleModels||[]})});data.scheduleModels=r.models||[];renderScheduleModels();alert('Zeitmodelle gespeichert.')}
 document.getElementById('adminLink').href=url('/admin/ui');
 loadAll().catch(e=>alert(e.message));
+setInterval(()=>{ if(document.getElementById('control')?.classList.contains('active')) loadSilent().catch(()=>{}); else renderControl(); },60000);
 </script>
 </body>
 </html>
