@@ -12,6 +12,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
   const TASKS = path.join(ROOT, "tasks.json");
   const EVENTS = path.join(ROOT, "events.jsonl");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
+  const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -76,6 +77,60 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     rows.push(event);
     // Genug Historie für Büroprüfung behalten, Datei aber begrenzen.
     await writeJson(TIME_EVENTS, rows.slice(-20000));
+  }
+
+  async function appendReviewEntry(entry) {
+    const rows = await readJson(REVIEW_ENTRIES, []);
+    rows.push({ id: `review_entry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), ...entry });
+    await writeJson(REVIEW_ENTRIES, rows.slice(-20000));
+  }
+
+  async function completeDayReview({ employeeId, employeeName, date, state, states, current, actualTime, now, hasMaterials = false, hasPhotos = false, hasRegie = false }) {
+    state.mode = "finished_day";
+    state.pending = null;
+    state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
+    state.timeline.push({
+      at: now,
+      time: actualTime,
+      type: "day_finished",
+      detail: "Tagesabschluss bestätigt",
+      assignmentKey: current ? assignmentKey(current) : null,
+      jobId: current?.jobId || null,
+      jobName: current?.jobName || "",
+    });
+    state.timeline = state.timeline.slice(-200);
+    states[employeeId] = state;
+    await writeJson(STATES, states);
+    await appendTimeEvent({
+      id: `review_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`,
+      employeeId,
+      employeeName,
+      date,
+      type: "day_review",
+      at: actualTime,
+      jobId: current?.jobId || null,
+      jobName: current?.jobName || "",
+      hasMaterials,
+      hasPhotos,
+      hasRegie,
+      createdAt: now,
+    });
+    await appendEvent({
+      type: "day_finished",
+      employeeId,
+      employeeName,
+      date,
+      jobId: current?.jobId || null,
+      time: actualTime,
+      hasMaterials,
+      hasPhotos,
+      hasRegie,
+    });
+    return {
+      reply: "Tagesabschluss gespeichert. Schönen Feierabend! 👋",
+      buttons: [],
+      state,
+    };
   }
 
   function normalizeText(text) {
@@ -438,10 +493,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
 
     if (state.pending?.type === "review_day") {
       if (intent === "yes") {
-        state.pending = { type: "review_material", createdAt: now };
+        state.pending = { type: "review_material_question", createdAt: now };
         await saveState();
         return {
-          reply: "Hast du heute Material verwendet oder Fotos ergänzt?",
+          reply: "Hast du heute Material verwendet?",
           buttons: ["Ja", "Nein"],
           state,
         };
@@ -494,70 +549,130 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         detail: String(text),
         needsOfficeReview: true,
       });
-      state.pending = { type: "review_material", createdAt: now, changeRequested: true };
+      state.pending = { type: "review_material_question", createdAt: now, changeRequested: true };
       await saveState();
       return {
-        reply: "Danke, die Korrektur ist für Chef/Büro vorgemerkt. Hast du heute Material verwendet oder Fotos ergänzt?",
+        reply: "Danke, die Korrektur ist für Chef/Büro vorgemerkt. Hast du heute Material verwendet?",
         buttons: ["Ja", "Nein"],
         needsOfficeReview: true,
         state,
       };
     }
 
-    if (state.pending?.type === "review_material") {
-      if (!["yes", "no"].includes(intent)) {
-        return { reply: "Hast du heute Material verwendet oder Fotos ergänzt?", buttons: ["Ja", "Nein"], state };
+    if (state.pending?.type === "review_material_question") {
+      if (!['yes', 'no'].includes(intent)) {
+        return { reply: "Hast du heute Material verwendet?", buttons: ["Ja", "Nein"], state };
       }
-      state.pending = { type: "review_regie", createdAt: now, hasMaterials: intent === "yes" };
+      if (intent === "yes") {
+        state.pending = { type: "collect_material", createdAt: now, itemCount: 0, hasMaterials: true };
+        await saveState();
+        return {
+          reply: "Bitte Material jetzt eingeben. Du kannst schreiben, eine Sprachnachricht oder ein Foto senden. Schreib „fertig“, wenn alles erfasst ist.",
+          buttons: [],
+          state,
+        };
+      }
+      state.pending = { type: "review_photos_question", createdAt: now, hasMaterials: false };
+      await saveState();
+      return { reply: "Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "collect_material") {
+      if (intent === "finish") {
+        state.pending = {
+          type: "review_photos_question",
+          createdAt: now,
+          hasMaterials: true,
+          materialCount: Number(state.pending.itemCount || 0),
+        };
+        await saveState();
+        return { reply: "Material gespeichert. Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
+      }
+      await appendReviewEntry({
+        employeeId, employeeName: state.employeeName, date: today,
+        jobId: current?.jobId || null, jobName: current?.jobName || "",
+        category: "material", source: "text", content: String(text).trim(),
+      });
+      state.pending.itemCount = Number(state.pending.itemCount || 0) + 1;
       await saveState();
       return {
-        reply: "Gab es heute Regiearbeiten?",
-        buttons: ["Ja", "Nein"],
+        reply: "Material aufgenommen. Sende bei Bedarf noch etwas oder schreibe „fertig“.",
+        buttons: ["Fertig"],
         state,
       };
     }
 
-    if (state.pending?.type === "review_regie") {
-      if (!["yes", "no"].includes(intent)) {
-        return { reply: "Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
+    if (state.pending?.type === "review_photos_question") {
+      if (!['yes', 'no'].includes(intent)) {
+        return { reply: "Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
       }
-      const hasMaterials = Boolean(state.pending.hasMaterials);
-      const hasRegie = intent === "yes";
-      state.mode = "finished_day";
-      state.pending = null;
-      addTimeline("day_finished", "Tagesabschluss bestätigt", current);
+      if (intent === "yes") {
+        state.pending = {
+          type: "collect_photos", createdAt: now, photoCount: 0,
+          hasMaterials: Boolean(state.pending.hasMaterials),
+        };
+        await saveState();
+        return {
+          reply: "Bitte die Baustellenfotos jetzt hochladen. Schreib „fertig“, wenn alle Fotos gesendet sind.",
+          buttons: [],
+          state,
+        };
+      }
+      state.pending = {
+        type: "review_regie_question", createdAt: now,
+        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: false,
+      };
       await saveState();
-      await appendTimeEvent({
-        id: `review_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`,
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "day_review",
-        at: actualTime,
-        jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
-        hasMaterials,
-        hasRegie,
-        createdAt: now,
-      });
-      await appendEvent({
-        type: "day_finished",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        jobId: current?.jobId || null,
-        time: actualTime,
-        hasMaterials,
-        hasRegie,
-      });
-      const notes = [];
-      if (hasMaterials) notes.push("Material/Fotos vorgemerkt");
-      if (hasRegie) notes.push("Regie vorgemerkt");
+      return { reply: "Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "collect_photos") {
+      if (intent === "finish") {
+        state.pending = {
+          type: "review_regie_question", createdAt: now,
+          hasMaterials: Boolean(state.pending.hasMaterials),
+          hasPhotos: Number(state.pending.photoCount || 0) > 0,
+          photoCount: Number(state.pending.photoCount || 0),
+        };
+        await saveState();
+        return { reply: "Fotos gespeichert. Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
+      }
       return {
-        reply: `Tagesabschluss gespeichert.${notes.length ? " " + notes.join(" · ") + "." : ""} Schönen Feierabend! 👋`,
-        buttons: [],
+        reply: "Bitte ein Foto senden oder „fertig“ schreiben, wenn alle Fotos hochgeladen sind.",
+        buttons: ["Fertig"],
         state,
       };
+    }
+
+    if (state.pending?.type === "review_regie_question") {
+      if (!['yes', 'no'].includes(intent)) {
+        return { reply: "Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
+      }
+      if (intent === "yes") {
+        state.pending = {
+          type: "collect_regie", createdAt: now,
+          hasMaterials: Boolean(state.pending.hasMaterials),
+          hasPhotos: Boolean(state.pending.hasPhotos),
+        };
+        await saveState();
+        return { reply: "Bitte die Regiearbeit kurz beschreiben. Du kannst schreiben oder eine Sprachnachricht senden.", buttons: [], state };
+      }
+      return completeDayReview({
+        employeeId, employeeName: state.employeeName, date: today, state, states, current, actualTime, now,
+        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: Boolean(state.pending.hasPhotos), hasRegie: false,
+      });
+    }
+
+    if (state.pending?.type === "collect_regie") {
+      await appendReviewEntry({
+        employeeId, employeeName: state.employeeName, date: today,
+        jobId: current?.jobId || null, jobName: current?.jobName || "",
+        category: "regie", source: "text", content: String(text).trim(), needsOfficeReview: true,
+      });
+      return completeDayReview({
+        employeeId, employeeName: state.employeeName, date: today, state, states, current, actualTime, now,
+        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: Boolean(state.pending.hasPhotos), hasRegie: true,
+      });
     }
 
     if (state.pending?.type === "finish_choice") {
@@ -858,6 +973,62 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     };
   }
 
+  async function getPendingState(employeeId) {
+    const states = await readJson(STATES, {});
+    return states[String(employeeId)]?.pending || null;
+  }
+
+  async function handleMedia({ employeeId, employeeName, date, mediaType, file, transcript = "" }) {
+    const today = date || localDateISO();
+    const [assignments, states] = await Promise.all([readJson(ASSIGNMENTS, []), readJson(STATES, {})]);
+    const state = states[String(employeeId)];
+    if (!state?.pending) return { handled: false };
+    const dayAssignments = assignmentsFor(assignments, employeeId, today);
+    const current = activeAssignment(dayAssignments, state);
+    const pending = state.pending;
+    const now = new Date().toISOString();
+    const actualTime = localTimeHM(new Date());
+
+    if (pending.type === "collect_material" && ["image", "audio"].includes(mediaType)) {
+      await appendReviewEntry({
+        employeeId, employeeName: employeeName || state.employeeName, date: today,
+        jobId: current?.jobId || null, jobName: current?.jobName || "",
+        category: "material", source: mediaType, file: file || "", transcript: transcript || "",
+      });
+      pending.itemCount = Number(pending.itemCount || 0) + 1;
+      states[String(employeeId)] = state;
+      await writeJson(STATES, states);
+      return { handled: true, reply: "Material aufgenommen. Sende bei Bedarf noch etwas oder schreibe „fertig“.", buttons: ["Fertig"] };
+    }
+
+    if (pending.type === "collect_photos" && mediaType === "image") {
+      await appendReviewEntry({
+        employeeId, employeeName: employeeName || state.employeeName, date: today,
+        jobId: current?.jobId || null, jobName: current?.jobName || "",
+        category: "photo", source: "image", file: file || "",
+      });
+      pending.photoCount = Number(pending.photoCount || 0) + 1;
+      states[String(employeeId)] = state;
+      await writeJson(STATES, states);
+      return { handled: true, reply: `Foto ${pending.photoCount} gespeichert. Sende weitere Fotos oder schreibe „fertig“.`, buttons: ["Fertig"] };
+    }
+
+    if (pending.type === "collect_regie" && mediaType === "audio") {
+      await appendReviewEntry({
+        employeeId, employeeName: employeeName || state.employeeName, date: today,
+        jobId: current?.jobId || null, jobName: current?.jobName || "",
+        category: "regie", source: "audio", file: file || "", transcript: transcript || "", needsOfficeReview: true,
+      });
+      const result = await completeDayReview({
+        employeeId, employeeName: employeeName || state.employeeName, date: today, state, states, current, actualTime, now,
+        hasMaterials: Boolean(pending.hasMaterials), hasPhotos: Boolean(pending.hasPhotos), hasRegie: true,
+      });
+      return { handled: true, reply: result.reply, buttons: result.buttons };
+    }
+
+    return { handled: false };
+  }
+
   app.get("/kristine", (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kristine.html"));
@@ -949,7 +1120,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
   });
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
-  return { handleMessage, localDateISO };
+  return { handleMessage, handleMedia, getPendingState, localDateISO };
 }
 
 module.exports = { registerKristine };
