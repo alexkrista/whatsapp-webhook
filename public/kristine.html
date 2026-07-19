@@ -27,6 +27,8 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
 .control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:17px;font-weight:800}.control-site{font-size:13px;color:#555;margin-top:3px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:flex;justify-content:space-between;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
+
+.planning-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.planning-heading h3{min-width:220px;text-align:center}.planning-arrow{width:42px;min-width:42px;padding:8px 10px}.planning-today{width:auto;padding:8px 12px}@media(max-width:700px){.planning-heading{width:100%;justify-content:center}.planning-heading h3{order:-1;width:100%;min-width:0}.planning-today{min-width:78px}}
 </style>
 </head>
 <body>
@@ -70,7 +72,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   </div>
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <h3 id="planningTitle" style="margin:0">Wochenansicht – Baustellenkarten</h3>
+      <div class="planning-heading">
+        <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(-1)" title="Zurück">◀</button>
+        <button class="secondary planning-today" onclick="gotoPlanningToday()">Heute</button>
+        <h3 id="planningTitle" style="margin:0">Wochenansicht – Baustellenkarten</h3>
+        <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(1)" title="Weiter">▶</button>
+      </div>
       <div class="actions" style="margin:0">
         <button id="viewDayBtn" class="secondary" onclick="setPlanningView('day')">Tag</button>
         <button id="viewWeekBtn" onclick="setPlanningView('week')">Woche</button>
@@ -221,6 +228,22 @@ function selectedPlanningDate(){return document.getElementById('aDate').value||d
 function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
 function assignmentCard(a,compact=false){return `<div class="${compact?'monthitem':'assignment'}"><strong>#${esc(a.jobId)} · ${esc(a.jobName)}</strong>${compact?'':`<span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span><br><span class="small">${esc(a.city)}${a.vehicle?' · '+esc(a.vehicle):''}</span><div class="actions">${a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="danger" onclick="removeAssignment('${a.id}')">×</button></div>`}${compact?`<div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')}</div>`:''}</div>`}
 function setPlanningView(view){planningView=view;renderPlanning()}
+function shiftPlanningPeriod(direction){
+  const input=document.getElementById('aDate');
+  const d=new Date((input.value||data.today)+'T12:00:00');
+  if(planningView==='day')d.setDate(d.getDate()+direction);
+  else if(planningView==='week')d.setDate(d.getDate()+7*direction);
+  else {
+    const targetDay=Math.min(d.getDate(),28);
+    d.setDate(1);
+    d.setMonth(d.getMonth()+direction);
+    const lastDay=new Date(d.getFullYear(),d.getMonth()+1,0,12).getDate();
+    d.setDate(Math.min(targetDay,lastDay));
+  }
+  input.value=iso(d);
+  renderPlanning();
+}
+function gotoPlanningToday(){document.getElementById('aDate').value=data.today||iso(new Date());renderPlanning()}
 function updatePlanningButtons(){for(const view of ['day','week','month']){const b=document.getElementById('view'+view[0].toUpperCase()+view.slice(1)+'Btn');if(b)b.className=view===planningView?'':'secondary'}}
 function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
   if(planningView==='day'){
@@ -335,8 +358,9 @@ function employeeDaySegments(employeeId,today,state){
   }
   return segments;
 }
-function renderDayBar(segments){
-  const dayStart=7*60,dayEnd=17*60,total=dayEnd-dayStart;
+function formatAxisHM(minutes){const h=Math.floor(minutes/60),m=minutes%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`}
+function renderDayBar(segments,dayStart,dayEnd){
+  const total=Math.max(60,dayEnd-dayStart);
   let cursor=dayStart,html='';
   for(const seg of segments){
     const from=Math.max(dayStart,Math.min(dayEnd,seg.from));
@@ -351,6 +375,7 @@ function renderDayBar(segments){
   if(cursor<dayEnd)html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
   return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
 }
+
 function renderControl(){
   const today=chatDate.value||data.today;
   const planned=data.assignments.filter(a=>a.date===today);
@@ -364,8 +389,14 @@ function renderControl(){
     const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
     const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
     const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+    const dayStart=7*60;
+    const plannedEnd=Math.max(17*60,...plans.map(x=>hmToMinutes(x.to)||0));
+    const lastEvent=Math.max(0,...segments.map(x=>x.to||0));
+    const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
+    const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
+    const mid=Math.round((dayStart+dayEnd)/120)*60;
     const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
-    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(currentPlan?.jobName||'Keine Baustelle')}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap"><div class="daybar-labels"><span>07:00</span><span>12:00</span><span>17:00</span></div><div class="daybar">${renderDayBar(segments)}</div></div><div class="control-meta"><span>Netto: <strong>${durationText(workMinutes)}</strong></span><span>Pause: <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(currentPlan?.jobName||'Keine Baustelle')}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap"><div class="daybar-labels"><span>${formatAxisHM(dayStart)}</span><span>${formatAxisHM(mid)}</span><span>${formatAxisHM(dayEnd)}</span></div><div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>Netto: <strong>${durationText(workMinutes)}</strong></span><span>Pause: <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
   }).join('')}</div>`;
 }
 
