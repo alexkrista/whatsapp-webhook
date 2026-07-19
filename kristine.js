@@ -158,6 +158,56 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return { assignments, states, tasks };
   }
 
+  function normalizeSiteSearch(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/ß/g, "ss")
+      .replace(/[^a-z0-9_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  async function listBuildingSites() {
+    const entries = await fsp.readdir(dataDir, { withFileTypes: true }).catch(() => []);
+    const sites = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
+
+      const siteId = entry.name;
+      const meta = await readJson(path.join(dataDir, siteId, ".meta.json"), {});
+      sites.push({
+        siteId,
+        name: String(meta?.name || siteId.replace(/_/g, " ")),
+        city: String(meta?.city || meta?.ort || ""),
+        address: String(meta?.address || meta?.adresse || ""),
+      });
+    }
+
+    return sites;
+  }
+
+  async function findBuildingSiteMatches(query) {
+    const wanted = normalizeSiteSearch(query);
+    if (!wanted) return [];
+
+    const sites = await listBuildingSites();
+    const valuesFor = (site) => [site.siteId, site.name, site.city]
+      .map(normalizeSiteSearch)
+      .filter(Boolean);
+
+    const exact = sites.filter(site => valuesFor(site).some(value => value === wanted));
+    if (exact.length) return exact;
+
+    const prefix = sites.filter(site => valuesFor(site).some(value => value.startsWith(wanted)));
+    if (prefix.length) return prefix;
+
+    return sites.filter(site => valuesFor(site).some(value => value.includes(wanted)));
+  }
+
   async function handleMessage({ employeeId, employeeName, text, date }) {
     const today = date || localDateISO();
     const [assignments, states, tasks] = await Promise.all([
@@ -223,6 +273,58 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     }
 
     if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
+      const matches = await findBuildingSiteMatches(text);
+
+      if (matches.length === 1) {
+        const site = matches[0];
+        const actualAssignment = {
+          id: `actual_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`,
+          date: today,
+          jobId: site.siteId,
+          jobName: site.name,
+          city: site.city,
+          address: site.address,
+          employeeId: String(employeeId),
+          employeeName: state.employeeName,
+          vehicle: "",
+          from: actualTime,
+          to: "",
+          note: "Tatsächliche Einteilung über Kristine",
+        };
+
+        assignments.push(actualAssignment);
+        await writeJson(ASSIGNMENTS, assignments);
+
+        state.activeAssignmentKey = assignmentKey(actualAssignment);
+        state.pending = null;
+        addTimeline("assignment_deviation", `Baustelle ${assignmentLabel(actualAssignment)} übernommen`, actualAssignment);
+        await saveState();
+        await appendEvent({
+          type: "assignment_deviation",
+          employeeId,
+          employeeName: state.employeeName,
+          date: today,
+          jobId: actualAssignment.jobId,
+          detail: assignmentLabel(actualAssignment),
+        });
+
+        return {
+          reply: `Perfekt. Baustelle ${assignmentLabel(actualAssignment)} übernommen. Sag einfach Start.`,
+          buttons: ["Start", "Navigation"],
+          needsOfficeReview: true,
+          state,
+        };
+      }
+
+      if (matches.length > 1) {
+        const choices = matches.slice(0, 5).map(site => site.name || site.siteId);
+        return {
+          reply: `Ich habe mehrere passende Baustellen gefunden:\n- ${choices.join("\n- ")}\n\nBitte schreib den Namen etwas genauer.`,
+          buttons: [],
+          state,
+        };
+      }
+
       state.pending = null;
       addTimeline("assignment_deviation", String(text), null);
       await saveState();
@@ -234,8 +336,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         detail: String(text),
       });
       return {
-        reply: `Danke, ich habe „${String(text).trim()}“ als abweichende Einteilung ans Büro gemeldet.`,
-        buttons: ["Start"],
+        reply: `Ich finde keine Baustelle zu „${String(text).trim()}“. Die abweichende Einteilung wurde zur Kontrolle vorgemerkt.`,
+        buttons: [],
         needsOfficeReview: true,
         state,
       };
