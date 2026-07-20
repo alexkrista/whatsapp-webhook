@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0020.4 -->
+<!-- Datei: public/kristine.html · Build 0020.5 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -40,7 +40,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0020.4 · Speicher-Fix Zeitmodelle und Feiertage.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0020.5 · Arbeitsmodelle im Admin und Tageskarten beim Verschieben.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -375,7 +375,26 @@ function planningSiteRows(days){
   return all
 }
 function assignmentMatchesSiteKey(a,key){if(key.startsWith('type:'))return cardTypeOf(a)===key.slice(5);return cardTypeOf(a)==='site'&&String(a.jobId)===key.slice(4)}
-async function planningSiteDrop(event,date,siteKey){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source)return;const target=movedOrCopiedAssignment(event,source);target.date=date;if(siteKey.startsWith('type:')){const type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;target.cardType=type;target.jobId='__'+type+'__';target.jobName=meta.label;target.city='';target.address='';target.vehicle='';target.note=target.note||meta.label}else{const jobId=siteKey.slice(4),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;target.cardType='site';target.jobId=String(job.jobId);target.jobName=job.name||('#'+job.jobId);target.city=job.city||'';target.address=jobAddress(job)}await saveAssignments(true)}
+async function planningSiteDrop(event,date,siteKey){
+  event.preventDefault();event.currentTarget.classList.remove('dragover');
+  const source=droppedAssignment(event);if(!source)return;
+  const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';
+  const sourceDate=source.date;
+  if(siteKey.startsWith('type:')){
+    const target=movedOrCopiedAssignment(event,source),type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;
+    target.date=date;target.cardType=type;target.jobId='__'+type+'__';target.jobName=meta.label;target.city='';target.address='';target.vehicle='';target.note=target.note||meta.label;
+    await saveAssignments(true);return;
+  }
+  const jobId=siteKey.slice(4),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;
+  const employee=employeeById(source.employeeId);if(!employee)return;
+  const original={...source};
+  if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);
+  const template={...source,id:copy?id():source.id,cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job)};
+  const changedDay=String(sourceDate)!==String(date);
+  const placed=await placeSiteAssignment(template,employee,date,{forceDialog:!changedDay&&siteSegments(employee.id,date).length>0});
+  if(!placed&&!copy)data.assignments.push(original);
+  if(placed)await saveAssignments(true);else renderPlanning();
+}
 function groupedAssignmentCard(rows){
   const first=rows[0],type=cardTypeOf(first),meta=cardMeta(first),special=type!=='site';
   if(rows.length===1||special)return assignmentCard(first,true);
