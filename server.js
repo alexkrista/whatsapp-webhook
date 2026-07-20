@@ -1,3 +1,4 @@
+// Datei: server.js · Build 0020.1
 // server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
