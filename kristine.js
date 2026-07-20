@@ -1,4 +1,4 @@
-// Datei: kristine.js · Build 0020.3
+// Datei: kristine.js · Build 0020.6
 
 "use strict";
 
@@ -81,26 +81,26 @@ function getDefaultScheduleModels() {
       id: "sommer",
       name: "Sommer (Krista)",
       days: [
-        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Freitag", isWorkDay: true, from: "07:00", to: "14:15", pauseMinutes: 15, shouldHours: 7.8 },
-        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 }
+        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Freitag", isWorkDay: true, from: "07:00", to: "14:15", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "", lunchEnd: "", pauseMinutes: 15, shouldHours: 7.0 },
+        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 }
       ]
     },
     {
       id: "winter",
       name: "Winter",
       days: [
-        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseMinutes: 45, shouldHours: 7.8 },
-        { dayName: "Freitag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseMinutes: 0, shouldHours: 0 }
+        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
+        { dayName: "Freitag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
+        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 }
       ]
     }
   ];
@@ -1334,6 +1334,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           isWorkDay: Boolean(d.isWorkDay),
           from: String(d.from || "").slice(0, 5),
           to: String(d.to || "").slice(0, 5),
+          pauseStart: String(d.pauseStart || "").slice(0, 5),
+          pauseEnd: String(d.pauseEnd || "").slice(0, 5),
+          lunchStart: String(d.lunchStart || "").slice(0, 5),
+          lunchEnd: String(d.lunchEnd || "").slice(0, 5),
           pauseMinutes: Number(d.pauseMinutes) || 0,
           shouldHours: Number(d.shouldHours) || 0
         })) : []
