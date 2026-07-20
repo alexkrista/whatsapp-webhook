@@ -75,3 +75,31 @@ Drag & Drop in der Mitarbeiteransicht ändert Mitarbeiter und Datum.
 Drag & Drop in der Baustellenansicht ändert Baustelle/Kartentyp und Datum.
 Beide Ansichten verwenden weiterhin denselben assignments-Datensatz.
 Monatsansicht bleibt als gemeinsame Kalenderübersicht erhalten.
+Build 0019a – Planung & Übersicht
+Planung
+Baustellenansicht mit Sortierung: Eingeteilt, Status, Neueste, Älteste, A–Z und Z–A.
+Gewählte Sortierung wird im Browser beibehalten.
+Standard ist „Eingeteilt“.
+Mitarbeiterübersicht
+Linke Mitarbeiterkarte zeigt Soll, Plan, Geleistet und Rest.
+Bei Überplanung wird die Differenz deutlich ausgewiesen.
+Sollstunden werden aus dem zugeordneten Arbeitszeitmodell und dem jeweiligen Datum ermittelt.
+Kartenanzeige
+Baustellenkarten zeigen Planstunden und bereits geleistete Stunden auf dieser Baustelle.
+Urlaub, Krank und Arzt verwenden 7,8 Stunden je Tag.
+Bei mehreren Baustellenkarten am selben Tag bleibt vorläufig die konkrete Von-bis-Zeit maßgeblich; die automatische Zeitsegmentplanung folgt in Build 0019b.
+Build 0020 – Intelligente Zeitfensterplanung
+Planung
+Die erste Baustelle eines Mitarbeiters übernimmt automatisch den vollständigen Arbeitstag aus dem Zeitmodell.
+Bei einer zweiten oder weiteren Baustelle öffnet sich eine Von-bis-Abfrage.
+Das neue Zeitfenster schneidet den betreffenden Zeitraum automatisch aus bestehenden Baustellensegmenten heraus.
+Bestehende Baustellen können dadurch vor und nach einem eingeschobenen Einsatz weiterlaufen.
+Mehrere Segmente derselben Baustelle pro Tag sind möglich.
+Direkt angrenzende Segmente derselben Baustelle werden automatisch zusammengeführt.
+Beim Verschieben auf einen anderen Mitarbeiter oder Tag wird dieselbe Segmentlogik verwendet.
+Zeitfenster außerhalb des Modelltags erzeugen eine Warnung, blockieren die Planung aber nicht.
+Karten
+Baustellenkarten zeigen kompakt Zeitfenster und berechnete Segmentstunden.
+Unproduktive Ganztagskarten bleiben mit 7,8 Stunden bewertet.
+Daten
+Bestehende assignments-Datenstruktur bleibt kompatibel; jedes Zeitsegment ist weiterhin ein eigener Assignment-Datensatz.
