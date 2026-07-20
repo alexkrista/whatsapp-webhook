@@ -1,7 +1,5 @@
 {
-  "version": "3.4.5",
-  "build": "0013-chefmodus",
-  "status": "Chefmodus",
-  "date": "2026-07-16",
-  "name": "KRISTINE Chefmodus"
+  "version": "0020",
+  "name": "Intelligente Zeitfensterplanung",
+  "date": "2026-07-20"
 }
