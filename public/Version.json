@@ -1,4 +1,5 @@
 {
-  "build": "0020.3",
-  "name": "Speicher-Fix Zeitmodelle und Feiertage"
+  "build": "0020.4",
+  "name": "Build 0020.4 – Segmentstunden-Fix",
+  "version": "0020.4"
 }
