@@ -1,4 +1,4 @@
-// Datei: server.js · Build 0020.2
+// Datei: server.js · Build 0020.5
 // server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
@@ -2607,6 +2607,47 @@ async function readWorktimeModels() {
     return DEFAULT_WORKTIME_MODELS;
   }
 }
+
+function scheduleModelToWorktimeModel(model = {}) {
+  const dayIndex = { Sonntag: 0, Montag: 1, Dienstag: 2, Mittwoch: 3, Donnerstag: 4, Freitag: 5, Samstag: 6 };
+  const weekdays = {};
+  for (const day of Array.isArray(model.days) ? model.days : []) {
+    const idx = dayIndex[String(day.dayName || "")];
+    if (idx === undefined) continue;
+    const pause = Math.max(0, Number(day.pauseMinutes || 0));
+    const otherBreakMinutes = Math.min(15, pause);
+    const lunchBreakMinutes = Math.max(0, pause - otherBreakMinutes);
+    const from = String(day.from || "").slice(0, 5);
+    const to = String(day.to || "").slice(0, 5);
+    let targetHours = 0;
+    if (day.isWorkDay !== false && /^\d{2}:\d{2}$/.test(from) && /^\d{2}:\d{2}$/.test(to)) {
+      const [fh, fm] = from.split(":").map(Number), [th, tm] = to.split(":").map(Number);
+      targetHours = Math.max(0, ((th * 60 + tm) - (fh * 60 + fm) - pause) / 60);
+    }
+    weekdays[String(idx)] = day.isWorkDay === false
+      ? { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0 }
+      : { from, to, lunchBreakMinutes, otherBreakMinutes, targetHours };
+  }
+  return {
+    id: String(model.id || uid("model")).slice(0, 80),
+    name: String(model.name || "Arbeitsmodell").trim().slice(0, 140),
+    active: model.active !== false,
+    description: "Arbeitsmodell aus Kristine",
+    seasons: [{ id: "all-year", name: "Ganzjährig", months: [1,2,3,4,5,6,7,8,9,10,11,12], weekdays }]
+  };
+}
+async function readUnifiedWorktimeModels() {
+  const legacy = await readWorktimeModels();
+  let scheduleModels = [];
+  try {
+    const p = path.join(DATA_DIR, "_kristine", "schedule-models.json");
+    const parsed = JSON.parse(await fsp.readFile(p, "utf8"));
+    if (Array.isArray(parsed)) scheduleModels = parsed.map(scheduleModelToWorktimeModel);
+  } catch {}
+  const byId = new Map();
+  for (const model of [...scheduleModels, ...legacy]) if (model?.id && !byId.has(String(model.id))) byId.set(String(model.id), model);
+  return [...byId.values()];
+}
 function scheduleForDate(model, dateStr) {
   const d = new Date(String(dateStr) + "T12:00:00");
   if (Number.isNaN(d.getTime())) return null;
@@ -2709,7 +2750,7 @@ app.delete("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))
 app.get("/admin/api/worktime-models", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const models = await readWorktimeModels();
+    const models = await readUnifiedWorktimeModels();
     res.json({ ok: true, models });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -2720,7 +2761,7 @@ app.get("/admin/api/worktime-models/:modelId/schedule", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const date = String(req.query.date || todayISO());
-    const models = await readWorktimeModels();
+    const models = await readUnifiedWorktimeModels();
     const model = models.find(m => String(m.id) === String(req.params.modelId));
     if (!model) return res.status(404).json({ ok: false, error: "Arbeitszeitmodell nicht gefunden" });
     res.json({ ok: true, schedule: scheduleForDate(model, date) });
