@@ -1,5 +1,4 @@
 {
-  "version": "3.4.0",
-  "build": "0020.1",
-  "status": "Alpha"
+  "build": "0020.3",
+  "name": "Speicher-Fix Zeitmodelle und Feiertage"
 }
