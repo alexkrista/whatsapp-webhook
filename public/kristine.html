@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0020.3 -->
+<!-- Datei: public/kristine.html · Build 0020.4 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -40,7 +40,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0020.3 · Speicher-Fix Zeitmodelle und Feiertage.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0020.4 · Speicher-Fix Zeitmodelle und Feiertage.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -294,7 +294,7 @@ function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const d
 const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},arzt:{label:'Arzt',icon:'🩺'},krank:{label:'Krank',icon:'🔴'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'}};
 function cardTypeOf(a){return a.cardType||'site'}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
-function rawCardHours(a){const explicit=Number(a.hours);if(Number.isFinite(explicit)&&explicit>0)return explicit;const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);return 0}
+function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
 function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
 function worktimeRule(employeeId,date){const employee=employeeById(employeeId),model=worktimeModelById(employee?.worktimeModelId||'krista-standard');if(!model||!date)return null;const d=new Date(String(date)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const month=d.getMonth()+1,weekday=d.getDay();const season=(model.seasons||[]).find(x=>(x.months||[]).includes(month));const rule=season?.weekdays?.[String(weekday)]||{free:true,from:'',to:'',targetHours:0};const otherBreakMinutes=Number(rule.otherBreakMinutes||0),lunchBreakMinutes=Number(rule.lunchBreakMinutes||0);return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',targetHours:Number(rule.targetHours||0),otherBreakMinutes,lunchBreakMinutes,breakMinutes:otherBreakMinutes+lunchBreakMinutes,breakWindows:[...(otherBreakMinutes>0?[{type:'pause',from:'09:00',to:minutesToHm(9*60+otherBreakMinutes)}]:[]),...(lunchBreakMinutes>0?[{type:'lunch',from:'12:00',to:minutesToHm(12*60+lunchBreakMinutes)}]:[])]}}
