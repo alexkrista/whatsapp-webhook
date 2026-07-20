@@ -1,5 +1,5 @@
 {
-  "version": "0020",
-  "name": "Intelligente Zeitfensterplanung",
-  "date": "2026-07-20"
+  "version": "3.4.0",
+  "build": "0020.1",
+  "status": "Alpha"
 }
