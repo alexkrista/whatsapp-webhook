@@ -1,3 +1,4 @@
+<!-- Datei: public/admin.html · Build 0020.1 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -25,7 +26,7 @@
     .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
     .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .readonly-highlight{background:#fffbe8;font-weight:800}
-    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}.reload-icon{width:42px;height:42px;padding:0;border-radius:50%;font-size:22px;display:inline-flex;align-items:center;justify-content:center}.status-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;margin-top:8px;background:#eee}.job-address{margin-top:8px;line-height:1.45}.nav-link{display:inline-flex;align-items:center;gap:5px;margin-top:6px;text-decoration:none;font-weight:750;color:#17662f}.history-list{max-height:58vh;overflow:auto}.history-entry{padding:12px 0;border-bottom:1px solid #eee}.history-entry:last-child{border-bottom:0}.history-time{font-size:12px;color:#777}.rapport-launch{width:min(760px,96vw)!important}.rapport-launch #rapportJob{font-size:18px;padding:14px;min-height:54px}
+    .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}.status-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 18px}.status-tabs button{background:#fff;color:#111;border-color:#ccc;padding:8px 12px}.status-tabs button.active{background:#24733b;color:#fff;border-color:#24733b;font-weight:800}.reload-icon{width:42px;height:42px;padding:0;border-radius:50%;font-size:22px;display:inline-flex;align-items:center;justify-content:center}.status-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;margin-top:8px;background:#eee}.job-address{margin-top:8px;line-height:1.45}.nav-link{display:inline-flex;align-items:center;gap:5px;margin-top:6px;text-decoration:none;font-weight:750;color:#17662f}.history-list{max-height:58vh;overflow:auto}.history-entry{padding:12px 0;border-bottom:1px solid #eee}.history-entry:last-child{border-bottom:0}.history-time{font-size:12px;color:#777}.rapport-launch{width:min(760px,96vw)!important}.rapport-launch #rapportJob{font-size:18px;padding:14px;min-height:54px}
     .card{position:relative;padding:20px 20px 58px}.card .actions.primary-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.card .actions.primary-actions>*{min-height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
     .trash-mini{position:absolute;right:14px;bottom:12px;background:transparent!important;border:0!important;color:#9b1c1c!important;font-size:20px;padding:5px!important;min-width:auto!important}
     .company-stack{max-width:760px;margin:0 auto}.company-stack .fieldline{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,260px);gap:18px;align-items:center;padding:9px 0;border-bottom:1px solid #eee}.company-stack label{font-weight:650}.company-stack input{min-width:0;width:100%;text-align:right;box-sizing:border-box}.company-stack .summaryline{font-weight:800}.company-stack .billing-highlight{background:#dff4df;border:2px solid #4d8f50;font-size:20px;font-weight:900}.company-stack h3{margin:24px 0 8px}
@@ -45,6 +46,7 @@
       <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="kristine-link" onclick="openKristine()">🤖 Chefzentrale</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
+    <div class="status-tabs" id="jobStatusTabs"><button type="button" data-status="Laufend" class="active">Laufend</button><button type="button" data-status="Auftrag">Auftrag</button><button type="button" data-status="Angebot">Angebot</button><button type="button" data-status="Fertig – nicht abgerechnet">Fertig</button><button type="button" data-status="Geschlossen">Geschlossen</button><button type="button" data-status="">Alle</button></div>
     <div id="app" class="loading">Lade Baustellen …</div>
   </main>
 
@@ -197,9 +199,12 @@ function fullAddress(j){
 function mapsUrl(j){
   const address=fullAddress(j); return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):'';
 }
+let activeJobStatus='Laufend';
+function setJobStatusFilter(status){activeJobStatus=status;document.querySelectorAll('#jobStatusTabs button').forEach(b=>b.classList.toggle('active',b.dataset.status===status));render()}
+document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('#jobStatusTabs button').forEach(b=>b.addEventListener('click',()=>setJobStatusFilter(b.dataset.status||''))) });
 function render(){
   const app=document.getElementById('app'); const q=document.getElementById('search').value.trim().toLowerCase(); const sort=document.getElementById('sortJobs')?.value||'newest';
-  let list=jobs.filter(j=>!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q)||fullAddress(j).toLowerCase().includes(q));
+  let list=jobs.filter(j=>(!activeJobStatus||String(j.status||'Angebot')===activeJobStatus)&&(!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q)||fullAddress(j).toLowerCase().includes(q)));
   const cmpText=(a,b)=>String(a||'').localeCompare(String(b||''),'de',{numeric:true,sensitivity:'base'});
   list=[...list].sort((a,b)=>sort==='oldest'?cmpText(a.latestDay,b.latestDay):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(b.latestDay,a.latestDay));
   if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;} app.className='grid';
