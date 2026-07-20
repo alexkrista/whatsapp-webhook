@@ -1,3 +1,27 @@
+Build 0020.3 – Speicher-Fix
+Fehlende API-Routen für Feiertage wiederhergestellt.
+Österreichische Feiertage können neu geladen und dauerhaft gespeichert werden.
+Betriebsurlaub kann dauerhaft gespeichert werden.
+Zeitmodelle können wieder geladen und gespeichert werden.
+Standardmodelle Sommer/Winter werden bei leerer Datei automatisch erzeugt.
+Build 0020.2 – Stunden-Engine & Jahresplanung
+Behoben
+Pausen werden nach ihren echten Zeitfenstern 09:00–09:15 und 12:00–12:30 nur dem überlappenden Baustellensegment abgezogen.
+Freitag 07:00–14:15 ergibt wieder korrekt 7,0 Stunden.
+Beschäftigungsgrad und Arbeitsmodell sind getrennt; der Beschäftigungsgrad verändert die Plan-/Sollstunden nicht automatisch.
+Neu
+Urlaub, Krank, Arzt und Feiertag werden als Ganztageswert mit 7,8 Stunden geführt.
+Werkstatt und Aufräumen bleiben unproduktiv und können als Zeitfenster erfasst werden.
+Jahresplanung der produktiven Kapazität nach Arbeitsmodell, Feiertagen, Betriebsurlaub und geplantem Urlaub.
+Kalkulationsbasis bleibt unverändert bei 1.650 Stunden; Plan und tatsächliches Ist werden nur verglichen.
+Datei: docs/CHANGELOG.md
+Build 0020.1
+Pause wird einmal beim größten Tagessegment abgezogen.
+Mehrere Segmente derselben Baustelle/Mitarbeiter werden in einer Karte gebündelt.
+Sortierung Eingeteilt berücksichtigt auch Urlaub/Krank und andere Karten.
+Tageskopf zeigt geplant/verfügbar.
+Admin erhält den Standardreiter Laufend.
+
 Build 0016 – Planungskarten & Stunden
 Neue Kartentypen in der Planung: Baustelle, Urlaub, Arzt, Krank, Aufräumen und Werkstatt.
 Sonderkarten brauchen keine Baustelle und können wie Baustellenkarten gezogen und kopiert werden.
@@ -103,3 +127,13 @@ Baustellenkarten zeigen kompakt Zeitfenster und berechnete Segmentstunden.
 Unproduktive Ganztagskarten bleiben mit 7,8 Stunden bewertet.
 Daten
 Bestehende assignments-Datenstruktur bleibt kompatibel; jedes Zeitsegment ist weiterhin ein eigener Assignment-Datensatz.
+
+Build 0020.4 – Segmentstunden-Fix
+Fehler behoben: gespeicherte Modell-/Altstunden (z. B. 9,25 oder 10,0) wurden statt der Segmentdauer angezeigt.
+Baustellenkarten rechnen jetzt zuerst strikt aus `from`/`to`.
+Beispiele: 07:00–13:00 = 5,25 h; 13:00–15:00 = 2,0 h; 15:00–17:00 = 2,0 h.
+
+Build 0020.6 – Konfigurationsmodul
+Vier alte Spalten durch ein ruhiges Akkordeon ersetzt.
+Arbeitsmodelle mit Pause/Mittag sowie Brutto/Netto ausgebaut.
+Feiertage und Betriebsurlaub kompakt verwaltbar und nach Speichern einklappbar.
