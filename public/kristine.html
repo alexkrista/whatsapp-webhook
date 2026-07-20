@@ -32,12 +32,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 .planning-summary{display:inline-flex;align-items:center;gap:6px;background:#eef7ee;color:#145829;border:1px solid #b8d4bc;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;margin-left:6px}.planning-summary.warn{background:#fff2cf;color:#765300;border-color:#efd28b}.planning-summary.full{background:#d9f1df;color:#145829}.assignment.type-urlaub,.monthitem.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.assignment.type-arzt,.monthitem.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.assignment.type-krank,.monthitem.type-krank{border-left-color:#c53b3b;background:#fff0f0}.assignment.type-aufraeumen,.monthitem.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.assignment.type-werkstatt,.monthitem.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.cardtype-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;border-radius:999px;padding:3px 7px;background:rgba(255,255,255,.8);margin-bottom:4px}.hours-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:800;color:#333;background:#f4f4f4;border-radius:999px;padding:3px 7px;margin-left:4px}.dropzone{transition:box-shadow .15s ease,background .15s ease}.dropzone.dragover{box-shadow:inset 0 0 0 3px #27713d;background:#e5f2e7}.assignment[draggable="true"],.monthitem[draggable="true"]{cursor:grab}.assignment.dragging,.monthitem.dragging{opacity:.45}.copybtn{background:#fff;color:#111;border-color:#ccc;padding:7px 9px}.monthitem .mini-actions{display:flex;gap:4px;margin-top:5px}.monthitem .mini-actions button{padding:3px 6px;border-radius:6px;font-size:11px}.dayhead-count{float:right}.planning-hint{font-size:12px;color:#666;margin-top:8px}
 
-.planning-perspective{display:inline-flex;gap:6px;padding:4px;background:#ece9e2;border-radius:12px}.planning-perspective button{padding:8px 11px}.planning-matrix{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;overflow:auto;align-items:stretch}.planning-matrix.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.matrix-head{font-size:12px;font-weight:800;text-align:center;color:#555;padding:8px;background:#e8e4dc;border-radius:10px}.matrix-label{background:#f5f3ee;border-radius:12px;padding:10px;font-weight:800;min-height:88px;position:sticky;left:0;z-index:2}.matrix-label .small{display:block;margin-top:5px;font-weight:400}.matrix-cell{background:#ebe8e1;border-radius:12px;padding:8px;min-height:88px}.matrix-cell .monthitem{margin:3px 0}.perspective-note{font-size:12px;color:#666;margin-top:8px}@media(max-width:800px){.planning-matrix{grid-template-columns:150px repeat(5,220px)}.planning-matrix.day-matrix{grid-template-columns:150px 320px}}
+.planning-perspective{display:inline-flex;gap:6px;padding:4px;background:#ece9e2;border-radius:12px}.planning-perspective button{padding:8px 11px}.planning-matrix{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;overflow:auto;align-items:stretch}.planning-matrix.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.matrix-head{font-size:12px;font-weight:800;text-align:center;color:#555;padding:8px;background:#e8e4dc;border-radius:10px}.matrix-label{background:#f5f3ee;border-radius:12px;padding:10px;font-weight:800;min-height:88px;position:sticky;left:0;z-index:2}.matrix-label .small{display:block;margin-top:5px;font-weight:400}.matrix-metrics{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin-top:7px;font-size:11px;font-weight:500;color:#666}.matrix-metrics strong{text-align:right;color:#222}.matrix-metrics .over{color:#9d2525;font-weight:800}.matrix-metrics .rest{color:#27713d}.card-hours-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:5px;font-size:11px}.metric-pill{display:inline-flex;gap:4px;align-items:center;border-radius:999px;background:#f4f4f4;padding:3px 7px;font-weight:800}.metric-pill.actual{background:#eef7ee;color:#145829}.site-sortbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:0 0 9px}.site-sortbar label{margin:0;font-size:12px}.site-sortbar select{width:auto;min-width:160px;padding:7px 9px}.matrix-cell{background:#ebe8e1;border-radius:12px;padding:8px;min-height:88px}.matrix-cell .monthitem{margin:3px 0}.perspective-note{font-size:12px;color:#666;margin-top:8px}@media(max-width:800px){.planning-matrix{grid-template-columns:150px repeat(5,220px)}.planning-matrix.day-matrix{grid-template-columns:150px 320px}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Alpha 4 · Klarer Leitstand, Regie und Navigation.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0019a · Sortierung, Plan/Soll/Ist und Kartenanzeige.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -183,7 +183,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
-let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[];let planningView='week',planningPerspective='employee';
+let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[];let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -191,19 +191,21 @@ function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
 function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
 async function loadAll(){
-  const [k,j,e,v,h,cv,sm]=await Promise.all([
+  const [k,j,e,v,h,cv,sm,wm]=await Promise.all([
     api('/kristine/api/bootstrap'),
     api('/admin/api/jobs'),
     api('/admin/api/employees'),
     api('/admin/api/vehicles'),
     api('/kristine/api/holidays').catch(()=>({holidays:[]})),
     api('/kristine/api/company-vacations').catch(()=>({vacations:[]})),
-    api('/kristine/api/schedule-models').catch(()=>({models:[]}))
+    api('/kristine/api/schedule-models').catch(()=>({models:[]})),
+    api('/admin/api/worktime-models').catch(()=>({models:[]}))
   ]);
   data=k;
   data.holidays=h.holidays||[];
   data.companyVacations=cv.vacations||[];
   data.scheduleModels=sm.models||[];
+  worktimeModels=wm.models||[];
   masterJobs=j.jobs||[];
   masterEmployees=(e.employees||[]).filter(x=>x.active!==false);
   masterVehicles=v.vehicles||[];
@@ -260,20 +262,33 @@ function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const d
 const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},arzt:{label:'Arzt',icon:'🩺'},krank:{label:'Krank',icon:'🔴'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'}};
 function cardTypeOf(a){return a.cardType||'site'}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
-function cardHours(a){const explicit=Number(a.hours);if(Number.isFinite(explicit)&&explicit>=0)return explicit;const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);return 0}
+function rawCardHours(a){const explicit=Number(a.hours);if(Number.isFinite(explicit)&&explicit>0)return explicit;const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);return 0}
+function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
+function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
+function worktimeRule(employeeId,date){const employee=employeeById(employeeId),model=worktimeModelById(employee?.worktimeModelId||'krista-standard');if(!model||!date)return null;const d=new Date(String(date)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const month=d.getMonth()+1,weekday=d.getDay();const season=(model.seasons||[]).find(x=>(x.months||[]).includes(month));const rule=season?.weekdays?.[String(weekday)]||{free:true,from:'',to:'',targetHours:0};return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',targetHours:Number(rule.targetHours||0),breakMinutes:Number(rule.lunchBreakMinutes||0)+Number(rule.otherBreakMinutes||0)}}
+function specialPlanHours(a){return ['urlaub','krank','arzt'].includes(cardTypeOf(a))?7.8:Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||7.8))}
+function plannedHoursForAssignment(a){if(cardTypeOf(a)!=='site')return specialPlanHours(a);const sameDaySites=data.assignments.filter(x=>x.date===a.date&&String(x.employeeId)===String(a.employeeId)&&cardTypeOf(x)==='site');if(sameDaySites.length<=1)return Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||rawCardHours(a)));return rawCardHours(a)}
+function cardHours(a){return plannedHoursForAssignment(a)}
 function formatHours(value){return Number(value||0).toLocaleString('de-AT',{minimumFractionDigits:1,maximumFractionDigits:2})+' h'}
+function employeeActualMinutes(employeeId,dates){const wanted=new Set(dates);let total=0;for(const date of dates){const state=data.states?.[employeeId]||null;total+=employeeDaySegments(employeeId,date,state).filter(x=>x.type==='work').reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)}return total}
+function actualHoursForAssignment(a){return employeeDaySegments(a.employeeId,a.date,data.states?.[a.employeeId]||null).filter(x=>x.type==='work'&&String(x.jobId||'')===String(a.jobId||'')).reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)/60}
+function employeeShouldHours(employeeId,dates){return dates.reduce((sum,date)=>sum+Math.max(0,Number(worktimeRule(employeeId,date)?.targetHours||0)),0)}
+function employeePlannedHours(employeeId,dates){return data.assignments.filter(a=>dates.includes(a.date)&&String(a.employeeId)===String(employeeId)).reduce((sum,a)=>sum+plannedHoursForAssignment(a),0)}
 function plannedEmployeeCount(date){return new Set(data.assignments.filter(a=>a.date===date).map(a=>String(a.employeeId))).size}
-function plannedHoursForDate(date){return data.assignments.filter(a=>a.date===date).reduce((sum,a)=>sum+cardHours(a),0)}
+function plannedHoursForDate(date){return data.assignments.filter(a=>a.date===date).reduce((sum,a)=>sum+plannedHoursForAssignment(a),0)}
 function planningSummary(date,short=false){const count=plannedEmployeeCount(date),total=masterEmployees.length,hours=plannedHoursForDate(date);const cls=count>=total&&total?'full':'warn';return `<span class="planning-summary ${cls}" title="${count} von ${total} aktiven Mitarbeitern eingeplant · ${formatHours(hours)} geplant">👷 ${count}/${total} MA · ⏱ ${formatHours(hours)}</span>`}
 function assignmentCard(a,compact=false){
   const type=cardTypeOf(a),meta=cardMeta(a),special=type!=='site';
   const sameJobCount=special?new Set(data.assignments.filter(x=>x.date===a.date&&cardTypeOf(x)===type).map(x=>String(x.employeeId))).size:new Set(data.assignments.filter(x=>x.date===a.date&&String(x.jobId)===String(a.jobId)&&cardTypeOf(x)==='site').map(x=>String(x.employeeId))).size;
   const title=special?`${meta.icon} ${meta.label}`:`#${esc(a.jobId)} · ${esc(a.jobName)}`;
   const info=special?`${sameJobCount} MA mit ${esc(meta.label)}`:`${sameJobCount} MA auf dieser Baustelle`;
+  const plan=plannedHoursForAssignment(a),actual=special?null:actualHoursForAssignment(a);
+  const hoursHtml=`<div class="card-hours-line"><span class="metric-pill">Plan ${formatHours(plan)}</span>${actual!==null?`<span class="metric-pill actual">Geleistet ${actual>0?formatHours(actual):'–'}</span>`:''}</div>`;
   const drag=`draggable="true" data-assignment-id="${esc(a.id)}" ondragstart="dragAssignmentStart(event,'${a.id}')" ondragend="dragAssignmentEnd(event)"`;
-  if(compact)return `<div class="monthitem type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')} <span class="hours-badge">⏱ ${formatHours(cardHours(a))}</span></div><div class="small">${info}</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
-  return `<div class="assignment type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)} <span class="hours-badge">⏱ ${formatHours(cardHours(a))}</span></span><br><span class="small">${special?esc(a.note||meta.label):esc(a.city)+(a.vehicle?' · '+esc(a.vehicle):'')} · ${info}</span><div class="actions">${!special&&a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
+  if(compact)return `<div class="monthitem type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><div>${esc(a.employeeName)} · ${esc(a.from||'')}–${esc(a.to||'')}</div>${hoursHtml}<div class="small">${info}</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
+  return `<div class="assignment type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><span>${esc(a.employeeName)} · ${esc(a.from)}–${esc(a.to)}</span>${hoursHtml}<span class="small">${special?esc(a.note||meta.label):esc(a.city)+(a.vehicle?' · '+esc(a.vehicle):'')} · ${info}</span><div class="actions">${!special&&a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
 }
+
 let draggedAssignmentId=null;
 function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentId;event.currentTarget.classList.add('dragging');event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('text/plain',assignmentId)}
 function dragAssignmentEnd(event){event.currentTarget.classList.remove('dragging');document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));draggedAssignmentId=null}
@@ -283,7 +298,23 @@ async function planningDrop(event,date){event.preventDefault();event.currentTarg
 function droppedAssignment(event){const assignmentId=event.dataTransfer.getData('text/plain')||draggedAssignmentId;return data.assignments.find(a=>a.id===assignmentId)||null}
 function movedOrCopiedAssignment(event,source){const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(copy){const clone={...source,id:id()};data.assignments.push(clone);return clone}return source}
 async function planningEmployeeDrop(event,date,employeeId){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source)return;const targetEmployee=masterEmployees.find(e=>String(e.id)===String(employeeId));if(!targetEmployee)return;const target=movedOrCopiedAssignment(event,source);target.date=date;target.employeeId=String(targetEmployee.id);target.employeeName=targetEmployee.name||String(targetEmployee.id);await saveAssignments(true)}
-function planningSiteRows(days){const usedSiteIds=new Set(data.assignments.filter(a=>days.includes(a.date)&&cardTypeOf(a)==='site').map(a=>String(a.jobId)));const jobs=[...masterJobs].sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));const specials=Object.entries(CARD_TYPES).filter(([type])=>type!=='site').map(([type,meta])=>({key:'type:'+type,label:meta.icon+' '+meta.label,type}));return jobs.map(j=>({key:'job:'+j.jobId,label:'🏗️ '+(j.name||('#'+j.jobId)),job:j,used:usedSiteIds.has(String(j.jobId))})).concat(specials)}
+function setSiteSort(value){siteSort=value||'assigned';localStorage.setItem('kristaSiteSort',siteSort);renderPlanning()}
+function siteStatusRank(status){const order={'Angebot':1,'Auftrag':2,'Laufend':3,'Fertig nicht abgerechnet':4,'Geschlossen':5};return order[String(status||'')]||99}
+function planningSiteRows(days){
+  const usedSiteIds=new Set(data.assignments.filter(a=>days.includes(a.date)&&cardTypeOf(a)==='site').map(a=>String(a.jobId)));
+  const nextDateByJob=new Map();for(const a of data.assignments){if(cardTypeOf(a)!=='site'||!a.date)continue;const key=String(a.jobId),old=nextDateByJob.get(key);if(!old||a.date<old)nextDateByJob.set(key,a.date)}
+  const jobs=[...masterJobs].map(j=>({key:'job:'+j.jobId,label:'🏗️ '+(j.name||('#'+j.jobId)),job:j,used:usedSiteIds.has(String(j.jobId)),nextDate:nextDateByJob.get(String(j.jobId))||''}));
+  jobs.sort((a,b)=>{
+    if(siteSort==='assigned'){const d=Number(b.used)-Number(a.used);if(d)return d;const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd}
+    else if(siteSort==='status'){const d=siteStatusRank(a.job?.status)-siteStatusRank(b.job?.status);if(d)return d}
+    else if(siteSort==='newest'){const d=String(b.job?.createdAt||b.job?.updatedAt||'').localeCompare(String(a.job?.createdAt||a.job?.updatedAt||''));if(d)return d}
+    else if(siteSort==='oldest'){const d=String(a.job?.createdAt||a.job?.updatedAt||'').localeCompare(String(b.job?.createdAt||b.job?.updatedAt||''));if(d)return d}
+    else if(siteSort==='za')return String(b.job?.name||b.job?.jobId).localeCompare(String(a.job?.name||a.job?.jobId),'de');
+    return String(a.job?.name||a.job?.jobId).localeCompare(String(b.job?.name||b.job?.jobId),'de')
+  });
+  const specials=Object.entries(CARD_TYPES).filter(([type])=>type!=='site').map(([type,meta])=>({key:'type:'+type,label:meta.icon+' '+meta.label,type,used:data.assignments.some(a=>days.includes(a.date)&&cardTypeOf(a)===type)}));
+  return jobs.concat(specials)
+}
 function assignmentMatchesSiteKey(a,key){if(key.startsWith('type:'))return cardTypeOf(a)===key.slice(5);return cardTypeOf(a)==='site'&&String(a.jobId)===key.slice(4)}
 async function planningSiteDrop(event,date,siteKey){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source)return;const target=movedOrCopiedAssignment(event,source);target.date=date;if(siteKey.startsWith('type:')){const type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;target.cardType=type;target.jobId='__'+type+'__';target.jobName=meta.label;target.city='';target.address='';target.vehicle='';target.note=target.note||meta.label}else{const jobId=siteKey.slice(4),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;target.cardType='site';target.jobId=String(job.jobId);target.jobName=job.name||('#'+job.jobId);target.city=job.city||'';target.address=jobAddress(job)}await saveAssignments(true)}
 function matrixCardList(rows){return rows.map(a=>assignmentCard(a,true)).join('')||'<span class="small">frei · Karte hierher ziehen</span>'}
@@ -313,15 +344,21 @@ function renderEmployeePlanning(target,title,days){
   const dayMode=days.length===1;
   title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Mitarbeitern · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
   const heads='<div class="matrix-head">Mitarbeiter</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
-  const rows=masterEmployees.map(employee=>{const label=`<div class="matrix-label">👷 ${esc(employee.name)}<span class="small">${days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&String(a.employeeId)===String(employee.id)).reduce((x,a)=>x+cardHours(a),0),0).toLocaleString('de-AT',{minimumFractionDigits:1,maximumFractionDigits:2})} h geplant</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
+  const rows=masterEmployees.map(employee=>{
+    const should=employeeShouldHours(employee.id,days),planned=employeePlannedHours(employee.id,days),actual=employeeActualMinutes(employee.id,days)/60,rest=Math.max(0,should-planned),over=Math.max(0,planned-should);
+    const label=`<div class="matrix-label">👷 ${esc(employee.name)}<div class="matrix-metrics"><span>Soll</span><strong>${formatHours(should)}</strong><span>Plan</span><strong>${formatHours(planned)}</strong><span>Geleistet</span><strong>${formatHours(actual)}</strong>${over>0?`<span class="over">Überplant</span><strong class="over">+${formatHours(over)}</strong>`:`<span class="rest">Rest</span><strong class="rest">${formatHours(rest)}</strong>`}</div></div>`;
+    const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${matrixCardList(assignments)}</div>`}).join('');
+    return label+cells
+  }).join('');
   target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte auf einen anderen Mitarbeiter oder Tag ziehen = umplanen; Strg/Alt = kopieren.</div>`;
 }
 function renderSitePlanning(target,title,days){
   const dayMode=days.length===1,sites=planningSiteRows(days);
   title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Baustellen · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
+  const sortbar=`<div class="site-sortbar"><label for="siteSortSelect">Sortierung</label><select id="siteSortSelect" onchange="setSiteSort(this.value)"><option value="assigned" ${siteSort==='assigned'?'selected':''}>Eingeteilt</option><option value="status" ${siteSort==='status'?'selected':''}>Status</option><option value="newest" ${siteSort==='newest'?'selected':''}>Neueste</option><option value="oldest" ${siteSort==='oldest'?'selected':''}>Älteste</option><option value="az" ${siteSort==='az'?'selected':''}>A–Z</option><option value="za" ${siteSort==='za'?'selected':''}>Z–A</option></select></div>`;
   const heads='<div class="matrix-head">Baustelle / Karte</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
-  const rows=sites.map(site=>{const hours=days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&assignmentMatchesSiteKey(a,site.key)).reduce((x,a)=>x+cardHours(a),0),0);const label=`<div class="matrix-label">${esc(site.label)}<span class="small">${formatHours(hours)} · ${new Set(data.assignments.filter(a=>days.includes(a.date)&&assignmentMatchesSiteKey(a,site.key)).map(a=>String(a.employeeId))).size} MA</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&assignmentMatchesSiteKey(a,site.key)).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de'));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningSiteDrop(event,'${day}','${esc(site.key)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
-  target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten können zwischen Baustellen und Tagen verschoben oder mit Strg/Alt kopiert werden.</div>`;
+  const rows=sites.map(site=>{const hours=days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&assignmentMatchesSiteKey(a,site.key)).reduce((x,a)=>x+plannedHoursForAssignment(a),0),0);const label=`<div class="matrix-label">${esc(site.label)}<span class="small">${formatHours(hours)} · ${new Set(data.assignments.filter(a=>days.includes(a.date)&&assignmentMatchesSiteKey(a,site.key)).map(a=>String(a.employeeId))).size} MA${site.job?.status?' · '+esc(site.job.status):''}</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&assignmentMatchesSiteKey(a,site.key)).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de'));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningSiteDrop(event,'${day}','${esc(site.key)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
+  target.innerHTML=sortbar+`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten können zwischen Baustellen und Tagen verschoben oder mit Strg/Alt kopiert werden.</div>`;
 }
 function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
   if(planningView==='month'){
