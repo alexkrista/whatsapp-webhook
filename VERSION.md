@@ -1,17 +1,9 @@
-# KRISTA
+# KRISTA Build 0020.10
 
-Aktuelle Version
+## Erinnerungen & Automatik
 
-Build: 0014
-
-Branch:
-build-0014
-
-Stand:
-18.07.2026
-
-Status:
-🟡 Entwicklung
-
-Nächster Sprint:
-0015 Baustellenprotokoll
+- Mittagserinnerung laut Arbeitsmodell
+- Pause während Mittagszeit fragt: Mittag oder normale Pause
+- Vergessenes Ende von Mittag/Pause: Nachfrage und rückwirkende Uhrzeit
+- 17:30 Chefhinweis bei noch aktiven Mitarbeitern
+- Mitarbeiter wird gefragt, ob er noch arbeitet und wann er aufgehört hat
