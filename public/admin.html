@@ -1,4 +1,4 @@
-<!-- Datei: public/admin.html · Build 0020.5 -->
+<!-- Datei: public/admin.html · Build 0020.9c -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -23,6 +23,8 @@
     .employee-modal-body{padding:20px}.employee-table{width:100%;border-collapse:collapse}.employee-table th,.employee-table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}.employee-form{display:grid;grid-template-columns:1fr;gap:10px;background:#f7f7f7;padding:14px;border-radius:14px;margin-bottom:18px}.employee-form>div:not(.full):not(.employee-docs):not(.employee-sizes):not(.employee-flags):not(.model-summary){display:grid;grid-template-columns:minmax(210px,34%) 1fr;gap:14px;align-items:center}.employee-form>div>label{margin:0}.vehicle-stack{max-width:860px}.vehicle-stack h3{margin:22px 0 8px}.doc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.doc-box{background:#fff;border:1px solid #ddd;border-radius:12px;padding:12px}.doc-box label{display:block;font-weight:650;margin-bottom:7px}.employee-form input,.employee-form select{min-width:0;width:100%;box-sizing:border-box}.employee-form .full{grid-column:1/-1}.employee-flags{grid-column:1/-1;display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:#fff;padding:10px 12px;border-radius:10px;border:1px solid #e3e3e3}.employee-flags .checkline{margin:0;font-weight:600}.model-summary{grid-column:1/-1;background:#fff;border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;color:#444;line-height:1.5}.emp-select{min-width:0;width:100%;box-sizing:border-box;padding:10px 8px;border-radius:10px;border:1px solid #ccc;background:#fff}
     .calcbox{background:#f7f7f7;border:1px solid #e3e3e3;border-radius:12px;padding:12px;margin-top:12px}.calcgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:7px 14px}.calcgrid .value{text-align:right;font-weight:700}.calcgrid .total{border-top:1px solid #ccc;padding-top:7px;margin-top:3px}.progress{height:10px;background:#ddd;border-radius:999px;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:#111}.negative{color:#9b1c1c}.positive{color:#2d6a2d}.warning{color:#9a5b00}
     .job-summary{margin-top:12px;border-top:1px solid #eee;padding-top:10px}
+
+    .job-tasks{margin-top:12px;padding:10px 12px;border:1px solid #e3e3e3;border-radius:12px;background:#fafafa}.job-tasks button{width:100%;display:flex;justify-content:space-between;align-items:center;background:#fff;color:#111;border-color:#d7d7d7}.job-tasks .task-count{font-weight:850}.task-row{padding:12px 0;border-bottom:1px solid #eee}.task-row:last-child{border-bottom:0}.task-row.done{opacity:.7}.task-row-head{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}.task-status{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800;background:#fff1c9;color:#7a4b00}.task-status.done{background:#dff3e4;color:#216934}.task-meta{font-size:13px;color:#666;line-height:1.5;margin-top:5px}
     .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
     .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .readonly-highlight{background:#fffbe8;font-weight:800}
@@ -165,6 +167,13 @@
     </div><div id="vehicleList" style="margin-top:22px"></div></div>
   </section>
   <div id="ideaBackdrop" class="drawer-backdrop" onclick="closeIdeas()" style="z-index:74"></div><section id="ideaModal" class="employee-modal" style="z-index:75"><div class="employee-modal-head"><strong>💡 Ideen & Wünsche</strong><button class="closebtn" onclick="closeIdeas()">×</button></div><div class="employee-modal-body"><div class="modal-grid"><input type="hidden" id="ideaId"><div><label>Titel</label><input id="ideaTitle"></div><div><label>Status</label><select id="ideaStatus"><option value="offen">offen</option><option value="geplant">geplant</option><option value="umgesetzt">umgesetzt</option></select></div><div class="full"><label>Beschreibung</label><textarea id="ideaNote"></textarea></div><div class="full actions"><button onclick="saveIdea()">💾 Idee speichern</button><button class="secondary" onclick="resetIdeaForm()">Neu</button></div></div><div id="ideaList"></div></div></section>
+
+  <div id="jobTasksBackdrop" class="drawer-backdrop" onclick="closeJobTasks()" style="z-index:78"></div>
+  <section id="jobTasksModal" class="employee-modal" style="z-index:79">
+    <div class="employee-modal-head"><div><strong>🔨 Offene Arbeiten</strong><div id="jobTasksTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeJobTasks()">×</button></div>
+    <div class="employee-modal-body"><div id="jobTasksList" class="loading">Lade offene Arbeiten …</div></div>
+  </section>
+
   <div id="historyBackdrop" class="drawer-backdrop" onclick="closeHistory()" style="z-index:76"></div>
   <section id="historyModal" class="employee-modal" style="z-index:77">
     <div class="employee-modal-head"><div><strong>📜 Historisches Baustellentagebuch</strong><div id="historyTitle" class="small" style="color:#ddd"></div></div><button class="closebtn" onclick="closeHistory()">×</button></div>
@@ -214,6 +223,7 @@ function render(){
     ${address?`<div class="job-address">📍 ${esc(address)}${j.addressExtra?`<br><span class="small">${esc(j.addressExtra)}</span>`:''}${nav?`<br><a class="nav-link" target="_blank" href="${nav}">Navigation starten ↗</a>`:''}</div>`:''}
     ${(j.contactName||j.contactPhone)?`<div class="meta">👤 ${esc(j.contactName||'–')}${j.contactPhone?` · <a href="tel:${esc(j.contactPhone)}">${esc(j.contactPhone)}</a>`:''}</div>`:''}
     <div class="meta">letzter Tag: ${esc(j.latestDay||'-')}<br>Tage: ${j.daysCount||0}<br>gesamt: 🖼 ${(j.totalStats&&j.totalStats.images)||0} · 📄 ${(j.totalStats&&j.totalStats.pdfs)||0} · 🎤 ${(j.totalStats&&j.totalStats.audio)||0}<br><span class="pill">💾 ${bytes(j.sizeBytes)}</span></div><div class="job-summary" id="summary-${esc(j.jobId)}"></div>
+    ${(Number(j.openTaskCount||0)||Number(j.doneTaskCount||0))?`<div class="job-tasks"><button type="button" onclick="openJobTasks('${esc(j.jobId)}')"><span>🔨 Offene Arbeiten</span><span class="task-count">${Number(j.openTaskCount||0)} offen · ${Number(j.doneTaskCount||0)} erledigt</span></button></div>`:''}
     <div class="actions primary-actions"><button class="secondary" onclick="toggleDays('${esc(j.jobId)}',this)">Tage</button><a class="action" target="_blank" href="${tokenJoin('/admin/akte/'+encodeURIComponent(j.jobId))}">Akte öffnen</a><button class="secondary" onclick="openHistory('${esc(j.jobId)}')">Tagebuch</button><button class="ghost" onclick="toggleEdit('${esc(j.jobId)}')">Bearbeiten</button></div>
     <button class="trash-mini" title="Baustelle löschen" onclick="deleteJob('${esc(j.jobId)}')">🗑️</button>
     <div class="edit" id="edit-${esc(j.jobId)}">
@@ -243,10 +253,15 @@ async function loadJobs(){
 function toggleEdit(jobId){ const box=document.getElementById('edit-'+jobId); box.style.display = box.style.display==='block' ? 'none':'block'; }
 async function saveMeta(jobId){
   const j = jobs.find(x=>String(x.jobId)===String(jobId));
+  const requestedStatus=document.getElementById('status-'+jobId).value;
+  if(requestedStatus==='Geschlossen' && Number(j?.openTaskCount||0)>0){
+    const ok=confirm(`⚠️ Diese Baustelle hat noch ${Number(j.openTaskCount||0)} offene Arbeit${Number(j.openTaskCount||0)===1?'':'en'}.\n\nTrotzdem schließen?`);
+    if(!ok)return;
+  }
   const body={
     name:document.getElementById('name-'+jobId).value,
     notes:document.getElementById('notes-'+jobId).value,
-    status:document.getElementById('status-'+jobId).value,
+    status:requestedStatus,
     street:document.getElementById('street-'+jobId).value,
     houseNumber:document.getElementById('house-'+jobId).value,
     postalCode:document.getElementById('postal-'+jobId).value,
@@ -375,6 +390,30 @@ async function deleteJob(jobId){
   if(typed !== String(jobId)) { if(typed !== null) alert('Nicht gelöscht – Nummer war nicht korrekt.'); return; }
   await api(`/admin/api/job/${encodeURIComponent(jobId)}`, {method:'DELETE'});
   await loadJobs();
+}
+
+
+function taskDueText(date){if(!date)return 'ohne Fälligkeit';try{return new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(date+'T12:00:00'))}catch{return date}}
+function openJobTasks(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId));if(!j)return;
+  document.getElementById('jobTasksTitle').textContent=jobTitle(j);
+  document.getElementById('jobTasksBackdrop').style.display='block';
+  document.getElementById('jobTasksModal').style.display='block';
+  renderJobTasks(jobId);
+}
+function closeJobTasks(){document.getElementById('jobTasksBackdrop').style.display='none';document.getElementById('jobTasksModal').style.display='none';}
+function renderJobTasks(jobId){
+  const j=jobs.find(x=>String(x.jobId)===String(jobId));const box=document.getElementById('jobTasksList');
+  const tasks=[...(j?.tasks||[])].sort((a,b)=>(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  box.className='';
+  box.innerHTML=tasks.length?tasks.map(t=>`<div class="task-row ${t.status==='done'?'done':''}"><div class="task-row-head"><div><strong>${esc(t.title)}</strong><div class="task-meta">Zuständig: ${esc(t.assigneeName||t.assigneeId||'–')}<br>Fällig: ${esc(taskDueText(t.dueDate))}<br>Ersteller: ${esc(t.creatorName||'Chef / Büro')}${t.reminder?`<br>Hinweis: ${esc(t.reminder)}`:''}</div></div><span class="task-status ${t.status==='done'?'done':''}">${t.status==='done'?'Erledigt':'Offen'}</span></div><div class="actions" style="margin-top:10px">${t.status!=='done'?`<button onclick="completeJobTask('${esc(jobId)}','${esc(t.id)}')">✓ Erledigt</button>`:''}</div></div>`).join(''):'<div class="hint">Keine offenen oder erledigten Arbeiten für diese Baustelle.</div>';
+}
+async function completeJobTask(jobId,taskId){
+  try{
+    await api(`/kristine/api/tasks/${encodeURIComponent(taskId)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'done',completedById:'admin',completedByName:'Chef / Büro'})});
+    await loadJobs();
+    openJobTasks(jobId);
+  }catch(e){alert('Aufgabe konnte nicht erledigt werden: '+e.message)}
 }
 
 async function openHistory(jobId){
