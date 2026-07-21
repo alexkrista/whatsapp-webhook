@@ -1,3 +1,8 @@
+Build 0020.9b – Offene Arbeiten anklickbar
+Leitstand: offene Arbeiten anklickbar.
+Detaildialog und Erledigt-Workflow ergänzt.
+Ersteller-Felder für spätere Rückmeldung vorbereitet.
+Keine Änderungen an Planung, Urlaub, Zeitmodellen oder Tagesreport.
 Build 0020.3 – Speicher-Fix
 Fehlende API-Routen für Feiertage wiederhergestellt.
 Österreichische Feiertage können neu geladen und dauerhaft gespeichert werden.
@@ -137,3 +142,14 @@ Build 0020.6 – Konfigurationsmodul
 Vier alte Spalten durch ein ruhiges Akkordeon ersetzt.
 Arbeitsmodelle mit Pause/Mittag sowie Brutto/Netto ausgebaut.
 Feiertage und Betriebsurlaub kompakt verwaltbar und nach Speichern einklappbar.
+Build 0020.7 – Tagesreport auf aktuellem Stand
+Basis bleibt Build 0020.6 mit Abwesenheiten & Betrieb sowie Konfigurationsmodul.
+Tagesreport-Modul aus Build 0019 ergänzt.
+Button „Tagesreport gestern“ im Leitstand ergänzt.
+Admin-Token wird beim Öffnen des Reports mitgegeben; dadurch kein „Forbidden“ aus der Kristine-Oberfläche.
+Automatische Erzeugung täglich um 05:30 Uhr für den Vortag.
+Build 0020.8 – Datenquellen & Sortierung
+Baustellenliste „Neueste zuerst“ sortiert jetzt nach der jüngsten echten Buchung/Aktivität, nicht nur nach dem letzten Ordnerdatum.
+Geleistete Auftragsstunden werden zusätzlich aus den Kristine-Zeitereignissen berechnet; Baustellen wie Fink_Loos_M3 zeigen dadurch ihre tatsächlich erfassten Stunden.
+Betriebskarten rechts zeigen echte Jahressummen aus der Planung statt festem 0,0-h-Platzhalter.
+Urlaub, Krank, Arzt, Aufräumen, Werkstatt, Schulung, Material holen, Lager und Besprechung sind anklickbar und wählen direkt den Kartentyp.
