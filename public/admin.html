@@ -206,7 +206,7 @@ function render(){
   const app=document.getElementById('app'); const q=document.getElementById('search').value.trim().toLowerCase(); const sort=document.getElementById('sortJobs')?.value||'newest';
   let list=jobs.filter(j=>(!activeJobStatus||String(j.status||'Angebot')===activeJobStatus)&&(!q||String(j.jobId).toLowerCase().includes(q)||String(j.name||'').toLowerCase().includes(q)||fullAddress(j).toLowerCase().includes(q)));
   const cmpText=(a,b)=>String(a||'').localeCompare(String(b||''),'de',{numeric:true,sensitivity:'base'});
-  list=[...list].sort((a,b)=>sort==='oldest'?cmpText(a.latestDay,b.latestDay):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(b.latestDay,a.latestDay));
+  list=[...list].sort((a,b)=>{const activityA=a.latestActivity||a.latestDay||'';const activityB=b.latestActivity||b.latestDay||'';return sort==='oldest'?cmpText(activityA,activityB):sort==='jobAsc'?cmpText(a.jobId,b.jobId):sort==='jobDesc'?cmpText(b.jobId,a.jobId):sort==='nameAsc'?cmpText(a.name,b.name):sort==='nameDesc'?cmpText(b.name,a.name):cmpText(activityB,activityA)});
   if(!list.length){app.className='loading';app.textContent='Keine Baustellen gefunden.';return;} app.className='grid';
   app.innerHTML=list.map(j=>{
     const address=fullAddress(j), nav=mapsUrl(j);
