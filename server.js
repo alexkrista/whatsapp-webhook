@@ -2050,9 +2050,80 @@ async function readLogStats(dayDir) {
   return { items, images, audio, pdfs };
 }
 
-async function summarizeJobHours(jobId) {
-  const days = await listDaysForJob(jobId);
+function normalizeJobKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function eventTimestamp(event) {
+  const created = Date.parse(String(event?.createdAt || event?.timestamp || ""));
+  if (Number.isFinite(created)) return new Date(created).toISOString();
+  const date = String(event?.date || "");
+  const at = /^\d{1,2}:\d{2}$/.test(String(event?.at || "")) ? String(event.at) : "00:00";
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T${at.padStart(5, "0")}:00` : "";
+}
+
+async function summarizeKristineJobActivity(jobId, meta = {}) {
+  const root = path.join(DATA_DIR, "_kristine");
+  const [timeEvents, reviewEntries] = await Promise.all([
+    readJsonArrayFile(path.join(root, "time-events.json")),
+    readJsonArrayFile(path.join(root, "day-review-entries.json")),
+  ]);
+  const aliases = new Set([
+    normalizeJobKey(jobId),
+    normalizeJobKey(meta.name),
+    normalizeJobKey(`#${jobId}`),
+  ].filter(Boolean));
+  const matches = (row) => {
+    const idKey = normalizeJobKey(row?.jobId);
+    const nameKey = normalizeJobKey(row?.jobName);
+    return aliases.has(idKey) || aliases.has(nameKey);
+  };
+
+  const grouped = new Map();
+  let latestActivity = "";
+  for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
+    if (!matches(event)) continue;
+    const ts = eventTimestamp(event);
+    if (ts && ts > latestActivity) latestActivity = ts;
+    const key = `${event.employeeId || event.employeeName || "?"}|${event.date || ""}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(event);
+  }
+  for (const entry of Array.isArray(reviewEntries) ? reviewEntries : []) {
+    if (!matches(entry)) continue;
+    const ts = eventTimestamp(entry);
+    if (ts && ts > latestActivity) latestActivity = ts;
+  }
+
   let actualHours = 0;
+  const hm = (value) => {
+    const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  for (const events of grouped.values()) {
+    const sorted = events
+      .map((event, index) => ({ ...event, _index: index, _minutes: hm(event.at) }))
+      .filter((event) => event._minutes !== null)
+      .sort((a, b) => a._minutes - b._minutes || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || a._index - b._index);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const event = sorted[i];
+      const next = sorted[i + 1];
+      if (!["start", "weiter"].includes(String(event.type || "").toLowerCase())) continue;
+      if (!matches(event) || next._minutes < event._minutes) continue;
+      actualHours += (next._minutes - event._minutes) / 60;
+    }
+  }
+  return { actualHours, latestActivity };
+}
+
+async function summarizeJobHours(jobId, meta = {}) {
+  const days = await listDaysForJob(jobId);
+  let regieActualHours = 0;
   let actualRegieHours = 0;
   for (const day of days) {
     const p = regiePathForDay(jobId, day);
@@ -2060,12 +2131,17 @@ async function summarizeJobHours(jobId) {
     try {
       const regie = JSON.parse(await fsp.readFile(p, "utf8"));
       for (const employee of Array.isArray(regie.employees) ? regie.employees : []) {
-        actualHours += Math.max(0, Number(employee.totalHours || 0));
+        regieActualHours += Math.max(0, Number(employee.totalHours || 0));
         actualRegieHours += Math.max(0, Number(employee.regieHours || 0));
       }
     } catch {}
   }
-  return { actualHours, actualRegieHours };
+  const kristine = await summarizeKristineJobActivity(jobId, meta);
+  return {
+    actualHours: kristine.actualHours > 0 ? kristine.actualHours : regieActualHours,
+    actualRegieHours,
+    latestActivity: kristine.latestActivity || "",
+  };
 }
 
 function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
@@ -2121,7 +2197,7 @@ app.get("/admin/api/jobs", async (req, res) => {
       }
 
       const meta = await readJobMeta(jobId);
-      const hours = await summarizeJobHours(jobId);
+      const hours = await summarizeJobHours(jobId, meta);
       const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
       const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
 
@@ -2148,6 +2224,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         totalStats,
         daysCount: days.length,
         latestDay,
+        latestActivity: hours.latestActivity || (latestDay ? `${latestDay}T00:00:00` : ""),
         itemsLastDay: stats.items,
         imagesLastDay: stats.images,
         audioLastDay: stats.audio,
