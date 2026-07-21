@@ -1,4 +1,4 @@
-// Datei: kristine.js · Build 0020.6
+// Datei: kristine.js · Build 0020.10
 
 "use strict";
 
@@ -240,6 +240,24 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       .toLowerCase()
       .replace(/[.!?,;:]+/g, "")
       .replace(/\s+/g, " ");
+  }
+
+  function parseReminderTime(text, nowDate = new Date()) {
+    const raw = normalizeText(text);
+    if (/^(jetzt|ab jetzt|sofort)$/.test(raw)) return localTimeHM(nowDate);
+    const relative = raw.match(/vor\s+(\d{1,3})\s*min/);
+    if (relative) {
+      const d = new Date(nowDate.getTime() - Number(relative[1]) * 60000);
+      return localTimeHM(d);
+    }
+    const match = raw.match(/(?:^|\s)([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s|$)/);
+    if (!match) return null;
+    return `${String(match[1]).padStart(2, "0")}:${match[2]}`;
+  }
+
+  function isLunchWindow(hm) {
+    const minutes = minutesFromHm(hm);
+    return minutes != null && minutes >= 11 * 60 + 30 && minutes <= 13 * 60;
   }
 
   function detectIntent(text) {
@@ -501,6 +519,87 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     };
 
     // Pending questions have priority.
+    if (state.pending?.type === "pause_or_lunch") {
+      if (intent === "lunch" || intent === "yes") {
+        state.mode = "lunch";
+        state.pending = null;
+        addTimeline("lunch_started", "Mittagspause", current);
+        await saveState();
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "mittag", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
+        return { reply: "Mittagspause begonnen. Mahlzeit! 🍽️", buttons: ["Weiter"], state };
+      }
+      if (intent === "pause" || intent === "no") {
+        state.mode = "pause";
+        state.pending = null;
+        addTimeline("pause_started", "Pause", current);
+        await saveState();
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "pause", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
+        return { reply: "Normale Pause begonnen. ☕", buttons: ["Weiter"], state };
+      }
+      return { reply: "Meinst du deine Mittagspause?", buttons: ["Mittag", "Pause"], state };
+    }
+
+    if (state.pending?.type === "lunch_start_question") {
+      if (intent === "yes" || intent === "lunch") {
+        state.mode = "lunch";
+        state.pending = null;
+        addTimeline("lunch_started", "Mittagspause nach Erinnerung", current);
+        await saveState();
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "mittag", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
+        return { reply: "Mittagspause begonnen. Mahlzeit! 🍽️", buttons: ["Weiter"], state };
+      }
+      if (intent === "no") { state.pending = null; await saveState(); return { reply: "Alles klar. Deine Arbeitszeit läuft weiter.", buttons: ["Pause", "Mittag", "Fertig"], state }; }
+      return { reply: "Machst du jetzt Mittagspause?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "resume_check") {
+      if (intent === "yes" || intent === "resume") {
+        state.pending = { type: "resume_since", createdAt: now, breakMode: state.mode };
+        await saveState();
+        return { reply: "Seit wann arbeitest du wieder? Zum Beispiel 12:30, jetzt oder vor 10 Minuten.", buttons: [], state };
+      }
+      if (intent === "no") { state.pending = null; await saveState(); return { reply: "Alles klar. Melde dich mit „Weiter“, sobald du wieder arbeitest.", buttons: ["Weiter"], state }; }
+      return { reply: "Arbeitest du bereits wieder?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "resume_since") {
+      const correctedTime = parseReminderTime(text, nowDate);
+      if (!correctedTime) return { reply: "Bitte gib eine Uhrzeit an, zum Beispiel 12:30, jetzt oder vor 10 Minuten.", buttons: [], state };
+      state.mode = "working";
+      state.pending = null;
+      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
+      state.timeline.push({ at: now, time: correctedTime, type: "work_resumed", detail: "Arbeitsbeginn nach Pause korrigiert", assignmentKey: current ? assignmentKey(current) : null, jobId: current?.jobId || null, jobName: current?.jobName || "" });
+      state.timeline = state.timeline.slice(-200);
+      await saveState();
+      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: correctedTime, actualAt: actualTime, adjusted: correctedTime !== actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
+      return { reply: `Danke. Deine Arbeitszeit läuft seit ${correctedTime} wieder.`, buttons: ["Pause", "Mittag", "Fertig"], state };
+    }
+
+    if (state.pending?.type === "day_end_check") {
+      if (intent === "yes") { state.pending = null; await saveState(); return { reply: "Alles klar. Deine Arbeitszeit läuft weiter.", buttons: ["Pause", "Fertig"], state }; }
+      if (intent === "no" || intent === "finish") {
+        state.pending = { type: "day_end_since", createdAt: now, previousMode: state.mode };
+        await saveState();
+        return { reply: "Wann hast du aufgehört? Zum Beispiel 16:45, jetzt oder vor 20 Minuten.", buttons: [], state };
+      }
+      return { reply: "Arbeitest du noch?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "day_end_since") {
+      const correctedTime = parseReminderTime(text, nowDate);
+      if (!correctedTime) return { reply: "Bitte gib eine Uhrzeit an, zum Beispiel 16:45, jetzt oder vor 20 Minuten.", buttons: [], state };
+      const finishEventId = `finish_reminder_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`;
+      await appendTimeEvent({ id: finishEventId, employeeId, employeeName: state.employeeName, date: today, type: "ende", at: correctedTime, actualAt: actualTime, adjusted: correctedTime !== actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
+      state.mode = "closing_day";
+      state.pending = { type: "review_day", previousMode: state.pending.previousMode || "working", finishEventId, createdAt: now };
+      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
+      state.timeline.push({ at: now, time: correctedTime, type: "day_review_started", detail: "Tagesende nach Erinnerung korrigiert", assignmentKey: current ? assignmentKey(current) : null, jobId: current?.jobId || null, jobName: current?.jobName || "" });
+      state.timeline = state.timeline.slice(-200);
+      await saveState();
+      const summary = await buildDaySummary(employeeId, today);
+      return { reply: `Danke. Feierabend wurde auf ${correctedTime} gesetzt.\n\n${summary.text}`, buttons: ["Passt", "Ändern", "Abbrechen"], state };
+    }
+
     if (state.pending?.type === "confirm_assignment") {
       if (intent === "yes") {
         state.pending = null;
@@ -926,6 +1025,12 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         buttons: ["Pause", "Mittag", "Baustelle wechseln", "Fertig"],
         state,
       };
+    }
+
+    if (intent === "pause" && state.mode === "working" && isLunchWindow(actualTime)) {
+      state.pending = { type: "pause_or_lunch", createdAt: now };
+      await saveState();
+      return { reply: "Meinst du deine Mittagspause?", buttons: ["Mittag", "Pause"], state };
     }
 
     if (intent === "pause" || intent === "lunch") {
