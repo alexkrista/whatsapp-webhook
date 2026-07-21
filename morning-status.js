@@ -226,6 +226,28 @@ function reminderText(employee, assignment) {
   ].join("\n");
 }
 
+function weekdayIndex(dateStr) {
+  const day = new Date(`${dateStr}T12:00:00`).getDay();
+  return day === 0 ? 6 : day - 1;
+}
+
+function addMinutes(hm, amount) {
+  const base = minutesFromHm(hm);
+  if (base == null) return "";
+  const total = ((base + Number(amount || 0)) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function reminderDone(scheduler, group, date, employeeId) {
+  return Boolean(scheduler?.[group]?.[date]?.[String(employeeId)]);
+}
+
+function markReminder(scheduler, group, date, employeeId) {
+  scheduler[group] = scheduler[group] || {};
+  scheduler[group][date] = scheduler[group][date] || {};
+  scheduler[group][date][String(employeeId)] = true;
+}
+
 async function registerMorningStatus({
   dataDir,
   readEmployees,
@@ -245,18 +267,22 @@ async function registerMorningStatus({
     events: path.join(kristineDir, "time-events.json"),
     lateNotices: path.join(kristineDir, "late-notices.json"),
     scheduler: path.join(kristineDir, "scheduler-state.json"),
+    states: path.join(kristineDir, "states.json"),
+    scheduleModels: path.join(kristineDir, "schedule-models.json"),
   };
 
   async function loadState() {
-    const [employees, assignments, absences, events, lateNotices, scheduler] = await Promise.all([
+    const [employees, assignments, absences, events, lateNotices, scheduler, states, scheduleModels] = await Promise.all([
       readEmployees(),
       readJson(files.assignments, []),
       readJson(files.absences, []),
       readJson(files.events, []),
       readJson(files.lateNotices, []),
       readJson(files.scheduler, {}),
+      readJson(files.states, {}),
+      readJson(files.scheduleModels, []),
     ]);
-    return { employees, assignments, absences, events, lateNotices, scheduler };
+    return { employees, assignments, absences, events, lateNotices, scheduler, states, scheduleModels };
   }
 
   async function saveRun(key, date, scheduler) {
@@ -308,6 +334,58 @@ async function registerMorningStatus({
     return { sent: true, statuses, report };
   }
 
+  function scheduleDayFor(employee, date, scheduleModels) {
+    const modelId = String(employee?.worktimeModelId || "");
+    const model = (Array.isArray(scheduleModels) ? scheduleModels : []).find((item) => String(item?.id) === modelId) || (Array.isArray(scheduleModels) ? scheduleModels[0] : null);
+    return model?.days?.[weekdayIndex(date)] || null;
+  }
+
+  async function runLunchAutomation(date = localIsoDate(), hm = localHm()) {
+    const state = await loadState();
+    let changed = false;
+    for (const employee of activeEmployees(state.employees)) {
+      const employeeState = state.states[String(employee.id)];
+      if (!employeeState || employeeState.pending) continue;
+      const day = scheduleDayFor(employee, date, state.scheduleModels);
+      if (!day?.isWorkDay || !day.lunchStart || !day.lunchEnd) continue;
+
+      const startReminderAt = addMinutes(day.lunchStart, 5);
+      const endReminderAt = addMinutes(day.lunchEnd, 5);
+      if (hm === startReminderAt && employeeState.mode === "working" && !reminderDone(state.scheduler, "lunchStart", date, employee.id)) {
+        employeeState.pending = { type: "lunch_start_question", createdAt: new Date().toISOString() };
+        await sendWhatsApp({ phoneNumberId, to: normalizePhone(employee.phone), reply: "🍽️ Laut deinem Arbeitsmodell wäre jetzt Mittagspause. Machst du jetzt Mittag?", buttons: ["Ja", "Nein"] }).catch((error) => logger.error("Mittagserinnerung fehlgeschlagen", employee.name, error));
+        markReminder(state.scheduler, "lunchStart", date, employee.id); changed = true;
+      }
+      if (hm === endReminderAt && employeeState.mode === "lunch" && !reminderDone(state.scheduler, "lunchEnd", date, employee.id)) {
+        employeeState.pending = { type: "resume_check", createdAt: new Date().toISOString(), breakMode: "lunch" };
+        await sendWhatsApp({ phoneNumberId, to: normalizePhone(employee.phone), reply: "🍽️ Arbeitest du bereits wieder?", buttons: ["Ja", "Nein"] }).catch((error) => logger.error("Mittagsende-Erinnerung fehlgeschlagen", employee.name, error));
+        markReminder(state.scheduler, "lunchEnd", date, employee.id); changed = true;
+      }
+    }
+    if (changed) { await writeJson(files.states, state.states); await writeJson(files.scheduler, state.scheduler); }
+  }
+
+  async function runDayEndCheck(date = localIsoDate(), force = false) {
+    const state = await loadState();
+    if (!force && state.scheduler.dayEndCheck === date) return { skipped: true };
+    const active = [];
+    for (const employee of activeEmployees(state.employees)) {
+      const employeeState = state.states[String(employee.id)];
+      if (!employeeState || !["working", "pause", "lunch"].includes(employeeState.mode)) continue;
+      active.push(employee);
+      if (!employeeState.pending) {
+        employeeState.pending = { type: "day_end_check", createdAt: new Date().toISOString(), previousMode: employeeState.mode };
+        await sendWhatsApp({ phoneNumberId, to: normalizePhone(employee.phone), reply: "👋 Du bist bei mir noch eingestempelt. Arbeitest du noch?", buttons: ["Ja", "Nein"] }).catch((error) => logger.error("Feierabend-Erinnerung fehlgeschlagen", employee.name, error));
+      }
+    }
+    if (active.length && normalizePhone(chefPhone)) {
+      await sendWhatsApp({ phoneNumberId, to: normalizePhone(chefPhone), reply: [`⚠️ 17:30 Uhr – noch aktiv:`, ...active.map((employee) => `• ${employee.name}`), "", "Kristine fragt die Mitarbeiter direkt, ob sie noch arbeiten und gegebenenfalls seit wann sie aufgehört haben."].join("\n") }).catch((error) => logger.error("Chef-Feierabendinfo fehlgeschlagen", error));
+    }
+    await writeJson(files.states, state.states);
+    await saveRun("dayEndCheck", date, state.scheduler);
+    return { sent: active.length, employees: active.map((employee) => employee.name) };
+  }
+
   // Prüft jede Minute, führt aber jeden Job pro Datum nur einmal aus.
   const timer = setInterval(async () => {
     try {
@@ -315,6 +393,8 @@ async function registerMorningStatus({
       const date = localIsoDate();
       if (hm === "07:00") await runSevenOClock(date);
       if (hm === "08:00") await runEightOClock(date);
+      await runLunchAutomation(date, hm);
+      if (hm === "17:30") await runDayEndCheck(date);
     } catch (error) {
       logger.error("KRISTA Morgenstatus Scheduler:", error);
     }
@@ -324,6 +404,8 @@ async function registerMorningStatus({
   return {
     runSevenOClock,
     runEightOClock,
+    runLunchAutomation,
+    runDayEndCheck,
     clampStartTime,
     dailyTargetHours: DAILY_TARGET_HOURS,
     files,
