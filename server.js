@@ -137,18 +137,19 @@ function parseProtocolStart(text) {
 function ensureDirSync(p) {
   fs.mkdirSync(p, { recursive: true });
 }
+async function ensureDir(p) {
+  await fsp.mkdir(p, { recursive: true });
+}
 async function readJson(file, fallback) {
   try {
     const raw = await fsp.readFile(file, "utf8");
     return JSON.parse(raw);
-  } catch {
-    return fallback;
+  } catch (error) {
+    if (error && error.code === "ENOENT") return fallback;
+    try { return fallback; } catch { return fallback; }
   }
 }
 
-async function ensureDir(p) {
-  await fsp.mkdir(p, { recursive: true });
-}
 async function appendJsonl(filePath, obj) {
   await ensureDir(path.dirname(filePath));
   await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
