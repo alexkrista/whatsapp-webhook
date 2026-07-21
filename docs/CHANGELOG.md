@@ -1,3 +1,10 @@
+# Build 0020.10a – Leitstand Mitarbeiteraktion
+
+- Aktive Mitarbeiter im Leitstand anklickbar
+- Dialog mit Status, Baustelle, Arbeits- und Pausenzeit
+- Manuelle Feierabend-Nachfrage an genau einen Mitarbeiter
+- Neue Admin-API für die gezielte Nachfrage
+
 ## Build 0020.10 – Erinnerungen & Automatik
 
 - Mittagserinnerung auf Basis des Arbeitsmodells.
