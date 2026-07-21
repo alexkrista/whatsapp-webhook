@@ -1212,12 +1212,40 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         jobName: String(t.jobName || "").trim().slice(0, 140),
         dueDate: String(t.dueDate || "").slice(0, 10),
         reminder: String(t.reminder || "").trim().slice(0, 300),
+        creatorId: String(t.creatorId || "admin").slice(0, 100),
+        creatorName: String(t.creatorName || "Chef / Büro").trim().slice(0, 140),
         status: t.status === "done" ? "done" : "open",
         createdAt: t.createdAt || new Date().toISOString(),
         completedAt: t.completedAt || null,
       })).filter(t => t.title);
       await writeJson(TASKS, clean);
       res.json({ ok: true, tasks: clean });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+
+  app.patch("/kristine/api/tasks/:taskId", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const taskId = String(req.params.taskId || "");
+      const tasks = await readJson(TASKS, []);
+      const task = tasks.find((t) => String(t.id) === taskId);
+      if (!task) return res.status(404).json({ ok: false, error: "Aufgabe nicht gefunden." });
+      if (req.body?.status === "done") {
+        task.status = "done";
+        task.completedAt = req.body?.completedAt || new Date().toISOString();
+        task.completedById = String(req.body?.completedById || "admin");
+        task.completedByName = String(req.body?.completedByName || "Chef / Büro").slice(0, 140);
+      } else if (req.body?.status === "open") {
+        task.status = "open";
+        task.completedAt = null;
+        task.completedById = "";
+        task.completedByName = "";
+      }
+      await writeJson(TASKS, tasks);
+      res.json({ ok: true, task, tasks });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
