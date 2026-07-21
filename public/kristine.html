@@ -154,7 +154,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
         <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="z. B. erinnern, wenn Alex wieder bei Müller ist"></div>
       </div>
       <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
-      <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
+      <div class="actions"><button class="green" id="taskAddButton" type="button" onclick="addTask()">+ Aufgabe</button><button class="secondary" id="taskSaveButton" type="button" onclick="saveTasks()">Aufgaben speichern</button><span id="taskSavedNote" class="saved-note"></span></div>
     </div>
     <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
   </div>
@@ -676,19 +676,30 @@ function renderControl(){
   }).join('')}</div>`;
 }
 
-function addTask(){
-  if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
-  if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
+async function addTask(){
+  const title=document.getElementById('tTitle');
+  const assigneeId=document.getElementById('tAssigneeId');
+  const assigneeName=document.getElementById('tAssigneeName');
+  const jobId=document.getElementById('tJobId');
+  const jobName=document.getElementById('tJobName');
+  const dueDate=document.getElementById('tDueDate');
+  const reminder=document.getElementById('tReminder');
+  if(!title.value.trim()){setTaskNote('Bitte eine Aufgabe eingeben.','error');title.focus();return}
+  if(!assigneeId.value.trim()){setTaskNote('Bitte eine zuständige Person auswählen.','error');document.getElementById('tAssigneeSelect').focus();return}
   data.tasks.push({
-    id:id(),title:tTitle.value.trim(),
-    assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
-    jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
-    dueDate:tDueDate.value,reminder:tReminder.value.trim(),
+    id:id(),title:title.value.trim(),
+    assigneeId:assigneeId.value.trim(),assigneeName:assigneeName.value.trim(),
+    jobId:jobId.value.trim(),jobName:jobName.value.trim(),
+    dueDate:dueDate.value,reminder:reminder.value.trim(),
     status:'open',createdAt:new Date().toISOString()
   });
-  tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
-  tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
-  updateTaskSelectionInfo();renderTasks();
+  renderTasks();
+  const saved=await saveTasks({quiet:true});
+  if(!saved)return;
+  title.value='';reminder.value='';document.getElementById('tAssigneeSelect').value='';document.getElementById('tJobSelect').value='';
+  assigneeId.value='';assigneeName.value='';jobId.value='';jobName.value='';dueDate.value='';
+  updateTaskSelectionInfo();
+  setTaskNote('✓ Aufgabe angelegt und gespeichert.','success');
 }
 function renderTasks(){
   taskList.innerHTML=data.tasks.length?data.tasks.map(t=>{
@@ -696,8 +707,41 @@ function renderTasks(){
     return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(t.dueDate||'–')} · ${esc(t.status)}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
   }).join(''):'<span class="small">Keine Aufgaben.</span>'
 }
-function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks()}
-async function saveTasks(){const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});data.tasks=r.tasks;renderTasks();alert('Aufgaben gespeichert.')}
+function setTaskNote(message,type='success'){
+  const note=document.getElementById('taskSavedNote');
+  if(!note)return;
+  note.textContent=message;
+  note.style.color=type==='error'?'#b42318':'#27713d';
+  clearTimeout(setTaskNote.timer);
+  setTaskNote.timer=setTimeout(()=>{if(note.textContent===message)note.textContent=''},3500);
+}
+async function removeTask(x){
+  const previous=[...(data.tasks||[])];
+  data.tasks=(data.tasks||[]).filter(t=>t.id!==x);
+  renderTasks();
+  const saved=await saveTasks({quiet:true});
+  if(!saved){data.tasks=previous;renderTasks();return}
+  setTaskNote('✓ Aufgabe gelöscht.','success');
+}
+async function saveTasks(options={}){
+  const button=document.getElementById('taskSaveButton');
+  const original=button?.textContent||'Aufgaben speichern';
+  try{
+    if(button){button.disabled=true;button.textContent='Speichert …'}
+    const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks||[]})});
+    if(!r?.ok||!Array.isArray(r.tasks))throw new Error(r?.error||'Ungültige Serverantwort');
+    data.tasks=r.tasks;
+    renderTasks();
+    if(!options.quiet)setTaskNote('✓ Aufgaben gespeichert.','success');
+    return true;
+  }catch(error){
+    console.error('[KRISTA] Aufgaben speichern fehlgeschlagen',error);
+    setTaskNote('✗ Speichern fehlgeschlagen: '+error.message,'error');
+    return false;
+  }finally{
+    if(button){button.disabled=false;button.textContent=original}
+  }
+}
 // ===== HOLIDAYS =====
 function toggleConfigSection(id){document.querySelectorAll('.config-section').forEach(section=>section.classList.toggle('open',section.id===id?!section.classList.contains('open'):false))}
 function setSavedNote(id,text){const el=document.getElementById(id);if(!el)return;el.textContent=text;setTimeout(()=>{if(el.textContent===text)el.textContent=''},2500)}
