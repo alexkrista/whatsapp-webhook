@@ -69,7 +69,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <h3>Karte einteilen</h3>
       <div class="formgrid">
         <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning()"></div>
-        <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="arzt">🩺 Arzt</option><option value="krank">🔴 Krank</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option></select></div>
+        <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="krank">🔴 Krank</option><option value="arzt">🩺 Arzt</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option><option value="schulung">🎓 Schulung</option><option value="material_holen">🚚 Material holen</option><option value="lager">📦 Lager</option><option value="besprechung">🤝 Besprechung</option></select></div>
         <div class="full" id="jobPickerRow"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
         <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
         <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
@@ -83,18 +83,8 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     </div>
     <div class="card">
       <h3>Abwesenheiten & Betrieb</h3>
-      <div class="system-cards">
-        <button class="secondary" style="width:100%;text-align:left">🔵 Urlaub <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🔴 Krank <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🩺 Arzt <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🧹 Aufräumen <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🔧 Werkstatt <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🎓 Schulung <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🚚 Material holen <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">📦 Lager <span style="float:right">0,0 h</span></button>
-        <button class="secondary" style="width:100%;text-align:left">🤝 Besprechung <span style="float:right">0,0 h</span></button>
-      </div>
-      <p class="small" style="margin-top:10px">Nächster Schritt: Karten verhalten sich wie Baustellenkarten und können direkt eingeteilt werden.</p>
+      <div class="system-cards" id="systemCards"></div>
+      <p class="small" style="margin-top:10px">Stunden = Summe im ausgewählten Kalenderjahr. Karte anklicken und links einteilen.</p>
     </div>
   </div>
   <div class="card" style="margin-top:14px">
@@ -274,7 +264,7 @@ async function loadAll(){
   document.getElementById('chatDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;
   renderMasterData();
-  renderWeek();renderControl();renderTasks();
+  renderWeek();renderControl();renderTasks();renderSystemCards();
   renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
@@ -321,9 +311,11 @@ function selectCardType(){
 function selectedPlanningDate(){return document.getElementById('aDate').value||data.today}
 function isoWeekNumber(value){const d=new Date((typeof value==='string'?value:iso(value))+'T12:00:00');const utc=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1));return Math.ceil((((utc-yearStart)/86400000)+1)/7)}
 function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
-const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},arzt:{label:'Arzt',icon:'🩺'},krank:{label:'Krank',icon:'🔴'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'}};
+const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},krank:{label:'Krank',icon:'🔴'},arzt:{label:'Arzt',icon:'🩺'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'},schulung:{label:'Schulung',icon:'🎓'},material_holen:{label:'Material holen',icon:'🚚'},lager:{label:'Lager',icon:'📦'},besprechung:{label:'Besprechung',icon:'🤝'}};
 function cardTypeOf(a){return a.cardType||'site'}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
+function selectSystemCard(type){const select=document.getElementById('aCardType');if(!select)return;select.value=type;selectCardType();document.getElementById('aDate')?.scrollIntoView({behavior:'smooth',block:'center'})}
+function renderSystemCards(){const box=document.getElementById('systemCards');if(!box)return;const selected=selectedPlanningDate();const year=String(selected||data.today||new Date().getFullYear()).slice(0,4);const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];const rows=data.assignments.filter(a=>cardTypeOf(a)===type&&String(a.date||'').startsWith(year));const hours=rows.reduce((sum,a)=>sum+plannedHoursForAssignment(a),0);const employees=new Set(rows.map(a=>String(a.employeeId||'')).filter(Boolean)).size;return `<button class="secondary" style="width:100%;text-align:left" onclick="selectSystemCard('${type}')" title="${employees} Mitarbeiter im Jahr ${year}">${meta.icon} ${esc(meta.label)} <span style="float:right">${formatHours(hours)}</span></button>`}).join('')}
 function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
 function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
@@ -490,7 +482,7 @@ function renderPlanning(){updatePlanningButtons();const target=document.getEleme
   const days=planningView==='day'?[selectedPlanningDate()]:weekDays();
   if(planningPerspective==='site')renderSitePlanning(target,title,days);else renderEmployeePlanning(target,title,days);
 }
-function renderWeek(){renderPlanning()}
+function renderWeek(){renderPlanning();renderSystemCards()}
 async function addAssignment(){
   const type=document.getElementById('aCardType').value||'site';
   const special=type!=='site';
