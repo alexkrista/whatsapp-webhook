@@ -52,7 +52,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0020.9b · Offene Arbeiten im Leitstand anklickbar.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0020.9c22 · Aufgaben laden und speichern repariert.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -252,17 +252,30 @@ function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
 function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
 async function loadAll(){
-  const [k,j,e,v,h,cv,sm,wm,company]=await Promise.all([
+  // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
+  const results=await Promise.allSettled([
     api('/kristine/api/bootstrap'),
     api('/admin/api/jobs'),
     api('/admin/api/employees'),
     api('/admin/api/vehicles'),
-    api('/kristine/api/holidays').catch(()=>({holidays:[]})),
-    api('/kristine/api/company-vacations').catch(()=>({vacations:[]})),
-    api('/kristine/api/schedule-models').catch(()=>({models:[]})),
-    api('/admin/api/worktime-models').catch(()=>({models:[]})),
-    api('/admin/api/company').catch(()=>({company:{productiveHoursPerFullTimeYear:1650}}))
+    api('/kristine/api/holidays'),
+    api('/kristine/api/company-vacations'),
+    api('/kristine/api/schedule-models'),
+    api('/admin/api/worktime-models'),
+    api('/admin/api/company')
   ]);
+  const value=(idx,fallback)=>results[idx].status==='fulfilled'?results[idx].value:fallback;
+  const k=value(0,{assignments:[],states:{},tasks:[],timeEvents:[],today:iso(new Date())});
+  const j=value(1,{jobs:[]});
+  const e=value(2,{employees:[]});
+  const v=value(3,{vehicles:[]});
+  const h=value(4,{holidays:[]});
+  const cv=value(5,{vacations:[]});
+  const sm=value(6,{models:[]});
+  const wm=value(7,{models:[]});
+  const company=value(8,{company:{productiveHoursPerFullTimeYear:1650}});
+  const failed=results.map((r,i)=>r.status==='rejected'?['Bootstrap','Baustellen','Mitarbeiter','Fahrzeuge','Feiertage','Betriebsurlaub','Arbeitsmodelle','Zeitmodelle','Betrieb'][i]+': '+r.reason?.message:null).filter(Boolean);
+  if(failed.length) console.error('KRISTA Ladefehler',failed);
   data=k;
   data.holidays=h.holidays||[];
   data.companyVacations=cv.vacations||[];
@@ -688,20 +701,34 @@ function renderControl(){
   }).join('')}</div>`;
 }
 
-function addTask(){
+async function addTask(){
   if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
   if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
-  data.tasks.push({
+  const button=document.querySelector('button[onclick="addTask()"]');
+  const oldLabel=button?.textContent;
+  const newTask={
     id:id(),title:tTitle.value.trim(),
     assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
     jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
     dueDate:tDueDate.value,reminder:tReminder.value.trim(),
     creatorId:'admin',creatorName:'Chef / Büro',
     status:'open',createdAt:new Date().toISOString(),completedAt:null
-  });
-  tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
-  tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
-  updateTaskSelectionInfo();renderTasks();
+  };
+  data.tasks.push(newTask);
+  renderTasks();renderControl();
+  try{
+    if(button){button.disabled=true;button.textContent='Speichert …'}
+    await persistTasks();
+    tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
+    tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
+    updateTaskSelectionInfo();
+    alert('Aufgabe gespeichert.');
+  }catch(e){
+    data.tasks=(data.tasks||[]).filter(t=>t.id!==newTask.id);renderTasks();renderControl();
+    alert('Aufgabe konnte nicht gespeichert werden: '+e.message);
+  }finally{
+    if(button){button.disabled=false;button.textContent=oldLabel||'+ Aufgabe'}
+  }
 }
 function taskStatusLabel(t){return t.status==='done'?'Erledigt':'Offen'}
 function taskDueLabel(date){if(!date)return '–';try{return new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(date+'T12:00:00'))}catch{return date}}
