@@ -137,6 +137,15 @@ function parseProtocolStart(text) {
 function ensureDirSync(p) {
   fs.mkdirSync(p, { recursive: true });
 }
+async function readJson(file, fallback) {
+  try {
+    const raw = await fsp.readFile(file, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 async function ensureDir(p) {
   await fsp.mkdir(p, { recursive: true });
 }
