@@ -1,1490 +1,868 @@
-// Datei: kristine.js · Build 0020.10
+<!-- Datei: public/kristine.html · Build 0020.10a -->
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kristine – Alpha 1</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#202020;background:#f3f1ec}
+*{box-sizing:border-box}body{margin:0}header{background:#111;color:#fff;padding:20px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
+h1{margin:0;font-size:26px}.sub{opacity:.72;font-size:13px;margin-top:3px}main{max-width:1400px;margin:auto;padding:20px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}button,input,select,textarea{font:inherit;border:1px solid #ccc;border-radius:10px;padding:10px 12px}
+button{background:#111;color:#fff;cursor:pointer}button.secondary{background:#fff;color:#111}button.green{background:#27713d;border-color:#27713d}button.danger{background:#9d2525;border-color:#9d2525}
+.tab{display:none}.tab.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 15px rgba(0,0,0,.07)}.card h2,.card h3{margin-top:0}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.formgrid .full{grid-column:1/-1}
+label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textarea{width:100%;min-width:0}textarea{min-height:70px}
+.week{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;overflow:auto;padding-bottom:5px}.daycol{background:#ebe8e1;border-radius:14px;padding:10px;min-height:260px}.dayview{background:#ebe8e1;border-radius:14px;padding:12px;min-height:220px}.monthgrid{display:grid;grid-template-columns:56px repeat(7,minmax(130px,1fr));gap:8px;overflow:auto}.monthday{background:#f4f2ed;border:1px solid #e2ded5;border-radius:12px;padding:8px;min-height:120px}.monthday.outside{opacity:.42}.monthdate{font-weight:800;margin-bottom:6px}.monthitem{background:#fff;border-left:4px solid #27713d;border-radius:8px;padding:6px;margin:5px 0;font-size:12px}.monthhead{font-size:12px;font-weight:800;text-align:center;color:#666;padding:4px}.monthkw{display:flex;align-items:center;justify-content:center;background:#e8e4dc;border-radius:10px;font-size:12px;font-weight:800;color:#555;min-height:120px}
+.dayhead{font-weight:800;margin-bottom:8px;position:sticky;top:0}.assignment{background:#fff;border-left:5px solid #27713d;border-radius:10px;padding:10px;margin:8px 0;box-shadow:0 1px 6px rgba(0,0,0,.07)}
+.assignment strong{display:block}.small{font-size:12px;color:#707070}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chatwrap{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:16px}.phone{background:#e9e4db;border-radius:28px;padding:12px;box-shadow:0 12px 40px rgba(0,0,0,.14)}
+.chat{height:540px;background:#efeae2;border-radius:20px;padding:14px;overflow:auto}.bubble{max-width:86%;padding:10px 12px;border-radius:12px;margin:8px 0;white-space:pre-wrap}
+.bot{background:#fff}.user{background:#d7f5c7;margin-left:auto}.quick{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.quick button{font-size:13px;padding:7px 9px;background:#fff;color:#155b2b;border-color:#8ab99a}
+.sendrow{display:flex;gap:8px;margin-top:10px}.sendrow input{flex:1}.statebox{background:#f7f7f7;border-radius:12px;padding:12px;margin-bottom:12px}
+.status{display:inline-block;padding:5px 9px;border-radius:999px;background:#eee;font-size:12px;font-weight:800}.working{background:#d9f1df;color:#145829}.pause{background:#fff0c7;color:#795400}.finished_day{background:#e5e5e5}
+.table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
+.notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
+.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+@media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 
-"use strict";
+/* Build 0020.6: ruhiges Konfigurationsmodul als Akkordeon */
+.config-shell{max-width:1100px;margin:0 auto}.config-title{margin:0 0 14px}.config-accordion{display:grid;gap:12px}.config-section{background:#fff;border:1px solid #e6e1d8;border-radius:18px;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.05)}
+.config-toggle{width:100%;border:0;border-radius:0;background:#fff;color:#202020;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;text-align:left;font-weight:800;font-size:18px}.config-toggle:hover{background:#faf9f6}.config-toggle .config-summary{font-size:12px;font-weight:500;color:#707070;margin-left:auto;margin-right:12px}.config-toggle .chev{transition:transform .18s ease}.config-section.open .config-toggle .chev{transform:rotate(180deg)}
+.config-panel{display:none;padding:0 20px 20px;border-top:1px solid #eee9e1}.config-section.open .config-panel{display:block}.config-panel-inner{padding-top:18px}.config-savebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}.saved-note{font-size:12px;color:#27713d;font-weight:700}
+.model-card{border:1px solid #e5e0d7;border-left:5px solid #27713d;border-radius:16px;padding:16px;margin:0 0 14px;background:#fcfbf8}.model-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.model-head strong{font-size:18px}.model-day{display:grid;grid-template-columns:130px 72px repeat(6,minmax(105px,1fr));gap:9px;align-items:end;padding:12px 0;border-top:1px solid #ece7de}.model-day:first-of-type{margin-top:10px}.model-day .day-title{align-self:center;font-weight:800}.model-day input{padding:8px}.model-day .day-metric{background:#f1efe9;border-radius:10px;padding:8px 10px;font-size:12px;min-height:39px}.model-day .day-metric strong{display:block;font-size:14px}.model-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.model-summary .metric-pill{font-size:13px;padding:7px 11px}.holiday-list-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:14px}.compact-entry{border:1px solid #e7e2da;border-left:4px solid #27713d;border-radius:12px;background:#fff;padding:10px 12px;display:flex;justify-content:space-between;gap:10px;align-items:center}.compact-entry strong{display:block}.compact-entry .danger{padding:6px 9px}.annual-wrap{overflow:auto}.annual-wrap .table{min-width:900px}
+@media(max-width:1000px){.model-day{grid-template-columns:120px repeat(3,minmax(120px,1fr))}.model-day .day-title{grid-row:span 2}.model-day .work-toggle{grid-row:span 2}.model-day .day-metric{min-height:auto}}
+@media(max-width:700px){.config-toggle{font-size:16px;padding:15px}.config-toggle .config-summary{display:none}.config-panel{padding:0 14px 16px}.model-day{grid-template-columns:1fr 1fr}.model-day .day-title,.model-day .work-toggle{grid-row:auto}.model-day .day-title{grid-column:1/-1}.model-summary{display:grid;grid-template-columns:1fr 1fr}}
 
-const fs = require("fs");
-const fsp = require("fs/promises");
-const path = require("path");
 
-// ===== HELPER: Österreichische Feiertage =====
-function getAustrianHolidays(year) {
-  const holidays = [];
-  
-  // Fixe Feiertage
-  holidays.push({ date: `${year}-01-01`, name: "Neujahr" });
-  holidays.push({ date: `${year}-01-06`, name: "Heilige Drei Könige" });
-  holidays.push({ date: `${year}-05-01`, name: "Staatsfeiertag" });
-  holidays.push({ date: `${year}-08-15`, name: "Mariä Himmelfahrt" });
-  holidays.push({ date: `${year}-10-26`, name: "Nationalfeiertag" });
-  holidays.push({ date: `${year}-11-01`, name: "Allerheiligen" });
-  holidays.push({ date: `${year}-12-08`, name: "Mariä Empfängnis" });
-  holidays.push({ date: `${year}-12-25`, name: "Christtag" });
-  holidays.push({ date: `${year}-12-26`, name: "Stefanitag" });
-  
-  // Ostern berechnen (Computus)
-  const easterDate = getEasterDate(year);
-  const easterTime = easterDate.getTime();
-  
-  // Ostermontag: Ostern + 1 Tag
-  const easterMonday = new Date(easterTime + 86400000);
-  holidays.push({ 
-    date: `${easterMonday.getFullYear()}-${String(easterMonday.getMonth() + 1).padStart(2, "0")}-${String(easterMonday.getDate()).padStart(2, "0")}`,
-    name: "Ostermontag"
-  });
-  
-  // Christi Himmelfahrt: Ostern + 39 Tage
-  const ascensionDay = new Date(easterTime + 39 * 86400000);
-  holidays.push({
-    date: `${ascensionDay.getFullYear()}-${String(ascensionDay.getMonth() + 1).padStart(2, "0")}-${String(ascensionDay.getDate()).padStart(2, "0")}`,
-    name: "Christi Himmelfahrt"
-  });
-  
-  // Pfingstmontag: Ostern + 50 Tage
-  const whitMondayDay = new Date(easterTime + 50 * 86400000);
-  holidays.push({
-    date: `${whitMondayDay.getFullYear()}-${String(whitMondayDay.getMonth() + 1).padStart(2, "0")}-${String(whitMondayDay.getDate()).padStart(2, "0")}`,
-    name: "Pfingstmontag"
-  });
-  
-  // Fronleichnam: Ostern + 60 Tage
-  const corpusChristiDay = new Date(easterTime + 60 * 86400000);
-  holidays.push({
-    date: `${corpusChristiDay.getFullYear()}-${String(corpusChristiDay.getMonth() + 1).padStart(2, "0")}-${String(corpusChristiDay.getDate()).padStart(2, "0")}`,
-    name: "Fronleichnam"
-  });
-  
-  return holidays.sort((a, b) => a.date.localeCompare(b.date));
+.planning-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.planning-heading h3{min-width:220px;text-align:center}.planning-arrow{width:42px;min-width:42px;padding:8px 10px}.planning-today{width:auto;padding:8px 12px}@media(max-width:700px){.planning-heading{width:100%;justify-content:center}.planning-heading h3{order:-1;width:100%;min-width:0}.planning-today{min-width:78px}}
+
+.planning-summary{display:inline-flex;align-items:center;gap:6px;background:#eef7ee;color:#145829;border:1px solid #b8d4bc;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;margin-left:6px}.planning-summary.warn{background:#fff2cf;color:#765300;border-color:#efd28b}.planning-summary.full{background:#d9f1df;color:#145829}.assignment.type-urlaub,.monthitem.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.assignment.type-arzt,.monthitem.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.assignment.type-krank,.monthitem.type-krank{border-left-color:#c53b3b;background:#fff0f0}.assignment.type-aufraeumen,.monthitem.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.assignment.type-werkstatt,.monthitem.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.cardtype-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;border-radius:999px;padding:3px 7px;background:rgba(255,255,255,.8);margin-bottom:4px}.hours-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:800;color:#333;background:#f4f4f4;border-radius:999px;padding:3px 7px;margin-left:4px}.dropzone{transition:box-shadow .15s ease,background .15s ease}.dropzone.dragover{box-shadow:inset 0 0 0 3px #27713d;background:#e5f2e7}.assignment[draggable="true"],.monthitem[draggable="true"]{cursor:grab}.assignment.dragging,.monthitem.dragging{opacity:.45}.copybtn{background:#fff;color:#111;border-color:#ccc;padding:7px 9px}.monthitem .mini-actions{display:flex;gap:4px;margin-top:5px}.monthitem .mini-actions button{padding:3px 6px;border-radius:6px;font-size:11px}.dayhead-count{float:right}.planning-hint{font-size:12px;color:#666;margin-top:8px}
+
+.planning-perspective{display:inline-flex;gap:6px;padding:4px;background:#ece9e2;border-radius:12px}.planning-perspective button{padding:8px 11px}.planning-matrix{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;overflow:auto;align-items:stretch}.planning-matrix.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.matrix-head{font-size:12px;font-weight:800;text-align:center;color:#555;padding:8px;background:#e8e4dc;border-radius:10px}.matrix-label{background:#f5f3ee;border-radius:12px;padding:10px;font-weight:800;min-height:88px;position:sticky;left:0;z-index:2}.matrix-label .small{display:block;margin-top:5px;font-weight:400}.matrix-metrics{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin-top:7px;font-size:11px;font-weight:500;color:#666}.matrix-metrics strong{text-align:right;color:#222}.matrix-metrics .over{color:#9d2525;font-weight:800}.matrix-metrics .rest{color:#27713d}.card-hours-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:5px;font-size:11px}.metric-pill{display:inline-flex;gap:4px;align-items:center;border-radius:999px;background:#f4f4f4;padding:3px 7px;font-weight:800}.metric-pill.actual{background:#eef7ee;color:#145829}.site-sortbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:0 0 9px}.site-sortbar label{margin:0;font-size:12px}.site-sortbar select{width:auto;min-width:160px;padding:7px 9px}.matrix-cell{background:#ebe8e1;border-radius:12px;padding:8px;min-height:88px}.matrix-cell .monthitem{margin:3px 0}.perspective-note{font-size:12px;color:#666;margin-top:8px}@media(max-width:800px){.planning-matrix{grid-template-columns:150px repeat(5,220px)}.planning-matrix.day-matrix{grid-template-columns:150px 320px}}
+
+.segment-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}.segment-modal-backdrop.open{display:flex}.segment-modal{background:#fff;border-radius:16px;padding:18px;width:min(460px,100%);box-shadow:0 18px 60px rgba(0,0,0,.25)}.segment-modal h3{margin-top:0}.segment-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.segment-modal .warning{background:#fff3cd;border:1px solid #e6c86c;color:#654b00;border-radius:10px;padding:9px;margin:10px 0;display:none}.segment-modal .warning.show{display:block}.segment-list{font-size:12px;color:#555;background:#f5f3ee;border-radius:10px;padding:9px;margin:10px 0}.segment-badge{display:inline-flex;gap:5px;align-items:center;background:#eef7ee;border:1px solid #b8d4bc;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;margin-top:5px}.segment-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:5px}.segment-row{display:flex;align-items:center;gap:5px}.segment-delete{padding:1px 5px!important;min-width:0!important;border-radius:6px!important;font-size:11px!important}.assignment.segment-split,.monthitem.segment-split{border-left-color:#1e5f9e}.time-gap-note{font-size:11px;color:#9a6500;margin-top:4px}
+
+.task-alert-link{border:0;background:transparent;color:#145829;padding:0;font-weight:800;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.task-modal-list{display:grid;gap:10px;max-height:60vh;overflow:auto;margin-top:12px}.task-modal-item{border:1px solid #e5e0d7;border-left:5px solid #27713d;border-radius:12px;padding:12px;background:#fcfbf8}.task-modal-item.overdue{border-left-color:#c53b3b}.task-modal-item h4{margin:0 0 7px}.task-detail-grid{display:grid;grid-template-columns:120px 1fr;gap:5px 10px;font-size:13px}.task-detail-grid span:nth-child(odd){color:#707070}.task-modal-empty{padding:18px;text-align:center;color:#707070}.task-done-note{font-size:12px;color:#27713d;font-weight:800;margin-left:auto}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Kristine</h1><div class="sub">Build 0020.9c22 · Aufgaben laden und speichern repariert.</div></div>
+  <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
+</header>
+<main>
+<nav>
+  <button onclick="showTab('planning')">📅 Planung</button>
+  <button onclick="showTab('chat')">💬 Kristine-Chat</button>
+  <button onclick="showTab('control')">🧾 Leitstand</button>
+  <button onclick="showTab('tasks')">📌 Aufgaben</button>
+  <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
+  <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
+</nav>
+
+<section id="planning" class="tab active">
+  <div class="notice">Ein Datensatz, zwei Sichten: nach Mitarbeitern planen oder nach Baustellen kontrollieren. Kristine liest immer die Zuordnung Mitarbeiter + Karte + Datum.</div>
+  <div class="grid">
+    <div class="card">
+      <h3>Karte einteilen</h3>
+      <div class="formgrid">
+        <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning()"></div>
+        <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="krank">🔴 Krank</option><option value="arzt">🩺 Arzt</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option><option value="schulung">🎓 Schulung</option><option value="material_holen">🚚 Material holen</option><option value="lager">📦 Lager</option><option value="besprechung">🤝 Besprechung</option></select></div>
+        <div class="full" id="jobPickerRow"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
+        <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
+        <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
+        <div><label>Bis</label><input id="aTo" type="time" value="17:00"></div>
+        <div><label>Stunden</label><input id="aHours" type="number" min="0" max="24" step="0.1" value="7.8"></div>
+        <div><label>Fahrzeug</label><select id="aVehicleSelect"><option value="">– kein Fahrzeug –</option></select></div>
+        <div class="full"><label>Mitarbeiter</label><div id="employeePicker" class="employee-picker"><span class="small">Mitarbeiter werden geladen …</span></div></div>
+        <div class="full"><label>Hinweis</label><input id="aNote" placeholder="z. B. Schlüssel beim Chef"></div>
+      </div>
+      <div class="actions"><button class="green" onclick="addAssignment()">+ Einteilen</button><button class="secondary" onclick="saveAssignments()">Planung speichern</button></div>
+    </div>
+    <div class="card">
+      <h3>Abwesenheiten & Betrieb</h3>
+      <div class="system-cards" id="systemCards"></div>
+      <p class="small" style="margin-top:10px">Stunden = Summe im ausgewählten Kalenderjahr. Karte anklicken und links einteilen.</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="planning-heading">
+        <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(-1)" title="Zurück">◀</button>
+        <button class="secondary planning-today" onclick="gotoPlanningToday()">Heute</button>
+        <h3 id="planningTitle" style="margin:0">Wochenansicht – Baustellenkarten</h3>
+        <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(1)" title="Weiter">▶</button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="planning-perspective" title="Dieselben Einteilungen aus zwei Blickwinkeln">
+          <button id="perspectiveEmployeeBtn" onclick="setPlanningPerspective('employee')">👷 Mitarbeiter</button>
+          <button id="perspectiveSiteBtn" class="secondary" onclick="setPlanningPerspective('site')">🏗️ Baustellen</button>
+        </div>
+        <div class="actions" style="margin:0">
+          <button id="viewDayBtn" class="secondary" onclick="setPlanningView('day')">Tag</button>
+          <button id="viewWeekBtn" onclick="setPlanningView('week')">Woche</button>
+          <button id="viewMonthBtn" class="secondary" onclick="setPlanningView('month')">Monat</button>
+        </div>
+      </div>
+    </div>
+    <div id="planningView" style="margin-top:12px"></div>
+  </div>
+</section>
+
+<section id="chat" class="tab">
+  <div class="chatwrap">
+    <div class="card">
+      <h3>Mitarbeiter auswählen</h3>
+      <label>Mitarbeiter</label><select id="chatEmployeeSelect" onchange="selectChatEmployee()"><option value="">– Mitarbeiter auswählen –</option></select>
+      <input id="chatEmployeeId" type="hidden"><input id="chatEmployeeName" type="hidden">
+      <label style="margin-top:8px">Datum</label><input id="chatDate" type="date">
+      <div class="actions"><button onclick="beginConversation()">Gespräch beginnen</button><button class="secondary" onclick="resetState()">Tag zurücksetzen</button></div>
+      <div id="currentState" class="statebox" style="margin-top:12px">Noch kein Status geladen.</div>
+      <p class="small">Natürliche Kurzmeldungen: Start, Pause, Mittag, Weiter, Fertig, Regie, Status, Erledigt.</p>
+    </div>
+    <div class="phone">
+      <div id="chatMessages" class="chat"></div>
+      <div id="quickButtons" class="quick"></div>
+      <div class="sendrow"><input id="chatInput" placeholder="z. B. Start" onkeydown="if(event.key==='Enter')sendMessage()"><button class="green" onclick="sendMessage()">Senden</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="control" class="tab">
+  <div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h3 style="margin:0">Leitstand heute</h3>
+    <button type="button" onclick="openYesterdayReport()">📄 Tagesreport gestern</button>
+  </div>
+  <div id="controlAlerts" class="notice" style="display:none;margin:12px 0"></div>
+  <div id="controlList"></div>
+</div>
+</section>
+
+<section id="tasks" class="tab">
+  <div class="grid">
+    <div class="card">
+      <h3>Aufgabe verteilen</h3>
+      <div class="formgrid">
+        <div class="full"><label>Aufgabe</label><input id="tTitle" placeholder="Rückruf Müller / Ausbesserung Sockel"></div>
+        <div><label>Zuständig</label><select id="tAssigneeSelect" onchange="selectTaskAssignee()"><option value="">– Mitarbeiter oder Chef auswählen –</option></select></div>
+        <div><label>Baustelle optional</label><select id="tJobSelect" onchange="selectTaskJob()"><option value="">– keine Baustelle –</option></select></div>
+        <div><label>Fällig</label><input id="tDueDate" type="date"></div>
+        <div class="full"><label>Ausgewählte Zuordnung</label><div id="taskSelectionInfo" class="auto-box small">Noch keine Zuordnung ausgewählt.</div></div>
+        <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="z. B. erinnern, wenn Alex wieder bei Müller ist"></div>
+      </div>
+      <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
+      <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
+    </div>
+    <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
+  </div>
+</section>
+
+<section id="schedules" class="tab">
+  <div class="config-shell">
+    <h2 class="config-title">⚙️ Arbeitsmodelle & Jahresplanung</h2>
+    <div class="config-accordion">
+      <div class="config-section open" id="cfg-models">
+        <button class="config-toggle" type="button" onclick="toggleConfigSection('cfg-models')"><span>⏰ Arbeitsmodelle</span><span class="config-summary" id="modelSummary">–</span><span class="chev">⌄</span></button>
+        <div class="config-panel"><div class="config-panel-inner">
+          <div id="scheduleModelList"></div>
+          <div class="config-savebar"><button class="green" onclick="addScheduleModel()">+ Neues Arbeitsmodell</button><span id="modelSavedNote" class="saved-note"></span></div>
+        </div></div>
+      </div>
+
+      <div class="config-section" id="cfg-holidays">
+        <button class="config-toggle" type="button" onclick="toggleConfigSection('cfg-holidays')"><span>🌍 Feiertage 2026</span><span class="config-summary" id="holidaySummary">–</span><span class="chev">⌄</span></button>
+        <div class="config-panel"><div class="config-panel-inner">
+          <div class="formgrid">
+            <div><label>Datum</label><input id="hDate" type="date"></div>
+            <div><label>Feiertag</label><input id="hName" placeholder="z. B. Neujahrstag, Weihnachten"></div>
+          </div>
+          <div class="config-savebar"><button class="green" onclick="addHoliday()">+ Feiertag</button><button class="secondary" onclick="reloadAustrianHolidays()">🇦🇹 Österreichische Feiertage neu laden</button><button class="green" onclick="saveHolidaysData()">💾 Alle speichern</button><span id="holidaySavedNote" class="saved-note"></span></div>
+          <div id="holidayList" class="holiday-list-grid"></div>
+        </div></div>
+      </div>
+
+      <div class="config-section" id="cfg-vacation">
+        <button class="config-toggle" type="button" onclick="toggleConfigSection('cfg-vacation')"><span>🏢 Betriebsurlaub</span><span class="config-summary" id="vacationSummary">–</span><span class="chev">⌄</span></button>
+        <div class="config-panel"><div class="config-panel-inner">
+          <div class="formgrid">
+            <div><label>Von</label><input id="cvFrom" type="date"></div>
+            <div><label>Bis</label><input id="cvTo" type="date"></div>
+            <div class="full"><label>Grund</label><input id="cvReason" placeholder="z. B. Werksferien, Betriebsurlaub"></div>
+          </div>
+          <div class="config-savebar"><button class="green" onclick="addCompanyVacation()">+ Betriebsurlaub</button><button class="green" onclick="saveCompanyVacationsData()">💾 Alle speichern</button><span id="vacationSavedNote" class="saved-note"></span></div>
+          <div id="companyVacationList" class="holiday-list-grid"></div>
+        </div></div>
+      </div>
+
+      <div class="config-section" id="cfg-annual">
+        <button class="config-toggle" type="button" onclick="toggleConfigSection('cfg-annual')"><span>📈 Produktive Jahresstunden</span><span class="config-summary">Plan · Ist · 1.650 h Basis</span><span class="chev">⌄</span></button>
+        <div class="config-panel"><div class="config-panel-inner">
+          <p class="small">Die Kalkulationsbasis bleibt unverändert bei 1.650 produktiven Stunden. Krankenstand und Arzt werden nicht vorausgeplant, sondern am Jahresende als Ist verglichen.</p>
+          <div class="formgrid">
+            <div><label>Jahr</label><input id="annualHoursYear" type="number" min="2024" max="2100" value="2026" onchange="renderAnnualProductivePlanning()"></div>
+            <div><label>Mitarbeiter</label><select id="annualHoursEmployee" onchange="renderAnnualProductivePlanning()"><option value="">Alle Mitarbeiter</option></select></div>
+          </div>
+          <div id="annualProductivePlanning" class="annual-wrap" style="margin-top:12px"></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+<div id="segmentModalBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="segmentModalTitle">
+  <div class="segment-modal">
+    <h3 id="segmentModalTitle">Zeitfenster festlegen</h3>
+    <div id="segmentModalText" class="small"></div>
+    <div id="segmentExisting" class="segment-list"></div>
+    <div class="segment-modal-grid">
+      <div><label for="segmentFrom">Von</label><input id="segmentFrom" type="time"></div>
+      <div><label for="segmentTo">Bis</label><input id="segmentTo" type="time"></div>
+    </div>
+    <div id="segmentWarning" class="warning"></div>
+    <div class="actions">
+      <button id="segmentApply" type="button" class="green">Übernehmen</button>
+      <button id="segmentCancel" type="button" class="secondary">Abbrechen</button>
+    </div>
+  </div>
+</div>
+<div id="taskModalBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <div class="segment-modal" style="width:min(720px,100%)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h3 id="taskModalTitle" style="margin:0">Offene Arbeiten</h3>
+      <button type="button" class="secondary" onclick="closeTaskModal()">Schließen</button>
+    </div>
+    <div id="taskModalList" class="task-modal-list"></div>
+    <div id="taskModalNote" class="task-done-note"></div>
+  </div>
+</div>
+
+<div id="employeeActionBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="employeeActionTitle">
+  <div class="segment-modal" style="width:min(620px,100%)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h3 id="employeeActionTitle" style="margin:0">Mitarbeiter</h3>
+      <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
+    </div>
+    <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
+    <div id="employeeActionNote" class="task-done-note"></div>
+    <div class="actions" style="margin-top:14px">
+      <button type="button" class="green" id="employeeActionAsk" onclick="sendEmployeeDayEndCheck()">Arbeitest du noch? senden</button>
+      <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Alles OK</button>
+    </div>
+  </div>
+</div>
+<script>
+const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
+let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
+window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()})});
+function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
+async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
+function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
+async function loadAll(){
+  // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
+  const results=await Promise.allSettled([
+    api('/kristine/api/bootstrap'),
+    api('/admin/api/jobs'),
+    api('/admin/api/employees'),
+    api('/admin/api/vehicles'),
+    api('/kristine/api/holidays'),
+    api('/kristine/api/company-vacations'),
+    api('/kristine/api/schedule-models'),
+    api('/admin/api/worktime-models'),
+    api('/admin/api/company')
+  ]);
+  const value=(idx,fallback)=>results[idx].status==='fulfilled'?results[idx].value:fallback;
+  const k=value(0,{assignments:[],states:{},tasks:[],timeEvents:[],today:iso(new Date())});
+  const j=value(1,{jobs:[]});
+  const e=value(2,{employees:[]});
+  const v=value(3,{vehicles:[]});
+  const h=value(4,{holidays:[]});
+  const cv=value(5,{vacations:[]});
+  const sm=value(6,{models:[]});
+  const wm=value(7,{models:[]});
+  const company=value(8,{company:{productiveHoursPerFullTimeYear:1650}});
+  const failed=results.map((r,i)=>r.status==='rejected'?['Bootstrap','Baustellen','Mitarbeiter','Fahrzeuge','Feiertage','Betriebsurlaub','Arbeitsmodelle','Zeitmodelle','Betrieb'][i]+': '+r.reason?.message:null).filter(Boolean);
+  if(failed.length) console.error('KRISTA Ladefehler',failed);
+  data=k;
+  data.holidays=h.holidays||[];
+  data.companyVacations=cv.vacations||[];
+  data.scheduleModels=sm.models||[];
+  worktimeModels=wm.models||[];
+  companySettings=company.company||companySettings;
+  masterJobs=j.jobs||[];
+  masterEmployees=(e.employees||[]).filter(x=>x.active!==false);
+  masterVehicles=v.vehicles||[];
+  document.getElementById('aDate').value=data.today;
+  document.getElementById('chatDate').value=data.today;
+  document.getElementById('tDueDate').value=data.today;
+  renderMasterData();
+  renderWeek();renderControl();renderTasks();renderSystemCards();
+  renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
+}
+function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+function mapsUrl(address){return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):''}
+function renderMasterData(){
+  aJobSelect.innerHTML='<option value="">– Baustelle auswählen –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');
+  aVehicleSelect.innerHTML='<option value="">– kein Fahrzeug –</option>'+masterVehicles.map(v=>`<option value="${esc(v.label||v.plate)}">${esc(v.label||v.plate)}${v.plate&&v.label?' · '+esc(v.plate):''}</option>`).join('');
+  employeePicker.innerHTML=masterEmployees.length?masterEmployees.map(e=>`<label class="employee-chip"><input type="checkbox" class="aEmployeeCheck" value="${esc(e.id)}" data-name="${esc(e.name)}"><span>${esc(e.name)}</span></label>`).join(''):'<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';chatEmployeeSelect.innerHTML='<option value="">– Mitarbeiter auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tAssigneeSelect.innerHTML='<option value="">– Mitarbeiter oder Chef auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tJobSelect.innerHTML='<option value="">– keine Baustelle –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');;
+  const annualSelect=document.getElementById('annualHoursEmployee');if(annualSelect)annualSelect.innerHTML='<option value="">Alle Mitarbeiter</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
+}
+function selectTaskAssignee(){
+  const o=tAssigneeSelect.selectedOptions[0];
+  tAssigneeId.value=tAssigneeSelect.value;
+  tAssigneeName.value=o?.dataset.name||'';
+  updateTaskSelectionInfo();
+}
+function selectTaskJob(){
+  const j=masterJobs.find(x=>String(x.jobId)===String(tJobSelect.value));
+  tJobId.value=j?String(j.jobId):'';
+  tJobName.value=j?(j.name||('#'+j.jobId)):'';
+  updateTaskSelectionInfo();
+}
+function updateTaskSelectionInfo(){
+  const employee=tAssigneeName.value||'niemand';
+  const j=masterJobs.find(x=>String(x.jobId)===String(tJobId.value));
+  taskSelectionInfo.innerHTML=`<strong>Zuständig:</strong> ${esc(employee)}<br><strong>Baustelle:</strong> ${j?`#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}`:'keine Baustelle'}${j&&jobAddress(j)?`<br><span class="small">${esc(jobAddress(j))}</span>`:''}`;
+}
+function selectChatEmployee(){const o=chatEmployeeSelect.selectedOptions[0];chatEmployeeId.value=chatEmployeeSelect.value;chatEmployeeName.value=o?.dataset.name||''}
+function selectJob(){
+  const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
+  if(!j){selectedJobInfo.textContent='Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.';return}
+  const address=jobAddress(j);
+  selectedJobInfo.innerHTML=`<strong>#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}</strong><br>${esc(address||'Adresse noch nicht hinterlegt')}${j.contactName?`<br>👤 ${esc(j.contactName)}${j.contactPhone?' · '+esc(j.contactPhone):''}`:''}<br><span class="small">Status: ${esc(j.status||'Angebot')}</span>`;
+}
+function selectCardType(){
+  const type=document.getElementById('aCardType').value||'site';
+  const special=type!=='site';
+  document.getElementById('jobPickerRow').style.display=special?'none':'';
+  document.getElementById('selectedJobInfo').textContent=special?`${cardMeta({cardType:type}).icon} ${cardMeta({cardType:type}).label}-Karte: Mitarbeiter, Zeit und Stunden auswählen.`:'Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.';
+  if(special){aJobSelect.value='';aVehicleSelect.value='';}
+  if(['urlaub','krank'].includes(type)){aFrom.value='07:00';aTo.value='17:00';aHours.value='7.8';}
 }
 
-function getEasterDate(year) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31);
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(year, month - 1, day);
+function selectedPlanningDate(){return document.getElementById('aDate').value||data.today}
+function isoWeekNumber(value){const d=new Date((typeof value==='string'?value:iso(value))+'T12:00:00');const utc=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1));return Math.ceil((((utc-yearStart)/86400000)+1)/7)}
+function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
+const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},krank:{label:'Krank',icon:'🔴'},arzt:{label:'Arzt',icon:'🩺'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'},schulung:{label:'Schulung',icon:'🎓'},material_holen:{label:'Material holen',icon:'🚚'},lager:{label:'Lager',icon:'📦'},besprechung:{label:'Besprechung',icon:'🤝'}};
+function cardTypeOf(a){return a.cardType||'site'}
+function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
+function selectSystemCard(type){const select=document.getElementById('aCardType');if(!select)return;select.value=type;selectCardType();document.getElementById('aDate')?.scrollIntoView({behavior:'smooth',block:'center'})}
+function renderSystemCards(){const box=document.getElementById('systemCards');if(!box)return;const selected=selectedPlanningDate();const year=String(selected||data.today||new Date().getFullYear()).slice(0,4);const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];const rows=data.assignments.filter(a=>cardTypeOf(a)===type&&String(a.date||'').startsWith(year));const hours=rows.reduce((sum,a)=>sum+plannedHoursForAssignment(a),0);const employees=new Set(rows.map(a=>String(a.employeeId||'')).filter(Boolean)).size;return `<button class="secondary" style="width:100%;text-align:left" onclick="selectSystemCard('${type}')" title="${employees} Mitarbeiter im Jahr ${year}">${meta.icon} ${esc(meta.label)} <span style="float:right">${formatHours(hours)}</span></button>`}).join('')}
+function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
+function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
+function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
+function worktimeRule(employeeId,date){const employee=employeeById(employeeId),model=worktimeModelById(employee?.worktimeModelId||'krista-standard');if(!model||!date)return null;const d=new Date(String(date)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const month=d.getMonth()+1,weekday=d.getDay();const season=(model.seasons||[]).find(x=>(x.months||[]).includes(month));const rule=season?.weekdays?.[String(weekday)]||{free:true,from:'',to:'',targetHours:0};const otherBreakMinutes=Number(rule.otherBreakMinutes||0),lunchBreakMinutes=Number(rule.lunchBreakMinutes||0);return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',targetHours:Number(rule.targetHours||0),otherBreakMinutes,lunchBreakMinutes,breakMinutes:otherBreakMinutes+lunchBreakMinutes,breakWindows:[...(otherBreakMinutes>0?[{type:'pause',from:'09:00',to:minutesToHm(9*60+otherBreakMinutes)}]:[]),...(lunchBreakMinutes>0?[{type:'lunch',from:'12:00',to:minutesToHm(12*60+lunchBreakMinutes)}]:[])]}}
+function isWeekdayDate(date){const d=new Date(String(date)+'T12:00:00');const wd=d.getDay();return wd>=1&&wd<=5}
+function fullDayUnproductiveHours(a){return isWeekdayDate(a.date)?7.8:0}
+function specialPlanHours(a){const type=cardTypeOf(a);if(['urlaub','krank','arzt'].includes(type))return fullDayUnproductiveHours(a);if(['aufraeumen','werkstatt'].includes(type))return rawCardHours(a)||fullDayUnproductiveHours(a);return Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||0))}
+
+function minutesToHm(value){const n=Math.max(0,Math.round(Number(value||0)));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
+function modelDayWindow(employeeId,date){const rule=worktimeRule(employeeId,date);return {from:rule?.from||'07:00',to:rule?.to||'17:00',fromMin:hmToMinutes(rule?.from||'07:00')??420,toMin:hmToMinutes(rule?.to||'17:00')??1020}}
+function siteSegments(employeeId,date,excludeId=''){return data.assignments.filter(a=>a.date===date&&String(a.employeeId)===String(employeeId)&&cardTypeOf(a)==='site'&&String(a.id)!==String(excludeId)).sort((a,b)=>(hmToMinutes(a.from)||0)-(hmToMinutes(b.from)||0))}
+function segmentSummary(rows){return rows.length?rows.map(a=>`${a.from||'?'}–${a.to||'?'} · ${a.jobName||a.jobId}`).join('<br>'):'Noch keine Baustelle eingeteilt.'}
+function suggestedSegment(employeeId,date){const w=modelDayWindow(employeeId,date),rows=siteSegments(employeeId,date);if(!rows.length)return {from:w.from,to:w.to};const occupied=rows.map(a=>({from:hmToMinutes(a.from),to:hmToMinutes(a.to)})).filter(x=>x.from!==null&&x.to!==null).sort((a,b)=>a.from-b.from);let cursor=w.fromMin;const gaps=[];for(const x of occupied){if(x.from>cursor)gaps.push({from:cursor,to:Math.min(x.from,w.toMin)});cursor=Math.max(cursor,x.to)}if(cursor<w.toMin)gaps.push({from:cursor,to:w.toMin});const valid=gaps.filter(g=>g.to>g.from);if(valid.length){const best=valid.sort((a,b)=>(b.to-b.from)-(a.to-a.from))[0];return {from:minutesToHm(best.from),to:minutesToHm(best.to)}}const preferred=Math.max(w.fromMin,Math.min(w.toMin-60,13*60));return {from:minutesToHm(preferred),to:w.to}}
+let segmentModalResolver=null;
+function closeSegmentModal(result){document.getElementById('segmentModalBackdrop').classList.remove('open');const r=segmentModalResolver;segmentModalResolver=null;if(r)r(result)}
+function askSegmentWindow({employee,date,jobName,excludeId='',suggestion=null}){const rows=siteSegments(employee.id,date,excludeId),w=modelDayWindow(employee.id,date),sug=suggestion||suggestedSegment(employee.id,date);document.getElementById('segmentModalText').innerHTML=`<strong>${esc(employee.name)}</strong> · ${esc(jobName)}<br>Modelltag ${esc(w.from)}–${esc(w.to)}`;document.getElementById('segmentExisting').innerHTML=`<strong>Bereits geplant:</strong><br>${segmentSummary(rows)}`;segmentFrom.value=sug.from;segmentTo.value=sug.to;segmentWarning.classList.remove('show');segmentWarning.textContent='';document.getElementById('segmentModalBackdrop').classList.add('open');return new Promise(resolve=>{segmentModalResolver=resolve})}
+function validateSegmentWindow(employeeId,date,from,to){const w=modelDayWindow(employeeId,date),f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f)return {ok:false,message:'Bitte ein gültiges Zeitfenster eingeben.'};if(f<w.fromMin||t>w.toMin)return {ok:true,warning:`Das Zeitfenster liegt außerhalb des Modelltags ${w.from}–${w.to}. Trotzdem übernehmen?`};return {ok:true,warning:''}}
+function normalizeEmployeeDaySegments(employeeId,date){const rows=siteSegments(employeeId,date);for(let i=0;i<rows.length-1;i++){const a=rows[i],b=rows[i+1];if(String(a.jobId)===String(b.jobId)&&a.to===b.from&&String(a.vehicle||'')===String(b.vehicle||'')){a.to=b.to;a.hours=rawCardHours(a);data.assignments=data.assignments.filter(x=>x.id!==b.id);return normalizeEmployeeDaySegments(employeeId,date)}}}
+function subtractWindowFromExisting(employeeId,date,from,to,excludeId=''){const f=hmToMinutes(from),t=hmToMinutes(to);const rows=siteSegments(employeeId,date,excludeId);for(const a of rows){const af=hmToMinutes(a.from),at=hmToMinutes(a.to);if(af===null||at===null||at<=f||af>=t)continue;if(f<=af&&t>=at){data.assignments=data.assignments.filter(x=>x.id!==a.id);continue}if(f<=af&&t<at){a.from=to;a.hours=rawCardHours(a);continue}if(f>af&&t>=at){a.to=from;a.hours=rawCardHours(a);continue}const right={...a,id:id(),from:to,to:a.to};a.to=from;a.hours=rawCardHours(a);right.hours=rawCardHours(right);data.assignments.push(right)}}
+async function placeSiteAssignment(template,employee,date,{forceDialog=false,excludeId=''}={}){const existing=siteSegments(employee.id,date,excludeId);const w=modelDayWindow(employee.id,date);let from=w.from,to=w.to;if(existing.length||forceDialog){const selected=await askSegmentWindow({employee,date,jobName:template.jobName||template.jobId,excludeId});if(!selected)return null;from=selected.from;to=selected.to}const check=validateSegmentWindow(employee.id,date,from,to);if(!check.ok){alert(check.message);return placeSiteAssignment(template,employee,date,{forceDialog:true,excludeId})}if(check.warning&&!confirm(check.warning))return null;subtractWindowFromExisting(employee.id,date,from,to,excludeId);const result={...template,date,employeeId:String(employee.id),employeeName:employee.name||String(employee.id),from,to,hours:rawCardHours({...template,from,to})};if(excludeId){const old=data.assignments.find(a=>String(a.id)===String(excludeId));if(old)Object.assign(old,result);else data.assignments.push({...result,id:excludeId})}else data.assignments.push({...result,id:template.id||id()});normalizeEmployeeDaySegments(employee.id,date);return result}
+
+function overlapMinutes(fromA,toA,fromB,toB){const a1=hmToMinutes(fromA),a2=hmToMinutes(toA),b1=hmToMinutes(fromB),b2=hmToMinutes(toB);if([a1,a2,b1,b2].some(v=>v===null))return 0;return Math.max(0,Math.min(a2,b2)-Math.max(a1,b1))}
+function plannedHoursForAssignment(a){
+  if(cardTypeOf(a)!=='site')return specialPlanHours(a);
+  const raw=rawCardHours(a),rule=worktimeRule(a.employeeId,a.date);
+  if(!rule)return raw;
+  const deductedMinutes=(rule.breakWindows||[]).reduce((sum,w)=>sum+overlapMinutes(a.from,a.to,w.from,w.to),0);
+  return Math.max(0,raw-deductedMinutes/60);
+}
+function cardHours(a){return plannedHoursForAssignment(a)}
+function formatHours(value){return Number(value||0).toLocaleString('de-AT',{minimumFractionDigits:1,maximumFractionDigits:2})+' h'}
+function employeeActualMinutes(employeeId,dates){const wanted=new Set(dates);let total=0;for(const date of dates){const state=data.states?.[employeeId]||null;total+=employeeDaySegments(employeeId,date,state).filter(x=>x.type==='work').reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)}return total}
+function actualHoursForAssignment(a){return employeeDaySegments(a.employeeId,a.date,data.states?.[a.employeeId]||null).filter(x=>x.type==='work'&&String(x.jobId||'')===String(a.jobId||'')).reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)/60}
+function dailySollHours(employeeId,date){const rows=data.assignments.filter(a=>a.date===date&&String(a.employeeId)===String(employeeId));const fullDay=rows.find(a=>['urlaub','krank','arzt'].includes(cardTypeOf(a)));if(fullDay)return fullDayUnproductiveHours(fullDay);return Math.max(0,Number(worktimeRule(employeeId,date)?.targetHours||0))}
+function employeeShouldHours(employeeId,dates){return dates.reduce((sum,date)=>sum+dailySollHours(employeeId,date),0)}
+function employeePlannedHours(employeeId,dates){return data.assignments.filter(a=>dates.includes(a.date)&&String(a.employeeId)===String(employeeId)).reduce((sum,a)=>sum+plannedHoursForAssignment(a),0)}
+function plannedEmployeeCount(date){return new Set(data.assignments.filter(a=>a.date===date).map(a=>String(a.employeeId))).size}
+function plannedHoursForDate(date){return data.assignments.filter(a=>a.date===date).reduce((sum,a)=>sum+plannedHoursForAssignment(a),0)}
+function availableHoursForDate(date){return masterEmployees.reduce((sum,e)=>sum+dailySollHours(e.id,date),0)}
+function planningSummary(date,short=false){const count=plannedEmployeeCount(date),total=masterEmployees.length,hours=plannedHoursForDate(date),available=availableHoursForDate(date);const cls=count>=total&&total&&hours<=available+0.01?'full':'warn';const over=hours>available+0.01?` · ⚠ +${formatHours(hours-available)}`:'';return `<span class="planning-summary ${cls}" title="${count} von ${total} aktiven Mitarbeitern eingeplant · ${formatHours(hours)} von ${formatHours(available)} verfügbar">👷 ${count}/${total} MA · ⏱ ${formatHours(hours).replace(' h','')}/${formatHours(available)}${over}</span>`}
+function assignmentCard(a,compact=false){
+  const type=cardTypeOf(a),meta=cardMeta(a),special=type!=='site';
+  const sameJobCount=special?new Set(data.assignments.filter(x=>x.date===a.date&&cardTypeOf(x)===type).map(x=>String(x.employeeId))).size:new Set(data.assignments.filter(x=>x.date===a.date&&String(x.jobId)===String(a.jobId)&&cardTypeOf(x)==='site').map(x=>String(x.employeeId))).size;
+  const title=special?`${meta.icon} ${meta.label}`:`#${esc(a.jobId)} · ${esc(a.jobName)}`;
+  const info=special?`${sameJobCount} MA mit ${esc(meta.label)}`:`${sameJobCount} MA auf dieser Baustelle`;
+  const plan=plannedHoursForAssignment(a);
+  const hoursHtml=special?`<div class="card-hours-line"><span class="metric-pill">${formatHours(plan)}</span></div>`:`<div class="segment-badge">🕒 ${esc(a.from||'')}–${esc(a.to||'')} · ${formatHours(plan)}</div>`;
+  const drag=`draggable="true" data-assignment-id="${esc(a.id)}" ondragstart="dragAssignmentStart(event,'${a.id}')" ondragend="dragAssignmentEnd(event)"`;
+  if(compact)return `<div class="monthitem type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><div>${esc(a.employeeName)}</div>${hoursHtml}<div class="small">${info}</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
+  return `<div class="assignment type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><span>${esc(a.employeeName)}</span>${hoursHtml}<span class="small">${special?esc(a.note||meta.label):esc(a.city)+(a.vehicle?' · '+esc(a.vehicle):'')} · ${info}</span><div class="actions">${!special&&a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
 }
 
-// ===== HELPER: Standard-Zeitmodelle =====
-function getDefaultScheduleModels() {
-  return [
-    {
-      id: "sommer",
-      name: "Sommer (Krista)",
-      days: [
-        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Freitag", isWorkDay: true, from: "07:00", to: "14:15", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "", lunchEnd: "", pauseMinutes: 15, shouldHours: 7.0 },
-        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 }
-      ]
-    },
-    {
-      id: "winter",
-      name: "Winter",
-      days: [
-        { dayName: "Montag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Dienstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Mittwoch", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Donnerstag", isWorkDay: true, from: "07:00", to: "17:00", pauseStart: "09:00", pauseEnd: "09:15", lunchStart: "12:00", lunchEnd: "12:30", pauseMinutes: 45, shouldHours: 9.25 },
-        { dayName: "Freitag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Samstag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 },
-        { dayName: "Sonntag", isWorkDay: false, from: "", to: "", pauseStart: "", pauseEnd: "", lunchStart: "", lunchEnd: "", pauseMinutes: 0, shouldHours: 0 }
-      ]
-    }
-  ];
+let draggedAssignmentId=null;
+function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentId;event.currentTarget.classList.add('dragging');event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('text/plain',assignmentId)}
+function dragAssignmentEnd(event){event.currentTarget.classList.remove('dragging');document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));draggedAssignmentId=null}
+function planningDragOver(event){event.preventDefault();event.currentTarget.classList.add('dragover');event.dataTransfer.dropEffect=(event.ctrlKey||event.altKey)?'copy':'move'}
+function planningDragLeave(event){if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.classList.remove('dragover')}
+async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const assignmentId=event.dataTransfer.getData('text/plain')||draggedAssignmentId;const source=data.assignments.find(a=>a.id===assignmentId);if(!source||source.date===date)return;const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const template={...source,id:copy?id():source.id};if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);const placed=await placeSiteAssignment(template,employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(!placed&&!copy)data.assignments.push(source);if(placed)await saveAssignments(true);else renderPlanning();return}if(copy)data.assignments.push({...source,id:id(),date});else source.date=date;await saveAssignments(true)}
+function droppedAssignment(event){const assignmentId=event.dataTransfer.getData('text/plain')||draggedAssignmentId;return data.assignments.find(a=>a.id===assignmentId)||null}
+function movedOrCopiedAssignment(event,source){const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(copy){const clone={...source,id:id()};data.assignments.push(clone);return clone}return source}
+async function planningEmployeeDrop(event,date,employeeId){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source)return;const targetEmployee=masterEmployees.find(e=>String(e.id)===String(employeeId));if(!targetEmployee)return;const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(cardTypeOf(source)==='site'){const original={...source};if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);const template={...source,id:copy?id():source.id};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(!placed&&!copy)data.assignments.push(original);if(placed)await saveAssignments(true);else renderPlanning();return}const target=movedOrCopiedAssignment(event,source);target.date=date;target.employeeId=String(targetEmployee.id);target.employeeName=targetEmployee.name||String(targetEmployee.id);await saveAssignments(true)}
+function setSiteSort(value){siteSort=value||'assigned';localStorage.setItem('kristaSiteSort',siteSort);renderPlanning()}
+function siteStatusRank(status){const order={'Angebot':1,'Auftrag':2,'Laufend':3,'Fertig nicht abgerechnet':4,'Geschlossen':5};return order[String(status||'')]||99}
+function planningSiteRows(days){
+  const usedSiteIds=new Set(data.assignments.filter(a=>days.includes(a.date)&&cardTypeOf(a)==='site').map(a=>String(a.jobId)));
+  const nextDateByJob=new Map();for(const a of data.assignments){if(cardTypeOf(a)!=='site'||!a.date)continue;const key=String(a.jobId),old=nextDateByJob.get(key);if(!old||a.date<old)nextDateByJob.set(key,a.date)}
+  const jobs=[...masterJobs].map(j=>({key:'job:'+j.jobId,label:'🏗️ '+(j.name||('#'+j.jobId)),job:j,used:usedSiteIds.has(String(j.jobId)),nextDate:nextDateByJob.get(String(j.jobId))||''}));
+  jobs.sort((a,b)=>{
+    if(siteSort==='assigned'){const d=Number(b.used)-Number(a.used);if(d)return d;const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd}
+    else if(siteSort==='status'){const d=siteStatusRank(a.job?.status)-siteStatusRank(b.job?.status);if(d)return d}
+    else if(siteSort==='newest'){const d=String(b.job?.createdAt||b.job?.updatedAt||'').localeCompare(String(a.job?.createdAt||a.job?.updatedAt||''));if(d)return d}
+    else if(siteSort==='oldest'){const d=String(a.job?.createdAt||a.job?.updatedAt||'').localeCompare(String(b.job?.createdAt||b.job?.updatedAt||''));if(d)return d}
+    else if(siteSort==='za')return String(b.job?.name||b.job?.jobId).localeCompare(String(a.job?.name||a.job?.jobId),'de');
+    return String(a.job?.name||a.job?.jobId).localeCompare(String(b.job?.name||b.job?.jobId),'de')
+  });
+  const specials=Object.entries(CARD_TYPES).filter(([type])=>type!=='site').map(([type,meta])=>({key:'type:'+type,label:meta.icon+' '+meta.label,type,used:data.assignments.some(a=>days.includes(a.date)&&cardTypeOf(a)===type),nextDate:data.assignments.filter(a=>cardTypeOf(a)===type&&a.date).map(a=>a.date).sort()[0]||''}));
+  const all=jobs.concat(specials);
+  if(siteSort==='assigned')all.sort((a,b)=>{const d=Number(b.used)-Number(a.used);if(d)return d;const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd;return String(a.label).localeCompare(String(b.label),'de')});
+  return all
+}
+function assignmentMatchesSiteKey(a,key){if(key.startsWith('type:'))return cardTypeOf(a)===key.slice(5);return cardTypeOf(a)==='site'&&String(a.jobId)===key.slice(4)}
+async function planningSiteDrop(event,date,siteKey){
+  event.preventDefault();event.currentTarget.classList.remove('dragover');
+  const source=droppedAssignment(event);if(!source)return;
+  const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';
+  const sourceDate=source.date;
+  if(siteKey.startsWith('type:')){
+    const target=movedOrCopiedAssignment(event,source),type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;
+    target.date=date;target.cardType=type;target.jobId='__'+type+'__';target.jobName=meta.label;target.city='';target.address='';target.vehicle='';target.note=target.note||meta.label;
+    await saveAssignments(true);return;
+  }
+  const jobId=siteKey.slice(4),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;
+  const employee=employeeById(source.employeeId);if(!employee)return;
+  const original={...source};
+  if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);
+  const template={...source,id:copy?id():source.id,cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job)};
+  const changedDay=String(sourceDate)!==String(date);
+  const placed=await placeSiteAssignment(template,employee,date,{forceDialog:!changedDay&&siteSegments(employee.id,date).length>0});
+  if(!placed&&!copy)data.assignments.push(original);
+  if(placed)await saveAssignments(true);else renderPlanning();
+}
+function groupedAssignmentCard(rows){
+  const first=rows[0],type=cardTypeOf(first),meta=cardMeta(first),special=type!=='site';
+  if(rows.length===1||special)return assignmentCard(first,true);
+  const sorted=[...rows].sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));
+  const total=sorted.reduce((sum,a)=>sum+plannedHoursForAssignment(a),0);
+  const sameJobCount=new Set(data.assignments.filter(x=>x.date===first.date&&String(x.jobId)===String(first.jobId)&&cardTypeOf(x)==='site').map(x=>String(x.employeeId))).size;
+  const drag=`draggable="true" data-assignment-id="${esc(first.id)}" ondragstart="dragAssignmentStart(event,'${first.id}')" ondragend="dragAssignmentEnd(event)"`;
+  const segments=sorted.map(a=>`<div class="segment-row"><span class="segment-badge">🕒 ${esc(a.from||'')}–${esc(a.to||'')} · ${formatHours(plannedHoursForAssignment(a))}</span><button class="danger segment-delete" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Zeitblock löschen">×</button></div>`).join('');
+  return `<div class="monthitem type-site segment-split" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>#${esc(first.jobId)} · ${esc(first.jobName)}</strong><div>${esc(first.employeeName)}</div><div class="segment-stack">${segments}</div><div class="card-hours-line"><span class="metric-pill">Gesamt ${formatHours(total)}</span></div><div class="small">${sameJobCount} MA auf dieser Baustelle</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${first.id}')" title="Kopieren">⧉</button></div></div>`;
+}
+function matrixCardList(rows){
+  if(!rows.length)return '<span class="small">frei · Karte hierher ziehen</span>';
+  const groups=[];
+  for(const a of rows){const key=cardTypeOf(a)==='site'?`site|${a.employeeId}|${a.jobId}`:`${cardTypeOf(a)}|${a.employeeId}`;let g=groups.find(x=>x.key===key);if(!g){g={key,rows:[]};groups.push(g)}g.rows.push(a)}
+  return groups.map(g=>groupedAssignmentCard(g.rows)).join('');
+}
+function setPlanningPerspective(value){planningPerspective=value==='site'?'site':'employee';renderPlanning()}
+function addDaysISO(date,days){const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+days);return iso(d)}
+function cloneAssignmentToDate(source,date){const duplicate=data.assignments.some(a=>a.date===date&&String(a.employeeId)===String(source.employeeId)&&String(a.jobId)===String(source.jobId)&&String(a.from||'')===String(source.from||''));if(!duplicate)data.assignments.push({...source,id:id(),date})}
+async function copyAssignment(assignmentId){const source=data.assignments.find(a=>a.id===assignmentId);if(!source)return;const choice=prompt(`Einteilung kopieren:\n1 = auf morgen\n2 = auf die restlichen Werktage dieser Woche\n3 = auf nächste Woche (gleicher Wochentag)\n4 = auf ein bestimmtes Datum`,'1');if(!choice)return;if(choice==='1')cloneAssignmentToDate(source,addDaysISO(source.date,1));else if(choice==='2'){const d=new Date(source.date+'T12:00:00');const weekday=d.getDay()||7;for(let i=1;i<=5-weekday;i++)cloneAssignmentToDate(source,addDaysISO(source.date,i))}else if(choice==='3')cloneAssignmentToDate(source,addDaysISO(source.date,7));else if(choice==='4'){const target=prompt('Datum im Format JJJJ-MM-TT',source.date);if(!/^\d{4}-\d{2}-\d{2}$/.test(String(target||''))){alert('Ungültiges Datum.');return}cloneAssignmentToDate(source,target)}else{return}await saveAssignments(true)}
+function setPlanningView(view){planningView=view;renderPlanning()}
+function shiftPlanningPeriod(direction){
+  const input=document.getElementById('aDate');
+  const d=new Date((input.value||data.today)+'T12:00:00');
+  if(planningView==='day')d.setDate(d.getDate()+direction);
+  else if(planningView==='week')d.setDate(d.getDate()+7*direction);
+  else {
+    const targetDay=Math.min(d.getDate(),28);
+    d.setDate(1);
+    d.setMonth(d.getMonth()+direction);
+    const lastDay=new Date(d.getFullYear(),d.getMonth()+1,0,12).getDate();
+    d.setDate(Math.min(targetDay,lastDay));
+  }
+  input.value=iso(d);
+  renderPlanning();
+}
+function gotoPlanningToday(){document.getElementById('aDate').value=data.today||iso(new Date());renderPlanning()}
+function updatePlanningButtons(){for(const view of ['day','week','month']){const b=document.getElementById('view'+view[0].toUpperCase()+view.slice(1)+'Btn');if(b)b.className=view===planningView?'':'secondary'}const employeeBtn=document.getElementById('perspectiveEmployeeBtn'),siteBtn=document.getElementById('perspectiveSiteBtn');if(employeeBtn)employeeBtn.className=planningPerspective==='employee'?'':'secondary';if(siteBtn)siteBtn.className=planningPerspective==='site'?'':'secondary'}
+function renderEmployeePlanning(target,title,days){
+  const dayMode=days.length===1;
+  title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Mitarbeitern · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
+  const heads='<div class="matrix-head">Mitarbeiter</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
+  const rows=masterEmployees.map(employee=>{
+    const should=employeeShouldHours(employee.id,days),planned=employeePlannedHours(employee.id,days),actual=employeeActualMinutes(employee.id,days)/60,rest=Math.max(0,should-planned),over=Math.max(0,planned-should);
+    const label=`<div class="matrix-label">👷 ${esc(employee.name)}<div class="matrix-metrics"><span>Soll</span><strong>${formatHours(should)}</strong><span>Plan</span><strong>${formatHours(planned)}</strong><span>Geleistet</span><strong>${formatHours(actual)}</strong>${over>0?`<span class="over">Überplant</span><strong class="over">+${formatHours(over)}</strong>`:`<span class="rest">Rest</span><strong class="rest">${formatHours(rest)}</strong>`}</div></div>`;
+    const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${matrixCardList(assignments)}</div>`}).join('');
+    return label+cells
+  }).join('');
+  target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte auf einen anderen Mitarbeiter oder Tag ziehen = umplanen; Strg/Alt = kopieren.</div>`;
+}
+function renderSitePlanning(target,title,days){
+  const dayMode=days.length===1,sites=planningSiteRows(days);
+  title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Baustellen · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
+  const sortbar=`<div class="site-sortbar"><label for="siteSortSelect">Sortierung</label><select id="siteSortSelect" onchange="setSiteSort(this.value)"><option value="assigned" ${siteSort==='assigned'?'selected':''}>Eingeteilt</option><option value="status" ${siteSort==='status'?'selected':''}>Status</option><option value="newest" ${siteSort==='newest'?'selected':''}>Neueste</option><option value="oldest" ${siteSort==='oldest'?'selected':''}>Älteste</option><option value="az" ${siteSort==='az'?'selected':''}>A–Z</option><option value="za" ${siteSort==='za'?'selected':''}>Z–A</option></select></div>`;
+  const heads='<div class="matrix-head">Baustelle / Karte</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
+  const rows=sites.map(site=>{const hours=days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&assignmentMatchesSiteKey(a,site.key)).reduce((x,a)=>x+plannedHoursForAssignment(a),0),0);const label=`<div class="matrix-label">${esc(site.label)}<span class="small">${formatHours(hours)} · ${new Set(data.assignments.filter(a=>days.includes(a.date)&&assignmentMatchesSiteKey(a,site.key)).map(a=>String(a.employeeId))).size} MA${site.job?.status?' · '+esc(site.job.status):''}</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&assignmentMatchesSiteKey(a,site.key)).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de'));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningSiteDrop(event,'${day}','${esc(site.key)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
+  target.innerHTML=sortbar+`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten können zwischen Baustellen und Tagen verschoben oder mit Strg/Alt kopiert werden.</div>`;
+}
+function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
+  if(planningView==='month'){
+    const base=new Date(selectedPlanningDate()+'T12:00:00');const year=base.getFullYear(),month=base.getMonth();title.textContent='Monatsplanung – '+base.toLocaleDateString('de-AT',{month:'long',year:'numeric'})+' · KW '+isoWeekNumber(selectedPlanningDate());const first=new Date(year,month,1,12);const offset=(first.getDay()+6)%7;const gridStart=new Date(year,month,1-offset,12);const heads='<div class="monthhead">KW</div>'+['Mo','Di','Mi','Do','Fr','Sa','So'].map(x=>`<div class="monthhead">${x}</div>`).join('');let body='';for(let week=0;week<6;week++){const monday=new Date(gridStart);monday.setDate(gridStart.getDate()+week*7);body+=`<div class="monthkw">KW ${isoWeekNumber(iso(monday))}</div>`;for(let weekday=0;weekday<7;weekday++){const d=new Date(monday);d.setDate(monday.getDate()+weekday);const ds=iso(d);const rows=data.assignments.filter(a=>a.date===ds).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));body+=`<div class="monthday dropzone ${d.getMonth()===month?'':'outside'}" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningDrop(event,'${ds}')"><div class="monthdate">${d.getDate()} ${planningSummary(ds,true)}</div>${rows.map(a=>assignmentCard(a,true)).join('')}</div>`}}target.innerHTML=`<div class="monthgrid">${heads}${body}</div><div class="planning-hint">Monatsansicht zeigt alle Karten gemeinsam. Mitarbeiter-/Baustellensicht gilt für Tag und Woche.</div>`;return;
+  }
+  const days=planningView==='day'?[selectedPlanningDate()]:weekDays();
+  if(planningPerspective==='site')renderSitePlanning(target,title,days);else renderEmployeePlanning(target,title,days);
+}
+function renderWeek(){renderPlanning();renderSystemCards()}
+async function addAssignment(){
+  const type=document.getElementById('aCardType').value||'site';
+  const special=type!=='site';
+  const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
+  const selected=[...document.querySelectorAll('.aEmployeeCheck:checked')];
+  if(!special&&!j){alert('Bitte eine Baustelle auswählen.');return}
+  if(!selected.length){alert('Bitte mindestens einen Mitarbeiter auswählen.');return}
+  const vehicle=special?'':aVehicleSelect.value;
+  const meta=CARD_TYPES[type]||CARD_TYPES.site;
+  const hours=Math.max(0,Number(document.getElementById('aHours').value||0));
+  for(const el of selected){
+    const employee=masterEmployees.find(e=>String(e.id)===String(el.value))||{id:el.value,name:el.dataset.name||el.value};
+    const template={id:id(),cardType:type,jobId:special?`__${type}__`:String(j.jobId),jobName:special?meta.label:(j.name||('#'+j.jobId)),city:special?'':(j.city||''),address:special?'':jobAddress(j),vehicle,note:aNote.value.trim()||meta.label};
+    if(!special){const placed=await placeSiteAssignment(template,employee,aDate.value,{forceDialog:siteSegments(employee.id,aDate.value).length>0});if(!placed)continue}
+    else data.assignments.push({...template,date:aDate.value,employeeId:String(employee.id),employeeName:employee.name,from:aFrom.value,to:aTo.value,hours});
+  }
+  document.querySelectorAll('.aEmployeeCheck').forEach(x=>x.checked=false);
+  renderWeek();
+}
+function removeAssignment(x){const old=data.assignments.find(a=>a.id===x);data.assignments=data.assignments.filter(a=>a.id!==x);if(old)normalizeEmployeeDaySegments(old.employeeId,old.date);renderWeek()}
+async function saveAssignments(silent=false){const r=await api('/kristine/api/assignments',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignments:data.assignments})});data.assignments=r.assignments;renderWeek();renderControl();if(!silent)alert('Planung gespeichert.')}
+function seedDemo(){
+  const d=aDate.value||data.today;
+  const employee=masterEmployees[0];
+  const first=masterJobs[0], second=masterJobs[1]||masterJobs[0];
+  if(!employee||!first){alert('Für Demo-Daten werden mindestens ein Mitarbeiter und eine Baustelle benötigt.');return}
+  data.assignments=data.assignments.filter(a=>!(a.date===d&&a.employeeId===String(employee.id)));
+  data.assignments.push({
+    id:id(),date:d,jobId:String(first.jobId),jobName:first.name||('#'+first.jobId),city:first.city||'',address:jobAddress(first),
+    employeeId:String(employee.id),employeeName:employee.name,vehicle:masterVehicles[0]?.label||'',from:'07:00',to:'12:00',note:''
+  });
+  if(second && String(second.jobId)!==String(first.jobId))data.assignments.push({
+    id:id(),date:d,jobId:String(second.jobId),jobName:second.name||('#'+second.jobId),city:second.city||'',address:jobAddress(second),
+    employeeId:String(employee.id),employeeName:employee.name,vehicle:masterVehicles[0]?.label||'',from:'13:00',to:'17:00',note:''
+  });
+  chatEmployeeId.value=String(employee.id);chatEmployeeName.value=employee.name;
+  renderWeek();
+}
+function clearPlanning(){if(confirm('Planung wirklich leeren?')){data.assignments=[];renderWeek()}}
+function addBubble(text,who){const d=document.createElement('div');d.className='bubble '+who;d.textContent=text;chatMessages.appendChild(d);chatMessages.scrollTop=chatMessages.scrollHeight}
+function setQuick(buttons=[]){quickButtons.innerHTML=buttons.map(b=>`<button onclick="quickSend('${esc(b)}')">${esc(b)}</button>`).join('')}
+function currentChatAssignment(){
+  const employeeId=chatEmployeeId.value.trim(), date=chatDate.value;
+  const rows=data.assignments.filter(a=>String(a.employeeId)===String(employeeId)&&a.date===date).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));
+  const state=data.states[employeeId];
+  if(state?.activeAssignmentKey){
+    const hit=rows.find(a=>`${a.date}|${a.employeeId}|${a.from||''}|${a.jobId||''}`===state.activeAssignmentKey);
+    if(hit)return hit;
+  }
+  return rows[0]||null;
+}
+function openNavigation(){
+  const a=currentChatAssignment();
+  if(!a?.address){alert('Bei dieser Baustelle ist noch keine Adresse hinterlegt.');return}
+  window.open(mapsUrl(a.address),'_blank');
+}
+function quickSend(text){if(text==='Navigation'){openNavigation();return}chatInput.value=text;sendMessage()}
+function renderState(state){if(!state){currentState.textContent='Noch kein Status.';return}currentState.innerHTML=`<strong>${esc(state.employeeName)}</strong><br><span class="status ${esc(state.mode)}">${esc(state.mode)}</span><br><span class="small">${(state.timeline||[]).length} Ereignisse heute</span>`}
+async function beginConversation(){chatMessages.innerHTML='';setQuick([]);await postMessage('Hallo')}
+async function sendMessage(){const text=chatInput.value.trim();if(!text)return;chatInput.value='';addBubble(text,'user');await postMessage(text,true)}
+async function postMessage(text,alreadyShown=false){if(!alreadyShown&&text!=='Hallo')addBubble(text,'user');const r=await api('/kristine/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:chatEmployeeId.value.trim(),employeeName:chatEmployeeName.value.trim(),date:chatDate.value,text})});addBubble(r.reply,'bot');setQuick(r.buttons||[]);renderState(r.state);await loadSilent()}
+async function resetState(){await api('/kristine/api/reset-state/'+encodeURIComponent(chatEmployeeId.value.trim()),{method:'POST'});chatMessages.innerHTML='';setQuick([]);currentState.textContent='Tag wurde zurückgesetzt.';await loadSilent()}
+async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks()}
+function statusLabel(mode){
+  const labels={idle:'Noch nicht gestartet',working:'Arbeitet',pause:'Pause',lunch:'Mittagspause',finished_site:'Baustelle fertig',finished_day:'Feierabend'};
+  return labels[mode]||'Offen';
+}
+function latestRegie(state){
+  const items=(state?.timeline||[]).filter(x=>x.type==='regie_reported');
+  return items.length?items[items.length-1]:null;
+}
+function hmToMinutes(value){
+  const m=String(value||'').match(/^(\d{1,2}):(\d{2})$/);
+  return m?Number(m[1])*60+Number(m[2]):null;
+}
+function currentViennaMinutes(){
+  const parts=new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+  return Number(p.hour)*60+Number(p.minute);
+}
+function durationText(minutes){
+  const n=Math.max(0,Math.round(Number(minutes||0)));
+  return `${Math.floor(n/60)} h ${String(n%60).padStart(2,'0')} min`;
+}
+function employeeDaySegments(employeeId,today,state){
+  const rows=(data.timeEvents||[])
+    .filter(x=>String(x.employeeId)===String(employeeId)&&String(x.date)===String(today))
+    .map((x,i)=>({...x,_i:i,_m:hmToMinutes(x.at)}))
+    .filter(x=>x._m!==null)
+    .sort((a,b)=>a._m-b._m||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||a._i-b._i);
+  const segments=[];
+  for(let i=0;i<rows.length;i++){
+    const e=rows[i];
+    let type=null;
+    if(e.type==='start'||e.type==='weiter')type='work';
+    else if(e.type==='pause')type='pause';
+    else if(e.type==='mittag')type='lunch';
+    if(!type)continue;
+    let end=rows[i+1]?rows[i+1]._m:null;
+    if(end===null && ['working','pause','lunch'].includes(state?.mode)) end=currentViennaMinutes();
+    if(end===null||end<e._m)continue;
+    const seg={type,from:e._m,to:end,fromText:e.at,toText:`${String(Math.floor(end/60)).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`,jobId:e.jobId||'',jobName:e.jobName||''};
+    const prev=segments.at(-1);
+    if(prev&&prev.type===seg.type&&prev.to===seg.from&&(type!=='work'||String(prev.jobId||prev.jobName)===String(seg.jobId||seg.jobName))){prev.to=seg.to;prev.toText=seg.toText}else segments.push(seg);
+  }
+  return segments;
+}
+function formatAxisHM(minutes){const h=Math.floor(minutes/60),m=minutes%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`}
+function renderAxisLabels(dayStart,dayEnd){
+  const span=Math.max(60,dayEnd-dayStart);
+  const count=span<=10*60?6:span<=15*60?6:7;
+  const labels=[];
+  for(let i=0;i<count;i++){
+    const m=Math.round((dayStart+(span*i/(count-1)))/30)*30;
+    labels.push(`<span style="text-align:${i===0?'left':i===count-1?'right':'center'}">${formatAxisHM(m)}</span>`);
+  }
+  return `<div class="daybar-labels" style="grid-template-columns:repeat(${count},1fr)">${labels.join('')}</div>`;
+}
+function renderDayBar(segments,dayStart,dayEnd){
+  const total=Math.max(60,dayEnd-dayStart);
+  let cursor=dayStart,html='';
+  for(const seg of segments){
+    const from=Math.max(dayStart,Math.min(dayEnd,seg.from));
+    const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
+    if(to<=from)continue;
+    if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
+    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':'seg-lunch';
+    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':'Mittag'}`;
+    html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
+    cursor=Math.max(cursor,to);
+  }
+  if(cursor<dayEnd)html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
+  return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
 }
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
-  const ROOT = path.join(dataDir, "_kristine");
-  const ASSIGNMENTS = path.join(ROOT, "assignments.json");
-  const STATES = path.join(ROOT, "states.json");
-  const TASKS = path.join(ROOT, "tasks.json");
-  const EVENTS = path.join(ROOT, "events.jsonl");
-  const TIME_EVENTS = path.join(ROOT, "time-events.json");
-  const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
 
-  async function ensureRoot() {
-    await fsp.mkdir(ROOT, { recursive: true });
-  }
-
-  async function readJson(file, fallback) {
-    try {
-      return JSON.parse(await fsp.readFile(file, "utf8"));
-    } catch {
-      return fallback;
-    }
-  }
-
-  async function writeJson(file, value) {
-    await ensureRoot();
-    await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
-  }
-
-  async function appendEvent(event) {
-    await ensureRoot();
-    const line = JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n";
-    await fsp.appendFile(EVENTS, line, "utf8");
-  }
-
-  function viennaParts(d = new Date()) {
-    const parts = new Intl.DateTimeFormat("de-AT", {
-      timeZone: "Europe/Vienna",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(d);
-    return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  }
-
-  function localDateISO(d = new Date()) {
-    const p = viennaParts(d);
-    return `${p.year}-${p.month}-${p.day}`;
-  }
-
-  function localTimeHM(d = new Date()) {
-    const p = viennaParts(d);
-    return `${p.hour}:${p.minute}`;
-  }
-
-  function minutesFromHM(value) {
-    const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
-    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-  }
-
-  function clampOfficialStart(actualTime) {
-    const actual = minutesFromHM(actualTime);
-    const official = minutesFromHM("07:00");
-    return actual !== null && actual < official ? "07:00" : actualTime;
-  }
-
-  async function appendTimeEvent(event) {
-    const rows = await readJson(TIME_EVENTS, []);
-    rows.push(event);
-    // Genug Historie für Büroprüfung behalten, Datei aber begrenzen.
-    await writeJson(TIME_EVENTS, rows.slice(-20000));
-  }
-
-  async function appendReviewEntry(entry) {
-    const rows = await readJson(REVIEW_ENTRIES, []);
-    rows.push({ id: `review_entry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), ...entry });
-    await writeJson(REVIEW_ENTRIES, rows.slice(-20000));
-  }
-
-  async function completeDayReview({ employeeId, employeeName, date, state, states, current, actualTime, now, hasMaterials = false, hasPhotos = false, hasRegie = false }) {
-    state.mode = "finished_day";
-    state.pending = null;
-    state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
-    state.timeline.push({
-      at: now,
-      time: actualTime,
-      type: "day_finished",
-      detail: "Tagesabschluss bestätigt",
-      assignmentKey: current ? assignmentKey(current) : null,
-      jobId: current?.jobId || null,
-      jobName: current?.jobName || "",
-    });
-    state.timeline = state.timeline.slice(-200);
-    states[employeeId] = state;
-    await writeJson(STATES, states);
-    await appendTimeEvent({
-      id: `review_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`,
-      employeeId,
-      employeeName,
-      date,
-      type: "day_review",
-      at: actualTime,
-      jobId: current?.jobId || null,
-      jobName: current?.jobName || "",
-      hasMaterials,
-      hasPhotos,
-      hasRegie,
-      createdAt: now,
-    });
-    await appendEvent({
-      type: "day_finished",
-      employeeId,
-      employeeName,
-      date,
-      jobId: current?.jobId || null,
-      time: actualTime,
-      hasMaterials,
-      hasPhotos,
-      hasRegie,
-    });
-    return {
-      reply: "Tagesabschluss gespeichert. Schönen Feierabend! 👋",
-      buttons: [],
-      state,
-    };
-  }
-
-  function normalizeText(text) {
-    return String(text || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[.!?,;:]+/g, "")
-      .replace(/\s+/g, " ");
-  }
-
-  function parseReminderTime(text, nowDate = new Date()) {
-    const raw = normalizeText(text);
-    if (/^(jetzt|ab jetzt|sofort)$/.test(raw)) return localTimeHM(nowDate);
-    const relative = raw.match(/vor\s+(\d{1,3})\s*min/);
-    if (relative) {
-      const d = new Date(nowDate.getTime() - Number(relative[1]) * 60000);
-      return localTimeHM(d);
-    }
-    const match = raw.match(/(?:^|\s)([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s|$)/);
-    if (!match) return null;
-    return `${String(match[1]).padStart(2, "0")}:${match[2]}`;
-  }
-
-  function isLunchWindow(hm) {
-    const minutes = minutesFromHm(hm);
-    return minutes != null && minutes >= 11 * 60 + 30 && minutes <= 13 * 60;
-  }
-
-  function detectIntent(text) {
-    const t = normalizeText(text);
-    if (/^(start|beginn|los|arbeitsbeginn|geht los|auf gehts)$/.test(t)) return "start";
-    if (/^(pause|kaffee|kaffeepause|kurze pause)$/.test(t)) return "pause";
-    if (/^(mittag|essen|mittagspause|mahlzeit)$/.test(t)) return "lunch";
-    if (/^(weiter|wieder da|geht weiter|pause fertig|los gehts)$/.test(t)) return "resume";
-    if (/^(fertig|feierabend|schluss|wir sind fertig|bin fertig)$/.test(t)) return "finish";
-    if (/^(baustelle wechseln|wechseln|baustellenwechsel|andere baustelle)$/.test(t)) return "switch_site";
-    if (/^(ja|jup|passt|ok|okay|genau|👍)$/.test(t)) return "yes";
-    if (/^(ändern|aendern|korrigieren|korrektur)$/.test(t)) return "change";
-    if (/^(abbrechen|stopp|stop)$/.test(t)) return "cancel";
-    if (/^(nein|passt nicht|falsch|👎)$/.test(t)) return "no";
-    if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
-    if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
-    return "message";
-  }
-
-  function assignmentKey(a) {
-    return `${a.date}|${a.employeeId}|${a.from || ""}|${a.jobId || ""}`;
-  }
-
-  function sortedAssignments(items) {
-    return [...items].sort((a, b) =>
-      String(a.date).localeCompare(String(b.date)) ||
-      String(a.from || "").localeCompare(String(b.from || ""))
-    );
-  }
-
-  function assignmentsFor(items, employeeId, date) {
-    return sortedAssignments(items.filter(a =>
-      String(a.employeeId) === String(employeeId) &&
-      String(a.date) === String(date)
-    ));
-  }
-
-  function activeAssignment(dayAssignments, state) {
-    if (state?.activeAssignmentKey) {
-      const found = dayAssignments.find(a => assignmentKey(a) === state.activeAssignmentKey);
-      if (found) return found;
-    }
-    return dayAssignments[0] || null;
-  }
-
-  function nextAssignment(dayAssignments, current) {
-    if (!current) return dayAssignments[0] || null;
-    const idx = dayAssignments.findIndex(a => assignmentKey(a) === assignmentKey(current));
-    return idx >= 0 ? dayAssignments[idx + 1] || null : null;
-  }
-
-  function assignmentLabel(a) {
-    if (!a) return "keine Baustelle";
-    return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
-  }
-
-  function stateLabel(state) {
-    const map = {
-      idle: "noch nicht gestartet",
-      working: "arbeitet",
-      pause: "Pause",
-      lunch: "Mittagspause",
-      finished_site: "Baustelle fertig",
-      finished_day: "Feierabend",
-      closing_day: "Tagesabschluss",
-    };
-    return map[state?.mode] || map.idle;
-  }
-
-  async function getBootstrap() {
-    const [assignments, states, tasks, timeEvents] = await Promise.all([
-      readJson(ASSIGNMENTS, []),
-      readJson(STATES, {}),
-      readJson(TASKS, []),
-      readJson(TIME_EVENTS, []),
-    ]);
-    return { assignments, states, tasks, timeEvents };
-  }
-
-  function normalizeSiteSearch(value) {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/ß/g, "ss")
-      .replace(/[^a-z0-9_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  async function listBuildingSites() {
-    const entries = await fsp.readdir(dataDir, { withFileTypes: true }).catch(() => []);
-    const sites = [];
-
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
-
-      const siteId = entry.name;
-      const meta = await readJson(path.join(dataDir, siteId, ".meta.json"), {});
-      sites.push({
-        siteId,
-        name: String(meta?.name || siteId.replace(/_/g, " ")),
-        city: String(meta?.city || meta?.ort || ""),
-        address: String(meta?.address || meta?.adresse || ""),
-      });
-    }
-
-    return sites;
-  }
-
-  async function findBuildingSiteMatches(query) {
-    const wanted = normalizeSiteSearch(query);
-    if (!wanted) return [];
-
-    const sites = await listBuildingSites();
-    const valuesFor = (site) => [site.siteId, site.name, site.city]
-      .map(normalizeSiteSearch)
-      .filter(Boolean);
-
-    const exact = sites.filter(site => valuesFor(site).some(value => value === wanted));
-    if (exact.length) return exact;
-
-    const prefix = sites.filter(site => valuesFor(site).some(value => value.startsWith(wanted)));
-    if (prefix.length) return prefix;
-
-    return sites.filter(site => valuesFor(site).some(value => value.includes(wanted)));
-  }
-
-
-  function formatDuration(totalMinutes) {
-    const value = Math.max(0, Number(totalMinutes || 0));
-    const hours = Math.floor(value / 60);
-    const minutes = value % 60;
-    return `${hours}:${String(minutes).padStart(2, "0")} h`;
-  }
-
-  function blockLabel(type) {
-    if (type === "work") return "Arbeit";
-    if (type === "pause") return "Pause";
-    if (type === "lunch") return "Mittag";
-    return "";
-  }
-
-  async function buildDaySummary(employeeId, date) {
-    const rows = await readJson(TIME_EVENTS, []);
-    const events = rows
-      .filter(row => String(row.employeeId) === String(employeeId) && String(row.date) === String(date))
-      .map((row, index) => ({ ...row, _index: index, _minutes: minutesFromHM(row.at) }))
-      .filter(row => row._minutes !== null)
-      .sort((a, b) => a._minutes - b._minutes || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || a._index - b._index);
-
-    const blocks = [];
-    for (let i = 0; i < events.length - 1; i++) {
-      const event = events[i];
-      const next = events[i + 1];
-      if (next._minutes < event._minutes) continue;
-
-      let type = null;
-      if (event.type === "start" || event.type === "weiter") type = "work";
-      else if (event.type === "pause") type = "pause";
-      else if (event.type === "mittag") type = "lunch";
-      if (!type) continue;
-
-      const block = {
-        type,
-        from: event.at,
-        to: next.at,
-        fromMinutes: event._minutes,
-        toMinutes: next._minutes,
-        jobId: event.jobId || null,
-        jobName: event.jobName || "",
-      };
-      if (block.toMinutes < block.fromMinutes) continue;
-
-      const previous = blocks.at(-1);
-      if (previous && previous.type === block.type && previous.toMinutes === block.fromMinutes &&
-          (block.type !== "work" || String(previous.jobId || previous.jobName) === String(block.jobId || block.jobName))) {
-        previous.to = block.to;
-        previous.toMinutes = block.toMinutes;
-      } else {
-        blocks.push(block);
-      }
-    }
-
-    const workMinutes = blocks.filter(block => block.type === "work")
-      .reduce((sum, block) => sum + block.toMinutes - block.fromMinutes, 0);
-    const breakMinutes = blocks.filter(block => block.type === "pause" || block.type === "lunch")
-      .reduce((sum, block) => sum + block.toMinutes - block.fromMinutes, 0);
-
-    const lines = blocks.map(block => {
-      const site = block.type === "work" ? ` · ${block.jobName || (block.jobId ? "#" + block.jobId : "Baustelle")}` : "";
-      return `${block.from}–${block.to} ${blockLabel(block.type)}${site}`;
-    });
-
-    return {
-      blocks,
-      workMinutes,
-      breakMinutes,
-      text: [
-        "Heute war:",
-        "",
-        ...(lines.length ? lines : ["Keine vollständigen Zeitblöcke gefunden."]),
-        "",
-        `Netto-Arbeitszeit: ${formatDuration(workMinutes)}`,
-        `Pause und Mittag: ${formatDuration(breakMinutes)}`,
-        "",
-        "Passt das?",
-      ].join("\n"),
-    };
-  }
-
-  async function removeTimeEventById(eventId) {
-    if (!eventId) return;
-    const rows = await readJson(TIME_EVENTS, []);
-    await writeJson(TIME_EVENTS, rows.filter(row => String(row.id || "") !== String(eventId)));
-  }
-
-  async function handleMessage({ employeeId, employeeName, text, date }) {
-    const today = date || localDateISO();
-    const [assignments, states, tasks] = await Promise.all([
-      readJson(ASSIGNMENTS, []),
-      readJson(STATES, {}),
-      readJson(TASKS, []),
-    ]);
-
-    const dayAssignments = assignmentsFor(assignments, employeeId, today);
-    const previous = states[employeeId] || {
-      employeeId,
-      employeeName: employeeName || employeeId,
-      mode: "idle",
-      activeAssignmentKey: dayAssignments[0] ? assignmentKey(dayAssignments[0]) : null,
-      pending: null,
-      timeline: [],
-    };
-    const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
-    const current = activeAssignment(dayAssignments, state);
-    const intent = detectIntent(text);
-    const nowDate = new Date();
-    const now = nowDate.toISOString();
-    const actualTime = localTimeHM(nowDate);
-
-    const saveState = async () => {
-      states[employeeId] = state;
-      await writeJson(STATES, states);
-    };
-    const addTimeline = (type, detail, assignment = current) => {
-      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
-      state.timeline.push({
-        at: now,
-        time: actualTime,
-        type,
-        detail,
-        assignmentKey: assignment ? assignmentKey(assignment) : null,
-        jobId: assignment?.jobId || null,
-        jobName: assignment?.jobName || "",
-      });
-      state.timeline = state.timeline.slice(-200);
-    };
-
-    // Pending questions have priority.
-    if (state.pending?.type === "pause_or_lunch") {
-      if (intent === "lunch" || intent === "yes") {
-        state.mode = "lunch";
-        state.pending = null;
-        addTimeline("lunch_started", "Mittagspause", current);
-        await saveState();
-        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "mittag", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
-        return { reply: "Mittagspause begonnen. Mahlzeit! 🍽️", buttons: ["Weiter"], state };
-      }
-      if (intent === "pause" || intent === "no") {
-        state.mode = "pause";
-        state.pending = null;
-        addTimeline("pause_started", "Pause", current);
-        await saveState();
-        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "pause", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
-        return { reply: "Normale Pause begonnen. ☕", buttons: ["Weiter"], state };
-      }
-      return { reply: "Meinst du deine Mittagspause?", buttons: ["Mittag", "Pause"], state };
-    }
-
-    if (state.pending?.type === "lunch_start_question") {
-      if (intent === "yes" || intent === "lunch") {
-        state.mode = "lunch";
-        state.pending = null;
-        addTimeline("lunch_started", "Mittagspause nach Erinnerung", current);
-        await saveState();
-        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "mittag", at: actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
-        return { reply: "Mittagspause begonnen. Mahlzeit! 🍽️", buttons: ["Weiter"], state };
-      }
-      if (intent === "no") { state.pending = null; await saveState(); return { reply: "Alles klar. Deine Arbeitszeit läuft weiter.", buttons: ["Pause", "Mittag", "Fertig"], state }; }
-      return { reply: "Machst du jetzt Mittagspause?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "resume_check") {
-      if (intent === "yes" || intent === "resume") {
-        state.pending = { type: "resume_since", createdAt: now, breakMode: state.mode };
-        await saveState();
-        return { reply: "Seit wann arbeitest du wieder? Zum Beispiel 12:30, jetzt oder vor 10 Minuten.", buttons: [], state };
-      }
-      if (intent === "no") { state.pending = null; await saveState(); return { reply: "Alles klar. Melde dich mit „Weiter“, sobald du wieder arbeitest.", buttons: ["Weiter"], state }; }
-      return { reply: "Arbeitest du bereits wieder?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "resume_since") {
-      const correctedTime = parseReminderTime(text, nowDate);
-      if (!correctedTime) return { reply: "Bitte gib eine Uhrzeit an, zum Beispiel 12:30, jetzt oder vor 10 Minuten.", buttons: [], state };
-      state.mode = "working";
-      state.pending = null;
-      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
-      state.timeline.push({ at: now, time: correctedTime, type: "work_resumed", detail: "Arbeitsbeginn nach Pause korrigiert", assignmentKey: current ? assignmentKey(current) : null, jobId: current?.jobId || null, jobName: current?.jobName || "" });
-      state.timeline = state.timeline.slice(-200);
-      await saveState();
-      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: correctedTime, actualAt: actualTime, adjusted: correctedTime !== actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
-      return { reply: `Danke. Deine Arbeitszeit läuft seit ${correctedTime} wieder.`, buttons: ["Pause", "Mittag", "Fertig"], state };
-    }
-
-    if (state.pending?.type === "day_end_check") {
-      if (intent === "yes") { state.pending = null; await saveState(); return { reply: "Alles klar. Deine Arbeitszeit läuft weiter.", buttons: ["Pause", "Fertig"], state }; }
-      if (intent === "no" || intent === "finish") {
-        state.pending = { type: "day_end_since", createdAt: now, previousMode: state.mode };
-        await saveState();
-        return { reply: "Wann hast du aufgehört? Zum Beispiel 16:45, jetzt oder vor 20 Minuten.", buttons: [], state };
-      }
-      return { reply: "Arbeitest du noch?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "day_end_since") {
-      const correctedTime = parseReminderTime(text, nowDate);
-      if (!correctedTime) return { reply: "Bitte gib eine Uhrzeit an, zum Beispiel 16:45, jetzt oder vor 20 Minuten.", buttons: [], state };
-      const finishEventId = `finish_reminder_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`;
-      await appendTimeEvent({ id: finishEventId, employeeId, employeeName: state.employeeName, date: today, type: "ende", at: correctedTime, actualAt: actualTime, adjusted: correctedTime !== actualTime, jobId: current?.jobId || null, jobName: current?.jobName || "", createdAt: now });
-      state.mode = "closing_day";
-      state.pending = { type: "review_day", previousMode: state.pending.previousMode || "working", finishEventId, createdAt: now };
-      state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
-      state.timeline.push({ at: now, time: correctedTime, type: "day_review_started", detail: "Tagesende nach Erinnerung korrigiert", assignmentKey: current ? assignmentKey(current) : null, jobId: current?.jobId || null, jobName: current?.jobName || "" });
-      state.timeline = state.timeline.slice(-200);
-      await saveState();
-      const summary = await buildDaySummary(employeeId, today);
-      return { reply: `Danke. Feierabend wurde auf ${correctedTime} gesetzt.\n\n${summary.text}`, buttons: ["Passt", "Ändern", "Abbrechen"], state };
-    }
-
-    if (state.pending?.type === "confirm_assignment") {
-      if (intent === "yes") {
-        state.pending = null;
-        await saveState();
-        return {
-          reply: `Perfekt. Sag einfach „Start“, wenn ihr bei ${assignmentLabel(current)} beginnt.`,
-          buttons: ["Start", "Navigation"],
-          state,
-        };
-      }
-      if (intent === "no") {
-        state.pending = { type: "ask_actual_assignment", createdAt: now };
-        await saveState();
-        return {
-          reply: "Okay. Wo wurdest du stattdessen eingeteilt?",
-          buttons: [],
-          state,
-        };
-      }
-    }
-
-    if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
-      const matches = await findBuildingSiteMatches(text);
-
-      if (matches.length === 1) {
-        const site = matches[0];
-        const actualAssignment = {
-          id: `actual_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`,
-          date: today,
-          jobId: site.siteId,
-          jobName: site.name,
-          city: site.city,
-          address: site.address,
-          employeeId: String(employeeId),
-          employeeName: state.employeeName,
-          vehicle: "",
-          from: actualTime,
-          to: "",
-          note: "Tatsächliche Einteilung über Kristine",
-        };
-
-        assignments.push(actualAssignment);
-        await writeJson(ASSIGNMENTS, assignments);
-
-        state.activeAssignmentKey = assignmentKey(actualAssignment);
-        state.pending = null;
-        addTimeline("assignment_deviation", `Baustelle ${assignmentLabel(actualAssignment)} übernommen`, actualAssignment);
-        await saveState();
-        await appendEvent({
-          type: "assignment_deviation",
-          employeeId,
-          employeeName: state.employeeName,
-          date: today,
-          jobId: actualAssignment.jobId,
-          detail: assignmentLabel(actualAssignment),
-        });
-
-        return {
-          reply: `Perfekt. Baustelle ${assignmentLabel(actualAssignment)} übernommen. Sag einfach Start.`,
-          buttons: ["Start", "Navigation"],
-          needsOfficeReview: true,
-          state,
-        };
-      }
-
-      if (matches.length > 1) {
-        const choices = matches.slice(0, 5).map(site => site.name || site.siteId);
-        return {
-          reply: `Ich habe mehrere passende Baustellen gefunden:\n- ${choices.join("\n- ")}\n\nBitte schreib den Namen etwas genauer.`,
-          buttons: [],
-          state,
-        };
-      }
-
-      state.pending = null;
-      addTimeline("assignment_deviation", String(text), null);
-      await saveState();
-      await appendEvent({
-        type: "assignment_deviation",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        detail: String(text),
-      });
-      return {
-        reply: `Ich finde keine Baustelle zu „${String(text).trim()}“. Die abweichende Einteilung wurde zur Kontrolle vorgemerkt.`,
-        buttons: [],
-        needsOfficeReview: true,
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_day") {
-      if (intent === "yes") {
-        state.pending = { type: "review_material_question", createdAt: now };
-        await saveState();
-        return {
-          reply: "Hast du heute Material verwendet?",
-          buttons: ["Ja", "Nein"],
-          state,
-        };
-      }
-      if (intent === "change") {
-        state.pending = {
-          type: "review_change_note",
-          createdAt: now,
-          previousMode: state.pending.previousMode,
-          finishEventId: state.pending.finishEventId,
-        };
-        await saveState();
-        return {
-          reply: "Welche Zeit oder Baustelle soll geändert werden? Schreib mir die Korrektur bitte kurz.",
-          buttons: ["Abbrechen"],
-          state,
-        };
-      }
-      if (intent === "cancel") {
-        await removeTimeEventById(state.pending.finishEventId);
-        state.mode = state.pending.previousMode || "working";
-        state.pending = null;
-        addTimeline("day_review_cancelled", "Tagesabschluss abgebrochen", current);
-        await saveState();
-        return {
-          reply: "Tagesabschluss abgebrochen. Deine Arbeitszeit läuft weiter.",
-          buttons: ["Pause", "Mittag", "Baustelle wechseln", "Fertig"],
-          state,
-        };
-      }
-      return {
-        reply: "Bitte wähle Passt, Ändern oder Abbrechen.",
-        buttons: ["Passt", "Ändern", "Abbrechen"],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_change_note") {
-      if (intent === "cancel") {
-        state.pending = { ...state.pending, type: "review_day" };
-        await saveState();
-        const summary = await buildDaySummary(employeeId, today);
-        return { reply: summary.text, buttons: ["Passt", "Ändern", "Abbrechen"], state };
-      }
-      await appendEvent({
-        type: "day_review_change",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        detail: String(text),
-        needsOfficeReview: true,
-      });
-      state.pending = { type: "review_material_question", createdAt: now, changeRequested: true };
-      await saveState();
-      return {
-        reply: "Danke, die Korrektur ist für Chef/Büro vorgemerkt. Hast du heute Material verwendet?",
-        buttons: ["Ja", "Nein"],
-        needsOfficeReview: true,
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_material_question") {
-      if (!['yes', 'no'].includes(intent)) {
-        return { reply: "Hast du heute Material verwendet?", buttons: ["Ja", "Nein"], state };
-      }
-      if (intent === "yes") {
-        state.pending = { type: "collect_material", createdAt: now, itemCount: 0, hasMaterials: true };
-        await saveState();
-        return {
-          reply: "Bitte Material jetzt eingeben. Du kannst schreiben, eine Sprachnachricht oder ein Foto senden. Schreib „fertig“, wenn alles erfasst ist.",
-          buttons: [],
-          state,
-        };
-      }
-      state.pending = { type: "review_photos_question", createdAt: now, hasMaterials: false };
-      await saveState();
-      return { reply: "Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "collect_material") {
-      if (intent === "finish") {
-        state.pending = {
-          type: "review_photos_question",
-          createdAt: now,
-          hasMaterials: true,
-          materialCount: Number(state.pending.itemCount || 0),
-        };
-        await saveState();
-        return { reply: "Material gespeichert. Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
-      }
-      await appendReviewEntry({
-        employeeId, employeeName: state.employeeName, date: today,
-        jobId: current?.jobId || null, jobName: current?.jobName || "",
-        category: "material", source: "text", content: String(text).trim(),
-      });
-      state.pending.itemCount = Number(state.pending.itemCount || 0) + 1;
-      await saveState();
-      return {
-        reply: "Material aufgenommen. Sende bei Bedarf noch etwas oder schreibe „fertig“.",
-        buttons: ["Fertig"],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_photos_question") {
-      if (!['yes', 'no'].includes(intent)) {
-        return { reply: "Hast du heute Baustellenfotos gemacht?", buttons: ["Ja", "Nein"], state };
-      }
-      if (intent === "yes") {
-        state.pending = {
-          type: "collect_photos", createdAt: now, photoCount: 0,
-          hasMaterials: Boolean(state.pending.hasMaterials),
-        };
-        await saveState();
-        return {
-          reply: "Bitte die Baustellenfotos jetzt hochladen. Schreib „fertig“, wenn alle Fotos gesendet sind.",
-          buttons: [],
-          state,
-        };
-      }
-      state.pending = {
-        type: "review_regie_question", createdAt: now,
-        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: false,
-      };
-      await saveState();
-      return { reply: "Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "collect_photos") {
-      if (intent === "finish") {
-        state.pending = {
-          type: "review_regie_question", createdAt: now,
-          hasMaterials: Boolean(state.pending.hasMaterials),
-          hasPhotos: Number(state.pending.photoCount || 0) > 0,
-          photoCount: Number(state.pending.photoCount || 0),
-        };
-        await saveState();
-        return { reply: "Fotos gespeichert. Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
-      }
-      return {
-        reply: "Bitte ein Foto senden oder „fertig“ schreiben, wenn alle Fotos hochgeladen sind.",
-        buttons: ["Fertig"],
-        state,
-      };
-    }
-
-    if (state.pending?.type === "review_regie_question") {
-      if (!['yes', 'no'].includes(intent)) {
-        return { reply: "Gab es heute Regiearbeiten?", buttons: ["Ja", "Nein"], state };
-      }
-      if (intent === "yes") {
-        state.pending = {
-          type: "collect_regie", createdAt: now,
-          hasMaterials: Boolean(state.pending.hasMaterials),
-          hasPhotos: Boolean(state.pending.hasPhotos),
-        };
-        await saveState();
-        return { reply: "Bitte die Regiearbeit kurz beschreiben. Du kannst schreiben oder eine Sprachnachricht senden.", buttons: [], state };
-      }
-      return completeDayReview({
-        employeeId, employeeName: state.employeeName, date: today, state, states, current, actualTime, now,
-        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: Boolean(state.pending.hasPhotos), hasRegie: false,
-      });
-    }
-
-    if (state.pending?.type === "collect_regie") {
-      await appendReviewEntry({
-        employeeId, employeeName: state.employeeName, date: today,
-        jobId: current?.jobId || null, jobName: current?.jobName || "",
-        category: "regie", source: "text", content: String(text).trim(), needsOfficeReview: true,
-      });
-      return completeDayReview({
-        employeeId, employeeName: state.employeeName, date: today, state, states, current, actualTime, now,
-        hasMaterials: Boolean(state.pending.hasMaterials), hasPhotos: Boolean(state.pending.hasPhotos), hasRegie: true,
-      });
-    }
-
-    if (state.pending?.type === "finish_choice") {
-      if (intent === "yes" && state.pending.nextAssignmentKey) {
-        const next = dayAssignments.find(a => assignmentKey(a) === state.pending.nextAssignmentKey);
-        if (next) {
-          state.activeAssignmentKey = assignmentKey(next);
-          state.mode = "idle";
-          state.pending = null;
-          addTimeline("site_switch", `Wechsel zu ${assignmentLabel(next)}`, next);
-          await saveState();
-          await appendEvent({
-            type: "site_switch",
-            employeeId,
-            employeeName: state.employeeName,
-            date: today,
-            jobId: next.jobId,
-            detail: assignmentLabel(next),
-          });
-          return {
-            reply: `Passt. Nächste Baustelle: ${assignmentLabel(next)}${next.from ? ` ab ${next.from}` : ""}. Sag „Start“, wenn du dort beginnst.`,
-            buttons: ["Navigation", "Start"],
-            state,
-          };
-        }
-      }
-      if (intent === "finish" || /feierabend/.test(normalizeText(text)) || intent === "no") {
-        state.mode = "finished_day";
-        state.pending = null;
-        addTimeline("day_finished", "Feierabend", current);
-        await saveState();
-        await appendTimeEvent({
-          employeeId,
-          employeeName: state.employeeName,
-          date: today,
-          type: "ende",
-          at: actualTime,
-          jobId: current?.jobId || null,
-          jobName: current?.jobName || "",
-          createdAt: now,
-        });
-        await appendEvent({
-          type: "day_finished",
-          employeeId,
-          employeeName: state.employeeName,
-          date: today,
-          jobId: current?.jobId || null,
-          time: actualTime,
-        });
-        return {
-          reply: "Feierabend ist gespeichert. Danke und schönen Abend! 👋",
-          buttons: [],
-          state,
-        };
-      }
-    }
-
-    if (intent === "status") {
-      if (!dayAssignments.length) {
-        state.pending = { type: "ask_actual_assignment", createdAt: now };
-        await saveState();
-        return {
-          reply: "Für heute finde ich noch keine Einteilung. Wo wurdest du eingeteilt?",
-          buttons: [],
-          state,
-        };
-      }
-      return {
-        reply: `Heute: ${dayAssignments.map(a => `${a.from || "ganztägig"}${a.to ? "–" + a.to : ""} ${assignmentLabel(a)}`).join(" · ")}. Aktueller Status: ${stateLabel(state)}.`,
-        buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Start"],
-        state,
-      };
-    }
-
-    if (intent === "switch_site") {
-      if (state.mode !== "working") {
-        return {
-          reply: "Ein Baustellenwechsel ist nur während laufender Arbeitszeit möglich.",
-          buttons: ["Start"],
-          state,
-        };
-      }
-
-      await appendTimeEvent({
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "wechsel",
-        at: actualTime,
-        jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
-        createdAt: now,
-      });
-      addTimeline("site_switch_requested", `Baustellenwechsel von ${assignmentLabel(current)}`, current);
-      state.mode = "idle";
-      state.pending = { type: "ask_actual_assignment", createdAt: now };
-      await saveState();
-      return {
-        reply: "Auf welche Baustelle wechselst du?",
-        buttons: [],
-        state,
-      };
-    }
-
-    if (intent === "start") {
-      if (!current) {
-        state.pending = { type: "ask_actual_assignment", createdAt: now };
-        await saveState();
-        return {
-          reply: "Ich finde für heute noch keine Baustelle. Wo wurdest du eingeteilt?",
-          buttons: [],
-          state,
-        };
-      }
-      const bookedTime = clampOfficialStart(actualTime);
-      state.mode = "working";
-      state.pending = null;
-      state.activeAssignmentKey = assignmentKey(current);
-      state.lastStartActual = actualTime;
-      state.lastStartBooked = bookedTime;
-      addTimeline("work_started", `Arbeitsbeginn ${bookedTime}${bookedTime !== actualTime ? ` (gestempelt ${actualTime})` : ""}`, current);
-      await saveState();
-      await appendTimeEvent({
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "start",
-        at: bookedTime,
-        actualAt: actualTime,
-        adjusted: bookedTime !== actualTime,
-        jobId: current.jobId,
-        jobName: current.jobName || "",
-        createdAt: now,
-      });
-      await appendEvent({
-        type: "work_started",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        jobId: current.jobId,
-        actualTime,
-        bookedTime,
-        adjusted: bookedTime !== actualTime,
-      });
-      return {
-        reply: bookedTime !== actualTime
-          ? `Arbeitsbeginn bei ${assignmentLabel(current)} ist gespeichert. Gemäß Betriebsregel wurde ${actualTime} auf 07:00 Uhr gesetzt. Gute Arbeit!`
-          : `Arbeitsbeginn bei ${assignmentLabel(current)} ist um ${bookedTime} gespeichert. Gute Arbeit!`,
-        buttons: ["Pause", "Mittag", "Baustelle wechseln", "Fertig"],
-        state,
-      };
-    }
-
-    if (intent === "pause" && state.mode === "working" && isLunchWindow(actualTime)) {
-      state.pending = { type: "pause_or_lunch", createdAt: now };
-      await saveState();
-      return { reply: "Meinst du deine Mittagspause?", buttons: ["Mittag", "Pause"], state };
-    }
-
-    if (intent === "pause" || intent === "lunch") {
-      if (state.mode !== "working") {
-        return {
-          reply: "Deine Arbeitszeit läuft gerade nicht. Soll ich zuerst den Arbeitsbeginn speichern?",
-          buttons: ["Start"],
-          state,
-        };
-      }
-      state.mode = intent === "lunch" ? "lunch" : "pause";
-      addTimeline(intent === "lunch" ? "lunch_started" : "pause_started", intent === "lunch" ? "Mittagspause" : "Pause", current);
-      await saveState();
-      await appendTimeEvent({
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: intent === "lunch" ? "mittag" : "pause",
-        at: actualTime,
-        jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
-        createdAt: now,
-      });
-      return {
-        reply: intent === "lunch" ? "Mittagspause begonnen. Mahlzeit! 🍽️" : "Pause begonnen. ☕",
-        buttons: ["Weiter"],
-        state,
-      };
-    }
-
-    if (intent === "resume") {
-      if (!["pause", "lunch"].includes(state.mode)) {
-        return {
-          reply: "Bei mir ist gerade keine Pause offen. Deine Arbeitszeit läuft weiter.",
-          buttons: ["Pause", "Fertig"],
-          state,
-        };
-      }
-      state.mode = "working";
-      addTimeline("work_resumed", "Arbeit fortgesetzt", current);
-      await saveState();
-      await appendTimeEvent({
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "weiter",
-        at: actualTime,
-        jobId: current?.jobId || null,
-        jobName: current?.jobName || "",
-        createdAt: now,
-      });
-      return {
-        reply: "Weiter geht’s. Arbeitszeit läuft wieder.",
-        buttons: ["Pause", "Mittag", "Baustelle wechseln", "Fertig"],
-        state,
-      };
-    }
-
-    if (intent === "finish") {
-      if (!current || !["working", "pause", "lunch"].includes(state.mode)) {
-        return {
-          reply: "Ich finde gerade keine laufende Arbeitszeit für den Tagesabschluss.",
-          buttons: current ? ["Start"] : [],
-          state,
-        };
-      }
-
-      const previousMode = state.mode;
-      const finishEventId = `finish_${Date.now()}_${String(employeeId).replace(/[^A-Za-z0-9_-]/g, "")}`;
-      await appendTimeEvent({
-        id: finishEventId,
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "ende",
-        at: actualTime,
-        jobId: current.jobId,
-        jobName: current.jobName || "",
-        createdAt: now,
-      });
-
-      state.mode = "closing_day";
-      state.pending = {
-        type: "review_day",
-        previousMode,
-        finishEventId,
-        createdAt: now,
-      };
-      addTimeline("day_review_started", "Tagesabschluss gestartet", current);
-      await saveState();
-
-      const summary = await buildDaySummary(employeeId, today);
-      return {
-        reply: summary.text,
-        buttons: ["Passt", "Ändern", "Abbrechen"],
-        state,
-      };
-    }
-
-    if (intent === "task_done") {
-      const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
-      if (!open) {
-        return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
-      }
-      open.status = "done";
-      open.completedAt = now;
-      await writeJson(TASKS, tasks);
-      await appendEvent({
-        type: "task_completed",
-        employeeId,
-        employeeName: state.employeeName,
-        taskId: open.id,
-        detail: open.title,
-      });
-      return {
-        reply: `Danke. „${open.title}“ ist als erledigt markiert.`,
-        buttons: [],
-        state,
-      };
-    }
-
-    // If this is the first contact of the day, confirm plan.
-    if (state.mode === "idle" && current && !state.pending) {
-      state.pending = { type: "confirm_assignment", createdAt: now };
-      await saveState();
-      return {
-        reply: `Hallo ${state.employeeName}. Du bist heute bei ${assignmentLabel(current)}${current.from ? ` von ${current.from}${current.to ? " bis " + current.to : ""}` : ""} eingeteilt. Passt das?`,
-        buttons: ["Ja", "Nein", "Navigation"],
-        state,
-      };
-    }
-
-    addTimeline("message", String(text), current);
-    await saveState();
-    await appendEvent({
-      type: "employee_message",
-      employeeId,
-      employeeName: state.employeeName,
-      date: today,
-      jobId: current?.jobId || null,
-      detail: String(text),
-    });
-    return {
-      reply: "Danke, ich habe deine Nachricht gespeichert. Für den Test verstehe ich bereits: Start, Pause, Mittag, Weiter, Fertig, Status und Erledigt.",
-      buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Status", "Start"],
-      state,
-    };
-  }
-
-  async function getPendingState(employeeId) {
-    const states = await readJson(STATES, {});
-    return states[String(employeeId)]?.pending || null;
-  }
-
-  async function handleMedia({ employeeId, employeeName, date, mediaType, file, transcript = "" }) {
-    const today = date || localDateISO();
-    const [assignments, states] = await Promise.all([readJson(ASSIGNMENTS, []), readJson(STATES, {})]);
-    const state = states[String(employeeId)];
-    if (!state?.pending) return { handled: false };
-    const dayAssignments = assignmentsFor(assignments, employeeId, today);
-    const current = activeAssignment(dayAssignments, state);
-    const pending = state.pending;
-    const now = new Date().toISOString();
-    const actualTime = localTimeHM(new Date());
-
-    if (pending.type === "collect_material" && ["image", "audio"].includes(mediaType)) {
-      await appendReviewEntry({
-        employeeId, employeeName: employeeName || state.employeeName, date: today,
-        jobId: current?.jobId || null, jobName: current?.jobName || "",
-        category: "material", source: mediaType, file: file || "", transcript: transcript || "",
-      });
-      pending.itemCount = Number(pending.itemCount || 0) + 1;
-      states[String(employeeId)] = state;
-      await writeJson(STATES, states);
-      return { handled: true, reply: "Material aufgenommen. Sende bei Bedarf noch etwas oder schreibe „fertig“.", buttons: ["Fertig"] };
-    }
-
-    if (pending.type === "collect_photos" && mediaType === "image") {
-      await appendReviewEntry({
-        employeeId, employeeName: employeeName || state.employeeName, date: today,
-        jobId: current?.jobId || null, jobName: current?.jobName || "",
-        category: "photo", source: "image", file: file || "",
-      });
-      pending.photoCount = Number(pending.photoCount || 0) + 1;
-      states[String(employeeId)] = state;
-      await writeJson(STATES, states);
-      return { handled: true, reply: `Foto ${pending.photoCount} gespeichert. Sende weitere Fotos oder schreibe „fertig“.`, buttons: ["Fertig"] };
-    }
-
-    if (pending.type === "collect_regie" && mediaType === "audio") {
-      await appendReviewEntry({
-        employeeId, employeeName: employeeName || state.employeeName, date: today,
-        jobId: current?.jobId || null, jobName: current?.jobName || "",
-        category: "regie", source: "audio", file: file || "", transcript: transcript || "", needsOfficeReview: true,
-      });
-      const result = await completeDayReview({
-        employeeId, employeeName: employeeName || state.employeeName, date: today, state, states, current, actualTime, now,
-        hasMaterials: Boolean(pending.hasMaterials), hasPhotos: Boolean(pending.hasPhotos), hasRegie: true,
-      });
-      return { handled: true, reply: result.reply, buttons: result.buttons };
-    }
-
-    return { handled: false };
-  }
-
-  app.get("/kristine", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    res.sendFile(path.join(publicDir, "kristine.html"));
-  });
-
-  app.get("/kristine/api/bootstrap", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      res.json({ ok: true, ...(await getBootstrap()), today: localDateISO() });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.put("/kristine/api/assignments", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const rows = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
-      const clean = rows.map((a, index) => ({
-        id: String(a.id || `a_${Date.now()}_${index}`),
-        date: String(a.date || "").slice(0, 10),
-        jobId: String(a.jobId || "").slice(0, 80),
-        jobName: String(a.jobName || "").trim().slice(0, 140),
-        city: String(a.city || "").trim().slice(0, 100),
-        address: String(a.address || "").trim().slice(0, 300),
-        employeeId: String(a.employeeId || "").slice(0, 100),
-        employeeName: String(a.employeeName || "").trim().slice(0, 140),
-        vehicle: String(a.vehicle || "").trim().slice(0, 100),
-        from: String(a.from || "").slice(0, 5),
-        to: String(a.to || "").slice(0, 5),
-        note: String(a.note || "").trim().slice(0, 500),
-        cardType: ["site", "urlaub", "arzt", "krank", "aufraeumen", "werkstatt"].includes(String(a.cardType || "site")) ? String(a.cardType || "site") : "site",
-        hours: Math.max(0, Math.min(24, Number(a.hours || 0))),
-      })).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
-      await writeJson(ASSIGNMENTS, clean);
-      await appendEvent({ type: "planning_saved", detail: `${clean.length} Einteilungen gespeichert`, source: "office" });
-      res.json({ ok: true, assignments: clean });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.post("/kristine/api/message", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const employeeId = String(req.body?.employeeId || "").trim();
-      const employeeName = String(req.body?.employeeName || employeeId).trim();
-      const text = String(req.body?.text || "").trim();
-      const date = String(req.body?.date || localDateISO()).slice(0, 10);
-      if (!employeeId || !text) return res.status(400).json({ ok: false, error: "employeeId und text erforderlich" });
-      res.json({ ok: true, ...(await handleMessage({ employeeId, employeeName, text, date })) });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.post("/kristine/api/reset-state/:employeeId", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const states = await readJson(STATES, {});
-      delete states[String(req.params.employeeId)];
-      await writeJson(STATES, states);
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.put("/kristine/api/tasks", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
-      const clean = tasks.map((t, index) => ({
-        id: String(t.id || `t_${Date.now()}_${index}`),
-        title: String(t.title || "").trim().slice(0, 180),
-        assigneeId: String(t.assigneeId || "").slice(0, 100),
-        assigneeName: String(t.assigneeName || "").trim().slice(0, 140),
-        jobId: String(t.jobId || "").slice(0, 80),
-        jobName: String(t.jobName || "").trim().slice(0, 140),
-        dueDate: String(t.dueDate || "").slice(0, 10),
-        reminder: String(t.reminder || "").trim().slice(0, 300),
-        creatorId: String(t.creatorId || "admin").slice(0, 100),
-        creatorName: String(t.creatorName || "Chef / Büro").trim().slice(0, 140),
-        status: t.status === "done" ? "done" : "open",
-        createdAt: t.createdAt || new Date().toISOString(),
-        completedAt: t.completedAt || null,
-      })).filter(t => t.title);
-      await writeJson(TASKS, clean);
-      res.json({ ok: true, tasks: clean });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-
-  app.patch("/kristine/api/tasks/:taskId", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const taskId = String(req.params.taskId || "");
-      const tasks = await readJson(TASKS, []);
-      const task = tasks.find((t) => String(t.id) === taskId);
-      if (!task) return res.status(404).json({ ok: false, error: "Aufgabe nicht gefunden." });
-      if (req.body?.status === "done") {
-        task.status = "done";
-        task.completedAt = req.body?.completedAt || new Date().toISOString();
-        task.completedById = String(req.body?.completedById || "admin");
-        task.completedByName = String(req.body?.completedByName || "Chef / Büro").slice(0, 140);
-      } else if (req.body?.status === "open") {
-        task.status = "open";
-        task.completedAt = null;
-        task.completedById = "";
-        task.completedByName = "";
-      }
-      await writeJson(TASKS, tasks);
-      res.json({ ok: true, task, tasks });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  // ===== HOLIDAYS =====
-  app.get("/kristine/api/holidays", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const holidaysFile = path.join(dataDir, "_kristine", "holidays.json");
-      let holidays = await readJson(holidaysFile, []);
-      
-      // Auto-Load: Wenn leer, lade österreichische Feiertage für 2026
-      if (holidays.length === 0) {
-        holidays = getAustrianHolidays(2026);
-        await writeJson(holidaysFile, holidays);
-      }
-      
-      res.json({ ok: true, holidays });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.post("/kristine/api/holidays/reload-austrian", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const holidaysFile = path.join(dataDir, "_kristine", "holidays.json");
-      const existing = await readJson(holidaysFile, []);
-      const year = req.body?.year || 2026;
-      const austrian = getAustrianHolidays(year);
-      
-      // Merge: Behalte nicht-österreichische Feiertage
-      const manual = existing.filter(h => !austrian.some(a => a.date === h.date));
-      const merged = [...austrian, ...manual].sort((a, b) => a.date.localeCompare(b.date));
-      
-      await writeJson(holidaysFile, merged);
-      res.json({ ok: true, holidays: merged });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.put("/kristine/api/holidays", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const holidays = Array.isArray(req.body?.holidays) ? req.body.holidays : [];
-      const clean = holidays.map(h => ({
-        date: String(h.date || "").slice(0, 10),
-        name: String(h.name || "").trim().slice(0, 140)
-      })).filter(h => h.date && h.name).sort((a, b) => a.date.localeCompare(b.date));
-      await writeJson(path.join(dataDir, "_kristine", "holidays.json"), clean);
-      res.json({ ok: true, holidays: clean });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  // ===== COMPANY VACATIONS =====
-  app.get("/kristine/api/company-vacations", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const vacations = await readJson(path.join(dataDir, "_kristine", "company-vacations.json"), []);
-      res.json({ ok: true, vacations });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.put("/kristine/api/company-vacations", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const vacations = Array.isArray(req.body?.vacations) ? req.body.vacations : [];
-      const clean = vacations.map(v => ({
-        from: String(v.from || "").slice(0, 10),
-        to: String(v.to || "").slice(0, 10),
-        reason: String(v.reason || "").trim().slice(0, 300)
-      })).filter(v => v.from && v.to).sort((a, b) => a.from.localeCompare(b.from));
-      await writeJson(path.join(dataDir, "_kristine", "company-vacations.json"), clean);
-      res.json({ ok: true, vacations: clean });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  // ===== SCHEDULE MODELS =====
-  app.get("/kristine/api/schedule-models", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const modelsFile = path.join(dataDir, "_kristine", "schedule-models.json");
-      let models = await readJson(modelsFile, []);
-      
-      // Auto-Load: Wenn leer, lade Standard-Modelle (Sommer/Winter)
-      if (models.length === 0) {
-        models = getDefaultScheduleModels();
-        await writeJson(modelsFile, models);
-      }
-      
-      res.json({ ok: true, models });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-  app.put("/kristine/api/schedule-models", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const models = Array.isArray(req.body?.models) ? req.body.models : [];
-      const clean = models.map(m => ({
-        id: String(m.id || Math.random().toString(36).slice(2)),
-        name: String(m.name || "").trim().slice(0, 140),
-        days: Array.isArray(m.days) ? m.days.map(d => ({
-          dayName: String(d.dayName || "").slice(0, 50),
-          isWorkDay: Boolean(d.isWorkDay),
-          from: String(d.from || "").slice(0, 5),
-          to: String(d.to || "").slice(0, 5),
-          pauseStart: String(d.pauseStart || "").slice(0, 5),
-          pauseEnd: String(d.pauseEnd || "").slice(0, 5),
-          lunchStart: String(d.lunchStart || "").slice(0, 5),
-          lunchEnd: String(d.lunchEnd || "").slice(0, 5),
-          pauseMinutes: Number(d.pauseMinutes) || 0,
-          shouldHours: Number(d.shouldHours) || 0
-        })) : []
-      })).filter(m => m.name && m.days.length > 0);
-      await writeJson(path.join(dataDir, "_kristine", "schedule-models.json"), clean);
-      res.json({ ok: true, models: clean });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
-
-
-  // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
-  return { handleMessage, handleMedia, getPendingState, localDateISO };
+let selectedControlEmployeeId='';
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';}
+function openEmployeeActionModal(employeeId){
+  const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));
+  const state=data.states?.[employeeId]||{mode:'idle'};
+  const today=chatDate.value||data.today;
+  const plans=(data.assignments||[]).filter(a=>a.date===today&&String(a.employeeId)===String(employeeId));
+  const segments=employeeDaySegments(employeeId,today,state);
+  const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
+  const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
+  const currentPlan=plans.find(x=>String(state.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+  selectedControlEmployeeId=String(employeeId);
+  employeeActionTitle.textContent=employee?.name||state.employeeName||String(employeeId);
+  employeeActionInfo.innerHTML=`<strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><strong>Baustelle:</strong> ${esc(currentPlan?.jobName||'Nicht eingeteilt')}<br><strong>Arbeitszeit heute:</strong> ${esc(durationText(workMinutes))}<br><strong>Pause/Mittag:</strong> ${esc(durationText(breakMinutes))}`;
+  employeeActionNote.textContent='';
+  employeeActionAsk.disabled=!["working","pause","lunch"].includes(state.mode);
+  employeeActionAsk.textContent=employeeActionAsk.disabled?'Nicht mehr aktiv':'Arbeitest du noch? senden';
+  employeeActionBackdrop.classList.add('open');
+}
+async function sendEmployeeDayEndCheck(){
+  if(!selectedControlEmployeeId)return;
+  const btn=document.getElementById('employeeActionAsk');
+  const old=btn.textContent;btn.disabled=true;btn.textContent='Sendet …';employeeActionNote.textContent='';
+  try{
+    const result=await api('/admin/api/morning-status/employee-end-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,date:chatDate.value||data.today})});
+    employeeActionNote.textContent=result?.result?.sent?'✓ Nachfrage wurde über Kristine gesendet.':(result?.result?.reason||'Keine Nachricht gesendet.');
+    btn.textContent='Gesendet';
+  }catch(error){employeeActionNote.textContent='Fehler: '+error.message;btn.disabled=false;btn.textContent=old;}
 }
 
-module.exports = { registerKristine };
+function renderControl(){
+  const today=chatDate.value||data.today;
+  const planned=data.assignments.filter(a=>a.date===today);
+  const employeeMap=new Map();
+
+  // Im Leitstand immer alle aktiven Mitarbeiter anzeigen – auch ohne Planung oder Status.
+  masterEmployees.forEach(e=>employeeMap.set(String(e.id),{
+    employeeId:String(e.id),employeeName:e.name||String(e.id),jobName:'Keine Baustelle'
+  }));
+  planned.forEach(a=>{
+    const key=String(a.employeeId);
+    if(!employeeMap.has(key))employeeMap.set(key,a);
+  });
+  Object.values(data.states||{}).forEach(s=>{
+    if(!s?.employeeId)return;
+    const key=String(s.employeeId);
+    if(!employeeMap.has(key)) employeeMap.set(key,{employeeId:s.employeeId,employeeName:s.employeeName||s.employeeId,jobName:'Keine Baustelle'});
+  });
+
+  const rank={working:1,pause:2,lunch:3,idle:4,finished_site:5,finished_day:6};
+  const employees=[...employeeMap.values()].sort((a,b)=>{
+    const sa=data.states[a.employeeId]?.mode||'idle';
+    const sb=data.states[b.employeeId]?.mode||'idle';
+    return (rank[sa]||99)-(rank[sb]||99)||String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de');
+  });
+
+  const unknownCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='assignment_deviation').length,0);
+  const regieCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,0);
+  const openTaskCount=(data.tasks||[]).filter(t=>t.status!=='done').length;
+  const alerts=[];
+  if(unknownCount)alerts.push(`<span>🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}</span>`);
+  if(regieCount)alerts.push(`<span>📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}</span>`);
+  if(openTaskCount)alerts.push(`<button type="button" class="task-alert-link" onclick="openTaskListModal()">📌 ${openTaskCount} offene Arbeit${openTaskCount===1?'':'en'}</button>`);
+  controlAlerts.style.display=alerts.length?'block':'none';
+  controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`:'';
+  if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
+
+  controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
+    const s=data.states[a.employeeId]||{mode:'idle'};
+    const meaningful=(s?.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type));
+    const last=meaningful.at(-1),regie=latestRegie(s);
+    const plans=planned.filter(x=>String(x.employeeId)===String(a.employeeId));
+    const segments=employeeDaySegments(a.employeeId,today,s);
+    const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
+    const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
+    const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+    const lastWork=[...segments].reverse().find(x=>x.type==='work');
+    const siteName=currentPlan?.jobName||lastWork?.jobName||'Nicht eingeteilt';
+    const dayStart=7*60;
+    const plannedEnd=Math.max(17*60,...plans.map(x=>hmToMinutes(x.to)||0));
+    const lastEvent=Math.max(0,...segments.map(x=>x.to||0));
+    const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
+    const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
+    const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
+    return `<div class="control-card" style="cursor:${['working','pause','lunch'].includes(s.mode)?'pointer':'default'}" ${['working','pause','lunch'].includes(s.mode)?`onclick="openEmployeeActionModal('${esc(a.employeeId)}')"`:''}><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+  }).join('')}</div>`;
+}
+
+async function addTask(){
+  if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
+  if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
+  const button=document.querySelector('button[onclick="addTask()"]');
+  const oldLabel=button?.textContent;
+  const newTask={
+    id:id(),title:tTitle.value.trim(),
+    assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
+    jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
+    dueDate:tDueDate.value,reminder:tReminder.value.trim(),
+    creatorId:'admin',creatorName:'Chef / Büro',
+    status:'open',createdAt:new Date().toISOString(),completedAt:null
+  };
+  data.tasks.push(newTask);
+  renderTasks();renderControl();
+  try{
+    if(button){button.disabled=true;button.textContent='Speichert …'}
+    await persistTasks();
+    tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
+    tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
+    updateTaskSelectionInfo();
+    alert('Aufgabe gespeichert.');
+  }catch(e){
+    data.tasks=(data.tasks||[]).filter(t=>t.id!==newTask.id);renderTasks();renderControl();
+    alert('Aufgabe konnte nicht gespeichert werden: '+e.message);
+  }finally{
+    if(button){button.disabled=false;button.textContent=oldLabel||'+ Aufgabe'}
+  }
+}
+function taskStatusLabel(t){return t.status==='done'?'Erledigt':'Offen'}
+function taskDueLabel(date){if(!date)return '–';try{return new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(date+'T12:00:00'))}catch{return date}}
+function taskIsOverdue(t){return t.status!=='done'&&t.dueDate&&t.dueDate<(data.today||new Date().toISOString().slice(0,10))}
+function renderTasks(){
+  const tasks=[...(data.tasks||[])].sort((a,b)=>(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  taskList.innerHTML=tasks.length?tasks.map(t=>{
+    const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
+    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
+  }).join(''):'<span class="small">Keine Aufgaben.</span>'
+}
+function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks();renderControl()}
+async function persistTasks(){
+  const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});
+  data.tasks=r.tasks||[];renderTasks();renderControl();return r;
+}
+async function saveTasks(){
+  const button=document.querySelector('button[onclick="saveTasks()"]');const old=button?.textContent;
+  try{if(button){button.disabled=true;button.textContent='Speichert …'}await persistTasks();alert('Aufgaben gespeichert.')}catch(e){alert('Aufgaben konnten nicht gespeichert werden: '+e.message)}finally{if(button){button.disabled=false;button.textContent=old||'Aufgaben speichern'}}
+}
+function taskDetailHtml(t){
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Zuständig</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong><span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Ersteller</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Kontext</span><strong>${esc(t.reminder)}</strong>`:''}</div><div class="actions">${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
+}
+function openTaskListModal(focusId=''){
+  const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  const selected=focusId?(data.tasks||[]).find(t=>t.id===focusId):null;
+  taskModalTitle.textContent=selected?'Offene Arbeit':'Offene Arbeiten';
+  taskModalList.innerHTML=selected?taskDetailHtml(selected):(tasks.length?tasks.map(taskDetailHtml).join(''):'<div class="task-modal-empty">Keine offenen Arbeiten.</div>');
+  taskModalNote.textContent='';taskModalBackdrop.classList.add('open');
+}
+function closeTaskModal(){taskModalBackdrop.classList.remove('open')}
+async function markTaskDone(taskId){
+  const t=(data.tasks||[]).find(x=>x.id===taskId);if(!t)return;
+  t.status='done';t.completedAt=new Date().toISOString();
+  try{await persistTasks();taskModalNote.textContent='✓ Als erledigt gespeichert.';openTaskListModal()}catch(e){t.status='open';t.completedAt=null;alert('Aufgabe konnte nicht erledigt werden: '+e.message)}
+}
+// ===== HOLIDAYS =====
+function toggleConfigSection(id){document.querySelectorAll('.config-section').forEach(section=>section.classList.toggle('open',section.id===id?!section.classList.contains('open'):false))}
+function setSavedNote(id,text){const el=document.getElementById(id);if(!el)return;el.textContent=text;setTimeout(()=>{if(el.textContent===text)el.textContent=''},2500)}
+function addHoliday(){if(!hDate.value){alert('Datum erforderlich.');return}if(!hName.value.trim()){alert('Feiertag-Name erforderlich.');return}data.holidays=data.holidays||[];const existing=data.holidays.find(h=>h.date===hDate.value);if(existing)existing.name=hName.value.trim();else data.holidays.push({date:hDate.value,name:hName.value.trim()});data.holidays.sort((a,b)=>a.date.localeCompare(b.date));hDate.value='';hName.value='';renderHolidays()}
+function renderHolidays(){const list=data.holidays||[];const el=document.getElementById('holidayList');document.getElementById('holidaySummary').textContent=`${list.length} Feiertage hinterlegt`;el.innerHTML=list.length?list.map(h=>`<div class="compact-entry"><div><strong>${esc(h.date)}</strong><span class="small">${esc(h.name)}</span></div><button class="danger" onclick="removeHoliday('${h.date}')">🗑</button></div>`).join(''):'<span class="small">Keine Feiertage.</span>'}
+function removeHoliday(d){data.holidays=(data.holidays||[]).filter(h=>h.date!==d);renderHolidays()}
+async function saveHolidaysData(){const r=await api('/kristine/api/holidays',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({holidays:data.holidays||[]})});data.holidays=r.holidays||[];renderHolidays();setSavedNote('holidaySavedNote','✓ gespeichert');document.getElementById('cfg-holidays').classList.remove('open')}
+function addCompanyVacation(){if(!cvFrom.value||!cvTo.value){alert('Von und Bis erforderlich.');return}if(cvTo.value<cvFrom.value){alert('Bis darf nicht vor Von liegen.');return}data.companyVacations=data.companyVacations||[];data.companyVacations.push({from:cvFrom.value,to:cvTo.value,reason:cvReason.value.trim()});data.companyVacations.sort((a,b)=>a.from.localeCompare(b.from));cvFrom.value='';cvTo.value='';cvReason.value='';renderCompanyVacations()}
+function renderCompanyVacations(){const list=data.companyVacations||[];const el=document.getElementById('companyVacationList');document.getElementById('vacationSummary').textContent=list.length?`${list.length} Zeitraum${list.length===1?'':'e'}`:'kein Zeitraum';el.innerHTML=list.length?list.map((cv,idx)=>`<div class="compact-entry"><div><strong>${esc(cv.from)} – ${esc(cv.to)}</strong><span class="small">${esc(cv.reason||'Betriebsurlaub')}</span></div><button class="danger" onclick="removeCompanyVacation(${idx})">🗑</button></div>`).join(''):'<span class="small">Kein Betriebsurlaub.</span>'}
+function removeCompanyVacation(idx){data.companyVacations=(data.companyVacations||[]).filter((_,i)=>i!==idx);renderCompanyVacations()}
+async function saveCompanyVacationsData(){const r=await api('/kristine/api/company-vacations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vacations:data.companyVacations||[]})});data.companyVacations=r.vacations||[];renderCompanyVacations();setSavedNote('vacationSavedNote','✓ gespeichert');document.getElementById('cfg-vacation').classList.remove('open')}
+async function reloadAustrianHolidays(){if(!confirm('Österreichische Feiertage neu laden? Manuell angelegte Feiertage bleiben erhalten.'))return;try{const r=await api('/kristine/api/holidays/reload-austrian',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({year:Number(annualHoursYear?.value||2026)})});data.holidays=r.holidays||[];renderHolidays();setSavedNote('holidaySavedNote','✓ österreichische Feiertage geladen')}catch(e){alert('Fehler: '+e.message)}}
+// ===== PRODUCTIVE ANNUAL PLANNING =====
+function dateRangeForYear(year){const out=[];let d=new Date(Number(year),0,1,12);const end=new Date(Number(year),11,31,12);while(d<=end){out.push(iso(d));d.setDate(d.getDate()+1)}return out}
+function isHolidayDate(date){return (data.holidays||[]).some(h=>h.date===date)}
+function isCompanyVacationDate(date){return (data.companyVacations||[]).some(v=>date>=v.from&&date<=v.to)}
+function hasPlannedVacation(employeeId,date){return data.assignments.some(a=>a.date===date&&String(a.employeeId)===String(employeeId)&&cardTypeOf(a)==='urlaub')}
+function annualActualProductiveHours(employeeId,year){let minutes=0;for(const date of dateRangeForYear(year)){minutes+=employeeDaySegments(employeeId,date,data.states?.[employeeId]||null).filter(x=>x.type==='work').reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)}return minutes/60}
+function annualModelCapacity(employeeId,year){let gross=0,holiday=0,companyVacation=0,vacation=0;for(const date of dateRangeForYear(year)){const target=Math.max(0,Number(worktimeRule(employeeId,date)?.targetHours||0));if(target<=0)continue;gross+=target;if(isHolidayDate(date)){holiday+=7.8;continue}if(isCompanyVacationDate(date)){companyVacation+=7.8;continue}if(hasPlannedVacation(employeeId,date)){vacation+=7.8;continue}}return {gross,holiday,companyVacation,vacation,plannedProductive:Math.max(0,gross-holiday-companyVacation-vacation)}}
+function renderAnnualProductivePlanning(){
+  const el=document.getElementById('annualProductivePlanning');if(!el)return;
+  const year=Number(document.getElementById('annualHoursYear')?.value||new Date().getFullYear());
+  const employeeId=document.getElementById('annualHoursEmployee')?.value||'';
+  const employees=employeeId?masterEmployees.filter(e=>String(e.id)===String(employeeId)):masterEmployees;
+  const baseline=Math.max(1,Number(companySettings.productiveHoursPerFullTimeYear||1650));
+  if(!employees.length){el.innerHTML='<span class="small">Keine Mitarbeiter vorhanden.</span>';return}
+  const rows=employees.map(e=>{const c=annualModelCapacity(e.id,year),actual=annualActualProductiveHours(e.id,year);return {e,c,actual,diff:c.plannedProductive-baseline}});
+  const totals=rows.reduce((a,r)=>({planned:a.planned+r.c.plannedProductive,actual:a.actual+r.actual,baseline:a.baseline+baseline}),{planned:0,actual:0,baseline:0});
+  const avgPlan=totals.planned/rows.length,avgActual=totals.actual/rows.length;
+  el.innerHTML=`<div style="overflow:auto"><table class="table"><thead><tr><th>Mitarbeiter</th><th>Arbeitsmodell</th><th>Modell brutto</th><th>Feiertage</th><th>Betriebsurlaub</th><th>Urlaub geplant</th><th>Produktiv planbar</th><th>Kalkulationsbasis</th><th>Ist produktiv</th><th>Abweichung Plan/Basis</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${esc(r.e.name)}</strong><br><span class="small">Beschäftigung ${Number(r.e.employmentPercent??100).toFixed(0)} % · ohne Einfluss auf das Arbeitsmodell</span></td><td>${esc(worktimeModelById(r.e.worktimeModelId)?.name||'Krista Standard')}</td><td>${formatHours(r.c.gross)}</td><td>− ${formatHours(r.c.holiday)}</td><td>− ${formatHours(r.c.companyVacation)}</td><td>− ${formatHours(r.c.vacation)}</td><td><strong>${formatHours(r.c.plannedProductive)}</strong></td><td>${formatHours(baseline)}</td><td>${formatHours(r.actual)}</td><td class="${r.diff<0?'warn':''}">${r.diff>=0?'+':''}${formatHours(r.diff)}</td></tr>`).join('')}</tbody><tfoot><tr><th>Betrieb gesamt</th><th>${rows.length} Mitarbeiter</th><th colspan="4"></th><th>${formatHours(totals.planned)}</th><th>${formatHours(totals.baseline)}</th><th>${formatHours(totals.actual)}</th><th>${formatHours(totals.planned-totals.baseline)}</th></tr><tr><th>Betriebsschnitt</th><th>je Mitarbeiter</th><th colspan="4"></th><th>${formatHours(avgPlan)}</th><th>${formatHours(baseline)}</th><th>${formatHours(avgActual)}</th><th>${formatHours(avgPlan-baseline)}</th></tr></tfoot></table></div><p class="small">Krankenstand und Arzt werden bewusst nicht vorausgeplant. Sie erscheinen erst im Ist. Die Kalkulationsbasis von 1.650 Stunden wird nicht automatisch verändert; nach Jahresende können Plan, Ist und Betriebsschnitt verglichen und die Basis bewusst angepasst werden.</p>`;
+}
+
+// ===== SCHEDULE MODELS - Neue Struktur mit Days-Editor =====
+function scheduleDayDefaults(d){const work=d.isWorkDay!==false;const pauseStart=d.pauseStart??(work?'09:00':'');const pauseEnd=d.pauseEnd??(work&&Number(d.pauseMinutes||0)>0?minutesToHm(9*60+Math.min(15,Number(d.pauseMinutes||0))):'');const remaining=Math.max(0,Number(d.pauseMinutes||0)-15);const lunchStart=d.lunchStart??(work&&remaining>0?'12:00':'');const lunchEnd=d.lunchEnd??(work&&remaining>0?minutesToHm(12*60+remaining):'');return {...d,isWorkDay:work,pauseStart,pauseEnd,lunchStart,lunchEnd}}
+function overlapMinutes(a1,a2,b1,b2){const s=Math.max(hmToMinutes(a1),hmToMinutes(b1)),e=Math.min(hmToMinutes(a2),hmToMinutes(b2));return Math.max(0,e-s)}
+function modelDayMetrics(day){const d=scheduleDayDefaults(day);if(!d.isWorkDay||!d.from||!d.to)return {gross:0,breaks:0,net:0};const gross=Math.max(0,(hmToMinutes(d.to)-hmToMinutes(d.from))/60);let breaks=0;if(d.pauseStart&&d.pauseEnd)breaks+=overlapMinutes(d.from,d.to,d.pauseStart,d.pauseEnd)/60;if(d.lunchStart&&d.lunchEnd)breaks+=overlapMinutes(d.from,d.to,d.lunchStart,d.lunchEnd)/60;return {gross,breaks,net:Math.max(0,gross-breaks)}}
+function addScheduleModel(){const modelId=id();const names=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];const newModel={id:modelId,name:'Neues Arbeitsmodell',days:names.map((dayName,idx)=>({dayName,isWorkDay:idx<5,from:idx<5?'07:00':'',to:idx<4?'17:00':idx===4?'14:15':'',pauseStart:idx<5?'09:00':'',pauseEnd:idx<5?'09:15':'',lunchStart:idx<4?'12:00':'',lunchEnd:idx<4?'12:30':'',pauseMinutes:idx<4?45:idx===4?15:0,shouldHours:idx<5?7.8:0}))};data.scheduleModels=data.scheduleModels||[];data.scheduleModels.push(newModel);renderScheduleModels()}
+function renderScheduleModels(){const models=data.scheduleModels||[];document.getElementById('modelSummary').textContent=`${models.length} Arbeitsmodell${models.length===1?'':'e'}`;const el=document.getElementById('scheduleModelList');el.innerHTML=models.map(sm=>{sm.days=(sm.days||[]).map(scheduleDayDefaults);let weekGross=0,weekNet=0;const days=sm.days.map((d,idx)=>{const m=modelDayMetrics(d);weekGross+=m.gross;weekNet+=m.net;return `<div class="model-day"><div class="day-title">${esc(d.dayName)}</div><label class="work-toggle"><input type="checkbox" ${d.isWorkDay?'checked':''} onchange="updateScheduleDay('${sm.id}',${idx},'isWorkDay',this.checked)"> Arbeit</label><div><label>Von</label><input type="time" value="${d.from||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'from',this.value)"></div><div><label>Bis</label><input type="time" value="${d.to||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'to',this.value)"></div><div><label>Pause von</label><input type="time" value="${d.pauseStart||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'pauseStart',this.value)"></div><div><label>Pause bis</label><input type="time" value="${d.pauseEnd||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'pauseEnd',this.value)"></div><div><label>Mittag von</label><input type="time" value="${d.lunchStart||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'lunchStart',this.value)"></div><div><label>Mittag bis</label><input type="time" value="${d.lunchEnd||''}" ${d.isWorkDay?'':'disabled'} onchange="updateScheduleDay('${sm.id}',${idx},'lunchEnd',this.value)"></div><div class="day-metric"><span>Brutto</span><strong>${formatHours(m.gross)}</strong></div><div class="day-metric"><span>Netto</span><strong>${formatHours(m.net)}</strong></div></div>`}).join('');return `<div class="model-card"><div class="model-head"><strong>${esc(sm.name)}</strong><div class="actions" style="margin:0"><button class="secondary" onclick="editScheduleModelName('${sm.id}')">Umbenennen</button><button class="danger" onclick="removeScheduleModel('${sm.id}')">🗑</button></div></div>${days}<div class="model-summary"><span class="metric-pill">Woche brutto ${formatHours(weekGross)}</span><span class="metric-pill actual">Woche netto ${formatHours(weekNet)}</span></div><div class="config-savebar"><button class="green" onclick="saveScheduleModelsData()">💾 Arbeitsmodelle speichern</button></div></div>`}).join('')||'<span class="small">Keine Arbeitsmodelle.</span>'}
+function editScheduleModelName(smId){const sm=(data.scheduleModels||[]).find(m=>m.id===smId);if(!sm)return;const newName=prompt('Modellname:',sm.name);if(newName&&newName.trim()){sm.name=newName.trim();renderScheduleModels()}}
+function updateScheduleDay(smId,dayIdx,field,value){const sm=(data.scheduleModels||[]).find(m=>m.id===smId);if(!sm||!sm.days[dayIdx])return;sm.days[dayIdx][field]=value;const d=scheduleDayDefaults(sm.days[dayIdx]);const m=modelDayMetrics(d);d.pauseMinutes=Math.round(m.breaks*60);d.shouldHours=Number(m.net.toFixed(2));sm.days[dayIdx]=d;renderScheduleModels()}
+function removeScheduleModel(modelId){if(!confirm('Arbeitsmodell wirklich löschen?'))return;data.scheduleModels=(data.scheduleModels||[]).filter(sm=>sm.id!==modelId);renderScheduleModels()}
+async function saveScheduleModelsData(){const normalized=(data.scheduleModels||[]).map(sm=>({...sm,days:(sm.days||[]).map(d=>{const x=scheduleDayDefaults(d),m=modelDayMetrics(x);return {...x,pauseMinutes:Math.round(m.breaks*60),shouldHours:Number(m.net.toFixed(2))}})}));const r=await api('/kristine/api/schedule-models',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:normalized})});data.scheduleModels=r.models||[];renderScheduleModels();setSavedNote('modelSavedNote','✓ gespeichert');document.getElementById('cfg-models').classList.remove('open')}
+
+function openYesterdayReport(){
+  const d=new Date();
+  d.setDate(d.getDate()-1);
+  const date=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+  window.open(url('/admin/daily-report/'+date+'?rebuild=1'),'_blank','noopener');
+}
+document.getElementById('adminLink').href=url('/admin/ui');
+loadAll().catch(e=>alert(e.message));
+setInterval(()=>{ if(document.getElementById('control')?.classList.contains('active')) loadSilent().catch(()=>{}); else renderControl(); },60000);
+</script>
+</body>
+</html>
