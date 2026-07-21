@@ -3116,7 +3116,10 @@ app.post("/admin/api/morning-status/test", async (req, res) => {
   try {
     const date = String(req.body?.date || req.query.date || todayISO());
     const type = String(req.body?.type || req.query.type || "8");
-    const result = type === "7" ? await morningStatus.runSevenOClock(date, true) : await morningStatus.runEightOClock(date, true);
+    const result = type === "7" ? await morningStatus.runSevenOClock(date, true)
+      : type === "lunch" ? await morningStatus.runLunchAutomation(date, String(req.body?.time || req.query.time || "12:35"))
+      : type === "end" ? await morningStatus.runDayEndCheck(date, true)
+      : await morningStatus.runEightOClock(date, true);
     res.json({ ok: true, type, date, result });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
