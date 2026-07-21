@@ -1,9 +1,8 @@
-# KRISTA Build 0020.10
+# KRISTA Build 0020.10a
 
-## Erinnerungen & Automatik
+## Leitstand Mitarbeiteraktion
 
-- Mittagserinnerung laut Arbeitsmodell
-- Pause während Mittagszeit fragt: Mittag oder normale Pause
-- Vergessenes Ende von Mittag/Pause: Nachfrage und rückwirkende Uhrzeit
-- 17:30 Chefhinweis bei noch aktiven Mitarbeitern
-- Mitarbeiter wird gefragt, ob er noch arbeitet und wann er aufgehört hat
+- Aktive Mitarbeiterkarten im Leitstand sind anklickbar
+- Status, Baustelle, Arbeitszeit und Pause werden im Dialog angezeigt
+- Der Chef kann direkt „Arbeitest du noch?“ über Kristine senden
+- Mitarbeiter antwortet anschließend Ja/Nein und bei Nein mit der tatsächlichen Endzeit
