@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0020.6 -->
+<!-- Datei: public/kristine.html · Build 0020.9b -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -45,11 +45,14 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .planning-perspective{display:inline-flex;gap:6px;padding:4px;background:#ece9e2;border-radius:12px}.planning-perspective button{padding:8px 11px}.planning-matrix{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;overflow:auto;align-items:stretch}.planning-matrix.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.matrix-head{font-size:12px;font-weight:800;text-align:center;color:#555;padding:8px;background:#e8e4dc;border-radius:10px}.matrix-label{background:#f5f3ee;border-radius:12px;padding:10px;font-weight:800;min-height:88px;position:sticky;left:0;z-index:2}.matrix-label .small{display:block;margin-top:5px;font-weight:400}.matrix-metrics{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin-top:7px;font-size:11px;font-weight:500;color:#666}.matrix-metrics strong{text-align:right;color:#222}.matrix-metrics .over{color:#9d2525;font-weight:800}.matrix-metrics .rest{color:#27713d}.card-hours-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:5px;font-size:11px}.metric-pill{display:inline-flex;gap:4px;align-items:center;border-radius:999px;background:#f4f4f4;padding:3px 7px;font-weight:800}.metric-pill.actual{background:#eef7ee;color:#145829}.site-sortbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:0 0 9px}.site-sortbar label{margin:0;font-size:12px}.site-sortbar select{width:auto;min-width:160px;padding:7px 9px}.matrix-cell{background:#ebe8e1;border-radius:12px;padding:8px;min-height:88px}.matrix-cell .monthitem{margin:3px 0}.perspective-note{font-size:12px;color:#666;margin-top:8px}@media(max-width:800px){.planning-matrix{grid-template-columns:150px repeat(5,220px)}.planning-matrix.day-matrix{grid-template-columns:150px 320px}}
 
 .segment-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}.segment-modal-backdrop.open{display:flex}.segment-modal{background:#fff;border-radius:16px;padding:18px;width:min(460px,100%);box-shadow:0 18px 60px rgba(0,0,0,.25)}.segment-modal h3{margin-top:0}.segment-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.segment-modal .warning{background:#fff3cd;border:1px solid #e6c86c;color:#654b00;border-radius:10px;padding:9px;margin:10px 0;display:none}.segment-modal .warning.show{display:block}.segment-list{font-size:12px;color:#555;background:#f5f3ee;border-radius:10px;padding:9px;margin:10px 0}.segment-badge{display:inline-flex;gap:5px;align-items:center;background:#eef7ee;border:1px solid #b8d4bc;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;margin-top:5px}.segment-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:5px}.segment-row{display:flex;align-items:center;gap:5px}.segment-delete{padding:1px 5px!important;min-width:0!important;border-radius:6px!important;font-size:11px!important}.assignment.segment-split,.monthitem.segment-split{border-left-color:#1e5f9e}.time-gap-note{font-size:11px;color:#9a6500;margin-top:4px}
+
+.task-alert-link{border:0;background:transparent;color:#145829;padding:0;font-weight:800;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.task-modal-list{display:grid;gap:10px;max-height:60vh;overflow:auto;margin-top:12px}.task-modal-item{border:1px solid #e5e0d7;border-left:5px solid #27713d;border-radius:12px;padding:12px;background:#fcfbf8}.task-modal-item.overdue{border-left-color:#c53b3b}.task-modal-item h4{margin:0 0 7px}.task-detail-grid{display:grid;grid-template-columns:120px 1fr;gap:5px 10px;font-size:13px}.task-detail-grid span:nth-child(odd){color:#707070}.task-modal-empty{padding:18px;text-align:center;color:#707070}.task-done-note{font-size:12px;color:#27713d;font-weight:800;margin-left:auto}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0020.5 · Arbeitsmodelle im Admin und Tageskarten beim Verschieben.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0020.9b · Offene Arbeiten im Leitstand anklickbar.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -154,7 +157,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
         <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="z. B. erinnern, wenn Alex wieder bei Müller ist"></div>
       </div>
       <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
-      <div class="actions"><button class="green" id="taskAddButton" type="button" onclick="addTask()">+ Aufgabe</button><button class="secondary" id="taskSaveButton" type="button" onclick="saveTasks()">Aufgaben speichern</button><span id="taskSavedNote" class="saved-note"></span></div>
+      <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
     </div>
     <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
   </div>
@@ -228,11 +231,20 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     </div>
   </div>
 </div>
-
+<div id="taskModalBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <div class="segment-modal" style="width:min(720px,100%)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h3 id="taskModalTitle" style="margin:0">Offene Arbeiten</h3>
+      <button type="button" class="secondary" onclick="closeTaskModal()">Schließen</button>
+    </div>
+    <div id="taskModalList" class="task-modal-list"></div>
+    <div id="taskModalNote" class="task-done-note"></div>
+  </div>
+</div>
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
-window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)})});
+window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()})});
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -648,11 +660,11 @@ function renderControl(){
   const regieCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,0);
   const openTaskCount=(data.tasks||[]).filter(t=>t.status!=='done').length;
   const alerts=[];
-  if(unknownCount)alerts.push(`🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}`);
-  if(regieCount)alerts.push(`📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}`);
-  if(openTaskCount)alerts.push(`📌 ${openTaskCount} offene Aufgabe${openTaskCount===1?'':'n'}`);
+  if(unknownCount)alerts.push(`<span>🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}</span>`);
+  if(regieCount)alerts.push(`<span>📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}</span>`);
+  if(openTaskCount)alerts.push(`<button type="button" class="task-alert-link" onclick="openTaskListModal()">📌 ${openTaskCount} offene Arbeit${openTaskCount===1?'':'en'}</button>`);
   controlAlerts.style.display=alerts.length?'block':'none';
-  controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br>${alerts.join(' · ')}`:'';
+  controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`:'';
   if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
 
   controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
@@ -676,71 +688,55 @@ function renderControl(){
   }).join('')}</div>`;
 }
 
-async function addTask(){
-  const title=document.getElementById('tTitle');
-  const assigneeId=document.getElementById('tAssigneeId');
-  const assigneeName=document.getElementById('tAssigneeName');
-  const jobId=document.getElementById('tJobId');
-  const jobName=document.getElementById('tJobName');
-  const dueDate=document.getElementById('tDueDate');
-  const reminder=document.getElementById('tReminder');
-  if(!title.value.trim()){setTaskNote('Bitte eine Aufgabe eingeben.','error');title.focus();return}
-  if(!assigneeId.value.trim()){setTaskNote('Bitte eine zuständige Person auswählen.','error');document.getElementById('tAssigneeSelect').focus();return}
+function addTask(){
+  if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
+  if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
   data.tasks.push({
-    id:id(),title:title.value.trim(),
-    assigneeId:assigneeId.value.trim(),assigneeName:assigneeName.value.trim(),
-    jobId:jobId.value.trim(),jobName:jobName.value.trim(),
-    dueDate:dueDate.value,reminder:reminder.value.trim(),
-    status:'open',createdAt:new Date().toISOString()
+    id:id(),title:tTitle.value.trim(),
+    assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
+    jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
+    dueDate:tDueDate.value,reminder:tReminder.value.trim(),
+    creatorId:'admin',creatorName:'Chef / Büro',
+    status:'open',createdAt:new Date().toISOString(),completedAt:null
   });
-  renderTasks();
-  const saved=await saveTasks({quiet:true});
-  if(!saved)return;
-  title.value='';reminder.value='';document.getElementById('tAssigneeSelect').value='';document.getElementById('tJobSelect').value='';
-  assigneeId.value='';assigneeName.value='';jobId.value='';jobName.value='';dueDate.value='';
-  updateTaskSelectionInfo();
-  setTaskNote('✓ Aufgabe angelegt und gespeichert.','success');
+  tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
+  tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
+  updateTaskSelectionInfo();renderTasks();
 }
+function taskStatusLabel(t){return t.status==='done'?'Erledigt':'Offen'}
+function taskDueLabel(date){if(!date)return '–';try{return new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(date+'T12:00:00'))}catch{return date}}
+function taskIsOverdue(t){return t.status!=='done'&&t.dueDate&&t.dueDate<(data.today||new Date().toISOString().slice(0,10))}
 function renderTasks(){
-  taskList.innerHTML=data.tasks.length?data.tasks.map(t=>{
+  const tasks=[...(data.tasks||[])].sort((a,b)=>(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  taskList.innerHTML=tasks.length?tasks.map(t=>{
     const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
-    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(t.dueDate||'–')} · ${esc(t.status)}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
+    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
   }).join(''):'<span class="small">Keine Aufgaben.</span>'
 }
-function setTaskNote(message,type='success'){
-  const note=document.getElementById('taskSavedNote');
-  if(!note)return;
-  note.textContent=message;
-  note.style.color=type==='error'?'#b42318':'#27713d';
-  clearTimeout(setTaskNote.timer);
-  setTaskNote.timer=setTimeout(()=>{if(note.textContent===message)note.textContent=''},3500);
+function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks();renderControl()}
+async function persistTasks(){
+  const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks})});
+  data.tasks=r.tasks||[];renderTasks();renderControl();return r;
 }
-async function removeTask(x){
-  const previous=[...(data.tasks||[])];
-  data.tasks=(data.tasks||[]).filter(t=>t.id!==x);
-  renderTasks();
-  const saved=await saveTasks({quiet:true});
-  if(!saved){data.tasks=previous;renderTasks();return}
-  setTaskNote('✓ Aufgabe gelöscht.','success');
+async function saveTasks(){
+  const button=document.querySelector('button[onclick="saveTasks()"]');const old=button?.textContent;
+  try{if(button){button.disabled=true;button.textContent='Speichert …'}await persistTasks();alert('Aufgaben gespeichert.')}catch(e){alert('Aufgaben konnten nicht gespeichert werden: '+e.message)}finally{if(button){button.disabled=false;button.textContent=old||'Aufgaben speichern'}}
 }
-async function saveTasks(options={}){
-  const button=document.getElementById('taskSaveButton');
-  const original=button?.textContent||'Aufgaben speichern';
-  try{
-    if(button){button.disabled=true;button.textContent='Speichert …'}
-    const r=await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks:data.tasks||[]})});
-    if(!r?.ok||!Array.isArray(r.tasks))throw new Error(r?.error||'Ungültige Serverantwort');
-    data.tasks=r.tasks;
-    renderTasks();
-    if(!options.quiet)setTaskNote('✓ Aufgaben gespeichert.','success');
-    return true;
-  }catch(error){
-    console.error('[KRISTA] Aufgaben speichern fehlgeschlagen',error);
-    setTaskNote('✗ Speichern fehlgeschlagen: '+error.message,'error');
-    return false;
-  }finally{
-    if(button){button.disabled=false;button.textContent=original}
-  }
+function taskDetailHtml(t){
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Zuständig</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong><span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Ersteller</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Kontext</span><strong>${esc(t.reminder)}</strong>`:''}</div><div class="actions">${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
+}
+function openTaskListModal(focusId=''){
+  const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  const selected=focusId?(data.tasks||[]).find(t=>t.id===focusId):null;
+  taskModalTitle.textContent=selected?'Offene Arbeit':'Offene Arbeiten';
+  taskModalList.innerHTML=selected?taskDetailHtml(selected):(tasks.length?tasks.map(taskDetailHtml).join(''):'<div class="task-modal-empty">Keine offenen Arbeiten.</div>');
+  taskModalNote.textContent='';taskModalBackdrop.classList.add('open');
+}
+function closeTaskModal(){taskModalBackdrop.classList.remove('open')}
+async function markTaskDone(taskId){
+  const t=(data.tasks||[]).find(x=>x.id===taskId);if(!t)return;
+  t.status='done';t.completedAt=new Date().toISOString();
+  try{await persistTasks();taskModalNote.textContent='✓ Als erledigt gespeichert.';openTaskListModal()}catch(e){t.status='open';t.completedAt=null;alert('Aufgabe konnte nicht erledigt werden: '+e.message)}
 }
 // ===== HOLIDAYS =====
 function toggleConfigSection(id){document.querySelectorAll('.config-section').forEach(section=>section.classList.toggle('open',section.id===id?!section.classList.contains('open'):false))}
