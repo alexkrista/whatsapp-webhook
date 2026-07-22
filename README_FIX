@@ -1,18 +1,23 @@
-KRISTA Build 0022.1 – Planungstisch
-Ersetzen
-`public/kristine.html`
-`kristine.js` bleibt aus Build 0022.0 enthalten und kann mit ersetzt werden.
-Neu
-Oberer Planungskopf bleibt beim Scrollen stehen.
-Rechts oben drei kompakte Kartenpools:
-Abwesenheit & Betrieb
-Neue Aufträge
-Laufende Baustellen
-UP-Karten zeigen nur Typ und `7,8 h`; keine Jahres- oder Controllingsummen.
-Poolkarten lassen sich direkt auf einen Mitarbeiter und Tag ziehen.
-Ziehen bedeutet immer kopieren. Das Original bleibt bestehen.
-Beim Kopieren werden Zeitfenster und Stunden aus dem Arbeitsmodell des Zieltags neu berechnet.
-Dadurch stimmen insbesondere Freitagstunden.
-Entfernen bleibt eine bewusste Aktion über `×`.
-Daten
-Keine JSON-Dateien ersetzen. `time-events.json`, `day-review-entries.json`, Planung und Stammdaten bleiben erhalten.
+# KRISTA Build 0022.2 – Mitarbeiter-Workflow
+
+## Ersetzen
+1. `kristine.js`
+2. `public/kristine.html`
+
+## Nicht ersetzen
+- `time-events.json`
+- `day-review-entries.json`
+- sonstige JSON-Daten
+
+## Behoben
+1. Nach „Andere Baustelle“ wird eine Baustelle per Nummer oder Name wirklich ausgewählt.
+2. Ein Baustellenwechsel startet die Zeit nicht neu; die Arbeitszeit läuft weiter.
+3. Die Meldung „ans Büro gemeldet“ ist aus dem Mitarbeiterdialog entfernt.
+4. Nach dem Baustellenwechsel erscheint kein falscher Start-Button mehr.
+5. „Fertig“ startet den Tagesabschluss statt sofort Feierabend zu buchen.
+6. Tagesabschluss: Zusammenfassung → Fotos → Material → Regie → offene Aufgabe.
+7. Bei „Ändern“ bleibt der Tag offen; Zeiten können im Leitstand korrigiert werden.
+8. Eine offene Aufgabe kann direkt aus dem Tagesabschluss angelegt werden.
+
+## Hinweis
+Vor dem Deploy wie üblich den bisherigen Stand sichern. Bestehende JSON-Daten bleiben erhalten.
