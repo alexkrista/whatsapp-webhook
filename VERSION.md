@@ -1,9 +1,8 @@
-# KRISTA Build 0020.10a
-
-## Leitstand Mitarbeiteraktion
-
-- Aktive Mitarbeiterkarten im Leitstand sind anklickbar
-- Status, Baustelle, Arbeitszeit und Pause werden im Dialog angezeigt
-- Der Chef kann direkt „Arbeitest du noch?“ über Kristine senden
-- Mitarbeiter antwortet anschließend Ja/Nein und bei Nein mit der tatsächlichen Endzeit
-
+KRISTA Build 0021.0
+KRISTOOL Kontrollzentrum
+KRISTOOL ist die neue Startseite.
+Rote Karten zeigen unmittelbaren Handlungsbedarf.
+Gelbe Karten zeigen Entscheidungen für heute.
+Grüne Zahl fasst Kontrollen ohne Auffälligkeit zusammen.
+Offene Arbeiten, fehlende Tagesenden, offene Pausen/Mittag, unbekannte Baustellen und Regie-Vormerkungen werden aus vorhandenen Daten berechnet.
+Karten führen direkt zum Mitarbeiterdialog, zur Aufgabe oder zum Leitstand.
