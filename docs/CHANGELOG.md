@@ -1,3 +1,9 @@
+Build 0021.3 – Leitstand Eingriff & Protokoll-Sicherheit
+Aktives Baustellenprotokoll kann ohne PDF abgebrochen werden.
+Sichere Baustellensuche: keine zufälligen Teiltreffer werden automatisch gestartet.
+`neu` legt die zuletzt gesuchte, nicht gefundene Baustelle an.
+Leitstand-Mitarbeiterdialog mit direkten Büroaktionen und frei wählbarer Uhrzeit/Baustelle.
+Manuelle Eingriffe werden revisionsnah als Quelle `office` dokumentiert.
 Changelog
 0021.1 – Spachtelpaket 1 (2026-07-22)
 Leitstand zeigt Urlaub, Krank, ZA und Feiertage als farbigen Vollbalken.
