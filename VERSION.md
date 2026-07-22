@@ -1,12 +1,11 @@
-KRISTA Build 0021.1 – Spachtelpaket 1
-Geändert
-Abwesenheiten Urlaub/Krank/ZA/Feiertag als Vollbalken im Leitstand
-Aufgaben aus den offenen Punkten des Leitstands entfernt
-Aufgabenfilter: Neueste / Offen / Erledigt
-Kopierdialog mit Kalender und Mehrfachauswahl von Mitarbeitern
-Tagesreport: Gestern, Kalender sowie Vor/Zurück
-Materialfotos werden im Tagesreport separat angezeigt
-Nicht geändert
-Serverlogik
-WhatsApp-Workflow
-Stammdaten
+KRISTA Build 0021.2 – Beulen sauber
+Neu
+Admin: + Neue Baustelle mit vollständigem Dialog.
+Neue Baustellen stehen nach dem Speichern sofort in Admin, Planung und Auswahllisten bereit.
+Chefmodus WhatsApp: `protokoll` oder `proto` startet den geführten Baustellenprotokoll-Dialog.
+Kristine fragt nach Baustellenname oder Nummer, startet danach den bestehenden Protokollmodus und beendet mit `pdf`.
+Nicht gefundene Baustellen können mit `neu <Name>` direkt angelegt werden.
+Geglättet
+Neueste Aufgaben zeigt ausschließlich offene Aufgaben.
+Erledigte Aufgaben bleiben nur im Reiter Erledigt.
+Alle Verbesserungen aus 0021.1 bleiben enthalten.
