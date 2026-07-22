@@ -98,7 +98,7 @@ const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || "";
 // gespeichert, damit ein Render-Neustart sie nicht verliert.
 const PROTOCOL_BY_SENDER = {}; // { wa_id: { siteCode, startedAt } }
 const LATE_TIME_PENDING = {};  // Mitarbeiter wartet auf ungefähre Ankunftszeit
-const PROTOCOL_START_PENDING = {}; // Chef hat "protokoll"/"proto" gestartet und wählt die Baustelle
+const PROTOCOL_START_PENDING = {}; // Chef hat "protokoll"/"proto" gestartet und wählt/sucht/erstellt die Baustelle
 
 function digitsOnly(value) { return String(value || "").replace(/\D/g, ""); }
 function isChefSender(sender) {
@@ -1348,57 +1348,86 @@ app.post("/webhook", async (req, res) => {
       }
 
       if (!protocolSite && msg.type === "text" && isChefSender(sender) && PROTOCOL_START_PENDING[sender]) {
+        const pending = PROTOCOL_START_PENDING[sender];
         const answer = String(textOrCaption || "").trim();
         const lowerAnswer = answer.toLowerCase();
-        if (["abbrechen", "stopp", "stop"].includes(lowerAnswer)) {
+
+        if (["abbruch", "abbrechen", "stopp", "stop"].includes(lowerAnswer)) {
           delete PROTOCOL_START_PENDING[sender];
-          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Protokollstart abgebrochen." }); } catch {}
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "✅ Protokollstart abgebrochen. Es wurde nichts gespeichert." }); } catch {}
           continue;
         }
 
-        const newMatch = answer.match(/^neu(?:e baustelle)?\s+(.+)$/i);
-        if (newMatch) {
-          const name = newMatch[1].trim();
-          let jobId = jobIdFromName(name);
+        // "suchen" startet bewusst eine neue Suche. Niemals als Baustellenname interpretieren.
+        if (["suchen", "suche"].includes(lowerAnswer)) {
+          pending.lastQuery = "";
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "🔎 Bitte Baustellenname oder Baustellennummer schreiben. Mit ‚abbruch‘ beenden." }); } catch {}
+          continue;
+        }
+
+        // "neu" allein verwendet die zuletzt erfolglos gesuchte Bezeichnung.
+        // "neu NAME" legt NAME direkt an.
+        let createName = "";
+        const newMatch = answer.match(/^neu(?:e baustelle)?(?:\s+(.+))?$/i);
+        if (newMatch) createName = String(newMatch[1] || pending.lastQuery || "").trim();
+        if (newMatch && !createName) {
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "➕ Wie soll die neue Baustelle heißen? Bitte Name oder Baustellennummer schreiben. Mit ‚abbruch‘ beenden." }); } catch {}
+          pending.createNext = true;
+          continue;
+        }
+        if (pending.createNext && !newMatch) {
+          createName = answer;
+          pending.createNext = false;
+        }
+        if (createName) {
+          let jobId = jobIdFromName(createName);
           let suffix = 2;
-          while (fs.existsSync(path.join(DATA_DIR, jobId))) jobId = `${jobIdFromName(name)}_${suffix++}`;
+          while (fs.existsSync(path.join(DATA_DIR, jobId))) jobId = `${jobIdFromName(createName)}_${suffix++}`;
           await ensureDir(path.join(DATA_DIR, jobId));
-          await writeJobMeta(jobId, { name, status: "Laufend", createdAt: new Date().toISOString() });
+          await writeJobMeta(jobId, { name: createName, status: "Auftrag", createdAt: new Date().toISOString() });
           await startProtocol(sender, jobId);
           delete PROTOCOL_START_PENDING[sender];
           protocolSite = jobId;
           try {
             await sendWhatsAppKristineReply({
               phoneNumberId, to: sender,
-              reply: `✅ Neue Baustelle „${name}“ angelegt.\n📍 Baustellenprotokoll ${jobId} gestartet.\nTexte, Fotos, Audios und Dokumente werden zugeordnet. Mit pdf abschließen.`
+              reply: `✅ Neue Baustelle „${createName}“ angelegt.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit ‚pdf‘ abschließen oder mit ‚abbruch‘ ohne PDF beenden.`
             });
           } catch {}
           continue;
         }
 
         const matches = await findProtocolJobs(answer);
-        if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score)) {
-          const selected = matches[0];
+        const exact = matches.filter(x => x.score === 3);
+        if (exact.length === 1) {
+          const selected = exact[0];
           await startProtocol(sender, selected.jobId);
           delete PROTOCOL_START_PENDING[sender];
           protocolSite = selected.jobId;
           try {
             await sendWhatsAppKristineReply({
               phoneNumberId, to: sender,
-              reply: `✅ Baustelle „${selected.name}“ gefunden.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit pdf abschließen.`
+              reply: `✅ Baustelle „${selected.name}“ gefunden.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit ‚pdf‘ abschließen oder mit ‚abbruch‘ ohne PDF beenden.`
             });
           } catch {}
           continue;
         }
-        if (matches.length > 1) {
+
+        pending.lastQuery = answer;
+        if (matches.length) {
           const choices = matches.slice(0, 6).map((x,i) => `${i+1}. ${x.name} (#${x.jobId})`).join("\n");
-          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `Mehrere Baustellen passen:\n${choices}\nBitte Name oder Nummer genauer schreiben.` }); } catch {}
+          try {
+            await sendWhatsAppKristineReply({
+              phoneNumberId, to: sender,
+              reply: `⚠️ Keine eindeutige Baustelle für „${answer}“.\nMögliche Treffer:\n${choices}\n\nBitte den exakten Namen/die Nummer schreiben, „suchen“ für eine neue Suche, „neu“ zum Anlegen von „${answer}“ oder „abbruch“.`
+            });
+          } catch {}
           continue;
         }
         try {
           await sendWhatsAppKristineReply({
             phoneNumberId, to: sender,
-            reply: `Baustelle „${answer}“ nicht gefunden.\nBitte anders schreiben oder mit „neu ${answer}“ direkt neu anlegen.`
+            reply: `⚠️ Baustelle „${answer}“ wurde nicht gefunden.\nAntworte mit:\n• „neu“ – „${answer}“ neu anlegen\n• „suchen“ – anders suchen\n• „abbruch“ – beenden`
           });
         } catch {}
         continue;
@@ -1426,7 +1455,20 @@ app.post("/webhook", async (req, res) => {
         if (msg.type === "text" && String(textOrCaption).trim() === `@${protocolStart}`) continue;
       }
 
-      // 2) Im aktiven Protokollmodus wird "pdf" erzeugt und danach zurückgeschaltet.
+      // 2) Ein aktives Protokoll kann jederzeit ohne PDF abgebrochen werden.
+      if (protocolSite && msg.type === "text" && ["abbruch", "abbrechen", "stopp", "stop"].includes(String(textOrCaption).trim().toLowerCase())) {
+        await stopProtocol(sender);
+        try {
+          await sendWhatsAppKristineReply({
+            phoneNumberId,
+            to: sender,
+            reply: "✅ Baustellenprotokoll abgebrochen. Es wurde kein PDF erstellt. Kristine ist wieder im Mitarbeitermodus."
+          });
+        } catch {}
+        continue;
+      }
+
+      // 3) Im aktiven Protokollmodus wird "pdf" erzeugt und danach zurückgeschaltet.
       if (protocolSite && msg.type === "text" && String(textOrCaption).trim().toLowerCase() === "pdf") {
         if (!isAllowedPdfSender(sender)) continue;
         try {
