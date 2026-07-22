@@ -1,7 +1,7 @@
 {
-  "build": "0021.0",
-  "name": "KRISTOOL Kontrollzentrum",
+  "build": "0021.1",
+  "name": "Spachtelpaket 1",
   "date": "2026-07-22",
-  "version": "0021.0",
-  "status": "Handlungsbedarf, Entscheidungen und Kontrollen auf einer Startseite"
+  "version": "0021.1",
+  "status": "Leitstand, Aufgaben, Kopieren und Tagesreport geglättet"
 }
