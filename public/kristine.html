@@ -63,21 +63,23 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 /* Build 0022.1: Planungstisch – sticky Kopf, Kartenpools, Drag = Kopie */
 .planning-top{position:sticky;top:0;z-index:30;background:#f3f1ec;padding:0 0 12px;box-shadow:0 10px 18px rgba(243,241,236,.96)}
 .planning-top-grid{display:grid;grid-template-columns:minmax(520px,1.35fr) minmax(420px,1fr);gap:14px;align-items:stretch}
-.planning-pools{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}
-.pool-column{background:#f8f7f3;border:1px solid #e4e0d8;border-radius:13px;padding:9px;min-height:170px}
-.pool-column h4{margin:0 0 7px;font-size:13px;display:flex;justify-content:space-between;gap:6px}
-.pool-list{display:grid;gap:6px;max-height:250px;overflow:auto}
+.planning-top-grid>.card{height:100%;min-height:100%}
+.planning-pools{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px;height:calc(100% - 52px);min-height:410px}
+.pool-column{background:#f8f7f3;border:1px solid #e4e0d8;border-radius:13px;padding:9px;min-height:0;display:flex;flex-direction:column}
+.pool-column h4{margin:0 0 7px;font-size:13px;display:flex;justify-content:space-between;gap:6px;flex:0 0 auto}
+.pool-list{display:grid;align-content:start;gap:6px;min-height:0;flex:1 1 auto;overflow:auto}
 .pool-card{border:1px solid #ddd8cf;border-left:5px solid #27713d;border-radius:10px;background:#fff;padding:7px 8px;cursor:grab;font-size:12px;line-height:1.25}
 .pool-card:active{cursor:grabbing}.pool-card strong{display:block;font-size:12px}.pool-card .pool-hours{font-weight:800;color:#555;margin-top:3px}
 .pool-card.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.pool-card.type-krank{border-left-color:#c53b3b;background:#fff0f0}.pool-card.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.pool-card.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.pool-card.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.pool-card.type-schulung{border-left-color:#6d55a6;background:#f5f1ff}.pool-card.type-material_holen{border-left-color:#3f7c9b;background:#eef8fc}.pool-card.type-lager{border-left-color:#8b6a3e;background:#f8f2e9}.pool-card.type-besprechung{border-left-color:#b48723;background:#fff8df}
-.pool-empty{font-size:11px;color:#777;padding:6px}.planning-calendar-card{margin-top:14px}
+.pool-empty{font-size:11px;color:#777;padding:6px}.planning-calendar-card{margin-top:14px;position:relative}.planning-calendar-toolbar{position:sticky;top:0;z-index:25;background:#fff;padding:0 0 12px;box-shadow:0 8px 12px rgba(255,255,255,.96)}
+.assignment.type-schulung,.monthitem.type-schulung{border-left-color:#6d55a6;background:#f5f1ff}.assignment.type-material_holen,.monthitem.type-material_holen{border-left-color:#3f7c9b;background:#eef8fc}.assignment.type-lager,.monthitem.type-lager{border-left-color:#8b6a3e;background:#f8f2e9}.assignment.type-besprechung,.monthitem.type-besprechung{border-left-color:#b48723;background:#fff8df}
 @media(max-width:1050px){.planning-top{position:static;box-shadow:none}.planning-top-grid{grid-template-columns:1fr}.planning-pools{grid-template-columns:1fr 1fr 1fr}}
 @media(max-width:700px){.planning-pools{grid-template-columns:1fr}.pool-list{max-height:160px}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0022.2 · Mitarbeiter-Workflow</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0022.3 · Planung Final</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -144,7 +146,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     </div>
   </div>
   <div class="card planning-calendar-card">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="planning-calendar-toolbar" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="planning-heading">
         <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(-1)" title="Zurück">◀</button>
         <button class="secondary planning-today" onclick="gotoPlanningToday()">Heute</button>
@@ -435,7 +437,7 @@ function poolDragEnd(event){event.currentTarget.classList.remove('dragging')}
 function renderSystemCards(){
   const box=document.getElementById('systemCards');if(!box)return;
   const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');
-  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong><div class="pool-hours">7,8 h</div></div>`}).join('');
+  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type],showHours=['urlaub','krank','schulung'].includes(type);return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong>${showHours?'<div class="pool-hours">7,8 h</div>':''}</div>`}).join('');
 }
 function normalizedJobStatus(job){return String(job?.status||'').trim().toLowerCase()}
 function isNewOrderJob(job){const s=normalizedJobStatus(job);return s==='auftrag'||s.includes('auftrag')||s==='neu'}
@@ -456,7 +458,7 @@ function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===Stri
 function worktimeRule(employeeId,date){const employee=employeeById(employeeId),model=worktimeModelById(employee?.worktimeModelId||'krista-standard');if(!model||!date)return null;const d=new Date(String(date)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const month=d.getMonth()+1,weekday=d.getDay();const season=(model.seasons||[]).find(x=>(x.months||[]).includes(month));const rule=season?.weekdays?.[String(weekday)]||{free:true,from:'',to:'',targetHours:0};const otherBreakMinutes=Number(rule.otherBreakMinutes||0),lunchBreakMinutes=Number(rule.lunchBreakMinutes||0);return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',targetHours:Number(rule.targetHours||0),otherBreakMinutes,lunchBreakMinutes,breakMinutes:otherBreakMinutes+lunchBreakMinutes,breakWindows:[...(otherBreakMinutes>0?[{type:'pause',from:'09:00',to:minutesToHm(9*60+otherBreakMinutes)}]:[]),...(lunchBreakMinutes>0?[{type:'lunch',from:'12:00',to:minutesToHm(12*60+lunchBreakMinutes)}]:[])]}}
 function isWeekdayDate(date){const d=new Date(String(date)+'T12:00:00');const wd=d.getDay();return wd>=1&&wd<=5}
 function fullDayUnproductiveHours(a){return isWeekdayDate(a.date)?7.8:0}
-function specialPlanHours(a){const type=cardTypeOf(a);if(['urlaub','krank','arzt'].includes(type))return fullDayUnproductiveHours(a);if(['aufraeumen','werkstatt'].includes(type))return rawCardHours(a)||fullDayUnproductiveHours(a);return Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||0))}
+function specialPlanHours(a){const type=cardTypeOf(a);if(['urlaub','krank','schulung'].includes(type))return Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||fullDayUnproductiveHours(a)));return rawCardHours(a)}
 
 function minutesToHm(value){const n=Math.max(0,Math.round(Number(value||0)));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
 function modelDayWindow(employeeId,date){const rule=worktimeRule(employeeId,date);return {from:rule?.from||'07:00',to:rule?.to||'17:00',fromMin:hmToMinutes(rule?.from||'07:00')??420,toMin:hmToMinutes(rule?.to||'17:00')??1020}}
@@ -483,7 +485,7 @@ function cardHours(a){return plannedHoursForAssignment(a)}
 function formatHours(value){return Number(value||0).toLocaleString('de-AT',{minimumFractionDigits:1,maximumFractionDigits:2})+' h'}
 function employeeActualMinutes(employeeId,dates){const wanted=new Set(dates);let total=0;for(const date of dates){const state=data.states?.[employeeId]||null;total+=employeeDaySegments(employeeId,date,state).filter(x=>x.type==='work').reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)}return total}
 function actualHoursForAssignment(a){return employeeDaySegments(a.employeeId,a.date,data.states?.[a.employeeId]||null).filter(x=>x.type==='work'&&String(x.jobId||'')===String(a.jobId||'')).reduce((sum,x)=>sum+Math.max(0,(x.to||x.from)-(x.from||0)),0)/60}
-function dailySollHours(employeeId,date){const rows=data.assignments.filter(a=>a.date===date&&String(a.employeeId)===String(employeeId));const fullDay=rows.find(a=>['urlaub','krank','arzt'].includes(cardTypeOf(a)));if(fullDay)return fullDayUnproductiveHours(fullDay);return Math.max(0,Number(worktimeRule(employeeId,date)?.targetHours||0))}
+function dailySollHours(employeeId,date){const rows=data.assignments.filter(a=>a.date===date&&String(a.employeeId)===String(employeeId));const fullDay=rows.find(a=>['urlaub','krank','schulung'].includes(cardTypeOf(a)));if(fullDay)return fullDayUnproductiveHours(fullDay);return Math.max(0,Number(worktimeRule(employeeId,date)?.targetHours||0))}
 function employeeShouldHours(employeeId,dates){return dates.reduce((sum,date)=>sum+dailySollHours(employeeId,date),0)}
 function employeePlannedHours(employeeId,dates){return data.assignments.filter(a=>dates.includes(a.date)&&String(a.employeeId)===String(employeeId)).reduce((sum,a)=>sum+plannedHoursForAssignment(a),0)}
 function plannedEmployeeCount(date){return new Set(data.assignments.filter(a=>a.date===date).map(a=>String(a.employeeId))).size}
@@ -496,7 +498,7 @@ function assignmentCard(a,compact=false){
   const title=special?`${meta.icon} ${meta.label}`:`#${esc(a.jobId)} · ${esc(a.jobName)}`;
   const info=special?`${sameJobCount} MA mit ${esc(meta.label)}`:`${sameJobCount} MA auf dieser Baustelle`;
   const plan=plannedHoursForAssignment(a);
-  const hoursHtml=special?`<div class="card-hours-line"><span class="metric-pill">${formatHours(plan)}</span></div>`:`<div class="segment-badge">🕒 ${esc(a.from||'')}–${esc(a.to||'')} · ${formatHours(plan)}</div>`;
+  const fullDaySpecial=['urlaub','krank','schulung'].includes(type);const hoursHtml=special?(fullDaySpecial?`<div class="card-hours-line"><span class="metric-pill">${formatHours(plan)}</span></div>`:`<div class="segment-badge">🕒 ${esc(a.from||'')}–${esc(a.to||'')}</div>`):`<div class="segment-badge">🕒 ${esc(a.from||'')}–${esc(a.to||'')} · ${formatHours(plan)}</div>`;
   const drag=`draggable="true" data-assignment-id="${esc(a.id)}" ondragstart="dragAssignmentStart(event,'${a.id}')" ondragend="dragAssignmentEnd(event)"`;
   if(compact)return `<div class="monthitem type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><div>${esc(a.employeeName)}</div>${hoursHtml}<div class="small">${info}</div><div class="mini-actions"><button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')" title="Kopieren">⧉</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')" title="Löschen">×</button></div></div>`;
   return `<div class="assignment type-${esc(type)}" ${drag}><div class="cardtype-badge">${meta.icon} ${esc(meta.label)}</div><strong>${title}</strong><span>${esc(a.employeeName)}</span>${hoursHtml}<span class="small">${special?esc(a.note||meta.label):esc(a.city)+(a.vehicle?' · '+esc(a.vehicle):'')} · ${info}</span><div class="actions">${!special&&a.address?`<a class="navbtn" target="_blank" href="${mapsUrl(a.address)}">📍 Navigation</a>`:''}<button class="copybtn" onclick="event.stopPropagation();copyAssignment('${a.id}')">⧉ Kopieren</button><button class="danger" onclick="event.stopPropagation();removeAssignment('${a.id}')">×</button></div></div>`
@@ -507,18 +509,28 @@ function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentI
 function dragAssignmentEnd(event){event.currentTarget.classList.remove('dragging');document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));draggedAssignmentId=null}
 function planningDragOver(event){event.preventDefault();event.currentTarget.classList.add('dragover');event.dataTransfer.dropEffect='copy'}
 function planningDragLeave(event){if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.classList.remove('dragover')}
-async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source||source.date===date)return;if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}const employee=employeeById(source.employeeId),w=modelDayWindow(source.employeeId,date),rule=worktimeRule(source.employeeId,date);data.assignments.push({...source,id:id(),date,from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8)),employeeName:employee?.name||source.employeeName});await saveAssignments(true)}
+async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source||source.date===date)return;if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}const employee=employeeById(source.employeeId);if(!employee)return;const created=await createSpecialAssignment(cardTypeOf(source),employee,date,source);if(created)await saveAssignments(true);else renderPlanning()}
 function droppedPayload(event){return event.dataTransfer.getData('text/plain')||draggedAssignmentId||''}
 function droppedAssignment(event){const payload=droppedPayload(event);return data.assignments.find(a=>a.id===payload)||null}
 function movedOrCopiedAssignment(event,source){const clone={...source,id:id()};data.assignments.push(clone);return clone}
+
+async function createSpecialAssignment(type,targetEmployee,date,source=null){
+  const meta=CARD_TYPES[type];if(!meta)return null;
+  const fullDay=['urlaub','krank','schulung'].includes(type),w=modelDayWindow(targetEmployee.id,date),rule=worktimeRule(targetEmployee.id,date);
+  let from=w.from,to=w.to;
+  if(!fullDay){const selected=await askSegmentWindow({employee:targetEmployee,date,jobName:meta.label,suggestion:{from:'08:00',to:'10:00'}});if(!selected)return null;from=selected.from;to=selected.to}
+  const base=source?{...source}:{};
+  const row={...base,id:id(),cardType:type,jobId:'__'+type+'__',jobName:meta.label,city:'',address:'',employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),vehicle:'',from,to,hours:fullDay?Math.max(0,Number(rule?.targetHours||7.8)):rawCardHours({from,to}),note:base.note||meta.label,date};
+  data.assignments.push(row);return row;
+}
 async function planningEmployeeDrop(event,date,employeeId){
   event.preventDefault();event.currentTarget.classList.remove('dragover');
   const payload=droppedPayload(event),targetEmployee=masterEmployees.find(e=>String(e.id)===String(employeeId));if(!targetEmployee)return;
   if(payload.startsWith('pooljob:')){const jobId=payload.slice(8),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;const template={id:id(),cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job),vehicle:'',note:''};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
-  if(payload.startsWith('pooltype:')){const type=payload.slice(9),meta=CARD_TYPES[type];if(!meta)return;const w=modelDayWindow(targetEmployee.id,date),hours=Math.max(0,Number(worktimeRule(targetEmployee.id,date)?.targetHours||7.8));data.assignments.push({id:id(),cardType:type,jobId:'__'+type+'__',jobName:meta.label,city:'',address:'',employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),vehicle:'',from:w.from,to:w.to,hours,note:meta.label,date});await saveAssignments(true);return}
+  if(payload.startsWith('pooltype:')){const type=payload.slice(9);const created=await createSpecialAssignment(type,targetEmployee,date);if(created)await saveAssignments(true);else renderPlanning();return}
   const source=droppedAssignment(event);if(!source)return;
   if(cardTypeOf(source)==='site'){const template={...source,id:id()};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
-  const rule=worktimeRule(targetEmployee.id,date),w=modelDayWindow(targetEmployee.id,date);data.assignments.push({...source,id:id(),date,employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8))});await saveAssignments(true)
+  const created=await createSpecialAssignment(cardTypeOf(source),targetEmployee,date,source);if(created)await saveAssignments(true);else renderPlanning()
 }
 function setSiteSort(value){siteSort=value||'assigned';localStorage.setItem('kristaSiteSort',siteSort);renderPlanning()}
 function siteStatusRank(status){const order={'Angebot':1,'Auftrag':2,'Laufend':3,'Fertig nicht abgerechnet':4,'Geschlossen':5};return order[String(status||'')]||99}
@@ -546,9 +558,7 @@ async function planningSiteDrop(event,date,siteKey){
   const copy=true;
   const sourceDate=source.date;
   if(siteKey.startsWith('type:')){
-    const target=movedOrCopiedAssignment(event,source),type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;
-    target.date=date;target.cardType=type;target.jobId='__'+type+'__';target.jobName=meta.label;target.city='';target.address='';target.vehicle='';target.note=target.note||meta.label;
-    await saveAssignments(true);return;
+    const type=siteKey.slice(5),employee=employeeById(source.employeeId);if(!employee)return;const created=await createSpecialAssignment(type,employee,date,source);if(created)await saveAssignments(true);else renderPlanning();return;
   }
   const jobId=siteKey.slice(4),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;
   const employee=employeeById(source.employeeId);if(!employee)return;
@@ -592,7 +602,7 @@ async function applyCopyAssignment(){
   const source=data.assignments.find(a=>a.id===copySourceAssignmentId);if(!source)return;
   const employeeIds=[...document.querySelectorAll('.copyEmployeeCheck:checked')].map(x=>x.value);if(!employeeIds.length){copyModalNote.textContent='Bitte mindestens einen Mitarbeiter auswählen.';return}
   let dates=[];if(copyMode.value==='tomorrow')dates=[addDaysISO(source.date,1)];else if(copyMode.value==='restweek'){const d=new Date(source.date+'T12:00:00');const weekday=d.getDay()||7;for(let i=1;i<=5-weekday;i++)dates.push(addDaysISO(source.date,i))}else if(copyMode.value==='nextweek')dates=[addDaysISO(source.date,7)];else{if(!/^\d{4}-\d{2}-\d{2}$/.test(copyTargetDate.value)){copyModalNote.textContent='Bitte ein gültiges Datum auswählen.';return}dates=[copyTargetDate.value]}
-  for(const employeeId of employeeIds){const employee=employeeById(employeeId);if(!employee)continue;for(const date of dates){const rule=worktimeRule(employee.id,date),w=modelDayWindow(employee.id,date);if(cardTypeOf(source)==='site'){const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(!placed)continue}else data.assignments.push({...source,id:id(),date,employeeId:String(employee.id),employeeName:employee.name||String(employee.id),from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8))})}}
+  for(const employeeId of employeeIds){const employee=employeeById(employeeId);if(!employee)continue;for(const date of dates){const rule=worktimeRule(employee.id,date),w=modelDayWindow(employee.id,date);if(cardTypeOf(source)==='site'){const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(!placed)continue}else {const created=await createSpecialAssignment(cardTypeOf(source),employee,date,source);if(!created)continue}}}
   await saveAssignments(true);closeCopyModal();
 }
 
@@ -656,7 +666,7 @@ async function addAssignment(){
     const employee=masterEmployees.find(e=>String(e.id)===String(el.value))||{id:el.value,name:el.dataset.name||el.value};
     const template={id:id(),cardType:type,jobId:special?`__${type}__`:String(j.jobId),jobName:special?meta.label:(j.name||('#'+j.jobId)),city:special?'':(j.city||''),address:special?'':jobAddress(j),vehicle,note:aNote.value.trim()||meta.label};
     if(!special){const placed=await placeSiteAssignment(template,employee,aDate.value,{forceDialog:siteSegments(employee.id,aDate.value).length>0});if(!placed)continue}
-    else data.assignments.push({...template,date:aDate.value,employeeId:String(employee.id),employeeName:employee.name,from:aFrom.value,to:aTo.value,hours});
+    else {const fullDay=['urlaub','krank','schulung'].includes(type);if(fullDay)data.assignments.push({...template,date:aDate.value,employeeId:String(employee.id),employeeName:employee.name,from:aFrom.value,to:aTo.value,hours});else {const selected=await askSegmentWindow({employee,date:aDate.value,jobName:meta.label,suggestion:{from:aFrom.value||'08:00',to:aTo.value||'10:00'}});if(!selected)continue;data.assignments.push({...template,date:aDate.value,employeeId:String(employee.id),employeeName:employee.name,from:selected.from,to:selected.to,hours:rawCardHours(selected)})}}
   }
   document.querySelectorAll('.aEmployeeCheck').forEach(x=>x.checked=false);
   renderWeek();
