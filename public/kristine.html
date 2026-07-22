@@ -901,7 +901,7 @@ function taskDueLabel(date){if(!date)return '–';try{return new Intl.DateTimeFo
 function taskIsOverdue(t){return t.status!=='done'&&t.dueDate&&t.dueDate<(data.today||new Date().toISOString().slice(0,10))}
 function renderTasks(){
   let tasks=[...(data.tasks||[])];
-  if(taskFilter==='open')tasks=tasks.filter(t=>t.status!=='done');
+  if(taskFilter==='newest'||taskFilter==='open')tasks=tasks.filter(t=>t.status!=='done');
   if(taskFilter==='done')tasks=tasks.filter(t=>t.status==='done');
   tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
