@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0020.9b -->
+<!-- Datei: public/kristine.html · Build 0021.0 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -48,15 +48,20 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 .task-alert-link{border:0;background:transparent;color:#145829;padding:0;font-weight:800;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .task-modal-list{display:grid;gap:10px;max-height:60vh;overflow:auto;margin-top:12px}.task-modal-item{border:1px solid #e5e0d7;border-left:5px solid #27713d;border-radius:12px;padding:12px;background:#fcfbf8}.task-modal-item.overdue{border-left-color:#c53b3b}.task-modal-item h4{margin:0 0 7px}.task-detail-grid{display:grid;grid-template-columns:120px 1fr;gap:5px 10px;font-size:13px}.task-detail-grid span:nth-child(odd){color:#707070}.task-modal-empty{padding:18px;text-align:center;color:#707070}.task-done-note{font-size:12px;color:#27713d;font-weight:800;margin-left:auto}
+
+/* Build 0021.0: KRISTOOL Kontrollzentrum */
+.kristool-hero{background:linear-gradient(135deg,#18211c,#2f4a39);color:#fff;border-radius:20px;padding:22px;box-shadow:0 10px 32px rgba(0,0,0,.14)}
+.kristool-hero h2{margin:0 0 5px;font-size:28px}.kristool-hero .subline{opacity:.78}.kristool-counters{display:grid;grid-template-columns:repeat(3,minmax(170px,1fr));gap:12px;margin-top:18px}.kristool-counter{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:15px}.kristool-counter strong{display:block;font-size:30px}.kristool-counter span{font-size:13px;opacity:.9}.kristool-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.kristool-section{background:#fff;border-radius:18px;padding:16px;box-shadow:0 2px 15px rgba(0,0,0,.07)}.kristool-section h3{margin:0 0 12px}.kristool-list{display:grid;gap:10px}.kristool-item{border:1px solid #e5e0d8;border-left:6px solid #d3a132;border-radius:14px;padding:13px;background:#fcfbf8}.kristool-item.red{border-left-color:#c53b3b;background:#fffafa}.kristool-item.yellow{border-left-color:#d3a132;background:#fffdf6}.kristool-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.kristool-item-title{font-weight:850;font-size:16px}.kristool-item-detail{color:#666;font-size:13px;margin-top:4px}.kristool-item-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.kristool-empty{padding:18px;border:1px dashed #cfd8d1;border-radius:14px;color:#49604f;background:#f5faf6}.kristool-ok{background:#eef7ee;border:1px solid #b8d4bc;border-radius:18px;padding:16px;margin-top:14px}.kristool-ok strong{font-size:22px}.kristool-estimate{margin-top:10px;font-weight:700}.kristool-refresh{background:#fff;color:#111}.kristool-badge{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}.kristool-badge.red{background:#ffe0e0;color:#8a2020}.kristool-badge.yellow{background:#fff0c8;color:#7b5600}@media(max-width:850px){.kristool-columns{grid-template-columns:1fr}.kristool-counters{grid-template-columns:1fr}.kristool-hero{padding:18px}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0020.9c22 · Aufgaben laden und speichern repariert.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0021.0 · KRISTOOL Kontrollzentrum.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
 <nav>
+  <button onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('chat')">💬 Kristine-Chat</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
@@ -65,7 +70,28 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
-<section id="planning" class="tab active">
+
+<section id="kristool" class="tab active">
+  <div class="kristool-hero">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div><h2>🧰 KRISTOOL</h2><div class="subline" id="kristoolGreeting">Kontrollzentrum wird geladen …</div></div>
+      <button class="kristool-refresh" onclick="loadAll()">↻ Neu prüfen</button>
+    </div>
+    <div class="kristool-counters">
+      <div class="kristool-counter"><strong id="kristoolRedCount">0</strong><span>🔴 Handlungsbedarf</span></div>
+      <div class="kristool-counter"><strong id="kristoolYellowCount">0</strong><span>🟡 Entscheidungen</span></div>
+      <div class="kristool-counter"><strong id="kristoolGreenCount">0</strong><span>🟢 Kontrollen OK</span></div>
+    </div>
+    <div class="kristool-estimate" id="kristoolEstimate"></div>
+  </div>
+  <div class="kristool-columns">
+    <div class="kristool-section"><h3>🔴 Jetzt handeln</h3><div id="kristoolRedList" class="kristool-list"></div></div>
+    <div class="kristool-section"><h3>🟡 Heute entscheiden</h3><div id="kristoolYellowList" class="kristool-list"></div></div>
+  </div>
+  <div class="kristool-ok"><strong id="kristoolOkHeadline">🟢 Alles Weitere ist in Ordnung.</strong><div class="small" id="kristoolOkDetail" style="margin-top:5px"></div></div>
+</section>
+
+<section id="planning" class="tab">
   <div class="notice">Ein Datensatz, zwei Sichten: nach Mitarbeitern planen oder nach Baustellen kontrollieren. Kristine liest immer die Zuordnung Mitarbeiter + Karte + Datum.</div>
   <div class="grid">
     <div class="card">
@@ -241,16 +267,31 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     <div id="taskModalNote" class="task-done-note"></div>
   </div>
 </div>
+
+<div id="employeeActionBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="employeeActionTitle">
+  <div class="segment-modal" style="width:min(620px,100%)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h3 id="employeeActionTitle" style="margin:0">Mitarbeiter</h3>
+      <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
+    </div>
+    <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
+    <div id="employeeActionNote" class="task-done-note"></div>
+    <div class="actions" style="margin-top:14px">
+      <button type="button" class="green" id="employeeActionAsk" onclick="sendEmployeeDayEndCheck()">Arbeitest du noch? senden</button>
+      <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Alles OK</button>
+    </div>
+  </div>
+</div>
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
-window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()})});
+window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()})});
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
-function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id))}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='kristool')renderKristool()}
 async function loadAll(){
   // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
   const results=await Promise.allSettled([
@@ -289,7 +330,7 @@ async function loadAll(){
   document.getElementById('chatDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;
   renderMasterData();
-  renderWeek();renderControl();renderTasks();renderSystemCards();
+  renderWeek();renderControl();renderTasks();renderSystemCards();renderKristool();
   renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
@@ -570,7 +611,7 @@ async function beginConversation(){chatMessages.innerHTML='';setQuick([]);await 
 async function sendMessage(){const text=chatInput.value.trim();if(!text)return;chatInput.value='';addBubble(text,'user');await postMessage(text,true)}
 async function postMessage(text,alreadyShown=false){if(!alreadyShown&&text!=='Hallo')addBubble(text,'user');const r=await api('/kristine/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:chatEmployeeId.value.trim(),employeeName:chatEmployeeName.value.trim(),date:chatDate.value,text})});addBubble(r.reply,'bot');setQuick(r.buttons||[]);renderState(r.state);await loadSilent()}
 async function resetState(){await api('/kristine/api/reset-state/'+encodeURIComponent(chatEmployeeId.value.trim()),{method:'POST'});chatMessages.innerHTML='';setQuick([]);currentState.textContent='Tag wurde zurückgesetzt.';await loadSilent()}
-async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks()}
+async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks();renderKristool()}
 function statusLabel(mode){
   const labels={idle:'Noch nicht gestartet',working:'Arbeitet',pause:'Pause',lunch:'Mittagspause',finished_site:'Baustelle fertig',finished_day:'Feierabend'};
   return labels[mode]||'Offen';
@@ -643,6 +684,90 @@ function renderDayBar(segments,dayStart,dayEnd){
   return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
 }
 
+
+let selectedControlEmployeeId='';
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';}
+function openEmployeeActionModal(employeeId){
+  const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));
+  const state=data.states?.[employeeId]||{mode:'idle'};
+  const today=chatDate.value||data.today;
+  const plans=(data.assignments||[]).filter(a=>a.date===today&&String(a.employeeId)===String(employeeId));
+  const segments=employeeDaySegments(employeeId,today,state);
+  const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
+  const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
+  const currentPlan=plans.find(x=>String(state.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+  selectedControlEmployeeId=String(employeeId);
+  employeeActionTitle.textContent=employee?.name||state.employeeName||String(employeeId);
+  employeeActionInfo.innerHTML=`<strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><strong>Baustelle:</strong> ${esc(currentPlan?.jobName||'Nicht eingeteilt')}<br><strong>Arbeitszeit heute:</strong> ${esc(durationText(workMinutes))}<br><strong>Pause/Mittag:</strong> ${esc(durationText(breakMinutes))}`;
+  employeeActionNote.textContent='';
+  employeeActionAsk.disabled=!["working","pause","lunch"].includes(state.mode);
+  employeeActionAsk.textContent=employeeActionAsk.disabled?'Nicht mehr aktiv':'Arbeitest du noch? senden';
+  employeeActionBackdrop.classList.add('open');
+}
+async function sendEmployeeDayEndCheck(){
+  if(!selectedControlEmployeeId)return;
+  const btn=document.getElementById('employeeActionAsk');
+  const old=btn.textContent;btn.disabled=true;btn.textContent='Sendet …';employeeActionNote.textContent='';
+  try{
+    const result=await api('/admin/api/morning-status/employee-end-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,date:chatDate.value||data.today})});
+    employeeActionNote.textContent=result?.result?.sent?'✓ Nachfrage wurde über Kristine gesendet.':(result?.result?.reason||'Keine Nachricht gesendet.');
+    btn.textContent='Gesendet';
+  }catch(error){employeeActionNote.textContent='Fehler: '+error.message;btn.disabled=false;btn.textContent=old;}
+}
+
+
+function kristoolEmployeeName(employeeId,state){return masterEmployees.find(e=>String(e.id)===String(employeeId))?.name||state?.employeeName||String(employeeId||'Mitarbeiter')}
+function kristoolTaskAction(task){return `openTaskListModal('${esc(task.id)}')`}
+function kristoolItemHtml(item,level){
+  const actions=(item.actions||[]).map(a=>`<button type="button" class="${a.primary?'green':'secondary'}" onclick="${a.onclick}">${esc(a.label)}</button>`).join('');
+  return `<div class="kristool-item ${level}"><div class="kristool-item-head"><div><div class="kristool-item-title">${esc(item.title)}</div><div class="kristool-item-detail">${esc(item.detail||'')}</div></div><span class="kristool-badge ${level}">${level==='red'?'Handeln':'Prüfen'}</span></div>${item.suggestion?`<div class="kristool-item-detail" style="margin-top:8px"><strong>Vorschlag:</strong> ${esc(item.suggestion)}</div>`:''}${actions?`<div class="kristool-item-actions">${actions}</div>`:''}</div>`
+}
+function renderKristool(){
+  const root=document.getElementById('kristool');if(!root)return;
+  const today=chatDate?.value||data.today||iso(new Date());
+  const now=currentViennaMinutes();
+  const red=[],yellow=[];
+  const tasks=data.tasks||[];
+  tasks.filter(t=>t.status!=='done').forEach(t=>{
+    const overdue=t.dueDate&&t.dueDate<today;
+    const dueToday=!t.dueDate||t.dueDate===today;
+    const item={title:t.title||'Offene Arbeit',detail:[t.assigneeName||'',t.jobName||'',t.dueDate?('fällig '+taskDueLabel(t.dueDate)):''].filter(Boolean).join(' · '),suggestion:overdue?'Heute erledigen oder neu terminieren.':'Öffnen und entscheiden.',actions:[{label:'Öffnen',primary:true,onclick:kristoolTaskAction(t)}]};
+    if(overdue)red.push(item);else if(dueToday)yellow.push(item);
+  });
+  Object.values(data.states||{}).forEach(state=>{
+    if(!state?.employeeId)return;
+    const employeeId=String(state.employeeId),name=kristoolEmployeeName(employeeId,state),mode=state.mode||'idle';
+    const rule=worktimeRule(employeeId,today);
+    const plannedEnd=hmToMinutes(rule?.to||'');
+    if(['working','pause','lunch'].includes(mode)&&plannedEnd!==null&&now>plannedEnd+30){
+      red.push({title:name+' · Tagesende offen',detail:`Status: ${statusLabel(mode)} · Sollende ${rule?.to||'–'}`,suggestion:'Mitarbeiter fragen, ob er noch arbeitet.',actions:[{label:'Öffnen',primary:true,onclick:`openEmployeeActionModal('${esc(employeeId)}')`},{label:'Direkt fragen',onclick:`openEmployeeActionModal('${esc(employeeId)}')`} ]});
+    }
+    if(['pause','lunch'].includes(mode)){
+      const timeline=state.timeline||[];const last=[...timeline].reverse().find(x=>x.type===mode+'_start'||(mode==='pause'&&x.type==='pause_start')||(mode==='lunch'&&x.type==='lunch_start'));
+      const started=last?.at?new Date(last.at):null;const minutes=started&&!Number.isNaN(started.getTime())?Math.max(0,Math.round((Date.now()-started.getTime())/60000)):0;
+      const allowed=mode==='lunch'?Number(rule?.lunchBreakMinutes||30):Number(rule?.otherBreakMinutes||15);
+      if(minutes>allowed+15)yellow.push({title:name+' · '+(mode==='lunch'?'Mittag':'Pause')+' offen',detail:`seit ca. ${minutes} Minuten`,suggestion:'Nachfragen, seit wann wieder gearbeitet wird.',actions:[{label:'Mitarbeiter öffnen',primary:true,onclick:`openEmployeeActionModal('${esc(employeeId)}')`} ]});
+    }
+  });
+  const unknown=[];const regie=[];
+  Object.values(data.states||{}).forEach(state=>(state?.timeline||[]).forEach(x=>{if(x.type==='assignment_deviation')unknown.push({state,x});if(x.type==='regie_reported')regie.push({state,x})}));
+  if(unknown.length)red.push({title:`${unknown.length} unbekannte Baustelle${unknown.length===1?'':'n'}`,detail:'Zuordnung im Leitstand prüfen.',suggestion:'Bestehender Baustelle zuordnen oder neu anlegen.',actions:[{label:'Leitstand öffnen',primary:true,onclick:"showTab('control')"}]});
+  if(regie.length)yellow.push({title:`${regie.length} Regie-Vormerkung${regie.length===1?'':'en'}`,detail:'Vom Büro ergänzen und prüfen.',suggestion:'Regie im Leitstand öffnen.',actions:[{label:'Leitstand öffnen',primary:true,onclick:"showTab('control')"}]});
+  const activeIds=new Set(Object.values(data.states||{}).filter(s=>s?.employeeId).map(s=>String(s.employeeId)));
+  const employeesOk=Math.max(0,masterEmployees.length-new Set([...red,...yellow].flatMap(i=>{const m=(i.title||'').split(' · ')[0];return masterEmployees.filter(e=>e.name===m).map(e=>String(e.id))})).size);
+  const jobsWithOpenTasks=new Set(tasks.filter(t=>t.status!=='done'&&t.jobId).map(t=>String(t.jobId)));
+  const jobsOk=Math.max(0,masterJobs.length-jobsWithOpenTasks.size);
+  const green=Math.max(0,employeesOk+jobsOk+activeIds.size);
+  kristoolRedCount.textContent=red.length;kristoolYellowCount.textContent=yellow.length;kristoolGreenCount.textContent=green;
+  const estimate=Math.max(1,red.length*2+yellow.length);
+  kristoolEstimate.textContent=(red.length||yellow.length)?`Geschätzter Aufwand: ca. ${estimate} Minute${estimate===1?'':'n'}.`:'Heute ist nichts offen. Genieß den Kaffee. ☕';
+  kristoolGreeting.textContent=`${new Intl.DateTimeFormat('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(today+'T12:00:00'))} · Nur Punkte, die Aufmerksamkeit brauchen.`;
+  kristoolRedList.innerHTML=red.length?red.map(x=>kristoolItemHtml(x,'red')).join(''):'<div class="kristool-empty">Keine dringenden Handlungen.</div>';
+  kristoolYellowList.innerHTML=yellow.length?yellow.map(x=>kristoolItemHtml(x,'yellow')).join(''):'<div class="kristool-empty">Keine Entscheidungen offen.</div>';
+  kristoolOkHeadline.textContent=`🟢 ${green} Kontrollen ohne Auffälligkeit`;
+  kristoolOkDetail.textContent='Details bleiben bewusst eingeklappt. KRISTOOL zeigt nur, was heute Aufmerksamkeit braucht.';
+}
+
 function renderControl(){
   const today=chatDate.value||data.today;
   const planned=data.assignments.filter(a=>a.date===today);
@@ -697,7 +822,7 @@ function renderControl(){
     const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
     const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
     const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
-    return `<div class="control-card"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+    return `<div class="control-card" style="cursor:pointer" role="button" tabindex="0" onclick="openEmployeeActionModal('${esc(a.employeeId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(a.employeeId)}')}"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><div style="display:flex;align-items:center;gap:8px"><button type="button" class="secondary" style="padding:6px 9px" onclick="event.stopPropagation();openEmployeeActionModal('${esc(a.employeeId)}')">Öffnen</button><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
   }).join('')}</div>`;
 }
 
