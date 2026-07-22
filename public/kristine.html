@@ -59,11 +59,25 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .report-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-toolbar input{width:auto;min-width:160px}.copy-employee-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-top:10px;max-height:220px;overflow:auto}.copy-option{display:flex;gap:8px;align-items:center;background:#f7f7f7;border:1px solid #e2e2e2;border-radius:10px;padding:8px}.copy-option input{width:auto}
 
 .time-editor-table{width:100%;border-collapse:collapse;margin-top:12px}.time-editor-table th,.time-editor-table td{padding:8px;border-bottom:1px solid #ece8e0;text-align:left}.time-editor-table select,.time-editor-table input{padding:7px 8px}.time-editor-row-work{background:#f5fbf6}.time-editor-row-pause{background:#fff7f7}.time-editor-row-lunch{background:#fffaf0}.time-editor-actions{display:flex;gap:5px;flex-wrap:wrap}.time-editor-actions button{padding:6px 8px}.time-editor-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.time-editor-summary span{background:#f3f1ec;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}
+
+/* Build 0022.1: Planungstisch – sticky Kopf, Kartenpools, Drag = Kopie */
+.planning-top{position:sticky;top:0;z-index:30;background:#f3f1ec;padding:0 0 12px;box-shadow:0 10px 18px rgba(243,241,236,.96)}
+.planning-top-grid{display:grid;grid-template-columns:minmax(520px,1.35fr) minmax(420px,1fr);gap:14px;align-items:stretch}
+.planning-pools{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}
+.pool-column{background:#f8f7f3;border:1px solid #e4e0d8;border-radius:13px;padding:9px;min-height:170px}
+.pool-column h4{margin:0 0 7px;font-size:13px;display:flex;justify-content:space-between;gap:6px}
+.pool-list{display:grid;gap:6px;max-height:250px;overflow:auto}
+.pool-card{border:1px solid #ddd8cf;border-left:5px solid #27713d;border-radius:10px;background:#fff;padding:7px 8px;cursor:grab;font-size:12px;line-height:1.25}
+.pool-card:active{cursor:grabbing}.pool-card strong{display:block;font-size:12px}.pool-card .pool-hours{font-weight:800;color:#555;margin-top:3px}
+.pool-card.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.pool-card.type-krank{border-left-color:#c53b3b;background:#fff0f0}.pool-card.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.pool-card.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.pool-card.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.pool-card.type-schulung{border-left-color:#6d55a6;background:#f5f1ff}.pool-card.type-material_holen{border-left-color:#3f7c9b;background:#eef8fc}.pool-card.type-lager{border-left-color:#8b6a3e;background:#f8f2e9}.pool-card.type-besprechung{border-left-color:#b48723;background:#fff8df}
+.pool-empty{font-size:11px;color:#777;padding:6px}.planning-calendar-card{margin-top:14px}
+@media(max-width:1050px){.planning-top{position:static;box-shadow:none}.planning-top-grid{grid-template-columns:1fr}.planning-pools{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:700px){.planning-pools{grid-template-columns:1fr}.pool-list{max-height:160px}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0021.1 · Spachtelpaket 1.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0022.1 · Planungstisch</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -99,31 +113,37 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </section>
 
 <section id="planning" class="tab">
-  <div class="notice">Ein Datensatz, zwei Sichten: nach Mitarbeitern planen oder nach Baustellen kontrollieren. Kristine liest immer die Zuordnung Mitarbeiter + Karte + Datum.</div>
-  <div class="grid">
-    <div class="card">
-      <h3>Karte einteilen</h3>
-      <div class="formgrid">
-        <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning()"></div>
-        <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="krank">🔴 Krank</option><option value="arzt">🩺 Arzt</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option><option value="schulung">🎓 Schulung</option><option value="material_holen">🚚 Material holen</option><option value="lager">📦 Lager</option><option value="besprechung">🤝 Besprechung</option></select></div>
-        <div class="full" id="jobPickerRow"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
-        <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
-        <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
-        <div><label>Bis</label><input id="aTo" type="time" value="17:00"></div>
-        <div><label>Stunden</label><input id="aHours" type="number" min="0" max="24" step="0.1" value="7.8"></div>
-        <div><label>Fahrzeug</label><select id="aVehicleSelect"><option value="">– kein Fahrzeug –</option></select></div>
-        <div class="full"><label>Mitarbeiter</label><div id="employeePicker" class="employee-picker"><span class="small">Mitarbeiter werden geladen …</span></div></div>
-        <div class="full"><label>Hinweis</label><input id="aNote" placeholder="z. B. Schlüssel beim Chef"></div>
+  <div class="planning-top">
+    <div class="notice">Ein Datensatz, zwei Sichten: nach Mitarbeitern planen oder nach Baustellen kontrollieren. Kristine liest immer die Zuordnung Mitarbeiter + Karte + Datum.</div>
+    <div class="planning-top-grid">
+      <div class="card">
+        <h3>Karte einteilen</h3>
+        <div class="formgrid">
+          <div><label>Datum</label><input id="aDate" type="date" onchange="renderPlanning();renderPlanningPools()"></div>
+          <div><label>Kartentyp</label><select id="aCardType" onchange="selectCardType()"><option value="site">🏗️ Baustelle</option><option value="urlaub">🔵 Urlaub</option><option value="krank">🔴 Krank</option><option value="arzt">🩺 Arzt</option><option value="aufraeumen">🧹 Aufräumen</option><option value="werkstatt">🔧 Werkstatt</option><option value="schulung">🎓 Schulung</option><option value="material_holen">🚚 Material holen</option><option value="lager">📦 Lager</option><option value="besprechung">🤝 Besprechung</option></select></div>
+          <div class="full" id="jobPickerRow"><label>Baustelle</label><select id="aJobSelect" onchange="selectJob()"><option value="">– Baustelle auswählen –</option></select></div>
+          <div class="full"><label>Baustellendaten</label><div id="selectedJobInfo" class="auto-box small">Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.</div></div>
+          <div><label>Von</label><input id="aFrom" type="time" value="07:00"></div>
+          <div><label>Bis</label><input id="aTo" type="time" value="17:00"></div>
+          <div><label>Stunden</label><input id="aHours" type="number" min="0" max="24" step="0.1" value="7.8"></div>
+          <div><label>Fahrzeug</label><select id="aVehicleSelect"><option value="">– kein Fahrzeug –</option></select></div>
+          <div class="full"><label>Mitarbeiter</label><div id="employeePicker" class="employee-picker"><span class="small">Mitarbeiter werden geladen …</span></div></div>
+          <div class="full"><label>Hinweis</label><input id="aNote" placeholder="z. B. Schlüssel beim Chef"></div>
+        </div>
+        <div class="actions"><button class="green" onclick="addAssignment()">+ Einteilen</button><button class="secondary" onclick="saveAssignments()">Planung speichern</button></div>
       </div>
-      <div class="actions"><button class="green" onclick="addAssignment()">+ Einteilen</button><button class="secondary" onclick="saveAssignments()">Planung speichern</button></div>
-    </div>
-    <div class="card">
-      <h3>Abwesenheiten & Betrieb</h3>
-      <div class="system-cards" id="systemCards"></div>
-      <p class="small" style="margin-top:10px">Stunden = Summe im ausgewählten Kalenderjahr. Karte anklicken und links einteilen.</p>
+      <div class="card">
+        <h3>Planungskarten</h3>
+        <div class="planning-pools">
+          <div class="pool-column"><h4><span>Abwesenheit & Betrieb</span></h4><div id="systemCards" class="pool-list"></div></div>
+          <div class="pool-column"><h4><span>Neue Aufträge</span><span id="newOrdersCount" class="small"></span></h4><div id="newOrdersPool" class="pool-list"></div></div>
+          <div class="pool-column"><h4><span>Laufende Baustellen</span><span id="runningJobsCount" class="small"></span></h4><div id="runningJobsPool" class="pool-list"></div></div>
+        </div>
+        <p class="small" style="margin-top:9px">Karte ziehen = kopieren. Das Original bleibt stehen. Stunden werden für den Zieltag neu berechnet.</p>
+      </div>
     </div>
   </div>
-  <div class="card" style="margin-top:14px">
+  <div class="card planning-calendar-card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="planning-heading">
         <button class="secondary planning-arrow" onclick="shiftPlanningPeriod(-1)" title="Zurück">◀</button>
@@ -359,7 +379,7 @@ async function loadAll(){
   document.getElementById('chatDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;const reportDate=document.getElementById('dailyReportDate');if(reportDate&&!reportDate.value)reportDate.value=data.today;
   renderMasterData();
-  renderWeek();renderControl();renderTasks();renderSystemCards();renderKristool();
+  renderWeek();renderControl();renderTasks();renderPlanningPools();renderKristool();
   renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
@@ -410,7 +430,26 @@ const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub'
 function cardTypeOf(a){return a.cardType||'site'}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
 function selectSystemCard(type){const select=document.getElementById('aCardType');if(!select)return;select.value=type;selectCardType();document.getElementById('aDate')?.scrollIntoView({behavior:'smooth',block:'center'})}
-function renderSystemCards(){const box=document.getElementById('systemCards');if(!box)return;const selected=selectedPlanningDate();const year=String(selected||data.today||new Date().getFullYear()).slice(0,4);const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];const rows=data.assignments.filter(a=>cardTypeOf(a)===type&&String(a.date||'').startsWith(year));const hours=rows.reduce((sum,a)=>sum+plannedHoursForAssignment(a),0);const employees=new Set(rows.map(a=>String(a.employeeId||'')).filter(Boolean)).size;return `<button class="secondary" style="width:100%;text-align:left" onclick="selectSystemCard('${type}')" title="${employees} Mitarbeiter im Jahr ${year}">${meta.icon} ${esc(meta.label)} <span style="float:right">${formatHours(hours)}</span></button>`}).join('')}
+function poolDragStart(event,payload){event.dataTransfer.effectAllowed='copy';event.dataTransfer.dropEffect='copy';event.dataTransfer.setData('text/plain',payload);event.currentTarget.classList.add('dragging')}
+function poolDragEnd(event){event.currentTarget.classList.remove('dragging')}
+function renderSystemCards(){
+  const box=document.getElementById('systemCards');if(!box)return;
+  const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');
+  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong><div class="pool-hours">7,8 h</div></div>`}).join('');
+}
+function normalizedJobStatus(job){return String(job?.status||'').trim().toLowerCase()}
+function isNewOrderJob(job){const s=normalizedJobStatus(job);return s==='auftrag'||s.includes('auftrag')||s==='neu'}
+function isRunningJob(job){const s=normalizedJobStatus(job);return s==='laufend'||s.includes('lauf')||s==='in arbeit'}
+function planningPoolJobCard(job){const number=job.jobId||job.number||'',name=job.name||('#'+number);return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><strong>${esc(number)} · ${esc(name)}</strong><div class="pool-hours">7,8 h</div></div>`}
+function renderPlanningPools(){
+  renderSystemCards();
+  const newJobs=masterJobs.filter(isNewOrderJob).sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));
+  const running=masterJobs.filter(isRunningJob).sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));
+  const n=document.getElementById('newOrdersPool'),r=document.getElementById('runningJobsPool');
+  if(n)n.innerHTML=newJobs.length?newJobs.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
+  if(r)r.innerHTML=running.length?running.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
+  const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');if(nc)nc.textContent=String(newJobs.length);if(rc)rc.textContent=String(running.length);
+}
 function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
 function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
@@ -466,12 +505,21 @@ function assignmentCard(a,compact=false){
 let draggedAssignmentId=null;
 function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentId;event.currentTarget.classList.add('dragging');event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('text/plain',assignmentId)}
 function dragAssignmentEnd(event){event.currentTarget.classList.remove('dragging');document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));draggedAssignmentId=null}
-function planningDragOver(event){event.preventDefault();event.currentTarget.classList.add('dragover');event.dataTransfer.dropEffect=(event.ctrlKey||event.altKey)?'copy':'move'}
+function planningDragOver(event){event.preventDefault();event.currentTarget.classList.add('dragover');event.dataTransfer.dropEffect='copy'}
 function planningDragLeave(event){if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.classList.remove('dragover')}
-async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const assignmentId=event.dataTransfer.getData('text/plain')||draggedAssignmentId;const source=data.assignments.find(a=>a.id===assignmentId);if(!source||source.date===date)return;const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const template={...source,id:copy?id():source.id};if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);const placed=await placeSiteAssignment(template,employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(!placed&&!copy)data.assignments.push(source);if(placed)await saveAssignments(true);else renderPlanning();return}if(copy)data.assignments.push({...source,id:id(),date});else source.date=date;await saveAssignments(true)}
-function droppedAssignment(event){const assignmentId=event.dataTransfer.getData('text/plain')||draggedAssignmentId;return data.assignments.find(a=>a.id===assignmentId)||null}
-function movedOrCopiedAssignment(event,source){const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(copy){const clone={...source,id:id()};data.assignments.push(clone);return clone}return source}
-async function planningEmployeeDrop(event,date,employeeId){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source)return;const targetEmployee=masterEmployees.find(e=>String(e.id)===String(employeeId));if(!targetEmployee)return;const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';if(cardTypeOf(source)==='site'){const original={...source};if(!copy)data.assignments=data.assignments.filter(a=>a.id!==source.id);const template={...source,id:copy?id():source.id};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(!placed&&!copy)data.assignments.push(original);if(placed)await saveAssignments(true);else renderPlanning();return}const target=movedOrCopiedAssignment(event,source);target.date=date;target.employeeId=String(targetEmployee.id);target.employeeName=targetEmployee.name||String(targetEmployee.id);await saveAssignments(true)}
+async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source||source.date===date)return;if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}const employee=employeeById(source.employeeId),w=modelDayWindow(source.employeeId,date),rule=worktimeRule(source.employeeId,date);data.assignments.push({...source,id:id(),date,from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8)),employeeName:employee?.name||source.employeeName});await saveAssignments(true)}
+function droppedPayload(event){return event.dataTransfer.getData('text/plain')||draggedAssignmentId||''}
+function droppedAssignment(event){const payload=droppedPayload(event);return data.assignments.find(a=>a.id===payload)||null}
+function movedOrCopiedAssignment(event,source){const clone={...source,id:id()};data.assignments.push(clone);return clone}
+async function planningEmployeeDrop(event,date,employeeId){
+  event.preventDefault();event.currentTarget.classList.remove('dragover');
+  const payload=droppedPayload(event),targetEmployee=masterEmployees.find(e=>String(e.id)===String(employeeId));if(!targetEmployee)return;
+  if(payload.startsWith('pooljob:')){const jobId=payload.slice(8),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;const template={id:id(),cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job),vehicle:'',note:''};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
+  if(payload.startsWith('pooltype:')){const type=payload.slice(9),meta=CARD_TYPES[type];if(!meta)return;const w=modelDayWindow(targetEmployee.id,date),hours=Math.max(0,Number(worktimeRule(targetEmployee.id,date)?.targetHours||7.8));data.assignments.push({id:id(),cardType:type,jobId:'__'+type+'__',jobName:meta.label,city:'',address:'',employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),vehicle:'',from:w.from,to:w.to,hours,note:meta.label,date});await saveAssignments(true);return}
+  const source=droppedAssignment(event);if(!source)return;
+  if(cardTypeOf(source)==='site'){const template={...source,id:id()};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
+  const rule=worktimeRule(targetEmployee.id,date),w=modelDayWindow(targetEmployee.id,date);data.assignments.push({...source,id:id(),date,employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8))});await saveAssignments(true)
+}
 function setSiteSort(value){siteSort=value||'assigned';localStorage.setItem('kristaSiteSort',siteSort);renderPlanning()}
 function siteStatusRank(status){const order={'Angebot':1,'Auftrag':2,'Laufend':3,'Fertig nicht abgerechnet':4,'Geschlossen':5};return order[String(status||'')]||99}
 function planningSiteRows(days){
@@ -495,7 +543,7 @@ function assignmentMatchesSiteKey(a,key){if(key.startsWith('type:'))return cardT
 async function planningSiteDrop(event,date,siteKey){
   event.preventDefault();event.currentTarget.classList.remove('dragover');
   const source=droppedAssignment(event);if(!source)return;
-  const copy=event.ctrlKey||event.altKey||event.dataTransfer.dropEffect==='copy';
+  const copy=true;
   const sourceDate=source.date;
   if(siteKey.startsWith('type:')){
     const target=movedOrCopiedAssignment(event,source),type=siteKey.slice(5),meta=CARD_TYPES[type];if(!meta)return;
@@ -544,7 +592,7 @@ async function applyCopyAssignment(){
   const source=data.assignments.find(a=>a.id===copySourceAssignmentId);if(!source)return;
   const employeeIds=[...document.querySelectorAll('.copyEmployeeCheck:checked')].map(x=>x.value);if(!employeeIds.length){copyModalNote.textContent='Bitte mindestens einen Mitarbeiter auswählen.';return}
   let dates=[];if(copyMode.value==='tomorrow')dates=[addDaysISO(source.date,1)];else if(copyMode.value==='restweek'){const d=new Date(source.date+'T12:00:00');const weekday=d.getDay()||7;for(let i=1;i<=5-weekday;i++)dates.push(addDaysISO(source.date,i))}else if(copyMode.value==='nextweek')dates=[addDaysISO(source.date,7)];else{if(!/^\d{4}-\d{2}-\d{2}$/.test(copyTargetDate.value)){copyModalNote.textContent='Bitte ein gültiges Datum auswählen.';return}dates=[copyTargetDate.value]}
-  for(const employeeId of employeeIds){const employee=employeeById(employeeId);if(!employee)continue;for(const date of dates){data.assignments.push({...source,id:id(),date,employeeId:String(employee.id),employeeName:employee.name||String(employee.id)})}}
+  for(const employeeId of employeeIds){const employee=employeeById(employeeId);if(!employee)continue;for(const date of dates){const rule=worktimeRule(employee.id,date),w=modelDayWindow(employee.id,date);if(cardTypeOf(source)==='site'){const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(!placed)continue}else data.assignments.push({...source,id:id(),date,employeeId:String(employee.id),employeeName:employee.name||String(employee.id),from:w.from,to:w.to,hours:Math.max(0,Number(rule?.targetHours||7.8))})}}
   await saveAssignments(true);closeCopyModal();
 }
 
@@ -576,7 +624,7 @@ function renderEmployeePlanning(target,title,days){
     const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${matrixCardList(assignments)}</div>`}).join('');
     return label+cells
   }).join('');
-  target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte auf einen anderen Mitarbeiter oder Tag ziehen = umplanen; Strg/Alt = kopieren.</div>`;
+  target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte ziehen = Kopie erstellen. Das Original bleibt bestehen; Zielstunden werden aus dem Arbeitsmodell des Zieltags berechnet.</div>`;
 }
 function renderSitePlanning(target,title,days){
   const dayMode=days.length===1,sites=planningSiteRows(days);
@@ -584,7 +632,7 @@ function renderSitePlanning(target,title,days){
   const sortbar=`<div class="site-sortbar"><label for="siteSortSelect">Sortierung</label><select id="siteSortSelect" onchange="setSiteSort(this.value)"><option value="assigned" ${siteSort==='assigned'?'selected':''}>Eingeteilt</option><option value="status" ${siteSort==='status'?'selected':''}>Status</option><option value="newest" ${siteSort==='newest'?'selected':''}>Neueste</option><option value="oldest" ${siteSort==='oldest'?'selected':''}>Älteste</option><option value="az" ${siteSort==='az'?'selected':''}>A–Z</option><option value="za" ${siteSort==='za'?'selected':''}>Z–A</option></select></div>`;
   const heads='<div class="matrix-head">Baustelle / Karte</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
   const rows=sites.map(site=>{const hours=days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&assignmentMatchesSiteKey(a,site.key)).reduce((x,a)=>x+plannedHoursForAssignment(a),0),0);const label=`<div class="matrix-label">${esc(site.label)}<span class="small">${formatHours(hours)} · ${new Set(data.assignments.filter(a=>days.includes(a.date)&&assignmentMatchesSiteKey(a,site.key)).map(a=>String(a.employeeId))).size} MA${site.job?.status?' · '+esc(site.job.status):''}</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&assignmentMatchesSiteKey(a,site.key)).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de'));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningSiteDrop(event,'${day}','${esc(site.key)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
-  target.innerHTML=sortbar+`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten können zwischen Baustellen und Tagen verschoben oder mit Strg/Alt kopiert werden.</div>`;
+  target.innerHTML=sortbar+`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten werden beim Ziehen kopiert. Das Original bleibt bestehen; Entfernen erfolgt bewusst über ×.</div>`;
 }
 function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
   if(planningView==='month'){
@@ -593,7 +641,7 @@ function renderPlanning(){updatePlanningButtons();const target=document.getEleme
   const days=planningView==='day'?[selectedPlanningDate()]:weekDays();
   if(planningPerspective==='site')renderSitePlanning(target,title,days);else renderEmployeePlanning(target,title,days);
 }
-function renderWeek(){renderPlanning();renderSystemCards()}
+function renderWeek(){renderPlanning();renderPlanningPools()}
 async function addAssignment(){
   const type=document.getElementById('aCardType').value||'site';
   const special=type!=='site';
