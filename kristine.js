@@ -150,12 +150,13 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
   }
 
   async function getBootstrap() {
-    const [assignments, states, tasks] = await Promise.all([
+    const [assignments, states, tasks, timeEvents] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
+      readJson(TIME_EVENTS, []),
     ]);
-    return { assignments, states, tasks };
+    return { assignments, states, tasks, timeEvents };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
