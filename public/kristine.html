@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0021.0 -->
+<!-- Datei: public/kristine.html · Build 0021.1 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -52,11 +52,16 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 /* Build 0021.0: KRISTOOL Kontrollzentrum */
 .kristool-hero{background:linear-gradient(135deg,#18211c,#2f4a39);color:#fff;border-radius:20px;padding:22px;box-shadow:0 10px 32px rgba(0,0,0,.14)}
 .kristool-hero h2{margin:0 0 5px;font-size:28px}.kristool-hero .subline{opacity:.78}.kristool-counters{display:grid;grid-template-columns:repeat(3,minmax(170px,1fr));gap:12px;margin-top:18px}.kristool-counter{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:15px}.kristool-counter strong{display:block;font-size:30px}.kristool-counter span{font-size:13px;opacity:.9}.kristool-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.kristool-section{background:#fff;border-radius:18px;padding:16px;box-shadow:0 2px 15px rgba(0,0,0,.07)}.kristool-section h3{margin:0 0 12px}.kristool-list{display:grid;gap:10px}.kristool-item{border:1px solid #e5e0d8;border-left:6px solid #d3a132;border-radius:14px;padding:13px;background:#fcfbf8}.kristool-item.red{border-left-color:#c53b3b;background:#fffafa}.kristool-item.yellow{border-left-color:#d3a132;background:#fffdf6}.kristool-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.kristool-item-title{font-weight:850;font-size:16px}.kristool-item-detail{color:#666;font-size:13px;margin-top:4px}.kristool-item-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.kristool-empty{padding:18px;border:1px dashed #cfd8d1;border-radius:14px;color:#49604f;background:#f5faf6}.kristool-ok{background:#eef7ee;border:1px solid #b8d4bc;border-radius:18px;padding:16px;margin-top:14px}.kristool-ok strong{font-size:22px}.kristool-estimate{margin-top:10px;font-weight:700}.kristool-refresh{background:#fff;color:#111}.kristool-badge{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}.kristool-badge.red{background:#ffe0e0;color:#8a2020}.kristool-badge.yellow{background:#fff0c8;color:#7b5600}@media(max-width:850px){.kristool-columns{grid-template-columns:1fr}.kristool-counters{grid-template-columns:1fr}.kristool-hero{padding:18px}}
+
+/* Build 0021.1: Spachtelpaket */
+.seg-vacation{background:#2f73c8}.seg-sick{background:#c53b3b}.seg-za{background:#d7a51f}.seg-holiday{background:#7d8790}.absence-bar-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:850;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.task-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}.task-tabs button{background:#fff;color:#111;border-color:#ccc}.task-tabs button.active{background:#27713d;color:#fff;border-color:#27713d;font-weight:800}
+.report-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-toolbar input{width:auto;min-width:160px}.copy-employee-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-top:10px;max-height:220px;overflow:auto}.copy-option{display:flex;gap:8px;align-items:center;background:#f7f7f7;border:1px solid #e2e2e2;border-radius:10px;padding:8px}.copy-option input{width:auto}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0021.0 · KRISTOOL Kontrollzentrum.</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0021.1 · Spachtelpaket 1.</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -163,7 +168,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   <div class="card">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
     <h3 style="margin:0">Leitstand heute</h3>
-    <button type="button" onclick="openYesterdayReport()">📄 Tagesreport gestern</button>
+    <div class="report-toolbar">
+      <button type="button" onclick="shiftReportDate(-1)" title="Vorheriger Tag">◀</button>
+      <button type="button" onclick="openYesterdayReport()">📄 Gestern</button>
+      <input id="dailyReportDate" type="date" onchange="openDailyReport(this.value)">
+      <button type="button" onclick="shiftReportDate(1)" title="Nächster Tag">▶</button>
+    </div>
   </div>
   <div id="controlAlerts" class="notice" style="display:none;margin:12px 0"></div>
   <div id="controlList"></div>
@@ -185,7 +195,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
       <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
     </div>
-    <div class="card"><h3>Offene Aufgaben</h3><div id="taskList"></div></div>
+    <div class="card"><h3>Aufgaben</h3><div class="task-tabs"><button id="taskTabNewest" class="active" onclick="setTaskFilter('newest')">Neueste</button><button id="taskTabOpen" onclick="setTaskFilter('open')">Offen</button><button id="taskTabDone" onclick="setTaskFilter('done')">Erledigt</button></div><div id="taskList"></div></div>
   </div>
 </section>
 
@@ -268,6 +278,18 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   </div>
 </div>
 
+<div id="copyModalBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="copyModalTitle">
+  <div class="segment-modal" style="width:min(720px,100%)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3 id="copyModalTitle" style="margin:0">Einteilung kopieren</h3><button class="secondary" onclick="closeCopyModal()">Schließen</button></div>
+    <div class="formgrid" style="margin-top:14px">
+      <div><label>Ziel</label><select id="copyMode" onchange="toggleCopyDate()"><option value="tomorrow">Morgen</option><option value="restweek">Restliche Woche</option><option value="nextweek">Nächste Woche, gleicher Wochentag</option><option value="date">Bestimmtes Datum</option></select></div>
+      <div id="copyDateWrap" style="display:none"><label>Datum</label><input id="copyTargetDate" type="date"></div>
+      <div class="full"><label>Mitarbeiter</label><div id="copyEmployeeGrid" class="copy-employee-grid"></div></div>
+    </div>
+    <div id="copyModalNote" class="small" style="margin-top:10px"></div>
+    <div class="actions"><button class="green" onclick="applyCopyAssignment()">Kopieren</button><button class="secondary" onclick="closeCopyModal()">Abbrechen</button></div>
+  </div>
+</div>
 <div id="employeeActionBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="employeeActionTitle">
   <div class="segment-modal" style="width:min(620px,100%)">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -285,7 +307,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
-window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()})});
+window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()});copyModalBackdrop.addEventListener('click',e=>{if(e.target===copyModalBackdrop)closeCopyModal()})});
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -328,7 +350,7 @@ async function loadAll(){
   masterVehicles=v.vehicles||[];
   document.getElementById('aDate').value=data.today;
   document.getElementById('chatDate').value=data.today;
-  document.getElementById('tDueDate').value=data.today;
+  document.getElementById('tDueDate').value=data.today;const reportDate=document.getElementById('dailyReportDate');if(reportDate&&!reportDate.value)reportDate.value=data.today;
   renderMasterData();
   renderWeek();renderControl();renderTasks();renderSystemCards();renderKristool();
   renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
@@ -502,7 +524,23 @@ function matrixCardList(rows){
 function setPlanningPerspective(value){planningPerspective=value==='site'?'site':'employee';renderPlanning()}
 function addDaysISO(date,days){const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+days);return iso(d)}
 function cloneAssignmentToDate(source,date){const duplicate=data.assignments.some(a=>a.date===date&&String(a.employeeId)===String(source.employeeId)&&String(a.jobId)===String(source.jobId)&&String(a.from||'')===String(source.from||''));if(!duplicate)data.assignments.push({...source,id:id(),date})}
-async function copyAssignment(assignmentId){const source=data.assignments.find(a=>a.id===assignmentId);if(!source)return;const choice=prompt(`Einteilung kopieren:\n1 = auf morgen\n2 = auf die restlichen Werktage dieser Woche\n3 = auf nächste Woche (gleicher Wochentag)\n4 = auf ein bestimmtes Datum`,'1');if(!choice)return;if(choice==='1')cloneAssignmentToDate(source,addDaysISO(source.date,1));else if(choice==='2'){const d=new Date(source.date+'T12:00:00');const weekday=d.getDay()||7;for(let i=1;i<=5-weekday;i++)cloneAssignmentToDate(source,addDaysISO(source.date,i))}else if(choice==='3')cloneAssignmentToDate(source,addDaysISO(source.date,7));else if(choice==='4'){const target=prompt('Datum im Format JJJJ-MM-TT',source.date);if(!/^\d{4}-\d{2}-\d{2}$/.test(String(target||''))){alert('Ungültiges Datum.');return}cloneAssignmentToDate(source,target)}else{return}await saveAssignments(true)}
+let copySourceAssignmentId='';
+function copyAssignment(assignmentId){
+  const source=data.assignments.find(a=>a.id===assignmentId);if(!source)return;
+  copySourceAssignmentId=assignmentId;copyMode.value='tomorrow';copyTargetDate.value=addDaysISO(source.date,1);toggleCopyDate();
+  copyEmployeeGrid.innerHTML=masterEmployees.map(e=>`<label class="copy-option"><input type="checkbox" class="copyEmployeeCheck" value="${esc(e.id)}" ${String(e.id)===String(source.employeeId)?'checked':''}><span>${esc(e.name)}</span></label>`).join('');
+  copyModalNote.textContent=`${source.employeeName} · ${source.jobName||cardMeta(source).label} · ${source.date}`;copyModalBackdrop.classList.add('open');
+}
+function toggleCopyDate(){copyDateWrap.style.display=copyMode.value==='date'?'':'none'}
+function closeCopyModal(){copyModalBackdrop.classList.remove('open');copySourceAssignmentId=''}
+async function applyCopyAssignment(){
+  const source=data.assignments.find(a=>a.id===copySourceAssignmentId);if(!source)return;
+  const employeeIds=[...document.querySelectorAll('.copyEmployeeCheck:checked')].map(x=>x.value);if(!employeeIds.length){copyModalNote.textContent='Bitte mindestens einen Mitarbeiter auswählen.';return}
+  let dates=[];if(copyMode.value==='tomorrow')dates=[addDaysISO(source.date,1)];else if(copyMode.value==='restweek'){const d=new Date(source.date+'T12:00:00');const weekday=d.getDay()||7;for(let i=1;i<=5-weekday;i++)dates.push(addDaysISO(source.date,i))}else if(copyMode.value==='nextweek')dates=[addDaysISO(source.date,7)];else{if(!/^\d{4}-\d{2}-\d{2}$/.test(copyTargetDate.value)){copyModalNote.textContent='Bitte ein gültiges Datum auswählen.';return}dates=[copyTargetDate.value]}
+  for(const employeeId of employeeIds){const employee=employeeById(employeeId);if(!employee)continue;for(const date of dates){data.assignments.push({...source,id:id(),date,employeeId:String(employee.id),employeeName:employee.name||String(employee.id)})}}
+  await saveAssignments(true);closeCopyModal();
+}
+
 function setPlanningView(view){planningView=view;renderPlanning()}
 function shiftPlanningPeriod(direction){
   const input=document.getElementById('aDate');
@@ -675,8 +713,8 @@ function renderDayBar(segments,dayStart,dayEnd){
     const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
     if(to<=from)continue;
     if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
-    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':'seg-lunch';
-    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':'Mittag'}`;
+    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':seg.type==='lunch'?'seg-lunch':seg.type==='vacation'?'seg-vacation':seg.type==='sick'?'seg-sick':seg.type==='za'?'seg-za':'seg-holiday';
+    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':seg.type==='lunch'?'Mittag':(seg.jobName||'Abwesenheit')}`;
     html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
     cursor=Math.max(cursor,to);
   }
@@ -800,7 +838,6 @@ function renderControl(){
   const alerts=[];
   if(unknownCount)alerts.push(`<span>🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}</span>`);
   if(regieCount)alerts.push(`<span>📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}</span>`);
-  if(openTaskCount)alerts.push(`<button type="button" class="task-alert-link" onclick="openTaskListModal()">📌 ${openTaskCount} offene Arbeit${openTaskCount===1?'':'en'}</button>`);
   controlAlerts.style.display=alerts.length?'block':'none';
   controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`:'';
   if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
@@ -810,7 +847,9 @@ function renderControl(){
     const meaningful=(s?.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type));
     const last=meaningful.at(-1),regie=latestRegie(s);
     const plans=planned.filter(x=>String(x.employeeId)===String(a.employeeId));
-    const segments=employeeDaySegments(a.employeeId,today,s);
+    let segments=employeeDaySegments(a.employeeId,today,s);
+    const absencePlan=plans.find(x=>['urlaub','krank','za','feiertag','betriebsurlaub'].includes(cardTypeOf(x)));
+    if(absencePlan){const win=modelDayWindow(a.employeeId,today);segments=[{type:cardTypeOf(absencePlan)==='krank'?'sick':cardTypeOf(absencePlan)==='urlaub'?'vacation':cardTypeOf(absencePlan)==='za'?'za':'holiday',from:win.fromMin,to:win.toMin,fromText:win.from,toText:win.to,jobName:cardMeta(absencePlan).label}]}
     const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
     const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
     const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
@@ -821,7 +860,7 @@ function renderControl(){
     const lastEvent=Math.max(0,...segments.map(x=>x.to||0));
     const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
     const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
-    const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':'Mittag'}`).join('<br>');
+    const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':x.type==='lunch'?'Mittag':esc(x.jobName||'Abwesenheit')}`).join('<br>');
     return `<div class="control-card" style="cursor:pointer" role="button" tabindex="0" onclick="openEmployeeActionModal('${esc(a.employeeId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(a.employeeId)}')}"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><div style="display:flex;align-items:center;gap:8px"><button type="button" class="secondary" style="padding:6px 9px" onclick="event.stopPropagation();openEmployeeActionModal('${esc(a.employeeId)}')">Öffnen</button><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
   }).join('')}</div>`;
 }
@@ -855,11 +894,16 @@ async function addTask(){
     if(button){button.disabled=false;button.textContent=oldLabel||'+ Aufgabe'}
   }
 }
+let taskFilter='newest';
+function setTaskFilter(value){taskFilter=value;['Newest','Open','Done'].forEach(x=>document.getElementById('taskTab'+x)?.classList.toggle('active',value===x.toLowerCase()));renderTasks()}
 function taskStatusLabel(t){return t.status==='done'?'Erledigt':'Offen'}
 function taskDueLabel(date){if(!date)return '–';try{return new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(date+'T12:00:00'))}catch{return date}}
 function taskIsOverdue(t){return t.status!=='done'&&t.dueDate&&t.dueDate<(data.today||new Date().toISOString().slice(0,10))}
 function renderTasks(){
-  const tasks=[...(data.tasks||[])].sort((a,b)=>(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  let tasks=[...(data.tasks||[])];
+  if(taskFilter==='open')tasks=tasks.filter(t=>t.status!=='done');
+  if(taskFilter==='done')tasks=tasks.filter(t=>t.status==='done');
+  tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
     const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
     return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
@@ -933,12 +977,9 @@ function updateScheduleDay(smId,dayIdx,field,value){const sm=(data.scheduleModel
 function removeScheduleModel(modelId){if(!confirm('Arbeitsmodell wirklich löschen?'))return;data.scheduleModels=(data.scheduleModels||[]).filter(sm=>sm.id!==modelId);renderScheduleModels()}
 async function saveScheduleModelsData(){const normalized=(data.scheduleModels||[]).map(sm=>({...sm,days:(sm.days||[]).map(d=>{const x=scheduleDayDefaults(d),m=modelDayMetrics(x);return {...x,pauseMinutes:Math.round(m.breaks*60),shouldHours:Number(m.net.toFixed(2))}})}));const r=await api('/kristine/api/schedule-models',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:normalized})});data.scheduleModels=r.models||[];renderScheduleModels();setSavedNote('modelSavedNote','✓ gespeichert');document.getElementById('cfg-models').classList.remove('open')}
 
-function openYesterdayReport(){
-  const d=new Date();
-  d.setDate(d.getDate()-1);
-  const date=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
-  window.open(url('/admin/daily-report/'+date+'?rebuild=1'),'_blank','noopener');
-}
+function openDailyReport(date){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||'')))return;const input=document.getElementById('dailyReportDate');if(input)input.value=date;window.open(url('/admin/daily-report/'+date+'?rebuild=1'),'_blank','noopener')}
+function openYesterdayReport(){const d=new Date();d.setDate(d.getDate()-1);openDailyReport(iso(d))}
+function shiftReportDate(days){const input=document.getElementById('dailyReportDate');const base=input?.value||data.today||iso(new Date());const d=new Date(base+'T12:00:00');d.setDate(d.getDate()+days);openDailyReport(iso(d))}
 document.getElementById('adminLink').href=url('/admin/ui');
 loadAll().catch(e=>alert(e.message));
 setInterval(()=>{ if(document.getElementById('control')?.classList.contains('active')) loadSilent().catch(()=>{}); else renderControl(); },60000);
