@@ -1,3 +1,4 @@
+// Datei: daily-report.js · Build 0021.1
 "use strict";
 
 const fs = require("fs");
@@ -171,12 +172,13 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
     for (const employee of employees) {
       const materials = employee.reviews.filter((entry) => entry.category === "material");
+      const materialPhotos = materials.filter((entry) => entry.source === "image" || entry.file);
       const photos = employee.reviews.filter((entry) => entry.category === "photo");
       const regie = employee.reviews.filter((entry) => entry.category === "regie");
       const blockLines = employee.blocks.slice(0, 6);
       const materialText = materials.map((entry) => entry.content || entry.transcript || (entry.source === "image" ? "Materialfoto" : "Material")).filter(Boolean).join("; ");
       const regieText = regie.map((entry) => entry.content || entry.transcript || "Regie vorgemerkt").filter(Boolean).join("; ");
-      const approxHeight = 44 + blockLines.length * 14 + (materialText ? 28 : 0) + (regieText ? 24 : 0) + (photos.length ? 74 : 0);
+      const approxHeight = 44 + blockLines.length * 14 + (materialText ? 28 : 0) + (materialPhotos.length ? 62 : 0) + (regieText ? 24 : 0) + (photos.length ? 74 : 0);
       if (y - approxHeight < 42) newPage();
 
       page.drawText(employee.employeeName, { x: margin, y, size: 13, font: bold });
@@ -198,6 +200,24 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         const lines = wrap(materialText, 92).slice(0, 2);
         lines.forEach((line, idx) => page.drawText(line, { x: margin + 50, y: y - idx * 12, size: 8.5, font, maxWidth: PAGE_W - margin * 2 - 50 }));
         y -= Math.max(14, lines.length * 12);
+      }
+
+      if (materialPhotos.length) {
+        page.drawText(`Materialfotos: ${materialPhotos.length}`, { x: margin, y, size: 9, font: bold });
+        let x = margin + 82;
+        for (const materialPhoto of materialPhotos.slice(0, 5)) {
+          const bytes = await imageBytes(materialPhoto);
+          if (!bytes) continue;
+          try {
+            const img = await pdf.embedJpg(bytes);
+            const boxW = 72, boxH = 48;
+            const scale = Math.min(boxW / img.width, boxH / img.height);
+            const w = img.width * scale, h = img.height * scale;
+            page.drawImage(img, { x, y: y - 51 + (boxH - h) / 2, width: w, height: h });
+            x += 82;
+          } catch {}
+        }
+        y -= 56;
       }
 
       if (regieText) {
