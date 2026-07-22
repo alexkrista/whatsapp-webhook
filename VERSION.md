@@ -1,4 +1,8 @@
-Build 0022.0
-Name: Die Zeit ist die Wahrheit  
-Datum: 2026-07-22
-Leitstand als Tagesbuchungs-Editor, Zeitsegmente als gemeinsame Datenbasis und automatische Neuzuordnung von Fotos, Material und Regie.
+KRISTA 0022.1
+Name: Planungstisch
+Sticky Planungskopf
+kompakte UP-Karten
+Pool „Neue Aufträge“
+Pool „Laufende Baustellen“
+Drag & Drop kopiert statt verschiebt
+Zielstunden werden aus dem Ziel-Arbeitsmodell berechnet
