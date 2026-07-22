@@ -1,5 +1,3 @@
-const cron = require("node-cron");
-// Datei: server.js · Build 0020.5
 // server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
@@ -50,7 +48,6 @@ const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
-const { registerDailyReport } = require("./daily-report");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -101,6 +98,44 @@ const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || "";
 // gespeichert, damit ein Render-Neustart sie nicht verliert.
 const PROTOCOL_BY_SENDER = {}; // { wa_id: { siteCode, startedAt } }
 const LATE_TIME_PENDING = {};  // Mitarbeiter wartet auf ungefähre Ankunftszeit
+const PROTOCOL_START_PENDING = {}; // Chef hat "protokoll"/"proto" gestartet und wählt die Baustelle
+
+function digitsOnly(value) { return String(value || "").replace(/\D/g, ""); }
+function isChefSender(sender) {
+  const chef = digitsOnly(CHEF_PHONE);
+  const from = digitsOnly(sender);
+  if (!chef || !from) return false;
+  return from === chef || from.endsWith(chef) || chef.endsWith(from);
+}
+function isProtocolCommand(text) {
+  return /^(proto|protokoll)$/i.test(String(text || "").trim());
+}
+function jobIdFromName(name) {
+  return normalizeSiteCode(String(name || ""))
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || `Baustelle_${Date.now()}`;
+}
+async function findProtocolJobs(query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return [];
+  const entries = await fsp.readdir(DATA_DIR).catch(() => []);
+  const jobs = [];
+  for (const jobId of entries) {
+    if (!jobId || ["unknown", "_unassigned", "_kristine"].includes(jobId) || !isSafeJobId(jobId)) continue;
+    if (!fs.existsSync(path.join(DATA_DIR, jobId))) continue;
+    const meta = await readJobMeta(jobId);
+    const name = String(meta.name || "");
+    const idLower = String(jobId).toLowerCase();
+    const nameLower = name.toLowerCase();
+    let score = 0;
+    if (idLower === needle || nameLower === needle) score = 3;
+    else if (idLower.startsWith(needle) || nameLower.startsWith(needle)) score = 2;
+    else if (idLower.includes(needle) || nameLower.includes(needle)) score = 1;
+    if (score) jobs.push({ jobId, name: name || jobId, score });
+  }
+  return jobs.sort((a,b) => b.score-a.score || a.name.localeCompare(b.name, "de"));
+}
 
 function protocolSessionsPath() {
   return path.join(DATA_DIR, "_kristine", "protocol-sessions.json");
@@ -140,16 +175,6 @@ function ensureDirSync(p) {
 async function ensureDir(p) {
   await fsp.mkdir(p, { recursive: true });
 }
-async function readJson(file, fallback) {
-  try {
-    const raw = await fsp.readFile(file, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    if (error && error.code === "ENOENT") return fallback;
-    try { return fallback; } catch { return fallback; }
-  }
-}
-
 async function appendJsonl(filePath, obj) {
   await ensureDir(path.dirname(filePath));
   await fsp.appendFile(filePath, JSON.stringify(obj) + "\n", "utf8");
@@ -1221,7 +1246,7 @@ async function employeeFromWhatsAppSender(sender) {
 
 function cleanWhatsAppButtons(buttons) {
   const source = Array.isArray(buttons) ? buttons : [];
-  return source.slice(0, 10).map((title, index) => {
+  return source.slice(0, 3).map((title, index) => {
     const label = String(title || "").trim().slice(0, 20);
     let id = `kristine_${index}`;
     const lower = label.toLowerCase();
@@ -1234,10 +1259,6 @@ function cleanWhatsAppButtons(buttons) {
     else if (lower === "weiter") id = "weiter";
     else if (lower.includes("fertig")) id = "fertig";
     else if (lower.includes("navigation")) id = "navigation";
-    else if (lower.includes("baustelle wechseln") || lower === "wechseln") id = "baustelle_wechseln";
-    else if (lower === "passt") id = "passt";
-    else if (lower === "ändern" || lower === "aendern") id = "aendern";
-    else if (lower === "abbrechen") id = "abbrechen";
     return { id, title: label || `Option ${index + 1}` };
   }).filter((button) => button.title);
 }
@@ -1247,56 +1268,30 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   if (!phoneNumberId) throw new Error("WhatsApp phone_number_id missing in webhook metadata");
 
   const cleanedButtons = cleanWhatsAppButtons(buttons);
-  let payload;
-  if (cleanedButtons.length > 3) {
-    // WhatsApp erlaubt höchstens drei direkte Antwortbuttons. Bei vier oder mehr
-    // Aktionen verwenden wir deshalb eine kompakte Auswahlliste.
-    payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: String(to),
-      type: "interactive",
-      interactive: {
-        type: "list",
-        body: { text: String(reply || "").slice(0, 1024) },
-        action: {
-          button: "Aktion wählen",
-          sections: [{
-            title: "Arbeitszeit",
-            rows: cleanedButtons.map((button) => ({
-              id: button.id,
-              title: button.title,
+  const payload = cleanedButtons.length
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: String(to),
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: String(reply || "").slice(0, 1024) },
+          action: {
+            buttons: cleanedButtons.map((button) => ({
+              type: "reply",
+              reply: { id: button.id, title: button.title },
             })),
-          }],
+          },
         },
-      },
-    };
-  } else if (cleanedButtons.length) {
-    payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: String(to),
-      type: "interactive",
-      interactive: {
-        type: "button",
-        body: { text: String(reply || "").slice(0, 1024) },
-        action: {
-          buttons: cleanedButtons.map((button) => ({
-            type: "reply",
-            reply: { id: button.id, title: button.title },
-          })),
-        },
-      },
-    };
-  } else {
-    payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: String(to),
-      type: "text",
-      text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
-    };
-  }
+      }
+    : {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: String(to),
+        type: "text",
+        text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
+      };
 
   return fetchJson(`https://graph.facebook.com/v22.0/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: "POST",
@@ -1318,22 +1313,6 @@ kristine = registerKristine(app, {
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID
 });
 
-// ===================== TAGESREPORT =====================
-const dailyReport = registerDailyReport(app, {
-  dataDir: DATA_DIR,
-  requireAdmin,
-});
-
-cron.schedule("30 5 * * *", async () => {
-  try {
-    const date = dailyReport.yesterdayISO();
-    const result = await dailyReport.generate(date);
-    console.log(`✅ Tagesreport ${date} erzeugt (${result.siteReports.length} Baustellen).`);
-  } catch (error) {
-    console.error("❌ Tagesreport automatisch fehlgeschlagen:", error?.message || error);
-  }
-}, { timezone: "Europe/Vienna" });
-
 // ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
@@ -1353,8 +1332,79 @@ app.post("/webhook", async (req, res) => {
       const date = isoDateFromWhatsAppTs(tsSec);
 
       const textOrCaption = parseCaptionTextFromMessage(msg);
-      const protocolStart = parseProtocolStart(textOrCaption);
       let protocolSite = activeProtocol(sender);
+
+      // Chefmodus: "protokoll" oder "proto" startet einen geführten Baustellenprotokoll-Dialog.
+      if (!protocolSite && msg.type === "text" && isChefSender(sender) && isProtocolCommand(textOrCaption)) {
+        PROTOCOL_START_PENDING[sender] = { startedAt: Date.now() };
+        try {
+          await sendWhatsAppKristineReply({
+            phoneNumberId,
+            to: sender,
+            reply: "📝 Baustellenprotokoll starten.\nFür welche Baustelle ist das Protokoll?\nBitte Name oder Baustellennummer schreiben. Mit ‚abbrechen‘ beenden."
+          });
+        } catch {}
+        continue;
+      }
+
+      if (!protocolSite && msg.type === "text" && isChefSender(sender) && PROTOCOL_START_PENDING[sender]) {
+        const answer = String(textOrCaption || "").trim();
+        const lowerAnswer = answer.toLowerCase();
+        if (["abbrechen", "stopp", "stop"].includes(lowerAnswer)) {
+          delete PROTOCOL_START_PENDING[sender];
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Protokollstart abgebrochen." }); } catch {}
+          continue;
+        }
+
+        const newMatch = answer.match(/^neu(?:e baustelle)?\s+(.+)$/i);
+        if (newMatch) {
+          const name = newMatch[1].trim();
+          let jobId = jobIdFromName(name);
+          let suffix = 2;
+          while (fs.existsSync(path.join(DATA_DIR, jobId))) jobId = `${jobIdFromName(name)}_${suffix++}`;
+          await ensureDir(path.join(DATA_DIR, jobId));
+          await writeJobMeta(jobId, { name, status: "Laufend", createdAt: new Date().toISOString() });
+          await startProtocol(sender, jobId);
+          delete PROTOCOL_START_PENDING[sender];
+          protocolSite = jobId;
+          try {
+            await sendWhatsAppKristineReply({
+              phoneNumberId, to: sender,
+              reply: `✅ Neue Baustelle „${name}“ angelegt.\n📍 Baustellenprotokoll ${jobId} gestartet.\nTexte, Fotos, Audios und Dokumente werden zugeordnet. Mit pdf abschließen.`
+            });
+          } catch {}
+          continue;
+        }
+
+        const matches = await findProtocolJobs(answer);
+        if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score)) {
+          const selected = matches[0];
+          await startProtocol(sender, selected.jobId);
+          delete PROTOCOL_START_PENDING[sender];
+          protocolSite = selected.jobId;
+          try {
+            await sendWhatsAppKristineReply({
+              phoneNumberId, to: sender,
+              reply: `✅ Baustelle „${selected.name}“ gefunden.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit pdf abschließen.`
+            });
+          } catch {}
+          continue;
+        }
+        if (matches.length > 1) {
+          const choices = matches.slice(0, 6).map((x,i) => `${i+1}. ${x.name} (#${x.jobId})`).join("\n");
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `Mehrere Baustellen passen:\n${choices}\nBitte Name oder Nummer genauer schreiben.` }); } catch {}
+          continue;
+        }
+        try {
+          await sendWhatsAppKristineReply({
+            phoneNumberId, to: sender,
+            reply: `Baustelle „${answer}“ nicht gefunden.\nBitte anders schreiben oder mit „neu ${answer}“ direkt neu anlegen.`
+          });
+        } catch {}
+        continue;
+      }
+
+      const protocolStart = parseProtocolStart(textOrCaption);
 
       // 1) @baustelle hat IMMER Vorrang vor dem normalen Mitarbeitermodus.
       if (protocolStart) {
@@ -1394,66 +1444,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // 3) Medien im laufenden Tagesabschluss (Material, Fotos, Regie)
-      if (!protocolSite && ["image", "audio", "voice"].includes(msg.type)) {
-        const employee = await employeeFromWhatsAppSender(sender);
-        if (employee) {
-          try {
-            const pending = await kristine.getPendingState(employee.id);
-            const acceptsMedia = ["collect_material", "collect_photos", "collect_regie"].includes(pending?.type);
-            if (acceptsMedia) {
-              const mediaId = msg.image?.id || msg.audio?.id || msg.voice?.id || null;
-              if (mediaId) {
-                const { buf, mime } = await downloadWhatsAppMedia(mediaId);
-                const safeEmployee = String(employee.id).replace(/[^A-Za-z0-9_-]/g, "_");
-                const reviewDir = path.join(DATA_DIR, "_kristine", "review-media", date, safeEmployee);
-                await ensureDir(reviewDir);
-                const isImage = msg.type === "image";
-                const ext = isImage ? ".jpg" : ".ogg";
-                const filename = `${String(tsSec || Math.floor(Date.now() / 1000))}_${mediaId}${ext}`;
-                const fullPath = path.join(reviewDir, filename);
-                await fsp.writeFile(fullPath, buf);
-
-                let transcript = "";
-                if (!isImage && OPENAI_API_KEY) {
-                  try {
-                    transcript = await transcribeAudio({
-                      audioBuffer: buf,
-                      filename,
-                      mimeType: mime || "audio/ogg",
-                    });
-                    try { transcript = await polishGermanTranscript(transcript); } catch {}
-                  } catch (e) {
-                    console.error("❌ Tagesabschluss-Audio konnte nicht transkribiert werden:", e?.message || e);
-                  }
-                }
-
-                const result = await kristine.handleMedia({
-                  employeeId: employee.id,
-                  employeeName: employee.name,
-                  date,
-                  mediaType: isImage ? "image" : "audio",
-                  file: path.relative(DATA_DIR, fullPath).replace(/\\/g, "/"),
-                  transcript,
-                });
-                if (result?.handled) {
-                  await sendWhatsAppKristineReply({
-                    phoneNumberId,
-                    to: sender,
-                    reply: result.reply,
-                    buttons: result.buttons,
-                  });
-                  continue;
-                }
-              }
-            }
-          } catch (e) {
-            console.error("❌ Kristine Tagesabschluss-Medium fehlgeschlagen:", e?.message || e);
-          }
-        }
-      }
-
-      // 4) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
+      // 3) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
       const kristineText = whatsappTextFromMessage(msg);
       if (!protocolSite && kristineText) {
         const employee = await employeeFromWhatsAppSender(sender);
@@ -2060,80 +2051,9 @@ async function readLogStats(dayDir) {
   return { items, images, audio, pdfs };
 }
 
-function normalizeJobKey(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
-}
-
-function eventTimestamp(event) {
-  const created = Date.parse(String(event?.createdAt || event?.timestamp || ""));
-  if (Number.isFinite(created)) return new Date(created).toISOString();
-  const date = String(event?.date || "");
-  const at = /^\d{1,2}:\d{2}$/.test(String(event?.at || "")) ? String(event.at) : "00:00";
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T${at.padStart(5, "0")}:00` : "";
-}
-
-async function summarizeKristineJobActivity(jobId, meta = {}) {
-  const root = path.join(DATA_DIR, "_kristine");
-  const [timeEvents, reviewEntries] = await Promise.all([
-    readJsonArrayFile(path.join(root, "time-events.json")),
-    readJsonArrayFile(path.join(root, "day-review-entries.json")),
-  ]);
-  const aliases = new Set([
-    normalizeJobKey(jobId),
-    normalizeJobKey(meta.name),
-    normalizeJobKey(`#${jobId}`),
-  ].filter(Boolean));
-  const matches = (row) => {
-    const idKey = normalizeJobKey(row?.jobId);
-    const nameKey = normalizeJobKey(row?.jobName);
-    return aliases.has(idKey) || aliases.has(nameKey);
-  };
-
-  const grouped = new Map();
-  let latestActivity = "";
-  for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
-    if (!matches(event)) continue;
-    const ts = eventTimestamp(event);
-    if (ts && ts > latestActivity) latestActivity = ts;
-    const key = `${event.employeeId || event.employeeName || "?"}|${event.date || ""}`;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(event);
-  }
-  for (const entry of Array.isArray(reviewEntries) ? reviewEntries : []) {
-    if (!matches(entry)) continue;
-    const ts = eventTimestamp(entry);
-    if (ts && ts > latestActivity) latestActivity = ts;
-  }
-
-  let actualHours = 0;
-  const hm = (value) => {
-    const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
-    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
-  };
-  for (const events of grouped.values()) {
-    const sorted = events
-      .map((event, index) => ({ ...event, _index: index, _minutes: hm(event.at) }))
-      .filter((event) => event._minutes !== null)
-      .sort((a, b) => a._minutes - b._minutes || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || a._index - b._index);
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const event = sorted[i];
-      const next = sorted[i + 1];
-      if (!["start", "weiter"].includes(String(event.type || "").toLowerCase())) continue;
-      if (!matches(event) || next._minutes < event._minutes) continue;
-      actualHours += (next._minutes - event._minutes) / 60;
-    }
-  }
-  return { actualHours, latestActivity };
-}
-
-async function summarizeJobHours(jobId, meta = {}) {
+async function summarizeJobHours(jobId) {
   const days = await listDaysForJob(jobId);
-  let regieActualHours = 0;
+  let actualHours = 0;
   let actualRegieHours = 0;
   for (const day of days) {
     const p = regiePathForDay(jobId, day);
@@ -2141,17 +2061,12 @@ async function summarizeJobHours(jobId, meta = {}) {
     try {
       const regie = JSON.parse(await fsp.readFile(p, "utf8"));
       for (const employee of Array.isArray(regie.employees) ? regie.employees : []) {
-        regieActualHours += Math.max(0, Number(employee.totalHours || 0));
+        actualHours += Math.max(0, Number(employee.totalHours || 0));
         actualRegieHours += Math.max(0, Number(employee.regieHours || 0));
       }
     } catch {}
   }
-  const kristine = await summarizeKristineJobActivity(jobId, meta);
-  return {
-    actualHours: kristine.actualHours > 0 ? kristine.actualHours : regieActualHours,
-    actualRegieHours,
-    latestActivity: kristine.latestActivity || "",
-  };
+  return { actualHours, actualRegieHours };
 }
 
 function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
@@ -2176,6 +2091,40 @@ function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
   };
 }
 
+// Admin API: neue Baustelle anlegen
+app.post("/admin/api/jobs", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const body = req.body || {};
+    const name = String(body.name || "").trim();
+    if (!name) return res.status(400).json({ ok: false, error: "Baustellenname fehlt." });
+
+    let jobId = String(body.jobId || "").trim() || jobIdFromName(name);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Ungültige Baustellennummer. Erlaubt sind Buchstaben, Zahlen, _ und -." });
+    if (fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(409).json({ ok: false, error: `Baustelle #${jobId} existiert bereits.` });
+
+    await ensureDir(path.join(DATA_DIR, jobId));
+    await writeJobMeta(jobId, {
+      name,
+      status: String(body.status || "Angebot"),
+      street: String(body.street || ""),
+      houseNumber: String(body.houseNumber || ""),
+      postalCode: String(body.postalCode || ""),
+      city: String(body.city || ""),
+      addressExtra: String(body.addressExtra || ""),
+      contactName: String(body.contactName || ""),
+      contactPhone: String(body.contactPhone || ""),
+      notes: String(body.notes || ""),
+      startDate: String(body.startDate || ""),
+      createdAt: new Date().toISOString()
+    });
+    res.status(201).json({ ok: true, jobId, name });
+  } catch (error) {
+    console.error("Create job failed:", error);
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
 // Admin API: list jobs
 app.get("/admin/api/jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -2188,7 +2137,6 @@ app.get("/admin/api/jobs", async (req, res) => {
       .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
       .filter((j) => fs.existsSync(path.join(DATA_DIR, j)));
 
-    const allTasks = await readJson(path.join(DATA_DIR, "_kristine", "tasks.json"), []);
     const jobs = [];
     for (const jobId of filtered) {
       const days = await listDaysForJob(jobId);
@@ -2208,13 +2156,9 @@ app.get("/admin/api/jobs", async (req, res) => {
       }
 
       const meta = await readJobMeta(jobId);
-      const hours = await summarizeJobHours(jobId, meta);
+      const hours = await summarizeJobHours(jobId);
       const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
       const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
-
-      const jobTasks = allTasks.filter((t) => String(t.jobId || "") === String(jobId));
-      const openTasks = jobTasks.filter((t) => t.status !== "done");
-      const doneTasks = jobTasks.filter((t) => t.status === "done");
 
       jobs.push({
         jobId,
@@ -2239,14 +2183,10 @@ app.get("/admin/api/jobs", async (req, res) => {
         totalStats,
         daysCount: days.length,
         latestDay,
-        latestActivity: hours.latestActivity || (latestDay ? `${latestDay}T00:00:00` : ""),
         itemsLastDay: stats.items,
         imagesLastDay: stats.images,
         audioLastDay: stats.audio,
         pdfsLastDay: stats.pdfs,
-        tasks: jobTasks,
-        openTaskCount: openTasks.length,
-        doneTaskCount: doneTasks.length,
       });
     }
 
@@ -2322,31 +2262,7 @@ app.get("/admin/api/job/:jobId/history", async (req, res) => {
   try {
     const jobId = String(req.params.jobId);
     if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
-    const events = await readJobHistory(jobId, req.query.limit || 250);
-    const tasks = await readJson(path.join(DATA_DIR, "_kristine", "tasks.json"), []);
-    const taskEvents = tasks
-      .filter((t) => String(t.jobId || "") === String(jobId))
-      .flatMap((t) => {
-        const created = t.createdAt ? [{
-          at: t.createdAt,
-          type: "task_created",
-          title: "Offene Arbeit erstellt",
-          detail: `${t.title}${t.assigneeName ? ` · Zuständig: ${t.assigneeName}` : ""}`,
-          source: t.creatorName || "Chef / Büro",
-        }] : [];
-        const completed = t.status === "done" && t.completedAt ? [{
-          at: t.completedAt,
-          type: "task_done",
-          title: "Offene Arbeit erledigt",
-          detail: `${t.title}${t.completedByName ? ` · Erledigt von: ${t.completedByName}` : ""}`,
-          source: "Aufgaben",
-        }] : [];
-        return [...created, ...completed];
-      });
-    const merged = [...events, ...taskEvents]
-      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))
-      .slice(0, Math.max(1, Math.min(1000, Number(req.query.limit || 250))));
-    res.json({ ok: true, jobId, events: merged });
+    res.json({ ok: true, jobId, events: await readJobHistory(jobId, req.query.limit || 250) });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -2744,47 +2660,6 @@ async function readWorktimeModels() {
     return DEFAULT_WORKTIME_MODELS;
   }
 }
-
-function scheduleModelToWorktimeModel(model = {}) {
-  const dayIndex = { Sonntag: 0, Montag: 1, Dienstag: 2, Mittwoch: 3, Donnerstag: 4, Freitag: 5, Samstag: 6 };
-  const weekdays = {};
-  for (const day of Array.isArray(model.days) ? model.days : []) {
-    const idx = dayIndex[String(day.dayName || "")];
-    if (idx === undefined) continue;
-    const pause = Math.max(0, Number(day.pauseMinutes || 0));
-    const otherBreakMinutes = Math.min(15, pause);
-    const lunchBreakMinutes = Math.max(0, pause - otherBreakMinutes);
-    const from = String(day.from || "").slice(0, 5);
-    const to = String(day.to || "").slice(0, 5);
-    let targetHours = 0;
-    if (day.isWorkDay !== false && /^\d{2}:\d{2}$/.test(from) && /^\d{2}:\d{2}$/.test(to)) {
-      const [fh, fm] = from.split(":").map(Number), [th, tm] = to.split(":").map(Number);
-      targetHours = Math.max(0, ((th * 60 + tm) - (fh * 60 + fm) - pause) / 60);
-    }
-    weekdays[String(idx)] = day.isWorkDay === false
-      ? { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0 }
-      : { from, to, lunchBreakMinutes, otherBreakMinutes, targetHours };
-  }
-  return {
-    id: String(model.id || uid("model")).slice(0, 80),
-    name: String(model.name || "Arbeitsmodell").trim().slice(0, 140),
-    active: model.active !== false,
-    description: "Arbeitsmodell aus Kristine",
-    seasons: [{ id: "all-year", name: "Ganzjährig", months: [1,2,3,4,5,6,7,8,9,10,11,12], weekdays }]
-  };
-}
-async function readUnifiedWorktimeModels() {
-  const legacy = await readWorktimeModels();
-  let scheduleModels = [];
-  try {
-    const p = path.join(DATA_DIR, "_kristine", "schedule-models.json");
-    const parsed = JSON.parse(await fsp.readFile(p, "utf8"));
-    if (Array.isArray(parsed)) scheduleModels = parsed.map(scheduleModelToWorktimeModel);
-  } catch {}
-  const byId = new Map();
-  for (const model of [...scheduleModels, ...legacy]) if (model?.id && !byId.has(String(model.id))) byId.set(String(model.id), model);
-  return [...byId.values()];
-}
 function scheduleForDate(model, dateStr) {
   const d = new Date(String(dateStr) + "T12:00:00");
   if (Number.isNaN(d.getTime())) return null;
@@ -2887,7 +2762,7 @@ app.delete("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))
 app.get("/admin/api/worktime-models", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const models = await readUnifiedWorktimeModels();
+    const models = await readWorktimeModels();
     res.json({ ok: true, models });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -2898,7 +2773,7 @@ app.get("/admin/api/worktime-models/:modelId/schedule", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const date = String(req.query.date || todayISO());
-    const models = await readUnifiedWorktimeModels();
+    const models = await readWorktimeModels();
     const model = models.find(m => String(m.id) === String(req.params.modelId));
     if (!model) return res.status(404).json({ ok: false, error: "Arbeitszeitmodell nicht gefunden" });
     res.json({ ok: true, schedule: scheduleForDate(model, date) });
@@ -3116,10 +2991,7 @@ app.post("/admin/api/morning-status/test", async (req, res) => {
   try {
     const date = String(req.body?.date || req.query.date || todayISO());
     const type = String(req.body?.type || req.query.type || "8");
-    const result = type === "7" ? await morningStatus.runSevenOClock(date, true)
-      : type === "lunch" ? await morningStatus.runLunchAutomation(date, String(req.body?.time || req.query.time || "12:35"))
-      : type === "end" ? await morningStatus.runDayEndCheck(date, true)
-      : await morningStatus.runEightOClock(date, true);
+    const result = type === "7" ? await morningStatus.runSevenOClock(date, true) : await morningStatus.runEightOClock(date, true);
     res.json({ ok: true, type, date, result });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
