@@ -297,11 +297,21 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
     </div>
     <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
-    <div id="employeeActionNote" class="task-done-note"></div>
-    <div class="actions" style="margin-top:14px">
-      <button type="button" class="green" id="employeeActionAsk" onclick="sendEmployeeDayEndCheck()">Arbeitest du noch? senden</button>
-      <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Alles OK</button>
+    <div class="formgrid" style="margin-top:12px">
+      <div><label>Uhrzeit</label><input id="employeeActionTime" type="time"></div>
+      <div><label>Baustelle</label><select id="employeeActionJob"><option value="">– aktuelle Einteilung –</option></select></div>
     </div>
+    <div class="small" style="margin-top:10px;font-weight:800">Eingreifen / Aktion wählen</div>
+    <div class="actions" style="margin-top:8px">
+      <button type="button" class="green" onclick="runEmployeeManualAction('start')">▶ Arbeitsbeginn</button>
+      <button type="button" class="secondary" onclick="runEmployeeManualAction('pause')">☕ Pause</button>
+      <button type="button" class="secondary" onclick="runEmployeeManualAction('lunch')">🍴 Mittag</button>
+      <button type="button" class="green" onclick="runEmployeeManualAction('resume')">▶ Weiter / Baustelle wechseln</button>
+      <button type="button" class="danger" onclick="runEmployeeManualAction('end')">■ Feierabend</button>
+      <button type="button" class="secondary" id="employeeActionAsk" onclick="sendEmployeeDayEndCheck()">💬 Arbeitest du noch?</button>
+    </div>
+    <div id="employeeActionNote" class="task-done-note" style="margin-top:10px"></div>
+    <div class="small" style="margin-top:8px">Jeder Eingriff wird mit Uhrzeit und Quelle „Büro“ protokolliert.</div>
   </div>
 </div>
 <script>
@@ -725,6 +735,7 @@ function renderDayBar(segments,dayStart,dayEnd){
 
 let selectedControlEmployeeId='';
 function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';}
+function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
 function openEmployeeActionModal(employeeId){
   const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));
   const state=data.states?.[employeeId]||{mode:'idle'};
@@ -734,13 +745,31 @@ function openEmployeeActionModal(employeeId){
   const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
   const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
   const currentPlan=plans.find(x=>String(state.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+  const lastMeaningful=(state.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type)).at(-1);
   selectedControlEmployeeId=String(employeeId);
   employeeActionTitle.textContent=employee?.name||state.employeeName||String(employeeId);
-  employeeActionInfo.innerHTML=`<strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><strong>Baustelle:</strong> ${esc(currentPlan?.jobName||'Nicht eingeteilt')}<br><strong>Arbeitszeit heute:</strong> ${esc(durationText(workMinutes))}<br><strong>Pause/Mittag:</strong> ${esc(durationText(breakMinutes))}`;
+  employeeActionInfo.innerHTML=`<strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><strong>Baustelle:</strong> ${esc(currentPlan?.jobName||'Nicht eingeteilt')}<br><strong>Arbeitszeit heute:</strong> ${esc(durationText(workMinutes))}<br><strong>Pause/Mittag:</strong> ${esc(durationText(breakMinutes))}<br><strong>Letzte Aktion:</strong> ${esc(lastMeaningful?.detail||'–')}`;
+  employeeActionTime.value=currentViennaHM();
+  employeeActionJob.innerHTML='<option value="">– aktuelle Einteilung –</option>'+plans.map(p=>`<option value="${esc(p.jobId||'')}" data-name="${esc(p.jobName||'')}">${esc(p.jobName||p.jobId||'Baustelle')}</option>`).join('');
+  if(currentPlan?.jobId)employeeActionJob.value=String(currentPlan.jobId);
   employeeActionNote.textContent='';
-  employeeActionAsk.disabled=!["working","pause","lunch"].includes(state.mode);
-  employeeActionAsk.textContent=employeeActionAsk.disabled?'Nicht mehr aktiv':'Arbeitest du noch? senden';
+  employeeActionAsk.disabled=!['working','pause','lunch'].includes(state.mode);
+  employeeActionAsk.textContent=employeeActionAsk.disabled?'Nicht aktiv':'💬 Arbeitest du noch?';
   employeeActionBackdrop.classList.add('open');
+}
+async function runEmployeeManualAction(action){
+  if(!selectedControlEmployeeId)return;
+  const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
+  const option=employeeActionJob.selectedOptions[0];
+  const labels={start:'Arbeitsbeginn',pause:'Pause',lunch:'Mittag',resume:'Weiter / Baustelle wechseln',end:'Feierabend'};
+  if(!confirm(`${labels[action]} für ${employee?.name||selectedControlEmployeeId} um ${employeeActionTime.value||currentViennaHM()} buchen?`))return;
+  employeeActionNote.textContent='Speichert …';
+  try{
+    await api('/kristine/api/manual-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,employeeName:employee?.name||'',date:chatDate.value||data.today,action,at:employeeActionTime.value||currentViennaHM(),jobId:employeeActionJob.value||'',jobName:option?.dataset.name||''})});
+    employeeActionNote.textContent='✓ Eingriff gespeichert und protokolliert.';
+    await loadSilent();
+    openEmployeeActionModal(selectedControlEmployeeId);
+  }catch(error){employeeActionNote.textContent='Fehler: '+error.message;}
 }
 async function sendEmployeeDayEndCheck(){
   if(!selectedControlEmployeeId)return;
