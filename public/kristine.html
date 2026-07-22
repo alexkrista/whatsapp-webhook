@@ -57,6 +57,8 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .seg-vacation{background:#2f73c8}.seg-sick{background:#c53b3b}.seg-za{background:#d7a51f}.seg-holiday{background:#7d8790}.absence-bar-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:850;text-shadow:0 1px 2px rgba(0,0,0,.35)}
 .task-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}.task-tabs button{background:#fff;color:#111;border-color:#ccc}.task-tabs button.active{background:#27713d;color:#fff;border-color:#27713d;font-weight:800}
 .report-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-toolbar input{width:auto;min-width:160px}.copy-employee-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-top:10px;max-height:220px;overflow:auto}.copy-option{display:flex;gap:8px;align-items:center;background:#f7f7f7;border:1px solid #e2e2e2;border-radius:10px;padding:8px}.copy-option input{width:auto}
+
+.time-editor-table{width:100%;border-collapse:collapse;margin-top:12px}.time-editor-table th,.time-editor-table td{padding:8px;border-bottom:1px solid #ece8e0;text-align:left}.time-editor-table select,.time-editor-table input{padding:7px 8px}.time-editor-row-work{background:#f5fbf6}.time-editor-row-pause{background:#fff7f7}.time-editor-row-lunch{background:#fffaf0}.time-editor-actions{display:flex;gap:5px;flex-wrap:wrap}.time-editor-actions button{padding:6px 8px}.time-editor-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.time-editor-summary span{background:#f3f1ec;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}
 </style>
 </head>
 <body>
@@ -291,27 +293,22 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   </div>
 </div>
 <div id="employeeActionBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="employeeActionTitle">
-  <div class="segment-modal" style="width:min(620px,100%)">
+  <div class="segment-modal" style="width:min(900px,100%)">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <h3 id="employeeActionTitle" style="margin:0">Mitarbeiter</h3>
+      <h3 id="employeeActionTitle" style="margin:0">Tagesbuchungen bearbeiten</h3>
       <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
     </div>
     <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
-    <div class="formgrid" style="margin-top:12px">
-      <div><label>Uhrzeit</label><input id="employeeActionTime" type="time"></div>
-      <div><label>Baustelle</label><select id="employeeActionJob"><option value="">– aktuelle Einteilung –</option></select></div>
+    <div id="timeEditorTable"></div>
+    <div class="actions" style="margin-top:12px">
+      <button type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
+      <button type="button" class="secondary" onclick="addTimeEditorRow('lunch')">+ Mittag</button>
+      <button type="button" class="secondary" onclick="addTimeEditorRow('pause')">+ Pause</button>
+      <button type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
     </div>
-    <div class="small" style="margin-top:10px;font-weight:800">Eingreifen / Aktion wählen</div>
-    <div class="actions" style="margin-top:8px">
-      <button type="button" class="green" onclick="runEmployeeManualAction('start')">▶ Arbeitsbeginn</button>
-      <button type="button" class="secondary" onclick="runEmployeeManualAction('pause')">☕ Pause</button>
-      <button type="button" class="secondary" onclick="runEmployeeManualAction('lunch')">🍴 Mittag</button>
-      <button type="button" class="green" onclick="runEmployeeManualAction('resume')">▶ Weiter / Baustelle wechseln</button>
-      <button type="button" class="danger" onclick="runEmployeeManualAction('end')">■ Feierabend</button>
-      <button type="button" class="secondary" id="employeeActionAsk" onclick="sendEmployeeDayEndCheck()">💬 Arbeitest du noch?</button>
-    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input id="moveLinkedEntries" type="checkbox" checked style="width:auto"> Fotos, Material und Regie aus geänderten Zeiträumen automatisch mitverschieben</label>
     <div id="employeeActionNote" class="task-done-note" style="margin-top:10px"></div>
-    <div class="small" style="margin-top:8px">Jeder Eingriff wird mit Uhrzeit und Quelle „Büro“ protokolliert.</div>
+    <div class="small" style="margin-top:8px">Die Zeitabschnitte sind die Wahrheit. Änderungen werden protokolliert; zugehörige Dokumentation kann automatisch der richtigen Baustelle folgen.</div>
   </div>
 </div>
 <script>
@@ -734,42 +731,52 @@ function renderDayBar(segments,dayStart,dayEnd){
 
 
 let selectedControlEmployeeId='';
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';}
+let timeEditorSegments=[];
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
-function openEmployeeActionModal(employeeId){
-  const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));
-  const state=data.states?.[employeeId]||{mode:'idle'};
-  const today=chatDate.value||data.today;
-  const plans=(data.assignments||[]).filter(a=>a.date===today&&String(a.employeeId)===String(employeeId));
-  const segments=employeeDaySegments(employeeId,today,state);
-  const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
-  const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
-  const currentPlan=plans.find(x=>String(state.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
-  const lastMeaningful=(state.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type)).at(-1);
-  selectedControlEmployeeId=String(employeeId);
-  employeeActionTitle.textContent=employee?.name||state.employeeName||String(employeeId);
-  employeeActionInfo.innerHTML=`<strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><strong>Baustelle:</strong> ${esc(currentPlan?.jobName||'Nicht eingeteilt')}<br><strong>Arbeitszeit heute:</strong> ${esc(durationText(workMinutes))}<br><strong>Pause/Mittag:</strong> ${esc(durationText(breakMinutes))}<br><strong>Letzte Aktion:</strong> ${esc(lastMeaningful?.detail||'–')}`;
-  employeeActionTime.value=currentViennaHM();
-  employeeActionJob.innerHTML='<option value="">– aktuelle Einteilung –</option>'+plans.map(p=>`<option value="${esc(p.jobId||'')}" data-name="${esc(p.jobName||'')}">${esc(p.jobName||p.jobId||'Baustelle')}</option>`).join('');
-  if(currentPlan?.jobId)employeeActionJob.value=String(currentPlan.jobId);
-  employeeActionNote.textContent='';
-  employeeActionAsk.disabled=!['working','pause','lunch'].includes(state.mode);
-  employeeActionAsk.textContent=employeeActionAsk.disabled?'Nicht aktiv':'💬 Arbeitest du noch?';
-  employeeActionBackdrop.classList.add('open');
+function jobOptions(selected=''){
+  const jobs=[...masterJobs].filter(j=>j.active!==false).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
+  return '<option value="">– Baustelle wählen –</option>'+jobs.map(j=>{const jid=String(j.jobId||j.id||'');const name=String(j.name||j.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===String(selected)?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`}).join('');
 }
-async function runEmployeeManualAction(action){
+function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':'Pause'}
+function renderTimeEditor(){
+  const rows=timeEditorSegments.map((seg,index)=>`<tr class="time-editor-row-${esc(seg.type)}"><td><select onchange="updateTimeEditorRow(${index},'type',this.value)"><option value="work" ${seg.type==='work'?'selected':''}>Arbeit</option><option value="lunch" ${seg.type==='lunch'?'selected':''}>Mittag</option><option value="pause" ${seg.type==='pause'?'selected':''}>Pause</option></select></td><td><input type="time" value="${esc(seg.from||'')}" onchange="updateTimeEditorRow(${index},'from',this.value)"></td><td><input type="time" value="${esc(seg.to||'')}" onchange="updateTimeEditorRow(${index},'to',this.value)"></td><td>${seg.type==='work'?`<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`:'<span class="small">–</span>'}</td><td><div class="time-editor-actions"><button class="secondary" onclick="moveTimeEditorRow(${index},-1)" title="nach oben">↑</button><button class="secondary" onclick="moveTimeEditorRow(${index},1)" title="nach unten">↓</button><button class="danger" onclick="removeTimeEditorRow(${index})">Löschen</button></div></td></tr>`).join('');
+  const work=timeEditorSegments.filter(x=>x.type==='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
+  const breaks=timeEditorSegments.filter(x=>x.type!=='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
+  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
+}
+function updateTimeEditorRow(index,key,value){if(!timeEditorSegments[index])return;timeEditorSegments[index][key]=value;if(key==='type'&&value!=='work'){timeEditorSegments[index].jobId='';timeEditorSegments[index].jobName=''}renderTimeEditor()}
+function setTimeEditorJob(index,select){const row=timeEditorSegments[index];if(!row)return;row.jobId=select.value;row.jobName=select.selectedOptions[0]?.dataset.name||''}
+function addTimeEditorRow(type='work'){
+  const last=timeEditorSegments.at(-1);const from=last?.to||currentViennaHM();
+  const firstJob=masterJobs.find(j=>j.active!==false);
+  timeEditorSegments.push({id:id(),type,from,to:'',jobId:type==='work'?String(firstJob?.jobId||firstJob?.id||''):'',jobName:type==='work'?String(firstJob?.name||firstJob?.jobName||''):''});renderTimeEditor();
+}
+function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
+function moveTimeEditorRow(index,direction){const target=index+direction;if(target<0||target>=timeEditorSegments.length)return;[timeEditorSegments[index],timeEditorSegments[target]]=[timeEditorSegments[target],timeEditorSegments[index]];renderTimeEditor()}
+async function openEmployeeActionModal(employeeId){
+  const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));selectedControlEmployeeId=String(employeeId);
+  employeeActionTitle.textContent=`${employee?.name||employeeId} · Tagesbuchungen`;
+  employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
+  try{
+    const date=chatDate.value||data.today;const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
+    timeEditorSegments=(result.segments||[]).map(x=>({...x}));
+    const state=data.states?.[employeeId]||{mode:'idle'};
+    employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.</span>`;
+    renderTimeEditor();
+  }catch(error){employeeActionInfo.textContent='Fehler: '+error.message}
+}
+async function saveTimeEditor(){
   if(!selectedControlEmployeeId)return;
   const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
-  const option=employeeActionJob.selectedOptions[0];
-  const labels={start:'Arbeitsbeginn',pause:'Pause',lunch:'Mittag',resume:'Weiter / Baustelle wechseln',end:'Feierabend'};
-  if(!confirm(`${labels[action]} für ${employee?.name||selectedControlEmployeeId} um ${employeeActionTime.value||currentViennaHM()} buchen?`))return;
+  const date=chatDate.value||data.today;
+  for(const seg of timeEditorSegments){if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}}
   employeeActionNote.textContent='Speichert …';
   try{
-    await api('/kristine/api/manual-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,employeeName:employee?.name||'',date:chatDate.value||data.today,action,at:employeeActionTime.value||currentViennaHM(),jobId:employeeActionJob.value||'',jobName:option?.dataset.name||''})});
-    employeeActionNote.textContent='✓ Eingriff gespeichert und protokolliert.';
-    await loadSilent();
-    openEmployeeActionModal(selectedControlEmployeeId);
-  }catch(error){employeeActionNote.textContent='Fehler: '+error.message;}
+    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:document.getElementById('moveLinkedEntries').checked})});
+    employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
+    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));renderTimeEditor();
+  }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
 }
 async function sendEmployeeDayEndCheck(){
   if(!selectedControlEmployeeId)return;
@@ -890,7 +897,7 @@ function renderControl(){
     const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
     const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
     const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':x.type==='lunch'?'Mittag':esc(x.jobName||'Abwesenheit')}`).join('<br>');
-    return `<div class="control-card" style="cursor:pointer" role="button" tabindex="0" onclick="openEmployeeActionModal('${esc(a.employeeId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(a.employeeId)}')}"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><div style="display:flex;align-items:center;gap:8px"><button type="button" class="secondary" style="padding:6px 9px" onclick="event.stopPropagation();openEmployeeActionModal('${esc(a.employeeId)}')">Öffnen</button><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten anzeigen</summary>${details}</details>`:''}</div>`
+    return `<div class="control-card" style="cursor:pointer" role="button" tabindex="0" onclick="openEmployeeActionModal('${esc(a.employeeId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(a.employeeId)}')}"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><div style="display:flex;align-items:center;gap:8px"><button type="button" class="secondary" style="padding:6px 9px" onclick="event.stopPropagation();openEmployeeActionModal('${esc(a.employeeId)}')">Buchungen bearbeiten</button><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten ansehen</summary>${details}</details>`:''}</div>`
   }).join('')}</div>`;
 }
 
