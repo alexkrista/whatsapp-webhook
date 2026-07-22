@@ -1,7 +1,7 @@
 {
-  "build": "0021.2",
-  "name": "Beulen sauber",
+  "build": "0021.3",
+  "name": "Leitstand Eingriff & Protokoll-Sicherheit",
   "date": "2026-07-22",
-  "version": "0021.2",
-  "status": "Neue Baustelle, Chef-Protokoll und Aufgabenfilter geglättet"
+  "version": "0021.3",
+  "status": "Baustellenprotokoll sicher abbrechen und Leitstand direkt steuern"
 }
