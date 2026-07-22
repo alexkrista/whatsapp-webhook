@@ -1,5 +1,3 @@
-# Build 0022.2
+# Build 0022.3
 
-**Name:** Mitarbeiter-Workflow final
-
-**Status:** Baustellenwechsel und Tagesabschluss bereinigt
+Planung Final: volle Kartenhöhe, Sticky-Manövrierleiste, einheitliche Farben und Zeitfenster für stundenweise UP-Karten.
