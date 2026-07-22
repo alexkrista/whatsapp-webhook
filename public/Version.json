@@ -1,5 +1,7 @@
 {
-  "build": "0020.9b",
-  "name": "Offene Arbeiten anklickbar",
-  "date": "2026-07-21"
+  "build": "0021.0",
+  "name": "KRISTOOL Kontrollzentrum",
+  "date": "2026-07-22",
+  "version": "0021.0",
+  "status": "Handlungsbedarf, Entscheidungen und Kontrollen auf einer Startseite"
 }
