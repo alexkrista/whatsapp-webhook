@@ -12,6 +12,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
   const TASKS = path.join(ROOT, "tasks.json");
   const EVENTS = path.join(ROOT, "events.jsonl");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
+  const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -96,6 +97,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     if (/^(ja|jup|passt|ok|okay|genau|👍)$/.test(t)) return "yes";
     if (/^(nein|passt nicht|falsch|👎)$/.test(t)) return "no";
     if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
+    if (/^(andere baustelle|baustelle wechseln|wechseln)$/.test(t)) return "switch_site";
     if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
     return "message";
   }
@@ -297,6 +299,35 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       }
     }
 
+    if (intent === "switch_site") {
+      const alternatives = dayAssignments.filter((assignment) => !current || assignmentKey(assignment) !== assignmentKey(current));
+      if (!alternatives.length) {
+        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        await saveState();
+        return { reply: "Welche Baustelle ist richtig? Schreib bitte Name oder Nummer. Ich melde die Abweichung ans Büro.", buttons: [], state };
+      }
+      state.pending = { type: "choose_switch_assignment", choices: alternatives.map((assignment) => assignmentKey(assignment)), createdAt: now };
+      await saveState();
+      return { reply: `Welche Baustelle?\n${alternatives.map((assignment, index) => `${index + 1}. ${assignmentLabel(assignment)}`).join("\n")}`, buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)), state };
+    }
+
+    if (state.pending?.type === "choose_switch_assignment") {
+      const normalized = normalizeText(text);
+      const alternatives = dayAssignments.filter((assignment) => state.pending.choices?.includes(assignmentKey(assignment)));
+      const number = Number(normalized);
+      const selected = Number.isInteger(number) && number > 0 ? alternatives[number - 1] : alternatives.find((assignment) => normalizeText(assignment.jobName).includes(normalized) || normalizeText(assignment.jobId) === normalized);
+      if (selected) {
+        state.activeAssignmentKey = assignmentKey(selected);
+        state.mode = "working";
+        state.pending = null;
+        addTimeline("site_switch", `Baustellenwechsel zu ${assignmentLabel(selected)}`, selected);
+        await saveState();
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: actualTime, jobId: selected.jobId, jobName: selected.jobName || "", createdAt: now });
+        return { reply: `Passt. Ab ${actualTime} läuft deine Zeit auf ${assignmentLabel(selected)}.`, buttons: [], state };
+      }
+      return { reply: "Bitte antworte mit der Nummer oder dem Namen der Baustelle.", buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)), state };
+    }
+
     if (intent === "status") {
       if (!dayAssignments.length) {
         state.pending = { type: "ask_actual_assignment", createdAt: now };
@@ -309,7 +340,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       }
       return {
         reply: `Heute: ${dayAssignments.map(a => `${a.from || "ganztägig"}${a.to ? "–" + a.to : ""} ${assignmentLabel(a)}`).join(" · ")}. Aktueller Status: ${stateLabel(state)}.`,
-        buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Start"],
+        buttons: state.mode === "working" ? ["Andere Baustelle"] : ["Start"],
         state,
       };
     }
@@ -358,7 +389,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         reply: bookedTime !== actualTime
           ? `Arbeitsbeginn bei ${assignmentLabel(current)} ist gespeichert. Gemäß Betriebsregel wurde ${actualTime} auf 07:00 Uhr gesetzt. Gute Arbeit!`
           : `Arbeitsbeginn bei ${assignmentLabel(current)} ist um ${bookedTime} gespeichert. Gute Arbeit!`,
-        buttons: ["Pause", "Mittag", "Fertig"],
+        buttons: ["Andere Baustelle"],
         state,
       };
     }
@@ -395,7 +426,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       if (!["pause", "lunch"].includes(state.mode)) {
         return {
           reply: "Bei mir ist gerade keine Pause offen. Deine Arbeitszeit läuft weiter.",
-          buttons: ["Pause", "Fertig"],
+          buttons: ["Andere Baustelle"],
           state,
         };
       }
@@ -414,7 +445,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       });
       return {
         reply: "Weiter geht’s. Arbeitszeit läuft wieder.",
-        buttons: ["Pause", "Mittag", "Fertig"],
+        buttons: ["Andere Baustelle"],
         state,
       };
     }
@@ -526,7 +557,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     });
     return {
       reply: "Danke, ich habe deine Nachricht gespeichert. Für den Test verstehe ich bereits: Start, Pause, Mittag, Weiter, Fertig, Status und Erledigt.",
-      buttons: state.mode === "working" ? ["Pause", "Fertig"] : ["Status", "Start"],
+      buttons: state.mode === "working" ? ["Andere Baustelle"] : ["Status", "Start"],
       state,
     };
   }
@@ -582,6 +613,161 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       res.json({ ok: true, ...(await handleMessage({ employeeId, employeeName, text, date })) });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+
+  function hmFromMinutes(value) {
+    const minutes = Math.max(0, Math.min(24 * 60, Math.round(Number(value) || 0)));
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  }
+
+  function buildEditableSegments(events, employeeId, date, state) {
+    const rows = events
+      .filter((row) => String(row.employeeId) === String(employeeId) && String(row.date) === String(date))
+      .map((row, index) => ({ ...row, _index: index, _minutes: minutesFromHM(row.at) }))
+      .filter((row) => row._minutes !== null)
+      .sort((a, b) => a._minutes - b._minutes || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || a._index - b._index);
+
+    const result = [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const type = row.type === "start" || row.type === "weiter" ? "work" : row.type === "pause" ? "pause" : row.type === "mittag" ? "lunch" : null;
+      if (!type) continue;
+      const next = rows[index + 1];
+      let toMinutes = next?._minutes ?? null;
+      if (toMinutes === null && ["working", "pause", "lunch"].includes(state?.mode)) {
+        toMinutes = minutesFromHM(localTimeHM());
+      }
+      result.push({
+        id: String(row.segmentId || `seg_${employeeId}_${date}_${index}`),
+        type,
+        from: row.at,
+        to: toMinutes === null ? "" : hmFromMinutes(toMinutes),
+        jobId: String(row.jobId || ""),
+        jobName: String(row.jobName || ""),
+        source: String(row.source || "employee"),
+      });
+    }
+    return result;
+  }
+
+  function eventTypeForSegment(segment) {
+    if (segment.type === "pause") return "pause";
+    if (segment.type === "lunch") return "mittag";
+    return "start";
+  }
+
+  function entryMinutes(entry) {
+    const direct = minutesFromHM(entry.at || entry.time || entry.capturedAt);
+    if (direct !== null) return direct;
+    const raw = entry.createdAt || entry.timestamp || entry.capturedAt;
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : minutesFromHM(localTimeHM(parsed));
+  }
+
+  app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.params.employeeId || "");
+      const date = String(req.params.date || localDateISO()).slice(0, 10);
+      const [events, states] = await Promise.all([readJson(TIME_EVENTS, []), readJson(STATES, {})]);
+      res.json({ ok: true, segments: buildEditableSegments(events, employeeId, date, states[employeeId] || {}) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.put("/kristine/api/segments/:employeeId/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.params.employeeId || "").trim();
+      const date = String(req.params.date || localDateISO()).slice(0, 10);
+      const employeeName = String(req.body?.employeeName || employeeId).trim();
+      const moveLinked = req.body?.moveLinked !== false;
+      const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
+      const segments = incoming.map((segment, index) => ({
+        id: String(segment.id || `seg_${Date.now()}_${index}`),
+        type: ["work", "pause", "lunch"].includes(segment.type) ? segment.type : "work",
+        from: String(segment.from || "").slice(0, 5),
+        to: String(segment.to || "").slice(0, 5),
+        jobId: String(segment.jobId || "").slice(0, 80),
+        jobName: String(segment.jobName || "").trim().slice(0, 140),
+      })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
+
+      segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index];
+        const from = minutesFromHM(segment.from);
+        const to = segment.to ? minutesFromHM(segment.to) : null;
+        if (to !== null && to <= from) throw new Error(`Ungültiger Zeitraum ${segment.from}–${segment.to}`);
+        if (index > 0) {
+          const previous = segments[index - 1];
+          const previousTo = previous.to ? minutesFromHM(previous.to) : null;
+          if (previousTo === null || previousTo > from) throw new Error("Zeitsegmente überschneiden sich oder ein offenes Segment steht nicht am Ende.");
+        }
+      }
+
+      const [allEvents, states, reviewEntries] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []),
+      ]);
+      const oldSegments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
+      const retained = allEvents.filter((row) => !(String(row.employeeId) === employeeId && String(row.date) === date));
+      const createdAt = new Date().toISOString();
+      const replacement = [];
+      for (const segment of segments) {
+        replacement.push({
+          employeeId, employeeName, date,
+          type: eventTypeForSegment(segment), at: segment.from,
+          jobId: segment.type === "work" ? segment.jobId : null,
+          jobName: segment.type === "work" ? segment.jobName : "",
+          segmentId: segment.id, source: "office", manual: true, createdAt,
+        });
+      }
+      const last = segments.at(-1);
+      if (last?.to) replacement.push({
+        employeeId, employeeName, date, type: "ende", at: last.to,
+        jobId: last.type === "work" ? last.jobId : null,
+        jobName: last.type === "work" ? last.jobName : "",
+        source: "office", manual: true, createdAt,
+      });
+      await writeJson(TIME_EVENTS, [...retained, ...replacement].slice(-20000));
+
+      let moved = 0;
+      if (moveLinked) {
+        for (const entry of reviewEntries) {
+          if (String(entry.employeeId) !== employeeId || String(entry.date) !== date) continue;
+          const minute = entryMinutes(entry);
+          if (minute === null) continue;
+          const target = segments.find((segment) => segment.type === "work" && minute >= minutesFromHM(segment.from) && (!segment.to || minute < minutesFromHM(segment.to)));
+          if (!target) continue;
+          if (String(entry.jobId || "") !== String(target.jobId || "")) {
+            entry.history = Array.isArray(entry.history) ? entry.history : [];
+            entry.history.push({ at: createdAt, action: "job_reassigned_from_time_segment", oldJobId: entry.jobId || null, oldJobName: entry.jobName || "", newJobId: target.jobId || null, newJobName: target.jobName || "", source: "office" });
+            entry.jobId = target.jobId || null;
+            entry.jobName = target.jobName || "";
+            entry.bookingSegmentId = target.id;
+            moved += 1;
+          } else if (!entry.bookingSegmentId) entry.bookingSegmentId = target.id;
+        }
+        await writeJson(REVIEW_ENTRIES, reviewEntries);
+      }
+
+      const state = { ...(states[employeeId] || {}), employeeId, employeeName, timeline: Array.isArray(states[employeeId]?.timeline) ? states[employeeId].timeline : [] };
+      if (!segments.length) state.mode = "idle";
+      else if (last?.to) state.mode = "finished_day";
+      else state.mode = last.type === "pause" ? "pause" : last.type === "lunch" ? "lunch" : "working";
+      const active = [...segments].reverse().find((segment) => segment.type === "work");
+      if (active) state.activeAssignmentKey = `${date}|${employeeId}|${active.from}|${active.jobId}`;
+      state.timeline.push({ at: createdAt, time: localTimeHM(), type: "day_segments_edited", detail: `${segments.length} Tagesabschnitt(e) durch Büro gespeichert`, source: "office", manual: true, movedLinkedEntries: moved });
+      state.timeline = state.timeline.slice(-200);
+      states[employeeId] = state;
+      await writeJson(STATES, states);
+      await appendEvent({ type: "day_segments_edited", employeeId, employeeName, date, segmentCount: segments.length, movedLinkedEntries: moved, source: "office" });
+      res.json({ ok: true, segments, movedLinkedEntries: moved, state, previousSegments: oldSegments.length });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: String(error?.message || error) });
     }
   });
 
