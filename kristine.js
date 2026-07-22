@@ -139,6 +139,47 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     return `${a.jobName || ("#" + a.jobId)}${a.city ? ", " + a.city : ""}`;
   }
 
+  function uniqueSites(assignments) {
+    const map = new Map();
+    for (const assignment of assignments) {
+      const jobId = String(assignment?.jobId || "").trim();
+      const jobName = String(assignment?.jobName || "").trim();
+      if (!jobId && !jobName) continue;
+      const key = jobId || normalizeText(jobName);
+      if (!map.has(key)) map.set(key, {
+        jobId, jobName, city: assignment?.city || "", address: assignment?.address || "",
+      });
+    }
+    return [...map.values()];
+  }
+
+  function findSiteCandidates(assignments, query, preferredAssignments = []) {
+    const q = normalizeText(query);
+    const preferredKeys = new Set(preferredAssignments.map((assignment) => String(assignment.jobId || normalizeText(assignment.jobName))));
+    return uniqueSites(assignments)
+      .map((site) => {
+        const id = normalizeText(site.jobId);
+        const name = normalizeText(site.jobName);
+        let score = preferredKeys.has(String(site.jobId || name)) ? 100 : 0;
+        if (!q) score += 1;
+        if (id === q || name === q) score += 1000;
+        else if (id.startsWith(q) || name.startsWith(q)) score += 500;
+        else if (id.includes(q) || name.includes(q)) score += 200;
+        return { ...site, score };
+      })
+      .filter((site) => !q || site.score > 0)
+      .sort((a, b) => b.score - a.score || String(a.jobName).localeCompare(String(b.jobName), "de"));
+  }
+
+  function formatDaySummary(timeEvents, employeeId, date, state) {
+    const segments = buildEditableSegments(timeEvents, employeeId, date, state);
+    if (!segments.length) return "Keine Zeitabschnitte vorhanden.";
+    return segments.map((segment) => {
+      const label = segment.type === "lunch" ? "Mittag" : segment.type === "pause" ? "Pause" : (segment.jobName || segment.jobId || "Arbeit");
+      return `${segment.from}–${segment.to || "offen"} ${label}`;
+    }).join("\n");
+  }
+
   function stateLabel(state) {
     const map = {
       idle: "noch nicht gestartet",
@@ -163,10 +204,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
     const today = date || localDateISO();
-    const [assignments, states, tasks] = await Promise.all([
+    const [assignments, states, tasks, timeEvents] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
+      readJson(TIME_EVENTS, []),
     ]);
 
     const dayAssignments = assignmentsFor(assignments, employeeId, today);
@@ -179,7 +221,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       timeline: [],
     };
     const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
-    const current = activeAssignment(dayAssignments, state);
+    let current = activeAssignment(dayAssignments, state);
+    if (state.activeJobOverride?.jobId || state.activeJobOverride?.jobName) current = state.activeJobOverride;
     const intent = detectIntent(text);
     const nowDate = new Date();
     const now = nowDate.toISOString();
@@ -226,22 +269,57 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     }
 
     if (state.pending?.type === "ask_actual_assignment" && intent === "message") {
-      state.pending = null;
-      addTimeline("assignment_deviation", String(text), null);
+      const query = String(text).trim();
+      const candidates = findSiteCandidates(assignments, query, dayAssignments);
+      if (!candidates.length) {
+        return {
+          reply: `Ich finde keine Baustelle zu „${query}“. Bitte Name oder Nummer anders schreiben.`,
+          buttons: [],
+          state,
+        };
+      }
+      if (candidates.length === 1 || candidates[0].score >= 1000) {
+        const selected = candidates[0];
+        const wasWorking = ["working", "pause", "lunch"].includes(state.mode) || state.pending?.forSwitch;
+        state.activeAssignmentKey = null;
+        state.activeJobOverride = { jobId: selected.jobId, jobName: selected.jobName, city: selected.city || "" };
+        state.mode = wasWorking ? "working" : state.mode;
+        state.pending = null;
+        addTimeline(wasWorking ? "site_switch" : "assignment_deviation", `${wasWorking ? "Baustellenwechsel" : "Abweichende Einteilung"} zu ${assignmentLabel(selected)}`, selected);
+        await saveState();
+        if (wasWorking) {
+          await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: actualTime, jobId: selected.jobId, jobName: selected.jobName || "", createdAt: now });
+          await appendEvent({ type: "site_switch", employeeId, employeeName: state.employeeName, date: today, jobId: selected.jobId, detail: assignmentLabel(selected), time: actualTime });
+          return { reply: `✅ Baustelle gewechselt.\nArbeitszeit läuft weiter auf ${assignmentLabel(selected)}.`, buttons: [], state };
+        }
+        return { reply: `✅ Baustelle ausgewählt: ${assignmentLabel(selected)}.\nSag „Start“, wenn die Arbeit beginnt.`, buttons: ["Start"], state };
+      }
+      state.pending = { type: "choose_site_search", choices: candidates.slice(0, 6), forSwitch: Boolean(state.pending?.forSwitch), createdAt: now };
       await saveState();
-      await appendEvent({
-        type: "assignment_deviation",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        detail: String(text),
-      });
       return {
-        reply: `Danke, ich habe „${String(text).trim()}“ als abweichende Einteilung ans Büro gemeldet.`,
-        buttons: ["Start"],
-        needsOfficeReview: true,
+        reply: `Welche Baustelle meinst du?\n${candidates.slice(0, 6).map((site, index) => `${index + 1}. ${assignmentLabel(site)}`).join("\n")}`,
+        buttons: candidates.slice(0, 3).map((_, index) => String(index + 1)),
         state,
       };
+    }
+
+    if (state.pending?.type === "choose_site_search") {
+      const number = Number(normalizeText(text));
+      const choices = Array.isArray(state.pending.choices) ? state.pending.choices : [];
+      const selected = Number.isInteger(number) && number > 0 ? choices[number - 1] : choices.find((site) => normalizeText(site.jobName).includes(normalizeText(text)) || normalizeText(site.jobId) === normalizeText(text));
+      if (!selected) return { reply: "Bitte Nummer oder Baustellenname auswählen.", buttons: choices.slice(0, 3).map((_, index) => String(index + 1)), state };
+      const wasWorking = Boolean(state.pending.forSwitch) || ["working", "pause", "lunch"].includes(state.mode);
+      state.activeAssignmentKey = null;
+      state.activeJobOverride = { jobId: selected.jobId, jobName: selected.jobName, city: selected.city || "" };
+      state.mode = wasWorking ? "working" : state.mode;
+      state.pending = null;
+      addTimeline(wasWorking ? "site_switch" : "assignment_deviation", `${wasWorking ? "Baustellenwechsel" : "Abweichende Einteilung"} zu ${assignmentLabel(selected)}`, selected);
+      await saveState();
+      if (wasWorking) {
+        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: actualTime, jobId: selected.jobId, jobName: selected.jobName || "", createdAt: now });
+        return { reply: `✅ Baustelle gewechselt.\nArbeitszeit läuft weiter auf ${assignmentLabel(selected)}.`, buttons: [], state };
+      }
+      return { reply: `✅ Baustelle ausgewählt: ${assignmentLabel(selected)}.`, buttons: ["Start"], state };
     }
 
     if (state.pending?.type === "finish_choice") {
@@ -302,30 +380,39 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
     if (intent === "switch_site") {
       const alternatives = dayAssignments.filter((assignment) => !current || assignmentKey(assignment) !== assignmentKey(current));
       if (!alternatives.length) {
-        state.pending = { type: "ask_actual_assignment", createdAt: now };
+        state.pending = { type: "ask_actual_assignment", forSwitch: true, createdAt: now };
         await saveState();
-        return { reply: "Welche Baustelle ist richtig? Schreib bitte Name oder Nummer. Ich melde die Abweichung ans Büro.", buttons: [], state };
+        return { reply: "Welche Baustelle ist richtig? Schreib bitte Name oder Nummer.", buttons: [], state };
       }
       state.pending = { type: "choose_switch_assignment", choices: alternatives.map((assignment) => assignmentKey(assignment)), createdAt: now };
       await saveState();
-      return { reply: `Welche Baustelle?\n${alternatives.map((assignment, index) => `${index + 1}. ${assignmentLabel(assignment)}`).join("\n")}`, buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)), state };
+      return {
+        reply: `Welche Baustelle?\n${alternatives.map((assignment, index) => `${index + 1}. ${assignmentLabel(assignment)}`).join("\n")}\nOder schreibe Name bzw. Nummer.`,
+        buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)),
+        state,
+      };
     }
 
     if (state.pending?.type === "choose_switch_assignment") {
       const normalized = normalizeText(text);
       const alternatives = dayAssignments.filter((assignment) => state.pending.choices?.includes(assignmentKey(assignment)));
       const number = Number(normalized);
-      const selected = Number.isInteger(number) && number > 0 ? alternatives[number - 1] : alternatives.find((assignment) => normalizeText(assignment.jobName).includes(normalized) || normalizeText(assignment.jobId) === normalized);
+      const selected = Number.isInteger(number) && number > 0 && number <= alternatives.length
+        ? alternatives[number - 1]
+        : alternatives.find((assignment) => normalizeText(assignment.jobName).includes(normalized) || normalizeText(assignment.jobId) === normalized);
       if (selected) {
         state.activeAssignmentKey = assignmentKey(selected);
+        delete state.activeJobOverride;
         state.mode = "working";
         state.pending = null;
         addTimeline("site_switch", `Baustellenwechsel zu ${assignmentLabel(selected)}`, selected);
         await saveState();
         await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "weiter", at: actualTime, jobId: selected.jobId, jobName: selected.jobName || "", createdAt: now });
-        return { reply: `Passt. Ab ${actualTime} läuft deine Zeit auf ${assignmentLabel(selected)}.`, buttons: [], state };
+        return { reply: `✅ Baustelle gewechselt.\nArbeitszeit läuft weiter auf ${assignmentLabel(selected)}.`, buttons: [], state };
       }
-      return { reply: "Bitte antworte mit der Nummer oder dem Namen der Baustelle.", buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)), state };
+      state.pending = { type: "ask_actual_assignment", forSwitch: true, createdAt: now };
+      await saveState();
+      return { reply: "Schreib bitte Name oder Nummer der Baustelle.", buttons: [], state };
     }
 
     if (intent === "status") {
@@ -450,64 +537,87 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       };
     }
 
-    if (intent === "finish") {
-      if (!current) {
-        state.mode = "finished_day";
-        addTimeline("day_finished", "Feierabend ohne Einteilung", null);
+    if (state.pending?.type === "day_review_summary") {
+      if (intent === "no") {
+        state.pending = null;
         await saveState();
-        await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: null, createdAt: now });
-        return {
-          reply: "Feierabend ist gespeichert. Schönen Abend! 👋",
-          buttons: [],
-          state,
-        };
+        return { reply: "Bitte die Zeiten im Leitstand korrigieren und danach nochmals „Fertig“ schreiben.", buttons: [], state };
       }
-      const next = nextAssignment(dayAssignments, current);
-      addTimeline("site_finished", `${assignmentLabel(current)} fertig`, current);
-      if (next) {
-        state.mode = "finished_site";
-        state.pending = {
-          type: "finish_choice",
-          nextAssignmentKey: assignmentKey(next),
-          createdAt: now,
-        };
+      if (intent === "yes") {
+        state.dayReview = { ...(state.dayReview || {}), summaryConfirmed: true };
+        state.pending = { type: "day_review_photo", createdAt: now };
         await saveState();
-        return {
-          reply: `${assignmentLabel(current)} ist als fertig markiert. Geht’s jetzt weiter zu ${assignmentLabel(next)} oder hast du Feierabend?`,
-          buttons: [`Weiter zu ${next.jobName || "#" + next.jobId}`, "Feierabend"],
-          state,
-        };
+        return { reply: "Sind alle Fotos für heute erfasst?", buttons: ["Ja", "Nein"], state };
       }
-      state.mode = "finished_day";
-      state.pending = null;
-      addTimeline("day_finished", "Feierabend", current);
+      return { reply: "Passt die Zusammenfassung?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "day_review_photo") {
+      if (!["yes", "no"].includes(intent)) return { reply: "Sind alle Fotos erfasst?", buttons: ["Ja", "Nein"], state };
+      state.dayReview = { ...(state.dayReview || {}), photosComplete: intent === "yes" };
+      state.pending = { type: "day_review_material", createdAt: now };
       await saveState();
-      await appendTimeEvent({
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        type: "ende",
-        at: actualTime,
-        jobId: current.jobId,
-        jobName: current.jobName || "",
-        createdAt: now,
+      return { reply: "Ist das verwendete Material erfasst?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "day_review_material") {
+      if (!["yes", "no"].includes(intent)) return { reply: "Ist das Material erfasst?", buttons: ["Ja", "Nein"], state };
+      state.dayReview = { ...(state.dayReview || {}), materialComplete: intent === "yes" };
+      state.pending = { type: "day_review_regie", createdAt: now };
+      await saveState();
+      return { reply: "Ist noch ein Regiebericht nötig?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "day_review_regie") {
+      if (!["yes", "no"].includes(intent)) return { reply: "Ist ein Regiebericht nötig?", buttons: ["Ja", "Nein"], state };
+      state.dayReview = { ...(state.dayReview || {}), regieNeeded: intent === "yes" };
+      state.pending = { type: "day_review_task", createdAt: now };
+      await saveState();
+      return { reply: "Ist noch etwas offen, das als Aufgabe gespeichert werden soll?", buttons: ["Ja", "Nein"], state };
+    }
+
+    if (state.pending?.type === "day_review_task") {
+      if (intent === "yes") {
+        state.pending = { type: "day_review_task_text", createdAt: now };
+        await saveState();
+        return { reply: "Was ist noch offen? Schreib mir kurz die Aufgabe.", buttons: [], state };
+      }
+      if (intent !== "no") return { reply: "Soll ich noch eine Aufgabe speichern?", buttons: ["Ja", "Nein"], state };
+      state.pending = null;
+      state.mode = "finished_day";
+      addTimeline("day_finished", "Tagesabschluss bestätigt", current);
+      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: current?.jobId || state.activeJobOverride?.jobId || null, jobName: current?.jobName || state.activeJobOverride?.jobName || "", createdAt: now });
+      await appendEvent({ type: "day_finished", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || state.activeJobOverride?.jobId || null, time: actualTime, review: state.dayReview || {} });
+      await saveState();
+      return { reply: "✅ Tagesabschluss gespeichert. Danke und schönen Feierabend! 👋", buttons: [], state };
+    }
+
+    if (state.pending?.type === "day_review_task_text" && intent === "message") {
+      const title = String(text).trim();
+      tasks.push({
+        id: `t_${Date.now()}`, title, assigneeId: String(employeeId), assigneeName: state.employeeName,
+        jobId: current?.jobId || state.activeJobOverride?.jobId || "", jobName: current?.jobName || state.activeJobOverride?.jobName || "",
+        dueDate: today, reminder: "Beim Tagesabschluss erstellt", status: "open", createdAt: now, completedAt: null, createdBy: employeeId,
       });
-      await appendEvent({
-        type: "day_finished",
-        employeeId,
-        employeeName: state.employeeName,
-        date: today,
-        jobId: current.jobId,
-        time: actualTime,
-      });
-      const openTasks = tasks.filter(t =>
-        String(t.assigneeId) === String(employeeId) &&
-        t.status !== "done" &&
-        (!t.jobId || String(t.jobId) === String(current.jobId))
-      );
+      await writeJson(TASKS, tasks);
+      state.dayReview = { ...(state.dayReview || {}), taskCreated: title };
+      state.pending = null;
+      state.mode = "finished_day";
+      addTimeline("day_finished", "Tagesabschluss bestätigt", current);
+      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: current?.jobId || state.activeJobOverride?.jobId || null, jobName: current?.jobName || state.activeJobOverride?.jobName || "", createdAt: now });
+      await appendEvent({ type: "day_finished", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || state.activeJobOverride?.jobId || null, time: actualTime, review: state.dayReview || {} });
+      await saveState();
+      return { reply: `✅ Aufgabe „${title}“ gespeichert. Tagesabschluss erledigt. Schönen Feierabend! 👋`, buttons: [], state };
+    }
+
+    if (intent === "finish") {
+      const summary = formatDaySummary(timeEvents, employeeId, today, state);
+      state.pending = { type: "day_review_summary", createdAt: now };
+      state.dayReview = { startedAt: now, summary };
+      await saveState();
       return {
-        reply: `Feierabend ist gespeichert.${openTasks.length ? ` Es sind noch ${openTasks.length} offene Aufgabe(n) vorgemerkt.` : ""} Danke und schönen Abend! 👋`,
-        buttons: [],
+        reply: `📋 Tageszusammenfassung\n${summary}\n\nPasst das so?`,
+        buttons: ["Ja", "Nein"],
         state,
       };
     }
@@ -556,7 +666,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       detail: String(text),
     });
     return {
-      reply: "Danke, ich habe deine Nachricht gespeichert. Für den Test verstehe ich bereits: Start, Pause, Mittag, Weiter, Fertig, Status und Erledigt.",
+      reply: "Danke, ich habe deine Nachricht gespeichert.",
       buttons: state.mode === "working" ? ["Andere Baustelle"] : ["Status", "Start"],
       state,
     };
