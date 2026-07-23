@@ -9,7 +9,7 @@
 // ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
 // ✅ Admin: /admin oder /admin/ui + API + PDF View/Download + Akte + Löschen/Umbenennen/Zusammenführen
 // ✅ Mailversand NEU: PDF bleibt am Server, Mail enthält nur Download-Link (kein großer Anhang)
-// ✅ @ und # Kennung: @26072, #26072, @Raika-Alberschwende, #Raika-Alberschwende
+// ✅ Chef-Protokollmodus: Start nur mit "proto"; @ startet keinen Protokollmodus mehr
 //
 // Render ENV (wichtig):
 // DATA_DIR=/var/data
@@ -55,10 +55,10 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.4.5";
-const APP_BUILD = "0014-protokoll-morgenstatus";
+const APP_VERSION = "3.4.6";
+const APP_BUILD = "0015-chef-proto-fotosicher";
 const APP_STATUS = "WhatsApp Live Alpha";
-const APP_BUILD_DATE = "2026-07-17";
+const APP_BUILD_DATE = "2026-07-23";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -95,7 +95,7 @@ const CHEF_PHONE = process.env.CHEF_PHONE || "";
 const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || "";
 
 // ===================== Baustellenprotokoll-Sitzungen =====================
-// Ein Protokoll beginnt ausschließlich mit @baustellenname am Nachrichtenanfang
+// Ein Protokoll beginnt ausschließlich beim Chef mit dem Befehl "proto"
 // und bleibt bis zum Befehl "pdf" aktiv. Die Sitzung wird zusätzlich auf Disk
 // gespeichert, damit ein Render-Neustart sie nicht verliert.
 const PROTOCOL_BY_SENDER = {}; // { wa_id: { siteCode, startedAt } }
@@ -110,7 +110,7 @@ function isChefSender(sender) {
   return from === chef || from.endsWith(chef) || chef.endsWith(from);
 }
 function isProtocolCommand(text) {
-  return /^(proto|protokoll)$/i.test(String(text || "").trim());
+  return /^proto$/i.test(String(text || "").trim());
 }
 function jobIdFromName(name) {
   return normalizeSiteCode(String(name || ""))
@@ -164,10 +164,9 @@ function activeProtocol(sender) {
   return PROTOCOL_BY_SENDER[sender]?.siteCode || null;
 }
 function parseProtocolStart(text) {
-  // Nur @ als erstes Zeichen. Erstes Token bis zum Leerzeichen ist der Name.
-  // Unterstrich und Bindestrich verbinden Bestandteile des Baustellennamens.
-  const match = String(text || "").trim().match(/^@([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?:\s|$)/u);
-  return match ? normalizeSiteCode(match[1]) : null;
+  // Der alte Start mit @baustelle ist bewusst deaktiviert.
+  // Der Protokollmodus startet ausschließlich durch den geführten Chef-Befehl "proto".
+  return null;
 }
 
 // ===================== Helpers =====================
@@ -1246,11 +1245,29 @@ async function readKristineJson(filename, fallback) {
 async function appendKristineReviewEntry(entry) {
   const filePath = path.join(DATA_DIR, "_kristine", "day-review-entries.json");
   const rows = await readKristineJson("day-review-entries.json", []);
-  rows.push({
+  const normalized = {
     id: entry.id || `review_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     createdAt: new Date().toISOString(),
     ...entry,
-  });
+  };
+
+  // WhatsApp kann Webhooks erneut zustellen. Deshalb nicht doppelt eintragen.
+  const existingIndex = rows.findIndex((row) =>
+    (normalized.id && String(row.id || "") === String(normalized.id)) ||
+    (normalized.file && String(row.file || "") === String(normalized.file))
+  );
+
+  if (existingIndex >= 0) {
+    rows[existingIndex] = {
+      ...rows[existingIndex],
+      ...normalized,
+      createdAt: rows[existingIndex].createdAt || normalized.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    rows.push(normalized);
+  }
+
   await ensureDir(path.dirname(filePath));
   await fsp.writeFile(filePath, JSON.stringify(rows.slice(-20000), null, 2), "utf8");
 }
@@ -1293,6 +1310,7 @@ async function saveEmployeeReviewMedia({ msg, employee, date, sender }) {
   const job = await activeEmployeeJobAt(employee.id, date, time);
   const relativeFile = path.relative(DATA_DIR, absoluteFile).split(path.sep).join("/");
   await appendKristineReviewEntry({
+    id: `whatsapp_media_${String(msg.id || media.id)}`,
     employeeId: employee.id,
     employeeName: employee.name,
     date,
@@ -1306,6 +1324,8 @@ async function saveEmployeeReviewMedia({ msg, employee, date, sender }) {
     jobId: job.jobId,
     jobName: job.jobName,
     bookingSegmentId: job.bookingSegmentId,
+    assignmentStatus: job.jobId ? "assigned" : "unassigned",
+    needsOfficeReview: !job.jobId,
     content: media.caption || "",
   });
   return { kind, job };
@@ -1411,10 +1431,18 @@ app.post("/webhook", async (req, res) => {
       const date = isoDateFromWhatsAppTs(tsSec);
 
       const textOrCaption = parseCaptionTextFromMessage(msg);
-      let protocolSite = activeProtocol(sender);
+      const protocolAllowed = isChefSender(sender);
 
-      // Chefmodus: "protokoll" oder "proto" startet einen geführten Baustellenprotokoll-Dialog.
-      if (!protocolSite && msg.type === "text" && isChefSender(sender) && isProtocolCommand(textOrCaption)) {
+      // Sicherheitsregel: Nur der Chef darf eine Protokollsitzung besitzen.
+      // Alte/verwaiste Sitzungen anderer Mitarbeiter werden automatisch entfernt.
+      if (!protocolAllowed && activeProtocol(sender)) {
+        await stopProtocol(sender);
+      }
+
+      let protocolSite = protocolAllowed ? activeProtocol(sender) : null;
+
+      // Chefmodus: Nur "proto" startet den geführten Baustellenprotokoll-Dialog.
+      if (!protocolSite && msg.type === "text" && protocolAllowed && isProtocolCommand(textOrCaption)) {
         PROTOCOL_START_PENDING[sender] = { startedAt: Date.now() };
         try {
           await sendWhatsAppKristineReply({
@@ -1426,7 +1454,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      if (!protocolSite && msg.type === "text" && isChefSender(sender) && PROTOCOL_START_PENDING[sender]) {
+      if (!protocolSite && msg.type === "text" && protocolAllowed && PROTOCOL_START_PENDING[sender]) {
         const pending = PROTOCOL_START_PENDING[sender];
         const answer = String(textOrCaption || "").trim();
         const lowerAnswer = answer.toLowerCase();
@@ -1512,29 +1540,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      const protocolStart = parseProtocolStart(textOrCaption);
-
-      // 1) @baustelle hat IMMER Vorrang vor dem normalen Mitarbeitermodus.
-      if (protocolStart) {
-        protocolSite = protocolStart;
-        await startProtocol(sender, protocolSite);
-        const jobRoot = path.join(DATA_DIR, protocolSite);
-        await ensureDir(jobRoot);
-        if (!fs.existsSync(metaPathForJob(protocolSite))) {
-          await writeJobMeta(protocolSite, { name: protocolSite.replace(/_/g, " "), status: "Laufend" });
-        }
-        try {
-          await sendWhatsAppKristineReply({
-            phoneNumberId,
-            to: sender,
-            reply: `📍 Baustellenprotokoll ${protocolSite} gestartet.\nAlle folgenden Texte, Fotos, Audios und Dokumente werden zugeordnet.\nMit pdf abschließen.`
-          });
-        } catch {}
-        // Eine reine Startzeile wird nicht als Protokolltext gespeichert.
-        if (msg.type === "text" && String(textOrCaption).trim() === `@${protocolStart}`) continue;
-      }
-
-      // 2) Ein aktives Protokoll kann jederzeit ohne PDF abgebrochen werden.
+      // Ein aktives Protokoll kann jederzeit ohne PDF abgebrochen werden.
       if (protocolSite && msg.type === "text" && ["abbruch", "abbrechen", "stopp", "stop"].includes(String(textOrCaption).trim().toLowerCase())) {
         await stopProtocol(sender);
         try {
@@ -1565,24 +1571,51 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // 3) Medien eines bekannten Mitarbeiters werden direkt dem aktuellen Zeitblock zugeordnet.
-      if (!protocolSite && ["image", "video"].includes(msg.type)) {
+      // 3) Medien bekannter Mitarbeiter werden IMMER im Tagesrapport gesichert.
+      // Beim Chef dürfen sie bei aktivem Protokollmodus zusätzlich ins Baustellenprotokoll laufen.
+      if (["image", "video"].includes(msg.type)) {
         const employee = await employeeFromWhatsAppSender(sender);
+
         if (employee) {
           try {
             const saved = await saveEmployeeReviewMedia({ msg, employee, date, sender });
-            const label = saved?.kind === "video" ? "Video" : "Foto";
-            const site = saved?.job?.jobId ? `#${saved.job.jobId}${saved.job.jobName ? " · " + saved.job.jobName : ""}` : "dem heutigen Tagesrapport";
-            await sendWhatsAppKristineReply({
-              phoneNumberId,
-              to: sender,
-              reply: `✅ ${label} erhalten und ${site} zugeordnet.`
-            });
+
+            // Außerhalb des Chef-Protokollmodus ist die Verarbeitung hier abgeschlossen.
+            if (!protocolSite) {
+              const label = saved?.kind === "video" ? "Video" : "Foto";
+              const site = saved?.job?.jobId
+                ? `#${saved.job.jobId}${saved.job.jobName ? " · " + saved.job.jobName : ""}`
+                : "dem heutigen Tagesrapport zur Büroprüfung";
+
+              await sendWhatsAppKristineReply({
+                phoneNumberId,
+                to: sender,
+                reply: `✅ ${label} erhalten und ${site} zugeordnet.`
+              });
+
+              continue;
+            }
+
+            // Bei aktivem Chef-Protokollmodus bewusst NICHT continue:
+            // Das Medium wird danach zusätzlich im Baustellenprotokoll gespeichert.
           } catch (error) {
             console.error("❌ Mitarbeiter-Medium konnte nicht gespeichert werden:", error?.message || error);
-            try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Das Medium ist angekommen, konnte aber noch nicht eindeutig zugeordnet werden. Das Büro erhält einen Prüfhinweis." }); } catch {}
+
+            if (!protocolSite) {
+              try {
+                await sendWhatsAppKristineReply({
+                  phoneNumberId,
+                  to: sender,
+                  reply: "Das Medium ist angekommen, konnte aber noch nicht eindeutig zugeordnet werden. Das Büro erhält einen Prüfhinweis."
+                });
+              } catch {}
+
+              continue;
+            }
+
+            // Im Chef-Protokollmodus trotzdem weiterlaufen, damit das Medium
+            // wenigstens im ausgewählten Baustellenprotokoll erhalten bleibt.
           }
-          continue;
         }
       }
 
@@ -1648,8 +1681,8 @@ app.post("/webhook", async (req, res) => {
         }
       }
 
-      // Im Protokollmodus gilt ausschließlich die aktive @Baustelle.
-      // Außerhalb bleibt die alte #/@-Kompatibilität für unbekannte Absender erhalten.
+      // Im Chef-Protokollmodus gilt ausschließlich die aktiv ausgewählte Baustelle.
+      // Außerhalb bleibt die alte #/@-Kompatibilität nur für unbekannte Absender erhalten.
       let siteCode = protocolSite || parseSiteCodeFromText(textOrCaption) || "unknown";
 
       const dayDir = resolveDayDirForWrite(siteCode, date);
