@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0021.1
+// Datei: daily-report.js · Build 0022.5
 "use strict";
 
 const fs = require("fs");
@@ -174,11 +174,12 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       const materials = employee.reviews.filter((entry) => entry.category === "material");
       const materialPhotos = materials.filter((entry) => entry.source === "image" || entry.file);
       const photos = employee.reviews.filter((entry) => entry.category === "photo");
+      const videos = employee.reviews.filter((entry) => entry.category === "video");
       const regie = employee.reviews.filter((entry) => entry.category === "regie");
       const blockLines = employee.blocks.slice(0, 6);
       const materialText = materials.map((entry) => entry.content || entry.transcript || (entry.source === "image" ? "Materialfoto" : "Material")).filter(Boolean).join("; ");
       const regieText = regie.map((entry) => entry.content || entry.transcript || "Regie vorgemerkt").filter(Boolean).join("; ");
-      const approxHeight = 44 + blockLines.length * 14 + (materialText ? 28 : 0) + (materialPhotos.length ? 62 : 0) + (regieText ? 24 : 0) + (photos.length ? 74 : 0);
+      const approxHeight = 44 + blockLines.length * 14 + (materialText ? 28 : 0) + (materialPhotos.length ? 62 : 0) + (regieText ? 24 : 0) + (photos.length ? 74 : 0) + (videos.length ? 16 : 0);
       if (y - approxHeight < 42) newPage();
 
       page.drawText(employee.employeeName, { x: margin, y, size: 13, font: bold });
@@ -187,7 +188,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       if (blockLines.length) {
         for (const block of blockLines) {
           page.drawText(`${block.from}-${block.to}`, { x: margin, y, size: 9.5, font: bold });
-          page.drawText(block.jobName, { x: margin + 76, y, size: 9.5, font, maxWidth: 310 });
+          page.drawText(`${block.jobId ? "#" + block.jobId + " · " : ""}${block.jobName}`, { x: margin + 76, y, size: 9.5, font, maxWidth: 420 });
           y -= 14;
         }
       } else {
@@ -248,6 +249,14 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         y -= 58;
       }
 
+      if (videos.length) {
+        const videoNames = videos.map((entry) => path.basename(String(entry.file || "Video"))).slice(0, 4).join(", ");
+        page.drawText(`Videos: ${videos.length}${videoNames ? " · " + videoNames : ""}`, {
+          x: margin, y, size: 9, font: bold, maxWidth: PAGE_W - margin * 2
+        });
+        y -= 16;
+      }
+
       page.drawLine({ start: { x: margin, y: y - 2 }, end: { x: PAGE_W - margin, y: y - 2 }, thickness: 0.5, color: rgb(0.9, 0.9, 0.9) });
       y -= 15;
     }
@@ -285,7 +294,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     for (const [jobId, jobName] of jobs.entries()) {
       const siteEmployees = await collect(date, jobId);
       if (!siteEmployees.length) continue;
-      const bytes = await buildPdf({ date, employees: siteEmployees, titleSuffix: jobName || jobId });
+      const bytes = await buildPdf({ date, employees: siteEmployees, titleSuffix: `#${jobId} · ${jobName || jobId}` });
       const chronikDir = path.join(dataDir, String(jobId), "_chronik");
       await fsp.mkdir(chronikDir, { recursive: true });
       const filePath = path.join(chronikDir, `Tagesreport_${date}.pdf`);
