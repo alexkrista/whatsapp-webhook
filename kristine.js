@@ -795,7 +795,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       const employeeId = String(req.params.employeeId || "").trim();
       const date = String(req.params.date || localDateISO()).slice(0, 10);
       const employeeName = String(req.body?.employeeName || employeeId).trim();
-      const moveLinked = req.body?.moveLinked !== false;
+      const moveLinked = true; // Zeitblock ist die Wahrheit: verknüpfte Einträge werden immer mitgeführt.
       const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
       const segments = incoming.map((segment, index) => ({
         id: String(segment.id || `seg_${Date.now()}_${index}`),
@@ -862,6 +862,17 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
           } else if (!entry.bookingSegmentId) entry.bookingSegmentId = target.id;
         }
         await writeJson(REVIEW_ENTRIES, reviewEntries);
+      }
+
+      // Tagesreport ist nur eine Ansicht: nach Zeitblockänderungen immer neu erzeugen.
+      const reportFile = path.join(ROOT, "reports", `Tagesreport_${date}.pdf`);
+      await fsp.rm(reportFile, { force: true }).catch(() => {});
+      const affectedJobs = new Set([
+        ...oldSegments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
+        ...segments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
+      ]);
+      for (const jobId of affectedJobs) {
+        await fsp.rm(path.join(dataDir, jobId, "_chronik", `Tagesreport_${date}.pdf`), { force: true }).catch(() => {});
       }
 
       const state = { ...(states[employeeId] || {}), employeeId, employeeName, timeline: Array.isArray(states[employeeId]?.timeline) ? states[employeeId].timeline : [] };
