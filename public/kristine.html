@@ -71,15 +71,26 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .pool-card{border:1px solid #ddd8cf;border-left:5px solid #27713d;border-radius:10px;background:#fff;padding:7px 8px;cursor:grab;font-size:12px;line-height:1.25}
 .pool-card:active{cursor:grabbing}.pool-card strong{display:block;font-size:12px}.pool-card .pool-hours{font-weight:800;color:#555;margin-top:3px}
 .pool-card.type-urlaub{border-left-color:#2f73c8;background:#edf5ff}.pool-card.type-krank{border-left-color:#c53b3b;background:#fff0f0}.pool-card.type-arzt{border-left-color:#7b61a8;background:#f4f0fb}.pool-card.type-aufraeumen{border-left-color:#d38321;background:#fff6e8}.pool-card.type-werkstatt{border-left-color:#5d6670;background:#f0f2f4}.pool-card.type-schulung{border-left-color:#6d55a6;background:#f5f1ff}.pool-card.type-material_holen{border-left-color:#3f7c9b;background:#eef8fc}.pool-card.type-lager{border-left-color:#8b6a3e;background:#f8f2e9}.pool-card.type-besprechung{border-left-color:#b48723;background:#fff8df}
-.pool-empty{font-size:11px;color:#777;padding:6px}.planning-calendar-card{margin-top:14px;position:relative}.planning-calendar-toolbar{position:sticky;top:0;z-index:25;background:#fff;padding:0 0 12px;box-shadow:0 8px 12px rgba(255,255,255,.96)}
-.assignment.type-schulung,.monthitem.type-schulung{border-left-color:#6d55a6;background:#f5f1ff}.assignment.type-material_holen,.monthitem.type-material_holen{border-left-color:#3f7c9b;background:#eef8fc}.assignment.type-lager,.monthitem.type-lager{border-left-color:#8b6a3e;background:#f8f2e9}.assignment.type-besprechung,.monthitem.type-besprechung{border-left-color:#b48723;background:#fff8df}
+.pool-empty{font-size:11px;color:#777;padding:6px}.planning-calendar-card{margin-top:14px;position:relative}.planning-calendar-toolbar{position:sticky;top:var(--planning-sticky-top,0px);z-index:29;background:#fff;padding:10px 0 12px;box-shadow:0 8px 12px rgba(255,255,255,.96)}
+/* Ein Kartentyp = eine Farbe, oben im Pool und unten in jeder Planungsansicht */
+.assignment.type-urlaub,.monthitem.type-urlaub{border-left-color:#2f73c8!important;background:#edf5ff!important}
+.assignment.type-krank,.monthitem.type-krank{border-left-color:#c53b3b!important;background:#fff0f0!important}
+.assignment.type-arzt,.monthitem.type-arzt{border-left-color:#7b61a8!important;background:#f4f0fb!important}
+.assignment.type-aufraeumen,.monthitem.type-aufraeumen{border-left-color:#d38321!important;background:#fff6e8!important}
+.assignment.type-werkstatt,.monthitem.type-werkstatt{border-left-color:#5d6670!important;background:#f0f2f4!important}
+.assignment.type-schulung,.monthitem.type-schulung{border-left-color:#6d55a6!important;background:#f5f1ff!important}
+.assignment.type-material_holen,.monthitem.type-material_holen{border-left-color:#3f7c9b!important;background:#eef8fc!important}
+.assignment.type-lager,.monthitem.type-lager{border-left-color:#8b6a3e!important;background:#f8f2e9!important}
+.assignment.type-besprechung,.monthitem.type-besprechung{border-left-color:#b48723!important;background:#fff8df!important}
+.pool-budget{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:11px;font-weight:850;color:#4f4f4f}
+.pool-budget.over{color:#a51f1f}.pool-budget span{white-space:nowrap}
 @media(max-width:1050px){.planning-top{position:static;box-shadow:none}.planning-top-grid{grid-template-columns:1fr}.planning-pools{grid-template-columns:1fr 1fr 1fr}}
 @media(max-width:700px){.planning-pools{grid-template-columns:1fr}.pool-list{max-height:160px}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0022.3 · Planung Final</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0022.4 · Planung Feinschliff</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -336,13 +347,21 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
-window.addEventListener('DOMContentLoaded',()=>{segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()});copyModalBackdrop.addEventListener('click',e=>{if(e.target===copyModalBackdrop)closeCopyModal()})});
+window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
+window.addEventListener('DOMContentLoaded',()=>{const planningTop=document.querySelector('#planning .planning-top');if(planningTop&&window.ResizeObserver)new ResizeObserver(()=>updatePlanningStickyOffsets()).observe(planningTop);segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()});copyModalBackdrop.addEventListener('click',e=>{if(e.target===copyModalBackdrop)closeCopyModal()})});
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
-function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='kristool')renderKristool()}
+function updatePlanningStickyOffsets(){
+  const top=document.querySelector('#planning .planning-top');
+  if(!top)return;
+  const active=document.getElementById('planning')?.classList.contains('active');
+  if(!active)return;
+  document.documentElement.style.setProperty('--planning-sticky-top',`${Math.ceil(top.getBoundingClientRect().height)}px`);
+}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='kristool')renderKristool();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
 async function loadAll(){
   // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
   const results=await Promise.allSettled([
@@ -442,7 +461,38 @@ function renderSystemCards(){
 function normalizedJobStatus(job){return String(job?.status||'').trim().toLowerCase()}
 function isNewOrderJob(job){const s=normalizedJobStatus(job);return s==='auftrag'||s.includes('auftrag')||s==='neu'}
 function isRunningJob(job){const s=normalizedJobStatus(job);return s==='laufend'||s.includes('lauf')||s==='in arbeit'}
-function planningPoolJobCard(job){const number=job.jobId||job.number||'',name=job.name||('#'+number);return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><strong>${esc(number)} · ${esc(name)}</strong><div class="pool-hours">7,8 h</div></div>`}
+function roundedPlanningHours(value){return String(Math.round(Math.max(0,Number(value||0))))}
+function plannedHoursForJobFromToday(jobId){
+  const today=String(data.today||iso(new Date()));
+  return (data.assignments||[])
+    .filter(a=>cardTypeOf(a)==='site'&&String(a.jobId||'')===String(jobId||'')&&String(a.date||'')>=today)
+    .reduce((sum,a)=>sum+plannedHoursForAssignment(a),0);
+}
+function consumedHoursForJobUntilYesterday(jobId){
+  const today=String(data.today||iso(new Date()));
+  const keys=new Set((data.timeEvents||[])
+    .filter(e=>String(e.date||'')<today&&String(e.jobId||'')===String(jobId||''))
+    .map(e=>`${e.employeeId}|${e.date}`));
+  let minutes=0;
+  for(const key of keys){
+    const split=key.indexOf('|'),employeeId=key.slice(0,split),date=key.slice(split+1);
+    minutes+=employeeDaySegments(employeeId,date,null)
+      .filter(seg=>seg.type==='work'&&String(seg.jobId||'')===String(jobId||''))
+      .reduce((sum,seg)=>sum+Math.max(0,seg.to-seg.from),0);
+  }
+  return minutes/60;
+}
+function planningPoolJobCard(job){
+  const number=job.jobId||job.number||'',name=job.name||('#'+number);
+  const total=Number(job?.calculation?.calculatedHours||job?.calculatedHours||job?.plannedHours||0);
+  const used=consumedHoursForJobUntilYesterday(number);
+  const planned=plannedHoursForJobFromToday(number);
+  const over=total>0&&(used+planned)>total+0.01;
+  const metrics=total>0
+    ? `<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${roundedPlanningHours(total)}</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`
+    : `<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`;
+  return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><strong>${esc(number)} · ${esc(name)}</strong>${metrics}</div>`;
+}
 function renderPlanningPools(){
   renderSystemCards();
   const newJobs=masterJobs.filter(isNewOrderJob).sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));
@@ -450,7 +500,7 @@ function renderPlanningPools(){
   const n=document.getElementById('newOrdersPool'),r=document.getElementById('runningJobsPool');
   if(n)n.innerHTML=newJobs.length?newJobs.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
   if(r)r.innerHTML=running.length?running.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
-  const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');if(nc)nc.textContent=String(newJobs.length);if(rc)rc.textContent=String(running.length);
+  const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');if(nc)nc.textContent=String(newJobs.length);if(rc)rc.textContent=String(running.length);requestAnimationFrame(updatePlanningStickyOffsets);
 }
 function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
