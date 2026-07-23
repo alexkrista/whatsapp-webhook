@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0022.5
+// Datei: daily-report.js · Build 0022.6
 "use strict";
 
 const fs = require("fs");
@@ -6,6 +6,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { migrateLegacyMediaForDate } = require("./media-migration");
 
 function registerDailyReport(app, { dataDir, requireAdmin }) {
   const ROOT = path.join(dataDir, "_kristine");
@@ -275,6 +276,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
   async function generate(date = yesterdayISO()) {
     await fsp.mkdir(REPORTS_DIR, { recursive: true });
+    await migrateLegacyMediaForDate({ dataDir, date });
     const employees = await collect(date);
     const overallBytes = await buildPdf({ date, employees });
     const overallPath = path.join(REPORTS_DIR, `Tagesreport_${date}.pdf`);
