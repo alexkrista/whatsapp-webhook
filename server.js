@@ -48,6 +48,7 @@ const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
+const { registerDailyReport } = require("./daily-report");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -3108,6 +3109,12 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
+});
+
+// ===================== Tagesreport PDF =====================
+registerDailyReport(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
 });
 
 // ===================== Morgenstatus 07:00 / 08:00 =====================
