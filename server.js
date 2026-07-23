@@ -55,8 +55,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.4.6";
-const APP_BUILD = "0015-chef-proto-fotosicher";
+const APP_VERSION = "3.5.0";
+const APP_BUILD = "0021.4-planung-zeitmodell";
 const APP_STATUS = "WhatsApp Live Alpha";
 const APP_BUILD_DATE = "2026-07-23";
 
@@ -2700,6 +2700,67 @@ function employeesPath() {
 function worktimeModelsPath() {
   return path.join(systemDataDir(), "worktime-models.json");
 }
+function scheduleModelsPath() {
+  return path.join(systemDataDir(), "schedule-models.json");
+}
+function holidaysPath() {
+  return path.join(systemDataDir(), "holidays.json");
+}
+function companyVacationsPath() {
+  return path.join(systemDataDir(), "company-vacations.json");
+}
+function validDateISO(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+function cleanHolidayRows(rows) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const date = String(row?.date || "");
+    if (!validDateISO(date)) continue;
+    map.set(date, { date, name: String(row?.name || "Feiertag").trim().slice(0, 120) || "Feiertag" });
+  }
+  return [...map.values()].sort((a,b) => a.date.localeCompare(b.date));
+}
+function cleanCompanyVacationRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(row => ({
+      from: String(row?.from || ""),
+      to: String(row?.to || ""),
+      reason: String(row?.reason || "Betriebsurlaub").trim().slice(0, 160) || "Betriebsurlaub"
+    }))
+    .filter(row => validDateISO(row.from) && validDateISO(row.to) && row.to >= row.from)
+    .sort((a,b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+}
+function easterSundayUTC(year) {
+  const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4;
+  const f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451);
+  const month=Math.floor((h+l-7*m+114)/31),day=((h+l-7*m+114)%31)+1;
+  return new Date(Date.UTC(year,month-1,day,12));
+}
+function addUtcDays(date, days) {
+  const d = new Date(date.getTime());
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0,10);
+}
+function austrianHolidays(year) {
+  const easter = easterSundayUTC(year);
+  return cleanHolidayRows([
+    {date:`${year}-01-01`,name:"Neujahr"},
+    {date:`${year}-01-06`,name:"Heilige Drei Könige"},
+    {date:addUtcDays(easter,1),name:"Ostermontag"},
+    {date:`${year}-05-01`,name:"Staatsfeiertag"},
+    {date:addUtcDays(easter,39),name:"Christi Himmelfahrt"},
+    {date:addUtcDays(easter,50),name:"Pfingstmontag"},
+    {date:addUtcDays(easter,60),name:"Fronleichnam"},
+    {date:`${year}-08-15`,name:"Mariä Himmelfahrt"},
+    {date:`${year}-10-26`,name:"Nationalfeiertag"},
+    {date:`${year}-11-01`,name:"Allerheiligen"},
+    {date:`${year}-12-08`,name:"Mariä Empfängnis"},
+    {date:`${year}-12-25`,name:"Christtag"},
+    {date:`${year}-12-26`,name:"Stefanitag"}
+  ]);
+}
 function companyPath() {
   return path.join(systemDataDir(), "company.json");
 }
@@ -2794,28 +2855,30 @@ async function calculationSummary(year = new Date().getFullYear()) {
 const DEFAULT_WORKTIME_MODELS = [
   {
     id: "krista-standard",
-    name: "Krista Standard",
+    name: "KRISTA-Modell",
     active: true,
-    description: "Jänner bis März Freitag frei; April bis Dezember Freitag 07:00–14:15. Montag bis Donnerstag ganzjährig 07:00–17:00.",
+    systemProtected: true,
+    payrollTargetHoursWeekday: 7.8,
+    description: "Planung nach Modellstunden. Winter: Dezember bis März, Freitag frei. Sommer: April bis November, Freitag 07:00–14:15. Monatlicher Stundenzettel: Montag bis Freitag immer 7,8 Sollstunden.",
     seasons: [
       {
-        id: "winter", name: "Winter", months: [1,2,3],
+        id: "winter", name: "Winter (Dezember–März)", months: [12,1,2,3],
         weekdays: {
-          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "5": { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0 }
+          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "5": { free: true, from: "", to: "", lunchBreakMinutes: 0, otherBreakMinutes: 0, targetHours: 0, payrollTargetHours: 7.8 }
         }
       },
       {
-        id: "april-december", name: "April bis Dezember", months: [4,5,6,7,8,9,10,11,12],
+        id: "summer", name: "Sommer (April–November)", months: [4,5,6,7,8,9,10,11],
         weekdays: {
-          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25 },
-          "5": { from: "07:00", to: "14:15", lunchBreakMinutes: 0, otherBreakMinutes: 15, targetHours: 7.0 }
+          "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "3": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "4": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
+          "5": { from: "07:00", to: "14:15", lunchBreakMinutes: 0, otherBreakMinutes: 15, targetHours: 7.0, payrollTargetHours: 7.8 }
         }
       }
     ]
@@ -2830,7 +2893,17 @@ async function readWorktimeModels() {
   }
   try {
     const data = JSON.parse(await fsp.readFile(p, "utf8"));
-    return Array.isArray(data) && data.length ? data : DEFAULT_WORKTIME_MODELS;
+    if (!Array.isArray(data) || !data.length) return DEFAULT_WORKTIME_MODELS;
+
+    // Frühere KRISTA-Standardversion automatisch auf das vereinbarte Jahresmodell bringen.
+    const upgraded = data.map(model => {
+      if (String(model?.id) !== "krista-standard") return model;
+      return DEFAULT_WORKTIME_MODELS[0];
+    });
+    if (JSON.stringify(upgraded) !== JSON.stringify(data)) {
+      await fsp.writeFile(p, JSON.stringify(upgraded, null, 2), "utf8");
+    }
+    return upgraded;
   } catch {
     return DEFAULT_WORKTIME_MODELS;
   }
@@ -2846,7 +2919,11 @@ function scheduleForDate(model, dateStr) {
     modelId: model?.id || "", modelName: model?.name || "", seasonId: season?.id || "", seasonName: season?.name || "",
     weekday, free: !!rule.free, from: rule.from || "", to: rule.to || "",
     lunchBreakMinutes: Number(rule.lunchBreakMinutes || 0), otherBreakMinutes: Number(rule.otherBreakMinutes || 0),
-    breakMinutes: Number(rule.lunchBreakMinutes || 0) + Number(rule.otherBreakMinutes || 0), targetHours: Number(rule.targetHours || 0)
+    breakMinutes: Number(rule.lunchBreakMinutes || 0) + Number(rule.otherBreakMinutes || 0),
+    targetHours: Number(rule.targetHours || 0),
+    payrollTargetHours: weekday >= 1 && weekday <= 5
+      ? Number(rule.payrollTargetHours ?? model?.payrollTargetHoursWeekday ?? 7.8)
+      : 0
   };
 }
 function employeeIdFromName(name) {
@@ -2933,6 +3010,82 @@ app.get("/admin/api/ideas", async (req,res)=>{ if(!requireAdmin(req,res))return;
 app.post("/admin/api/ideas", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(ideasPath()); const row=cleanIdea(req.body||{}); if(!row.title)return res.status(400).json({ok:false,error:"Titel fehlt"}); rows.unshift(row); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true,idea:row}); });
 app.put("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; const rows=await readJsonArrayFile(ideasPath()); const i=rows.findIndex(x=>String(x.id)===String(req.params.id)); if(i<0)return res.status(404).json({ok:false,error:"Idee nicht gefunden"}); rows[i]=cleanIdea({...rows[i],...(req.body||{})},req.params.id); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true,idea:rows[i]}); });
 app.delete("/admin/api/ideas/:id", async (req,res)=>{ if(!requireAdmin(req,res))return; let rows=await readJsonArrayFile(ideasPath()); rows=rows.filter(x=>String(x.id)!==String(req.params.id)); await writeJsonArrayFile(ideasPath(),rows); res.json({ok:true}); });
+
+// ===================== Planung: Arbeitsmodelle, Feiertage, Betriebsurlaub =====================
+app.get("/kristine/api/schedule-models", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const models = await readJsonArrayFile(scheduleModelsPath());
+    res.json({ ok: true, models });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.put("/kristine/api/schedule-models", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const models = Array.isArray(req.body?.models) ? req.body.models.slice(0,100) : [];
+    await writeJsonArrayFile(scheduleModelsPath(), models);
+    res.json({ ok: true, models });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.get("/kristine/api/holidays", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    let holidays = cleanHolidayRows(await readJsonArrayFile(holidaysPath()));
+    if (!holidays.length) {
+      holidays = austrianHolidays(new Date().getFullYear());
+      await writeJsonArrayFile(holidaysPath(), holidays);
+    }
+    res.json({ ok: true, holidays });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.put("/kristine/api/holidays", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const holidays = cleanHolidayRows(req.body?.holidays);
+    await writeJsonArrayFile(holidaysPath(), holidays);
+    res.json({ ok: true, holidays });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.post("/kristine/api/holidays/reload-austrian", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const year = Math.min(2100, Math.max(2020, Number(req.body?.year || new Date().getFullYear())));
+    const existing = cleanHolidayRows(await readJsonArrayFile(holidaysPath()));
+    const generated = austrianHolidays(year);
+    const holidays = cleanHolidayRows([...existing.filter(h => !h.date.startsWith(`${year}-`)), ...generated]);
+    await writeJsonArrayFile(holidaysPath(), holidays);
+    res.json({ ok: true, holidays });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.get("/kristine/api/company-vacations", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const vacations = cleanCompanyVacationRows(await readJsonArrayFile(companyVacationsPath()));
+    res.json({ ok: true, vacations });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.put("/kristine/api/company-vacations", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const vacations = cleanCompanyVacationRows(req.body?.vacations);
+    await writeJsonArrayFile(companyVacationsPath(), vacations);
+    res.json({ ok: true, vacations });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
 app.get("/admin/api/worktime-models", async (req, res) => {
   if (!requireAdmin(req, res)) return;
