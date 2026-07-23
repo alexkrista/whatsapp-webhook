@@ -1,0 +1,191 @@
+"use strict";
+
+const fs = require("fs");
+const fsp = require("fs/promises");
+const path = require("path");
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function hmFromTimestampSeconds(value) {
+  const n = Number(value || 0);
+  if (!n) return "";
+  return new Date(n * 1000).toLocaleTimeString("de-AT", {
+    timeZone: "Europe/Vienna",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+}
+
+function minuteFromHM(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+async function readJson(file, fallback) {
+  try {
+    return JSON.parse(await fsp.readFile(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+async function readJsonLines(file) {
+  try {
+    const text = await fsp.readFile(file, "utf8");
+    return text.split("\n").filter(Boolean).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function resolveLegacyDayDir(dataDir, jobId, date) {
+  const [year, month, day] = String(date).split("-");
+  const modern = path.join(dataDir, jobId, year, month, day);
+  if (fs.existsSync(modern)) return modern;
+  const old = path.join(dataDir, jobId, date);
+  return fs.existsSync(old) ? old : null;
+}
+
+function mediaKind(filename) {
+  if (/\.(jpg|jpeg|png|webp)$/i.test(filename)) return "photo";
+  if (/\.(mp4|mov|m4v|avi|webm)$/i.test(filename)) return "video";
+  return "";
+}
+
+function timestampFromFilename(filename) {
+  const m = String(filename).match(/^(\d{10})(?:_|-)/);
+  return m ? Number(m[1]) : 0;
+}
+
+function employeeForSender(employees, sender) {
+  const wanted = normalizePhone(sender);
+  if (!wanted) return null;
+  return employees.find((employee) => {
+    const phone = normalizePhone(employee.phone);
+    return phone && (phone === wanted || phone.endsWith(wanted) || wanted.endsWith(phone));
+  }) || null;
+}
+
+function activeTimeEvent(timeEvents, employeeId, date, at, fallbackJobId, fallbackJobName) {
+  const wanted = minuteFromHM(at);
+  const rows = timeEvents
+    .filter((event) => String(event.employeeId) === String(employeeId) && String(event.date) === String(date))
+    .map((event, index) => ({ ...event, _index: index, _minute: minuteFromHM(event.at) }))
+    .filter((event) => event._minute !== null && (wanted === null || event._minute <= wanted))
+    .sort((a, b) => a._minute - b._minute || a._index - b._index);
+  const latest = [...rows].reverse().find((event) => ["start", "weiter"].includes(event.type) && event.jobId);
+  return latest ? {
+    jobId: String(latest.jobId),
+    jobName: String(latest.jobName || latest.jobId),
+    bookingSegmentId: latest.segmentId || null,
+  } : {
+    jobId: String(fallbackJobId || ""),
+    jobName: String(fallbackJobName || fallbackJobId || ""),
+    bookingSegmentId: null,
+  };
+}
+
+async function migrateLegacyMediaForDate({ dataDir, date }) {
+  const root = path.join(dataDir, "_kristine");
+  const reviewFile = path.join(root, "day-review-entries.json");
+  const employees = await readJson(path.join(dataDir, "_system", "employees.json"), []);
+  const timeEvents = await readJson(path.join(root, "time-events.json"), []);
+  const reviews = await readJson(reviewFile, []);
+  const referenced = new Set(reviews.map((entry) => String(entry.file || "").replace(/\\/g, "/")).filter(Boolean));
+
+  const jobIds = (await fsp.readdir(dataDir).catch(() => []))
+    .filter((jobId) => jobId && !jobId.startsWith("_") && /^[A-Za-z0-9_-]+$/.test(jobId));
+
+  let scanned = 0;
+  let imported = 0;
+  let unresolvedEmployees = 0;
+  const added = [];
+
+  for (const jobId of jobIds) {
+    const dayDir = resolveLegacyDayDir(dataDir, jobId, date);
+    if (!dayDir) continue;
+
+    const meta = await readJson(path.join(dataDir, jobId, ".meta.json"), {});
+    const jobName = String(meta.name || jobId);
+    const logs = await readJsonLines(path.join(dayDir, "log.jsonl"));
+    const files = (await fsp.readdir(dayDir).catch(() => [])).filter((name) => mediaKind(name));
+
+    for (const filename of files) {
+      scanned++;
+      const full = path.join(dayDir, filename);
+      const relative = path.relative(dataDir, full).split(path.sep).join("/");
+      if (referenced.has(relative)) continue;
+
+      const ts = timestampFromFilename(filename);
+      const matchingLog = logs.find((entry) => {
+        const rawTs = Number(entry?.raw?.timestamp || 0);
+        const fileTs = timestampFromFilename(entry?.file || "");
+        return (ts && rawTs === ts) || (ts && fileTs === ts) || String(entry?.file || "") === filename;
+      }) || null;
+      const sender = matchingLog?.from || matchingLog?.raw?.from || "";
+      const employee = employeeForSender(employees, sender);
+      if (!employee) unresolvedEmployees++;
+
+      const at = hmFromTimestampSeconds(ts || matchingLog?.raw?.timestamp);
+      const link = employee
+        ? activeTimeEvent(timeEvents, employee.id, date, at, jobId, jobName)
+        : { jobId, jobName, bookingSegmentId: null };
+
+      const kind = mediaKind(filename);
+      const entry = {
+        id: `legacy_${date}_${jobId}_${filename}`.replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 220),
+        createdAt: new Date().toISOString(),
+        migratedAt: new Date().toISOString(),
+        migratedFromLegacy: true,
+        employeeId: employee?.id || "",
+        employeeName: employee?.name || "",
+        date,
+        category: kind,
+        source: kind,
+        file: relative,
+        at,
+        capturedAt: at,
+        sender,
+        jobId: link.jobId,
+        jobName: link.jobName,
+        bookingSegmentId: link.bookingSegmentId,
+        content: matchingLog?.text || matchingLog?.raw?.image?.caption || matchingLog?.raw?.video?.caption || "",
+      };
+      reviews.push(entry);
+      added.push(entry);
+      referenced.add(relative);
+      imported++;
+    }
+  }
+
+  if (imported) {
+    await fsp.mkdir(root, { recursive: true });
+    await fsp.writeFile(reviewFile, JSON.stringify(reviews, null, 2), "utf8");
+  }
+
+  return { ok: true, date, scanned, imported, unresolvedEmployees, added };
+}
+
+function registerMediaMigration(app, { dataDir, requireAdmin }) {
+  app.post("/admin/api/media-migration/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const date = String(req.params.date || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ ok: false, error: "Ungültiges Datum" });
+      }
+      const result = await migrateLegacyMediaForDate({ dataDir, date });
+      res.json(result);
+    } catch (error) {
+      console.error("Legacy media migration failed:", error);
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+}
+
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration };
