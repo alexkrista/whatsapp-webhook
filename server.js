@@ -48,7 +48,6 @@ const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
-const { registerDailyReport } = require("./daily-report");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -1233,6 +1232,83 @@ function whatsappTextFromMessage(msg) {
   return "";
 }
 
+
+async function readKristineJson(filename, fallback) {
+  try {
+    return JSON.parse(await fsp.readFile(path.join(DATA_DIR, "_kristine", filename), "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+async function appendKristineReviewEntry(entry) {
+  const filePath = path.join(DATA_DIR, "_kristine", "day-review-entries.json");
+  const rows = await readKristineJson("day-review-entries.json", []);
+  rows.push({
+    id: entry.id || `review_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    createdAt: new Date().toISOString(),
+    ...entry,
+  });
+  await ensureDir(path.dirname(filePath));
+  await fsp.writeFile(filePath, JSON.stringify(rows.slice(-20000), null, 2), "utf8");
+}
+
+async function activeEmployeeJobAt(employeeId, date, at) {
+  const rows = await readKristineJson("time-events.json", []);
+  const wantedMinute = (() => {
+    const m = String(at || "").match(/^(\d{1,2}):(\d{2})$/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 24 * 60;
+  })();
+  const events = rows
+    .filter((row) => String(row.employeeId) === String(employeeId) && String(row.date) === String(date))
+    .map((row, index) => {
+      const m = String(row.at || "").match(/^(\d{1,2}):(\d{2})$/);
+      return { ...row, _index: index, _minute: m ? Number(m[1]) * 60 + Number(m[2]) : null };
+    })
+    .filter((row) => row._minute !== null && row._minute <= wantedMinute)
+    .sort((a, b) => a._minute - b._minute || a._index - b._index);
+  const latestWork = [...events].reverse().find((row) => ["start", "weiter"].includes(row.type) && row.jobId);
+  return latestWork ? { jobId: latestWork.jobId, jobName: latestWork.jobName || latestWork.jobId, bookingSegmentId: latestWork.segmentId || null } : { jobId: null, jobName: "", bookingSegmentId: null };
+}
+
+async function saveEmployeeReviewMedia({ msg, employee, date, sender }) {
+  const media = msg.image || msg.video;
+  if (!media?.id) return null;
+  const kind = msg.type === "video" ? "video" : "photo";
+  const { buf, mime } = await downloadWhatsAppMedia(media.id);
+  const ext = kind === "video"
+    ? (String(mime).includes("quicktime") ? ".mov" : ".mp4")
+    : ".jpg";
+  const relativeDir = path.join("_kristine", "media", date, String(employee.id));
+  const absoluteDir = path.join(DATA_DIR, relativeDir);
+  await ensureDir(absoluteDir);
+  const filename = `${String(msg.timestamp || Math.floor(Date.now() / 1000))}_${media.id}${ext}`;
+  const absoluteFile = path.join(absoluteDir, filename);
+  await fsp.writeFile(absoluteFile, buf);
+  const time = new Date(Number(msg.timestamp || 0) * 1000 || Date.now()).toLocaleTimeString("de-AT", {
+    timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  });
+  const job = await activeEmployeeJobAt(employee.id, date, time);
+  const relativeFile = path.relative(DATA_DIR, absoluteFile).split(path.sep).join("/");
+  await appendKristineReviewEntry({
+    employeeId: employee.id,
+    employeeName: employee.name,
+    date,
+    category: kind,
+    source: kind,
+    file: relativeFile,
+    mime,
+    at: time,
+    capturedAt: time,
+    sender,
+    jobId: job.jobId,
+    jobName: job.jobName,
+    bookingSegmentId: job.bookingSegmentId,
+    content: media.caption || "",
+  });
+  return { kind, job };
+}
+
 async function employeeFromWhatsAppSender(sender) {
   const wanted = normalizePhone(sender);
   if (!wanted) return null;
@@ -1487,7 +1563,28 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // 3) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
+      // 3) Medien eines bekannten Mitarbeiters werden direkt dem aktuellen Zeitblock zugeordnet.
+      if (!protocolSite && ["image", "video"].includes(msg.type)) {
+        const employee = await employeeFromWhatsAppSender(sender);
+        if (employee) {
+          try {
+            const saved = await saveEmployeeReviewMedia({ msg, employee, date, sender });
+            const label = saved?.kind === "video" ? "Video" : "Foto";
+            const site = saved?.job?.jobId ? `#${saved.job.jobId}${saved.job.jobName ? " · " + saved.job.jobName : ""}` : "dem heutigen Tagesrapport";
+            await sendWhatsAppKristineReply({
+              phoneNumberId,
+              to: sender,
+              reply: `✅ ${label} erhalten und ${site} zugeordnet.`
+            });
+          } catch (error) {
+            console.error("❌ Mitarbeiter-Medium konnte nicht gespeichert werden:", error?.message || error);
+            try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Das Medium ist angekommen, konnte aber noch nicht eindeutig zugeordnet werden. Das Büro erhält einen Prüfhinweis." }); } catch {}
+          }
+          continue;
+        }
+      }
+
+      // 4) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
       const kristineText = whatsappTextFromMessage(msg);
       if (!protocolSite && kristineText) {
         const employee = await employeeFromWhatsAppSender(sender);
@@ -3011,13 +3108,6 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
-});
-
-
-// ===================== Tagesreport PDF =====================
-registerDailyReport(app, {
-  dataDir: DATA_DIR,
-  requireAdmin,
 });
 
 // ===================== Morgenstatus 07:00 / 08:00 =====================
