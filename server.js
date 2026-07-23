@@ -55,8 +55,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.0";
-const APP_BUILD = "0021.4-planung-zeitmodell";
+const APP_VERSION = "3.5.1";
+const APP_BUILD = "0021.5-soll-ist-abwesenheit";
 const APP_STATUS = "WhatsApp Live Alpha";
 const APP_BUILD_DATE = "2026-07-23";
 
