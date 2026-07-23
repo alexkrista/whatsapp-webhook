@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0021.4 -->
+<!-- Datei: public/kristine.html · Build 0021.5 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -92,6 +92,14 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .pool-budget.over{color:#a51f1f}.pool-budget span{white-space:nowrap}
 @media(max-width:1050px){.planning-top{position:static;box-shadow:none}.planning-top-grid{grid-template-columns:1fr}.planning-pools{grid-template-columns:1fr 1fr 1fr}}
 @media(max-width:700px){.planning-pools{grid-template-columns:1fr}.pool-list{max-height:160px}}
+
+.payroll-line{font-weight:800;color:#333;margin:4px 0}
+.assignment.type-urlaub,.monthitem.type-urlaub,.pool-card.type-urlaub{border-left-color:#2f73c8!important;background:#e8f3ff!important}
+.assignment.type-krank,.monthitem.type-krank,.pool-card.type-krank{border-left-color:#c53b3b!important;background:#ffeaea!important}
+.assignment.type-za,.monthitem.type-za,.pool-card.type-za{border-left-color:#d38321!important;background:#fff0d9!important}
+.assignment.type-feiertag,.monthitem.type-feiertag,.pool-card.type-feiertag{border-left-color:#7b56b3!important;background:#f2ebfb!important}
+.assignment.type-betriebsurlaub,.monthitem.type-betriebsurlaub,.pool-card.type-betriebsurlaub{border-left-color:#a86424!important;background:#fff0e1!important}
+
 </style>
 </head>
 <body>
@@ -383,7 +391,7 @@ function synchronizeAutomaticCalendarAssignments(){
     if(!isWeekdayDate(holiday.date))continue;
     for(const employee of masterEmployees){
       const key=automaticCalendarKey('feiertag',employee.id,holiday.date);
-      wanted.set(key,{id:key,automatic:true,locked:true,cardType:'feiertag',jobId:'__feiertag__',jobName:holiday.name||'Feiertag',employeeId:String(employee.id),employeeName:employee.name||String(employee.id),date:holiday.date,from:'',to:'',hours:7.8,note:holiday.name||'Feiertag'})
+      wanted.set(key,{id:key,automatic:true,locked:true,cardType:'feiertag',jobId:'__feiertag__',jobName:holiday.name||'Feiertag',employeeId:String(employee.id),employeeName:employee.name||String(employee.id),date:holiday.date,from:'',to:'',hours:7.8,payrollSollHours:7.8,payrollIstHours:7.8,note:holiday.name||'Feiertag'})
     }
   }
   for(const vacation of data.companyVacations||[]){
@@ -391,12 +399,27 @@ function synchronizeAutomaticCalendarAssignments(){
       if(!isWeekdayDate(date)||isHolidayDate(date))continue;
       for(const employee of masterEmployees){
         const key=automaticCalendarKey('betriebsurlaub',employee.id,date);
-        wanted.set(key,{id:key,automatic:true,locked:true,cardType:'betriebsurlaub',jobId:'__betriebsurlaub__',jobName:vacation.reason||'Betriebsurlaub',employeeId:String(employee.id),employeeName:employee.name||String(employee.id),date,from:'',to:'',hours:7.8,note:vacation.reason||'Betriebsurlaub'})
+        wanted.set(key,{id:key,automatic:true,locked:true,cardType:'betriebsurlaub',jobId:'__betriebsurlaub__',jobName:vacation.reason||'Betriebsurlaub',employeeId:String(employee.id),employeeName:employee.name||String(employee.id),date,from:'',to:'',hours:7.8,payrollSollHours:7.8,payrollIstHours:7.8,note:vacation.reason||'Betriebsurlaub'})
       }
     }
   }
 
-  const manual=(data.assignments||[]).filter(a=>!a.automatic&&!String(a.id||'').startsWith('auto:'));
+  const manual=(data.assignments||[])
+    .filter(a=>!a.automatic&&!String(a.id||'').startsWith('auto:'))
+    .map(a=>{
+      const type=cardTypeOf(a);
+      if(type==='site') return a;
+      const credited=['urlaub','krank','feiertag','betriebsurlaub'].includes(type);
+      return {
+        ...a,
+        cardType:type,
+        jobId:a.jobId||`__${type}__`,
+        jobName:(CARD_TYPES[type]?.label)||a.jobName||type,
+        hours:credited?7.8:(type==='za'?0:Number(a.hours||0)),
+        payrollSollHours:isWeekdayDate(a.date)?7.8:0,
+        payrollIstHours:credited?7.8:(type==='za'?0:a.payrollIstHours)
+      };
+    });
   data.assignments=[...manual,...wanted.values()];
   return true
 }
@@ -492,7 +515,20 @@ function selectedPlanningDate(){return document.getElementById('aDate').value||d
 function isoWeekNumber(value){const d=new Date((typeof value==='string'?value:iso(value))+'T12:00:00');const utc=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1));return Math.ceil((((utc-yearStart)/86400000)+1)/7)}
 function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
 const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},krank:{label:'Krank',icon:'🔴'},za:{label:'Zeitausgleich',icon:'🟠'},feiertag:{label:'Feiertag',icon:'🟣'},betriebsurlaub:{label:'Betriebsurlaub',icon:'🏢'},arzt:{label:'Arzt',icon:'🩺'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'},schulung:{label:'Schulung',icon:'🎓'},material_holen:{label:'Material holen',icon:'🚚'},lager:{label:'Lager',icon:'📦'},besprechung:{label:'Besprechung',icon:'🤝'}};
-function cardTypeOf(a){return a.cardType||'site'}
+function cardTypeOf(a){
+  const explicit=String(a?.cardType||'').trim().toLowerCase();
+  if(explicit && explicit!=='site') return explicit;
+  const jobId=String(a?.jobId||'').trim().toLowerCase();
+  const jobName=String(a?.jobName||'').trim().toLowerCase();
+  const legacy=(jobId.match(/^__([a-z_]+)__$/)||[])[1]||'';
+  if(legacy) return legacy;
+  if(jobName==='urlaub') return 'urlaub';
+  if(jobName==='krank') return 'krank';
+  if(jobName.includes('zeitausgleich')||jobName==='za') return 'za';
+  if(jobName==='feiertag') return 'feiertag';
+  if(jobName==='betriebsurlaub') return 'betriebsurlaub';
+  return explicit||'site';
+}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
 function selectSystemCard(type){const select=document.getElementById('aCardType');if(!select)return;select.value=type;selectCardType();document.getElementById('aDate')?.scrollIntoView({behavior:'smooth',block:'center'})}
 function poolDragStart(event,payload){event.dataTransfer.effectAllowed='copy';event.dataTransfer.dropEffect='copy';event.dataTransfer.setData('text/plain',payload);event.currentTarget.classList.add('dragging')}
@@ -500,7 +536,14 @@ function poolDragEnd(event){event.currentTarget.classList.remove('dragging')}
 function renderSystemCards(){
   const box=document.getElementById('systemCards');if(!box)return;
   const types=Object.keys(CARD_TYPES).filter(type=>!['site','feiertag','betriebsurlaub'].includes(type));
-  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type],showHours=['urlaub','krank','za','schulung'].includes(type);return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong>${showHours?'<div class="pool-hours">7,8 h</div>':''}</div>`}).join('');
+  box.innerHTML=types.map(type=>{
+    const meta=CARD_TYPES[type];
+    let line='';
+    if(['urlaub','krank'].includes(type)) line='<div class="pool-hours">Soll 7,8 h · Ist 7,8 h</div>';
+    else if(type==='za') line='<div class="pool-hours">Soll 7,8 h · Ist 0,0 h</div>';
+    else if(type==='schulung') line='<div class="pool-hours">nach Modellstunden</div>';
+    return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong>${line}</div>`
+  }).join('');
 }
 function normalizedJobStatus(job){return String(job?.status||'').trim().toLowerCase()}
 function isNewOrderJob(job){const s=normalizedJobStatus(job);return s==='auftrag'||s.includes('auftrag')||s==='neu'}
@@ -552,9 +595,27 @@ function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===Stri
 function worktimeRule(employeeId,date){const employee=employeeById(employeeId),model=worktimeModelById(employee?.worktimeModelId||'krista-standard');if(!model||!date)return null;const d=new Date(String(date)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const month=d.getMonth()+1,weekday=d.getDay();const season=(model.seasons||[]).find(x=>(x.months||[]).includes(month));const rule=season?.weekdays?.[String(weekday)]||{free:true,from:'',to:'',targetHours:0};const otherBreakMinutes=Number(rule.otherBreakMinutes||0),lunchBreakMinutes=Number(rule.lunchBreakMinutes||0);return {model,season,free:!!rule.free,from:rule.from||'',to:rule.to||'',targetHours:Number(rule.targetHours||0),payrollTargetHours:isWeekdayDate(date)?Number(rule.payrollTargetHours??model.payrollTargetHoursWeekday??7.8):0,otherBreakMinutes,lunchBreakMinutes,breakMinutes:otherBreakMinutes+lunchBreakMinutes,breakWindows:[...(otherBreakMinutes>0?[{type:'pause',from:'09:00',to:minutesToHm(9*60+otherBreakMinutes)}]:[]),...(lunchBreakMinutes>0?[{type:'lunch',from:'12:00',to:minutesToHm(12*60+lunchBreakMinutes)}]:[])]}}
 function isWeekdayDate(date){const d=new Date(String(date)+'T12:00:00');const wd=d.getDay();return wd>=1&&wd<=5}
 function fullDayUnproductiveHours(a){return isWeekdayDate(a.date)?7.8:0}
+function payrollSollHours(a){
+  const type=cardTypeOf(a);
+  if(!isWeekdayDate(a?.date)) return 0;
+  return 7.8;
+}
+function payrollIstHours(a){
+  const type=cardTypeOf(a);
+  if(['urlaub','krank','feiertag','betriebsurlaub'].includes(type)) return 7.8;
+  if(type==='za') return 0;
+  return Math.max(0,Number(a?.hours||rawCardHours(a)||0));
+}
+function payrollLine(a){
+  const type=cardTypeOf(a);
+  if(['urlaub','krank','feiertag','betriebsurlaub','za'].includes(type)){
+    return `Soll ${formatHours(payrollSollHours(a))} · Ist ${formatHours(payrollIstHours(a))}`;
+  }
+  return '';
+}
 function specialPlanHours(a){
   const type=cardTypeOf(a);
-  if(['feiertag','betriebsurlaub','urlaub','krank'].includes(type)) return fullDayUnproductiveHours(a);
+  if(['feiertag','betriebsurlaub','urlaub','krank'].includes(type)) return 7.8;
   if(type==='za') return 0;
   if(type==='schulung') return Math.max(0,Number(worktimeRule(a.employeeId,a.date)?.targetHours||0));
   return rawCardHours(a)
@@ -620,7 +681,8 @@ async function createSpecialAssignment(type,targetEmployee,date,source=null){
   let from=w.from,to=w.to;
   if(!fullDay){const selected=await askSegmentWindow({employee:targetEmployee,date,jobName:meta.label,suggestion:{from:'08:00',to:'10:00'}});if(!selected)return null;from=selected.from;to=selected.to}
   const base=source?{...source}:{};
-  const row={...base,id:id(),cardType:type,jobId:'__'+type+'__',jobName:meta.label,city:'',address:'',employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),vehicle:'',from,to,hours:fullDay?(['urlaub','krank'].includes(type)?7.8:Math.max(0,Number(rule?.targetHours||7.8))):rawCardHours({from,to}),note:base.note||meta.label,date};
+  const credited=['urlaub','krank','feiertag','betriebsurlaub'].includes(type);
+  const row={...base,id:id(),cardType:type,jobId:'__'+type+'__',jobName:meta.label,city:'',address:'',employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),vehicle:'',from,to,hours:fullDay?(credited?7.8:(type==='za'?0:Math.max(0,Number(rule?.targetHours||7.8)))):rawCardHours({from,to}),payrollSollHours:isWeekdayDate(date)?7.8:0,payrollIstHours:credited?7.8:(type==='za'?0:undefined),note:base.note||meta.label,date};
   data.assignments.push(row);return row;
 }
 async function planningEmployeeDrop(event,date,employeeId){
