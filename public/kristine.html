@@ -90,7 +90,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0022.4 · Planung Feinschliff</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0022.5 · Zeitblock & Medien</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -339,7 +339,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button type="button" class="secondary" onclick="addTimeEditorRow('pause')">+ Pause</button>
       <button type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
     </div>
-    <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input id="moveLinkedEntries" type="checkbox" checked style="width:auto"> Fotos, Material und Regie aus geänderten Zeiträumen automatisch mitverschieben</label>
+    <div class="notice" style="margin-top:12px"><strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.</div><input id="moveLinkedEntries" type="hidden" value="1">
     <div id="employeeActionNote" class="task-done-note" style="margin-top:10px"></div>
     <div class="small" style="margin-top:8px">Die Zeitabschnitte sind die Wahrheit. Änderungen werden protokolliert; zugehörige Dokumentation kann automatisch der richtigen Baustelle folgen.</div>
   </div>
@@ -881,7 +881,7 @@ async function saveTimeEditor(){
   for(const seg of timeEditorSegments){if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}}
   employeeActionNote.textContent='Speichert …';
   try{
-    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:document.getElementById('moveLinkedEntries').checked})});
+    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true})});
     employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
     await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));renderTimeEditor();
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
