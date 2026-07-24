@@ -56,9 +56,9 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.1";
-const APP_BUILD = "0021.5-soll-ist-abwesenheit";
+const APP_BUILD = "0023.1-neue-baustelle";
 const APP_STATUS = "WhatsApp Live Alpha";
-const APP_BUILD_DATE = "2026-07-23";
+const APP_BUILD_DATE = "2026-07-24";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -1409,7 +1409,16 @@ kristine = registerKristine(app, {
   publicDir: path.join(process.cwd(), "public"),
   sendWhatsApp: sendWhatsAppKristineReply,
   chefPhoneNumber: CHEF_PHONE,
-  phoneNumberId: KRISTINE_PHONE_NUMBER_ID
+  phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
+  markJobRunning: async (jobId, source = "system") => {
+    const id = String(jobId || "").trim();
+    if (!/^\d{5}$/.test(id) || !fs.existsSync(path.join(DATA_DIR, id))) return false;
+    const meta = await readJobMeta(id);
+    if (meta.status !== "Auftrag") return false;
+    await writeJobMeta(id, { status: "Laufend" });
+    await appendJobHistory(id, { type: "status_changed", title: "Status automatisch auf Laufend gesetzt", detail: source, source });
+    return true;
+  }
 });
 
 // ===================== WhatsApp Incoming =====================
@@ -2266,6 +2275,20 @@ function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
   };
 }
 
+// Admin API: nächste reguläre Baustellennummer (JJ + 3-stellig)
+app.get("/admin/api/jobs/next-number", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const entries = await fsp.readdir(DATA_DIR).catch(() => []);
+    const nums = entries.filter(id => new RegExp(`^${yy}\\d{3}$`).test(String(id))).map(Number);
+    const next = nums.length ? Math.max(...nums) + 1 : Number(`${yy}001`);
+    res.json({ ok: true, nextNumber: String(next).padStart(5, "0") });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 // Admin API: neue Baustelle anlegen
 app.post("/admin/api/jobs", async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -2281,7 +2304,7 @@ app.post("/admin/api/jobs", async (req, res) => {
     await ensureDir(path.join(DATA_DIR, jobId));
     await writeJobMeta(jobId, {
       name,
-      status: String(body.status || "Angebot"),
+      status: /^\d{5}$/.test(jobId) ? "Auftrag" : String(body.status || "Angebot"),
       street: String(body.street || ""),
       houseNumber: String(body.houseNumber || ""),
       postalCode: String(body.postalCode || ""),
