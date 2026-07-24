@@ -5,7 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -957,22 +957,67 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   app.put("/kristine/api/tasks", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      const previousTasks = await readJson(TASKS, []);
+      const previousIds = new Set(previousTasks.map(t => String(t.id || "")));
       const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
-      const clean = tasks.map((t, index) => ({
-        id: String(t.id || `t_${Date.now()}_${index}`),
-        title: String(t.title || "").trim().slice(0, 180),
-        assigneeId: String(t.assigneeId || "").slice(0, 100),
-        assigneeName: String(t.assigneeName || "").trim().slice(0, 140),
-        jobId: String(t.jobId || "").slice(0, 80),
-        jobName: String(t.jobName || "").trim().slice(0, 140),
-        dueDate: String(t.dueDate || "").slice(0, 10),
-        reminder: String(t.reminder || "").trim().slice(0, 300),
-        status: t.status === "done" ? "done" : "open",
-        createdAt: t.createdAt || new Date().toISOString(),
-        completedAt: t.completedAt || null,
-      })).filter(t => t.title);
+      const employees = typeof readEmployees === "function" ? await readEmployees() : [];
+      const employeeById = new Map(employees.map(e => [String(e.id || ""), e]));
+      const clean = [];
+      for (let index = 0; index < tasks.length; index++) {
+        const t = tasks[index] || {};
+        const jobId = String(t.jobId || "").slice(0, 80);
+        let jobMeta = {};
+        if (jobId && typeof readJobMeta === "function") {
+          try { jobMeta = await readJobMeta(jobId) || {}; } catch {}
+        }
+        const row = {
+          id: String(t.id || `t_${Date.now()}_${index}`),
+          title: String(t.title || "").trim().slice(0, 180),
+          assigneeId: String(t.assigneeId || "").slice(0, 100),
+          assigneeName: String(t.assigneeName || "").trim().slice(0, 140),
+          jobId,
+          jobName: String(t.jobName || jobMeta.name || "").trim().slice(0, 140),
+          contactName: String(t.contactName || jobMeta.contactName || "").trim().slice(0, 140),
+          contactPhone: String(t.contactPhone || jobMeta.contactPhone || "").trim().slice(0, 60),
+          dueDate: String(t.dueDate || "").slice(0, 10),
+          reminder: String(t.reminder || "").trim().slice(0, 300),
+          status: t.status === "done" ? "done" : "open",
+          createdAt: t.createdAt || new Date().toISOString(),
+          completedAt: t.completedAt || null,
+        };
+        if (row.title) clean.push(row);
+      }
       await writeJson(TASKS, clean);
-      res.json({ ok: true, tasks: clean });
+
+      const notifications = [];
+      const newOpenTasks = clean.filter(t => !previousIds.has(String(t.id)) && t.status !== "done");
+      for (const task of newOpenTasks) {
+        const employee = employeeById.get(String(task.assigneeId || ""));
+        const employeePhone = String(employee?.phone || "").replace(/\D/g, "");
+        if (!employeePhone) {
+          notifications.push({ taskId: task.id, sent: false, reason: "no_employee_phone" });
+          continue;
+        }
+        if (typeof sendWhatsApp !== "function" || !phoneNumberId) {
+          notifications.push({ taskId: task.id, sent: false, reason: "whatsapp_not_configured" });
+          continue;
+        }
+        const lines = [
+          "📌 Neue Aufgabe",
+          `*${task.title}*`,
+          task.jobName ? `🏗️ ${task.jobName}${task.jobId ? ` (#${task.jobId})` : ""}` : "",
+          task.dueDate ? `📅 Fällig: ${task.dueDate.split("-").reverse().join(".")}` : "",
+          task.reminder ? `ℹ️ ${task.reminder}` : "",
+          task.contactPhone ? `📞 ${task.contactName ? task.contactName + ": " : ""}${task.contactPhone}` : "",
+        ].filter(Boolean);
+        try {
+          await sendWhatsApp({ phoneNumberId, to: employeePhone, reply: lines.join("\n"), buttons: ["Erledigt"] });
+          notifications.push({ taskId: task.id, sent: true });
+        } catch (error) {
+          notifications.push({ taskId: task.id, sent: false, reason: String(error?.message || error) });
+        }
+      }
+      res.json({ ok: true, tasks: clean, notifications });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
