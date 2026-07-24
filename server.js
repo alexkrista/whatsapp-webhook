@@ -56,7 +56,7 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.1";
-const APP_BUILD = "0023.1-neue-baustelle";
+const APP_BUILD = "0023.3-aufgaben-benachrichtigung";
 const APP_STATUS = "WhatsApp Live Alpha";
 const APP_BUILD_DATE = "2026-07-24";
 
@@ -1410,6 +1410,8 @@ kristine = registerKristine(app, {
   sendWhatsApp: sendWhatsAppKristineReply,
   chefPhoneNumber: CHEF_PHONE,
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
+  readEmployees,
+  readJobMeta,
   markJobRunning: async (jobId, source = "system") => {
     const id = String(jobId || "").trim();
     if (!/^\d{5}$/.test(id) || !fs.existsSync(path.join(DATA_DIR, id))) return false;
