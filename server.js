@@ -92,7 +92,7 @@ const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
 const CHEF_PHONE = process.env.CHEF_PHONE || "";
-const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || "";
+const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
 
 // ===================== Baustellenprotokoll-Sitzungen =====================
 // Ein Protokoll beginnt ausschließlich beim Chef mit dem Befehl "proto"
