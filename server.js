@@ -1402,9 +1402,20 @@ function cleanWhatsAppButtons(buttons) {
   }).filter((button) => button.title);
 }
 
+function getActiveKristinePhoneNumberId(phoneNumberId = "") {
+  // Die zuletzt tatsächlich von Meta über einen Kristine-Webhook gemeldete Sender-ID
+  // ist die verbindliche Quelle für alle Nachrichten. ENV und Parameter sind nur Fallbacks.
+  return String(
+    LAST_WHATSAPP_PHONE_NUMBER_ID ||
+    phoneNumberId ||
+    KRISTINE_PHONE_NUMBER_ID ||
+    ""
+  ).trim();
+}
+
 async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [] }) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
-  const senderId = String(phoneNumberId || KRISTINE_PHONE_NUMBER_ID || LAST_WHATSAPP_PHONE_NUMBER_ID || "").trim();
+  const senderId = getActiveKristinePhoneNumberId(phoneNumberId);
   if (!senderId) {
     throw new Error("WhatsApp phone_number_id fehlt: weder Parameter, Render-ENV noch gespeicherte Webhook-ID vorhanden");
   }
@@ -1488,7 +1499,8 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
 console.log("📡 WhatsApp-Sender-Konfiguration", {
   envConfigured: Boolean(KRISTINE_PHONE_NUMBER_ID),
   rememberedConfigured: Boolean(LAST_WHATSAPP_PHONE_NUMBER_ID),
-  senderIdTail: String(KRISTINE_PHONE_NUMBER_ID || LAST_WHATSAPP_PHONE_NUMBER_ID || "").slice(-6) || "fehlt",
+  senderIdTail: getActiveKristinePhoneNumberId().slice(-6) || "fehlt",
+  priority: LAST_WHATSAPP_PHONE_NUMBER_ID ? "letzter Kristine-Webhook" : "Render-ENV/Fallback",
 });
 
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
