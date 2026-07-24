@@ -126,6 +126,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </header>
 <main>
 <nav>
+  <a id="controlCenterLink" class="navbtn" href="/kontrollzentrum">🎛️ Kontrollzentrum</a>
   <button onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
@@ -420,7 +421,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
-window.addEventListener('DOMContentLoaded',()=>{
+window.addEventListener('DOMContentLoaded',()=>{const cc=document.getElementById('controlCenterLink');if(cc)cc.href='/kontrollzentrum'+(token?'?token='+encodeURIComponent(token):'');
   for(const [panelId,key,defaultOpen] of [['planningAssignPanel','kristaPlanningAssignOpen',false],['planningCardsPanel','kristaPlanningCardsOpen',true]]){
     const panel=document.getElementById(panelId);if(!panel)continue;
     const saved=localStorage.getItem(key);
