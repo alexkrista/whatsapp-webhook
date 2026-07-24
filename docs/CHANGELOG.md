@@ -1,12 +1,14 @@
-# Build 0023.11 – Aufgaben-WhatsApp Sender-Fix
+# Build 0023.12 – Aufgaben-WhatsApp Diagnose
 
-## Behoben
-- Die WhatsApp-Sender-ID wird bei jedem echten Webhook dauerhaft unter `/var/data/_kristine/whatsapp-sender.json` gespeichert.
-- Proaktive Aufgabenmeldungen verwenden die Sender-ID in dieser Reihenfolge: übergebener Wert → Render-ENV → gespeicherte Webhook-ID.
-- Ein Render-Neustart verliert die zuletzt erkannte Sender-ID nicht mehr.
-- Der Aufgaben-Endpunkt schreibt jetzt immer sichtbar ins Render-Log, wie viele neue Aufgaben erkannt wurden.
-- Fehlende Mitarbeitertelefonnummern und fehlende Sender-Konfiguration werden eindeutig geloggt.
+## Geändert
+- Fünfstufiges Logging vom Aufgaben-Speichern bis zur Meta-API.
+- Vollständige Meta-Fehlerausgabe mit Status, Code, Subcode und fbtrace_id.
+- Browser zeigt die echte Fehlerursache statt nur einer Sammelmeldung.
+- Geschlossenes 24-Stunden-Fenster wird ausdrücklich erkannt.
+- Wiederhergestellte `public/kristine.html` ist im ZIP enthalten.
 
 ## Test
-- `node --check server.js`
-- `node --check kristine.js`
+1. ZIP pfadtreu hochladen.
+2. Neue Aufgabe an einen Mitarbeiter anlegen.
+3. Im Render-Log nach `TASK-WA 1/5` bis `5/5` suchen.
+4. Bei Fehler die Zeile `WhatsApp API response` senden.
