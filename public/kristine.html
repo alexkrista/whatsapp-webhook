@@ -1,3 +1,4 @@
+<!-- Datei: public/kristine.html · Build 0021.1 -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -120,7 +121,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0023.2 · Planung & Kartentypen</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0023.12 · Aufgaben-WhatsApp Diagnose</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -1190,7 +1191,8 @@ async function addTask(){
     const note=(r.notifications||[]).find(n=>n.taskId===newTask.id)||(r.notifications||[])[0];
     if(note?.sent)showNotice('✓ Aufgabe gespeichert und Mitarbeiter informiert.','ok');
     else if(note?.reason==='no_employee_phone')showNotice('Aufgabe gespeichert. Beim Mitarbeiter fehlt die WhatsApp-Telefonnummer.','warn');
-    else showNotice('Aufgabe gespeichert. WhatsApp konnte nicht versendet werden.','warn');
+    else if(note?.reason==='outside_24h_window')showNotice('Aufgabe gespeichert. WhatsApp-Fenster geschlossen – für proaktive Nachrichten ist eine Meta-Vorlage nötig.','warn');
+    else showNotice('Aufgabe gespeichert. WhatsApp-Fehler: '+(note?.detail||note?.reason||'unbekannt'),'warn');
   }catch(e){
     data.tasks=(data.tasks||[]).filter(t=>t.id!==newTask.id);renderTasks();renderControl();
     showNotice('Aufgabe konnte nicht gespeichert werden: '+e.message,'error');
