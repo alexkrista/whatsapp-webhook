@@ -99,6 +99,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
     if (/^(andere baustelle|baustelle wechseln|wechseln)$/.test(t)) return "switch_site";
     if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
+    if (/^(anrufen|anruf|rufen)$/.test(t)) return "task_call";
     return "message";
   }
 
@@ -623,6 +624,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       };
     }
 
+    if (intent === "task_call") {
+      const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
+      if (!open) return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
+      const phone = String(open.contactPhone || "").trim();
+      if (!phone) return { reply: `Bei „${open.title}“ ist keine Rückrufnummer hinterlegt.`, buttons: ["Erledigt"], state };
+      return {
+        reply: `📞 ${open.contactName ? open.contactName + ": " : ""}${phone}`,
+        buttons: ["Erledigt"],
+        state,
+      };
+    }
+
     if (intent === "task_done") {
       const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
       if (!open) {
@@ -1022,7 +1035,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
           task.contactEmail ? `✉️ ${task.contactEmail}` : "",
         ].filter(Boolean);
         try {
-          await sendWhatsApp({ phoneNumberId, to: employeePhone, reply: lines.join("\n"), buttons: ["Erledigt"] });
+          await sendWhatsApp({ phoneNumberId, to: employeePhone, reply: lines.join("\n"), buttons: ["Anrufen", "Erledigt"] });
           notifications.push({ taskId: task.id, sent: true });
         } catch (error) {
           notifications.push({ taskId: task.id, sent: false, reason: String(error?.message || error) });
