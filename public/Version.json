@@ -1,7 +1,7 @@
 {
-  "build": "0021.3",
-  "name": "Leitstand Eingriff & Protokoll-Sicherheit",
-  "date": "2026-07-22",
-  "version": "0021.3",
-  "status": "Baustellenprotokoll sicher abbrechen und Leitstand direkt steuern"
+  "build": "0023.4",
+  "name": "Aufgaben 2.0",
+  "date": "2026-07-24",
+  "version": "0023.4",
+  "status": "Breite Aufgabeneingabe mit Von/Für, Typ, Priorität, Adresse, Rückrufnummer, E-Mail und kompakter Kristine-Nachricht"
 }
