@@ -1,10 +1,10 @@
-<!-- Datei: public/kristine.html · Build 0021.1 -->
+<!-- Datei: public/kristine.html · Build 0023.15 -->
 <!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kristine – Alpha 1</title>
+<title>Kristine – Organisation</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#202020;background:#f3f1ec}
 *{box-sizing:border-box}body{margin:0}header{background:#111;color:#fff;padding:20px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
@@ -121,14 +121,13 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0023.13 · PHONE_NUMBER_ID Fix</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0023.15 · Kristine ohne Test-Chat</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
 <nav>
   <button onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('planning')">📅 Planung</button>
-  <button onclick="showTab('chat')">💬 Kristine-Chat</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
   <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
@@ -213,25 +212,6 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       </div>
     </div>
     <div id="planningView" style="margin-top:12px"></div>
-  </div>
-</section>
-
-<section id="chat" class="tab">
-  <div class="chatwrap">
-    <div class="card">
-      <h3>Mitarbeiter auswählen</h3>
-      <label>Mitarbeiter</label><select id="chatEmployeeSelect" onchange="selectChatEmployee()"><option value="">– Mitarbeiter auswählen –</option></select>
-      <input id="chatEmployeeId" type="hidden"><input id="chatEmployeeName" type="hidden">
-      <label style="margin-top:8px">Datum</label><input id="chatDate" type="date">
-      <div class="actions"><button onclick="beginConversation()">Gespräch beginnen</button><button class="secondary" onclick="resetState()">Tag zurücksetzen</button></div>
-      <div id="currentState" class="statebox" style="margin-top:12px">Noch kein Status geladen.</div>
-      <p class="small">Natürliche Kurzmeldungen: Start, Pause, Mittag, Weiter, Fertig, Regie, Status, Erledigt.</p>
-    </div>
-    <div class="phone">
-      <div id="chatMessages" class="chat"></div>
-      <div id="quickButtons" class="quick"></div>
-      <div class="sendrow"><input id="chatInput" placeholder="z. B. Start" onkeydown="if(event.key==='Enter')sendMessage()"><button class="green" onclick="sendMessage()">Senden</button></div>
-    </div>
   </div>
 </section>
 
@@ -453,6 +433,7 @@ async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.t
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function id(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function iso(d){const off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
+function selectedWorkDate(){return document.getElementById('dailyReportDate')?.value||document.getElementById('aDate')?.value||data.today||iso(new Date())}
 function updatePlanningStickyOffsets(){
   const top=document.querySelector('#planning .planning-top');
   if(!top)return;
@@ -496,7 +477,6 @@ async function loadAll(){
   masterEmployees=(e.employees||[]).filter(x=>x.active!==false);
   masterVehicles=v.vehicles||[];
   document.getElementById('aDate').value=data.today;
-  document.getElementById('chatDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;const reportDate=document.getElementById('dailyReportDate');if(reportDate&&!reportDate.value)reportDate.value=data.today;
   renderMasterData();
   renderWeek();renderControl();renderTasks();renderPlanningPools();renderKristool();
@@ -508,7 +488,7 @@ function whatsappUrl(phone){let p=String(phone||'').replace(/\D/g,'');if(p.start
 function renderMasterData(){
   aJobSelect.innerHTML='<option value="">– Baustelle auswählen –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');
   aVehicleSelect.innerHTML='<option value="">– kein Fahrzeug –</option>'+masterVehicles.map(v=>`<option value="${esc(v.label||v.plate)}">${esc(v.label||v.plate)}${v.plate&&v.label?' · '+esc(v.plate):''}</option>`).join('');
-  employeePicker.innerHTML=masterEmployees.length?masterEmployees.map(e=>`<label class="employee-chip"><input type="checkbox" class="aEmployeeCheck" value="${esc(e.id)}" data-name="${esc(e.name)}"><span>${esc(e.name)}</span></label>`).join(''):'<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';chatEmployeeSelect.innerHTML='<option value="">– Mitarbeiter auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tAssigneeSelect.innerHTML='<option value="">– Mitarbeiter oder Chef auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tJobSelect.innerHTML='<option value="">– keine Baustelle –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');;
+  employeePicker.innerHTML=masterEmployees.length?masterEmployees.map(e=>`<label class="employee-chip"><input type="checkbox" class="aEmployeeCheck" value="${esc(e.id)}" data-name="${esc(e.name)}"><span>${esc(e.name)}</span></label>`).join(''):'<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';tAssigneeSelect.innerHTML='<option value="">– Mitarbeiter oder Chef auswählen –</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</option>`).join('');tJobSelect.innerHTML='<option value="">– keine Baustelle –</option>'+masterJobs.map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');;
   const annualSelect=document.getElementById('annualHoursEmployee');if(annualSelect)annualSelect.innerHTML='<option value="">Alle Mitarbeiter</option>'+masterEmployees.map(e=>`<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
 }
 function selectTaskAssignee(){
@@ -536,7 +516,6 @@ function updateTaskSelectionInfo(){
   const j=masterJobs.find(x=>String(x.jobId)===String(tJobId.value));
   taskSelectionInfo.innerHTML=`<strong>Von:</strong> ${esc(tCreatorName?.value||'Chef / Büro')}<br><strong>Für:</strong> ${esc(employee)}<br><strong>Art:</strong> ${esc(selectedTaskType())}<br><strong>Baustelle:</strong> ${j?`#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}`:'keine Baustelle'}${tAddress?.value?`<br><strong>Adresse:</strong> ${esc(tAddress.value)}`:''}${tContactPhone?.value?`<br><strong>Telefon:</strong> ${esc(tContactPhone.value)}`:''}`;
 }
-function selectChatEmployee(){const o=chatEmployeeSelect.selectedOptions[0];chatEmployeeId.value=chatEmployeeSelect.value;chatEmployeeName.value=o?.dataset.name||''}
 function selectJob(){
   const j=masterJobs.find(x=>String(x.jobId)===String(aJobSelect.value));
   if(!j){selectedJobInfo.textContent='Baustelle auswählen – Nummer, Ort und Adresse werden automatisch übernommen.';return}
@@ -890,33 +869,9 @@ function seedDemo(){
     id:id(),date:d,jobId:String(second.jobId),jobName:second.name||('#'+second.jobId),city:second.city||'',address:jobAddress(second),
     employeeId:String(employee.id),employeeName:employee.name,vehicle:masterVehicles[0]?.label||'',from:'13:00',to:'17:00',note:''
   });
-  chatEmployeeId.value=String(employee.id);chatEmployeeName.value=employee.name;
   renderWeek();
 }
 function clearPlanning(){if(confirm('Planung wirklich leeren?')){data.assignments=[];renderWeek()}}
-function addBubble(text,who){const d=document.createElement('div');d.className='bubble '+who;d.textContent=text;chatMessages.appendChild(d);chatMessages.scrollTop=chatMessages.scrollHeight}
-function setQuick(buttons=[]){quickButtons.innerHTML=buttons.map(b=>`<button onclick="quickSend('${esc(b)}')">${esc(b)}</button>`).join('')}
-function currentChatAssignment(){
-  const employeeId=chatEmployeeId.value.trim(), date=chatDate.value;
-  const rows=data.assignments.filter(a=>String(a.employeeId)===String(employeeId)&&a.date===date).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));
-  const state=data.states[employeeId];
-  if(state?.activeAssignmentKey){
-    const hit=rows.find(a=>`${a.date}|${a.employeeId}|${a.from||''}|${a.jobId||''}`===state.activeAssignmentKey);
-    if(hit)return hit;
-  }
-  return rows[0]||null;
-}
-function openNavigation(){
-  const a=currentChatAssignment();
-  if(!a?.address){alert('Bei dieser Baustelle ist noch keine Adresse hinterlegt.');return}
-  window.open(mapsUrl(a.address),'_blank');
-}
-function quickSend(text){if(text==='Navigation'){openNavigation();return}chatInput.value=text;sendMessage()}
-function renderState(state){if(!state){currentState.textContent='Noch kein Status.';return}currentState.innerHTML=`<strong>${esc(state.employeeName)}</strong><br><span class="status ${esc(state.mode)}">${esc(state.mode)}</span><br><span class="small">${(state.timeline||[]).length} Ereignisse heute</span>`}
-async function beginConversation(){chatMessages.innerHTML='';setQuick([]);await postMessage('Hallo')}
-async function sendMessage(){const text=chatInput.value.trim();if(!text)return;chatInput.value='';addBubble(text,'user');await postMessage(text,true)}
-async function postMessage(text,alreadyShown=false){if(!alreadyShown&&text!=='Hallo')addBubble(text,'user');const r=await api('/kristine/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:chatEmployeeId.value.trim(),employeeName:chatEmployeeName.value.trim(),date:chatDate.value,text})});addBubble(r.reply,'bot');setQuick(r.buttons||[]);renderState(r.state);await loadSilent()}
-async function resetState(){await api('/kristine/api/reset-state/'+encodeURIComponent(chatEmployeeId.value.trim()),{method:'POST'});chatMessages.innerHTML='';setQuick([]);currentState.textContent='Tag wurde zurückgesetzt.';await loadSilent()}
 async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks();renderKristool()}
 function statusLabel(mode){
   const labels={idle:'Noch nicht gestartet',working:'Arbeitet',pause:'Pause',lunch:'Mittagspause',finished_site:'Baustelle fertig',finished_day:'Feierabend'};
@@ -1020,7 +975,7 @@ async function openEmployeeActionModal(employeeId){
   employeeActionTitle.textContent=`${employee?.name||employeeId} · Tagesbuchungen`;
   employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
   try{
-    const date=chatDate.value||data.today;const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
+    const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
     timeEditorSegments=(result.segments||[]).map(x=>({...x}));
     const state=data.states?.[employeeId]||{mode:'idle'};
     employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.</span>`;
@@ -1030,7 +985,7 @@ async function openEmployeeActionModal(employeeId){
 async function saveTimeEditor(){
   if(!selectedControlEmployeeId)return;
   const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
-  const date=chatDate.value||data.today;
+  const date=selectedWorkDate();
   for(const seg of timeEditorSegments){if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}}
   employeeActionNote.textContent='Speichert …';
   try{
@@ -1044,7 +999,7 @@ async function sendEmployeeDayEndCheck(){
   const btn=document.getElementById('employeeActionAsk');
   const old=btn.textContent;btn.disabled=true;btn.textContent='Sendet …';employeeActionNote.textContent='';
   try{
-    const result=await api('/admin/api/morning-status/employee-end-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,date:chatDate.value||data.today})});
+    const result=await api('/admin/api/morning-status/employee-end-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,date:selectedWorkDate()})});
     employeeActionNote.textContent=result?.result?.sent?'✓ Nachfrage wurde über Kristine gesendet.':(result?.result?.reason||'Keine Nachricht gesendet.');
     btn.textContent='Gesendet';
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message;btn.disabled=false;btn.textContent=old;}
@@ -1059,7 +1014,7 @@ function kristoolItemHtml(item,level){
 }
 function renderKristool(){
   const root=document.getElementById('kristool');if(!root)return;
-  const today=chatDate?.value||data.today||iso(new Date());
+  const today=selectedWorkDate();
   const now=currentViennaMinutes();
   const red=[],yellow=[];
   const tasks=data.tasks||[];
@@ -1104,7 +1059,7 @@ function renderKristool(){
 }
 
 function renderControl(){
-  const today=chatDate.value||data.today;
+  const today=selectedWorkDate();
   const planned=data.assignments.filter(a=>a.date===today);
   const employeeMap=new Map();
 
