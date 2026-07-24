@@ -1,18 +1,1 @@
-{
-  "name": "krista-baustellenprotokoll",
-  "version": "2.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "nodemailer": "^6.9.14",
-    "pdf-lib": "^1.17.1",
-    "sharp": "^0.33.4",
-    "node-cron": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=20"
-  }
-}
+{"name":"krista-baustellenprotokoll","version":"2.0.0","main":"server.js","scripts":{"start":"node server.js"},"dependencies":{"express":"^4.19.2","nodemailer":"^6.9.14","pdf-lib":"^1.17.1","sharp":"^0.33.4","node-cron":"^3.0.2"},"engines":{"node":">=20"}}
