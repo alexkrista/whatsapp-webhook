@@ -1,7 +1,7 @@
 {
-  "build": "0023.10",
-  "name": "Aufgaben-WhatsApp zentraler Versand",
+  "build": "0023.11",
+  "name": "Aufgaben-WhatsApp Sender-Fix",
   "date": "2026-07-24",
-  "version": "0023.10",
-  "status": "Aufgabenversand nutzt denselben WhatsApp-Sender wie Kristine"
+  "version": "0023.11",
+  "status": "Sender-ID aus ENV, Webhook oder dauerhaft gespeichertem Fallback"
 }
