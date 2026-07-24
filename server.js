@@ -93,7 +93,33 @@ const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() =
 
 const CHEF_PHONE = process.env.CHEF_PHONE || "";
 const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
-let LAST_WHATSAPP_PHONE_NUMBER_ID = ""; // wird aus dem letzten echten Webhook aktualisiert
+let LAST_WHATSAPP_PHONE_NUMBER_ID = ""; // wird aus ENV, Disk oder dem letzten echten Webhook aktualisiert
+
+function whatsappSenderConfigPath() {
+  return path.join(DATA_DIR, "_kristine", "whatsapp-sender.json");
+}
+
+function loadRememberedWhatsAppSenderId() {
+  try {
+    const row = JSON.parse(fs.readFileSync(whatsappSenderConfigPath(), "utf8"));
+    const id = String(row?.phoneNumberId || "").trim();
+    if (id) LAST_WHATSAPP_PHONE_NUMBER_ID = id;
+  } catch {}
+}
+
+async function rememberWhatsAppSenderId(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) return;
+  LAST_WHATSAPP_PHONE_NUMBER_ID = id;
+  try {
+    await ensureDir(path.dirname(whatsappSenderConfigPath()));
+    await fsp.writeFile(whatsappSenderConfigPath(), JSON.stringify({ phoneNumberId: id, updatedAt: new Date().toISOString() }, null, 2), "utf8");
+  } catch (error) {
+    console.error("⚠️ WhatsApp-Sender-ID konnte nicht gespeichert werden:", String(error?.message || error));
+  }
+}
+
+loadRememberedWhatsAppSenderId();
 
 function normalizeWhatsAppRecipient(value) {
   let digits = String(value || "").replace(/\D/g, "");
@@ -1375,7 +1401,9 @@ function cleanWhatsAppButtons(buttons) {
 async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [] }) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
   const senderId = String(phoneNumberId || KRISTINE_PHONE_NUMBER_ID || LAST_WHATSAPP_PHONE_NUMBER_ID || "").trim();
-  if (!senderId) throw new Error("WhatsApp phone_number_id fehlt (ENV und Webhook leer)");
+  if (!senderId) {
+    throw new Error("WhatsApp phone_number_id fehlt: weder Parameter, Render-ENV noch gespeicherte Webhook-ID vorhanden");
+  }
   const recipient = normalizeWhatsAppRecipient(to);
   if (!recipient) throw new Error("WhatsApp-Empfänger fehlt");
 
@@ -1415,6 +1443,12 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   });
 }
 
+console.log("📡 WhatsApp-Sender-Konfiguration", {
+  envConfigured: Boolean(KRISTINE_PHONE_NUMBER_ID),
+  rememberedConfigured: Boolean(LAST_WHATSAPP_PHONE_NUMBER_ID),
+  senderIdTail: String(KRISTINE_PHONE_NUMBER_ID || LAST_WHATSAPP_PHONE_NUMBER_ID || "").slice(-6) || "fehlt",
+});
+
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
 kristine = registerKristine(app, {
   dataDir: DATA_DIR,
@@ -1447,7 +1481,7 @@ app.post("/webhook", async (req, res) => {
     const value = changes?.value;
     const msgs = value?.messages || [];
     const phoneNumberId = value?.metadata?.phone_number_id || "";
-    if (phoneNumberId) LAST_WHATSAPP_PHONE_NUMBER_ID = String(phoneNumberId);
+    if (phoneNumberId) await rememberWhatsAppSenderId(phoneNumberId);
     if (!Array.isArray(msgs) || msgs.length === 0) return;
 
     for (const msg of msgs) {
