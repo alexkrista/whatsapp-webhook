@@ -1,7 +1,7 @@
 {
-  "build": "0023.12",
-  "name": "Aufgaben-WhatsApp Diagnose",
+  "build": "0023.13",
+  "name": "PHONE_NUMBER_ID ENV Fix",
   "date": "2026-07-24",
   "version": "3.5.2",
-  "status": "Detailliertes Meta-Logging und sichtbare Fehlerursache"
+  "status": "Aufgaben-WhatsApp liest bestehende Render-Variable PHONE_NUMBER_ID"
 }
