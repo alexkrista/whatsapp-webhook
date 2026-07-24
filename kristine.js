@@ -1012,8 +1012,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const newOpenTasks = clean.filter(t => !previousIds.has(String(t.id)) && t.status !== "done");
       console.log("🧾 Aufgaben gespeichert", { total: clean.length, newOpenTasks: newOpenTasks.length });
       for (const task of newOpenTasks) {
+        console.log("🧪 TASK-WA 1/5 Aufgabe erkannt", { taskId: task.id, assigneeId: task.assigneeId, assigneeName: task.assigneeName });
         const employee = employeeById.get(String(task.assigneeId || ""));
+        console.log("🧪 TASK-WA 2/5 Mitarbeiter gesucht", { taskId: task.id, found: Boolean(employee), employeeId: employee?.id || null, employeeName: employee?.name || null });
         const employeePhone = String(employee?.phone || "").replace(/\D/g, "");
+        console.log("🧪 TASK-WA 3/5 Telefonnummer geprüft", { taskId: task.id, phonePresent: Boolean(employeePhone), phoneTail: employeePhone.slice(-6) || null });
         if (!employeePhone) {
           notifications.push({ taskId: task.id, sent: false, reason: "no_employee_phone" });
           console.error("❌ Aufgaben-WhatsApp: Mitarbeiter-Telefonnummer fehlt", {
@@ -1046,13 +1049,20 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
             assigneeName: task.assigneeName,
             employeePhone,
           });
+          console.log("🧪 TASK-WA 4/5 sendWhatsApp wird aufgerufen", { taskId: task.id });
           // Absichtlich ohne eigenen Sonderweg: exakt dieselbe Versandfunktion wie Kristine.
           await sendWhatsApp({ to: employeePhone, reply: lines.join("\n"), buttons: ["Anrufen", "Erledigt"] });
+          console.log("🧪 TASK-WA 5/5 sendWhatsApp erfolgreich beendet", { taskId: task.id });
           notifications.push({ taskId: task.id, sent: true });
           console.log("✅ Aufgaben-WhatsApp versendet", { taskId: task.id, assigneeName: task.assigneeName });
         } catch (error) {
           const reason = String(error?.message || error);
-          notifications.push({ taskId: task.id, sent: false, reason });
+          const reasonCode = error?.metaCode === 131047 || /24.?hour|re-engagement|outside.*window/i.test(reason)
+            ? "outside_24h_window"
+            : error?.metaCode
+              ? `meta_${error.metaCode}`
+              : reason;
+          notifications.push({ taskId: task.id, sent: false, reason: reasonCode, detail: reason });
           console.error("❌ Aufgaben-WhatsApp fehlgeschlagen", {
             taskId: task.id,
             assigneeId: task.assigneeId,
