@@ -691,6 +691,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     res.sendFile(path.join(publicDir, "kristine.html"));
   });
 
+  app.get("/kontrollzentrum", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.sendFile(path.join(publicDir, "kontrollzentrum.html"));
+  });
+
   app.get("/kristine/api/bootstrap", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
