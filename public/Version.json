@@ -1,7 +1,7 @@
 {
-  "build": "0023.5",
-  "name": "Aufgaben WhatsApp korrekt",
+  "build": "0023.9",
+  "name": "Aufgaben-WhatsApp, Offline-Zeit & Tageskorrektur",
   "date": "2026-07-24",
-  "version": "0023.5",
-  "status": "Aufgabenmeldung an Aufgabe-für-Mitarbeiter; Rückrufnummer nur im WhatsApp-Button"
+  "version": "0023.9",
+  "status": "Echter Build aus den aktuellen server.js und kristine.js"
 }
