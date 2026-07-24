@@ -177,13 +177,14 @@
       <div class="new-job-head"><h2 id="newJobTitle">+ Neue Baustelle</h2><button class="closebtn" type="button" onclick="closeNewJob()">×</button></div>
       <div class="new-job-body">
         <div class="new-job-grid">
-          <div><label>Baustellennummer optional</label><input id="newJobId" placeholder="z. B. 26081"></div>
-          <div><label>Status</label><select id="newJobStatus"><option>Angebot</option><option>Auftrag</option><option selected>Laufend</option></select></div>
+          <div><label>Baustellennummer</label><input id="newJobId" placeholder="wird vorgeschlagen" oninput="syncNewJobStatus()"><div class="small">JJ + dreistellige laufende Nummer, überschreibbar</div></div>
+          <div><label>Status</label><select id="newJobStatus"><option>Angebot</option><option selected>Auftrag</option><option>Laufend</option></select><div class="small">Bei fünfstelliger Nummer automatisch Auftrag</div></div>
           <div class="full"><label>Baustellenname *</label><input id="newJobName" placeholder="z. B. Wolfgangstraße"></div>
           <div><label>Straße</label><input id="newJobStreet" placeholder="Wolfgangstraße"></div>
           <div><label>Hausnummer</label><input id="newJobHouse" placeholder="12"></div>
           <div><label>PLZ</label><input id="newJobPostal" placeholder="6800"></div>
           <div><label>Ort</label><input id="newJobCity" placeholder="Feldkirch"></div>
+          <div class="full actions"><button type="button" class="secondary" onclick="openAddressInGoogleMaps()">📍 Adresse in Google Maps suchen</button><span class="small">Adresse eingeben, dann Haus in Maps prüfen. Die Felder bleiben jederzeit änderbar.</span></div>
           <div><label>Ansprechpartner</label><input id="newJobContact" placeholder="Name"></div>
           <div><label>Telefon</label><input id="newJobPhone" placeholder="+43 …"></div>
           <div><label>Baubeginn</label><input id="newJobStart" type="date"></div>
@@ -206,11 +207,24 @@ let employeeMasters = [];
 let worktimeModels = [];
 function tokenJoin(url){ return url + (token ? (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''); }
 function openKristine(){ window.location.href = tokenJoin('/kristine'); }
-function openNewJob(){
+async function openNewJob(){
   document.getElementById('newJobBackdrop').classList.add('open');
   document.getElementById('newJobError').style.display='none';
   document.getElementById('newJobStart').value=new Date().toISOString().slice(0,10);
+  try{
+    const d=await api('/admin/api/jobs/next-number');
+    if(!document.getElementById('newJobId').value.trim()) document.getElementById('newJobId').value=d.nextNumber||'';
+    syncNewJobStatus();
+  }catch(e){}
   setTimeout(()=>document.getElementById('newJobName').focus(),50);
+}
+function syncNewJobStatus(){
+  const id=document.getElementById('newJobId').value.trim();
+  if(/^\d{5}$/.test(id)) document.getElementById('newJobStatus').value='Auftrag';
+}
+function openAddressInGoogleMaps(){
+  const q=[document.getElementById('newJobStreet').value.trim(),document.getElementById('newJobHouse').value.trim(),document.getElementById('newJobPostal').value.trim(),document.getElementById('newJobCity').value.trim()].filter(Boolean).join(' ');
+  window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q||'Adresse suchen'),'_blank','noopener');
 }
 function closeNewJob(){document.getElementById('newJobBackdrop').classList.remove('open')}
 async function createNewJob(){
@@ -232,7 +246,7 @@ async function createNewJob(){
     closeNewJob();
     ['newJobId','newJobName','newJobStreet','newJobHouse','newJobPostal','newJobCity','newJobContact','newJobPhone','newJobExtra','newJobNotes'].forEach(id=>document.getElementById(id).value='');
     await loadJobs();
-    const card=document.getElementById('job-'+result.jobId);if(card)card.scrollIntoView({behavior:'smooth',block:'center'});
+    const card=document.getElementById('job-'+result.jobId);if(card){card.scrollIntoView({behavior:'smooth',block:'center'});const edit=document.getElementById('edit-'+result.jobId);if(edit)edit.style.display='block';}
   }catch(e){error.textContent=e.message;error.style.display='block'}finally{save.disabled=false;save.textContent='Speichern'}
 }
 
