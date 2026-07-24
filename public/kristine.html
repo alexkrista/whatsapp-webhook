@@ -1143,11 +1143,11 @@ async function addTask(){
   renderTasks();renderControl();
   try{
     if(button){button.disabled=true;button.textContent='Speichert …'}
-    await persistTasks();
+    const r=await persistTasks();
     tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
     tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
     updateTaskSelectionInfo();
-    alert('Aufgabe gespeichert.');
+    const note=(r.notifications||[])[0]; alert(note?.sent?'Aufgabe gespeichert und Mitarbeiter informiert.':note?.reason==='no_employee_phone'?'Aufgabe gespeichert. Beim Mitarbeiter ist keine Telefonnummer hinterlegt.':'Aufgabe gespeichert. Nachricht konnte nicht versendet werden.');
   }catch(e){
     data.tasks=(data.tasks||[]).filter(t=>t.id!==newTask.id);renderTasks();renderControl();
     alert('Aufgabe konnte nicht gespeichert werden: '+e.message);
@@ -1167,7 +1167,7 @@ function renderTasks(){
   tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
     const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
-    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
+    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}${t.contactPhone?`<br><a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||'Anrufen')}</a>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
   }).join(''):'<span class="small">Keine Aufgaben.</span>'
 }
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks();renderControl()}
@@ -1180,7 +1180,7 @@ async function saveTasks(){
   try{if(button){button.disabled=true;button.textContent='Speichert …'}await persistTasks();alert('Aufgaben gespeichert.')}catch(e){alert('Aufgaben konnten nicht gespeichert werden: '+e.message)}finally{if(button){button.disabled=false;button.textContent=old||'Aufgaben speichern'}}
 }
 function taskDetailHtml(t){
-  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Zuständig</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong><span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Ersteller</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Kontext</span><strong>${esc(t.reminder)}</strong>`:''}</div><div class="actions">${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Zuständig</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong><span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Ersteller</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Kontext</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactPhone?`<span>Telefon</span><strong><a href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||t.contactPhone)}</a></strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
 }
 function openTaskListModal(focusId=''){
   const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
