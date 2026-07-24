@@ -100,12 +100,6 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     if (/^(andere baustelle|baustelle wechseln|wechseln)$/.test(t)) return "switch_site";
     if (/^(erledigt|aufgabe erledigt)$/.test(t)) return "task_done";
     if (/^(anrufen|anruf|rufen)$/.test(t)) return "task_call";
-    if (/^(zeit falsch|zeit|uhrzeit falsch)$/.test(t)) return "review_time";
-    if (/^(baustelle falsch|falsche baustelle|baustelle)$/.test(t)) return "review_site";
-    if (/^(eintrag fehlt|fehlt|ergänzen)$/.test(t)) return "review_missing";
-    if (/^(startzeit|start)$/.test(t)) return "review_start";
-    if (/^(endzeit|ende)$/.test(t)) return "review_end";
-    if (/^(beide|start und ende)$/.test(t)) return "review_both";
     return "message";
   }
 
@@ -181,9 +175,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   function formatDaySummary(timeEvents, employeeId, date, state) {
     const segments = buildEditableSegments(timeEvents, employeeId, date, state);
     if (!segments.length) return "Keine Zeitabschnitte vorhanden.";
-    return segments.map((segment, index) => {
+    return segments.map((segment) => {
       const label = segment.type === "lunch" ? "Mittag" : segment.type === "pause" ? "Pause" : (segment.jobName || segment.jobId || "Arbeit");
-      return `${index + 1}. ${segment.from}–${segment.to || "offen"} ${label}`;
+      return `${segment.from}–${segment.to || "offen"} ${label}`;
     }).join("\n");
   }
 
@@ -209,34 +203,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return { assignments, states, tasks, timeEvents };
   }
 
-  function parseFlexibleTime(value) {
-    const raw = String(value || "").toLowerCase().replace(/uhr/g, " ").trim();
-    const m = raw.match(/(?:^|\D)([01]?\d|2[0-3])[:.]?([0-5]\d)(?:\D|$)/);
-    if (m) return `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
-    const compact = raw.match(/(?:^|\D)([01]\d|2[0-3])([0-5]\d)(?:\D|$)/);
-    return compact ? `${compact[1]}:${compact[2]}` : null;
-  }
-
-  function parseFlexibleSpan(value) {
-    const raw = String(value || "").toLowerCase().replace(/von|ca\.?|ungefähr|uhr/g, " ");
-    const matches = [...raw.matchAll(/([01]?\d|2[0-3])(?:[:.]?)([0-5]\d)/g)].map(m => `${String(Number(m[1])).padStart(2,"0")}:${m[2]}`);
-    return matches.length >= 2 ? { from: matches[0], to: matches[1] } : null;
-  }
-
-  async function replaceDayFromSegments(employeeId, employeeName, date, segments) {
-    const all = await readJson(TIME_EVENTS, []);
-    const retained = all.filter(row => !(String(row.employeeId) === String(employeeId) && String(row.date) === String(date)));
-    const createdAt = new Date().toISOString();
-    const replacement = [];
-    for (const segment of segments) {
-      replacement.push({ employeeId, employeeName, date, type: segment.type === "pause" ? "pause" : segment.type === "lunch" ? "mittag" : "start", at: segment.from, jobId: segment.type === "work" ? segment.jobId : null, jobName: segment.type === "work" ? segment.jobName : "", segmentId: segment.id, source: "whatsapp_correction", manual: true, createdAt });
-    }
-    const last = segments.at(-1);
-    if (last?.to) replacement.push({ employeeId, employeeName, date, type: "ende", at: last.to, jobId: last.type === "work" ? last.jobId : null, jobName: last.type === "work" ? last.jobName : "", source: "whatsapp_correction", manual: true, createdAt });
-    await writeJson(TIME_EVENTS, [...retained, ...replacement].slice(-20000));
-  }
-
-  async function handleMessage({ employeeId, employeeName, text, date, messageDate }) {
+  async function handleMessage({ employeeId, employeeName, text, date }) {
     const today = date || localDateISO();
     const [assignments, states, tasks, timeEvents] = await Promise.all([
       readJson(ASSIGNMENTS, []),
@@ -258,7 +225,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     let current = activeAssignment(dayAssignments, state);
     if (state.activeJobOverride?.jobId || state.activeJobOverride?.jobName) current = state.activeJobOverride;
     const intent = detectIntent(text);
-    const nowDate = messageDate instanceof Date && !Number.isNaN(messageDate.getTime()) ? messageDate : new Date();
+    const nowDate = new Date();
     const now = nowDate.toISOString();
     const actualTime = localTimeHM(nowDate);
 
@@ -573,103 +540,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     }
 
     if (state.pending?.type === "day_review_summary") {
+      if (intent === "no") {
+        state.pending = null;
+        await saveState();
+        return { reply: "Bitte die Zeiten im Leitstand korrigieren und danach nochmals „Fertig“ schreiben.", buttons: [], state };
+      }
       if (intent === "yes") {
         state.dayReview = { ...(state.dayReview || {}), summaryConfirmed: true };
         state.pending = { type: "day_review_photo", createdAt: now };
         await saveState();
         return { reply: "Sind alle Fotos für heute erfasst?", buttons: ["Ja", "Nein"], state };
       }
-      if (intent === "no") {
-        state.pending = { type: "day_review_correction_kind", createdAt: now };
-        await saveState();
-        return { reply: "Was stimmt nicht?", buttons: ["Zeit falsch", "Baustelle falsch", "Eintrag fehlt"], state };
-      }
       return { reply: "Passt die Zusammenfassung?", buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "day_review_correction_kind") {
-      if (intent === "review_time") {
-        state.pending = { type: "day_review_time_number", createdAt: now };
-        await saveState();
-        return { reply: "Welche Nummer ist zeitlich falsch?", buttons: [], state };
-      }
-      if (intent === "review_site") {
-        state.pending = { type: "day_review_site_number", createdAt: now };
-        await saveState();
-        return { reply: "Welche Nummer ist auf der falschen Baustelle?", buttons: [], state };
-      }
-      if (intent === "review_missing") {
-        return { reply: "Der fehlende Eintrag kommt im nächsten Schritt. Bitte vorerst Zeit oder Baustelle korrigieren.", buttons: ["Zeit falsch", "Baustelle falsch"], state };
-      }
-      return { reply: "Bitte auswählen, was nicht stimmt.", buttons: ["Zeit falsch", "Baustelle falsch", "Eintrag fehlt"], state };
-    }
-
-    if (state.pending?.type === "day_review_time_number") {
-      const segments = buildEditableSegments(timeEvents, employeeId, today, state);
-      const number = Number(String(text).match(/\d+/)?.[0] || 0);
-      if (!segments[number - 1]) return { reply: `Bitte eine Nummer von 1 bis ${segments.length} eingeben.`, buttons: [], state };
-      state.pending = { type: "day_review_time_part", segmentNumber: number, createdAt: now };
-      await saveState();
-      const seg = segments[number - 1];
-      return { reply: `Eintrag ${number}: ${seg.from}–${seg.to || "offen"}. Was ist falsch?`, buttons: ["Startzeit", "Endzeit", "Beide"], state };
-    }
-
-    if (state.pending?.type === "day_review_time_part") {
-      if (!["review_start", "review_end", "review_both"].includes(intent)) return { reply: "Startzeit, Endzeit oder beide?", buttons: ["Startzeit", "Endzeit", "Beide"], state };
-      state.pending = { ...state.pending, type: "day_review_time_value", part: intent, createdAt: now };
-      await saveState();
-      return { reply: intent === "review_both" ? "Bitte neue Zeitspanne eingeben, z. B. 12:20-13:10." : intent === "review_start" ? "Welche Startzeit ist richtig?" : "Welche Endzeit ist richtig?", buttons: [], state };
-    }
-
-    if (state.pending?.type === "day_review_time_value") {
-      const segments = buildEditableSegments(timeEvents, employeeId, today, state);
-      const index = Number(state.pending.segmentNumber) - 1;
-      const segment = segments[index];
-      if (!segment) { state.pending = { type: "day_review_summary", createdAt: now }; await saveState(); return { reply: "Der Eintrag wurde nicht mehr gefunden. Bitte nochmals Fertig schreiben.", buttons: [], state }; }
-      if (state.pending.part === "review_both") {
-        const span = parseFlexibleSpan(text);
-        if (!span) return { reply: "Ich brauche zwei Zeiten, z. B. 12:20-13:10 oder 1220-1310.", buttons: [], state };
-        segment.from = span.from; segment.to = span.to;
-      } else {
-        const value = parseFlexibleTime(text);
-        if (!value) return { reply: "Zeit bitte z. B. als 13:15, 1315 oder bis 13.15 eingeben.", buttons: [], state };
-        if (state.pending.part === "review_start") segment.from = value; else segment.to = value;
-      }
-      if (minutesFromHM(segment.to) !== null && minutesFromHM(segment.from) >= minutesFromHM(segment.to)) return { reply: "Die Endzeit muss nach der Startzeit liegen. Bitte nochmals eingeben.", buttons: [], state };
-      if (index > 0) segments[index - 1].to = segment.from;
-      if (index + 1 < segments.length && segment.to) segments[index + 1].from = segment.to;
-      await replaceDayFromSegments(employeeId, state.employeeName, today, segments);
-      const freshEvents = await readJson(TIME_EVENTS, []);
-      const summary = formatDaySummary(freshEvents, employeeId, today, state);
-      state.pending = { type: "day_review_summary", createdAt: now };
-      state.dayReview = { ...(state.dayReview || {}), summary };
-      await saveState();
-      return { reply: `✅ Zeit geändert.\n\n📋 Neue Tageszusammenfassung\n${summary}\n\nPasst das jetzt?`, buttons: ["Ja", "Nein"], state };
-    }
-
-    if (state.pending?.type === "day_review_site_number") {
-      const segments = buildEditableSegments(timeEvents, employeeId, today, state);
-      const number = Number(String(text).match(/\d+/)?.[0] || 0);
-      const segment = segments[number - 1];
-      if (!segment || segment.type !== "work") return { reply: "Bitte die Nummer eines Arbeitsblocks eingeben.", buttons: [], state };
-      state.pending = { type: "day_review_site_value", segmentNumber: number, createdAt: now };
-      await saveState();
-      return { reply: `Eintrag ${number}: ${segment.jobName || segment.jobId}. Welche Baustelle ist richtig?`, buttons: [], state };
-    }
-
-    if (state.pending?.type === "day_review_site_value") {
-      const candidates = findSiteCandidates(assignments, text, dayAssignments);
-      if (!candidates.length) return { reply: "Baustelle nicht gefunden. Bitte Name oder Nummer anders schreiben.", buttons: [], state };
-      const selected = candidates[0];
-      const segments = buildEditableSegments(timeEvents, employeeId, today, state);
-      const segment = segments[Number(state.pending.segmentNumber) - 1];
-      segment.jobId = selected.jobId; segment.jobName = selected.jobName;
-      await replaceDayFromSegments(employeeId, state.employeeName, today, segments);
-      const freshEvents = await readJson(TIME_EVENTS, []);
-      const summary = formatDaySummary(freshEvents, employeeId, today, state);
-      state.pending = { type: "day_review_summary", createdAt: now };
-      await saveState();
-      return { reply: `✅ Baustelle geändert.\n\n📋 Neue Tageszusammenfassung\n${summary}\n\nPasst das jetzt?`, buttons: ["Ja", "Nein"], state };
     }
 
     if (state.pending?.type === "day_review_photo") {
@@ -1130,15 +1012,14 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const newOpenTasks = clean.filter(t => !previousIds.has(String(t.id)) && t.status !== "done");
       for (const task of newOpenTasks) {
         const employee = employeeById.get(String(task.assigneeId || ""));
-        let employeePhone = String(employee?.phone || "").replace(/\D/g, "");
-        if (employeePhone.startsWith("00")) employeePhone = employeePhone.slice(2);
-        if (employeePhone.startsWith("0")) employeePhone = "43" + employeePhone.slice(1);
+        const employeePhone = String(employee?.phone || "").replace(/\D/g, "");
         if (!employeePhone) {
           notifications.push({ taskId: task.id, sent: false, reason: "no_employee_phone" });
           continue;
         }
         if (typeof sendWhatsApp !== "function") {
           notifications.push({ taskId: task.id, sent: false, reason: "whatsapp_not_configured" });
+          console.error("❌ Aufgaben-WhatsApp: Versandfunktion fehlt", { taskId: task.id });
           continue;
         }
         const priorityLabel = task.priority === "sofort" ? "🔴 Sofort" : task.priority === "heute" ? "🟡 Heute" : "🟢 Normal";
@@ -1155,10 +1036,26 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
           task.contactEmail ? `✉️ ${task.contactEmail}` : "",
         ].filter(Boolean);
         try {
+          console.log("📤 Aufgaben-WhatsApp wird gesendet", {
+            taskId: task.id,
+            assigneeId: task.assigneeId,
+            assigneeName: task.assigneeName,
+            employeePhone,
+          });
+          // Absichtlich ohne eigenen Sonderweg: exakt dieselbe Versandfunktion wie Kristine.
           await sendWhatsApp({ to: employeePhone, reply: lines.join("\n"), buttons: ["Anrufen", "Erledigt"] });
           notifications.push({ taskId: task.id, sent: true });
+          console.log("✅ Aufgaben-WhatsApp versendet", { taskId: task.id, assigneeName: task.assigneeName });
         } catch (error) {
-          notifications.push({ taskId: task.id, sent: false, reason: String(error?.message || error) });
+          const reason = String(error?.message || error);
+          notifications.push({ taskId: task.id, sent: false, reason });
+          console.error("❌ Aufgaben-WhatsApp fehlgeschlagen", {
+            taskId: task.id,
+            assigneeId: task.assigneeId,
+            assigneeName: task.assigneeName,
+            employeePhone,
+            reason,
+          });
         }
       }
       res.json({ ok: true, tasks: clean, notifications });
