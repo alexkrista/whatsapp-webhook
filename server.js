@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.10-aufgaben-whatsapp-final";
-const APP_STATUS = "WhatsApp Live Alpha";
+const APP_BUILD = "0023.13-phone-number-id-env";
+const APP_STATUS = "Aufgaben-WhatsApp Sender-ID ENV Fix";
 const APP_BUILD_DATE = "2026-07-24";
 
 // Static files for Admin UI
@@ -92,7 +92,11 @@ const PDF_ALLOWED_FROM = process.env.PDF_ALLOWED_FROM || "";
 const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() === "1";
 
 const CHEF_PHONE = process.env.CHEF_PHONE || "";
-const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+const KRISTINE_PHONE_NUMBER_ID =
+  process.env.PHONE_NUMBER_ID ||
+  process.env.WHATSAPP_PHONE_NUMBER_ID ||
+  process.env.KRISTINE_PHONE_NUMBER_ID ||
+  "";
 let LAST_WHATSAPP_PHONE_NUMBER_ID = ""; // wird aus ENV, Disk oder dem letzten echten Webhook aktualisiert
 
 function whatsappSenderConfigPath() {
@@ -3429,7 +3433,7 @@ registerMorningStatus({
   readEmployees,
   sendWhatsApp: sendWhatsAppKristineReply,
   chefPhone: process.env.CHEF_PHONE || "",
-  phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+  phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
 }).then((service) => {
   morningStatus = service;
   console.log("✅ KRISTA Morgenstatus aktiv");
