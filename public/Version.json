@@ -1,7 +1,7 @@
 {
-  "build": "0023.13",
-  "name": "PHONE_NUMBER_ID ENV Fix",
+  "build": "0023.14",
+  "name": "Zentraler Kristine-WhatsApp-Sender",
   "date": "2026-07-24",
-  "version": "3.5.2",
-  "status": "Aufgaben-WhatsApp liest bestehende Render-Variable PHONE_NUMBER_ID"
+  "version": "0023.14",
+  "status": "Alle proaktiven Nachrichten verwenden die zuletzt aktive Kristine-Sender-ID"
 }
