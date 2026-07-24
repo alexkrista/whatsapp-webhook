@@ -5,7 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -450,6 +450,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
       state.lastStartBooked = bookedTime;
       addTimeline("work_started", `Arbeitsbeginn ${bookedTime}${bookedTime !== actualTime ? ` (gestempelt ${actualTime})` : ""}`, current);
       await saveState();
+      if (typeof markJobRunning === "function") await markJobRunning(current.jobId, "time_booking").catch(() => false);
       await appendTimeEvent({
         employeeId,
         employeeName: state.employeeName,
@@ -705,6 +706,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir }) {
         note: String(a.note || "").trim().slice(0, 500),
       })).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
       await writeJson(ASSIGNMENTS, clean);
+      if (typeof markJobRunning === "function") {
+        for (const jobId of [...new Set(clean.map(a => a.jobId).filter(Boolean))]) {
+          await markJobRunning(jobId, "planning").catch(() => false);
+        }
+      }
       await appendEvent({ type: "planning_saved", detail: `${clean.length} Einteilungen gespeichert`, source: "office" });
       res.json({ ok: true, assignments: clean });
     } catch (e) {
