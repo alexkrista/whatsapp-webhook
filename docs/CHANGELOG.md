@@ -1,22 +1,11 @@
-# Build 0023.13 – PHONE_NUMBER_ID ENV Fix
-
-## Ursache
-Render enthält die funktionierende WhatsApp-Sender-ID unter `PHONE_NUMBER_ID`. Der Aufgabenversand las bisher nur `WHATSAPP_PHONE_NUMBER_ID` und `KRISTINE_PHONE_NUMBER_ID`.
+# Build 0023.14 – Zentraler Kristine-WhatsApp-Sender
 
 ## Änderung
-- Zentrale Sender-ID akzeptiert jetzt in dieser Reihenfolge:
-  1. `PHONE_NUMBER_ID`
-  2. `WHATSAPP_PHONE_NUMBER_ID`
-  3. `KRISTINE_PHONE_NUMBER_ID`
-  4. gespeicherte Sender-ID aus dem letzten Webhook
-- Morgenstatus verwendet dieselbe zentrale Sender-ID.
-- Versionsanzeige auf Build 0023.13 aktualisiert.
+- Alle WhatsApp-Nachrichten verwenden vorrangig die zuletzt durch einen echten Kristine-Webhook bestätigte `phone_number_id`.
+- Aufgaben, Morgenstatus, Erinnerungen und normale Antworten laufen damit über dieselbe aktive Kristine-Nummer.
+- Render-ENV und übergebene IDs bleiben ausschließlich als Fallback erhalten.
+- Startlog zeigt die verwendete Priorität und die letzten sechs Stellen der aktiven Sender-ID.
 
-## Betroffene Dateien
-- `server.js`
-- `public/kristine.html`
-- `version.json`
-
-## Test
-- `node --check server.js`
-- `node --check kristine.js`
+## Erwarteter Test
+- Aufgaben-Log und normale Kristine-Nachricht müssen dieselbe `senderIdTail` anzeigen.
+- In der aktuellen Umgebung soll dies `822135` sein.
