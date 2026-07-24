@@ -1,7 +1,7 @@
 {
-  "build": "0023.9",
-  "name": "Aufgaben-WhatsApp, Offline-Zeit & Tageskorrektur",
+  "build": "0023.10",
+  "name": "Aufgaben-WhatsApp zentraler Versand",
   "date": "2026-07-24",
-  "version": "0023.9",
-  "status": "Echter Build aus den aktuellen server.js und kristine.js"
+  "version": "0023.10",
+  "status": "Aufgabenversand nutzt denselben WhatsApp-Sender wie Kristine"
 }
