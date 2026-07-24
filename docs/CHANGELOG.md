@@ -1,14 +1,22 @@
-# Build 0023.12 – Aufgaben-WhatsApp Diagnose
+# Build 0023.13 – PHONE_NUMBER_ID ENV Fix
 
-## Geändert
-- Fünfstufiges Logging vom Aufgaben-Speichern bis zur Meta-API.
-- Vollständige Meta-Fehlerausgabe mit Status, Code, Subcode und fbtrace_id.
-- Browser zeigt die echte Fehlerursache statt nur einer Sammelmeldung.
-- Geschlossenes 24-Stunden-Fenster wird ausdrücklich erkannt.
-- Wiederhergestellte `public/kristine.html` ist im ZIP enthalten.
+## Ursache
+Render enthält die funktionierende WhatsApp-Sender-ID unter `PHONE_NUMBER_ID`. Der Aufgabenversand las bisher nur `WHATSAPP_PHONE_NUMBER_ID` und `KRISTINE_PHONE_NUMBER_ID`.
+
+## Änderung
+- Zentrale Sender-ID akzeptiert jetzt in dieser Reihenfolge:
+  1. `PHONE_NUMBER_ID`
+  2. `WHATSAPP_PHONE_NUMBER_ID`
+  3. `KRISTINE_PHONE_NUMBER_ID`
+  4. gespeicherte Sender-ID aus dem letzten Webhook
+- Morgenstatus verwendet dieselbe zentrale Sender-ID.
+- Versionsanzeige auf Build 0023.13 aktualisiert.
+
+## Betroffene Dateien
+- `server.js`
+- `public/kristine.html`
+- `version.json`
 
 ## Test
-1. ZIP pfadtreu hochladen.
-2. Neue Aufgabe an einen Mitarbeiter anlegen.
-3. Im Render-Log nach `TASK-WA 1/5` bis `5/5` suchen.
-4. Bei Fehler die Zeile `WhatsApp API response` senden.
+- `node --check server.js`
+- `node --check kristine.js`
