@@ -1010,11 +1010,15 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
       const notifications = [];
       const newOpenTasks = clean.filter(t => !previousIds.has(String(t.id)) && t.status !== "done");
+      console.log("🧾 Aufgaben gespeichert", { total: clean.length, newOpenTasks: newOpenTasks.length });
       for (const task of newOpenTasks) {
         const employee = employeeById.get(String(task.assigneeId || ""));
         const employeePhone = String(employee?.phone || "").replace(/\D/g, "");
         if (!employeePhone) {
           notifications.push({ taskId: task.id, sent: false, reason: "no_employee_phone" });
+          console.error("❌ Aufgaben-WhatsApp: Mitarbeiter-Telefonnummer fehlt", {
+            taskId: task.id, assigneeId: task.assigneeId, assigneeName: task.assigneeName,
+          });
           continue;
         }
         if (typeof sendWhatsApp !== "function") {
