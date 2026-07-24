@@ -1,11 +1,16 @@
-# Build 0023.14 – Zentraler Kristine-WhatsApp-Sender
+# Build 0023.15 – Kristine Oberfläche aufgeräumt
 
 ## Änderung
-- Alle WhatsApp-Nachrichten verwenden vorrangig die zuletzt durch einen echten Kristine-Webhook bestätigte `phone_number_id`.
-- Aufgaben, Morgenstatus, Erinnerungen und normale Antworten laufen damit über dieselbe aktive Kristine-Nummer.
-- Render-ENV und übergebene IDs bleiben ausschließlich als Fallback erhalten.
-- Startlog zeigt die verwendete Priorität und die letzten sechs Stellen der aktiven Sender-ID.
+- Menüpunkt **Kristine-Chat** aus der Kristine-Oberfläche entfernt.
+- Chat-Testbereich vollständig aus `public/kristine.html` entfernt.
+- Bestehende Backend- und WhatsApp-Logik bleibt unverändert.
+- Leitstand, Tageskorrektur und KRISTOOL verwenden nun eine gemeinsame Datumsfunktion statt des früheren Chat-Datumsfeldes.
+- Planung, Leitstand, Aufgaben, Zeitmodelle und KRISTOOL bleiben erhalten.
 
-## Erwarteter Test
-- Aufgaben-Log und normale Kristine-Nachricht müssen dieselbe `senderIdTail` anzeigen.
-- In der aktuellen Umgebung soll dies `822135` sein.
+## Betroffene Datei
+- `public/kristine.html`
+- `version.json`
+
+## Prüfung
+- Keine verbliebenen DOM-Zugriffe auf entfernte Chat-Felder.
+- JavaScript-Syntax geprüft.
