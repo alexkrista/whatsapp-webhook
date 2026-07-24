@@ -96,11 +96,29 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .pool-budget.over{color:#a51f1f}.pool-budget span{white-space:nowrap}
 @media(max-width:1050px){.planning-top{position:static;box-shadow:none}.planning-form-horizontal{grid-template-columns:repeat(3,minmax(140px,1fr))}.planning-form-horizontal .span-6{grid-column:1/-1}}
 @media(max-width:760px){.planning-form-horizontal{grid-template-columns:1fr 1fr}.planning-form-horizontal .span-2,.planning-form-horizontal .span-3,.planning-form-horizontal .span-6{grid-column:1/-1}.pool-card{width:155px}.pool-lane-wrap{grid-template-columns:34px minmax(0,1fr) 34px}}
+
+/* Build 0023.2: Kartentypen + leere Planungszelle */
+.assignment.type-urlaub,.monthitem.type-urlaub{border-left-color:#2f73c8!important;background:#dcecff!important}
+.assignment.type-krank,.monthitem.type-krank{border-left-color:#c53b3b!important;background:#ffe3e3!important}
+.assignment.type-arzt,.monthitem.type-arzt{border-left-color:#7b61a8!important;background:#eee7fa!important}
+.assignment.type-schulung,.monthitem.type-schulung{border-left-color:#6d55a6!important;background:#eee8ff!important}
+.assignment.type-aufraeumen,.monthitem.type-aufraeumen{border-left-color:#d38321!important;background:#fff0d7!important}
+.assignment.type-werkstatt,.monthitem.type-werkstatt{border-left-color:#5d6670!important;background:#e8ebee!important}
+.assignment.type-material_holen,.monthitem.type-material_holen{border-left-color:#3f7c9b!important;background:#e4f4fb!important}
+.assignment.type-lager,.monthitem.type-lager{border-left-color:#8b6a3e!important;background:#f2e8d9!important}
+.assignment.type-besprechung,.monthitem.type-besprechung{border-left-color:#b48723!important;background:#fff2c7!important}
+.assignment.type-za,.monthitem.type-za{border-left-color:#368b8b!important;background:#e1f5f5!important}
+.assignment.type-feiertag,.monthitem.type-feiertag{border-left-color:#d39a1c!important;background:#fff4c9!important}
+.assignment.type-betriebsurlaub,.monthitem.type-betriebsurlaub{border-left-color:#2166a8!important;background:#d8eaff!important}
+.empty-planning-action{width:100%;min-height:72px;border:1px dashed #bdb8ae;border-radius:10px;background:rgba(255,255,255,.28);color:#68635b;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;box-sizing:border-box;cursor:pointer;font-size:12px}
+.empty-planning-action:hover{background:#fff;border-color:#27713d;color:#145829}
+.quick-plan-tabs{display:flex;gap:8px;margin:14px 0}.quick-plan-tabs button{flex:1}.quick-plan-tabs button.active{background:#27713d;border-color:#27713d;color:#fff}.quick-plan-section{display:none}.quick-plan-section.active{display:block}.quick-plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.quick-plan-grid .full{grid-column:1/-1}.quick-plan-grid input,.quick-plan-grid select{width:100%;box-sizing:border-box;min-width:0}.quick-plan-error{display:none;color:#9b1c1c;font-weight:800;margin-top:10px}@media(max-width:650px){.quick-plan-grid{grid-template-columns:1fr}.quick-plan-grid .full{grid-column:auto}}
+
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Kristine</h1><div class="sub">Build 0023.0 · Planung Workspace</div></div>
+  <div><h1>Kristine</h1><div class="sub">Build 0023.2 · Planung & Kartentypen</div></div>
   <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
 </header>
 <main>
@@ -359,6 +377,38 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     <div class="small" style="margin-top:8px">Die Zeitabschnitte sind die Wahrheit. Änderungen werden protokolliert; zugehörige Dokumentation kann automatisch der richtigen Baustelle folgen.</div>
   </div>
 </div>
+
+<div id="quickPlanBackdrop" class="segment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="quickPlanTitle" onclick="if(event.target===this)closeQuickPlan()">
+  <div class="segment-modal" style="width:min(680px,100%)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h3 id="quickPlanTitle" style="margin:0">Baustelle einteilen</h3>
+      <button type="button" class="secondary" onclick="closeQuickPlan()">Schließen</button>
+    </div>
+    <div id="quickPlanContext" class="small" style="margin-top:7px"></div>
+    <div class="quick-plan-tabs">
+      <button id="quickExistingTab" type="button" class="active" onclick="setQuickPlanMode('existing')">Bestehende Baustelle</button>
+      <button id="quickNewTab" type="button" class="secondary" onclick="setQuickPlanMode('new')">+ Neue Baustelle</button>
+    </div>
+    <div id="quickExistingSection" class="quick-plan-section active">
+      <label>Baustelle suchen / auswählen</label>
+      <select id="quickJobSelect"></select>
+      <div class="actions" style="margin-top:14px"><button type="button" class="green" onclick="assignQuickExistingJob()">In dieses Feld einteilen</button></div>
+    </div>
+    <div id="quickNewSection" class="quick-plan-section">
+      <div class="quick-plan-grid">
+        <div><label>Baustellennummer</label><input id="quickNewJobId" oninput="syncQuickNewStatus()"><div class="small">automatisch vorgeschlagen, überschreibbar</div></div>
+        <div><label>Status</label><select id="quickNewStatus"><option>Angebot</option><option selected>Auftrag</option><option>Laufend</option></select></div>
+        <div class="full"><label>Baustellenname *</label><input id="quickNewName" placeholder="z. B. Müller, Rankweil"></div>
+        <div><label>Straße</label><input id="quickNewStreet"></div><div><label>Hausnummer</label><input id="quickNewHouse"></div>
+        <div><label>PLZ</label><input id="quickNewPostal"></div><div><label>Ort</label><input id="quickNewCity"></div>
+        <div class="full"><button type="button" class="secondary" onclick="openQuickAddressMaps()">📍 Adresse in Google Maps kontrollieren</button></div>
+      </div>
+      <div class="actions" style="margin-top:14px"><button id="quickNewSave" type="button" class="green" onclick="createAndAssignQuickJob()">Anlegen und hier einteilen</button></div>
+    </div>
+    <div id="quickPlanError" class="quick-plan-error"></div>
+  </div>
+</div>
+
 <script>
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
@@ -469,8 +519,15 @@ function selectCardType(){
 function selectedPlanningDate(){return document.getElementById('aDate').value||data.today}
 function isoWeekNumber(value){const d=new Date((typeof value==='string'?value:iso(value))+'T12:00:00');const utc=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=utc.getUTCDay()||7;utc.setUTCDate(utc.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(utc.getUTCFullYear(),0,1));return Math.ceil((((utc-yearStart)/86400000)+1)/7)}
 function weekDays(){const d=new Date(selectedPlanningDate()+'T12:00:00');const day=d.getDay()||7;d.setDate(d.getDate()-day+1);return Array.from({length:5},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return iso(x)})}
-const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},krank:{label:'Krank',icon:'🔴'},arzt:{label:'Arzt',icon:'🩺'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'},schulung:{label:'Schulung',icon:'🎓'},material_holen:{label:'Material holen',icon:'🚚'},lager:{label:'Lager',icon:'📦'},besprechung:{label:'Besprechung',icon:'🤝'}};
-function cardTypeOf(a){return a.cardType||'site'}
+const CARD_TYPES={site:{label:'Baustelle',icon:'🏗️'},urlaub:{label:'Urlaub',icon:'🔵'},krank:{label:'Krank',icon:'🔴'},arzt:{label:'Arzt',icon:'🩺'},aufraeumen:{label:'Aufräumen',icon:'🧹'},werkstatt:{label:'Werkstatt',icon:'🔧'},schulung:{label:'Schulung',icon:'🎓'},material_holen:{label:'Material holen',icon:'🚚'},lager:{label:'Lager',icon:'📦'},besprechung:{label:'Besprechung',icon:'🤝'},za:{label:'Zeitausgleich',icon:'🟦'},feiertag:{label:'Feiertag',icon:'🎉'},betriebsurlaub:{label:'Betriebsurlaub',icon:'🏢'}};
+function cardTypeOf(a){
+  const explicit=String(a?.cardType||'').trim().toLowerCase();if(explicit&&CARD_TYPES[explicit])return explicit;
+  const raw=String(a?.jobId||a?.jobName||'').toLowerCase().replace(/^_+|_+$/g,'');
+  const aliases={vacation:'urlaub',holiday:'feiertag',sick:'krank',training:'schulung',zeitausgleich:'za'};
+  const inferred=aliases[raw]||raw;if(CARD_TYPES[inferred])return inferred;
+  for(const type of Object.keys(CARD_TYPES)){if(type!=='site'&&raw.includes(type))return type}
+  return 'site'
+}
 function cardMeta(a){return CARD_TYPES[cardTypeOf(a)]||CARD_TYPES.site}
 function selectSystemCard(type){const select=document.getElementById('aCardType');if(!select)return;select.value=type;selectCardType();document.getElementById('aDate')?.scrollIntoView({behavior:'smooth',block:'center'})}
 function poolDragStart(event,payload){event.dataTransfer.effectAllowed='copy';event.dataTransfer.dropEffect='copy';event.dataTransfer.setData('text/plain',payload);event.currentTarget.classList.add('dragging')}
@@ -700,6 +757,7 @@ function shiftPlanningPeriod(direction){
 }
 function gotoPlanningToday(){document.getElementById('aDate').value=data.today||iso(new Date());renderPlanning()}
 function updatePlanningButtons(){for(const view of ['day','week','month']){const b=document.getElementById('view'+view[0].toUpperCase()+view.slice(1)+'Btn');if(b)b.className=view===planningView?'':'secondary'}const employeeBtn=document.getElementById('perspectiveEmployeeBtn'),siteBtn=document.getElementById('perspectiveSiteBtn');if(employeeBtn)employeeBtn.className=planningPerspective==='employee'?'':'secondary';if(siteBtn)siteBtn.className=planningPerspective==='site'?'':'secondary'}
+function emptyPlanningCellHtml(date,employeeId){return `<button type="button" class="empty-planning-action" onclick="openQuickPlan(event,'${date}','${esc(employeeId)}')">＋ Baustelle einteilen<br><span>oder neue Baustelle anlegen</span></button>`}
 function renderEmployeePlanning(target,title,days){
   const dayMode=days.length===1;
   title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Mitarbeitern · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
@@ -707,7 +765,7 @@ function renderEmployeePlanning(target,title,days){
   const rows=masterEmployees.map(employee=>{
     const should=employeeShouldHours(employee.id,days),planned=employeePlannedHours(employee.id,days),actual=employeeActualMinutes(employee.id,days)/60,rest=Math.max(0,should-planned),over=Math.max(0,planned-should);
     const label=`<div class="matrix-label">👷 ${esc(employee.name)}<div class="matrix-metrics"><span>Soll</span><strong>${formatHours(should)}</strong><span>Plan</span><strong>${formatHours(planned)}</strong><span>Geleistet</span><strong>${formatHours(actual)}</strong>${over>0?`<span class="over">Überplant</span><strong class="over">+${formatHours(over)}</strong>`:`<span class="rest">Rest</span><strong class="rest">${formatHours(rest)}</strong>`}</div></div>`;
-    const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${matrixCardList(assignments)}</div>`}).join('');
+    const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${assignments.length?matrixCardList(assignments):emptyPlanningCellHtml(day,employee.id)}</div>`}).join('');
     return label+cells
   }).join('');
   target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte ziehen = Kopie erstellen. Das Original bleibt bestehen; Zielstunden werden aus dem Arbeitsmodell des Zieltags berechnet.</div>`;
@@ -728,6 +786,39 @@ function renderPlanning(){updatePlanningButtons();const target=document.getEleme
   if(planningPerspective==='site')renderSitePlanning(target,title,days);else renderEmployeePlanning(target,title,days);
 }
 function renderWeek(){renderPlanning();renderPlanningPools()}
+
+let quickPlanTarget={date:'',employeeId:''};
+function openQuickPlan(event,date,employeeId){
+  event?.preventDefault?.();event?.stopPropagation?.();quickPlanTarget={date,employeeId:String(employeeId)};
+  const employee=employeeById(employeeId);document.getElementById('quickPlanContext').textContent=`${employee?.name||employeeId} · ${new Date(date+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'})}`;
+  document.getElementById('quickJobSelect').innerHTML='<option value="">– Baustelle auswählen –</option>'+masterJobs.filter(j=>normalizedJobStatus(j)!=='geschlossen').map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}${j.city?' · '+esc(j.city):''}</option>`).join('');
+  document.getElementById('quickPlanError').style.display='none';setQuickPlanMode('existing');document.getElementById('quickPlanBackdrop').classList.add('open');
+}
+function closeQuickPlan(){document.getElementById('quickPlanBackdrop').classList.remove('open');quickPlanTarget={date:'',employeeId:''}}
+function setQuickPlanMode(mode){
+  const existing=mode==='existing';document.getElementById('quickExistingSection').classList.toggle('active',existing);document.getElementById('quickNewSection').classList.toggle('active',!existing);
+  document.getElementById('quickExistingTab').className=existing?'active':'secondary';document.getElementById('quickNewTab').className=existing?'secondary':'active';
+  if(!existing)prepareQuickNewJob();
+}
+async function prepareQuickNewJob(){try{const d=await api('/admin/api/jobs/next-number');if(!document.getElementById('quickNewJobId').value.trim())document.getElementById('quickNewJobId').value=d.nextNumber||'';syncQuickNewStatus()}catch(e){showQuickPlanError(e.message)}}
+function syncQuickNewStatus(){if(/^\d{5}$/.test(document.getElementById('quickNewJobId').value.trim()))document.getElementById('quickNewStatus').value='Auftrag'}
+function showQuickPlanError(message){const el=document.getElementById('quickPlanError');el.textContent=message;el.style.display='block'}
+function openQuickAddressMaps(){const q=['quickNewStreet','quickNewHouse','quickNewPostal','quickNewCity'].map(id=>document.getElementById(id).value.trim()).filter(Boolean).join(' ');window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q||'Adresse suchen'),'_blank','noopener')}
+async function assignJobToQuickTarget(job){
+  const employee=employeeById(quickPlanTarget.employeeId);if(!employee||!job)return false;
+  const template={id:id(),cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job),vehicle:'',note:''};
+  const placed=await placeSiteAssignment(template,employee,quickPlanTarget.date,{forceDialog:siteSegments(employee.id,quickPlanTarget.date).length>0});if(!placed)return false;
+  await saveAssignments(true);closeQuickPlan();return true;
+}
+async function assignQuickExistingJob(){const job=masterJobs.find(j=>String(j.jobId)===String(document.getElementById('quickJobSelect').value));if(!job){showQuickPlanError('Bitte eine Baustelle auswählen.');return}await assignJobToQuickTarget(job)}
+async function createAndAssignQuickJob(){
+  const name=document.getElementById('quickNewName').value.trim(),save=document.getElementById('quickNewSave');if(!name){showQuickPlanError('Bitte einen Baustellennamen eingeben.');return}
+  const body={jobId:document.getElementById('quickNewJobId').value.trim(),name,status:document.getElementById('quickNewStatus').value,street:document.getElementById('quickNewStreet').value.trim(),houseNumber:document.getElementById('quickNewHouse').value.trim(),postalCode:document.getElementById('quickNewPostal').value.trim(),city:document.getElementById('quickNewCity').value.trim(),startDate:quickPlanTarget.date};
+  save.disabled=true;save.textContent='Legt an …';document.getElementById('quickPlanError').style.display='none';
+  try{const result=await api('/admin/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const jobsResult=await api('/admin/api/jobs');masterJobs=jobsResult.jobs||masterJobs;renderMasterData();renderPlanningPools();const job=masterJobs.find(j=>String(j.jobId)===String(result.jobId))||{...body,jobId:result.jobId};await assignJobToQuickTarget(job);['quickNewJobId','quickNewName','quickNewStreet','quickNewHouse','quickNewPostal','quickNewCity'].forEach(id=>document.getElementById(id).value='')}
+  catch(e){showQuickPlanError(e.message)}finally{save.disabled=false;save.textContent='Anlegen und hier einteilen'}
+}
+
 async function addAssignment(){
   const type=document.getElementById('aCardType').value||'site';
   const special=type!=='site';
