@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.9-echte-fixes";
-const APP_STATUS = "Aufgaben-WhatsApp + Offline-Zeit + Tageskorrektur";
+const APP_BUILD = "0023.10-aufgaben-whatsapp-final";
+const APP_STATUS = "WhatsApp Live Alpha";
 const APP_BUILD_DATE = "2026-07-24";
 
 // Static files for Admin UI
@@ -93,6 +93,14 @@ const PDF_IGNORE_UNKNOWN = String(process.env.PDF_IGNORE_UNKNOWN || "").trim() =
 
 const CHEF_PHONE = process.env.CHEF_PHONE || "";
 const KRISTINE_PHONE_NUMBER_ID = process.env.KRISTINE_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+let LAST_WHATSAPP_PHONE_NUMBER_ID = ""; // wird aus dem letzten echten Webhook aktualisiert
+
+function normalizeWhatsAppRecipient(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = `43${digits.slice(1)}`;
+  return digits;
+}
 
 // ===================== Baustellenprotokoll-Sitzungen =====================
 // Ein Protokoll beginnt ausschließlich beim Chef mit dem Befehl "proto"
@@ -1358,31 +1366,18 @@ function cleanWhatsAppButtons(buttons) {
     else if (lower === "weiter") id = "weiter";
     else if (lower.includes("fertig")) id = "fertig";
     else if (lower.includes("navigation")) id = "navigation";
-    else if (lower.includes("anrufen")) id = "anrufen";
+    else if (lower.includes("anrufen") || lower === "anruf") id = "anrufen";
     else if (lower.includes("erledigt")) id = "erledigt";
-    else if (lower.includes("zeit falsch")) id = "zeit_falsch";
-    else if (lower.includes("baustelle falsch")) id = "baustelle_falsch";
-    else if (lower.includes("eintrag fehlt")) id = "eintrag_fehlt";
-    else if (lower === "startzeit") id = "startzeit";
-    else if (lower === "endzeit") id = "endzeit";
-    else if (lower === "beide") id = "beide";
     return { id, title: label || `Option ${index + 1}` };
   }).filter((button) => button.title);
 }
 
-function normalizeWhatsAppRecipient(value) {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.startsWith("0")) digits = "43" + digits.slice(1);
-  return digits;
-}
-
 async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [] }) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
-  const senderId = String(phoneNumberId || KRISTINE_PHONE_NUMBER_ID || "").trim();
-  if (!senderId) throw new Error("WhatsApp phone_number_id missing");
+  const senderId = String(phoneNumberId || KRISTINE_PHONE_NUMBER_ID || LAST_WHATSAPP_PHONE_NUMBER_ID || "").trim();
+  if (!senderId) throw new Error("WhatsApp phone_number_id fehlt (ENV und Webhook leer)");
   const recipient = normalizeWhatsAppRecipient(to);
-  if (!recipient) throw new Error("WhatsApp recipient missing");
+  if (!recipient) throw new Error("WhatsApp-Empfänger fehlt");
 
   const cleanedButtons = cleanWhatsAppButtons(buttons);
   const payload = cleanedButtons.length
@@ -1452,6 +1447,7 @@ app.post("/webhook", async (req, res) => {
     const value = changes?.value;
     const msgs = value?.messages || [];
     const phoneNumberId = value?.metadata?.phone_number_id || "";
+    if (phoneNumberId) LAST_WHATSAPP_PHONE_NUMBER_ID = String(phoneNumberId);
     if (!Array.isArray(msgs) || msgs.length === 0) return;
 
     for (const msg of msgs) {
@@ -1700,7 +1696,7 @@ app.post("/webhook", async (req, res) => {
               continue;
             }
 
-            const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employee.name, text: normalizedInput, date, messageDate: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date() });
+            const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employee.name, text: normalizedInput, date });
             await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: result.reply, buttons: result.buttons });
           } catch (e) {
             console.error("❌ Kristine WhatsApp failed:", e?.message || e);
