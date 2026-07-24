@@ -1433,7 +1433,15 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
         text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
       };
 
-  return fetchJson(`https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`, {
+  const endpoint = `https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`;
+  console.log("📨 WhatsApp API request", {
+    senderIdTail: senderId.slice(-6),
+    recipientTail: recipient.slice(-6),
+    type: payload.type,
+    buttonIds: cleanedButtons.map((button) => button.id),
+  });
+
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
@@ -1441,6 +1449,36 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
     },
     body: JSON.stringify(payload),
   });
+  const responseText = await response.text().catch(() => "");
+  let responseJson = null;
+  try { responseJson = responseText ? JSON.parse(responseText) : null; } catch {}
+
+  if (!response.ok) {
+    const metaError = responseJson?.error || {};
+    console.error("❌ WhatsApp API response", {
+      status: response.status,
+      code: metaError.code || null,
+      subcode: metaError.error_subcode || null,
+      type: metaError.type || null,
+      message: metaError.message || responseText || response.statusText,
+      fbtraceId: metaError.fbtrace_id || null,
+      recipientTail: recipient.slice(-6),
+      senderIdTail: senderId.slice(-6),
+      payloadType: payload.type,
+    });
+    const error = new Error(`Meta ${response.status}: ${metaError.message || responseText || response.statusText}`);
+    error.metaCode = metaError.code || null;
+    error.metaSubcode = metaError.error_subcode || null;
+    error.metaType = metaError.type || null;
+    throw error;
+  }
+
+  console.log("✅ WhatsApp API accepted", {
+    messageId: responseJson?.messages?.[0]?.id || "unbekannt",
+    recipientTail: recipient.slice(-6),
+    payloadType: payload.type,
+  });
+  return responseJson;
 }
 
 console.log("📡 WhatsApp-Sender-Konfiguration", {
