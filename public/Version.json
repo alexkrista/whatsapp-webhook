@@ -1,7 +1,7 @@
 {
-  "build": "0023.15",
-  "name": "Kristine Oberfläche aufgeräumt",
+  "build": "0023.16",
+  "name": "Kontrollzentrum – Kristine-Kommunikation",
   "date": "2026-07-24",
-  "version": "0023.15",
-  "status": "Test-Chat aus Kristine entfernt; operative Bereiche bleiben unverändert"
+  "version": "0023.16",
+  "status": "Chat aus Kristine ausgelagert und ins Kontrollzentrum verschoben"
 }
