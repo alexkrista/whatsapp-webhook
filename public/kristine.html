@@ -114,6 +114,9 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .empty-planning-action:hover{background:#fff;border-color:#27713d;color:#145829}
 .quick-plan-tabs{display:flex;gap:8px;margin:14px 0}.quick-plan-tabs button{flex:1}.quick-plan-tabs button.active{background:#27713d;border-color:#27713d;color:#fff}.quick-plan-section{display:none}.quick-plan-section.active{display:block}.quick-plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.quick-plan-grid .full{grid-column:1/-1}.quick-plan-grid input,.quick-plan-grid select{width:100%;box-sizing:border-box;min-width:0}.quick-plan-error{display:none;color:#9b1c1c;font-weight:800;margin-top:10px}@media(max-width:650px){.quick-plan-grid{grid-template-columns:1fr}.quick-plan-grid .full{grid-column:auto}}
 
+
+/* Build 0023.4: Aufgaben 2.0 */
+.task-layout{display:block}.task-create-card{width:100%;box-sizing:border-box;margin-bottom:16px}.task-list-card{width:100%;box-sizing:border-box}.task-formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.task-formgrid .full{grid-column:1/-1}.task-formgrid label{display:block;font-size:13px;color:#555;margin:0 0 5px}.task-formgrid input,.task-formgrid select,.task-formgrid textarea{width:100%;min-width:0;box-sizing:border-box}.task-title{min-height:84px;resize:vertical;font-size:17px;line-height:1.4}.task-type-row{display:flex;gap:8px;flex-wrap:wrap}.task-type-choice{display:inline-flex;align-items:center;gap:6px;border:1px solid #ccc;border-radius:999px;padding:8px 11px;background:#fff;cursor:pointer}.task-type-choice input{width:auto;min-width:0}.task-contact-box{background:#f8f7f3;border:1px solid #e2ded5;border-radius:12px;padding:12px}.task-save-notice{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-weight:750}.task-save-notice.ok{display:block;background:#e8f5e9;color:#215b2b}.task-save-notice.warn{display:block;background:#fff3d6;color:#805800}.task-save-notice.error{display:block;background:#fde7e7;color:#8b1f1f}.task-priority-row{display:flex;gap:8px;flex-wrap:wrap}.task-priority-row label{display:inline-flex;align-items:center;gap:6px;border:1px solid #ccc;border-radius:999px;padding:8px 11px;background:#fff}.task-priority-row input{width:auto}.task-card-meta{display:flex;gap:10px;flex-wrap:wrap;margin:7px 0}.task-badge{display:inline-flex;border-radius:999px;padding:4px 8px;background:#eee;font-size:12px;font-weight:800}@media(max-width:760px){.task-formgrid{grid-template-columns:1fr}.task-formgrid .full{grid-column:auto}}
 </style>
 </head>
 <body>
@@ -249,21 +252,45 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </section>
 
 <section id="tasks" class="tab">
-  <div class="grid">
-    <div class="card">
-      <h3>Aufgabe verteilen</h3>
-      <div class="formgrid">
-        <div class="full"><label>Aufgabe</label><input id="tTitle" placeholder="Rückruf Müller / Ausbesserung Sockel"></div>
-        <div><label>Zuständig</label><select id="tAssigneeSelect" onchange="selectTaskAssignee()"><option value="">– Mitarbeiter oder Chef auswählen –</option></select></div>
+  <div class="task-layout">
+    <div class="card task-create-card">
+      <h3>📝 Neue Aufgabe</h3>
+      <div class="task-formgrid">
+        <div class="full"><label>Aufgabe</label><textarea id="tTitle" class="task-title" rows="2" placeholder="Was ist zu erledigen?"></textarea></div>
+        <div class="full"><label>Art der Aufgabe</label><div class="task-type-row">
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Rückruf" checked>☎ Rückruf</label>
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Angebot">📋 Angebot</label>
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Problem">⚠ Problem</label>
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Termin">📅 Termin</label>
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Reklamation">🚨 Reklamation</label>
+          <label class="task-type-choice"><input type="radio" name="taskType" value="Sonstiges">📌 Sonstiges</label>
+        </div></div>
+        <div><label>Von</label><input id="tCreatorName" value="Alexander Krista" placeholder="Aufgabe erstellt von"></div>
+        <div><label>Aufgabe für</label><select id="tAssigneeSelect" onchange="selectTaskAssignee()"><option value="">– Mitarbeiter oder Chef auswählen –</option></select></div>
         <div><label>Baustelle optional</label><select id="tJobSelect" onchange="selectTaskJob()"><option value="">– keine Baustelle –</option></select></div>
         <div><label>Fällig</label><input id="tDueDate" type="date"></div>
-        <div class="full"><label>Ausgewählte Zuordnung</label><div id="taskSelectionInfo" class="auto-box small">Noch keine Zuordnung ausgewählt.</div></div>
-        <div class="full"><label>Erinnerung / Kontext</label><input id="tReminder" placeholder="z. B. erinnern, wenn Alex wieder bei Müller ist"></div>
+        <div class="full"><label>Priorität</label><div class="task-priority-row">
+          <label><input type="radio" name="taskPriority" value="normal" checked>🟢 Normal</label>
+          <label><input type="radio" name="taskPriority" value="heute">🟡 Heute</label>
+          <label><input type="radio" name="taskPriority" value="sofort">🔴 Sofort</label>
+        </div></div>
+        <div class="full task-contact-box">
+          <strong>Kontakt und Ort</strong><div class="small" style="margin:3px 0 10px">Bei Baustellenbezug werden vorhandene Daten automatisch übernommen. Ohne Baustelle bitte hier eintragen.</div>
+          <div class="task-formgrid">
+            <div class="full"><label>Adresse</label><input id="tAddress" placeholder="Straße, Hausnummer, PLZ, Ort"></div>
+            <div><label>Kontaktperson</label><input id="tContactName" placeholder="Name"></div>
+            <div><label>Rückrufnummer</label><input id="tContactPhone" type="tel" placeholder="+43 …"></div>
+            <div class="full"><label>E-Mail-Adresse</label><input id="tContactEmail" type="email" placeholder="name@firma.at"></div>
+          </div>
+        </div>
+        <div class="full"><label>Hinweise</label><textarea id="tReminder" rows="2" placeholder="Zusätzliche Informationen oder Kontext"></textarea></div>
+        <div class="full"><label>Zusammenfassung</label><div id="taskSelectionInfo" class="auto-box small">Noch keine Zuordnung ausgewählt.</div></div>
       </div>
       <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
-      <div class="actions"><button class="green" onclick="addTask()">+ Aufgabe</button><button class="secondary" onclick="saveTasks()">Aufgaben speichern</button></div>
+      <div class="actions" style="margin-top:14px"><button class="green" onclick="addTask()">+ Aufgabe anlegen</button></div>
+      <div id="taskSaveNotice" class="task-save-notice"></div>
     </div>
-    <div class="card"><h3>Aufgaben</h3><div class="task-tabs"><button id="taskTabNewest" class="active" onclick="setTaskFilter('newest')">Neueste</button><button id="taskTabOpen" onclick="setTaskFilter('open')">Offen</button><button id="taskTabDone" onclick="setTaskFilter('done')">Erledigt</button></div><div id="taskList"></div></div>
+    <div class="card task-list-card"><h3>Aufgaben</h3><div class="task-tabs"><button id="taskTabNewest" class="active" onclick="setTaskFilter('newest')">Neueste</button><button id="taskTabOpen" onclick="setTaskFilter('open')">Offen</button><button id="taskTabDone" onclick="setTaskFilter('done')">Erledigt</button></div><div id="taskList"></div></div>
   </div>
 </section>
 
@@ -420,7 +447,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     panel.open=saved===null?defaultOpen:saved==='1';
     panel.addEventListener('toggle',()=>{localStorage.setItem(key,panel.open?'1':'0');requestAnimationFrame(updatePlanningStickyOffsets)});
   }
-  const planningTop=document.querySelector('#planning .planning-top');if(planningTop&&window.ResizeObserver)new ResizeObserver(()=>updatePlanningStickyOffsets()).observe(planningTop);segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()});copyModalBackdrop.addEventListener('click',e=>{if(e.target===copyModalBackdrop)closeCopyModal()})});
+  const planningTop=document.querySelector('#planning .planning-top');if(planningTop&&window.ResizeObserver)new ResizeObserver(()=>updatePlanningStickyOffsets()).observe(planningTop);segmentCancel.addEventListener('click',()=>closeSegmentModal(null));segmentApply.addEventListener('click',()=>{const from=segmentFrom.value,to=segmentTo.value;const f=hmToMinutes(from),t=hmToMinutes(to);if(f===null||t===null||t<=f){segmentWarning.textContent='Bitte ein gültiges Zeitfenster eingeben.';segmentWarning.classList.add('show');return}closeSegmentModal({from,to})});segmentModalBackdrop.addEventListener('click',e=>{if(e.target===segmentModalBackdrop)closeSegmentModal(null)});taskModalBackdrop.addEventListener('click',e=>{if(e.target===taskModalBackdrop)closeTaskModal()});employeeActionBackdrop.addEventListener('click',e=>{if(e.target===employeeActionBackdrop)closeEmployeeActionModal()});copyModalBackdrop.addEventListener('click',e=>{if(e.target===copyModalBackdrop)closeCopyModal()});document.querySelectorAll('input[name="taskType"],input[name="taskPriority"]').forEach(el=>el.addEventListener('change',updateTaskSelectionInfo));['tCreatorName','tAddress','tContactPhone'].forEach(id=>document.getElementById(id)?.addEventListener('input',updateTaskSelectionInfo))});
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
 async function api(p,opts={}){const r=await fetch(url(p),opts);const t=await r.text();let j;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error(j?.error||t||r.statusText);return j}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -493,12 +520,20 @@ function selectTaskJob(){
   const j=masterJobs.find(x=>String(x.jobId)===String(tJobSelect.value));
   tJobId.value=j?String(j.jobId):'';
   tJobName.value=j?(j.name||('#'+j.jobId)):'';
+  if(j){
+    tAddress.value=jobAddress(j)||'';
+    tContactName.value=j.contactName||'';
+    tContactPhone.value=j.contactPhone||'';
+    tContactEmail.value=j.contactEmail||j.email||'';
+  }
   updateTaskSelectionInfo();
 }
+function selectedTaskType(){return document.querySelector('input[name="taskType"]:checked')?.value||'Sonstiges'}
+function selectedTaskPriority(){return document.querySelector('input[name="taskPriority"]:checked')?.value||'normal'}
 function updateTaskSelectionInfo(){
   const employee=tAssigneeName.value||'niemand';
   const j=masterJobs.find(x=>String(x.jobId)===String(tJobId.value));
-  taskSelectionInfo.innerHTML=`<strong>Zuständig:</strong> ${esc(employee)}<br><strong>Baustelle:</strong> ${j?`#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}`:'keine Baustelle'}${j&&jobAddress(j)?`<br><span class="small">${esc(jobAddress(j))}</span>`:''}`;
+  taskSelectionInfo.innerHTML=`<strong>Von:</strong> ${esc(tCreatorName?.value||'Chef / Büro')}<br><strong>Für:</strong> ${esc(employee)}<br><strong>Art:</strong> ${esc(selectedTaskType())}<br><strong>Baustelle:</strong> ${j?`#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}`:'keine Baustelle'}${tAddress?.value?`<br><strong>Adresse:</strong> ${esc(tAddress.value)}`:''}${tContactPhone?.value?`<br><strong>Telefon:</strong> ${esc(tContactPhone.value)}`:''}`;
 }
 function selectChatEmployee(){const o=chatEmployeeSelect.selectedOptions[0];chatEmployeeId.value=chatEmployeeSelect.value;chatEmployeeName.value=o?.dataset.name||''}
 function selectJob(){
@@ -1128,32 +1163,38 @@ function renderControl(){
 
 async function addTask(){
   if(!tTitle.value.trim()){alert('Bitte eine Aufgabe eingeben.');return}
-  if(!tAssigneeId.value.trim()){alert('Bitte eine zuständige Person auswählen.');return}
+  if(!tAssigneeId.value.trim()){alert('Bitte auswählen, für wen die Aufgabe ist.');return}
   const button=document.querySelector('button[onclick="addTask()"]');
   const oldLabel=button?.textContent;
   const newTask={
-    id:id(),title:tTitle.value.trim(),
+    id:id(),title:tTitle.value.trim(),taskType:selectedTaskType(),priority:selectedTaskPriority(),
     assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
     jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
     dueDate:tDueDate.value,reminder:tReminder.value.trim(),
-    creatorId:'admin',creatorName:'Chef / Büro',
+    creatorId:'admin',creatorName:(tCreatorName.value||'Chef / Büro').trim(),
+    address:tAddress.value.trim(),contactName:tContactName.value.trim(),
+    contactPhone:tContactPhone.value.trim(),contactEmail:tContactEmail.value.trim(),
     status:'open',createdAt:new Date().toISOString(),completedAt:null
   };
-  data.tasks.push(newTask);
-  renderTasks();renderControl();
+  data.tasks.push(newTask);renderTasks();renderControl();
+  const showNotice=(text,type='ok')=>{taskSaveNotice.textContent=text;taskSaveNotice.className='task-save-notice '+type};
   try{
     if(button){button.disabled=true;button.textContent='Speichert …'}
     const r=await persistTasks();
-    tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';
+    tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';tDueDate.value='';
     tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
+    tAddress.value='';tContactName.value='';tContactPhone.value='';tContactEmail.value='';
+    document.querySelector('input[name="taskType"][value="Rückruf"]').checked=true;
+    document.querySelector('input[name="taskPriority"][value="normal"]').checked=true;
     updateTaskSelectionInfo();
-    const note=(r.notifications||[])[0]; alert(note?.sent?'Aufgabe gespeichert und Mitarbeiter informiert.':note?.reason==='no_employee_phone'?'Aufgabe gespeichert. Beim Mitarbeiter ist keine Telefonnummer hinterlegt.':'Aufgabe gespeichert. Nachricht konnte nicht versendet werden.');
+    const note=(r.notifications||[]).find(n=>n.taskId===newTask.id)||(r.notifications||[])[0];
+    if(note?.sent)showNotice('✓ Aufgabe gespeichert und Mitarbeiter informiert.','ok');
+    else if(note?.reason==='no_employee_phone')showNotice('Aufgabe gespeichert. Beim Mitarbeiter fehlt die WhatsApp-Telefonnummer.','warn');
+    else showNotice('Aufgabe gespeichert. WhatsApp konnte nicht versendet werden.','warn');
   }catch(e){
     data.tasks=(data.tasks||[]).filter(t=>t.id!==newTask.id);renderTasks();renderControl();
-    alert('Aufgabe konnte nicht gespeichert werden: '+e.message);
-  }finally{
-    if(button){button.disabled=false;button.textContent=oldLabel||'+ Aufgabe'}
-  }
+    showNotice('Aufgabe konnte nicht gespeichert werden: '+e.message,'error');
+  }finally{if(button){button.disabled=false;button.textContent=oldLabel||'+ Aufgabe anlegen'}}
 }
 let taskFilter='newest';
 function setTaskFilter(value){taskFilter=value;['Newest','Open','Done'].forEach(x=>document.getElementById('taskTab'+x)?.classList.toggle('active',value===x.toLowerCase()));renderTasks()}
@@ -1167,7 +1208,9 @@ function renderTasks(){
   tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
     const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
-    return `<div class="assignment"><strong>${esc(t.title)}</strong><span>${esc(t.assigneeName||t.assigneeId)}${t.jobName?' · '+esc(t.jobName):''}</span><br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">🔔 ${esc(t.reminder)}</span>`:''}${j&&jobAddress(j)?`<br><span class="small">📍 ${esc(jobAddress(j))}</span>`:''}${t.contactPhone?`<br><a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||'Anrufen')}</a>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
+    const address=t.address||(j&&jobAddress(j))||'';
+    const priority=t.priority==='sofort'?'🔴 Sofort':t.priority==='heute'?'🟡 Heute':'🟢 Normal';
+    return `<div class="assignment"><strong>${esc(t.title)}</strong><div class="task-card-meta"><span class="task-badge">${esc(t.taskType||'Aufgabe')}</span><span class="task-badge">${priority}</span></div><span><strong>Für:</strong> ${esc(t.assigneeName||t.assigneeId)} · <strong>Von:</strong> ${esc(t.creatorName||'Chef / Büro')}</span>${t.jobName?`<br><span class="small">🏗 ${esc(t.jobName)}</span>`:''}<br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">ℹ️ ${esc(t.reminder)}</span>`:''}${address?`<br><span class="small">📍 ${esc(address)}</span>`:''}${t.contactEmail?`<br><span class="small">✉ ${esc(t.contactEmail)}</span>`:''}${t.contactPhone?`<br><a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||t.contactPhone)}</a>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
   }).join(''):'<span class="small">Keine Aufgaben.</span>'
 }
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks();renderControl()}
@@ -1180,7 +1223,8 @@ async function saveTasks(){
   try{if(button){button.disabled=true;button.textContent='Speichert …'}await persistTasks();alert('Aufgaben gespeichert.')}catch(e){alert('Aufgaben konnten nicht gespeichert werden: '+e.message)}finally{if(button){button.disabled=false;button.textContent=old||'Aufgaben speichern'}}
 }
 function taskDetailHtml(t){
-  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Zuständig</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong><span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Ersteller</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Kontext</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactPhone?`<span>Telefon</span><strong><a href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||t.contactPhone)}</a></strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
+  const address=t.address||(masterJobs.find(x=>String(x.jobId)===String(t.jobId))&&jobAddress(masterJobs.find(x=>String(x.jobId)===String(t.jobId))))||'';
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Art</span><strong>${esc(t.taskType||'Aufgabe')}</strong><span>Priorität</span><strong>${esc(t.priority||'normal')}</strong><span>Für</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Von</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong>${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:''}<span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Hinweise</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactEmail?`<span>E-Mail</span><strong>${esc(t.contactEmail)}</strong>`:''}${t.contactPhone?`<span>Telefon</span><strong><a href="tel:${esc(t.contactPhone)}">📞 ${esc(t.contactName||t.contactPhone)}</a></strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${address?`<a class="navbtn" target="_blank" href="${mapsUrl(address)}">📍 Navigation</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}<button class="secondary" onclick="showTab('tasks');closeTaskModal()">Im Aufgabenbereich öffnen</button></div></div>`
 }
 function openTaskListModal(focusId=''){
   const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
