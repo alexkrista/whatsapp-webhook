@@ -977,10 +977,16 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
           assigneeName: String(t.assigneeName || "").trim().slice(0, 140),
           jobId,
           jobName: String(t.jobName || jobMeta.name || "").trim().slice(0, 140),
+          taskType: ["Rückruf","Angebot","Problem","Termin","Reklamation","Sonstiges"].includes(String(t.taskType || "")) ? String(t.taskType) : "Sonstiges",
+          priority: ["normal","heute","sofort"].includes(String(t.priority || "")) ? String(t.priority) : "normal",
+          creatorId: String(t.creatorId || "admin").slice(0, 100),
+          creatorName: String(t.creatorName || "Chef / Büro").trim().slice(0, 140),
+          address: String(t.address || [jobMeta.street, jobMeta.houseNumber, [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "").trim().slice(0, 300),
           contactName: String(t.contactName || jobMeta.contactName || "").trim().slice(0, 140),
           contactPhone: String(t.contactPhone || jobMeta.contactPhone || "").trim().slice(0, 60),
+          contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
           dueDate: String(t.dueDate || "").slice(0, 10),
-          reminder: String(t.reminder || "").trim().slice(0, 300),
+          reminder: String(t.reminder || "").trim().slice(0, 500),
           status: t.status === "done" ? "done" : "open",
           createdAt: t.createdAt || new Date().toISOString(),
           completedAt: t.completedAt || null,
@@ -1002,13 +1008,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
           notifications.push({ taskId: task.id, sent: false, reason: "whatsapp_not_configured" });
           continue;
         }
+        const priorityLabel = task.priority === "sofort" ? "🔴 Sofort" : task.priority === "heute" ? "🟡 Heute" : "🟢 Normal";
         const lines = [
-          "📌 Neue Aufgabe",
+          `📌 Neue Aufgabe · ${task.taskType || "Aufgabe"}`,
           `*${task.title}*`,
+          task.creatorName ? `👤 Von: ${task.creatorName}` : "",
           task.jobName ? `🏗️ ${task.jobName}${task.jobId ? ` (#${task.jobId})` : ""}` : "",
+          task.address ? `📍 ${task.address}` : "",
           task.dueDate ? `📅 Fällig: ${task.dueDate.split("-").reverse().join(".")}` : "",
+          `Priorität: ${priorityLabel}`,
           task.reminder ? `ℹ️ ${task.reminder}` : "",
           task.contactPhone ? `📞 ${task.contactName ? task.contactName + ": " : ""}${task.contactPhone}` : "",
+          task.contactEmail ? `✉️ ${task.contactEmail}` : "",
         ].filter(Boolean);
         try {
           await sendWhatsApp({ phoneNumberId, to: employeePhone, reply: lines.join("\n"), buttons: ["Erledigt"] });
