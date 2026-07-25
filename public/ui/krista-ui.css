@@ -1,0 +1,99 @@
+/* KRISTA UI 4.0 foundation · Build 0023.18 */
+:root{
+  --krista-ink:#171b18;
+  --krista-ink-soft:#26312a;
+  --krista-green:#2f6f4f;
+  --krista-green-deep:#24583f;
+  --krista-green-light:#e8f1eb;
+  --krista-sage:#8ca592;
+  --krista-sand:#f3f0e8;
+  --krista-paper:#fffdf9;
+  --krista-line:#ddd8ce;
+  --krista-brass:#b18a43;
+  --krista-red:#a6403d;
+  --krista-blue:#3f6f94;
+  --krista-text:#252824;
+  --krista-muted:#6f756f;
+  --krista-shadow:0 12px 34px rgba(23,27,24,.10);
+  --krista-radius:14px;
+}
+
+.krista-shell-topbar{
+  position:relative;
+  z-index:120;
+  background:
+    radial-gradient(circle at 15% 0%,rgba(140,165,146,.16),transparent 34%),
+    linear-gradient(135deg,var(--krista-ink),var(--krista-ink-soft));
+  color:#fff;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  box-shadow:0 8px 28px rgba(16,20,17,.18);
+}
+.krista-shell-inner{
+  max-width:1480px;
+  margin:0 auto;
+  padding:16px 22px 15px;
+  display:grid;
+  grid-template-columns:minmax(250px,1fr) auto;
+  gap:18px;
+  align-items:center;
+}
+.krista-brand{display:flex;align-items:center;gap:13px;min-width:0}
+.krista-mark{
+  width:43px;height:43px;display:grid;place-items:center;flex:0 0 auto;
+  border-radius:13px;
+  background:linear-gradient(145deg,#f2e8cf,#b18a43);
+  color:#252018;font-size:22px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 6px 18px rgba(0,0,0,.18);
+}
+.krista-brand-copy{min-width:0}.krista-brand-title{font-weight:900;letter-spacing:.045em;font-size:18px;line-height:1.05}
+.krista-brand-sub{margin-top:4px;color:rgba(255,255,255,.67);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.krista-world-nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.krista-world-link{
+  min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:9px 13px;border:1px solid rgba(255,255,255,.14);border-radius:11px;
+  background:rgba(255,255,255,.06);color:#fff;text-decoration:none;
+  font-weight:780;font-size:13px;letter-spacing:.005em;
+  transition:transform .16s ease,background .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.krista-world-link:hover{transform:translateY(-1px);background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.26)}
+.krista-world-link.active{background:var(--krista-green);border-color:#5a9b76;box-shadow:0 5px 16px rgba(16,47,32,.32)}
+.krista-world-link .nav-icon{font-size:16px;line-height:1}
+
+/* Gemeinsame Modulnavigation */
+.krista-module-nav{
+  display:flex!important;gap:8px!important;align-items:center!important;flex-wrap:wrap!important;
+  padding:10px!important;margin:0 0 18px!important;
+  border:1px solid var(--krista-line)!important;border-radius:15px!important;
+  background:rgba(255,253,249,.92)!important;
+  box-shadow:0 5px 20px rgba(23,27,24,.06)!important;
+}
+.krista-module-nav button,.krista-module-nav a{
+  min-height:40px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;
+  margin:0!important;padding:9px 13px!important;border:1px solid #202420!important;border-radius:10px!important;
+  background:#202420!important;color:#fff!important;text-decoration:none!important;
+  font:700 13px/1.1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif!important;
+  box-shadow:none!important;transition:transform .15s ease,background .15s ease,border-color .15s ease!important;
+}
+.krista-module-nav button:hover,.krista-module-nav a:hover{transform:translateY(-1px)!important;background:#303831!important}
+.krista-module-nav button.active,.krista-module-nav a.active,.krista-module-nav [aria-current="page"]{
+  background:var(--krista-green)!important;border-color:var(--krista-green)!important;
+}
+.krista-module-nav .secondary,.krista-module-nav .krista-refresh{
+  background:#fff!important;color:#202420!important;border-color:#cbc6bd!important;
+}
+.krista-module-nav .secondary:hover,.krista-module-nav .krista-refresh:hover{background:var(--krista-sand)!important}
+
+/* Ruhige, malerische Grundflächen */
+body.krista-ui{background:linear-gradient(180deg,#f2efe8 0,#f7f5ef 34%,#f2f0e9 100%)!important;color:var(--krista-text)!important}
+body.krista-ui main{max-width:1480px!important}
+body.krista-ui .card{border:1px solid rgba(212,206,195,.72);box-shadow:0 7px 24px rgba(23,27,24,.065)}
+body.krista-ui button.green{background:var(--krista-green)!important;border-color:var(--krista-green)!important}
+body.krista-ui button.green:hover{background:var(--krista-green-deep)!important}
+
+@media(max-width:820px){
+  .krista-shell-inner{grid-template-columns:1fr;padding:14px 15px;gap:12px}
+  .krista-world-nav{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}
+  .krista-world-link{white-space:nowrap}
+  .krista-module-nav{overflow-x:auto!important;flex-wrap:nowrap!important}
+  .krista-module-nav button,.krista-module-nav a{white-space:nowrap!important}
+}
