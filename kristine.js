@@ -93,7 +93,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     if (/^(pause|kaffee|kaffeepause|kurze pause)$/.test(t)) return "pause";
     if (/^(mittag|essen|mittagspause|mahlzeit)$/.test(t)) return "lunch";
     if (/^(weiter|wieder da|geht weiter|pause fertig|los gehts)$/.test(t)) return "resume";
-    if (/^(fertig|feierabend|schluss|wir sind fertig|bin fertig)$/.test(t)) return "finish";
+    if (/^(fertig|ende|stopp|stop|feierabend|schluss|wir sind fertig|bin fertig)$/.test(t)) return "finish";
     if (/^(ja|jup|passt|ok|okay|genau|👍)$/.test(t)) return "yes";
     if (/^(nein|passt nicht|falsch|👎)$/.test(t)) return "no";
     if (/^(status|wo bin ich|was steht an|heute)$/.test(t)) return "status";
