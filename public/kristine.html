@@ -1,10 +1,11 @@
-<!-- Datei: public/kristine.html · Build 0023.15 -->
+<!-- Datei: public/kristine.html · Build 0023.18 · KRISTA UI -->
 <!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Kristine – Organisation</title>
+<link rel="stylesheet" href="/public/ui/krista-ui.css">
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#202020;background:#f3f1ec}
 *{box-sizing:border-box}body{margin:0}header{background:#111;color:#fff;padding:20px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
@@ -120,19 +121,15 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<header>
-  <div><h1>Kristine</h1><div class="sub">Build 0023.15 · Kristine ohne Test-Chat</div></div>
-  <a id="adminLink" style="color:white" href="/admin/ui">← Admin</a>
-</header>
+<div id="kristaTopbar"></div>
 <main>
-<nav>
-  <a id="controlCenterLink" class="navbtn" href="/kontrollzentrum">🎛️ Kontrollzentrum</a>
-  <button onclick="showTab('kristool')">🧰 KRISTOOL</button>
+<nav class="krista-module-nav">
+  <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
   <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
-  <button class="secondary" onclick="loadAll()">↻ Aktualisieren</button>
+  <button class="secondary krista-refresh" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
 
@@ -417,7 +414,9 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   </div>
 </div>
 
+<script src="/public/ui/topbar.js"></script>
 <script>
+createKristaTopbar({active:"kristine",build:"0023.18"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -442,7 +441,7 @@ function updatePlanningStickyOffsets(){
   if(!active)return;
   document.documentElement.style.setProperty('--planning-sticky-top',`${Math.ceil(top.getBoundingClientRect().height)}px`);
 }
-function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='kristool')renderKristool();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.krista-module-nav button').forEach(btn=>btn.classList.toggle('active',String(btn.getAttribute('onclick')||'').includes("'"+id+"'")));if(id==='kristool')renderKristool();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
 async function loadAll(){
   // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
   const results=await Promise.allSettled([
@@ -1243,7 +1242,7 @@ async function saveScheduleModelsData(){const normalized=(data.scheduleModels||[
 function openDailyReport(date){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||'')))return;const input=document.getElementById('dailyReportDate');if(input)input.value=date;window.open(url('/admin/daily-report/'+date+'?rebuild=1'),'_blank','noopener')}
 function openYesterdayReport(){const d=new Date();d.setDate(d.getDate()-1);openDailyReport(iso(d))}
 function shiftReportDate(days){const input=document.getElementById('dailyReportDate');const base=input?.value||data.today||iso(new Date());const d=new Date(base+'T12:00:00');d.setDate(d.getDate()+days);openDailyReport(iso(d))}
-document.getElementById('adminLink').href=url('/admin/ui');
+
 loadAll().catch(e=>alert(e.message));
 setInterval(()=>{ if(document.getElementById('control')?.classList.contains('active')) loadSilent().catch(()=>{}); else renderControl(); },60000);
 </script>
