@@ -1,16 +1,11 @@
-# Build 0023.15 – Kristine Oberfläche aufgeräumt
+# Build 0023.16 – Kontrollzentrum
 
-## Änderung
-- Menüpunkt **Kristine-Chat** aus der Kristine-Oberfläche entfernt.
-- Chat-Testbereich vollständig aus `public/kristine.html` entfernt.
-- Bestehende Backend- und WhatsApp-Logik bleibt unverändert.
-- Leitstand, Tageskorrektur und KRISTOOL verwenden nun eine gemeinsame Datumsfunktion statt des früheren Chat-Datumsfeldes.
-- Planung, Leitstand, Aufgaben, Zeitmodelle und KRISTOOL bleiben erhalten.
+## Neu
+- Neue eigenständige Route `/kontrollzentrum`.
+- Neue Datei `public/kontrollzentrum.html`.
+- Der bisherige Kristine-Testchat liegt nun als erstes Modul im Kontrollzentrum.
+- Zugriff weiterhin auf dieselben Originaldaten und dieselbe `/kristine/api/message`-Logik.
+- Navigation von Kristine zum Kontrollzentrum ergänzt.
 
-## Betroffene Datei
-- `public/kristine.html`
-- `version.json`
-
-## Prüfung
-- Keine verbliebenen DOM-Zugriffe auf entfernte Chat-Felder.
-- JavaScript-Syntax geprüft.
+## Unverändert
+- WhatsApp-Versand, Aufgaben, Planung, Leitstand und Zeitdaten wurden nicht verändert.
