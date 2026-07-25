@@ -1,20 +1,14 @@
-# Build 0023.17 – Sinnvolle Erinnerungen & natürliche Befehle
+# Build 0023.19 – Tageskorrektur „Wie …“
 
-## Geändert
-- 07:00-Erinnerungen gehen nur noch an Mitarbeiter, die an diesem Tag tatsächlich arbeiten sollen.
-- Keine Mitarbeiter-Erinnerung an Samstag, Sonntag, Feiertagen, Betriebsurlaub, Urlaub, Krankenstand oder Zeitausgleich.
-- Individuelle Arbeitszeitmodelle werden berücksichtigt, z. B. freier Freitag im Winter.
-- Wer an einem freien Tag dennoch startet, erscheint im Chefbericht korrekt als aktiv.
-- Der 08:00-Chefbericht wird weiterhin auch an freien Tagen versendet und unterscheidet aktiv, frei/abwesend, später und offen.
-- Arbeitsbeginn versteht weiterhin: `Start`, `Beginn`, `Los`.
-- Arbeitsende versteht zusätzlich: `Ende`, `Stopp`, `Stop`, `Fertig`, `Feierabend`, `Schluss`.
+## Neu
+- In **Leitstand → Tagesbuchungen bearbeiten** gibt es jetzt **📋 Wie …**.
+- Korrektur eines bereits bearbeiteten Mitarbeiters kann auf den geöffneten Mitarbeiter übernommen werden.
+- Mitarbeiter mit gleicher Baustelle werden mit ⭐ nach oben sortiert.
+- Übernahme wird zunächst nur in die Maske geladen und muss bewusst gespeichert werden.
+- Beim Speichern wird die Quelle im Ereignis- und Mitarbeiterverlauf protokolliert.
+- Verknüpfte Fotos, Material- und Regieeinträge folgen weiterhin den Zeitblöcken.
 
-## Betroffene Dateien
-- `morning-status.js`
-- `kristine.js`
-- `version.json`
-
-## Prüfung
-- `node --check server.js`
-- `node --check kristine.js`
-- `node --check morning-status.js`
+## Sicherheit
+- Quelle und Ziel können nicht identisch sein.
+- Leere Quellbuchungen werden nicht übernommen.
+- Bestehende Zeitvalidierung und Überschneidungsprüfung bleiben aktiv.
