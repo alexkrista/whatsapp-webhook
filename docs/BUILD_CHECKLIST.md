@@ -14,3 +14,18 @@
 - [ ] Live-Test: Aufgabe an Alexander
 - [ ] Live-Test: Button Anrufen
 - [ ] Live-Test: Button Erledigt
+
+
+## Build 0023.18
+
+- [x] Build 0023.17 als Basis verwendet
+- [x] Gemeinsame Topbar als eigene JS-Komponente angelegt
+- [x] Zentrales Farb- und Buttonsystem angelegt
+- [x] Kontrollzentrum umgestellt
+- [x] Kristine umgestellt
+- [x] Aktive Modulmarkierung geprüft
+- [x] Token wird in Hauptnavigation übernommen
+- [x] Keine Backend-, WhatsApp- oder Datenlogik verändert
+- [x] JavaScript-Syntaxprüfung bestanden
+- [ ] Aktuelle Admin-HTML einsetzen und anbinden
+- [ ] Sichtprüfung nach Deploy auf Desktop und Mobil
