@@ -60,6 +60,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .report-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-toolbar input{width:auto;min-width:160px}.copy-employee-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-top:10px;max-height:220px;overflow:auto}.copy-option{display:flex;gap:8px;align-items:center;background:#f7f7f7;border:1px solid #e2e2e2;border-radius:10px;padding:8px}.copy-option input{width:auto}
 
 .time-editor-table{width:100%;border-collapse:collapse;margin-top:12px}.time-editor-table th,.time-editor-table td{padding:8px;border-bottom:1px solid #ece8e0;text-align:left}.time-editor-table select,.time-editor-table input{padding:7px 8px}.time-editor-row-work{background:#f5fbf6}.time-editor-row-pause{background:#fff7f7}.time-editor-row-lunch{background:#fffaf0}.time-editor-actions{display:flex;gap:5px;flex-wrap:wrap}.time-editor-actions button{padding:6px 8px}.time-editor-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.time-editor-summary span{background:#f3f1ec;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}
+.time-copybar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:12px;padding:12px;background:#f7f5ef;border:1px solid #e3ded4;border-radius:12px}.time-copybar>div{min-width:240px;flex:1}.time-copybar select{width:100%}.time-copy-hint{font-size:12px;color:#666;margin-top:5px}.time-copy-source{font-weight:800;color:#27713d}
 
 /* Build 0022.1: Planungstisch – sticky Kopf, Kartenpools, Drag = Kopie */
 .planning-top{position:sticky;top:0;z-index:30;background:#f3f1ec;padding:0 0 12px;box-shadow:0 10px 18px rgba(243,241,236,.96)}
@@ -370,6 +371,10 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
     </div>
     <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
+    <div class="time-copybar">
+      <div><label for="timeCopyEmployee">📋 Wie …</label><select id="timeCopyEmployee"><option value="">– Korrektur übernehmen von –</option></select><div id="timeCopyHint" class="time-copy-hint">Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.</div></div>
+      <button type="button" class="secondary" onclick="copyTimeEditorFromEmployee()">Übernehmen</button>
+    </div>
     <div id="timeEditorTable"></div>
     <div class="actions" style="margin-top:12px">
       <button type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
@@ -948,7 +953,8 @@ function renderDayBar(segments,dayStart,dayEnd){
 
 let selectedControlEmployeeId='';
 let timeEditorSegments=[];
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];}
+let timeEditorCopiedFrom=null;
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
 function jobOptions(selected=''){
   const jobs=[...masterJobs].filter(j=>j.active!==false).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
@@ -970,16 +976,44 @@ function addTimeEditorRow(type='work'){
 }
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
 function moveTimeEditorRow(index,direction){const target=index+direction;if(target<0||target>=timeEditorSegments.length)return;[timeEditorSegments[index],timeEditorSegments[target]]=[timeEditorSegments[target],timeEditorSegments[index]];renderTimeEditor()}
+function timeEditorJobIds(segments){return new Set((segments||[]).filter(x=>x.type==='work'&&x.jobId).map(x=>String(x.jobId)))}
+function populateTimeCopyEmployees(){
+  const select=document.getElementById('timeCopyEmployee');if(!select)return;
+  const targetJobs=timeEditorJobIds(timeEditorSegments);const date=selectedWorkDate();
+  const rows=masterEmployees.filter(e=>String(e.id)!==String(selectedControlEmployeeId)).map(e=>{
+    const assignments=data.assignments.filter(a=>String(a.employeeId)===String(e.id)&&String(a.date)===String(date));
+    const sameJob=assignments.some(a=>targetJobs.has(String(a.jobId||'')));
+    const hasEvents=(data.timeEvents||[]).some(x=>String(x.employeeId)===String(e.id)&&String(x.date)===String(date));
+    return {e,sameJob,hasEvents};
+  }).sort((a,b)=>Number(b.sameJob)-Number(a.sameJob)||Number(b.hasEvents)-Number(a.hasEvents)||String(a.e.name||'').localeCompare(String(b.e.name||''),'de'));
+  select.innerHTML='<option value="">– Korrektur übernehmen von –</option>'+rows.map(({e,sameJob,hasEvents})=>`<option value="${esc(e.id)}">${sameJob?'⭐ ':''}${esc(e.name||e.id)}${sameJob?' · gleiche Baustelle':hasEvents?' · Buchungen vorhanden':''}</option>`).join('');
+}
+async function copyTimeEditorFromEmployee(){
+  const select=document.getElementById('timeCopyEmployee');const sourceId=String(select?.value||'');
+  if(!sourceId){employeeActionNote.textContent='Bitte zuerst einen Mitarbeiter bei „Wie …“ auswählen.';return}
+  const source=masterEmployees.find(e=>String(e.id)===sourceId);const target=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
+  employeeActionNote.textContent=`Lädt Korrektur von ${source?.name||sourceId} …`;
+  try{
+    const result=await api(`/kristine/api/segments/${encodeURIComponent(sourceId)}/${encodeURIComponent(selectedWorkDate())}`);
+    if(!(result.segments||[]).length){employeeActionNote.textContent=`Bei ${source?.name||sourceId} sind für diesen Tag keine Zeitabschnitte vorhanden.`;return}
+    timeEditorSegments=(result.segments||[]).map((x,index)=>({...x,id:`copy_${Date.now()}_${index}`}));
+    timeEditorCopiedFrom={employeeId:sourceId,employeeName:source?.name||sourceId};
+    renderTimeEditor();
+    const hint=document.getElementById('timeCopyHint');if(hint)hint.innerHTML=`<span class="time-copy-source">Von ${esc(source?.name||sourceId)} übernommen.</span> Bitte kontrollieren und anschließend speichern.`;
+    employeeActionNote.textContent=`✓ Korrektur von ${source?.name||sourceId} übernommen – noch nicht gespeichert.`;
+  }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
+}
 async function openEmployeeActionModal(employeeId){
   const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));selectedControlEmployeeId=String(employeeId);
   employeeActionTitle.textContent=`${employee?.name||employeeId} · Tagesbuchungen`;
-  employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
+  timeEditorCopiedFrom=null;employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
   try{
     const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
     timeEditorSegments=(result.segments||[]).map(x=>({...x}));
     const state=data.states?.[employeeId]||{mode:'idle'};
     employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.</span>`;
-    renderTimeEditor();
+    const hint=document.getElementById('timeCopyHint');if(hint)hint.textContent='Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.';
+    renderTimeEditor();populateTimeCopyEmployees();
   }catch(error){employeeActionInfo.textContent='Fehler: '+error.message}
 }
 async function saveTimeEditor(){
@@ -989,9 +1023,9 @@ async function saveTimeEditor(){
   for(const seg of timeEditorSegments){if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}}
   employeeActionNote.textContent='Speichert …';
   try{
-    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true})});
-    employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
-    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));renderTimeEditor();
+    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
+    employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert${timeEditorCopiedFrom?` · wie ${timeEditorCopiedFrom.employeeName}`:''}.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
+    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
 }
 async function sendEmployeeDayEndCheck(){
