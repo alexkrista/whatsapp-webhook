@@ -1,7 +1,7 @@
 {
-  "build": "0023.17",
-  "name": "Sinnvolle Erinnerungen & natürliche Befehle",
+  "build": "0023.18",
+  "name": "KRISTA UI Fundament",
   "date": "2026-07-25",
-  "version": "0023.17",
-  "status": "Mitarbeiter nur an tatsächlichen Arbeitstagen erinnern"
+  "version": "0023.18",
+  "status": "Gemeinsame Topbar und Designsprache"
 }
