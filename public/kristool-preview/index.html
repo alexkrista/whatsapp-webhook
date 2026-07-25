@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KRISTOOL – Informationsfabrik</title>
+  <link rel="stylesheet" href="kristool.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">
+      <div class="brand-icon">🛠</div>
+      <div>
+        <h1>KRISTOOL</h1>
+        <p>Informationsfabrik</p>
+      </div>
+    </div>
+
+    <div class="factory-flow" aria-label="Informationsfluss">
+      <div class="flow-step active">📥 <span>Eingang</span><small>Informationen sammeln</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step active center">🏭 <span>Informationsfabrik</span><small>Prüfen · Bearbeiten · Veredeln</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">📤 <span>Ausgang</span><small>Ergebnisse erzeugen</small></div>
+    </div>
+
+    <div class="day-progress">
+      <div class="date"><strong>24. Juli 2026</strong><span>Freitag</span></div>
+      <div class="progress-label">Heute</div>
+      <div class="progress-track"><span style="width:27%"></span></div>
+      <small>3 von 11 Arbeitstagen abgeschlossen</small>
+      <div class="nav-rounds">
+        <button title="Vorheriger Mitarbeiter">‹</button>
+        <button title="Nächster Mitarbeiter">›</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="employee-card">
+      <div class="avatar">AK</div>
+      <h2>Alexander Krista</h2>
+      <p class="muted">Mitarbeiter</p>
+
+      <div class="site">
+        <span>📍</span>
+        <div><strong>Baustelle</strong><br>Schwerzler<br><span class="muted">Dornbirn</span></div>
+      </div>
+
+      <div class="status-list">
+        <div class="status ok"><span>✓</span><div><strong>GPS vollständig</strong><small>08:15–16:37 Uhr</small></div></div>
+        <div class="status warn"><span>!</span><div><strong>Pause prüfen</strong><small>4:15 h gearbeitet</small></div></div>
+        <div class="status info"><span>📷</span><div><strong>5 Fotos</strong><small>Heute hochgeladen</small></div></div>
+        <div class="status material"><span>🪣</span><div><strong>Material vorhanden</strong><small>3 Positionen</small></div></div>
+        <div class="status info"><span>🚗</span><div><strong>93 km</strong><small>Fahrstrecke heute</small></div></div>
+      </div>
+
+      <button class="secondary wide" id="showDetails">Details anzeigen</button>
+    </aside>
+
+    <section class="processing-card">
+      <div class="processing-head">
+        <div>
+          <h2>Informationsverarbeitung</h2>
+          <p>Vom Rohmaterial zum freigegebenen Arbeitstag.</p>
+        </div>
+        <div class="mini-flow">
+          <span class="done">GPS</span><i>→</i><span class="active">Büro</span><i>→</i><span>Regie</span><i>→</i><span>Material</span><i>→</i><span>Ergebnis</span>
+        </div>
+      </div>
+
+      <article class="step open" data-step="gps">
+        <button class="step-title">
+          <span class="num green">1</span>
+          <div><strong>GPS – Quelle</strong><small>Fahrzeiten, GPS-Daten und Standorte auslesen.</small></div>
+          <span class="state done">vollständig</span>
+          <span class="chevron">⌃</span>
+        </button>
+        <div class="step-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Zeit</th><th>Fahrzeit</th><th>Distanz</th><th>Start</th><th>Ziel</th><th>Privat</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>06:45–07:02</td><td>0:17</td><td>12 km</td><td>Nenzing</td><td>Frastanz</td><td><input type="checkbox"></td></tr>
+                <tr><td>11:58–12:10</td><td>0:12</td><td>2 km</td><td>Baustelle</td><td>Dornbirn</td><td><input type="checkbox" checked></td></tr>
+                <tr><td>17:01–17:45</td><td>0:44</td><td>33 km</td><td>Dornbirn</td><td>Frastanz</td><td><input type="checkbox"></td></tr>
+                <tr><td>18:50–18:59</td><td>0:09</td><td>12 km</td><td>Frastanz</td><td>Nenzing</td><td><input type="checkbox"></td></tr>
+              </tbody>
+              <tfoot><tr><td>Gesamt</td><td>1:22</td><td>59 km</td><td colspan="2"></td><td>1 privat</td></tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="step open" data-step="office">
+        <button class="step-title">
+          <span class="num blue">2</span>
+          <div><strong>Büro – Bearbeiten</strong><small>GPS, Stempelung, Regie und Korrektur direkt vergleichen.</small></div>
+          <span class="state pending">prüfen</span>
+          <span class="chevron">⌃</span>
+        </button>
+        <div class="step-content">
+          <div class="office-actions">
+            <label>
+              <span>📋 Wie …</span>
+              <select id="copyFrom">
+                <option value="">Mitarbeiter wählen</option>
+                <option value="max">Maximilian Krista ⭐</option>
+                <option value="ronny">Ronny Hoffmann</option>
+                <option value="johannes">Johannes Wiederin</option>
+              </select>
+            </label>
+            <button class="secondary" id="applyCopy">Übernehmen</button>
+            <button class="secondary" id="addBlock">+ Zeitblock</button>
+          </div>
+
+          <div class="compare-grid">
+            <div class="compare-card">
+              <h3>GPS-Zeiten</h3>
+              <div>07:02–11:58</div><div>12:10–17:01</div><strong>9:47 h</strong>
+            </div>
+            <div class="compare-card">
+              <h3>Gestempelt</h3>
+              <div>07:00–11:58</div><div>12:38–17:01</div><strong>9:21 h</strong>
+            </div>
+            <div class="compare-card regie">
+              <h3>Regiebericht</h3>
+              <div>07:00–12:00</div><div>12:38–17:08</div><strong>9:30 h</strong>
+            </div>
+            <div class="compare-card final">
+              <h3>Korrigiert</h3>
+              <input value="07:00–11:58">
+              <input value="12:38–17:01">
+              <strong>9:21 h</strong>
+            </div>
+          </div>
+
+          <div class="impact-box">
+            <strong>Diese Korrektur wirkt auf:</strong>
+            <span>✓ Mitarbeiterstunden</span>
+            <span>✓ Baustellenstunden</span>
+            <span>✓ Regiebericht</span>
+            <span>✓ Kilometerbuch</span>
+            <span>✓ Nachkalkulation</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="step" data-step="report">
+        <button class="step-title">
+          <span class="num orange">3</span>
+          <div><strong>Regiebericht – Prüfen</strong><small>Bericht, Zeiten, Leistungen und Beschreibung abgleichen.</small></div>
+          <span class="state pending">offen</span>
+          <span class="chevron">⌄</span>
+        </button>
+        <div class="step-content">
+          <div class="report-grid">
+            <div>
+              <h3>Leistungen</h3>
+              <ul><li>Spachteln – Decke Wohnzimmer</li><li>Schleifen – Vorbereitung</li><li>Grundieren – Decke</li></ul>
+            </div>
+            <div>
+              <h3>GPS vs. Regie</h3>
+              <p>Arbeitszeit: 9:21 h / Regie: 9:30 h</p>
+              <p class="warn-text">Abweichung: 0:09 h</p>
+            </div>
+          </div>
+          <textarea rows="4">Arbeiten abgeschlossen. Decke fertig gespachtelt. Leichte Nacharbeiten morgen.</textarea>
+          <button class="primary mark-complete">Regiebericht geprüft</button>
+        </div>
+      </article>
+
+      <article class="step" data-step="material">
+        <button class="step-title">
+          <span class="num purple">4</span>
+          <div><strong>Material & Fotos – Prüfen</strong><small>Materialpositionen, Bilder und Anhänge zuordnen.</small></div>
+          <span class="state pending">offen</span>
+          <span class="chevron">⌄</span>
+        </button>
+        <div class="step-content">
+          <div class="material-grid">
+            <div class="small-card"><strong>3 Positionen</strong><small>2 Liter Farbe · 1 Rolle Vlies</small></div>
+            <div class="small-card"><strong>5 Fotos</strong><small>4 Baustellenfotos · 1 Detailfoto</small></div>
+          </div>
+          <button class="primary mark-complete">Material und Fotos geprüft</button>
+        </div>
+      </article>
+
+      <article class="step" data-step="result">
+        <button class="step-title">
+          <span class="num green">5</span>
+          <div><strong>Ergebnis – Freigeben</strong><small>Alle Informationen final prüfen und Ergebnisse erzeugen.</small></div>
+          <span class="state pending">wartet</span>
+          <span class="chevron">⌄</span>
+        </button>
+        <div class="step-content">
+          <p>Nach der Freigabe werden alle Ergebnisse erzeugt und miteinander verknüpft.</p>
+        </div>
+      </article>
+    </section>
+
+    <aside class="results-card">
+      <h2>Ergebnisse</h2>
+      <p class="muted">werden nach Freigabe erzeugt</p>
+
+      <div class="result-list">
+        <div><span>📄</span><div><strong>Tagesbericht Baustelle</strong><small>täglicher Bericht zur Baustellenakte</small></div><b>○</b></div>
+        <div><span>🧾</span><div><strong>Regiebericht</strong><small>PDF und Freigabestatus</small></div><b>○</b></div>
+        <div><span>📅</span><div><strong>Stundenjournal</strong><small>Lohn- und Baustellenstunden</small></div><b>○</b></div>
+        <div><span>🚗</span><div><strong>Kilometerbuch</strong><small>Fahrten und Privatkilometer</small></div><b>○</b></div>
+        <div><span>💶</span><div><strong>Gebührenvariable</strong><small>Monatsabgleich</small></div><b>○</b></div>
+        <div><span>📊</span><div><strong>Nachkalkulation</strong><small>Baufortschritt aktualisieren</small></div><b>○</b></div>
+        <div><span>🗂</span><div><strong>Dokumentation</strong><small>Fotos, Material, Notizen</small></div><b>○</b></div>
+      </div>
+
+      <div class="info-note">Mit der Freigabe werden alle Ergebnisse erzeugt und miteinander verknüpft.</div>
+    </aside>
+  </main>
+
+  <section class="approval-bar">
+    <div><strong>Qualitätsprüfung</strong><small id="approvalHint">Noch 2 Schritte offen.</small></div>
+    <button id="releaseButton" class="release" disabled>✓ FREIGEBEN<small>Arbeitstag abschließen & nächsten Mitarbeiter laden</small></button>
+    <div><strong>Danach</strong><small>Der nächste Mitarbeiter wird automatisch geladen.</small></div>
+  </section>
+
+  <div id="toast" class="toast">✓ Korrektur von Maximilian übernommen.</div>
+
+  <script src="kristool.js"></script>
+</body>
+</html>
