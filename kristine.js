@@ -819,6 +819,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const employeeId = String(req.params.employeeId || "").trim();
       const date = String(req.params.date || localDateISO()).slice(0, 10);
       const employeeName = String(req.body?.employeeName || employeeId).trim();
+      const copiedFromRaw = req.body?.copiedFrom && typeof req.body.copiedFrom === "object" ? req.body.copiedFrom : null;
+      const copiedFrom = copiedFromRaw ? { employeeId: String(copiedFromRaw.employeeId || "").slice(0, 100), employeeName: String(copiedFromRaw.employeeName || "").trim().slice(0, 160) } : null;
       const moveLinked = true; // Zeitblock ist die Wahrheit: verknüpfte Einträge werden immer mitgeführt.
       const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
       const segments = incoming.map((segment, index) => ({
@@ -905,11 +907,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       else state.mode = last.type === "pause" ? "pause" : last.type === "lunch" ? "lunch" : "working";
       const active = [...segments].reverse().find((segment) => segment.type === "work");
       if (active) state.activeAssignmentKey = `${date}|${employeeId}|${active.from}|${active.jobId}`;
-      state.timeline.push({ at: createdAt, time: localTimeHM(), type: "day_segments_edited", detail: `${segments.length} Tagesabschnitt(e) durch Büro gespeichert`, source: "office", manual: true, movedLinkedEntries: moved });
+      state.timeline.push({ at: createdAt, time: localTimeHM(), type: copiedFrom?.employeeId ? "day_segments_copied" : "day_segments_edited", detail: copiedFrom?.employeeId ? `${segments.length} Tagesabschnitt(e) wie ${copiedFrom.employeeName || copiedFrom.employeeId} übernommen` : `${segments.length} Tagesabschnitt(e) durch Büro gespeichert`, source: "office", manual: true, movedLinkedEntries: moved, copiedFrom });
       state.timeline = state.timeline.slice(-200);
       states[employeeId] = state;
       await writeJson(STATES, states);
-      await appendEvent({ type: "day_segments_edited", employeeId, employeeName, date, segmentCount: segments.length, movedLinkedEntries: moved, source: "office" });
+      await appendEvent({ type: copiedFrom?.employeeId ? "day_segments_copied" : "day_segments_edited", employeeId, employeeName, date, segmentCount: segments.length, movedLinkedEntries: moved, source: "office", copiedFrom });
       res.json({ ok: true, segments, movedLinkedEntries: moved, state, previousSegments: oldSegments.length });
     } catch (error) {
       res.status(400).json({ ok: false, error: String(error?.message || error) });
