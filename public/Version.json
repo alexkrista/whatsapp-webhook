@@ -1,7 +1,7 @@
 {
-  "build": "0023.16",
-  "name": "Kontrollzentrum – Kristine-Kommunikation",
-  "date": "2026-07-24",
-  "version": "0023.16",
-  "status": "Chat aus Kristine ausgelagert und ins Kontrollzentrum verschoben"
+  "build": "0023.17",
+  "name": "Sinnvolle Erinnerungen & natürliche Befehle",
+  "date": "2026-07-25",
+  "version": "0023.17",
+  "status": "Mitarbeiter nur an tatsächlichen Arbeitstagen erinnern"
 }
