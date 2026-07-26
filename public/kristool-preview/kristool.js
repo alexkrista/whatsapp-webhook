@@ -7,7 +7,10 @@ const state = {
   groups: [],
   dayRows: [],
   segments: [],
+  originalSegments: [],
+  correction: null,
   activeDate: "",
+  saveTimer: null,
 };
 
 const $ = id => document.getElementById(id);
@@ -121,7 +124,11 @@ function refreshDriversForActiveDate(){
     select.innerHTML=`<option value="">Keine GPS-Daten am ${esc(shortDate(state.activeDate))}</option>`;
     return;
   }
-  select.innerHTML='<option value="">GPS-Fahrer wählen</option>'+dateGroups.map(g=>`<option value="${esc(g.key)}">${esc(g.driverName)} · ${g.trips} Fahrten · ${esc(g.licensePlate||g.vehicleName||"")}</option>`).join("");
+  select.innerHTML='<option value="">GPS-Fahrer wählen</option>'+dateGroups.map(g=>{
+    const plates=(g.vehicles||[]).map(v=>v.licensePlate).filter(Boolean);
+    const vehicleLabel=plates.length?[...new Set(plates)].join(", "):(g.licensePlate||g.vehicleName||"");
+    return `<option value="${esc(g.key)}">${esc(g.driverName)} · ${g.trips} Fahrten · ${esc(vehicleLabel)}</option>`;
+  }).join("");
   if(dateGroups.length===1){
     select.value=dateGroups[0].key;
     applyGroup(dateGroups[0]);
@@ -227,7 +234,9 @@ async function loadDay(){
     const gps=group&&state.gpsImport?results[0]:{rows:[]};
     const seg=group&&state.gpsImport?results[1]:results[0];
     state.dayRows=gps.rows||[];
-    state.segments=seg.segments||[];
+    state.segments=(seg.segments||[]).map(row=>({...row}));
+    state.originalSegments=(seg.originalSegments||seg.segments||[]).map(row=>({...row}));
+    state.correction=seg.correction||null;
     renderDay(group,date);
   }catch(error){toast(`Tagesfolie konnte nicht geöffnet werden: ${error.message}`,true)}
 }
@@ -235,6 +244,8 @@ async function loadDay(){
 function clearDay(){
   state.dayRows=[];
   state.segments=[];
+  state.originalSegments=[];
+  state.correction=null;
   $("personBadge").textContent="?";
   $("dayTitle").textContent=`Tagesfolie ${deDate(state.activeDate)}`;
   $("daySubtitle").textContent="Mitarbeiter auswählen und Tagesfolie öffnen.";
@@ -246,6 +257,12 @@ function clearDay(){
   $("gpsTripCount").textContent="–";
   $("gpsDistance").textContent="–";
   $("gpsPrivate").textContent="–";
+  $("gpsVehicles").hidden=true;
+  $("gpsVehicles").innerHTML="";
+  $("correctionToolbar").hidden=true;
+  $("segmentActions").hidden=true;
+  $("correctionHistory").hidden=true;
+  $("correctionHistory").innerHTML="";
   $("checkKristine").textContent="noch nicht geladen";
   $("checkGps").textContent=groupsForDate(state.activeDate).length?"GPS vorhanden":"noch kein GPS für diesen Tag";
 }
@@ -254,9 +271,32 @@ function renderDay(group,date){
   const employee=$("employeeSelect").selectedOptions[0]?.textContent||group?.driverName||"Mitarbeiter";
   $("personBadge").textContent=initials(employee);
   $("dayTitle").textContent=`${employee} · ${deDate(date)}`;
-  $("daySubtitle").textContent=group?`GPS-Fahrer: ${group.driverName} · ${group.licensePlate||group.vehicleName||"Fahrzeug nicht angegeben"}`:"KRISTINE-Zeiten ohne GPS-Kontrolle";
+  if(group){
+    const vehicles=(group.vehicles||[]).map(v=>v.licensePlate||v.vehicleName).filter(Boolean);
+    $("daySubtitle").textContent=`GPS-Fahrer: ${group.driverName} · ${vehicles.length?[...new Set(vehicles)].join(", "):(group.licensePlate||group.vehicleName||"Fahrzeug nicht angegeben")}`;
+  }else $("daySubtitle").textContent="KRISTINE-Zeiten ohne GPS-Kontrolle";
   renderSegments();
   renderTrips();
+}
+function normalizeTimeInput(value){
+  let raw=String(value||"").trim().replace(/[^0-9:]/g,"");
+  if(/^\d{3,4}$/.test(raw)) raw=raw.padStart(4,"0").replace(/^(\d{2})(\d{2})$/,"$1:$2");
+  if(/^\d{1,2}:\d{1,2}$/.test(raw)){
+    const [h,m]=raw.split(":").map(Number);
+    if(h>=0&&h<=23&&m>=0&&m<=59)return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+  }
+  return null;
+}
+function cloneSegments(rows){ return (rows||[]).map(row=>({...row})); }
+function workMinutes(rows){
+  return (rows||[]).reduce((sum,row)=>{
+    const a=minutes(row.from),b=minutes(row.to);
+    return sum+(row.type==="work"&&a!==null&&b!==null?Math.max(0,b-a):0);
+  },0);
+}
+function segmentLabel(type){ return type==="work"?"Arbeitszeit":type==="lunch"?"Mittag":"Pause"; }
+function originalForSegment(row,index){
+  return state.originalSegments.find(item=>item.id===row.id)||state.originalSegments[index]||null;
 }
 function renderSegments(){
   const box=$("kristineSegments"),rows=state.segments;
@@ -265,28 +305,150 @@ function renderSegments(){
     box.innerHTML="Für diesen Tag wurden keine KRISTINE-Zeitblöcke gefunden.";
     $("kristineTotal").textContent="0:00 h";
     $("checkKristine").textContent="keine Zeitblöcke gefunden";
+    $("correctionToolbar").hidden=true;
+    $("segmentActions").hidden=false;
+    renderCorrectionHistory();
     return;
   }
-  box.className="timeline";
-  let work=0;
-  box.innerHTML=rows.map(row=>{
-    const a=minutes(row.from),b=minutes(row.to);
-    if(row.type==="work"&&a!==null&&b!==null)work+=Math.max(0,b-a);
-    return `<div class="segment ${row.type}"><span class="segment-dot"></span><div><strong>${esc(row.from)}–${esc(row.to||"offen")}</strong><small>${row.type==="work"?esc(row.jobName||"Arbeitszeit"):row.type==="lunch"?"Mittag":"Pause"}</small></div><b>${a!==null&&b!==null?durationLabel(b-a):"–"}</b></div>`;
+  $("correctionToolbar").hidden=false;
+  $("segmentActions").hidden=false;
+  $("correctionReason").value=state.correction?.reason||"";
+  $("correctionNote").value=state.correction?.note||"";
+  box.className="timeline correction-list";
+  box.innerHTML=rows.map((row,index)=>{
+    const original=originalForSegment(row,index);
+    const changed=!original||original.from!==row.from||original.to!==row.to||original.type!==row.type;
+    return `<div class="segment-editor ${row.type} ${changed?"changed":""}" data-index="${index}">
+      <div class="source-line"><span class="segment-dot"></span><div><b>Original</b><strong>${esc(original?.from||row.from)}–${esc(original?.to||row.to||"offen")}</strong><small>${esc(original?.jobName||row.jobName||segmentLabel(original?.type||row.type))}</small></div><span class="source-duration">${durationLabel(Math.max(0,(minutes(original?.to)-minutes(original?.from))||0))}</span></div>
+      <div class="office-line">
+        <div class="office-title"><b>Büro</b><span>${changed?"KORRIGIERT":"UNVERÄNDERT"}</span></div>
+        <select class="segment-type" data-index="${index}" aria-label="Art"><option value="work" ${row.type==="work"?"selected":""}>Arbeit</option><option value="pause" ${row.type==="pause"?"selected":""}>Pause</option><option value="lunch" ${row.type==="lunch"?"selected":""}>Mittag</option></select>
+        <input class="time-input" data-field="from" data-index="${index}" value="${esc(row.from)}" inputmode="numeric" aria-label="Von">
+        <span>–</span>
+        <input class="time-input" data-field="to" data-index="${index}" value="${esc(row.to||"")}" inputmode="numeric" aria-label="Bis">
+        <button class="remove-segment" data-index="${index}" title="Zeitblock entfernen">×</button>
+        <strong class="office-duration">${durationLabel(Math.max(0,(minutes(row.to)-minutes(row.from))||0))}</strong>
+      </div>
+    </div>`;
   }).join("");
-  $("kristineTotal").textContent=durationLabel(work);
-  $("checkKristine").textContent=`${rows.length} Zeitblöcke · ${durationLabel(work)}`;
+  bindSegmentEditors();
+  updateCorrectionTotals();
+  renderCorrectionHistory();
+}
+function bindSegmentEditors(){
+  document.querySelectorAll(".time-input").forEach(input=>{
+    input.addEventListener("input",()=>{
+      const index=Number(input.dataset.index), field=input.dataset.field;
+      state.segments[index][field]=input.value;
+      updateCorrectionTotals();
+    });
+    input.addEventListener("keydown",event=>{
+      if(event.key==="Enter"){ event.preventDefault(); input.blur(); }
+      if(event.key==="Escape"){ renderSegments(); }
+    });
+    input.addEventListener("blur",()=>{
+      const normalized=normalizeTimeInput(input.value);
+      if(!normalized){ toast("Bitte eine gültige Uhrzeit eingeben, z. B. 14:15.",true); return renderSegments(); }
+      state.segments[Number(input.dataset.index)][input.dataset.field]=normalized;
+      input.value=normalized;
+      scheduleCorrectionSave(80);
+    });
+  });
+  document.querySelectorAll(".segment-type").forEach(select=>select.addEventListener("change",()=>{
+    state.segments[Number(select.dataset.index)].type=select.value;
+    renderSegments();
+    scheduleCorrectionSave(80);
+  }));
+  document.querySelectorAll(".remove-segment").forEach(button=>button.addEventListener("click",()=>{
+    state.segments.splice(Number(button.dataset.index),1);
+    renderSegments();
+    scheduleCorrectionSave(80);
+  }));
+}
+function updateCorrectionTotals(){
+  const office=workMinutes(state.segments), original=workMinutes(state.originalSegments);
+  $("kristineTotal").textContent=durationLabel(office);
+  const diff=office-original;
+  $("checkKristine").textContent=`Original ${durationLabel(original)} · Büro ${durationLabel(office)}${diff?` · ${diff>0?"+":""}${diff} min`:" · unverändert"}`;
+  document.querySelectorAll(".segment-editor").forEach((editor,index)=>{
+    const row=state.segments[index];
+    const duration=editor.querySelector(".office-duration");
+    if(duration)duration.textContent=durationLabel(Math.max(0,(minutes(row.to)-minutes(row.from))||0));
+  });
+}
+function scheduleCorrectionSave(delay=450){
+  clearTimeout(state.saveTimer);
+  state.saveTimer=setTimeout(saveCorrection,delay);
+}
+async function saveCorrection(){
+  const employeeId=$("employeeSelect").value;
+  if(!employeeId)return;
+  const invalid=state.segments.some(row=>!normalizeTimeInput(row.from)||!normalizeTimeInput(row.to));
+  if(invalid)return;
+  const employeeName=$("employeeSelect").selectedOptions[0]?.textContent||employeeId;
+  try{
+    const data=await request(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`,{
+      method:"PUT",
+      body:JSON.stringify({employeeName,segments:state.segments,reason:$("correctionReason").value,note:$("correctionNote").value,correctedBy:"Bettina / Büro"})
+    });
+    state.segments=cloneSegments(data.segments);
+    state.originalSegments=cloneSegments(data.originalSegments||state.originalSegments);
+    state.correction=data.correction||state.correction;
+    renderSegments();
+    toast("Korrektur automatisch gespeichert.");
+  }catch(error){ toast(`Korrektur nicht gespeichert: ${error.message}`,true); }
+}
+function renderCorrectionHistory(){
+  const box=$("correctionHistory"),history=state.correction?.history||[];
+  if(!history.length){ box.hidden=true; box.innerHTML=""; return; }
+  const last=history.at(-1);
+  box.hidden=false;
+  box.innerHTML=`<strong>Letzte Korrektur</strong><span>${esc(last.by||state.correction.updatedBy||"Büro")} · ${new Date(last.at||state.correction.updatedAt).toLocaleString("de-AT")}${last.reason?` · ${esc(last.reason)}`:""}</span>`;
+}
+$("correctionReason").addEventListener("change",()=>scheduleCorrectionSave(100));
+$("correctionNote").addEventListener("change",()=>scheduleCorrectionSave(100));
+$("addWorkSegment").addEventListener("click",()=>addSegment("work"));
+$("addPauseSegment").addEventListener("click",()=>addSegment("pause"));
+$("resetSegments").addEventListener("click",()=>{
+  state.segments=cloneSegments(state.originalSegments);
+  renderSegments();
+  scheduleCorrectionSave(80);
+});
+function addSegment(type){
+  const last=state.segments.at(-1);
+  const from=last?.to||"07:00";
+  const to=minutes(from)!==null?`${String(Math.floor((minutes(from)+30)/60)).padStart(2,"0")}:${String((minutes(from)+30)%60).padStart(2,"0")}`:"07:30";
+  state.segments.push({id:`seg_${Date.now()}`,type,from,to,jobId:last?.jobId||"",jobName:type==="work"?(last?.jobName||"Arbeitszeit"):""});
+  renderSegments();
+}
+function mapsUrl(row){
+  const start=row.startLat&&row.startLng?`${row.startLat},${row.startLng}`:row.startLocation;
+  const stop=row.stopLat&&row.stopLng?`${row.stopLat},${row.stopLng}`:row.stopLocation;
+  if(!start||!stop)return "";
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(stop)}&travelmode=driving`;
 }
 function renderTrips(){
   const box=$("gpsTrips"),rows=state.dayRows;
   if(!rows.length){
     box.className="trips empty";
     box.textContent="Keine GPS-Fahrten für diese Tagesfolie.";
+    $("gpsVehicles").hidden=true;
     $("checkGps").textContent=groupsForDate(state.activeDate).length?"GPS-Fahrer noch nicht gewählt":"noch kein GPS für diesen Tag";
     return;
   }
+  const vehicles=new Map();
+  rows.forEach(row=>{
+    const key=`${row.licensePlate||"ohne Kennzeichen"}|${row.vehicleName||""}`;
+    if(!vehicles.has(key))vehicles.set(key,{licensePlate:row.licensePlate||"ohne Kennzeichen",vehicleName:row.vehicleName||"",trips:0,km:0});
+    const vehicle=vehicles.get(key); vehicle.trips+=1; vehicle.km+=Number(row.distanceKm||0);
+  });
+  $("gpsVehicles").hidden=false;
+  $("gpsVehicles").innerHTML=`<strong>Fahrzeuge an diesem Tag</strong>${[...vehicles.values()].map(vehicle=>`<span><b>${esc(vehicle.licensePlate)}</b>${vehicle.vehicleName?` · ${esc(vehicle.vehicleName)}`:""}<small>${vehicle.trips} Fahrten · ${km(vehicle.km)}</small></span>`).join("")}`;
   box.className="trips";
-  box.innerHTML=rows.map(row=>`<div class="trip"><div class="trip-top"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong><label class="private-check"><input type="checkbox" data-row="${esc(row.id)}" ${row.isPrivate?"checked":""}> Privatfahrt</label></div><div class="trip-route"><div><strong title="${esc(row.startLocation)}">${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong title="${esc(row.stopLocation)}">${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}${row.departureTime?` · weiter ${esc(row.departureTime)}`:""}</small></div></div><div class="trip-meta"><span>${km(row.distanceKm)}</span><span>Fahrt ${secondsLabel(row.travelSeconds)}</span><span>Aufenthalt ${secondsLabel(row.staySeconds)}</span></div></div>`).join("");
+  box.innerHTML=rows.map(row=>{
+    const url=mapsUrl(row);
+    return `<div class="trip"><div class="trip-top"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span><label class="private-check"><input type="checkbox" data-row="${esc(row.id)}" ${row.isPrivate?"checked":""}> Privatfahrt</label></div><div class="trip-route"><div><strong title="${esc(row.startLocation)}">${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong title="${esc(row.stopLocation)}">${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}${row.departureTime?` · weiter ${esc(row.departureTime)}`:""}</small></div></div><div class="trip-meta"><span>${km(row.distanceKm)}</span><span>Fahrt ${secondsLabel(row.travelSeconds)}</span><span>Aufenthalt ${secondsLabel(row.staySeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
+  }).join("");
   box.querySelectorAll('input[data-row]').forEach(input=>input.addEventListener("change",()=>markPrivate(input.dataset.row,input.checked)));
   updateGpsTotals();
 }
