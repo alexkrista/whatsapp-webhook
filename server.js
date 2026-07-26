@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.30-heute-erledigen";
-const APP_STATUS = "Fahrer zuerst und Teamarbeitsliste";
+const APP_BUILD = "0023.31-rufname";
+const APP_STATUS = "Rufname in Stammdaten und GPS";
 const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
@@ -1797,7 +1797,7 @@ app.post("/webhook", async (req, res) => {
               continue;
             }
 
-            const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employee.name, text: normalizedInput, date });
+            const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employeeEverydayName(employee), text: normalizedInput, date });
             await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: result.reply, buttons: result.buttons });
           } catch (e) {
             console.error("❌ Kristine WhatsApp failed:", e?.message || e);
@@ -3066,6 +3066,15 @@ function scheduleForDate(model, dateStr) {
       : 0
   };
 }
+function employeeEverydayName(employee) {
+  const official = String(employee?.name || employee?.employeeName || "").trim();
+  const nickname = String(employee?.nickname || employee?.rufname || "").trim();
+  if (!nickname) return official;
+  const officialParts = official.split(/\s+/).filter(Boolean);
+  const lastName = officialParts.length > 1 ? officialParts.slice(1).join(" ") : "";
+  return lastName ? `${nickname} ${lastName}` : nickname;
+}
+
 function employeeIdFromName(name) {
   const base = String(name || "employee")
     .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
@@ -3077,6 +3086,7 @@ function cleanEmployeeMaster(e, existingId = "") {
   return {
     id: String(e?.id || existingId || employeeIdFromName(name)).trim().slice(0, 80),
     name,
+    nickname: String(e?.nickname || e?.rufname || "").trim().slice(0, 60),
     shortCode: String(e?.shortCode || "").trim().slice(0, 20),
     phone: String(e?.phone || "").trim().slice(0, 40),
     role: String(e?.role || "Maler").trim().slice(0, 80),
