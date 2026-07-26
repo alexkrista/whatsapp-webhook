@@ -37,11 +37,13 @@
     /* Build 0021.2: Neue Baustelle */
     .new-job-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;align-items:center;justify-content:center;z-index:120;padding:18px}.new-job-backdrop.open{display:flex}.new-job-modal{width:min(720px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 20px 70px rgba(0,0,0,.32)}.new-job-head{position:sticky;top:0;background:#111;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;z-index:2}.new-job-head h2{margin:0;font-size:21px}.new-job-body{padding:20px}.new-job-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.new-job-grid .full{grid-column:1/-1}.new-job-grid label{display:block;color:#555;font-size:13px;margin:0 0 5px}.new-job-grid input,.new-job-grid select,.new-job-grid textarea{width:100%;min-width:0;box-sizing:border-box}.new-job-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}.new-job-error{color:#9b1c1c;font-weight:700;margin-top:10px;display:none}@media(max-width:700px){.new-job-grid{grid-template-columns:1fr}.new-job-grid .full{grid-column:auto}}
   </style>
+  <link rel="stylesheet" href="/public/ui/krista-ui.css">
 </head>
 <body>
+  <div id="kristaTopbar" data-krista-active="krisadmin" data-krista-build="M3.1"></div>
   <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008b</span> · <span id="appStatus">Stable</span></div></header>
   <main>
-    <div class="bar">
+    <div class="bar krista-module-nav">
       <input id="search" placeholder="Suche nach Baustellennummer oder Name, z. B. Müller oder 26072" />
       <button id="reload" class="reload-icon" title="Aktualisieren" aria-label="Aktualisieren">↻</button>
       <button class="kristine-link" onclick="openNewJob()">+ Neue Baustelle</button>
@@ -724,5 +726,6 @@ loadVersion();
 loadWorktimeModels().then(()=>loadEmployeeMasters()).catch(()=>{});
 loadJobs();
 </script>
+  <script src="/public/ui/topbar.js"></script>
 </body>
 </html>
