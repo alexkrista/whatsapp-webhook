@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="kristool.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.26"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.27"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -141,6 +141,14 @@
     </section>
   </main>
 
+  <div id="gpsDialog" class="gps-dialog" hidden>
+    <div class="gps-dialog-backdrop" data-close-dialog></div>
+    <section class="gps-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="gpsDialogTitle">
+      <button class="gps-dialog-close" data-close-dialog aria-label="Schließen">×</button>
+      <h3 id="gpsDialogTitle">GPS-Fahrt bearbeiten</h3>
+      <div id="gpsDialogBody"></div>
+    </section>
+  </div>
   <div id="toast" class="toast"></div>
   <script src="/public/ui/topbar.js"></script>
   <script src="kristool.js"></script>
