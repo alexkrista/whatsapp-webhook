@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.29-mixed-gps-roles";
-const APP_STATUS = "Eigene Fahrten und Mitfahrer-Beziehungen";
+const APP_BUILD = "0023.30-heute-erledigen";
+const APP_STATUS = "Fahrer zuerst und Teamarbeitsliste";
 const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
