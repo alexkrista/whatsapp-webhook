@@ -19,3 +19,157 @@
 @media(max-width:720px){.correction-toolbar{grid-template-columns:1fr}.office-line{grid-template-columns:1fr 1fr 1fr}.office-title{grid-column:1/-1}.remove-segment{grid-column:3}.office-duration{grid-column:1/-1;text-align:left}.mini-action.subtle{margin-left:0}.correction-history{flex-direction:column}}
 
 .trip-driver{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 2px;color:#59625c;font-size:12px}.trip-tool{border:1px solid #cfd8d0;background:#fff;border-radius:8px;padding:5px 8px;cursor:pointer;color:#2d6440;font-weight:750}.trip-tool:hover{background:#edf6ef}.trip-section-title{margin:10px 0 6px;padding:7px 10px;border-radius:9px;background:#eef3ef;color:#365d42;font-size:12px;font-weight:850;text-transform:uppercase;letter-spacing:.04em}.passenger-trip{border-left:4px solid #55906a;background:#f4faf5}.gps-dialog[hidden]{display:none}.gps-dialog{position:fixed;inset:0;z-index:1000;display:grid;place-items:center}.gps-dialog-backdrop{position:absolute;inset:0;background:rgba(16,24,18,.55);backdrop-filter:blur(2px)}.gps-dialog-panel{position:relative;width:min(560px,calc(100vw - 28px));max-height:84vh;overflow:auto;background:#fffdf8;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(0,0,0,.28)}.gps-dialog-panel h3{margin:0 42px 18px 0}.gps-dialog-close{position:absolute;right:14px;top:12px;width:36px;height:36px;border:0;border-radius:50%;background:#eef1ed;font-size:24px;cursor:pointer}.dialog-note{padding:12px;background:#f4f3ed;border-radius:11px;line-height:1.55}.dialog-field{display:grid;gap:7px;margin:16px 0;font-weight:800}.dialog-field select{min-height:44px;border:1px solid #cfd4ce;border-radius:10px;padding:8px 11px;background:#fff}.dialog-check{display:flex;gap:10px;align-items:flex-start;margin:13px 0}.dialog-warning{padding:11px;border-radius:10px;background:#fff3dc;color:#7a5319;font-size:13px}.dialog-save{width:100%;margin-top:18px}.passenger-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:360px;overflow:auto}.passenger-option{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid #dce1dc;border-radius:10px;background:#fafbf9}.dialog-open{overflow:hidden}@media(max-width:640px){.passenger-list{grid-template-columns:1fr}}
+
+
+/* ===================== 0023.28: Arbeitsphasen ===================== */
+.phase-switcher{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  margin:0 0 14px;
+}
+.phase-button{
+  appearance:none;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:rgba(255,255,255,.72);
+  color:#39423b;
+  min-height:68px;
+  padding:10px 14px;
+  display:grid;
+  grid-template-columns:30px 1fr;
+  grid-template-rows:auto auto;
+  column-gap:10px;
+  text-align:left;
+  cursor:pointer;
+  transition:transform .22s ease,background .22s ease,border-color .22s ease,box-shadow .22s ease;
+}
+.phase-button:hover{transform:translateY(-1px);border-color:#aeb8af}
+.phase-button>span{
+  grid-row:1/3;
+  align-self:center;
+  width:29px;height:29px;border-radius:9px;
+  display:grid;place-items:center;
+  background:#e8e9e5;color:#606861;font-weight:900
+}
+.phase-button strong{align-self:end;font-size:14px}
+.phase-button small{align-self:start;color:var(--muted);margin-top:2px}
+.phase-button.active{
+  background:#fff;
+  border-color:#8eb39a;
+  box-shadow:0 8px 24px rgba(23,71,40,.10)
+}
+.phase-button.active>span{background:var(--green);color:#fff}
+
+.comparison-grid{
+  transition:grid-template-columns .28s ease;
+}
+.comparison-grid.phase-times{
+  grid-template-columns:minmax(390px,1fr) minmax(520px,1.35fr);
+}
+.comparison-grid.phase-times .regie-card,
+.comparison-grid.phase-times .release-card{display:none}
+
+.comparison-grid.phase-regie{
+  grid-template-columns:minmax(360px,.85fr) minmax(560px,1.45fr);
+}
+.comparison-grid.phase-regie .gps-card,
+.comparison-grid.phase-regie .release-card{display:none}
+.comparison-grid.phase-regie .regie-card{display:flex}
+
+.comparison-grid.phase-release{
+  grid-template-columns:minmax(360px,.78fr) minmax(580px,1.5fr);
+}
+.comparison-grid.phase-release .gps-card,
+.comparison-grid.phase-release .regie-card{display:none}
+.comparison-grid.phase-release .release-card{display:flex}
+
+.comparison-grid.phase-regie .regie-card,
+.comparison-grid.phase-release .release-card{
+  min-height:520px;
+  animation:phaseCardIn .25s ease both;
+}
+@keyframes phaseCardIn{
+  from{opacity:.35;transform:translateX(12px)}
+  to{opacity:1;transform:none}
+}
+
+/* ===================== 0023.28: Teamabgleich ===================== */
+.team-transfer{
+  margin:4px 14px 14px;
+  border:1px solid #cddccf;
+  border-radius:13px;
+  background:linear-gradient(135deg,#f6fbf7,#eef7f0);
+  overflow:hidden;
+}
+.team-transfer-head{
+  padding:13px;
+  display:flex;
+  gap:14px;
+  align-items:center;
+  justify-content:space-between;
+}
+.team-transfer-head>div{min-width:0}
+.team-transfer-head strong{display:block;font-size:13px}
+.team-transfer-head small{display:block;color:var(--muted);font-size:11px;margin-top:4px;line-height:1.35}
+.team-kicker{
+  display:block;
+  color:var(--green);
+  font-size:9px;
+  font-weight:950;
+  letter-spacing:.12em;
+  margin-bottom:4px;
+}
+.team-toggle{white-space:nowrap;background:#fff!important;border-color:#9ebea7!important;color:#225f36!important}
+.team-transfer-body{
+  padding:0 13px 13px;
+  border-top:1px solid rgba(47,125,74,.16);
+}
+.team-candidates{display:grid;gap:8px;margin:12px 0}
+.team-candidate{
+  display:grid;
+  grid-template-columns:22px 1fr auto;
+  gap:8px;
+  align-items:center;
+  padding:10px;
+  background:#fff;
+  border:1px solid #dce5dd;
+  border-radius:10px;
+  cursor:pointer;
+}
+.team-candidate input{width:17px;height:17px;accent-color:var(--green)}
+.team-candidate strong{display:block;font-size:13px}
+.team-candidate small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.team-candidate .shared-job{
+  color:#2a6c3e;
+  background:#e8f3eb;
+  border-radius:999px;
+  padding:5px 8px;
+  font-size:10px;
+  font-weight:850;
+  white-space:nowrap;
+}
+.team-empty{
+  padding:12px;
+  border-radius:10px;
+  background:#fff;
+  color:var(--muted);
+  font-size:12px;
+}
+.team-result{
+  margin-top:8px;
+  padding:9px 10px;
+  border-radius:9px;
+  background:#e7f4ea;
+  color:#236438;
+  font-size:12px;
+  font-weight:750;
+}
+
+@media(max-width:1000px){
+  .phase-switcher{grid-template-columns:1fr}
+  .comparison-grid.phase-times,
+  .comparison-grid.phase-regie,
+  .comparison-grid.phase-release{grid-template-columns:1fr}
+  .team-transfer-head{align-items:flex-start;flex-direction:column}
+}
