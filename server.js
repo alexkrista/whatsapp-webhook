@@ -1,4 +1,4 @@
-// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
+v// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
 // ✅ Layout A: Text + Transkripte seitenfüllend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.20-m3-1-eine-sprache";
-const APP_STATUS = "M3.1 – Einheitlicher KRISTA-Kopf";
+const APP_BUILD = "0023.21-one-date-one-truth";
+const APP_STATUS = "M3.1.1 – Ein Datum, eine Wahrheit";
 const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
