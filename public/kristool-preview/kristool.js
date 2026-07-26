@@ -12,6 +12,9 @@ const state = {
   correction: null,
   activeDate: "",
   saveTimer: null,
+  phase: "times",
+  teamCandidates: [],
+  teamJobs: [],
 };
 
 const $ = id => document.getElementById(id);
@@ -268,6 +271,9 @@ function clearDay(){
   $("correctionHistory").innerHTML="";
   $("checkKristine").textContent="noch nicht geladen";
   $("checkGps").textContent=groupsForDate(state.activeDate).length?"GPS vorhanden":"noch kein GPS für diesen Tag";
+  $("teamTransfer").hidden=true;
+  $("teamTransferBody").hidden=true;
+  state.teamCandidates=[];
 }
 
 function renderDay(group,date){
@@ -284,6 +290,8 @@ function renderDay(group,date){
   }else $("daySubtitle").textContent="KRISTINE-Zeiten ohne eigene GPS-Fahrt";
   renderSegments();
   renderTrips();
+  setPhase("times");
+  loadTeamCandidates();
 }
 function normalizeTimeInput(value){
   let raw=String(value||"").trim().replace(/[^0-9:]/g,"");
@@ -402,6 +410,7 @@ async function saveCorrection(){
     state.originalSegments=cloneSegments(data.originalSegments||state.originalSegments);
     state.correction=data.correction||state.correction;
     renderSegments();
+    loadTeamCandidates();
     toast("Korrektur automatisch gespeichert.");
   }catch(error){ toast(`Korrektur nicht gespeichert: ${error.message}`,true); }
 }
@@ -545,5 +554,121 @@ async function markPrivate(rowId,isPrivate){
     toast(isPrivate?"Fahrt als privat markiert.":"Privat-Markierung entfernt.");
   }catch(error){toast(error.message,true)}
 }
+
+
+function setPhase(phase){
+  if(!["times","regie","release"].includes(phase)) phase="times";
+  state.phase=phase;
+  const grid=$("comparisonGrid");
+  grid.classList.remove("phase-times","phase-regie","phase-release");
+  grid.classList.add(`phase-${phase}`);
+  document.querySelectorAll(".phase-button").forEach(button=>{
+    button.classList.toggle("active",button.dataset.phase===phase);
+  });
+}
+document.querySelectorAll(".phase-button").forEach(button=>{
+  button.addEventListener("click",()=>setPhase(button.dataset.phase));
+});
+
+function selectedEmployee(){
+  const option=$("employeeSelect").selectedOptions[0];
+  return {
+    employeeId:String($("employeeSelect").value||""),
+    employeeName:String(option?.textContent||"").trim()
+  };
+}
+function currentWorkJobs(){
+  const jobs=new Map();
+  state.segments.filter(row=>row.type==="work"&&row.jobId).forEach(row=>{
+    jobs.set(String(row.jobId),String(row.jobName||row.jobId));
+  });
+  return [...jobs].map(([jobId,jobName])=>({jobId,jobName}));
+}
+async function loadTeamCandidates(){
+  const source=selectedEmployee();
+  const teamBox=$("teamTransfer");
+  const candidatesBox=$("teamCandidates");
+  if(!source.employeeId||!state.activeDate||!state.segments.length){
+    teamBox.hidden=true;
+    state.teamCandidates=[];
+    return;
+  }
+  try{
+    const data=await request(`/kristine/api/team-candidates/${encodeURIComponent(source.employeeId)}/${encodeURIComponent(state.activeDate)}`);
+    state.teamCandidates=data.candidates||[];
+    state.teamJobs=data.sourceJobs||currentWorkJobs();
+    teamBox.hidden=!state.teamCandidates.length;
+    if(teamBox.hidden){
+      $("teamTransferBody").hidden=true;
+      return;
+    }
+    candidatesBox.innerHTML=state.teamCandidates.map(candidate=>`
+      <label class="team-candidate">
+        <input type="checkbox" value="${esc(candidate.employeeId)}" data-name="${esc(candidate.employeeName)}">
+        <span>
+          <strong>${esc(candidate.employeeName)}</strong>
+          <small>${candidate.segmentCount?`${candidate.segmentCount} vorhandene Zeitblöcke`:"noch keine Zeitblöcke"} · persönliche GPS-Daten bleiben unverändert</small>
+        </span>
+        <span class="shared-job">${esc((candidate.sharedJobs||[]).map(job=>job.jobName||job.jobId).join(", ")||"gleiche Baustelle")}</span>
+      </label>`).join("");
+  }catch(error){
+    teamBox.hidden=true;
+    state.teamCandidates=[];
+    console.warn("Teamabgleich konnte nicht vorbereitet werden:",error);
+  }
+}
+$("toggleTeamTransfer").addEventListener("click",()=>{
+  const body=$("teamTransferBody");
+  body.hidden=!body.hidden;
+  $("toggleTeamTransfer").textContent=body.hidden?"Für Team übernehmen":"Teamabgleich schließen";
+});
+$("applyTeamCorrection").addEventListener("click",async()=>{
+  const source=selectedEmployee();
+  const selected=[...$("teamCandidates").querySelectorAll('input[type="checkbox"]:checked')];
+  if(!selected.length)return toast("Bitte mindestens einen Mitarbeiter auswählen.",true);
+  if(!state.segments.length)return toast("Es sind keine Zeitblöcke zum Übernehmen vorhanden.",true);
+  const button=$("applyTeamCorrection");
+  button.disabled=true;
+  button.textContent="Tagesfolien werden vorbereitet …";
+  const results=[];
+  for(const input of selected){
+    const employeeId=input.value;
+    const employeeName=input.dataset.name;
+    const stamp=Date.now();
+    const copiedSegments=state.segments.map((segment,index)=>({
+      ...segment,
+      id:`team_${employeeId}_${state.activeDate}_${stamp}_${index}`
+    }));
+    try{
+      await request(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`,{
+        method:"PUT",
+        body:JSON.stringify({
+          employeeName,
+          segments:copiedSegments,
+          reason:state.correction?.reason||$("correctionReason").value||"Für Team übernommen",
+          note:state.correction?.note||$("correctionNote").value||`Zeitkorrektur von ${source.employeeName} für das Baustellenteam vorbereitet.`,
+          correctedBy:"Bettina / Büro",
+          copiedFrom:source
+        })
+      });
+      results.push({employeeName,ok:true});
+    }catch(error){
+      results.push({employeeName,ok:false,error:error.message});
+    }
+  }
+  button.disabled=false;
+  button.textContent="Ausgewählte Tagesfolien vorbereiten";
+  const ok=results.filter(row=>row.ok);
+  const failed=results.filter(row=>!row.ok);
+  const old=$("teamTransferBody").querySelector(".team-result");
+  if(old)old.remove();
+  const note=document.createElement("div");
+  note.className="team-result";
+  note.textContent=failed.length
+    ? `${ok.length} Tagesfolien vorbereitet, ${failed.length} konnten nicht übernommen werden.`
+    : `${ok.length} Tagesfolien vorbereitet. Persönliche GPS-Daten blieben unverändert.`;
+  $("teamTransferBody").appendChild(note);
+  toast(failed.length?`${ok.length} übernommen · ${failed.length} prüfen`:`Für ${ok.length} Mitarbeiter übernommen.`,Boolean(failed.length));
+});
 
 init();
