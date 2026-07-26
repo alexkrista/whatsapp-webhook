@@ -1,7 +1,7 @@
 {
-  "build": "0023.30",
-  "name": "Heute zu erledigen",
+  "build": "0023.31",
+  "name": "Rufname",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "Fahrer zuerst, Teams automatisch vorbereitet"
+  "status": "Rufname in Stammdaten, KRISTINE und GPS-Zuordnung"
 }
