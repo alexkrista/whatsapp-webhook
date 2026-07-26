@@ -78,7 +78,7 @@ async function init(){
 function renderEmployees(){
   const employees=state.bootstrap?.employees||[];
   const select=$("employeeSelect");
-  select.innerHTML='<option value="">Mitarbeiter wählen</option>'+employees.map(e=>`<option value="${esc(e.id||e.employeeId)}">${esc(e.name||e.employeeName)}</option>`).join("");
+  select.innerHTML='<option value="">Mitarbeiter wählen</option>'+employees.map(e=>`<option value="${esc(e.id||e.employeeId)}">${esc(e.nickname?`${e.nickname} ${String(e.name||"").split(/\s+/).slice(1).join(" ")}`:(e.name||e.employeeName))}</option>`).join("");
 }
 
 
@@ -552,7 +552,7 @@ function employeeOptions(selectedId=""){
   const employees=state.bootstrap?.employees||[];
   return employees.map(employee=>{
     const id=String(employee.id||employee.employeeId||"");
-    const name=String(employee.name||employee.employeeName||id);
+    const name=String(employee.nickname?`${employee.nickname} ${String(employee.name||"").split(/\s+/).slice(1).join(" ")}`:(employee.name||employee.employeeName||id));
     return `<option value="${esc(id)}" ${id===String(selectedId)?"selected":""}>${esc(name)}</option>`;
   }).join("");
 }
@@ -659,7 +659,7 @@ function editRidePassengers(rowId){
   const selected=new Set((row.passengers||[]).map(item=>String(item.employeeId)));
   const driverId=String(row.effectiveDriver?.employeeId||row.assignedEmployeeId||"");
   const checks=(state.bootstrap?.employees||[]).map(employee=>{
-    const id=String(employee.id||employee.employeeId||""); const name=String(employee.name||employee.employeeName||id);
+    const id=String(employee.id||employee.employeeId||""); const name=String(employee.nickname?`${employee.nickname} ${String(employee.name||"").split(/\s+/).slice(1).join(" ")}`:(employee.name||employee.employeeName||id));
     if(!id||id===driverId)return "";
     return `<label class="passenger-option"><input type="checkbox" value="${esc(id)}" data-name="${esc(name)}" ${selected.has(id)?"checked":""}><span>${esc(name)}</span></label>`;
   }).join("");
