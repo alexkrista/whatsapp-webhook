@@ -56,9 +56,9 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.13-phone-number-id-env";
-const APP_STATUS = "Aufgaben-WhatsApp Sender-ID ENV Fix";
-const APP_BUILD_DATE = "2026-07-24";
+const APP_BUILD = "0023.20-m3-1-eine-sprache";
+const APP_STATUS = "M3.1 – Einheitlicher KRISTA-Kopf";
+const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -1222,6 +1222,18 @@ ${downloadUrl}
 
 // ===================== KRISTINE =====================
 let kristine = null;  // Wird später nach sendWhatsAppKristineReply initialisiert
+
+
+// ===================== KRISTOOL Preview =====================
+app.get("/kristool-preview", (req, res) => {
+  const token = req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "";
+  res.redirect(`/kristool-preview/${token}`);
+});
+
+app.use(
+  "/kristool-preview",
+  express.static(path.join(process.cwd(), "public", "kristool-preview"))
+);
 
 // ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
