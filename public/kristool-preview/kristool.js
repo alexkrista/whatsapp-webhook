@@ -15,6 +15,8 @@ const state = {
   phase: "times",
   teamCandidates: [],
   teamJobs: [],
+  dayQueue: [],
+  activeEmployeeId: "",
 };
 
 const $ = id => document.getElementById(id);
@@ -69,6 +71,7 @@ async function init(){
     renderImport();
     renderDateHeading();
     refreshDriversForActiveDate();
+    await loadDayQueue();
   }catch(error){ toast(`Startfehler: ${error.message}`,true); }
 }
 
@@ -76,6 +79,102 @@ function renderEmployees(){
   const employees=state.bootstrap?.employees||[];
   const select=$("employeeSelect");
   select.innerHTML='<option value="">Mitarbeiter wählen</option>'+employees.map(e=>`<option value="${esc(e.id||e.employeeId)}">${esc(e.name||e.employeeName)}</option>`).join("");
+}
+
+
+async function loadDayQueue(){
+  if(!state.activeDate)return;
+  try{
+    const data=await request(`/kristine/api/day-queue/${encodeURIComponent(state.activeDate)}`);
+    state.dayQueue=data.items||[];
+    renderDayQueue();
+  }catch(error){
+    console.warn("Tagesarbeitsliste konnte nicht geladen werden:",error);
+    state.dayQueue=[];
+    renderDayQueue();
+  }
+}
+function queueStatus(item){
+  if(item.role==="driver"){
+    const plates=(item.vehicles||[]).map(vehicle=>vehicle.licensePlate).filter(Boolean);
+    return {
+      label:plates.length?plates.join(", "):`${item.ownTripCount||0} Fahrten`,
+      cls:"driver"
+    };
+  }
+  if(item.passengerDrivers?.length){
+    return {
+      label:`Mit ${item.passengerDrivers.join(", ")}`,
+      cls:"prepared"
+    };
+  }
+  if(item.copiedCorrection){
+    return {label:"Team vorbereitet",cls:"corrected"};
+  }
+  if(item.segmentCount){
+    return {label:"Zeit vorhanden",cls:"prepared"};
+  }
+  return {label:"noch zuordnen",cls:"waiting"};
+}
+function renderDayQueue(){
+  const drivers=state.dayQueue
+    .filter(item=>item.role==="driver")
+    .sort((a,b)=>a.employeeName.localeCompare(b.employeeName,"de"));
+  const team=state.dayQueue
+    .filter(item=>item.role!=="driver")
+    .sort((a,b)=>{
+      const aPrepared=Boolean(a.passengerDrivers?.length||a.copiedCorrection||a.segmentCount);
+      const bPrepared=Boolean(b.passengerDrivers?.length||b.copiedCorrection||b.segmentCount);
+      return Number(bPrepared)-Number(aPrepared)||a.employeeName.localeCompare(b.employeeName,"de");
+    });
+
+  $("queueDriverCount").textContent=drivers.length;
+  $("queueTeamCount").textContent=team.length;
+  $("queuePreparedCount").textContent=team.filter(item=>item.passengerDrivers?.length||item.copiedCorrection).length;
+
+  const renderItem=item=>{
+    const status=queueStatus(item);
+    const detail=item.role==="driver"
+      ? `${item.ownTripCount||0} Fahrten${item.distanceKm?` · ${km(item.distanceKm)}`:""}`
+      : item.passengerDrivers?.length
+        ? `Mitfahrer zugeordnet${item.segmentCount?` · ${item.segmentCount} Zeitblöcke`:""}`
+        : item.segmentCount
+          ? `${item.segmentCount} KRISTINE-Zeitblöcke`
+          : "Noch keiner Fahrer-Tagesfolie zugeordnet";
+    return `<button class="work-queue-item ${state.activeEmployeeId===String(item.employeeId)?"active":""}"
+      data-employee-id="${esc(item.employeeId)}"
+      data-driver-key="${esc(item.driverKey||"")}">
+      <span class="queue-avatar">${esc(initials(item.employeeName))}</span>
+      <span class="queue-copy">
+        <strong>${esc(item.employeeName)}</strong>
+        <small>${esc(detail)}</small>
+      </span>
+      <span class="queue-state ${status.cls}">${esc(status.label)}</span>
+    </button>`;
+  };
+
+  $("driverWorkQueue").innerHTML=drivers.length
+    ? drivers.map(renderItem).join("")
+    : `<div class="queue-empty">Für diese Tagesfolie wurden keine Fahrer erkannt.</div>`;
+
+  $("teamWorkQueue").innerHTML=team.length
+    ? team.map(renderItem).join("")
+    : `<div class="queue-empty">Alle Mitarbeiter fahren heute selbst oder es gibt keine weiteren Teammitglieder.</div>`;
+
+  document.querySelectorAll(".work-queue-item").forEach(button=>{
+    button.addEventListener("click",()=>openQueueEmployee(button.dataset.employeeId,button.dataset.driverKey));
+  });
+}
+async function openQueueEmployee(employeeId,driverKey=""){
+  if(!employeeId)return toast("Dieser Fahrer konnte keinem Mitarbeiter zugeordnet werden.",true);
+  state.activeEmployeeId=String(employeeId);
+  $("employeeSelect").value=String(employeeId);
+  const group=groupsForDate(state.activeDate).find(row=>
+    (driverKey&&row.driverKey===driverKey)||String(row.employeeId||"")===String(employeeId)
+  );
+  $("driverSelect").value=group?.key||"";
+  renderDayQueue();
+  await loadDay();
 }
 
 function renderImport(){
@@ -114,6 +213,7 @@ function setActiveDate(date,{load=false}={}){
   renderDateHeading();
   refreshDriversForActiveDate();
   hideDateMismatch();
+  loadDayQueue();
   if(load && $("employeeSelect").value) loadDay();
 }
 
@@ -183,6 +283,7 @@ async function importFile(file){
     renderImport();
     renderDateHeading();
     refreshDriversForActiveDate();
+    await loadDayQueue();
     const dates=uniqueDates();
     if(dates.includes(state.activeDate)){
       hideDateMismatch();
@@ -218,6 +319,7 @@ $("saveMapping").addEventListener("click",async()=>{
     refreshDriversForActiveDate();
     const refreshed=groupsForDate(state.activeDate).find(g=>g.driverKey===group.driverKey);
     if(refreshed){ $("driverSelect").value=refreshed.key; applyGroup(refreshed); }
+    await loadDayQueue();
     toast("Zuordnung wurde gemerkt.");
   }catch(error){toast(error.message,true)}
 });
@@ -226,6 +328,7 @@ $("loadDay").addEventListener("click",loadDay);
 async function loadDay(){
   const group=selectedGroup();
   const employeeId=$("employeeSelect").value;
+  state.activeEmployeeId=String(employeeId||"");
   const date=state.activeDate;
   if(!employeeId||!date)return toast("Mitarbeiter und Tagesfolie auswählen.",true);
   if(group && group.date!==date)return toast("Der gewählte GPS-Fahrer gehört nicht zur geöffneten Tagesfolie.",true);
@@ -291,6 +394,7 @@ function renderDay(group,date){
   renderSegments();
   renderTrips();
   setPhase("times");
+  renderDayQueue();
   loadTeamCandidates();
 }
 function normalizeTimeInput(value){
@@ -411,6 +515,7 @@ async function saveCorrection(){
     state.correction=data.correction||state.correction;
     renderSegments();
     loadTeamCandidates();
+    loadDayQueue();
     toast("Korrektur automatisch gespeichert.");
   }catch(error){ toast(`Korrektur nicht gespeichert: ${error.message}`,true); }
 }
@@ -705,6 +810,7 @@ $("applyTeamCorrection").addEventListener("click",async()=>{
     ? `${ok.length} Tagesfolien vorbereitet, ${failed.length} konnten nicht übernommen werden.`
     : `${ok.length} Tagesfolien vorbereitet. Persönliche GPS-Daten blieben unverändert.`;
   $("teamTransferBody").appendChild(note);
+  await loadDayQueue();
   toast(failed.length?`${ok.length} übernommen · ${failed.length} prüfen`:`Für ${ok.length} Mitarbeiter übernommen.`,Boolean(failed.length));
 });
 
