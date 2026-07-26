@@ -70,7 +70,19 @@
       <div class="day-state"><span>STATUS</span><strong>In Prüfung</strong></div>
     </section>
 
-    <section class="comparison-grid">
+    <section class="phase-switcher" aria-label="Arbeitsphase">
+      <button class="phase-button active" data-phase="times">
+        <span>1</span><strong>Zeiten</strong><small>KRISTINE + GPS</small>
+      </button>
+      <button class="phase-button" data-phase="regie">
+        <span>2</span><strong>Regie</strong><small>KRISTINE + Regie</small>
+      </button>
+      <button class="phase-button" data-phase="release">
+        <span>3</span><strong>Tagesabschluss</strong><small>KRISTINE + Abschluss</small>
+      </button>
+    </section>
+
+    <section class="comparison-grid phase-times" id="comparisonGrid">
       <article class="truth-card">
         <header><span class="step-number truth">1</span><div><h3>KRISTINE</h3><p>Offizielle Zeiterfassung · führende Wahrheit</p></div><span class="pill truth">WAHRHEIT</span></header>
         <div class="correction-toolbar" id="correctionToolbar" hidden>
@@ -96,6 +108,22 @@
           <button class="mini-action" id="addPauseSegment">+ Pause</button>
           <button class="mini-action subtle" id="resetSegments">↶ Original wiederherstellen</button>
         </div>
+
+        <div class="team-transfer" id="teamTransfer" hidden>
+          <div class="team-transfer-head">
+            <div>
+              <span class="team-kicker">TEAMABGLEICH</span>
+              <strong>Diese Korrektur auch für das Baustellenteam vorbereiten</strong>
+              <small>Persönliche GPS-Fahrten, Privatfahrten und Mitfahrer werden nicht übernommen.</small>
+            </div>
+            <button class="mini-action team-toggle" id="toggleTeamTransfer">Für Team übernehmen</button>
+          </div>
+          <div class="team-transfer-body" id="teamTransferBody" hidden>
+            <div id="teamCandidates" class="team-candidates"></div>
+            <button class="btn primary" id="applyTeamCorrection">Ausgewählte Tagesfolien vorbereiten</button>
+          </div>
+        </div>
+
         <div class="correction-history" id="correctionHistory" hidden></div>
         <footer><span>Arbeitszeit</span><strong id="kristineTotal">–</strong></footer>
       </article>
