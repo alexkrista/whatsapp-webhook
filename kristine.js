@@ -1146,6 +1146,78 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return Number.isNaN(parsed.getTime()) ? null : minutesFromHM(localTimeHM(parsed));
   }
 
+
+  // Tagesfolien derselben Baustelle für den Teamabgleich.
+  // Es werden ausschließlich Mitarbeiter vorgeschlagen, die am selben Tag
+  // zumindest einen Arbeitsblock auf einer identischen Baustelle besitzen.
+  app.get("/kristine/api/team-candidates/:employeeId/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const sourceEmployeeId = String(req.params.employeeId || "").trim();
+      const date = String(req.params.date || localDateISO()).slice(0, 10);
+      const [events, states, employees] = await Promise.all([
+        readJson(TIME_EVENTS, []),
+        readJson(STATES, {}),
+        typeof readEmployees === "function" ? readEmployees() : [],
+      ]);
+
+      const sourceSegments = buildEditableSegments(
+        events,
+        sourceEmployeeId,
+        date,
+        states[sourceEmployeeId] || {}
+      );
+      const sourceJobMap = new Map();
+      sourceSegments
+        .filter(segment => segment.type === "work" && segment.jobId)
+        .forEach(segment => sourceJobMap.set(
+          String(segment.jobId),
+          String(segment.jobName || segment.jobId)
+        ));
+
+      if (!sourceJobMap.size) {
+        return res.json({ ok: true, sourceJobs: [], candidates: [] });
+      }
+
+      const candidates = [];
+      for (const employee of employees || []) {
+        const employeeId = String(employee.id || employee.employeeId || "").trim();
+        if (!employeeId || employeeId === sourceEmployeeId) continue;
+        const employeeName = String(employee.name || employee.employeeName || employeeId).trim();
+        const segments = buildEditableSegments(
+          events,
+          employeeId,
+          date,
+          states[employeeId] || {}
+        );
+        const sharedJobs = [];
+        const seen = new Set();
+        for (const segment of segments) {
+          const jobId = String(segment.jobId || "");
+          if (segment.type !== "work" || !jobId || !sourceJobMap.has(jobId) || seen.has(jobId)) continue;
+          seen.add(jobId);
+          sharedJobs.push({ jobId, jobName: sourceJobMap.get(jobId) || segment.jobName || jobId });
+        }
+        if (!sharedJobs.length) continue;
+        candidates.push({
+          employeeId,
+          employeeName,
+          sharedJobs,
+          segmentCount: segments.length,
+        });
+      }
+
+      candidates.sort((a, b) => a.employeeName.localeCompare(b.employeeName, "de"));
+      res.json({
+        ok: true,
+        sourceJobs: [...sourceJobMap].map(([jobId, jobName]) => ({ jobId, jobName })),
+        candidates,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
