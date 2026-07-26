@@ -1,4 +1,4 @@
-v// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
+// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
 // ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
 // ✅ Layout A: Text + Transkripte seitenfüllend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
