@@ -1,7 +1,7 @@
 {
-  "build": "0023.3",
-  "name": "Aufgaben kompakt & Mitarbeiter informieren",
-  "date": "2026-07-24",
-  "version": "0023.3",
-  "status": "Neue Aufgaben werden per WhatsApp versendet; Anrufen-Button bei hinterlegter Baustellen-Telefonnummer"
+  "build": "0023.28",
+  "name": "Dynamische Tagesfolie & Teamabgleich",
+  "date": "2026-07-26",
+  "version": "3.5.2",
+  "status": "Arbeitsphasen und Zeitkorrektur für Baustellenteam"
 }
