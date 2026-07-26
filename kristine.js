@@ -974,6 +974,106 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   });
 
 
+
+  // KRISTOOL Tagesarbeitsliste:
+  // 1) tatsächliche Fahrer aus GPS
+  // 2) danach Teammitglieder ohne eigene Fahrt
+  app.get("/kristine/api/day-queue/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const date = String(req.params.date || localDateISO()).slice(0, 10);
+      const [gpsData, employees, events, states, corrections] = await Promise.all([
+        readGpsImport("latest"),
+        typeof readEmployees === "function" ? readEmployees() : [],
+        readJson(TIME_EVENTS, []),
+        readJson(STATES, {}),
+        readJson(DAY_CORRECTIONS, []),
+      ]);
+
+      const items = [];
+      const activeEmployees = (employees || []).filter(employee =>
+        employee && employee.active !== false && employee.archived !== true
+      );
+
+      for (const employee of activeEmployees) {
+        const employeeId = String(employee.id || employee.employeeId || "").trim();
+        if (!employeeId) continue;
+        const employeeName = String(employee.name || employee.employeeName || employeeId).trim();
+
+        const gpsDay = gpsEmployeeDay(gpsData, employeeId, date);
+        const ownRows = gpsDay.ownRows || [];
+        const passengerRows = gpsDay.passengerRows || [];
+        const segments = buildEditableSegments(
+          events,
+          employeeId,
+          date,
+          states[employeeId] || {}
+        );
+        const correction = (corrections || []).find(row =>
+          String(row.employeeId) === employeeId && String(row.date) === date
+        );
+
+        const vehicleMap = new Map();
+        for (const row of ownRows) {
+          const key = `${row.licensePlate || ""}|${row.vehicleName || ""}`;
+          if (!vehicleMap.has(key)) {
+            vehicleMap.set(key, {
+              licensePlate: String(row.licensePlate || ""),
+              vehicleName: String(row.vehicleName || ""),
+            });
+          }
+        }
+
+        const passengerDrivers = [...new Set(
+          passengerRows
+            .map(row => String(row.driver?.employeeName || row.effectiveDriver?.employeeName || "").trim())
+            .filter(Boolean)
+        )];
+
+        const driverKeys = [...new Set(ownRows.map(row => String(row.driverKey || "")).filter(Boolean))];
+
+        items.push({
+          employeeId,
+          employeeName,
+          role: ownRows.length ? "driver" : "team",
+          driverKey: driverKeys[0] || "",
+          ownTripCount: ownRows.length,
+          distanceKm: ownRows.reduce((sum, row) => sum + Number(row.distanceKm || 0), 0),
+          vehicles: [...vehicleMap.values()],
+          passengerDrivers,
+          passengerRideCount: passengerRows.length,
+          segmentCount: segments.length,
+          copiedCorrection: Boolean(
+            correction &&
+            (
+              String(correction.reason || "").toLowerCase().includes("team") ||
+              String(correction.note || "").toLowerCase().includes("team") ||
+              (correction.history || []).some(entry =>
+                String(entry.note || "").toLowerCase().includes("team")
+              )
+            )
+          ),
+          corrected: Boolean(correction?.updatedAt),
+        });
+      }
+
+      items.sort((a, b) =>
+        (a.role === b.role ? 0 : a.role === "driver" ? -1 : 1) ||
+        a.employeeName.localeCompare(b.employeeName, "de")
+      );
+
+      res.json({
+        ok: true,
+        date,
+        items,
+        drivers: items.filter(item => item.role === "driver").length,
+        team: items.filter(item => item.role !== "driver").length,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.get("/kristine/api/gps/employee-day", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
