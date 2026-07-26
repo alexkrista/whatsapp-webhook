@@ -467,11 +467,40 @@ function rideCard(row,{passenger=false}={}){
   const url=mapsUrl(row);
   const driver=row.effectiveDriver||row.driver||{employeeName:row.assignedEmployeeName||row.driverName};
   if(passenger){
-    return `<div class="trip passenger-trip"><div class="trip-top"><strong>🚐 Mitgefahren mit ${esc(driver.employeeName||"Kollege")}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span></div><div class="trip-route"><div><strong>${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong>${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}</small></div></div><div class="trip-meta"><span>${esc(row.vehicleName||"Fahrzeug")}</span><span>Mitfahrzeit ${secondsLabel(row.travelSeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
+    return `<div class="passenger-relation">
+      <div class="passenger-relation-icon">🚐</div>
+      <div class="passenger-relation-copy">
+        <span>Mitgefahren mit</span>
+        <strong>${esc(driver.employeeName||"Kollege")}</strong>
+        <small>${esc(row.licensePlate||"ohne Kennzeichen")}${row.vehicleName?` · ${esc(row.vehicleName)}`:""}</small>
+      </div>
+    </div>`;
   }
   const passengerCount=(row.passengers||[]).length;
   return `<div class="trip"><div class="trip-top"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span><label class="private-check"><input type="checkbox" data-row="${esc(row.id)}" ${row.isPrivate?"checked":""}> Privatfahrt</label></div><div class="trip-driver"><span>Fahrer: <strong>${esc(driver.employeeName||row.driverName||"nicht zugeordnet")}</strong></span><button class="trip-tool" data-driver-row="${esc(row.id)}">Fahrer ändern</button><button class="trip-tool" data-passenger-row="${esc(row.id)}">Mitfahrer${passengerCount?` (${passengerCount})`:""}</button></div><div class="trip-route"><div><strong title="${esc(row.startLocation)}">${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong title="${esc(row.stopLocation)}">${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}${row.departureTime?` · weiter ${esc(row.departureTime)}`:""}</small></div></div><div class="trip-meta"><span>${km(row.distanceKm)}</span><span>Fahrt ${secondsLabel(row.travelSeconds)}</span><span>Aufenthalt ${secondsLabel(row.staySeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
 }
+
+function passengerRelations(rows){
+  const relations=new Map();
+  for(const row of rows||[]){
+    const driver=row.effectiveDriver||row.driver||{employeeName:row.assignedEmployeeName||row.driverName};
+    const driverName=String(driver.employeeName||"Kollege").trim();
+    const driverId=String(driver.employeeId||row.assignedEmployeeId||driverName);
+    const plate=String(row.licensePlate||"ohne Kennzeichen").trim();
+    const vehicleName=String(row.vehicleName||"").trim();
+    const key=`${driverId}::${plate}::${vehicleName}`;
+    if(!relations.has(key)){
+      relations.set(key,{
+        ...row,
+        effectiveDriver:{...driver,employeeName:driverName},
+        relationCount:0
+      });
+    }
+    relations.get(key).relationCount+=1;
+  }
+  return [...relations.values()];
+}
+
 function renderTrips(){
   const box=$("gpsTrips"),rows=state.dayRows,passengers=state.passengerRows;
   if(!rows.length&&!passengers.length){
@@ -483,15 +512,20 @@ function renderTrips(){
     return;
   }
   const vehicles=new Map();
-  [...rows,...passengers].forEach(row=>{
+  rows.forEach(row=>{
     const key=`${row.licensePlate||"ohne Kennzeichen"}|${row.vehicleName||""}`;
     if(!vehicles.has(key))vehicles.set(key,{licensePlate:row.licensePlate||"ohne Kennzeichen",vehicleName:row.vehicleName||"",trips:0,km:0});
-    const vehicle=vehicles.get(key); vehicle.trips+=1; if(rows.includes(row))vehicle.km+=Number(row.distanceKm||0);
+    const vehicle=vehicles.get(key);
+    vehicle.trips+=1;
+    vehicle.km+=Number(row.distanceKm||0);
   });
-  $("gpsVehicles").hidden=false;
-  $("gpsVehicles").innerHTML=`<strong>Fahrzeuge an diesem Tag</strong>${[...vehicles.values()].map(vehicle=>`<span><b>${esc(vehicle.licensePlate)}</b>${vehicle.vehicleName?` · ${esc(vehicle.vehicleName)}`:""}<small>${vehicle.trips} Bewegungen${vehicle.km?` · ${km(vehicle.km)}`:""}</small></span>`).join("")}`;
+  $("gpsVehicles").hidden=!vehicles.size;
+  $("gpsVehicles").innerHTML=vehicles.size
+    ? `<strong>Eigene Fahrzeuge an diesem Tag</strong>${[...vehicles.values()].map(vehicle=>`<span><b>${esc(vehicle.licensePlate)}</b>${vehicle.vehicleName?` · ${esc(vehicle.vehicleName)}`:""}<small>${vehicle.trips} Bewegungen${vehicle.km?` · ${km(vehicle.km)}`:""}</small></span>`).join("")}`
+    : "";
   box.className="trips";
-  box.innerHTML=`${rows.length?`<div class="trip-section-title">Eigene Fahrten</div>${rows.map(row=>rideCard(row)).join("")}`:""}${passengers.length?`<div class="trip-section-title">Mitfahrten</div>${passengers.map(row=>rideCard(row,{passenger:true})).join("")}`:""}`;
+  const relations=passengerRelations(passengers);
+  box.innerHTML=`${rows.length?`<div class="trip-section-title">Eigene Fahrten</div>${rows.map(row=>rideCard(row)).join("")}`:""}${relations.length?`<div class="trip-section-title">Mitgefahren</div><div class="passenger-relations">${relations.map(row=>rideCard(row,{passenger:true})).join("")}</div>`:""}`;
   box.querySelectorAll('input[data-row]').forEach(input=>input.addEventListener("change",()=>markPrivate(input.dataset.row,input.checked)));
   box.querySelectorAll('[data-driver-row]').forEach(button=>button.addEventListener("click",()=>editRideDriver(button.dataset.driverRow)));
   box.querySelectorAll('[data-passenger-row]').forEach(button=>button.addEventListener("click",()=>editRidePassengers(button.dataset.passengerRow)));
@@ -542,8 +576,11 @@ function updateGpsTotals(){
   $("gpsTripCount").textContent=String(rows.length);
   $("gpsDistance").textContent=km(dist);
   $("gpsPrivate").textContent=km(priv);
-  const rides=state.passengerRows.length;
-  $("checkGps").textContent=`${rows.length} eigene Fahrten${rides?` · ${rides} Mitfahrten`:""} · ${km(dist)} · ${km(priv)} privat`;
+  const relations=passengerRelations(state.passengerRows);
+  const rideText=relations.length
+    ? ` · mitgefahren mit ${relations.map(row=>(row.effectiveDriver||row.driver||{}).employeeName||"Kollege").join(", ")}`
+    : "";
+  $("checkGps").textContent=`${rows.length} eigene Fahrten${rideText} · ${km(dist)} · ${km(priv)} privat`;
 }
 async function markPrivate(rowId,isPrivate){
   try{
