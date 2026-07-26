@@ -1,7 +1,7 @@
 {
-  "build": "0023.19",
-  "name": "Tageskorrektur Wie",
-  "date": "2026-07-25",
-  "version": "0023.19",
-  "status": "Korrektur eines Mitarbeiters für andere übernehmen"
+  "build": "0023.20",
+  "name": "M3.1 – Eine Sprache",
+  "date": "2026-07-26",
+  "version": "3.5.2",
+  "status": "Einheitlicher KRISTA-Kopf und sichere KRISTOOL Preview"
 }
