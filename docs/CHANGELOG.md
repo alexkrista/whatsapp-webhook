@@ -1,14 +1,15 @@
-# Build 0023.19 – Tageskorrektur „Wie …“
+# Build 0023.20 – M3.1 „Eine Sprache“
 
 ## Neu
-- In **Leitstand → Tagesbuchungen bearbeiten** gibt es jetzt **📋 Wie …**.
-- Korrektur eines bereits bearbeiteten Mitarbeiters kann auf den geöffneten Mitarbeiter übernommen werden.
-- Mitarbeiter mit gleicher Baustelle werden mit ⭐ nach oben sortiert.
-- Übernahme wird zunächst nur in die Maske geladen und muss bewusst gespeichert werden.
-- Beim Speichern wird die Quelle im Ereignis- und Mitarbeiterverlauf protokolliert.
-- Verknüpfte Fotos, Material- und Regieeinträge folgen weiterhin den Zeitblöcken.
+- Einheitlicher KRISTA-Kopf auf KRISADMIN, KRISTINE, KRISTOWER und KRISTOOL Preview
+- Gemeinsame Arbeitswelten: KRISTOWER, KRISTOOL, KRISTINE, KRISPLAN, LEITSTAND, KRISADMIN
+- Aktiver Arbeitsbereich wird grün hervorgehoben
+- Token wird automatisch zwischen den Arbeitswelten mitgenommen
+- KRISTOOL Preview unter `/kristool-preview/`
+- Gemeinsames Design nur in `public/ui/krista-ui.css` und `public/ui/topbar.js`
 
 ## Sicherheit
-- Quelle und Ziel können nicht identisch sein.
-- Leere Quellbuchungen werden nicht übernommen.
-- Bestehende Zeitvalidierung und Überschneidungsprüfung bleiben aktiv.
+- Keine produktiven Datenmodelle geändert
+- Keine WhatsApp-Logik geändert
+- Keine Zeitlogik geändert
+- KRISTOOL bleibt eine reine Preview
