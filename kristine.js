@@ -88,27 +88,47 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return normalizePersonName(value).split(/\s+/).filter(Boolean);
   }
 
+  function employeeEverydayName(employee) {
+    const official = String(employee?.name || employee?.employeeName || "").trim();
+    const nickname = String(employee?.nickname || employee?.rufname || "").trim();
+    if (!nickname) return official;
+    const officialParts = official.split(/\s+/).filter(Boolean);
+    const lastName = officialParts.length > 1 ? officialParts.slice(1).join(" ") : "";
+    return lastName ? `${nickname} ${lastName}` : nickname;
+  }
+
   function matchGpsEmployee(driverName, employees) {
     const wanted = personNameParts(driverName);
     if (!wanted.length) return null;
     let best = null;
     for (const employee of employees || []) {
-      const parts = personNameParts(employee.name || employee.employeeName || "");
-      if (!parts.length) continue;
-      let score = 0;
-      if (parts.join(" ") === wanted.join(" ")) score = 100;
-      else {
-        const wantedLast = wanted[wanted.length - 1];
-        const actualLast = parts[parts.length - 1];
-        const wantedFirst = wanted[0];
-        const actualFirst = parts[0];
-        if (wantedLast === actualLast) score += 60;
-        if (wantedFirst === actualFirst) score += 30;
-        else if (wantedFirst.startsWith(actualFirst) || actualFirst.startsWith(wantedFirst)) score += 24;
-        const shared = wanted.filter(part => parts.includes(part)).length;
-        score += shared * 5;
+      const official = String(employee.name || employee.employeeName || "");
+      const officialParts = official.split(/\s+/).filter(Boolean);
+      const lastName = officialParts.length > 1 ? officialParts.slice(1).join(" ") : "";
+      const candidates = [
+        official,
+        employee.nickname ? `${employee.nickname}${lastName ? " " + lastName : ""}` : "",
+        employee.nickname || ""
+      ].filter(Boolean);
+      let employeeBest = 0;
+      for (const candidate of candidates) {
+        const parts = personNameParts(candidate);
+        if (!parts.length) continue;
+        let score = 0;
+        if (parts.join(" ") === wanted.join(" ")) score = 100;
+        else {
+          const wantedLast = wanted[wanted.length - 1];
+          const actualLast = parts[parts.length - 1];
+          const wantedFirst = wanted[0];
+          const actualFirst = parts[0];
+          if (wantedLast === actualLast) score += 60;
+          if (wantedFirst === actualFirst) score += 35;
+          else if (wantedFirst.startsWith(actualFirst) || actualFirst.startsWith(wantedFirst)) score += 24;
+          score += wanted.filter(part => parts.includes(part)).length * 5;
+        }
+        employeeBest = Math.max(employeeBest, score);
       }
-      if (!best || score > best.score) best = { score, employee };
+      if (!best || employeeBest > best.score) best = { score: employeeBest, employee };
     }
     return best && best.score >= 70 ? best.employee : null;
   }
@@ -937,7 +957,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       for (const driverName of [...new Set(rows.map(row => row.driverName))]) {
         const match = matchGpsEmployee(driverName, employees);
         const driverKey = rows.find(row => row.driverName === driverName)?.driverKey;
-        if (driverKey && match) mappings[driverKey] = { employeeId: String(match.id || match.employeeId || ""), employeeName: String(match.name || match.employeeName || driverName), autoMatched: true };
+        if (driverKey && match) mappings[driverKey] = { employeeId: String(match.id || match.employeeId || ""), employeeName: employeeEverydayName(match) || driverName, autoMatched: true };
       }
       const id = `gps_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
       const data = { id, filename, importedAt: new Date().toISOString(), mappings, rows };
@@ -998,7 +1018,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       for (const employee of activeEmployees) {
         const employeeId = String(employee.id || employee.employeeId || "").trim();
         if (!employeeId) continue;
-        const employeeName = String(employee.name || employee.employeeName || employeeId).trim();
+        const employeeName = employeeEverydayName(employee) || employeeId;
 
         const gpsDay = gpsEmployeeDay(gpsData, employeeId, date);
         const ownRows = gpsDay.ownRows || [];
@@ -1283,7 +1303,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       for (const employee of employees || []) {
         const employeeId = String(employee.id || employee.employeeId || "").trim();
         if (!employeeId || employeeId === sourceEmployeeId) continue;
-        const employeeName = String(employee.name || employee.employeeName || employeeId).trim();
+        const employeeName = employeeEverydayName(employee) || employeeId;
         const segments = buildEditableSegments(
           events,
           employeeId,
