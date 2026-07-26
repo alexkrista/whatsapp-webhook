@@ -133,6 +133,49 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return best && best.score >= 70 ? best.employee : null;
   }
 
+
+  function reconcileGpsMappings(data, employees) {
+    if (!data) return false;
+    data.mappings = data.mappings || {};
+
+    const firstRowByDriver = new Map();
+    for (const row of data.rows || []) {
+      const driverKey = String(row.driverKey || "").trim();
+      if (driverKey && !firstRowByDriver.has(driverKey)) firstRowByDriver.set(driverKey, row);
+    }
+
+    let changed = false;
+    for (const [driverKey, row] of firstRowByDriver) {
+      const existing = data.mappings[driverKey] || {};
+
+      // Explicit office corrections always win.
+      if (existing.employeeId && existing.autoMatched !== true) continue;
+
+      const match = matchGpsEmployee(row.driverName, employees);
+      if (!match) continue;
+
+      const employeeId = String(match.id || match.employeeId || "");
+      const employeeName = employeeEverydayName(match) || row.driverName;
+      if (!employeeId) continue;
+
+      if (
+        String(existing.employeeId || "") !== employeeId ||
+        String(existing.employeeName || "") !== employeeName ||
+        existing.autoMatched !== true
+      ) {
+        data.mappings[driverKey] = {
+          employeeId,
+          employeeName,
+          autoMatched: true,
+          matchedAt: new Date().toISOString(),
+          matchedBy: "official-name-or-rufname",
+        };
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function cleanGpsRow(row, index) {
     const driverName = String(row["Fahrername"] || "").replace(/\s+/g, " ").trim() || "Ohne Fahrer";
     const date = gpsDateISO(row["Datum"]);
@@ -953,14 +996,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       if (!sourceRows.length) return res.status(400).json({ ok: false, error: "Keine GPS-Zeilen erkannt." });
       const rows = sourceRows.map(cleanGpsRow).filter(row => row.date && row.startTime);
       const employees = typeof readEmployees === "function" ? await readEmployees() : [];
-      const mappings = {};
-      for (const driverName of [...new Set(rows.map(row => row.driverName))]) {
-        const match = matchGpsEmployee(driverName, employees);
-        const driverKey = rows.find(row => row.driverName === driverName)?.driverKey;
-        if (driverKey && match) mappings[driverKey] = { employeeId: String(match.id || match.employeeId || ""), employeeName: employeeEverydayName(match) || driverName, autoMatched: true };
-      }
       const id = `gps_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
-      const data = { id, filename, importedAt: new Date().toISOString(), mappings, rows };
+      const data = { id, filename, importedAt: new Date().toISOString(), mappings: {}, rows };
+      reconcileGpsMappings(data, employees);
       await writeGpsImport(data);
       await appendEvent({ type: "gps_csv_imported", detail: `${rows.length} GPS-Fahrten aus ${filename}`, source: "office" });
       res.json({ ok: true, import: gpsImportSummary(data) });
@@ -973,6 +1011,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     if (!requireAdmin(req, res)) return;
     try {
       const data = await readGpsImport("latest");
+      const employees = typeof readEmployees === "function" ? await readEmployees() : [];
+      if (data && reconcileGpsMappings(data, employees)) await writeGpsImport(data);
       res.json({ ok: true, import: gpsImportSummary(data) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
@@ -1009,6 +1049,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         readJson(STATES, {}),
         readJson(DAY_CORRECTIONS, []),
       ]);
+
+      if (gpsData && reconcileGpsMappings(gpsData, employees)) {
+        await writeGpsImport(gpsData);
+      }
 
       const items = [];
       const activeEmployees = (employees || []).filter(employee =>
@@ -1099,6 +1143,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     try {
       const data = await readGpsImport(String(req.query.importId || "latest"));
       if (!data) return res.json({ ok: true, ownRows: [], passengerRows: [] });
+      const employees = typeof readEmployees === "function" ? await readEmployees() : [];
+      if (reconcileGpsMappings(data, employees)) await writeGpsImport(data);
       const employeeId = String(req.query.employeeId || "");
       const date = String(req.query.date || "").slice(0, 10);
       if (!employeeId || !date) return res.status(400).json({ ok: false, error: "Mitarbeiter und Datum fehlen." });
