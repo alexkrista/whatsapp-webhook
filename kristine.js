@@ -15,6 +15,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
   const GPS_IMPORTS_DIR = path.join(ROOT, "gps-imports");
   const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
+  const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -170,9 +171,13 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         employeeId: data.mappings?.[row.driverKey]?.employeeId || "",
         employeeName: data.mappings?.[row.driverKey]?.employeeName || "",
         vehicleName: row.vehicleName, licensePlate: row.licensePlate,
-        trips: 0, distanceKm: 0, privateKm: 0,
+        vehicles: [], trips: 0, distanceKm: 0, privateKm: 0,
       });
       const group = groups.get(key);
+      const vehicleKey = `${row.licensePlate || ""}|${row.vehicleName || ""}`;
+      if (!group.vehicles.some(vehicle => vehicle.key === vehicleKey)) {
+        group.vehicles.push({ key: vehicleKey, licensePlate: row.licensePlate || "", vehicleName: row.vehicleName || "" });
+      }
       group.trips += 1;
       group.distanceKm += Number(row.distanceKm || 0);
       if (row.isPrivate) group.privateKm += Number(row.distanceKm || 0);
@@ -1050,8 +1055,23 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     try {
       const employeeId = String(req.params.employeeId || "");
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [events, states] = await Promise.all([readJson(TIME_EVENTS, []), readJson(STATES, {})]);
-      res.json({ ok: true, segments: buildEditableSegments(events, employeeId, date, states[employeeId] || {}) });
+      const [events, states, corrections] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(DAY_CORRECTIONS, []),
+      ]);
+      const segments = buildEditableSegments(events, employeeId, date, states[employeeId] || {});
+      const correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date) || null;
+      res.json({
+        ok: true,
+        segments,
+        originalSegments: correction?.originalSegments || segments,
+        correction: correction ? {
+          reason: correction.reason || "",
+          note: correction.note || "",
+          updatedAt: correction.updatedAt || null,
+          updatedBy: correction.updatedBy || "Büro",
+          history: Array.isArray(correction.history) ? correction.history.slice(-20) : [],
+        } : null,
+      });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
@@ -1063,6 +1083,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const employeeId = String(req.params.employeeId || "").trim();
       const date = String(req.params.date || localDateISO()).slice(0, 10);
       const employeeName = String(req.body?.employeeName || employeeId).trim();
+      const correctionReason = String(req.body?.reason || "").trim().slice(0, 160);
+      const correctionNote = String(req.body?.note || "").trim().slice(0, 500);
+      const correctedBy = String(req.body?.correctedBy || "Bettina / Büro").trim().slice(0, 120);
       const copiedFromRaw = req.body?.copiedFrom && typeof req.body.copiedFrom === "object" ? req.body.copiedFrom : null;
       const copiedFrom = copiedFromRaw ? { employeeId: String(copiedFromRaw.employeeId || "").slice(0, 100), employeeName: String(copiedFromRaw.employeeName || "").trim().slice(0, 160) } : null;
       const moveLinked = true; // Zeitblock ist die Wahrheit: verknüpfte Einträge werden immer mitgeführt.
@@ -1089,10 +1112,38 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         }
       }
 
-      const [allEvents, states, reviewEntries] = await Promise.all([
-        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []),
+      const [allEvents, states, reviewEntries, corrections] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []), readJson(DAY_CORRECTIONS, []),
       ]);
       const oldSegments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
+      let correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date);
+      if (!correction) {
+        correction = {
+          id: `corr_${employeeId}_${date}`,
+          employeeId, employeeName, date,
+          originalSegments: oldSegments,
+          history: [],
+          createdAt: new Date().toISOString(),
+        };
+        corrections.push(correction);
+      }
+      correction.employeeName = employeeName;
+      correction.reason = correctionReason;
+      correction.note = correctionNote;
+      correction.updatedBy = correctedBy;
+      correction.updatedAt = new Date().toISOString();
+      correction.history = Array.isArray(correction.history) ? correction.history : [];
+      correction.history.push({
+        at: correction.updatedAt,
+        by: correctedBy,
+        reason: correctionReason,
+        note: correctionNote,
+        before: oldSegments,
+        after: segments,
+      });
+      correction.history = correction.history.slice(-100);
+      await writeJson(DAY_CORRECTIONS, corrections);
+
       const retained = allEvents.filter((row) => !(String(row.employeeId) === employeeId && String(row.date) === date));
       const createdAt = new Date().toISOString();
       const replacement = [];
@@ -1156,7 +1207,21 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       states[employeeId] = state;
       await writeJson(STATES, states);
       await appendEvent({ type: copiedFrom?.employeeId ? "day_segments_copied" : "day_segments_edited", employeeId, employeeName, date, segmentCount: segments.length, movedLinkedEntries: moved, source: "office", copiedFrom });
-      res.json({ ok: true, segments, movedLinkedEntries: moved, state, previousSegments: oldSegments.length });
+      res.json({
+        ok: true,
+        segments,
+        originalSegments: correction.originalSegments || oldSegments,
+        correction: {
+          reason: correction.reason || "",
+          note: correction.note || "",
+          updatedAt: correction.updatedAt,
+          updatedBy: correction.updatedBy,
+          history: correction.history.slice(-20),
+        },
+        movedLinkedEntries: moved,
+        state,
+        previousSegments: oldSegments.length,
+      });
     } catch (error) {
       res.status(400).json({ ok: false, error: String(error?.message || error) });
     }
