@@ -1,14 +1,22 @@
-# Build 0023.25 – Tagesfolie bestimmt den Tag
+# Build 0023.26 – Die Korrektur lebt
 
-## Neu
-- Bettina wählt zuerst die Tagesfolie über Datum, Vor- und Zurückpfeil.
-- GPS heißt jetzt bewusst „GPS übernehmen“.
-- Der GPS-Bericht verändert das geöffnete Datum niemals automatisch.
-- Nach dem Einlesen prüft KRISTOOL, ob die Datei Daten für die geöffnete Tagesfolie enthält.
-- Bei Abweichung werden alle enthaltenen Tage als verständliche Auswahl angeboten.
-- Mehrtagesdateien werden vollständig gespeichert; Bettina wechselt anschließend nur die Tagesfolie.
-- GPS-Fahrer werden ausschließlich für den aktuell geöffneten Tag angezeigt.
-- KRISTINE-Zeiten können auch ohne vorhandene GPS-Daten geöffnet werden.
+## Tagesfolie
+- KRISTINE-Originalzeiten bleiben sichtbar
+- Bürozeiten direkt inline editierbar
+- Eingaben wie `1415` werden zu `14:15`
+- Enter oder Verlassen des Feldes speichert automatisch
+- Arbeitszeit und Differenz werden live neu berechnet
+- Arbeitsblöcke und Pausen können ergänzt oder entfernt werden
+- Original kann mit einem Klick wiederhergestellt werden
+- Änderungsgrund und Notiz werden gespeichert
+- Änderungsprotokoll bleibt dauerhaft nachvollziehbar
 
-## Grundregel
-Ein Datum = eine Tagesfolie = eine Wahrheit.
+## GPS
+- Kennzeichen bei jeder einzelnen Fahrt
+- mehrere Fahrzeuge eines Fahrers am selben Tag sichtbar
+- Google-Maps-Link je Fahrt über Koordinaten, ersatzweise Adressen
+- Privatfahrt-Markierung bleibt erhalten
+
+## Sicherheit
+- ursprüngliche KRISTINE-Zeiten werden beim ersten Korrekturschritt als unveränderbarer Ausgangsstand gesichert
+- bestehende Regie- und Freigabelogik bleibt unverändert
