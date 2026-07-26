@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.25-tagesfolie-bestimmt-tag";
-const APP_STATUS = "KRISTOOL – Tagesfolie bestimmt den Tag";
+const APP_BUILD = "0023.26-korrektur-lebt";
+const APP_STATUS = "KRISTOOL Tagesfolie – Korrektur lebt";
 const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
