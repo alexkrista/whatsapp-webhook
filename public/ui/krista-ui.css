@@ -65,17 +65,6 @@
 .krista-user{text-align:right;display:flex;flex-direction:column}
 .krista-user strong{font-size:13px}.krista-user small{margin-top:4px;color:rgba(255,255,255,.6)}
 
-.krista-contextbar{
-  min-height:38px;padding:8px 22px;
-  border-top:1px solid rgba(255,255,255,.07);
-  background:rgba(0,0,0,.13);
-  display:flex;justify-content:space-between;align-items:center;gap:14px;
-  font-size:12px;
-}
-.krista-contextbar>div:first-child{display:flex;gap:10px;align-items:center}
-.krista-contextbar strong{letter-spacing:.04em}
-.krista-contextbar span{color:rgba(255,255,255,.66)}
-.krista-context-status{color:#dcecdf}
 
 /* Shared module navigation under the fixed product header */
 .krista-module-nav{
@@ -115,8 +104,24 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
   .krista-shell-main{grid-template-columns:1fr;padding:13px 14px;gap:11px}
   .krista-world-nav{justify-content:flex-start;overflow-x:auto}
   .krista-world-link{flex:0 0 auto}
-  .krista-contextbar{padding:8px 14px}
-  .krista-contextbar>div:first-child{align-items:flex-start;flex-direction:column;gap:2px}
   .krista-module-nav{overflow-x:auto!important;flex-wrap:nowrap!important}
   .krista-module-nav button,.krista-module-nav a{white-space:nowrap!important;flex:0 0 auto!important}
+}
+/* Build 0023.23 – finaler Produktkopf */
+.krista-shell-main{
+  grid-template-columns:230px minmax(560px,1fr) 170px;
+  max-width:1480px;
+}
+.krista-world-nav{
+  gap:8px;
+}
+.krista-world-link{
+  padding-inline:14px;
+}
+.krista-user small{
+  font-variant-numeric:tabular-nums;
+}
+@media(max-width:1050px){
+  .krista-shell-main{grid-template-columns:205px 1fr}
+  .krista-user{display:none}
 }
