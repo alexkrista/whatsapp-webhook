@@ -1,15 +1,16 @@
-# Build 0023.20 – M3.1 „Eine Sprache“
+# Build 0023.21 – M3.1.1 „Ein Datum, eine Wahrheit“
 
-## Neu
-- Einheitlicher KRISTA-Kopf auf KRISADMIN, KRISTINE, KRISTOWER und KRISTOOL Preview
-- Gemeinsame Arbeitswelten: KRISTOWER, KRISTOOL, KRISTINE, KRISPLAN, LEITSTAND, KRISADMIN
-- Aktiver Arbeitsbereich wird grün hervorgehoben
-- Token wird automatisch zwischen den Arbeitswelten mitgenommen
-- KRISTOOL Preview unter `/kristool-preview/`
-- Gemeinsames Design nur in `public/ui/krista-ui.css` und `public/ui/topbar.js`
+## Leitstand
+- Pfeile wechseln jetzt nur den im Leitstand angezeigten Tag.
+- Datumsauswahl aktualisiert den Leitstand direkt und öffnet nicht mehr ungefragt einen neuen Rapport.
+- Neuer eigener Button **Tagesrapport** öffnet den Rapport exakt für den aktuell angezeigten Tag.
+- Relative Orientierung: Heute, Gestern oder Morgen plus vollständiges Datum.
+
+## Doppelte Mitarbeiter
+- Mitarbeiter mit derselben normalisierten Identität (Telefonnummer, sonst Name) werden im Leitstand zu einer Person zusammengeführt.
+- Der Datensatz mit aktiver Planung bzw. den aussagekräftigsten Tagesdaten wird verwendet.
+- Verdächtige Dubletten werden mit beiden IDs in der Browser-Konsole protokolliert, damit die Stammdaten später sauber bereinigt werden können.
 
 ## Sicherheit
-- Keine produktiven Datenmodelle geändert
-- Keine WhatsApp-Logik geändert
-- Keine Zeitlogik geändert
-- KRISTOOL bleibt eine reine Preview
+- Keine Daten werden gelöscht oder automatisch zusammengeführt.
+- WhatsApp-, Buchungs- und Regielogik bleiben unverändert.
