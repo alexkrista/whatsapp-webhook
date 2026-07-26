@@ -1,7 +1,7 @@
 {
-  "build": "0023.26",
-  "name": "Die Korrektur lebt",
+  "build": "0023.27",
+  "name": "Teamfahrt & Mitfahrer",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "Inline-Zeitkorrektur, Kennzeichen und Maps in der Tagesfolie"
+  "status": "GPS-Fahrer korrigieren, Mitfahrer verknüpfen, keine doppelten Fahrten"
 }
