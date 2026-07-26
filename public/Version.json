@@ -1,7 +1,7 @@
 {
-  "build": "0023.20",
-  "name": "M3.1 – Eine Sprache",
+  "build": "0023.21",
+  "name": "M3.1.1 – Ein Datum, eine Wahrheit",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "Einheitlicher KRISTA-Kopf und sichere KRISTOOL Preview"
+  "status": "Leitstand-Deduplizierung und intuitive Tagesnavigation"
 }
