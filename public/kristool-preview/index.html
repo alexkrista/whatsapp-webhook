@@ -49,16 +49,51 @@
 
     <section id="dateMismatch" class="date-mismatch" hidden></section>
 
-    <section class="selector-bar">
-      <label>GPS-Fahrer für diese Tagesfolie
-        <select id="driverSelect"><option value="">Bitte zuerst GPS übernehmen</option></select>
-      </label>
-      <label>KRISTA-Mitarbeiter
-        <select id="employeeSelect"><option value="">Mitarbeiter wählen</option></select>
-      </label>
-      <button class="btn secondary" id="saveMapping">Zuordnung merken</button>
-      <button class="btn primary" id="loadDay">Tagesfolie öffnen</button>
+    <section class="today-queue" id="todayQueue">
+      <div class="queue-head">
+        <div>
+          <p class="eyebrow">Tagesprüfung</p>
+          <h2>Heute zu erledigen</h2>
+          <p>KRISTA beginnt mit den Fahrern. Danach sind die zugehörigen Teams bereits vorbereitet.</p>
+        </div>
+        <div class="queue-summary">
+          <span><strong id="queueDriverCount">0</strong> Fahrer</span>
+          <span><strong id="queueTeamCount">0</strong> Team</span>
+          <span><strong id="queuePreparedCount">0</strong> vorbereitet</span>
+        </div>
+      </div>
+
+      <div class="queue-columns">
+        <section class="queue-section driver-section">
+          <header>
+            <div class="queue-number">1</div>
+            <div>
+              <h3>Fahrer zuerst</h3>
+              <p>GPS lesen, Privatfahrten entscheiden und Mitfahrer festlegen.</p>
+            </div>
+          </header>
+          <div id="driverWorkQueue" class="work-queue-list"></div>
+        </section>
+
+        <section class="queue-section team-section">
+          <header>
+            <div class="queue-number">2</div>
+            <div>
+              <h3>Danach das Team</h3>
+              <p>Nur noch persönliche Unterschiede prüfen und abhaken.</p>
+            </div>
+          </header>
+          <div id="teamWorkQueue" class="work-queue-list"></div>
+        </section>
+      </div>
     </section>
+
+    <div class="legacy-selectors" hidden aria-hidden="true">
+      <select id="driverSelect"><option value="">GPS-Fahrer</option></select>
+      <select id="employeeSelect"><option value="">Mitarbeiter</option></select>
+      <button id="saveMapping" type="button">Zuordnung merken</button>
+      <button id="loadDay" type="button">Tagesfolie öffnen</button>
+    </div>
 
     <section class="day-head">
       <div class="person-badge" id="personBadge">?</div>
