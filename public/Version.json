@@ -1,7 +1,7 @@
 {
-  "build": "0023.23",
-  "name": "M3.1 – Kopf final",
+  "build": "0023.25",
+  "name": "KRISTOOL – Tagesfolie bestimmt den Tag",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "Finaler KRISTA-Kopf mit fünf Arbeitswelten"
+  "status": "GPS übernimmt Daten nur in die ausgewählte Tagesfolie"
 }
