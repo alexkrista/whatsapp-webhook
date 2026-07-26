@@ -6,6 +6,7 @@ const state = {
   gpsImport: null,
   groups: [],
   dayRows: [],
+  passengerRows: [],
   segments: [],
   originalSegments: [],
   correction: null,
@@ -227,13 +228,14 @@ async function loadDay(){
   if(group && group.date!==date)return toast("Der gewählte GPS-Fahrer gehört nicht zur geöffneten Tagesfolie.",true);
   try{
     const requests=[request(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`)];
-    if(group && state.gpsImport){
-      requests.unshift(request(`/kristine/api/gps/day?importId=${encodeURIComponent(state.gpsImport.id)}&driverKey=${encodeURIComponent(group.driverKey)}&date=${encodeURIComponent(date)}`));
+    if(state.gpsImport){
+      requests.unshift(request(`/kristine/api/gps/employee-day?importId=${encodeURIComponent(state.gpsImport.id)}&employeeId=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(date)}`));
     }
     const results=await Promise.all(requests);
-    const gps=group&&state.gpsImport?results[0]:{rows:[]};
-    const seg=group&&state.gpsImport?results[1]:results[0];
-    state.dayRows=gps.rows||[];
+    const gps=state.gpsImport?results[0]:{ownRows:[],passengerRows:[]};
+    const seg=state.gpsImport?results[1]:results[0];
+    state.dayRows=gps.ownRows||[];
+    state.passengerRows=gps.passengerRows||[];
     state.segments=(seg.segments||[]).map(row=>({...row}));
     state.originalSegments=(seg.originalSegments||seg.segments||[]).map(row=>({...row}));
     state.correction=seg.correction||null;
@@ -243,6 +245,7 @@ async function loadDay(){
 
 function clearDay(){
   state.dayRows=[];
+  state.passengerRows=[];
   state.segments=[];
   state.originalSegments=[];
   state.correction=null;
@@ -271,10 +274,14 @@ function renderDay(group,date){
   const employee=$("employeeSelect").selectedOptions[0]?.textContent||group?.driverName||"Mitarbeiter";
   $("personBadge").textContent=initials(employee);
   $("dayTitle").textContent=`${employee} · ${deDate(date)}`;
-  if(group){
-    const vehicles=(group.vehicles||[]).map(v=>v.licensePlate||v.vehicleName).filter(Boolean);
-    $("daySubtitle").textContent=`GPS-Fahrer: ${group.driverName} · ${vehicles.length?[...new Set(vehicles)].join(", "):(group.licensePlate||group.vehicleName||"Fahrzeug nicht angegeben")}`;
-  }else $("daySubtitle").textContent="KRISTINE-Zeiten ohne GPS-Kontrolle";
+  if(state.dayRows.length){
+    const drivers=[...new Set(state.dayRows.map(row=>row.effectiveDriver?.employeeName||row.assignedEmployeeName||row.driverName).filter(Boolean))];
+    const vehicles=[...new Set(state.dayRows.map(row=>row.licensePlate||row.vehicleName).filter(Boolean))];
+    $("daySubtitle").textContent=`GPS-Fahrer: ${drivers.join(", ")} · ${vehicles.join(", ")||"Fahrzeug nicht angegeben"}`;
+  }else if(state.passengerRows.length){
+    const drivers=[...new Set(state.passengerRows.map(row=>row.driver?.employeeName).filter(Boolean))];
+    $("daySubtitle").textContent=`Mitgefahren mit ${drivers.join(", ")}`;
+  }else $("daySubtitle").textContent="KRISTINE-Zeiten ohne eigene GPS-Fahrt";
   renderSegments();
   renderTrips();
 }
@@ -427,30 +434,97 @@ function mapsUrl(row){
   if(!start||!stop)return "";
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(stop)}&travelmode=driving`;
 }
+function employeeOptions(selectedId=""){
+  const employees=state.bootstrap?.employees||[];
+  return employees.map(employee=>{
+    const id=String(employee.id||employee.employeeId||"");
+    const name=String(employee.name||employee.employeeName||id);
+    return `<option value="${esc(id)}" ${id===String(selectedId)?"selected":""}>${esc(name)}</option>`;
+  }).join("");
+}
+function openGpsDialog(title,html){
+  $("gpsDialogTitle").textContent=title;
+  $("gpsDialogBody").innerHTML=html;
+  $("gpsDialog").hidden=false;
+  document.body.classList.add("dialog-open");
+}
+function closeGpsDialog(){
+  $("gpsDialog").hidden=true;
+  $("gpsDialogBody").innerHTML="";
+  document.body.classList.remove("dialog-open");
+}
+document.querySelectorAll("[data-close-dialog]").forEach(el=>el.addEventListener("click",closeGpsDialog));
+function rideCard(row,{passenger=false}={}){
+  const url=mapsUrl(row);
+  const driver=row.effectiveDriver||row.driver||{employeeName:row.assignedEmployeeName||row.driverName};
+  if(passenger){
+    return `<div class="trip passenger-trip"><div class="trip-top"><strong>🚐 Mitgefahren mit ${esc(driver.employeeName||"Kollege")}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span></div><div class="trip-route"><div><strong>${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong>${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}</small></div></div><div class="trip-meta"><span>${esc(row.vehicleName||"Fahrzeug")}</span><span>Mitfahrzeit ${secondsLabel(row.travelSeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
+  }
+  const passengerCount=(row.passengers||[]).length;
+  return `<div class="trip"><div class="trip-top"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span><label class="private-check"><input type="checkbox" data-row="${esc(row.id)}" ${row.isPrivate?"checked":""}> Privatfahrt</label></div><div class="trip-driver"><span>Fahrer: <strong>${esc(driver.employeeName||row.driverName||"nicht zugeordnet")}</strong></span><button class="trip-tool" data-driver-row="${esc(row.id)}">Fahrer ändern</button><button class="trip-tool" data-passenger-row="${esc(row.id)}">Mitfahrer${passengerCount?` (${passengerCount})`:""}</button></div><div class="trip-route"><div><strong title="${esc(row.startLocation)}">${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong title="${esc(row.stopLocation)}">${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}${row.departureTime?` · weiter ${esc(row.departureTime)}`:""}</small></div></div><div class="trip-meta"><span>${km(row.distanceKm)}</span><span>Fahrt ${secondsLabel(row.travelSeconds)}</span><span>Aufenthalt ${secondsLabel(row.staySeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
+}
 function renderTrips(){
-  const box=$("gpsTrips"),rows=state.dayRows;
-  if(!rows.length){
+  const box=$("gpsTrips"),rows=state.dayRows,passengers=state.passengerRows;
+  if(!rows.length&&!passengers.length){
     box.className="trips empty";
-    box.textContent="Keine GPS-Fahrten für diese Tagesfolie.";
+    box.textContent="Keine GPS-Fahrt und keine Mitfahrt für diese Tagesfolie.";
     $("gpsVehicles").hidden=true;
-    $("checkGps").textContent=groupsForDate(state.activeDate).length?"GPS-Fahrer noch nicht gewählt":"noch kein GPS für diesen Tag";
+    $("checkGps").textContent=groupsForDate(state.activeDate).length?"keine Fahrt diesem Mitarbeiter zugeordnet":"noch kein GPS für diesen Tag";
+    updateGpsTotals();
     return;
   }
   const vehicles=new Map();
-  rows.forEach(row=>{
+  [...rows,...passengers].forEach(row=>{
     const key=`${row.licensePlate||"ohne Kennzeichen"}|${row.vehicleName||""}`;
     if(!vehicles.has(key))vehicles.set(key,{licensePlate:row.licensePlate||"ohne Kennzeichen",vehicleName:row.vehicleName||"",trips:0,km:0});
-    const vehicle=vehicles.get(key); vehicle.trips+=1; vehicle.km+=Number(row.distanceKm||0);
+    const vehicle=vehicles.get(key); vehicle.trips+=1; if(rows.includes(row))vehicle.km+=Number(row.distanceKm||0);
   });
   $("gpsVehicles").hidden=false;
-  $("gpsVehicles").innerHTML=`<strong>Fahrzeuge an diesem Tag</strong>${[...vehicles.values()].map(vehicle=>`<span><b>${esc(vehicle.licensePlate)}</b>${vehicle.vehicleName?` · ${esc(vehicle.vehicleName)}`:""}<small>${vehicle.trips} Fahrten · ${km(vehicle.km)}</small></span>`).join("")}`;
+  $("gpsVehicles").innerHTML=`<strong>Fahrzeuge an diesem Tag</strong>${[...vehicles.values()].map(vehicle=>`<span><b>${esc(vehicle.licensePlate)}</b>${vehicle.vehicleName?` · ${esc(vehicle.vehicleName)}`:""}<small>${vehicle.trips} Bewegungen${vehicle.km?` · ${km(vehicle.km)}`:""}</small></span>`).join("")}`;
   box.className="trips";
-  box.innerHTML=rows.map(row=>{
-    const url=mapsUrl(row);
-    return `<div class="trip"><div class="trip-top"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong><span class="plate-chip">${esc(row.licensePlate||"ohne Kennzeichen")}</span><label class="private-check"><input type="checkbox" data-row="${esc(row.id)}" ${row.isPrivate?"checked":""}> Privatfahrt</label></div><div class="trip-route"><div><strong title="${esc(row.startLocation)}">${esc(row.startLocation||"Start unbekannt")}</strong><small>${esc(row.startTime)}</small></div><div class="route-arrow">→</div><div><strong title="${esc(row.stopLocation)}">${esc(row.stopLocation||"Ziel unbekannt")}</strong><small>Ankunft ${esc(row.arrivalTime)}${row.departureTime?` · weiter ${esc(row.departureTime)}`:""}</small></div></div><div class="trip-meta"><span>${km(row.distanceKm)}</span><span>Fahrt ${secondsLabel(row.travelSeconds)}</span><span>Aufenthalt ${secondsLabel(row.staySeconds)}</span>${url?`<a class="map-link" href="${esc(url)}" target="_blank" rel="noopener">🗺 Karte</a>`:""}</div></div>`;
-  }).join("");
+  box.innerHTML=`${rows.length?`<div class="trip-section-title">Eigene Fahrten</div>${rows.map(row=>rideCard(row)).join("")}`:""}${passengers.length?`<div class="trip-section-title">Mitfahrten</div>${passengers.map(row=>rideCard(row,{passenger:true})).join("")}`:""}`;
   box.querySelectorAll('input[data-row]').forEach(input=>input.addEventListener("change",()=>markPrivate(input.dataset.row,input.checked)));
+  box.querySelectorAll('[data-driver-row]').forEach(button=>button.addEventListener("click",()=>editRideDriver(button.dataset.driverRow)));
+  box.querySelectorAll('[data-passenger-row]').forEach(button=>button.addEventListener("click",()=>editRidePassengers(button.dataset.passengerRow)));
   updateGpsTotals();
+}
+function editRideDriver(rowId){
+  const row=state.dayRows.find(item=>item.id===rowId); if(!row)return;
+  const current=row.effectiveDriver?.employeeId||row.assignedEmployeeId||"";
+  openGpsDialog("Fahrer dieser Fahrt ändern",`<p class="dialog-note"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong> · ${esc(row.licensePlate||"ohne Kennzeichen")}<br>${esc(row.startLocation)} → ${esc(row.stopLocation)}</p><label class="dialog-field">Tatsächlicher Fahrer<select id="dialogDriver"><option value="">nicht zugeordnet</option>${employeeOptions(current)}</select></label><label class="dialog-check"><input type="checkbox" id="dialogDriverScope"> Alle Fahrten mit diesem Kennzeichen an diesem Tag ebenfalls zuordnen</label><div class="dialog-warning">Privatfahrten werden nach der Änderung dem neuen Fahrer zugerechnet.</div><button class="btn primary dialog-save" id="saveRideDriver">Fahrer übernehmen</button>`);
+  $("saveRideDriver").addEventListener("click",()=>saveRideDriver(row));
+}
+async function saveRideDriver(row){
+  const employeeId=$("dialogDriver").value;
+  const employeeName=$("dialogDriver").selectedOptions[0]?.textContent||"";
+  const scope=$("dialogDriverScope").checked;
+  const targets=scope?state.dayRows.filter(item=>item.date===row.date&&String(item.licensePlate||"")===String(row.licensePlate||"")):[row];
+  try{
+    for(const target of targets){
+      await request(`/kristine/api/gps/imports/${encodeURIComponent(state.gpsImport.id)}/rows/${encodeURIComponent(target.id)}`,{method:"PUT",body:JSON.stringify({assignedEmployeeId:employeeId,assignedEmployeeName:employeeName})});
+    }
+    closeGpsDialog(); toast(scope?`${targets.length} Fahrten wurden neu zugeordnet.`:"Fahrer wurde geändert."); await loadDay();
+  }catch(error){toast(error.message,true)}
+}
+function editRidePassengers(rowId){
+  const row=state.dayRows.find(item=>item.id===rowId); if(!row)return;
+  const selected=new Set((row.passengers||[]).map(item=>String(item.employeeId)));
+  const driverId=String(row.effectiveDriver?.employeeId||row.assignedEmployeeId||"");
+  const checks=(state.bootstrap?.employees||[]).map(employee=>{
+    const id=String(employee.id||employee.employeeId||""); const name=String(employee.name||employee.employeeName||id);
+    if(!id||id===driverId)return "";
+    return `<label class="passenger-option"><input type="checkbox" value="${esc(id)}" data-name="${esc(name)}" ${selected.has(id)?"checked":""}><span>${esc(name)}</span></label>`;
+  }).join("");
+  openGpsDialog("Mitfahrer festlegen",`<p class="dialog-note"><strong>${esc(row.startTime)}–${esc(row.arrivalTime)}</strong> · ${esc(row.licensePlate||"ohne Kennzeichen")}<br>Fahrer: ${esc(row.effectiveDriver?.employeeName||row.driverName)}</p><div class="passenger-list">${checks||"Keine weiteren Mitarbeiter vorhanden."}</div><button class="btn primary dialog-save" id="saveRidePassengers">Mitfahrer übernehmen</button>`);
+  $("saveRidePassengers").addEventListener("click",()=>saveRidePassengers(row));
+}
+async function saveRidePassengers(row){
+  const passengers=[...$("gpsDialogBody").querySelectorAll('.passenger-option input:checked')].map(input=>({employeeId:input.value,employeeName:input.dataset.name}));
+  try{
+    const data=await request(`/kristine/api/gps/imports/${encodeURIComponent(state.gpsImport.id)}/rows/${encodeURIComponent(row.id)}`,{method:"PUT",body:JSON.stringify({passengers})});
+    row.passengers=data.row.passengers||passengers;
+    closeGpsDialog(); renderTrips(); toast(passengers.length?`${passengers.length} Mitfahrer gespeichert.`:"Mitfahrer entfernt.");
+  }catch(error){toast(error.message,true)}
 }
 function updateGpsTotals(){
   const rows=state.dayRows;
@@ -459,7 +533,8 @@ function updateGpsTotals(){
   $("gpsTripCount").textContent=String(rows.length);
   $("gpsDistance").textContent=km(dist);
   $("gpsPrivate").textContent=km(priv);
-  $("checkGps").textContent=`${rows.length} Fahrten · ${km(dist)} · ${km(priv)} privat`;
+  const rides=state.passengerRows.length;
+  $("checkGps").textContent=`${rows.length} eigene Fahrten${rides?` · ${rides} Mitfahrten`:""} · ${km(dist)} · ${km(priv)} privat`;
 }
 async function markPrivate(rowId,isPrivate){
   try{
