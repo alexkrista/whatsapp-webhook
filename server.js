@@ -56,8 +56,8 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.21-one-date-one-truth";
-const APP_STATUS = "M3.1.1 – Ein Datum, eine Wahrheit";
+const APP_BUILD = "0023.22-header-route-cleanup";
+const APP_STATUS = "M3.1 – Leitstand aus Kopf, KRISTOOL-Route repariert";
 const APP_BUILD_DATE = "2026-07-26";
 
 // Static files for Admin UI
@@ -1225,15 +1225,16 @@ let kristine = null;  // Wird später nach sendWhatsAppKristineReply initialisie
 
 
 // ===================== KRISTOOL Preview =====================
-app.get("/kristool-preview", (req, res) => {
-  const token = req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "";
-  res.redirect(`/kristool-preview/${token}`);
-});
+const KRISTOOL_PREVIEW_DIR = path.join(process.cwd(), "public", "kristool-preview");
 
 app.use(
   "/kristool-preview",
-  express.static(path.join(process.cwd(), "public", "kristool-preview"))
+  express.static(KRISTOOL_PREVIEW_DIR, { redirect: false })
 );
+
+app.get(["/kristool-preview", "/kristool-preview/"], (req, res) => {
+  res.sendFile(path.join(KRISTOOL_PREVIEW_DIR, "index.html"));
+});
 
 // ===================== Base Routes =====================
 app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
