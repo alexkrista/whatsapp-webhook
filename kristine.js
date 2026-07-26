@@ -13,6 +13,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const EVENTS = path.join(ROOT, "events.jsonl");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
+  const GPS_IMPORTS_DIR = path.join(ROOT, "gps-imports");
+  const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -29,6 +31,157 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   async function writeJson(file, value) {
     await ensureRoot();
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+  }
+
+
+
+  function parseCsvRows(text, delimiter = ";") {
+    const source = String(text || "").replace(/^\uFEFF/, "");
+    const rows = [];
+    let row = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < source.length; index += 1) {
+      const char = source[index];
+      const next = source[index + 1];
+      if (char === '"') {
+        if (quoted && next === '"') { cell += '"'; index += 1; }
+        else quoted = !quoted;
+      } else if (char === delimiter && !quoted) {
+        row.push(cell); cell = "";
+      } else if ((char === "\n" || char === "\r") && !quoted) {
+        if (char === "\r" && next === "\n") index += 1;
+        row.push(cell); cell = "";
+        if (row.some(value => String(value).trim() !== "")) rows.push(row);
+        row = [];
+      } else {
+        cell += char;
+      }
+    }
+    row.push(cell);
+    if (row.some(value => String(value).trim() !== "")) rows.push(row);
+    if (!rows.length) return [];
+    const headers = rows[0].map(value => String(value || "").trim());
+    return rows.slice(1).map(values => Object.fromEntries(headers.map((header, index) => [header, String(values[index] || "").trim()])));
+  }
+
+  function gpsDateISO(value) {
+    const match = String(value || "").trim().match(/^(\d{2})[-./](\d{2})[-./](\d{4})$/);
+    if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+    return String(value || "").slice(0, 10);
+  }
+
+  function gpsNumber(value) {
+    const normalized = String(value || "").trim().replace(/\./g, "").replace(",", ".");
+    const result = Number(normalized);
+    return Number.isFinite(result) ? result : 0;
+  }
+
+  function normalizePersonName(value) {
+    return String(value || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function personNameParts(value) {
+    return normalizePersonName(value).split(/\s+/).filter(Boolean);
+  }
+
+  function matchGpsEmployee(driverName, employees) {
+    const wanted = personNameParts(driverName);
+    if (!wanted.length) return null;
+    let best = null;
+    for (const employee of employees || []) {
+      const parts = personNameParts(employee.name || employee.employeeName || "");
+      if (!parts.length) continue;
+      let score = 0;
+      if (parts.join(" ") === wanted.join(" ")) score = 100;
+      else {
+        const wantedLast = wanted[wanted.length - 1];
+        const actualLast = parts[parts.length - 1];
+        const wantedFirst = wanted[0];
+        const actualFirst = parts[0];
+        if (wantedLast === actualLast) score += 60;
+        if (wantedFirst === actualFirst) score += 30;
+        else if (wantedFirst.startsWith(actualFirst) || actualFirst.startsWith(wantedFirst)) score += 24;
+        const shared = wanted.filter(part => parts.includes(part)).length;
+        score += shared * 5;
+      }
+      if (!best || score > best.score) best = { score, employee };
+    }
+    return best && best.score >= 70 ? best.employee : null;
+  }
+
+  function cleanGpsRow(row, index) {
+    const driverName = String(row["Fahrername"] || "").replace(/\s+/g, " ").trim() || "Ohne Fahrer";
+    const date = gpsDateISO(row["Datum"]);
+    const driverKey = normalizePersonName(driverName).replace(/\s+/g, "_") || `ohne_fahrer_${index}`;
+    return {
+      id: `gps_${date}_${driverKey}_${index}`,
+      date,
+      driverName,
+      driverKey,
+      gpsEmployeeId: String(row["Mitarbeiter-ID"] || row["Fahrernummer"] || ""),
+      vehicleName: String(row["Fahrzeugname"] || ""),
+      vehicleNumber: String(row["Fahrzeugnummer"] || ""),
+      licensePlate: String(row["Kennzeichen"] || ""),
+      startLocation: String(row["Startstandort"] || ""),
+      stopLocation: String(row["Stoppstandort"] || ""),
+      startTime: String(row["Startzeit"] || "").slice(0, 5),
+      arrivalTime: String(row["Ankunftszeit"] || "").slice(0, 5),
+      departureTime: String(row["Abfahrtszeit"] || "").slice(0, 5),
+      travelSeconds: Math.max(0, Number(row["Fahrzeit (in Sekunden)"] || 0) || 0),
+      staySeconds: Math.max(0, Number(row["Zeit vor Ort (in Sekunden)"] || 0) || 0),
+      idleSeconds: Math.max(0, Number(row["Leerlaufzeit (in Sekunden)"] || 0) || 0),
+      distanceKm: gpsNumber(row["Strecke"]),
+      odometerStart: gpsNumber(row["Kilometerzählerstart"]),
+      odometerEnd: gpsNumber(row["Kilometerzählerende"]),
+      startLat: gpsNumber(row["Breitengrad am Start"]),
+      startLng: gpsNumber(row["Längengrad am Start"]),
+      stopLat: gpsNumber(row["Breitengrad am Stopp"]),
+      stopLng: gpsNumber(row["Längengrad am Stopp"]),
+      fuelType: String(row["Kraftstoffart"] || ""),
+      isPrivate: false,
+      privateMarkedAt: null,
+    };
+  }
+
+  async function readGpsImport(importId = "latest") {
+    try {
+      const file = importId === "latest" ? GPS_LATEST : path.join(GPS_IMPORTS_DIR, `${String(importId).replace(/[^A-Za-z0-9_-]/g, "")}.json`);
+      return JSON.parse(await fsp.readFile(file, "utf8"));
+    } catch { return null; }
+  }
+
+  async function writeGpsImport(data) {
+    await fsp.mkdir(GPS_IMPORTS_DIR, { recursive: true });
+    const file = path.join(GPS_IMPORTS_DIR, `${data.id}.json`);
+    await fsp.writeFile(file, JSON.stringify(data, null, 2), "utf8");
+    await fsp.writeFile(GPS_LATEST, JSON.stringify(data, null, 2), "utf8");
+  }
+
+  function gpsImportSummary(data) {
+    if (!data) return null;
+    const groups = new Map();
+    for (const row of data.rows || []) {
+      const key = `${row.driverKey}|${row.date}`;
+      if (!groups.has(key)) groups.set(key, {
+        key, driverKey: row.driverKey, driverName: row.driverName, date: row.date,
+        employeeId: data.mappings?.[row.driverKey]?.employeeId || "",
+        employeeName: data.mappings?.[row.driverKey]?.employeeName || "",
+        vehicleName: row.vehicleName, licensePlate: row.licensePlate,
+        trips: 0, distanceKm: 0, privateKm: 0,
+      });
+      const group = groups.get(key);
+      group.trips += 1;
+      group.distanceKm += Number(row.distanceKm || 0);
+      if (row.isPrivate) group.privateKm += Number(row.distanceKm || 0);
+    }
+    return {
+      id: data.id, filename: data.filename, importedAt: data.importedAt,
+      rowCount: (data.rows || []).length,
+      groups: [...groups.values()].sort((a,b) => a.date.localeCompare(b.date) || a.driverName.localeCompare(b.driverName, "de")),
+    };
   }
 
   async function appendEvent(event) {
@@ -194,13 +347,15 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   }
 
   async function getBootstrap() {
-    const [assignments, states, tasks, timeEvents] = await Promise.all([
+    const [assignments, states, tasks, timeEvents, employees, latestGps] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
       readJson(TIME_EVENTS, []),
+      typeof readEmployees === "function" ? readEmployees() : [],
+      readGpsImport("latest"),
     ]);
-    return { assignments, states, tasks, timeEvents };
+    return { assignments, states, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
@@ -702,6 +857,95 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       res.json({ ok: true, ...(await getBootstrap()), today: localDateISO() });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+
+
+  // ===================== KRISTOOL GPS / Tagesfolie =====================
+  app.post("/kristine/api/gps/import", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const filename = String(req.body?.filename || "gps.csv").slice(0, 180);
+      const content = String(req.body?.content || "");
+      if (!content.trim()) return res.status(400).json({ ok: false, error: "CSV-Datei ist leer." });
+      const sourceRows = parseCsvRows(content, ";");
+      if (!sourceRows.length) return res.status(400).json({ ok: false, error: "Keine GPS-Zeilen erkannt." });
+      const rows = sourceRows.map(cleanGpsRow).filter(row => row.date && row.startTime);
+      const employees = typeof readEmployees === "function" ? await readEmployees() : [];
+      const mappings = {};
+      for (const driverName of [...new Set(rows.map(row => row.driverName))]) {
+        const match = matchGpsEmployee(driverName, employees);
+        const driverKey = rows.find(row => row.driverName === driverName)?.driverKey;
+        if (driverKey && match) mappings[driverKey] = { employeeId: String(match.id || match.employeeId || ""), employeeName: String(match.name || match.employeeName || driverName), autoMatched: true };
+      }
+      const id = `gps_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
+      const data = { id, filename, importedAt: new Date().toISOString(), mappings, rows };
+      await writeGpsImport(data);
+      await appendEvent({ type: "gps_csv_imported", detail: `${rows.length} GPS-Fahrten aus ${filename}`, source: "office" });
+      res.json({ ok: true, import: gpsImportSummary(data) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.get("/kristine/api/gps/imports/latest", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const data = await readGpsImport("latest");
+      res.json({ ok: true, import: gpsImportSummary(data) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.get("/kristine/api/gps/day", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const data = await readGpsImport(String(req.query.importId || "latest"));
+      if (!data) return res.json({ ok: true, rows: [], mapping: null });
+      const driverKey = String(req.query.driverKey || "");
+      const date = String(req.query.date || "").slice(0, 10);
+      const rows = (data.rows || []).filter(row => (!driverKey || row.driverKey === driverKey) && (!date || row.date === date));
+      res.json({ ok: true, importId: data.id, rows, mapping: data.mappings?.[driverKey] || null });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.put("/kristine/api/gps/imports/:importId/mapping", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const data = await readGpsImport(String(req.params.importId || "latest"));
+      if (!data) return res.status(404).json({ ok: false, error: "GPS-Import nicht gefunden." });
+      const driverKey = String(req.body?.driverKey || "");
+      const employeeId = String(req.body?.employeeId || "");
+      const employeeName = String(req.body?.employeeName || "");
+      if (!driverKey) return res.status(400).json({ ok: false, error: "Fahrer fehlt." });
+      data.mappings = data.mappings || {};
+      data.mappings[driverKey] = { employeeId, employeeName, autoMatched: false, updatedAt: new Date().toISOString() };
+      await writeGpsImport(data);
+      res.json({ ok: true, import: gpsImportSummary(data) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.put("/kristine/api/gps/imports/:importId/rows/:rowId", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const data = await readGpsImport(String(req.params.importId || "latest"));
+      if (!data) return res.status(404).json({ ok: false, error: "GPS-Import nicht gefunden." });
+      const row = (data.rows || []).find(item => String(item.id) === String(req.params.rowId));
+      if (!row) return res.status(404).json({ ok: false, error: "GPS-Fahrt nicht gefunden." });
+      if (typeof req.body?.isPrivate === "boolean") {
+        row.isPrivate = req.body.isPrivate;
+        row.privateMarkedAt = new Date().toISOString();
+      }
+      await writeGpsImport(data);
+      res.json({ ok: true, row, import: gpsImportSummary(data) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
   });
 
