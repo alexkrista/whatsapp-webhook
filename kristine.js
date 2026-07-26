@@ -144,6 +144,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       fuelType: String(row["Kraftstoffart"] || ""),
       isPrivate: false,
       privateMarkedAt: null,
+      assignedEmployeeId: "",
+      assignedEmployeeName: "",
+      assignmentUpdatedAt: null,
+      passengers: [],
+      changeHistory: [],
     };
   }
 
@@ -187,6 +192,56 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       rowCount: (data.rows || []).length,
       groups: [...groups.values()].sort((a,b) => a.date.localeCompare(b.date) || a.driverName.localeCompare(b.driverName, "de")),
     };
+  }
+
+
+  function effectiveGpsDriver(data, row) {
+    const mapping = data?.mappings?.[row.driverKey] || {};
+    return {
+      employeeId: String(row.assignedEmployeeId || mapping.employeeId || ""),
+      employeeName: String(row.assignedEmployeeName || mapping.employeeName || row.driverName || ""),
+      source: row.assignedEmployeeId ? "manual" : (mapping.employeeId ? "mapping" : "gps"),
+    };
+  }
+
+  function gpsEmployeeDay(data, employeeId, date) {
+    const id = String(employeeId || "");
+    const wantedDate = String(date || "").slice(0, 10);
+    const ownRows = [];
+    const passengerRows = [];
+    for (const row of data?.rows || []) {
+      if (wantedDate && row.date !== wantedDate) continue;
+      const driver = effectiveGpsDriver(data, row);
+      if (driver.employeeId && driver.employeeId === id) {
+        ownRows.push({ ...row, effectiveDriver: driver });
+      }
+      const passenger = (row.passengers || []).find(item => String(item.employeeId || "") === id);
+      if (passenger) {
+        passengerRows.push({
+          rideId: row.id,
+          date: row.date,
+          startTime: row.startTime,
+          arrivalTime: row.arrivalTime,
+          departureTime: row.departureTime,
+          startLocation: row.startLocation,
+          stopLocation: row.stopLocation,
+          distanceKm: row.distanceKm,
+          travelSeconds: row.travelSeconds,
+          staySeconds: row.staySeconds,
+          vehicleName: row.vehicleName,
+          licensePlate: row.licensePlate,
+          startLat: row.startLat,
+          startLng: row.startLng,
+          stopLat: row.stopLat,
+          stopLng: row.stopLng,
+          driver,
+          passenger,
+        });
+      }
+    }
+    ownRows.sort((a,b) => String(a.startTime).localeCompare(String(b.startTime)));
+    passengerRows.sort((a,b) => String(a.startTime).localeCompare(String(b.startTime)));
+    return { ownRows, passengerRows };
   }
 
   async function appendEvent(event) {
@@ -918,6 +973,21 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     }
   });
 
+
+  app.get("/kristine/api/gps/employee-day", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const data = await readGpsImport(String(req.query.importId || "latest"));
+      if (!data) return res.json({ ok: true, ownRows: [], passengerRows: [] });
+      const employeeId = String(req.query.employeeId || "");
+      const date = String(req.query.date || "").slice(0, 10);
+      if (!employeeId || !date) return res.status(400).json({ ok: false, error: "Mitarbeiter und Datum fehlen." });
+      res.json({ ok: true, importId: data.id, ...gpsEmployeeDay(data, employeeId, date) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.put("/kristine/api/gps/imports/:importId/mapping", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -943,12 +1013,38 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       if (!data) return res.status(404).json({ ok: false, error: "GPS-Import nicht gefunden." });
       const row = (data.rows || []).find(item => String(item.id) === String(req.params.rowId));
       if (!row) return res.status(404).json({ ok: false, error: "GPS-Fahrt nicht gefunden." });
+      const changedAt = new Date().toISOString();
+      row.changeHistory = Array.isArray(row.changeHistory) ? row.changeHistory : [];
       if (typeof req.body?.isPrivate === "boolean") {
+        row.changeHistory.push({ at: changedAt, type: "private", from: !!row.isPrivate, to: req.body.isPrivate, by: "Bettina / Büro" });
         row.isPrivate = req.body.isPrivate;
-        row.privateMarkedAt = new Date().toISOString();
+        row.privateMarkedAt = changedAt;
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "assignedEmployeeId")) {
+        const oldDriver = effectiveGpsDriver(data, row);
+        const assignedEmployeeId = String(req.body?.assignedEmployeeId || "");
+        const assignedEmployeeName = String(req.body?.assignedEmployeeName || "");
+        row.assignedEmployeeId = assignedEmployeeId;
+        row.assignedEmployeeName = assignedEmployeeName;
+        row.assignmentUpdatedAt = changedAt;
+        row.changeHistory.push({
+          at: changedAt,
+          type: "driver_changed",
+          from: { employeeId: oldDriver.employeeId, employeeName: oldDriver.employeeName },
+          to: { employeeId: assignedEmployeeId, employeeName: assignedEmployeeName },
+          by: "Bettina / Büro",
+        });
+      }
+      if (Array.isArray(req.body?.passengers)) {
+        const cleanPassengers = req.body.passengers
+          .map(item => ({ employeeId: String(item.employeeId || ""), employeeName: String(item.employeeName || "").trim() }))
+          .filter(item => item.employeeId)
+          .filter((item, index, list) => list.findIndex(other => other.employeeId === item.employeeId) === index);
+        row.changeHistory.push({ at: changedAt, type: "passengers_changed", from: row.passengers || [], to: cleanPassengers, by: "Bettina / Büro" });
+        row.passengers = cleanPassengers;
       }
       await writeGpsImport(data);
-      res.json({ ok: true, row, import: gpsImportSummary(data) });
+      res.json({ ok: true, row: { ...row, effectiveDriver: effectiveGpsDriver(data, row) }, import: gpsImportSummary(data) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
