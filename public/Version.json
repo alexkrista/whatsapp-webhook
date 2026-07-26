@@ -1,7 +1,7 @@
 {
-  "build": "0023.27",
-  "name": "Teamfahrt & Mitfahrer",
+  "build": "0023.29",
+  "name": "Gemischte GPS-Rollen",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "GPS-Fahrer korrigieren, Mitfahrer verknüpfen, keine doppelten Fahrten"
+  "status": "Eigene Fahrten und Mitfahrer-Beziehungen getrennt"
 }
