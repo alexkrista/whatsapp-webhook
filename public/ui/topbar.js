@@ -1,46 +1,103 @@
 "use strict";
 
-(function(){
-  const WORLD_CONFIG={
-    kontrollzentrum:{label:"Kontrollzentrum",icon:"🎛️",href:"/kontrollzentrum",subtitle:"Führung, Entscheidungen und Kommunikation"},
-    admin:{label:"Admin",icon:"▦",href:"/admin/ui",subtitle:"Stammdaten und Verwaltung"},
-    kristine:{label:"Kristine",icon:"✦",href:"/kristine",subtitle:"Planung, Aufgaben und Organisation"}
-  };
+(function () {
+  const WORLDS = [
+    { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick und Entscheidungen" },
+    { key: "kristool", label: "KRISTOOL", icon: "🛠", href: "/kristool-preview/", subtitle: "Informationsfabrik" },
+    { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine", subtitle: "Assistentin und Kommunikation" },
+    { key: "krisplan", label: "KRISPLAN", icon: "▦", href: "/kristine#planning", subtitle: "Planung und Einteilung" },
+    { key: "leitstand", label: "LEITSTAND", icon: "◉", href: "/kristine#control", subtitle: "Live-Betrieb und Tagesstatus" },
+    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Stammdaten und Verwaltung" }
+  ];
 
-  function withToken(href){
-    const qs=new URLSearchParams(location.search);
-    const token=qs.get("token");
-    if(!token)return href;
-    return href+(href.includes("?")?"&":"?")+"token="+encodeURIComponent(token);
+  function tokenized(href) {
+    const url = new URL(href, location.origin);
+    const token = new URLSearchParams(location.search).get("token");
+    if (token) url.searchParams.set("token", token);
+    return url.pathname + url.search + url.hash;
   }
 
-  function inferWorld(){
-    const p=location.pathname.toLowerCase();
-    if(p.includes("kontrollzentrum"))return "kontrollzentrum";
-    if(p.includes("/admin"))return "admin";
+  function inferActive() {
+    const path = location.pathname.toLowerCase();
+    const hash = location.hash.toLowerCase();
+    if (path.includes("kristool")) return "kristool";
+    if (path.includes("kontrollzentrum")) return "kristower";
+    if (path.includes("/admin")) return "krisadmin";
+    if (hash === "#planning") return "krisplan";
+    if (hash === "#control") return "leitstand";
     return "kristine";
   }
 
-  window.createKristaTopbar=function(options={}){
-    const active=options.active||inferWorld();
-    const mount=document.getElementById(options.mountId||"kristaTopbar");
-    if(!mount)return;
-    const current=WORLD_CONFIG[active]||WORLD_CONFIG.kontrollzentrum;
-    const build=options.build||"0023.18";
-    mount.className="krista-shell-topbar";
-    mount.innerHTML=`
-      <div class="krista-shell-inner">
-        <div class="krista-brand">
-          <div class="krista-mark" aria-hidden="true">K</div>
-          <div class="krista-brand-copy">
-            <div class="krista-brand-title">KRISTA</div>
-            <div class="krista-brand-sub">${current.subtitle} · Build ${build}</div>
-          </div>
-        </div>
-        <nav class="krista-world-nav" aria-label="Hauptbereiche">
-          ${Object.entries(WORLD_CONFIG).map(([key,item])=>`<a class="krista-world-link${key===active?" active":""}" ${key===active?'aria-current="page"':''} href="${withToken(item.href)}"><span class="nav-icon">${item.icon}</span><span>${item.label}</span></a>`).join("")}
+  function activateKristineHash() {
+    const hash = location.hash.replace("#", "");
+    if (!hash || typeof window.showTab !== "function") return;
+    if (["planning", "control", "tasks", "schedules", "kristool"].includes(hash)) {
+      window.showTab(hash);
+    }
+  }
+
+  function buildTopbar(mount, options) {
+    const active = options.active || mount.dataset.kristaActive || inferActive();
+    const current = WORLDS.find(item => item.key === active) || WORLDS[0];
+    const build = options.build || mount.dataset.kristaBuild || "M3.1";
+    const context = options.context || mount.dataset.kristaContext || current.subtitle;
+
+    mount.className = "krista-shell-topbar";
+    mount.innerHTML = `
+      <div class="krista-shell-main">
+        <a class="krista-brand" href="${tokenized("/kontrollzentrum")}" aria-label="KRISTA Start">
+          <span class="krista-mark">K</span>
+          <span class="krista-brand-copy">
+            <strong>KRISTA</strong>
+            <small>Einfach. Intuitiv. Gemeinsam.</small>
+          </span>
+        </a>
+
+        <nav class="krista-world-nav" aria-label="KRISTA Arbeitswelten">
+          ${WORLDS.map(item => `
+            <a class="krista-world-link ${item.key === active ? "active" : ""}"
+               ${item.key === active ? 'aria-current="page"' : ""}
+               href="${tokenized(item.href)}">
+              <span class="krista-world-icon" aria-hidden="true">${item.icon}</span>
+              <span>${item.label}</span>
+            </a>`).join("")}
         </nav>
+
+        <div class="krista-user">
+          <strong>Alexander Krista</strong>
+          <small>${build}</small>
+        </div>
+      </div>
+
+      <div class="krista-contextbar">
+        <div>
+          <strong>${current.label}</strong>
+          <span>${context}</span>
+        </div>
+        <div class="krista-context-status" id="kristaContextStatus"></div>
       </div>`;
+
     document.body.classList.add("krista-ui");
+  }
+
+  window.createKristaTopbar = function (options = {}) {
+    const mount = document.getElementById(options.mountId || "kristaTopbar");
+    if (mount) buildTopbar(mount, options);
   };
+
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("#kristaTopbar,[data-krista-topbar]").forEach(mount => {
+      if (!mount.dataset.kristaRendered) {
+        mount.dataset.kristaRendered = "1";
+        buildTopbar(mount, {});
+      }
+    });
+    activateKristineHash();
+  });
+
+  window.addEventListener("hashchange", function () {
+    activateKristineHash();
+    const mount = document.getElementById("kristaTopbar");
+    if (mount) buildTopbar(mount, {});
+  });
 })();
