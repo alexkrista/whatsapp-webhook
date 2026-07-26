@@ -1,7 +1,7 @@
 {
-  "build": "0023.21",
-  "name": "M3.1.1 – Ein Datum, eine Wahrheit",
+  "build": "0023.22",
+  "name": "M3.1 – Klarer Kopf",
   "date": "2026-07-26",
   "version": "3.5.2",
-  "status": "Leitstand-Deduplizierung und intuitive Tagesnavigation"
+  "status": "Leitstand aus globalem Kopf entfernt und KRISTOOL-Route ohne Redirect"
 }
