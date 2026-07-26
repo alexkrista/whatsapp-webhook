@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="kristool.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.25"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.26"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -73,12 +73,36 @@
     <section class="comparison-grid">
       <article class="truth-card">
         <header><span class="step-number truth">1</span><div><h3>KRISTINE</h3><p>Offizielle Zeiterfassung · führende Wahrheit</p></div><span class="pill truth">WAHRHEIT</span></header>
+        <div class="correction-toolbar" id="correctionToolbar" hidden>
+          <label>Änderungsgrund
+            <select id="correctionReason">
+              <option value="">Grund wählen</option>
+              <option>GPS bestätigt spätere Zeit</option>
+              <option>Arbeitsbeginn vergessen</option>
+              <option>Arbeitsende vergessen</option>
+              <option>Mitfahrt / Rückfahrt mit Kollegen</option>
+              <option>Baustellenwechsel ergänzt</option>
+              <option>Pause ergänzt oder korrigiert</option>
+              <option>Sonstiges</option>
+            </select>
+          </label>
+          <label>Notiz
+            <input id="correctionNote" type="text" placeholder="kurze Begründung">
+          </label>
+        </div>
         <div id="kristineSegments" class="timeline empty">Noch keine Tagesfolie geöffnet.</div>
+        <div class="segment-actions" id="segmentActions" hidden>
+          <button class="mini-action" id="addWorkSegment">+ Arbeitsblock</button>
+          <button class="mini-action" id="addPauseSegment">+ Pause</button>
+          <button class="mini-action subtle" id="resetSegments">↶ Original wiederherstellen</button>
+        </div>
+        <div class="correction-history" id="correctionHistory" hidden></div>
         <footer><span>Arbeitszeit</span><strong id="kristineTotal">–</strong></footer>
       </article>
 
       <article class="gps-card">
         <header><span class="step-number gps">2</span><div><h3>GPS</h3><p>Kontrolle, Ergänzung und Kilometerbuch</p></div><span class="pill gps">INFORMATION</span></header>
+        <div id="gpsVehicles" class="gps-vehicles" hidden></div>
         <div id="gpsTrips" class="trips empty">Noch keine GPS-Daten gewählt.</div>
         <footer class="gps-total"><div><span>Fahrten</span><strong id="gpsTripCount">–</strong></div><div><span>Kilometer</span><strong id="gpsDistance">–</strong></div><div><span>Privat</span><strong id="gpsPrivate">–</strong></div></footer>
       </article>
