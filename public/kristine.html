@@ -131,7 +131,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="M3.1"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.33"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -1106,28 +1106,49 @@ function renderKristool(){
 }
 
 
-function normalizedEmployeeIdentity(employee){
+function normalizedEmployeeIdentity(employee,employeeId=''){
+  // Wichtig: Im Leitstand ist die KRISTA-Mitarbeiter-ID die führende Identität.
+  // Telefon und Name sind nur Rückfallebenen für alte/unvollständige Datensätze.
+  const id=String(employeeId||employee?.employeeId||employee?.id||'').trim();
+  if(id)return `id:${id}`;
+
   const phone=String(employee?.phone||'').replace(/\D/g,'').replace(/^00/,'');
   if(phone)return `phone:${phone}`;
+
   const name=String(employee?.name||employee?.employeeName||'')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-  return `name:${name||String(employee?.id||employee?.employeeId||'unknown')}`;
+  return `name:${name||'unknown'}`;
 }
 
 function canonicalControlEmployees(date){
   const planned=data.assignments.filter(a=>a.date===date);
   const groups=new Map();
+
   const add=(row,source)=>{
-    const id=String(row?.id??row?.employeeId??'');
+    // Planung und Status besitzen oft zusätzlich ein technisches "id"-Feld.
+    // Für Personen muss employeeId immer Vorrang haben.
+    const rawId=source==='master'
+      ? (row?.id??row?.employeeId??'')
+      : (row?.employeeId??row?.id??'');
+    const id=String(rawId||'').trim();
     if(!id)return;
-    const employee=masterEmployees.find(e=>String(e.id)===id)||row;
-    const key=normalizedEmployeeIdentity(employee);
+
+    const master=masterEmployees.find(e=>String(e.id)===id);
+    const employee=master||row;
+    const canonicalId=String(master?.id||id);
+    const key=normalizedEmployeeIdentity(employee,canonicalId);
+
     if(!groups.has(key))groups.set(key,{key,rows:[],ids:new Set(),sources:new Set()});
     const group=groups.get(key);
-    group.ids.add(id);group.sources.add(source);
-    if(!group.rows.some(x=>String(x.id??x.employeeId)===id))group.rows.push(employee);
+    group.ids.add(canonicalId);
+    group.sources.add(source);
+
+    if(!group.rows.some(x=>String(x.id??x.employeeId)===canonicalId)){
+      group.rows.push(employee);
+    }
   };
+
   masterEmployees.forEach(e=>add(e,'master'));
   planned.forEach(a=>add(a,'planning'));
   Object.values(data.states||{}).forEach(s=>{if(s?.employeeId)add(s,'state')});
