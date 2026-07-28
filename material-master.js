@@ -125,7 +125,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     materialId: ["material id", "artikelnummer", "artikel nr", "kurzel", "kürzel", "code"],
     group: ["gruppe", "materialgruppe"],
     subgroup: ["untergruppe", "materialuntergruppe"],
-    manufacturer: ["hersteller", "marke"],
+    manufacturer: ["hersteller", "hersteller handler", "hersteller händler", "marke"],
+    articleNumber: ["artikel nummer", "artikelnummer", "artikel nr"],
     product: ["produkt", "produktname", "material"],
     productLine: ["produktlinie", "linie", "variante basis", "variante"],
     colorNumber: ["farbnummer", "farb nr", "farbtonnummer", "nummer"],
@@ -133,7 +134,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     containerSize: ["gebinde", "gebindegroße", "gebindegroesse", "inhalt"],
     unit: ["einheit", "mengeneinheit"],
     purchasePrice: ["ek", "ek netto", "einkaufspreis", "einkaufspreis netto"],
-    salePrice: ["vk", "vk netto", "verkaufspreis", "verkaufspreis netto"],
+    markup: ["aufschlag"],
+    overhead: ["gemeinkosten"],
+    salePrice: ["vk", "vk netto", "vk netto netto", "verkaufspreis", "verkaufspreis netto"],
     priceValidFrom: ["preis gultig ab", "preisstand", "datenstand", "preisdatum"],
     priceCheckedAt: ["zuletzt gepruft", "preis gepruft am", "gepruft am"],
     stock: ["lagerbestand", "aktueller bestand", "bestand"],
@@ -143,7 +146,10 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     supplierArticleNumber: ["lieferanten artikelnummer", "lieferantenartikelnummer"],
     manufacturerArticleNumber: ["hersteller artikelnummer", "herstellerartikelnummer"],
     regieItem: ["regieartikel", "regiepflicht", "regie"],
-    designRelevant: ["gestaltungsauftrag", "materialprotokoll", "dokumentationsrelevant"],
+    designRelevant: ["gestaltungsauftrag", "materialprotokoll", "dokumentationsrelevant", "projektrelevant"],
+    extraQuestion: ["zusatzfrage"],
+    alias: ["alias", "aliase", "suchbegriffe"],
+    labelPhotoRequired: ["foto etikett", "mischetikett", "dokumentationsfoto"],
     locationMode: ["ort abfrage", "wo erforderlich", "zuordnung"],
     roomRequired: ["raum erforderlich"],
     componentRequired: ["bauteil erforderlich"],
@@ -211,6 +217,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       group,
       subgroup,
       manufacturer: clean(raw.manufacturer, 120),
+      articleNumber: clean(raw.articleNumber, 100),
       product,
       productLine: clean(raw.productLine, 120),
       colorNumber: clean(raw.colorNumber, 50),
@@ -218,6 +225,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       containerSize: number(raw.containerSize),
       unit: clean(raw.unit, 30),
       purchasePrice: number(raw.purchasePrice),
+      markup: number(raw.markup),
+      overhead: number(raw.overhead),
       salePrice: number(raw.salePrice),
       priceValidFrom: dateISO(raw.priceValidFrom),
       priceCheckedAt: dateISO(raw.priceCheckedAt),
@@ -234,6 +243,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       componentRequired: locationMode === "component" || componentRequired,
       areaRequired: locationMode === "area" || areaRequired,
       photoRequired: bool(raw.photoRequired),
+      labelPhotoRequired: bool(raw.labelPhotoRequired),
+      extraQuestion: clean(raw.extraQuestion, 250),
+      alias: clean(raw.alias, 1000),
       active: bool(raw.active, true),
       note: clean(raw.note, 1000),
       sourceSheet: clean(raw.sourceSheet || context.sheetName, 100),
@@ -256,6 +268,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       normalized.colorName,
       normalized.supplierArticleNumber,
       normalized.manufacturerArticleNumber,
+      normalized.articleNumber,
+      normalized.alias,
     ].join(" ").toLowerCase();
 
     return normalized;
@@ -267,6 +281,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       group: findValue(row, "group") || context.sheetName,
       subgroup: findValue(row, "subgroup"),
       manufacturer: findValue(row, "manufacturer"),
+      articleNumber: findValue(row, "articleNumber"),
       product: findValue(row, "product"),
       productLine: findValue(row, "productLine"),
       colorNumber: findValue(row, "colorNumber"),
@@ -274,6 +289,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       containerSize: findValue(row, "containerSize"),
       unit: findValue(row, "unit"),
       purchasePrice: findValue(row, "purchasePrice"),
+      markup: findValue(row, "markup"),
+      overhead: findValue(row, "overhead"),
       salePrice: findValue(row, "salePrice"),
       priceValidFrom: findValue(row, "priceValidFrom"),
       priceCheckedAt: findValue(row, "priceCheckedAt"),
@@ -290,6 +307,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       componentRequired: findValue(row, "componentRequired"),
       areaRequired: findValue(row, "areaRequired"),
       photoRequired: findValue(row, "photoRequired"),
+      labelPhotoRequired: findValue(row, "labelPhotoRequired"),
+      extraQuestion: findValue(row, "extraQuestion"),
+      alias: findValue(row, "alias"),
       active: findValue(row, "active"),
       note: findValue(row, "note"),
       sourceSheet: context.sheetName,
@@ -371,7 +391,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         continue;
       }
       const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+      const headerIndex = matrix.findIndex(row => Array.isArray(row) && row.some(cell => normalizeHeader(cell) === "material id"));
+      if (headerIndex < 0) { skippedSheets.push(sheetName); continue; }
+      const headers = matrix[headerIndex].map(value => clean(value, 120));
+      const rows = matrix.slice(headerIndex + 1).map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
       rows.forEach((row, index) => {
         const material = rowToMaterial(row, {
           sheetName,
@@ -577,6 +601,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const subgroup = clean(req.query.subgroup, 100);
       const activeOnly = String(req.query.activeOnly || "1") !== "0";
       const staleOnly = String(req.query.staleOnly || "0") === "1";
+      const mode = clean(req.query.mode, 30);
 
       let rows = materials;
       if (activeOnly) rows = rows.filter(item => item.active !== false);
@@ -585,6 +610,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (query) {
         rows = rows.filter(item => String(item.searchText || "").includes(query));
       }
+      if (mode === "project") rows = rows.filter(item => item.designRelevant === true);
+      // Regie zeigt bewusst den gesamten aktiven Materialstamm.
+      if (mode === "regie") rows = rows.filter(item => item.active !== false);
       rows = rows.map(decorate);
       if (staleOnly) rows = rows.filter(item => item.priceStale);
 
