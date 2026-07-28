@@ -50,15 +50,16 @@ const { registerKristine } = require("./kristine");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration } = require("./media-migration");
+const { registerMaterialMaster } = require("./material-master");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.2";
-const APP_BUILD = "0023.32-header-rufname-reconcile";
-const APP_STATUS = "Admin-Kopf zurück und GPS-Rufnamen neu abgeglichen";
-const APP_BUILD_DATE = "2026-07-26";
+const APP_VERSION = "3.5.3";
+const APP_BUILD = "0025.2-materialsystem-komplett";
+const APP_STATUS = "Materialsystem mit Excel-Import, Preisprüfung und Lern-Inbox";
+const APP_BUILD_DATE = "2026-07-28";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
@@ -3447,6 +3448,14 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+
+// ===================== Materialsystem =====================
+registerMaterialMaster(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  publicDir: path.join(process.cwd(), "public"),
+});
+console.log("✅ KRISTINE Materialsystem registriert");
 
 // ===================== Medienmigration =====================
 registerMediaMigration(app, {
