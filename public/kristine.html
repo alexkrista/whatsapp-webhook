@@ -61,6 +61,13 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 .time-editor-table{width:100%;border-collapse:collapse;margin-top:12px}.time-editor-table th,.time-editor-table td{padding:8px;border-bottom:1px solid #ece8e0;text-align:left}.time-editor-table select,.time-editor-table input{padding:7px 8px}.time-editor-row-work{background:#f5fbf6}.time-editor-row-pause{background:#fff7f7}.time-editor-row-lunch{background:#fffaf0}.time-editor-actions{display:flex;gap:5px;flex-wrap:wrap}.time-editor-actions button{padding:6px 8px}.time-editor-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.time-editor-summary span{background:#f3f1ec;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800}
 .time-copybar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:12px;padding:12px;background:#f7f5ef;border:1px solid #e3ded4;border-radius:12px}.time-copybar>div{min-width:240px;flex:1}.time-copybar select{width:100%}.time-copy-hint{font-size:12px;color:#666;margin-top:5px}.time-copy-source{font-weight:800;color:#27713d}
+.time-editor-row-up{background:#eef6ff}
+.time-editor-time{width:78px!important;max-width:78px!important;text-align:center;font-variant-numeric:tabular-nums;font-weight:750}
+.time-editor-up-reason{min-width:180px}
+.time-editor-site-divider td{padding:12px 8px!important;border-bottom:0!important;background:#edf4ff;color:#245b8f;font-weight:900}
+.time-editor-site-divider-line{display:flex;align-items:center;gap:10px}
+.time-editor-site-divider-line:before,.time-editor-site-divider-line:after{content:"";height:1px;background:#9db9d6;flex:1}
+.time-editor-site-divider-label{white-space:nowrap}
 
 /* Build 0022.1: Planungstisch – sticky Kopf, Kartenpools, Drag = Kopie */
 .planning-top{position:sticky;top:0;z-index:30;background:#f3f1ec;padding:0 0 12px;box-shadow:0 10px 18px rgba(243,241,236,.96)}
@@ -131,7 +138,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.33"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.34"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -391,8 +398,10 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     <div id="timeEditorTable"></div>
     <div class="actions" style="margin-top:12px">
       <button type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
+      <button type="button" class="green" onclick="addTimeEditorRow('site')">+ Baustelle</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('lunch')">+ Mittag</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('pause')">+ Pause</button>
+      <button type="button" class="secondary" onclick="addTimeEditorRow('up')">+ Unproduktiv</button>
       <button type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
     </div>
     <div class="notice" style="margin-top:12px"><strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.</div><input id="moveLinkedEntries" type="hidden" value="1">
@@ -434,7 +443,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0023.18"});
+createKristaTopbar({active:"kristine",build:"0023.34"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -973,19 +982,85 @@ function jobOptions(selected=''){
   const jobs=[...masterJobs].filter(j=>j.active!==false).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
   return '<option value="">– Baustelle wählen –</option>'+jobs.map(j=>{const jid=String(j.jobId||j.id||'');const name=String(j.name||j.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===String(selected)?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`}).join('');
 }
-function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':'Pause'}
-function renderTimeEditor(){
-  const rows=timeEditorSegments.map((seg,index)=>`<tr class="time-editor-row-${esc(seg.type)}"><td><select onchange="updateTimeEditorRow(${index},'type',this.value)"><option value="work" ${seg.type==='work'?'selected':''}>Arbeit</option><option value="lunch" ${seg.type==='lunch'?'selected':''}>Mittag</option><option value="pause" ${seg.type==='pause'?'selected':''}>Pause</option></select></td><td><input type="time" value="${esc(seg.from||'')}" onchange="updateTimeEditorRow(${index},'from',this.value)"></td><td><input type="time" value="${esc(seg.to||'')}" onchange="updateTimeEditorRow(${index},'to',this.value)"></td><td>${seg.type==='work'?`<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`:'<span class="small">–</span>'}</td><td><div class="time-editor-actions"><button class="secondary" onclick="moveTimeEditorRow(${index},-1)" title="nach oben">↑</button><button class="secondary" onclick="moveTimeEditorRow(${index},1)" title="nach unten">↓</button><button class="danger" onclick="removeTimeEditorRow(${index})">Löschen</button></div></td></tr>`).join('');
-  const work=timeEditorSegments.filter(x=>x.type==='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
-  const breaks=timeEditorSegments.filter(x=>x.type!=='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
-  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
+function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':type==='pause'?'Pause':type==='up'?'Unproduktiv':'Abschnitt'}
+const UP_REASONS=['Werkstatt','Material holen','Besprechung','Schulung','Arzt','Fahrzeugpflege','Lager','Sonstiges'];
+function normalizeEditorTime(value){
+  const raw=String(value||'').trim();
+  if(/^\d{1,2}:\d{2}$/.test(raw)){
+    const [h,m]=raw.split(':').map(Number);
+    if(h>=0&&h<=23&&m>=0&&m<=59)return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+  const digits=raw.replace(/\D/g,'');
+  let h,m;
+  if(digits.length===1||digits.length===2){h=Number(digits);m=0}
+  else if(digits.length===3){h=Number(digits.slice(0,1));m=Number(digits.slice(1))}
+  else if(digits.length===4){h=Number(digits.slice(0,2));m=Number(digits.slice(2))}
+  else return '';
+  if(h<0||h>23||m<0||m>59)return '';
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
-function updateTimeEditorRow(index,key,value){if(!timeEditorSegments[index])return;timeEditorSegments[index][key]=value;if(key==='type'&&value!=='work'){timeEditorSegments[index].jobId='';timeEditorSegments[index].jobName=''}renderTimeEditor()}
-function setTimeEditorJob(index,select){const row=timeEditorSegments[index];if(!row)return;row.jobId=select.value;row.jobName=select.selectedOptions[0]?.dataset.name||''}
+function addMinuteToHM(hm){
+  const minutes=hmToMinutes(hm);
+  if(minutes===null)return '';
+  const next=(minutes+1)%(24*60);
+  return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
+}
+function upReasonOptions(selected=''){
+  return UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
+}
+function timeEditorContextCell(seg,index){
+  if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
+  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'Werkstatt')}</select>`;
+  return '<span class="small">–</span>';
+}
+function renderTimeEditor(){
+  let rows='';
+  for(let index=0;index<timeEditorSegments.length;index++){
+    const seg=timeEditorSegments[index];
+    const previous=timeEditorSegments[index-1];
+    if(seg.type==='work'&&previous?.type==='work'&&String(previous.jobId||'')!==String(seg.jobId||'')){
+      rows+=`<tr class="time-editor-site-divider"><td colspan="5"><div class="time-editor-site-divider-line"><span class="time-editor-site-divider-label">🏠 Baustellenwechsel · ${esc(seg.jobName||seg.jobId||'Baustelle wählen')}</span></div></td></tr>`;
+    }
+    rows+=`<tr class="time-editor-row-${esc(seg.type)}">
+      <td><select onchange="updateTimeEditorRow(${index},'type',this.value)">
+        <option value="work" ${seg.type==='work'?'selected':''}>Arbeit</option>
+        <option value="lunch" ${seg.type==='lunch'?'selected':''}>Mittag</option>
+        <option value="pause" ${seg.type==='pause'?'selected':''}>Pause</option>
+        <option value="up" ${seg.type==='up'?'selected':''}>Unproduktiv</option>
+      </select></td>
+      <td><input class="time-editor-time" type="text" inputmode="numeric" maxlength="5" value="${esc(seg.from||'')}" onfocus="this.select()" onblur="commitTimeEditorTime(${index},'from',this)"></td>
+      <td><input class="time-editor-time" type="text" inputmode="numeric" maxlength="5" value="${esc(seg.to||'')}" onfocus="this.select()" onblur="commitTimeEditorTime(${index},'to',this)"></td>
+      <td>${timeEditorContextCell(seg,index)}</td>
+      <td><div class="time-editor-actions"><button class="secondary" onclick="moveTimeEditorRow(${index},-1)">↑</button><button class="secondary" onclick="moveTimeEditorRow(${index},1)">↓</button><button class="danger" onclick="removeTimeEditorRow(${index})">Löschen</button></div></td>
+    </tr>`;
+  }
+  const work=timeEditorSegments.filter(x=>x.type==='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
+  const breaks=timeEditorSegments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
+  const up=timeEditorSegments.filter(x=>x.type==='up').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
+  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / UP-Grund</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
+}
+function commitTimeEditorTime(index,key,input){
+  const normalized=normalizeEditorTime(input.value);
+  if(!normalized){input.value=timeEditorSegments[index]?.[key]||'';employeeActionNote.textContent='Bitte Uhrzeit z. B. als 730 oder 07:30 eingeben.';return}
+  updateTimeEditorRow(index,key,normalized);
+}
+function updateTimeEditorRow(index,key,value){
+  const row=timeEditorSegments[index];if(!row)return;
+  row[key]=value;
+  if(key==='type'){
+    if(value==='work'){row.reason=''}
+    else{row.jobId='';row.jobName='';if(value==='up'&&!row.reason)row.reason='Werkstatt'}
+  }
+  if(key==='to'&&value&&timeEditorSegments[index+1])timeEditorSegments[index+1].from=addMinuteToHM(value);
+  renderTimeEditor();
+}
+function setTimeEditorJob(index,select){const row=timeEditorSegments[index];if(!row)return;row.jobId=select.value;row.jobName=select.selectedOptions[0]?.dataset.name||'';renderTimeEditor()}
 function addTimeEditorRow(type='work'){
-  const last=timeEditorSegments.at(-1);const from=last?.to||currentViennaHM();
-  const firstJob=masterJobs.find(j=>j.active!==false);
-  timeEditorSegments.push({id:id(),type,from,to:'',jobId:type==='work'?String(firstJob?.jobId||firstJob?.id||''):'',jobName:type==='work'?String(firstJob?.name||firstJob?.jobName||''):''});renderTimeEditor();
+  const last=timeEditorSegments.at(-1);
+  const from=last?.to?addMinuteToHM(last.to):currentViennaHM();
+  const rowType=type==='site'?'work':type;
+  timeEditorSegments.push({id:id(),type:rowType,from,to:'',jobId:'',jobName:'',reason:rowType==='up'?'Werkstatt':''});
+  renderTimeEditor();
 }
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
 function moveTimeEditorRow(index,direction){const target=index+direction;if(target<0||target>=timeEditorSegments.length)return;[timeEditorSegments[index],timeEditorSegments[target]]=[timeEditorSegments[target],timeEditorSegments[index]];renderTimeEditor()}
@@ -1033,25 +1108,27 @@ async function saveTimeEditor(){
   if(!selectedControlEmployeeId)return;
   const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
   const date=selectedWorkDate();
-  for(const seg of timeEditorSegments){if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}}
+  for(const seg of timeEditorSegments){
+    if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}
+    if(seg.to&&hmToMinutes(seg.to)<=hmToMinutes(seg.from)){employeeActionNote.textContent=`Ungültiger Zeitraum ${seg.from}–${seg.to}.`;return}
+    if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
+    if(seg.type==='up'&&!seg.reason)seg.reason='Sonstiges';
+  }
   employeeActionNote.textContent='Speichert …';
   try{
     const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
     employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert${timeEditorCopiedFrom?` · wie ${timeEditorCopiedFrom.employeeName}`:''}.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
     await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
+    if(confirm(`Zeiten von ${employee?.name||'dem Mitarbeiter'} wurden geändert.\n\nNeuen Tagesabschluss jetzt zur Bestätigung senden?`))await sendEmployeeDayEndCheck(true);
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
 }
-async function sendEmployeeDayEndCheck(){
+async function sendEmployeeDayEndCheck(silent=false){
   if(!selectedControlEmployeeId)return;
-  const btn=document.getElementById('employeeActionAsk');
-  const old=btn.textContent;btn.disabled=true;btn.textContent='Sendet …';employeeActionNote.textContent='';
   try{
     const result=await api('/admin/api/morning-status/employee-end-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeId:selectedControlEmployeeId,date:selectedWorkDate()})});
-    employeeActionNote.textContent=result?.result?.sent?'✓ Nachfrage wurde über Kristine gesendet.':(result?.result?.reason||'Keine Nachricht gesendet.');
-    btn.textContent='Gesendet';
-  }catch(error){employeeActionNote.textContent='Fehler: '+error.message;btn.disabled=false;btn.textContent=old;}
+    employeeActionNote.textContent=result?.result?.sent?'✓ Neuer Tagesabschluss wurde über Kristine gesendet.':(result?.result?.reason||'Keine Nachricht gesendet.');
+  }catch(error){employeeActionNote.textContent='Fehler beim Senden: '+error.message}
 }
-
 
 function kristoolEmployeeName(employeeId,state){return masterEmployees.find(e=>String(e.id)===String(employeeId))?.name||state?.employeeName||String(employeeId||'Mitarbeiter')}
 function kristoolTaskAction(task){return `openTaskListModal('${esc(task.id)}')`}
