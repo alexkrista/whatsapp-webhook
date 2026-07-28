@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KRISTINE · Material</title>
+<style>
+:root{--green:#1f7a4d;--soft:#e8f3ed;--bg:#f4f6f5;--ink:#17211c;--muted:#69746e;--line:#dce4df;--warn:#fff3d1;--danger:#ffe9e9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,system-ui,-apple-system,sans-serif;color:var(--ink)}
+header{padding:22px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+h1{margin:0;font-size:25px}.wrap{max-width:1200px;margin:auto;padding:20px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px}.big{font-size:28px;font-weight:900}.muted{color:var(--muted)}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}.btn,input,select{font:inherit;border-radius:13px;border:1px solid var(--line);padding:11px 13px;background:#fff}.btn{font-weight:800;cursor:pointer}.primary{background:var(--green);color:#fff;border-color:var(--green)}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:18px;overflow:hidden}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;text-transform:uppercase;color:var(--muted)}
+.pill{display:inline-block;padding:5px 8px;border-radius:999px;background:var(--soft);font-size:12px;font-weight:800}.yellow{background:var(--warn)}.red{background:var(--danger)}
+.tabs{display:flex;gap:8px;margin:18px 0}.tabs button.active{background:var(--green);color:#fff}
+.hidden{display:none}.inbox{display:grid;gap:12px}.inbox-item{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px}
+dialog{border:0;border-radius:22px;padding:0;max-width:650px;width:calc(100% - 24px)}dialog::backdrop{background:rgba(0,0,0,.4)}
+.form{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}.form h2,.form .wide{grid-column:1/-1}.form label{display:grid;gap:5px;font-size:13px;color:var(--muted)}
+@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.table-wrap{overflow:auto}.form{grid-template-columns:1fr}.form h2,.form .wide{grid-column:auto}}
+</style>
+</head>
+<body>
+<header><h1>💚 KRISTINE Material</h1><strong id="dataStatus">Datenstand –</strong></header>
+<div class="wrap">
+  <div class="grid">
+    <div class="card"><div class="muted">Materialien</div><div class="big" id="count">0</div></div>
+    <div class="card"><div class="muted">Preise prüfen</div><div class="big" id="stale">0</div></div>
+    <div class="card"><div class="muted">Neu zu lernen</div><div class="big" id="inboxCount">0</div></div>
+    <div class="card"><div class="muted">Aktive Gruppen</div><div class="big" id="groups">0</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input id="search" placeholder="Material, Farbnummer 154, Produkt …">
+    <select id="group"><option value="">Alle Gruppen</option></select>
+    <button class="btn" onclick="loadMaterials()">Suchen</button>
+    <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
+    <button class="btn" onclick="exportExcel()">Excel exportieren</button>
+  </div>
+
+  <div class="tabs">
+    <button class="btn active" id="tabMaterials" onclick="showTab('materials')">Materialstamm</button>
+    <button class="btn" id="tabInbox" onclick="showTab('inbox')">Neu gelernt / offen</button>
+  </div>
+
+  <section id="materials">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Gruppe</th><th>Material</th><th>Farbton</th><th>EK / VK</th><th>Preisstand</th><th>Aktion</th></tr></thead>
+        <tbody id="materialRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="inbox" class="hidden">
+    <div class="inbox" id="inboxRows"></div>
+  </section>
+</div>
+
+<dialog id="learnDialog">
+<form class="form" method="dialog" onsubmit="approveMaterial(event)">
+  <h2>Neues Material sauber anlegen</h2>
+  <input type="hidden" id="learnId">
+  <label>Gruppe<input id="learnGroup" required></label>
+  <label>Untergruppe<input id="learnSubgroup"></label>
+  <label>Hersteller<input id="learnManufacturer"></label>
+  <label>Produkt<input id="learnProduct" required></label>
+  <label>Farbnummer<input id="learnColorNumber"></label>
+  <label>Farbname<input id="learnColorName"></label>
+  <label>Einheit<input id="learnUnit"></label>
+  <label>Ort-Abfrage<select id="learnLocation"><option value="none">Keine</option><option value="room">Raum</option><option value="component">Bauteil</option><option value="area">Bereich/Fassade</option></select></label>
+  <label>EK (€)<input id="learnEk" inputmode="decimal"></label>
+  <label>VK (€)<input id="learnVk" inputmode="decimal"></label>
+  <label>Preis gültig ab<input id="learnPriceDate" type="date"></label>
+  <label>Gestaltungsauftrag<select id="learnDesign"><option value="false">Nein</option><option value="true">Ja</option></select></label>
+  <div class="wide toolbar">
+    <button type="button" class="btn" onclick="learnDialog.close()">Abbrechen</button>
+    <button class="btn primary">Material anlegen und lernen</button>
+  </div>
+</form>
+</dialog>
+
+<script>
+const token=new URLSearchParams(location.search).get("token")||"";
+const api=(url,opt={})=>fetch(url+(url.includes("?")?"&":"?")+"token="+encodeURIComponent(token),{headers:{"Content-Type":"application/json"},...opt}).then(async r=>{const body=await r.json().catch(()=>({error:"Unbekannter Fehler"}));if(!r.ok)throw new Error(body.error||"Fehler");return body});
+let inboxItems=[];
+
+async function loadMaterials(){
+  const q=document.getElementById("search").value;
+  const group=document.getElementById("group").value;
+  const data=await api(`/admin/api/materials?q=${encodeURIComponent(q)}&group=${encodeURIComponent(group)}&limit=2000`);
+  const s=data.summary;
+  count.textContent=s.activeCount; stale.textContent=s.stalePriceCount; inboxCount.textContent=s.inboxOpenCount;
+  groups.textContent=Object.keys(s.byGroup||{}).length; dataStatus.textContent=`Datenstand ${s.dataStatus||"noch offen"}`;
+  const select=document.getElementById("group");
+  const current=select.value;
+  select.innerHTML='<option value="">Alle Gruppen</option>'+Object.keys(s.byGroup||{}).sort().map(g=>`<option>${escapeHtml(g)}</option>`).join("");
+  select.value=current;
+  materialRows.innerHTML=data.materials.map(m=>`<tr>
+    <td><strong>${escapeHtml(m.materialId)}</strong></td>
+    <td>${escapeHtml(m.group)}<br><span class="muted">${escapeHtml(m.subgroup)}</span></td>
+    <td><strong>${escapeHtml([m.manufacturer,m.product].filter(Boolean).join(" · "))}</strong><br><span class="muted">${escapeHtml(m.unit||"")}</span></td>
+    <td>${m.colorNumber?`<strong>${escapeHtml(m.colorNumber)}</strong> · `:""}${escapeHtml(m.colorName||"")}</td>
+    <td>${money(m.purchasePrice)} / ${money(m.salePrice)}<br><span class="muted">Ertrag ${money(m.materialYield)}</span></td>
+    <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span></td>
+    <td>${m.priceStale?`<button class="btn" onclick="checkPrice('${js(m.materialId)}')">Preis geprüft</button>`:"✓"}</td>
+  </tr>`).join("");
+}
+async function loadInbox(){
+  const data=await api("/admin/api/material-inbox?status=open");
+  inboxItems=data.items; inboxCount.textContent=data.items.length;
+  inboxRows.innerHTML=data.items.length?data.items.map(x=>`<div class="inbox-item">
+    <strong>${escapeHtml(x.description||x.productSuggestion||"Unbekanntes Material")}</strong>
+    <p class="muted">${escapeHtml(x.quantity||"")} ${escapeHtml(x.unit||"")} · ${escapeHtml(x.jobName||x.jobId||"ohne Baustelle")} · ${escapeHtml(x.employeeName||"")}</p>
+    <button class="btn primary" onclick="openLearn('${js(x.id)}')">Einmal sauber anlegen</button>
+  </div>`).join(""):'<div class="card">Alles gelernt. 💚</div>';
+}
+function openLearn(id){
+  const x=inboxItems.find(v=>v.id===id);if(!x)return;
+  learnId.value=x.id;learnGroup.value=x.groupSuggestion||"";learnSubgroup.value=x.subgroupSuggestion||"";
+  learnManufacturer.value=x.manufacturerSuggestion||"";learnProduct.value=x.productSuggestion||x.description||"";
+  learnColorNumber.value=x.colorNumberSuggestion||"";learnColorName.value=x.colorNameSuggestion||"";
+  learnUnit.value=x.unit||"";learnPriceDate.value=new Date().toISOString().slice(0,10);
+  learnDialog.showModal();
+}
+async function approveMaterial(e){
+  e.preventDefault();
+  await api(`/admin/api/material-inbox/${encodeURIComponent(learnId.value)}/approve`,{method:"POST",body:JSON.stringify({
+    group:learnGroup.value,subgroup:learnSubgroup.value,manufacturer:learnManufacturer.value,product:learnProduct.value,
+    colorNumber:learnColorNumber.value,colorName:learnColorName.value,unit:learnUnit.value,locationMode:learnLocation.value,
+    purchasePrice:learnEk.value,salePrice:learnVk.value,priceValidFrom:learnPriceDate.value,priceCheckedAt:learnPriceDate.value,
+    designRelevant:learnDesign.value==="true",approvedBy:"Bettina / Büro"
+  })});
+  learnDialog.close();await Promise.all([loadMaterials(),loadInbox()]);
+  alert("Gelernt. Dieses Material steht ab jetzt überall zur Verfügung.");
+}
+async function checkPrice(id){
+  await api(`/admin/api/materials/${encodeURIComponent(id)}/check-price`,{method:"POST",body:JSON.stringify({priceCheckedAt:new Date().toISOString().slice(0,10)})});
+  loadMaterials();
+}
+async function importExcel(file){
+  if(!file)return;
+  const base64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(",")[1]);r.onerror=reject;r.readAsDataURL(file)});
+  const data=await api("/admin/api/materials/import-excel",{method:"POST",body:JSON.stringify({filename:file.name,base64})});
+  const r=data.report;alert(`Import fertig\nNeu: ${r.added}\nGeändert: ${r.changed}\nUnverändert: ${r.unchanged}\nDubletten: ${r.duplicateCount}`);
+  loadMaterials();
+}
+function exportExcel(){location.href="/admin/api/materials/export-excel?token="+encodeURIComponent(token)}
+function showTab(name){materials.classList.toggle("hidden",name!=="materials");inbox.classList.toggle("hidden",name!=="inbox");tabMaterials.classList.toggle("active",name==="materials");tabInbox.classList.toggle("active",name==="inbox");if(name==="inbox")loadInbox()}
+function money(v){return Number(v||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"})}
+function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function js(v){return String(v??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
+loadMaterials();loadInbox();
+</script>
+</body>
+</html>
