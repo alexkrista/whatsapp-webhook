@@ -10,7 +10,7 @@
 <section class="screen" id="s7"><h1>Passt der Regiebericht?</h1><div class="card summary" id="summary"></div></section>
 <section class="screen center" id="done"><div class="check">✓</div><h1>Regie vorbereitet.</h1><p>Die anderen Beteiligten bekommen nur noch: „Warst du dabei? – übernehmen?“</p></section>
 </div><div class="bottom"><button class="btn primary" id="next" style="width:100%" onclick="next()">Weiter</button></div>
-<dialog id="matDialog"><form method="dialog" style="padding:20px;min-width:min(420px,90vw)"><h2 id="matTitle"></h2><label>Menge<input id="qty" inputmode="decimal"></label><div id="dynamic"></div><div class="actions"><button class="btn secondary" value="cancel">Abbrechen</button><button class="btn primary" value="default" onclick="saveMaterial(event)">Übernehmen</button></div></form></dialog>
+<dialog id="matDialog"><form id="matForm" style="padding:20px;min-width:min(420px,90vw)" onsubmit="saveMaterial(event)"><h2 id="matTitle"></h2><label>Menge<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center"><input id="qty" inputmode="decimal" required><strong id="qtyUnit" style="min-width:70px"></strong></div></label><div id="dynamic"></div><div class="actions"><button type="button" class="btn secondary" onclick="document.getElementById('matDialog').close()">Abbrechen</button><button type="submit" class="btn primary">Übernehmen</button></div></form></dialog>
 <script>
 const qs = new URLSearchParams(location.search);
 const employeeId = qs.get("employeeId") || "";
@@ -325,8 +325,9 @@ function openMaterial(id) {
   current = materials.find(m => String(m.materialId) === String(id));
   if (!current) return;
 
-  matTitle.textContent = current.product || current.materialId;
-  qty.value = "";
+  $("matTitle").textContent = current.product || current.materialId;
+  $("qty").value = "";
+  $("qtyUnit").textContent = current.unit || "Einheit";
 
   let html = "";
 
@@ -370,8 +371,8 @@ function openMaterial(id) {
     `;
   }
 
-  dynamic.innerHTML = html;
-  matDialog.showModal();
+  $("dynamic").innerHTML = html;
+  $("matDialog").showModal();
 }
 
 function field(id, label) {
@@ -386,16 +387,22 @@ function field(id, label) {
 function saveMaterial(event) {
   event.preventDefault();
 
-  if (!qty.value) {
+  const quantity = $("qty").value.trim();
+  if (!quantity) {
     alert("Menge fehlt");
+    $("qty").focus();
+    return;
+  }
+  if (!current) {
+    alert("Material fehlt");
     return;
   }
 
   chosen.push({
     materialId: current.materialId,
-    product: current.product,
-    quantity: qty.value,
-    unit: current.unit,
+    product: current.product || current.materialId,
+    quantity,
+    unit: current.unit || "Einheit",
     room: val("room"),
     component: val("component"),
     area: val("area"),
@@ -404,8 +411,16 @@ function saveMaterial(event) {
     labelPhotoName: $("labelPhoto")?.files?.[0]?.name || ""
   });
 
-  matDialog.close();
+  $("matDialog").close();
+  $("search").value = "";
+  activeGroup = "";
+  document.querySelectorAll(".chip").forEach((chip, index) => chip.classList.toggle("on", index === 0));
+  applyMaterialFilter();
   drawChosen();
+
+  setTimeout(() => {
+    $("selectedMaterials").scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 50);
 }
 
 function val(id) {
