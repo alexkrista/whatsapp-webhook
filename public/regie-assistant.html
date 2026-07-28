@@ -12,8 +12,49 @@
 </div><div class="bottom"><button class="btn primary" id="next" style="width:100%" onclick="next()">Weiter</button></div>
 <dialog id="matDialog"><form method="dialog" style="padding:20px;min-width:min(420px,90vw)"><h2 id="matTitle"></h2><label>Menge<input id="qty" inputmode="decimal"></label><div id="dynamic"></div><div class="actions"><button class="btn secondary" value="cancel">Abbrechen</button><button class="btn primary" value="default" onclick="saveMaterial(event)">Übernehmen</button></div></form></dialog>
 <script>
-const qs=new URLSearchParams(location.search),employeeId=qs.get('employeeId')||'alex',date=qs.get('date')||new Date().toISOString().slice(0,10);let page=1,ctx={segments:[],team:[]},segment=null,materials=[],filtered=[],chosen=[],current=null;
-const $=id=>document.getElementById(id),api=(u,o={})=>fetch(u,{headers:{'Content-Type':'application/json'},...o}).then(async r=>{const b=await r.json();if(!r.ok)throw Error(b.error||'Fehler');return b});
+const qs=new URLSearchParams(location.search),
+employeeId=qs.get('employeeId')||'alex',
+date=qs.get('date')||new Date().toISOString().slice(0,10),
+token=qs.get('token')||'';
+
+let page=1,ctx={segments:[],team:[]},segment=null,materials=[],filtered=[],chosen=[],current=null;
+
+const $=id=>document.getElementById(id);
+
+async function api(url,options={}){
+  const finalUrl=token
+    ? url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(token)
+    : url;
+
+  const response=await fetch(finalUrl,{
+    ...options,
+    headers:{
+      'Content-Type':'application/json',
+      ...(options.headers||{})
+    }
+  });
+
+  const text=await response.text();
+  let body={};
+
+  if(text){
+    try{
+      body=JSON.parse(text);
+    }catch{
+      throw new Error(
+        response.status===403
+          ? 'Zugriff verweigert – der Admin-Token fehlt oder ist ungültig.'
+          : text
+      );
+    }
+  }
+
+  if(!response.ok){
+    throw new Error(body.error||text||('HTTP '+response.status));
+  }
+
+  return body;
+}
 function show(n){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));$('s'+n)?.classList.add('on');page=n;$('step').textContent=n+' / 7';$('next').textContent=n===7?'Regie vorbereiten':'Weiter'}
 async function init(){ctx=await api(`/kristine/api/regie/context?employeeId=${encodeURIComponent(employeeId)}&date=${date}`);segments.innerHTML=ctx.segments.map((s,i)=>`<button class="btn secondary" style="width:100%;margin:6px 0" onclick="pickSegment(${i})"><b>${s.from}–${s.to}</b><br>${esc(s.jobName||s.jobId)}</button>`).join('')||'<div class="card">Keine Baustellenzeit gefunden.</div>';const d=await api('/admin/api/materials?mode=regie&limit=5000');materials=d.materials;filtered=materials;drawGroups();drawMaterials()}
 function pickSegment(i){segment=ctx.segments[i];from.value=segment.from;to.value=segment.to;rangeHint.textContent=`Deine bekannte Baustellenzeit: ${segment.from}–${segment.to} bei ${segment.jobName}`;people.innerHTML=ctx.team.map(p=>`<label class="row choice"><span>${esc(p.name)}</span><input type="checkbox" value="${esc(p.id)}" data-name="${esc(p.name)}" checked></label>`).join('');show(2)}
