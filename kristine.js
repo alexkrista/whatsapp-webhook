@@ -1277,7 +1277,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     const result = [];
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
-      const type = row.type === "start" || row.type === "weiter" ? "work" : row.type === "pause" ? "pause" : row.type === "mittag" ? "lunch" : null;
+      const type =
+        row.type === "start" || row.type === "weiter" ? "work" :
+        row.type === "pause" ? "pause" :
+        row.type === "mittag" ? "lunch" :
+        row.type === "up" ? "up" : null;
       if (!type) continue;
       const next = rows[index + 1];
       let toMinutes = next?._minutes ?? null;
@@ -1291,6 +1295,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         to: toMinutes === null ? "" : hmFromMinutes(toMinutes),
         jobId: String(row.jobId || ""),
         jobName: String(row.jobName || ""),
+        reason: String(row.reason || ""),
         source: String(row.source || "employee"),
       });
     }
@@ -1300,6 +1305,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   function eventTypeForSegment(segment) {
     if (segment.type === "pause") return "pause";
     if (segment.type === "lunch") return "mittag";
+    if (segment.type === "up") return "up";
     return "start";
   }
 
@@ -1426,11 +1432,12 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
       const segments = incoming.map((segment, index) => ({
         id: String(segment.id || `seg_${Date.now()}_${index}`),
-        type: ["work", "pause", "lunch"].includes(segment.type) ? segment.type : "work",
+        type: ["work", "pause", "lunch", "up"].includes(segment.type) ? segment.type : "work",
         from: String(segment.from || "").slice(0, 5),
         to: String(segment.to || "").slice(0, 5),
         jobId: String(segment.jobId || "").slice(0, 80),
         jobName: String(segment.jobName || "").trim().slice(0, 140),
+        reason: String(segment.reason || "").trim().slice(0, 140),
       })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
@@ -1487,6 +1494,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
           type: eventTypeForSegment(segment), at: segment.from,
           jobId: segment.type === "work" ? segment.jobId : null,
           jobName: segment.type === "work" ? segment.jobName : "",
+          reason: segment.type === "up" ? segment.reason : "",
           segmentId: segment.id, source: "office", manual: true, createdAt,
         });
       }
