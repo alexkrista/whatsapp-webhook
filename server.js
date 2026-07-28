@@ -51,6 +51,7 @@ const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
+const { registerRegieAssistant } = require("./regie-assistant");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -3451,6 +3452,12 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
 
 // ===================== Materialsystem =====================
 registerMaterialMaster(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  publicDir: path.join(process.cwd(), "public"),
+});
+
+registerRegieAssistant(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   publicDir: path.join(process.cwd(), "public"),
