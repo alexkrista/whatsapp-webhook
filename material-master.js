@@ -82,6 +82,36 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return Number.isFinite(result) ? result : 0;
   }
 
+  function isNumericValue(value) {
+    const raw = clean(value).replace(/\s/g, "");
+    if (!raw) return false;
+    const normalized = raw.includes(",")
+      ? raw.replace(/\./g, "").replace(",", ".")
+      : raw;
+    return /^-?\d+(?:\.\d+)?$/.test(normalized);
+  }
+
+  function normalizePackage(rawContainer, rawUnit) {
+    const containerText = clean(rawContainer, 50);
+    const unitText = clean(rawUnit, 50);
+
+    // KRISTA-Excel: Gebinde = Sack/kg/Rolle, Einheit = 1,0
+    if (containerText && !isNumericValue(containerText) && isNumericValue(unitText)) {
+      return { containerSize: number(unitText), unit: containerText };
+    }
+
+    // Klassisch: Gebinde = 5, Einheit = L
+    if (isNumericValue(containerText)) {
+      return { containerSize: number(containerText), unit: unitText };
+    }
+
+    // Nur eine textliche Einheit vorhanden
+    return {
+      containerSize: isNumericValue(unitText) ? number(unitText) : 1,
+      unit: containerText || unitText
+    };
+  }
+
   function dateISO(value) {
     if (!value) return "";
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -211,6 +241,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       group, subgroup, product, roomRequired, componentRequired, areaRequired,
     });
 
+    const packageInfo = normalizePackage(raw.containerSize, raw.unit);
+
     const normalized = {
       id: clean(raw.id || raw.materialId, 120),
       materialId: clean(raw.materialId || raw.id, 120),
@@ -222,8 +254,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       productLine: clean(raw.productLine, 120),
       colorNumber: clean(raw.colorNumber, 50),
       colorName: clean(raw.colorName, 140),
-      containerSize: number(raw.containerSize),
-      unit: clean(raw.unit, 30),
+      containerSize: packageInfo.containerSize,
+      unit: clean(packageInfo.unit, 30),
       purchasePrice: number(raw.purchasePrice),
       markup: number(raw.markup),
       overhead: number(raw.overhead),
