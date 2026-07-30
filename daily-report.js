@@ -87,14 +87,38 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       const event = sorted[i];
       const next = sorted[i + 1];
       if (next._minutes < event._minutes) continue;
-      if (!["start", "weiter"].includes(event.type)) continue;
+      const eventType = String(event.type || "").toLowerCase();
 
-      const block = {
-        from: event.at,
-        to: next.at,
-        jobId: String(event.jobId || ""),
-        jobName: String(event.jobName || event.jobId || "Ohne Baustelle"),
-      };
+const isUnproductive =
+  ["up", "unproduktiv", "werkstatt", "lager", "büro", "buero"].includes(eventType) ||
+  String(event.workType || "").toLowerCase() === "unproductive" ||
+  String(event.assignmentType || "").toLowerCase() === "up" ||
+  String(event.jobType || "").toLowerCase() === "up";
+
+if (!["start", "weiter", "up", "unproduktiv", "werkstatt", "lager", "büro", "buero"].includes(eventType)) {
+  continue;
+}
+
+const block = {
+  from: event.at,
+  to: next.at,
+
+  // UP zählt zur Mitarbeiterzeit, aber nicht zu einer Baustelle.
+  jobId: isUnproductive ? "" : String(event.jobId || ""),
+
+  jobName: isUnproductive
+    ? String(
+        event.upGroup ||
+        event.upReason ||
+        event.jobName ||
+        event.jobId ||
+        "Unproduktiv"
+      )
+    : String(event.jobName || event.jobId || "Ohne Baustelle"),
+
+  type: isUnproductive ? "up" : "productive",
+  productive: !isUnproductive,
+};
       const previous = blocks.at(-1);
       if (previous && previous.to === block.from && previous.jobId === block.jobId && previous.jobName === block.jobName) {
         previous.to = block.to;
