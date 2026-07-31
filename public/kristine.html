@@ -28,6 +28,45 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
 .control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-up{background:#3677b8}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.site-change-marker{
+  position:absolute;
+  top:-7px;
+  bottom:-7px;
+  width:2px;
+  background:#1f2937;
+  transform:translateX(-1px);
+  z-index:8;
+  pointer-events:none;
+}
+
+.site-change-marker::after{
+  content:"";
+  position:absolute;
+  top:5px;
+  left:50%;
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#fff;
+  border:2px solid #1f2937;
+  transform:translate(-50%,-50%);
+}
+
+.site-change-time{
+  position:absolute;
+  left:50%;
+  top:-18px;
+  transform:translateX(-50%);
+  padding:1px 4px;
+  border-radius:4px;
+  background:#1f2937;
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+  line-height:14px;
+  white-space:nowrap;
+  box-shadow:0 1px 3px rgba(0,0,0,.22);
+}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 
 /* Build 0020.6: ruhiges Konfigurationsmodul als Akkordeon */
@@ -1000,19 +1039,113 @@ function renderAxisLabels(dayStart,dayEnd){
 }
 function renderDayBar(segments,dayStart,dayEnd){
   const total=Math.max(60,dayEnd-dayStart);
-  let cursor=dayStart,html='';
-  for(const seg of segments){
+  const ordered=[...segments]
+    .filter(seg=>Number.isFinite(seg.from)&&Number.isFinite(seg.to))
+    .sort((a,b)=>a.from-b.from||a.to-b.to);
+
+  let cursor=dayStart;
+  let html='';
+  let markers='';
+  let previousWork=null;
+
+  for(const seg of ordered){
     const from=Math.max(dayStart,Math.min(dayEnd,seg.from));
     const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
+
     if(to<=from)continue;
-    if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
-    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':seg.type==='lunch'?'seg-lunch':seg.type==='up'?'seg-up':seg.type==='vacation'?'seg-vacation':seg.type==='sick'?'seg-sick':seg.type==='za'?'seg-za':'seg-holiday';
-    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':seg.type==='lunch'?'Mittag':seg.type==='up'?'Unproduktiv · '+(seg.reason||'Sonstiges'):(seg.jobName||'Abwesenheit')}`;
-    html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
+
+    if(from>cursor){
+      html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
+    }
+
+    const cls=
+      seg.type==='work'?'seg-work':
+      seg.type==='pause'?'seg-pause':
+      seg.type==='lunch'?'seg-lunch':
+      seg.type==='up'?'seg-up':
+      seg.type==='vacation'?'seg-vacation':
+      seg.type==='sick'?'seg-sick':
+      seg.type==='za'?'seg-za':
+      'seg-holiday';
+
+    const label=
+      `${seg.fromText}–${seg.toText} ${
+        seg.type==='work'
+          ?`Arbeit · ${seg.jobName||seg.jobId||'Baustelle'}`
+          :seg.type==='pause'
+            ?'Pause'
+            :seg.type==='lunch'
+              ?'Mittag'
+              :seg.type==='up'
+                ?`Unproduktiv · ${seg.reason||'Sonstiges'}`
+                :(seg.jobName||'Abwesenheit')
+      }`;
+
+    html+=`
+      <span
+        class="daybar-segment ${cls}"
+        style="width:${((to-from)/total)*100}%"
+        title="${esc(label)}"
+      ></span>
+    `;
+
+    /*
+     * Baustellenwechsel erkennen:
+     * Die letzte produktive Baustelle bleibt auch über Pause,
+     * Mittag oder UP hinweg als Vergleich erhalten.
+     */
+    if(seg.type==='work'){
+      const currentJobKey=String(
+        seg.jobId||
+        seg.jobName||
+        ''
+      ).trim();
+
+      const previousJobKey=String(
+        previousWork?.jobId||
+        previousWork?.jobName||
+        ''
+      ).trim();
+
+      if(
+        previousWork
+        &&currentJobKey
+        &&previousJobKey
+        &&currentJobKey!==previousJobKey
+      ){
+        const position=((from-dayStart)/total)*100;
+        const oldSite=previousWork.jobName||previousWork.jobId||'Baustelle';
+        const newSite=seg.jobName||seg.jobId||'Baustelle';
+        const time=seg.fromText||minutesToHm(from);
+        const markerTitle=`Baustellenwechsel ${time}: ${oldSite} → ${newSite}`;
+
+        markers+=`
+          <span
+            class="site-change-marker"
+            style="left:${position}%"
+            title="${esc(markerTitle)}"
+            aria-label="${esc(markerTitle)}"
+          >
+            <span class="site-change-time">${esc(time)}</span>
+          </span>
+        `;
+      }
+
+      previousWork=seg;
+    }
+
     cursor=Math.max(cursor,to);
   }
-  if(cursor<dayEnd)html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
-  return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
+
+  if(cursor<dayEnd){
+    html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
+  }
+
+  if(!html){
+    html='<span class="daybar-segment seg-empty" style="width:100%"></span>';
+  }
+
+  return html+markers;
 }
 
 
@@ -1329,48 +1462,337 @@ function openSelectedDailyReport(){openDailyReport(selectedWorkDate())}
 function renderControl(){
   const today=selectedWorkDate();
   updateControlDateUi();
+
   const planned=data.assignments.filter(a=>a.date===today);
   const rank={working:1,pause:2,lunch:3,idle:4,finished_site:5,finished_day:6};
-  const employees=canonicalControlEmployees(today).sort((a,b)=>{
-    const sa=(a.aliasIds||[a.employeeId]).map(id=>data.states?.[id]).find(s=>s&&s.mode!=='idle')||data.states?.[a.employeeId]||{mode:'idle'};
-    const sb=(b.aliasIds||[b.employeeId]).map(id=>data.states?.[id]).find(s=>s&&s.mode!=='idle')||data.states?.[b.employeeId]||{mode:'idle'};
-    return (rank[sa.mode]||99)-(rank[sb.mode]||99)||String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de');
+
+  /*
+   * Für jeden Mitarbeiter zuerst alle relevanten Tagesdaten ermitteln.
+   * Diese aufbereiteten Daten sind anschließend die gemeinsame Wahrheit
+   * für Sortierung, aktuelle Baustelle, Balken und Detailanzeige.
+   */
+  const employees=canonicalControlEmployees(today).map(a=>{
+    const aliasIds=a.aliasIds||[a.employeeId];
+
+    const stateCandidates=aliasIds
+      .map(id=>data.states?.[id])
+      .filter(Boolean)
+      .sort((x,y)=>{
+        const scoreX=(x.timeline||[]).length+(x.mode&&x.mode!=='idle'?1000:0);
+        const scoreY=(y.timeline||[]).length+(y.mode&&y.mode!=='idle'?1000:0);
+        return scoreY-scoreX;
+      });
+
+    const s=stateCandidates[0]||{
+      mode:'idle',
+      employeeId:a.employeeId,
+      employeeName:a.employeeName
+    };
+
+    const activeEmployeeId=String(s.employeeId||a.employeeId);
+    const plans=planned.filter(x=>aliasIds.includes(String(x.employeeId)));
+
+    let segments=employeeDaySegments(activeEmployeeId,today,s);
+
+    const absencePlan=plans.find(x=>
+      ['urlaub','krank','za','feiertag','betriebsurlaub'].includes(cardTypeOf(x))
+    );
+
+    if(absencePlan){
+      const win=modelDayWindow(a.employeeId,today);
+      const absenceType=cardTypeOf(absencePlan);
+
+      segments=[{
+        type:
+          absenceType==='krank'?'sick':
+          absenceType==='urlaub'?'vacation':
+          absenceType==='za'?'za':
+          'holiday',
+        from:win.fromMin,
+        to:win.toMin,
+        fromText:win.from,
+        toText:win.to,
+        jobName:cardMeta(absencePlan).label
+      }];
+    }
+
+    const workMinutes=segments
+      .filter(x=>x.type==='work')
+      .reduce((sum,x)=>sum+x.to-x.from,0);
+
+    const upMinutes=segments
+      .filter(x=>x.type==='up')
+      .reduce((sum,x)=>sum+x.to-x.from,0);
+
+    const breakMinutes=segments
+      .filter(x=>x.type==='pause'||x.type==='lunch')
+      .reduce((sum,x)=>sum+x.to-x.from,0);
+
+    return {
+      ...a,
+      aliasIds,
+      state:s,
+      activeEmployeeId,
+      plans,
+      segments,
+      absencePlan,
+      workMinutes,
+      upMinutes,
+      breakMinutes,
+      hasProductiveBooking:workMinutes>0
+    };
+  }).sort((a,b)=>{
+    /*
+     * 1. Mitarbeiter mit produktiver Baustellenbuchung
+     * 2. Mitarbeiter mit nur UP, Urlaub, Krankheit usw.
+     */
+    if(a.hasProductiveBooking!==b.hasProductiveBooking){
+      return a.hasProductiveBooking?-1:1;
+    }
+
+    const modeA=a.state?.mode||'idle';
+    const modeB=b.state?.mode||'idle';
+
+    return (rank[modeA]||99)-(rank[modeB]||99)
+      ||String(a.employeeName||'').localeCompare(
+        String(b.employeeName||''),
+        'de'
+      );
   });
 
-  const unknownCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='assignment_deviation').length,0);
-  const regieCount=Object.values(data.states||{}).reduce((sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,0);
+  const unknownCount=Object.values(data.states||{}).reduce(
+    (sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='assignment_deviation').length,
+    0
+  );
+
+  const regieCount=Object.values(data.states||{}).reduce(
+    (sum,s)=>sum+(s?.timeline||[]).filter(x=>x.type==='regie_reported').length,
+    0
+  );
+
   const openTaskCount=(data.tasks||[]).filter(t=>t.status!=='done').length;
   const alerts=[];
-  if(unknownCount)alerts.push(`<span>🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}</span>`);
-  if(regieCount)alerts.push(`<span>📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}</span>`);
-  controlAlerts.style.display=alerts.length?'block':'none';
-  controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`:'';
-  if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
 
-  controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
-    const aliasIds=a.aliasIds||[a.employeeId];
-    const stateCandidates=aliasIds.map(id=>data.states?.[id]).filter(Boolean).sort((x,y)=>((y.timeline||[]).length+(y.mode&&y.mode!=='idle'?1000:0))-((x.timeline||[]).length+(x.mode&&x.mode!=='idle'?1000:0)));
-    const s=stateCandidates[0]||{mode:'idle',employeeId:a.employeeId,employeeName:a.employeeName};
-    const activeEmployeeId=String(s.employeeId||a.employeeId);
-    const meaningful=(s?.timeline||[]).filter(x=>!['message','employee_message'].includes(x.type));
-    const last=meaningful.at(-1),regie=latestRegie(s);
-    const plans=planned.filter(x=>aliasIds.includes(String(x.employeeId)));
-    let segments=employeeDaySegments(activeEmployeeId,today,s);
-    const absencePlan=plans.find(x=>['urlaub','krank','za','feiertag','betriebsurlaub'].includes(cardTypeOf(x)));
-    if(absencePlan){const win=modelDayWindow(a.employeeId,today);segments=[{type:cardTypeOf(absencePlan)==='krank'?'sick':cardTypeOf(absencePlan)==='urlaub'?'vacation':cardTypeOf(absencePlan)==='za'?'za':'holiday',from:win.fromMin,to:win.toMin,fromText:win.from,toText:win.to,jobName:cardMeta(absencePlan).label}]}
-    const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
-    const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
-    const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
-    const lastWork=[...segments].reverse().find(x=>x.type==='work');
-    const siteName=currentPlan?.jobName||lastWork?.jobName||'Nicht eingeteilt';
-    const dayStart=7*60;
-    const plannedEnd=Math.max(17*60,...plans.map(x=>hmToMinutes(x.to)||0));
-    const lastEvent=Math.max(0,...segments.map(x=>x.to||0));
-    const liveNow=(today===data.today&&['working','pause','lunch'].includes(s.mode))?currentViennaMinutes():0;
-    const dayEnd=Math.max(17*60,Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60);
-    const details=segments.map(x=>`${x.fromText}–${x.toText} ${x.type==='work'?'Arbeit · '+esc(x.jobName||x.jobId||'Baustelle'):x.type==='pause'?'Pause':x.type==='lunch'?'Mittag':esc(x.jobName||'Abwesenheit')}`).join('<br>');
-    return `<div class="control-card" style="cursor:pointer" role="button" tabindex="0" onclick="openEmployeeActionModal('${esc(activeEmployeeId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(activeEmployeeId)}')}"><div class="control-head"><div><div class="control-name">${esc(a.employeeName)}</div><div class="control-site">📍 ${esc(siteName)}${currentPlan?.address?` <a class="navbtn" target="_blank" onclick="event.stopPropagation()" href="${mapsUrl(currentPlan.address)}">Navi</a>`:''}</div></div><div style="display:flex;align-items:center;gap:8px"><button type="button" class="secondary" style="padding:6px 9px" onclick="event.stopPropagation();openEmployeeActionModal('${esc(activeEmployeeId)}')">Buchungen bearbeiten</button><span class="status ${esc(s.mode||'idle')}">${esc(statusLabel(s.mode))}</span></div></div><div class="daybar-wrap">${renderAxisLabels(dayStart,dayEnd)}<div class="daybar">${renderDayBar(segments,dayStart,dayEnd)}</div></div><div class="control-meta"><span>⏱ <strong>${durationText(workMinutes)}</strong></span><span>☕ <strong>${durationText(breakMinutes)}</strong></span><span>Letzte Aktion: <strong>${esc(last?.detail||'–')}</strong></span>${regie?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`:''}</div>${details?`<details class="control-details"><summary>Zeiten ansehen</summary>${details}</details>`:''}</div>`
-  }).join('')}</div>`;
+  if(unknownCount){
+    alerts.push(
+      `<span>🔔 ${unknownCount} unbekannte Baustelle${unknownCount===1?'':'n'}</span>`
+    );
+  }
+
+  if(regieCount){
+    alerts.push(
+      `<span>📝 ${regieCount} Regie-Vormerkung${regieCount===1?'':'en'}</span>`
+    );
+  }
+
+  controlAlerts.style.display=alerts.length?'block':'none';
+  controlAlerts.innerHTML=alerts.length
+    ?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`
+    :'';
+
+  if(!employees.length){
+    controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';
+    return;
+  }
+
+  controlList.innerHTML=`
+    <div class="bar-legend">
+      <span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span>
+      <span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span>
+      <span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span>
+      <span><i class="legend-dot" style="background:#3677b8"></i>Unproduktiv</span>
+      <span><i class="legend-dot" style="background:#dedbd4"></i>offen</span>
+    </div>
+
+    <div class="control-grid" style="margin-top:12px">
+      ${employees.map(a=>{
+        const s=a.state;
+        const plans=a.plans;
+        const segments=a.segments;
+        const activeEmployeeId=a.activeEmployeeId;
+
+        const meaningful=(s?.timeline||[])
+          .filter(x=>!['message','employee_message'].includes(x.type));
+
+        const last=meaningful.at(-1);
+        const regie=latestRegie(s);
+
+        /*
+         * Der letzte tatsächliche Zeitabschnitt entscheidet,
+         * was unter dem Mitarbeiternamen angezeigt wird.
+         */
+        const lastSegment=[...segments]
+          .sort((x,y)=>(x.to||0)-(y.to||0))
+          .at(-1);
+
+        let displaySegment=lastSegment;
+
+        /*
+         * Während Pause oder Mittag bleibt die zuletzt bearbeitete
+         * Baustelle sichtbar.
+         */
+        if(lastSegment&&['pause','lunch'].includes(lastSegment.type)){
+          displaySegment=[...segments]
+            .filter(x=>x.type==='work'&&(x.to||0)<=lastSegment.from)
+            .sort((x,y)=>(x.to||0)-(y.to||0))
+            .at(-1)||lastSegment;
+        }
+
+        let siteName='Nicht eingeteilt';
+
+        if(displaySegment?.type==='work'){
+          siteName=displaySegment.jobName
+            ||displaySegment.jobId
+            ||'Baustelle';
+        }else if(lastSegment?.type==='up'){
+          siteName=`Unproduktiv · ${lastSegment.reason||'Grund fehlt'}`;
+        }else if(lastSegment){
+          siteName=lastSegment.jobName
+            ||lastSegment.reason
+            ||(
+              lastSegment.type==='vacation'?'Urlaub':
+              lastSegment.type==='sick'?'Krank':
+              lastSegment.type==='za'?'Zeitausgleich':
+              lastSegment.type==='holiday'?'Feiertag':
+              'Nicht eingeteilt'
+            );
+        }
+
+        /*
+         * Passende Planung nur noch für Adresse/Navi suchen.
+         * Sie bestimmt nicht mehr den angezeigten Baustellennamen.
+         */
+        const displayJobId=String(displaySegment?.jobId||'');
+        const currentPlan=
+          plans.find(x=>displayJobId&&String(x.jobId||'')===displayJobId)
+          ||plans.find(x=>
+            displaySegment?.jobName
+            &&String(x.jobName||'')===String(displaySegment.jobName)
+          );
+
+        const dayStart=7*60;
+        const plannedEnd=Math.max(
+          17*60,
+          ...plans.map(x=>hmToMinutes(x.to)||0)
+        );
+
+        const lastEvent=Math.max(
+          0,
+          ...segments.map(x=>x.to||0)
+        );
+
+        const liveNow=
+          today===data.today
+          &&['working','pause','lunch'].includes(s.mode)
+            ?currentViennaMinutes()
+            :0;
+
+        const dayEnd=Math.max(
+          17*60,
+          Math.ceil(Math.max(plannedEnd,lastEvent,liveNow)/60)*60
+        );
+
+        const details=segments.map(x=>{
+          let label='';
+
+          if(x.type==='work'){
+            label=`Arbeit · ${esc(x.jobName||x.jobId||'Baustelle')}`;
+          }else if(x.type==='pause'){
+            label='Pause';
+          }else if(x.type==='lunch'){
+            label='Mittag';
+          }else if(x.type==='up'){
+            label=`Unproduktiv · ${esc(x.reason||'Grund fehlt')}`;
+          }else{
+            label=esc(x.jobName||x.reason||'Abwesenheit');
+          }
+
+          return `${x.fromText}–${x.toText} ${label}`;
+        }).join('<br>');
+
+        return `
+          <div
+            class="control-card"
+            style="cursor:pointer"
+            role="button"
+            tabindex="0"
+            onclick="openEmployeeActionModal('${esc(activeEmployeeId)}')"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openEmployeeActionModal('${esc(activeEmployeeId)}')}"
+          >
+            <div class="control-head">
+              <div>
+                <div class="control-name">${esc(a.employeeName)}</div>
+
+                <div class="control-site">
+                  📍 ${esc(siteName)}
+                  ${
+                    currentPlan?.address
+                      ?` <a
+                          class="navbtn"
+                          target="_blank"
+                          onclick="event.stopPropagation()"
+                          href="${mapsUrl(currentPlan.address)}"
+                        >Navi</a>`
+                      :''
+                  }
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:8px">
+                <button
+                  type="button"
+                  class="secondary"
+                  style="padding:6px 9px"
+                  onclick="event.stopPropagation();openEmployeeActionModal('${esc(activeEmployeeId)}')"
+                >
+                  Buchungen bearbeiten
+                </button>
+
+                <span class="status ${esc(s.mode||'idle')}">
+                  ${esc(statusLabel(s.mode))}
+                </span>
+              </div>
+            </div>
+
+            <div class="daybar-wrap">
+              ${renderAxisLabels(dayStart,dayEnd)}
+              <div class="daybar" style="position:relative;overflow:visible">
+                ${renderDayBar(segments,dayStart,dayEnd)}
+              </div>
+            </div>
+
+            <div class="control-meta">
+              <span>⏱ <strong>${durationText(a.workMinutes)}</strong></span>
+              <span>☕ <strong>${durationText(a.breakMinutes)}</strong></span>
+              ${
+                a.upMinutes
+                  ?`<span>🔵 <strong>${durationText(a.upMinutes)}</strong></span>`
+                  :''
+              }
+              <span>
+                Letzte Aktion:
+                <strong>${esc(last?.detail||'–')}</strong>
+              </span>
+              ${
+                regie
+                  ?`<span>Regie: <strong>${esc(regie.detail)}</strong></span>`
+                  :''
+              }
+            </div>
+
+            ${
+              details
+                ?`<details class="control-details">
+                    <summary>Zeiten ansehen</summary>
+                    ${details}
+                  </details>`
+                :''
+            }
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 async function addTask(){
