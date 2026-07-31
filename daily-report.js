@@ -1265,3 +1265,4 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 }
 
 module.exports = { registerDailyReport };
+
