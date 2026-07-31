@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.4 · Tagesauswertung kompakt
+// Datei: daily-report.js · Build 0029.5 · Urlaub/Abwesenheiten robust
 "use strict";
 
 const fs = require("fs");
@@ -83,41 +83,119 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   }
 
   function absenceType(value) {
-    const text = String(value || "").toLowerCase();
-    if (/urlaub|vacation|holiday/.test(text)) return "vacation";
-    if (/krank|krankenstand|sick|illness/.test(text)) return "sick";
-    if (/feiertag|public holiday/.test(text)) return "holiday";
-    if (/zeitausgleich|time off|absence|abwesen/.test(text)) return "other";
+    const text = String(value || "").toLowerCase().trim();
+    // Feiertag muss vor "holiday" geprüft werden: holiday wird in manchen Daten auch für Urlaub verwendet.
+    if (/feiertag|public[ _-]?holiday/.test(text)) return "holiday";
+    if (/urlaub|vacation|annual[ _-]?leave|ferien|holiday/.test(text)) return "vacation";
+    if (/krank|krankenstand|sick|illness|arbeitsunf[aä]hig/.test(text)) return "sick";
+    if (/zeitausgleich|time[ _-]?off|absence|abwesen|freistellung|sonstig/.test(text)) return "other";
     return null;
   }
 
+  function normalizeISODate(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    const text = String(value || "").trim();
+    if (!text) return "";
+
+    const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+
+    const de = text.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);
+    if (de) return `${de[3]}-${String(de[2]).padStart(2, "0")}-${String(de[1]).padStart(2, "0")}`;
+
+    return text.slice(0, 10);
+  }
+
   function isDateWithin(date, from, to) {
-    const target = String(date || "").slice(0, 10);
-    const start = String(from || to || "").slice(0, 10);
-    const end = String(to || from || "").slice(0, 10);
+    const target = normalizeISODate(date);
+    const start = normalizeISODate(from || to);
+    const end = normalizeISODate(to || from);
     return Boolean(target && start && end && target >= start && target <= end);
+  }
+
+  function firstValue(...values) {
+    return values.find((value) => value !== undefined && value !== null && String(value).trim() !== "");
   }
 
   function normalizeAbsence(record, date) {
     if (!record || typeof record !== "object") return null;
-    const type = absenceType(
-      record.type || record.absenceType || record.category || record.status || record.reason
-    );
+
+    const employee = record.employee && typeof record.employee === "object" ? record.employee : {};
+    const worker = record.worker && typeof record.worker === "object" ? record.worker : {};
+    const person = record.person && typeof record.person === "object" ? record.person : {};
+
+    // Nicht nur das erste Feld prüfen: Ein Planungsdatensatz kann z. B.
+    // type="assignment" UND jobName="Urlaub" enthalten.
+    const typeText = [
+      record.type,
+      record.absenceType,
+      record.assignmentType,
+      record.kind,
+      record.category,
+      record.status,
+      record.reason,
+      record.title,
+      record.label,
+      record.jobName,
+      record.name
+    ].filter(Boolean).join(" ");
+    const type = absenceType(typeText);
     if (!type) return null;
 
-    const matchesDate =
-      String(record.date || "").slice(0, 10) === String(date) ||
-      isDateWithin(date, record.from || record.startDate || record.dateFrom, record.to || record.endDate || record.dateTo);
-    if (!matchesDate) return null;
+    const singleDate = firstValue(
+      record.date,
+      record.day,
+      record.workDate,
+      record.assignmentDate,
+      record.plannedDate,
+      record.startDay
+    );
+    const from = firstValue(record.from, record.start, record.startDate, record.dateFrom, record.fromDate, singleDate);
+    const to = firstValue(record.to, record.end, record.endDate, record.dateTo, record.toDate, singleDate);
+    if (!isDateWithin(date, from, to)) return null;
 
-    const minutes = Number(record.minutes) || Number(record.hours) * 60 || 7.8 * 60;
+    const employeeId = firstValue(
+      record.employeeId,
+      record.workerId,
+      record.userId,
+      record.personId,
+      employee.id,
+      employee.employeeId,
+      worker.id,
+      person.id
+    );
+    const employeeName = firstValue(
+      record.employeeName,
+      record.workerName,
+      record.personName,
+      record.displayName,
+      employee.name,
+      employee.employeeName,
+      worker.name,
+      person.name,
+      // Nur als letzte Notlösung "name" verwenden, da es bei Assignments oft die Baustelle bezeichnet.
+      record.name
+    );
+
+    if (!employeeId && !employeeName) return null;
+
+    const hours = Number(firstValue(record.hours, record.durationHours));
+    const minutesRaw = Number(firstValue(record.minutes, record.durationMinutes));
+    const minutes = Number.isFinite(minutesRaw) && minutesRaw > 0
+      ? minutesRaw
+      : Number.isFinite(hours) && hours > 0
+        ? hours * 60
+        : 7.8 * 60;
+
     return {
-      employeeId: String(record.employeeId || record.workerId || record.userId || record.employeeName || record.name || ""),
-      employeeName: String(record.employeeName || record.workerName || record.name || record.employeeId || "Unbekannt"),
+      employeeId: String(employeeId || employeeName),
+      employeeName: String(employeeName || employeeId || "Unbekannt"),
       type,
       label: type === "vacation" ? "Urlaub" : type === "sick" ? "Krankenstand" : type === "holiday" ? "Feiertag" : "Sonstige Abwesenheit",
       minutes: Math.max(0, Math.round(minutes)),
-      reason: String(record.reason || record.note || "").trim(),
+      reason: String(firstValue(record.reason, record.note, record.comment, "") || "").trim(),
     };
   }
 
@@ -456,6 +534,47 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     return Object.values(value).filter((item) => item && typeof item === "object");
   }
 
+  // assignments.json und Mitarbeiterdateien existieren im Projekt in mehreren Strukturen
+  // (Array, nach Datum gruppiert, nach Mitarbeiter gruppiert, verschachtelte data/items-Container).
+  // Diese Funktion zieht alle echten Datensätze heraus und übernimmt Datum/Person aus dem Elternknoten.
+  function flattenRecords(value, inherited = {}, depth = 0, seen = new Set()) {
+    if (depth > 8 || value === null || value === undefined) return [];
+    if (typeof value !== "object") return [];
+    if (seen.has(value)) return [];
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => flattenRecords(item, inherited, depth + 1, seen));
+    }
+
+    const own = { ...inherited, ...value };
+    const hasRecordFields = [
+      "employeeId", "employeeName", "workerId", "workerName", "personId", "personName",
+      "type", "absenceType", "assignmentType", "category", "status", "reason",
+      "date", "day", "workDate", "assignmentDate", "plannedDate", "from", "to",
+      "startDate", "endDate", "dateFrom", "dateTo"
+    ].some((key) => value[key] !== undefined);
+
+    const children = [];
+    for (const [key, child] of Object.entries(value)) {
+      if (!child || typeof child !== "object") continue;
+
+      const nextInherited = { ...inherited };
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(key)) nextInherited.date = normalizeISODate(key);
+      if (/^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}$/.test(key)) nextInherited.date = normalizeISODate(key);
+
+      // Bei einem Mitarbeiter-Schlüssel Name/ID nur übernehmen, wenn der Kinddatensatz selbst keine Person enthält.
+      if (!["data", "items", "records", "assignments", "absences", "employees", "days", "dates"].includes(key)) {
+        if (!nextInherited.employeeId && !nextInherited.employeeName && !/^\d{4}-/.test(key)) {
+          nextInherited.employeeName = key;
+        }
+      }
+      children.push(...flattenRecords(child, nextInherited, depth + 1, seen));
+    }
+
+    return hasRecordFields ? [own, ...children] : children;
+  }
+
   async function collect(date, jobFilter = null) {
     const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, employeeMasterRaw, systemEmployeeMasterRaw] = await Promise.all([
       readJson(TIME_EVENTS, []),
@@ -468,30 +587,55 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
     const timeEvents = asArray(timeEventsRaw);
     const reviewEntries = asArray(reviewEntriesRaw);
-    const absences = asArray(absencesRaw);
-    const assignments = asArray(assignmentsRaw);
-    const employeeMaster = [...asArray(employeeMasterRaw), ...asArray(systemEmployeeMasterRaw)];
+    const absences = flattenRecords(absencesRaw);
+    const assignments = flattenRecords(assignmentsRaw);
+    const employeeMaster = [
+      ...flattenRecords(employeeMasterRaw),
+      ...flattenRecords(systemEmployeeMasterRaw),
+      ...asArray(employeeMasterRaw),
+      ...asArray(systemEmployeeMasterRaw),
+    ];
 
     const byEmployee = new Map();
 
+    const employeeAliases = new Map();
+    const normalizePersonKey = (value) => String(value || "").trim().toLocaleLowerCase("de-AT").replace(/\s+/g, " ");
+
     const ensure = (id, name) => {
-      const key = String(id || name || "unbekannt");
+      const cleanId = String(id || "").trim();
+      const cleanName = String(name || "").trim();
+      const alias = normalizePersonKey(cleanName || cleanId);
+      const existingKey = employeeAliases.get(alias) || employeeAliases.get(normalizePersonKey(cleanId));
+      const key = existingKey || cleanId || cleanName || "unbekannt";
+
       if (!byEmployee.has(key)) {
         byEmployee.set(key, {
-          employeeId: key,
-          employeeName: name || key,
+          employeeId: cleanId || key,
+          employeeName: cleanName || cleanId || key,
           events: [],
           reviews: [],
           absence: null,
+          inEmployeeMaster: false,
         });
+      } else if (cleanName && byEmployee.get(key).employeeName === key) {
+        byEmployee.get(key).employeeName = cleanName;
       }
+
+      if (alias) employeeAliases.set(alias, key);
+      if (cleanId) employeeAliases.set(normalizePersonKey(cleanId), key);
       return byEmployee.get(key);
     };
 
     for (const master of employeeMaster) {
-      const active = master.active !== false && master.isActive !== false && !master.archived;
+      if (!master || typeof master !== "object") continue;
+      const active = master.active !== false && master.isActive !== false && master.enabled !== false && !master.archived && !master.deleted;
       if (!active) continue;
-      ensure(master.id || master.employeeId || master.phone, master.name || master.employeeName);
+      const nested = master.employee && typeof master.employee === "object" ? master.employee : {};
+      const employee = ensure(
+        firstValue(master.id, master.employeeId, master.workerId, master.userId, master.phone, nested.id),
+        firstValue(master.name, master.employeeName, master.displayName, master.fullName, nested.name)
+      );
+      employee.inEmployeeMaster = true;
     }
 
     for (const event of timeEvents) {
@@ -528,7 +672,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         const withBlocks = { ...employee, blocks };
         return { ...withBlocks, summary: summarizeEmployee(withBlocks, date) };
       })
-      .filter((employee) => employee.blocks.length || employee.reviews.length || employee.absence)
+      .filter((employee) => employee.inEmployeeMaster || employee.blocks.length || employee.reviews.length || employee.absence)
       .sort((a, b) => String(a.employeeName).localeCompare(String(b.employeeName), "de"));
   }
 
@@ -690,7 +834,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
     newPage();
 
-    for (const employee of employees) {
+    for (const employee of employees.filter((item) => item.blocks.length || item.reviews.length || item.absence)) {
       const materials = employee.reviews.filter((entry) => entry.category === "material");
       const materialPhotos = materials.filter((entry) => entry.source === "image" || entry.file);
       const photos = employee.reviews.filter((entry) => entry.category === "photo");
@@ -1265,4 +1409,3 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 }
 
 module.exports = { registerDailyReport };
-
