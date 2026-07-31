@@ -342,11 +342,18 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
   }
 
-  function clampOfficialStart(actualTime) {
-    const actual = minutesFromHM(actualTime);
-    const official = minutesFromHM("07:00");
-    return actual !== null && actual < official ? "07:00" : actualTime;
-  }
+function clampOfficialStart(actualTime) {
+  const actual = minutesFromHM(actualTime);
+  if (actual === null) return actualTime;
+
+  const official = 7 * 60;
+  const tolerance = 15;
+
+  if (actual < official) return "07:00";
+  if (actual <= official + tolerance) return "07:00";
+
+  return actualTime;
+}
 
   async function appendTimeEvent(event) {
     const rows = await readJson(TIME_EVENTS, []);

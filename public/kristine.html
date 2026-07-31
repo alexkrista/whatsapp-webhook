@@ -27,7 +27,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
-.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-up{background:#3677b8}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 
 /* Build 0020.6: ruhiges Konfigurationsmodul als Akkordeon */
@@ -927,21 +927,64 @@ function employeeDaySegments(employeeId,today,state){
     .map((x,i)=>({...x,_i:i,_m:hmToMinutes(x.at)}))
     .filter(x=>x._m!==null)
     .sort((a,b)=>a._m-b._m||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||a._i-b._i);
+
   const segments=[];
+
   for(let i=0;i<rows.length;i++){
     const e=rows[i];
     let type=null;
+
     if(e.type==='start'||e.type==='weiter')type='work';
     else if(e.type==='pause')type='pause';
     else if(e.type==='mittag')type='lunch';
+    else if(e.type==='up')type='up';
+
     if(!type)continue;
+
     let end=rows[i+1]?rows[i+1]._m:null;
-    if(end===null && ['working','pause','lunch'].includes(state?.mode)) end=currentViennaMinutes();
+
+    if(
+      end===null &&
+      ['working','pause','lunch'].includes(state?.mode)
+    ){
+      end=currentViennaMinutes();
+    }
+
     if(end===null||end<e._m)continue;
-    const seg={type,from:e._m,to:end,fromText:e.at,toText:`${String(Math.floor(end/60)).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`,jobId:e.jobId||'',jobName:e.jobName||''};
+
+    const seg={
+      type,
+      from:e._m,
+      to:end,
+      fromText:e.at,
+      toText:`${String(Math.floor(end/60)).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`,
+      jobId:e.jobId||'',
+      jobName:e.jobName||'',
+      reason:e.reason||e.upReason||''
+    };
+
     const prev=segments.at(-1);
-    if(prev&&prev.type===seg.type&&prev.to===seg.from&&(type!=='work'||String(prev.jobId||prev.jobName)===String(seg.jobId||seg.jobName))){prev.to=seg.to;prev.toText=seg.toText}else segments.push(seg);
+
+    const sameContent=
+      type==='work'
+        ? String(prev?.jobId||prev?.jobName)===String(seg.jobId||seg.jobName)
+        : type==='up'
+          ? String(prev?.reason||'')===String(seg.reason||'')
+          : true;
+
+    if(
+      prev &&
+      prev.type===seg.type &&
+      prev.to===seg.from &&
+      sameContent
+    ){
+      prev.to=seg.to;
+      prev.toText=seg.toText;
+    }else{
+      segments.push(seg);
+    }
   }
+
   return segments;
 }
 function formatAxisHM(minutes){const h=Math.floor(minutes/60),m=minutes%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`}
@@ -963,8 +1006,8 @@ function renderDayBar(segments,dayStart,dayEnd){
     const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
     if(to<=from)continue;
     if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
-    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':seg.type==='lunch'?'seg-lunch':seg.type==='vacation'?'seg-vacation':seg.type==='sick'?'seg-sick':seg.type==='za'?'seg-za':'seg-holiday';
-    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':seg.type==='lunch'?'Mittag':(seg.jobName||'Abwesenheit')}`;
+    const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':seg.type==='lunch'?'seg-lunch':seg.type==='up'?'seg-up':seg.type==='vacation'?'seg-vacation':seg.type==='sick'?'seg-sick':seg.type==='za'?'seg-za':'seg-holiday';
+    const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':seg.type==='lunch'?'Mittag':seg.type==='up'?'Unproduktiv · '+(seg.reason||'Sonstiges'):(seg.jobName||'Abwesenheit')}`;
     html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
     cursor=Math.max(cursor,to);
   }
@@ -1006,11 +1049,12 @@ function addMinuteToHM(hm){
   return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
 }
 function upReasonOptions(selected=''){
-  return UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
+  return `<option value="" ${!selected?'selected':''}>– Grund auswählen –</option>`+
+    UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
 }
 function timeEditorContextCell(seg,index){
   if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
-  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'Werkstatt')}</select>`;
+  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'')}</select>`;
   return '<span class="small">–</span>';
 }
 function renderTimeEditor(){
@@ -1112,7 +1156,10 @@ async function saveTimeEditor(){
     if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}
     if(seg.to&&hmToMinutes(seg.to)<=hmToMinutes(seg.from)){employeeActionNote.textContent=`Ungültiger Zeitraum ${seg.from}–${seg.to}.`;return}
     if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
-    if(seg.type==='up'&&!seg.reason)seg.reason='Sonstiges';
+    if(seg.type==='up'&&!seg.reason){
+    employeeActionNote.textContent='Bitte bei jedem unproduktiven Abschnitt einen Grund auswählen.';
+    return;
+}
   }
   employeeActionNote.textContent='Speichert …';
   try{
