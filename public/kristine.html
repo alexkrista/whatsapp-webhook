@@ -962,7 +962,10 @@ function durationText(minutes){
 }
 function employeeDaySegments(employeeId,today,state){
   const rows=(data.timeEvents||[])
-    .filter(x=>String(x.employeeId)===String(employeeId)&&String(x.date)===String(today))
+  .filter(x=>{
+  const ids=(Array.isArray(employeeIds)?employeeIds:[employeeIds]).map(String);
+  return ids.includes(String(x.employeeId))&&String(x.date)===String(today);
+})
     .map((x,i)=>({...x,_i:i,_m:hmToMinutes(x.at)}))
     .filter(x=>x._m!==null)
     .sort((a,b)=>a._m-b._m||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||a._i-b._i);
@@ -1492,7 +1495,7 @@ function renderControl(){
     const activeEmployeeId=String(s.employeeId||a.employeeId);
     const plans=planned.filter(x=>aliasIds.includes(String(x.employeeId)));
 
-    let segments=employeeDaySegments(activeEmployeeId,today,s);
+    let segments=employeeDaySegments(aliasIds,today,s);
 
     const absencePlan=plans.find(x=>
       ['urlaub','krank','za','feiertag','betriebsurlaub'].includes(cardTypeOf(x))
