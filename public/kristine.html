@@ -1364,33 +1364,51 @@ function renderKristool(){
   kristoolOkHeadline.textContent=`🟢 ${green} Kontrollen ohne Auffälligkeit`;
   kristoolOkDetail.textContent='Details bleiben bewusst eingeklappt. KRISTOOL zeigt nur, was heute Aufmerksamkeit braucht.';
 }
-
-
 function normalizedEmployeeIdentity(employee,employeeId=''){
-  // Wichtig: Im Leitstand ist die KRISTA-Mitarbeiter-ID die führende Identität.
-  // Telefon und Name sind nur Rückfallebenen für alte/unvollständige Datensätze.
-  const id=String(employeeId||employee?.employeeId||employee?.id||'').trim();
-  if(id)return `id:${id}`;
+  /*
+   * Für die Zusammenführung im Leitstand ist der Name entscheidend.
+   * Dadurch werden alte WhatsApp-IDs, neue Mitarbeiter-IDs,
+   * Planung und Büro-Korrekturen derselben Person zusammengeführt.
+   */
+  const name=String(employee?.name||employee?.employeeName||'')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
 
-  const phone=String(employee?.phone||'').replace(/\D/g,'').replace(/^00/,'');
+  if(name)return `name:${name}`;
+
+  const phone=String(employee?.phone||'')
+    .replace(/\D/g,'')
+    .replace(/^00/,'');
+
   if(phone)return `phone:${phone}`;
 
-  const name=String(employee?.name||employee?.employeeName||'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-  return `name:${name||'unknown'}`;
+  const id=String(
+    employeeId||
+    employee?.employeeId||
+    employee?.id||
+    ''
+  ).trim();
+
+  return `id:${id||'unknown'}`;
 }
 
 function canonicalControlEmployees(date){
-  const planned=data.assignments.filter(a=>a.date===date);
+  const planned=(data.assignments||[])
+    .filter(a=>String(a.date)===String(date));
+
+  const dayEvents=(data.timeEvents||[])
+    .filter(e=>String(e.date)===String(date));
+
   const groups=new Map();
 
   const add=(row,source)=>{
-    // Planung und Status besitzen oft zusätzlich ein technisches "id"-Feld.
-    // Für Personen muss employeeId immer Vorrang haben.
     const rawId=source==='master'
-      ? (row?.id??row?.employeeId??'')
-      : (row?.employeeId??row?.id??'');
+      ?(row?.id??row?.employeeId??'')
+      :(row?.employeeId??row?.id??'');
+
     const id=String(rawId||'').trim();
     if(!id)return;
 
@@ -1399,36 +1417,105 @@ function canonicalControlEmployees(date){
     const canonicalId=String(master?.id||id);
     const key=normalizedEmployeeIdentity(employee,canonicalId);
 
-    if(!groups.has(key))groups.set(key,{key,rows:[],ids:new Set(),sources:new Set()});
+    if(!groups.has(key)){
+      groups.set(key,{
+        key,
+        rows:[],
+        ids:new Set(),
+        sources:new Set()
+      });
+    }
+
     const group=groups.get(key);
     group.ids.add(canonicalId);
     group.sources.add(source);
 
-    if(!group.rows.some(x=>String(x.id??x.employeeId)===canonicalId)){
+    if(
+      !group.rows.some(x=>
+        String(x.id??x.employeeId)===canonicalId
+      )
+    ){
       group.rows.push(employee);
     }
   };
 
   masterEmployees.forEach(e=>add(e,'master'));
   planned.forEach(a=>add(a,'planning'));
-  Object.values(data.states||{}).forEach(s=>{if(s?.employeeId)add(s,'state')});
+
+  Object.values(data.states||{}).forEach(s=>{
+    if(s?.employeeId)add(s,'state');
+  });
+
+  /*
+   * Wichtig:
+   * Auch IDs aus den tatsächlichen Zeitbuchungen aufnehmen.
+   * Genau diese fehlten bisher bei Ronny und Cathrin.
+   */
+  dayEvents.forEach(e=>{
+    if(e?.employeeId)add(e,'timeEvent');
+  });
 
   return [...groups.values()].map(group=>{
     const ids=[...group.ids];
+
     const score=id=>{
       const state=data.states?.[id];
       const timeline=(state?.timeline||[]).length;
-      const hasPlan=planned.some(a=>String(a.employeeId)===id);
-      const active=state&&state.mode&&state.mode!=='idle';
-      return (active?10000:0)+(hasPlan?1000:0)+timeline;
+
+      const hasPlan=planned.some(
+        a=>String(a.employeeId)===id
+      );
+
+      const eventCount=dayEvents.filter(
+        e=>String(e.employeeId)===id
+      ).length;
+
+      const active=
+        state&&
+        state.mode&&
+        state.mode!=='idle';
+
+      return
+        (active?10000:0)+
+        (eventCount*100)+
+        (hasPlan?1000:0)+
+        timeline;
     };
+
     ids.sort((a,b)=>score(b)-score(a));
+
     const employeeId=ids[0];
-    const primary=masterEmployees.find(e=>String(e.id)===employeeId)||group.rows[0]||{};
+
+    /*
+     * Für den angezeigten Namen nach Möglichkeit immer
+     * den Mitarbeiterstamm verwenden.
+     */
+    const primary=
+      ids
+        .map(id=>masterEmployees.find(e=>String(e.id)===id))
+        .find(Boolean)
+      ||group.rows[0]
+      ||{};
+
     if(ids.length>1){
-      console.warn('⚠️ Doppelte Mitarbeiteridentität im Leitstand zusammengeführt',{name:primary.name||primary.employeeName,employeeIds:ids,identity:group.key});
+      console.warn(
+        '⚠️ Mitarbeiteridentitäten im Leitstand zusammengeführt',
+        {
+          name:primary.name||primary.employeeName,
+          employeeIds:ids,
+          identity:group.key
+        }
+      );
     }
-    return {employeeId,employeeName:primary.name||primary.employeeName||employeeId,aliasIds:ids};
+
+    return {
+      employeeId,
+      employeeName:
+        primary.name||
+        primary.employeeName||
+        employeeId,
+      aliasIds:ids
+    };
   });
 }
 
