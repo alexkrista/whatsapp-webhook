@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.5 · Urlaub/Abwesenheiten robust
+// Datei: daily-report.js · Build 0029.6 · Abwesenheitsstunden 7,8 h
 "use strict";
 
 const fs = require("fs");
@@ -183,11 +183,18 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
     const hours = Number(firstValue(record.hours, record.durationHours));
     const minutesRaw = Number(firstValue(record.minutes, record.durationMinutes));
-    const minutes = Number.isFinite(minutesRaw) && minutesRaw > 0
-      ? minutesRaw
-      : Number.isFinite(hours) && hours > 0
-        ? hours * 60
-        : 7.8 * 60;
+    const weekday = weekdayForDate(date);
+    const payrollMinutes = weekday >= 1 && weekday <= 5 ? Math.round(7.8 * 60) : 0;
+    const explicitFullDay = record.fullDay === true || record.allDay === true || record.isFullDay === true;
+    const absenceAlwaysFullDay = ["vacation", "sick", "holiday"].includes(type);
+    const looksLikeFullDay = explicitFullDay || absenceAlwaysFullDay || (Number.isFinite(hours) && hours >= 7);
+    const minutes = looksLikeFullDay
+      ? payrollMinutes
+      : Number.isFinite(minutesRaw) && minutesRaw > 0
+        ? minutesRaw
+        : Number.isFinite(hours) && hours > 0
+          ? hours * 60
+          : payrollMinutes;
 
     return {
       employeeId: String(employeeId || employeeName),
@@ -1210,17 +1217,18 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       page.drawText("Personal", { x: rightX, y: rightY, size: 10, font: bold });
       rightY -= 15;
 
+      const absenceTotal = (rows) => rows.reduce((sum, row) => sum + Number(row.minutes || 0), 0);
       const personalRows = [
-        ["Mitarbeiter gesamt", day.headcount],
-        ["Im Einsatz", day.activeCount],
-        ["Urlaub", day.absences.vacation.length],
-        ["Krankenstand", day.absences.sick.length],
-        ["Feiertag", day.absences.holiday.length],
-        ["Sonstige Abwesenheit", day.absences.other.length],
+        ["Mitarbeiter gesamt", String(day.headcount)],
+        ["Im Einsatz", String(day.activeCount)],
+        ["Urlaub", `${day.absences.vacation.length} · ${formatDurationCompact(absenceTotal(day.absences.vacation))}`],
+        ["Krankenstand", `${day.absences.sick.length} · ${formatDurationCompact(absenceTotal(day.absences.sick))}`],
+        ["Feiertag", `${day.absences.holiday.length} · ${formatDurationCompact(absenceTotal(day.absences.holiday))}`],
+        ["Sonstige Abwesenheit", `${day.absences.other.length} · ${formatDurationCompact(absenceTotal(day.absences.other))}`],
       ];
       for (const [label, value] of personalRows) {
         page.drawText(label, { x: rightX, y: rightY, size: 8.4, font });
-        page.drawText(String(value), { x: rightValueX, y: rightY, size: 8.4, font: bold });
+        page.drawText(String(value), { x: rightValueX - 25, y: rightY, size: 8.4, font: bold });
         rightY -= 11;
       }
 
