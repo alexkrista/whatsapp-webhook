@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.2 · Reporting-Basis
+// Datei: daily-report.js · Build 0029.3 · Tagesreport Feinschliff
 "use strict";
 
 const fs = require("fs");
@@ -13,7 +13,9 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
   const ABSENCES = path.join(ROOT, "absences.json");
-  const EMPLOYEES = path.join(ROOT, "employees.json");
+  const ASSIGNMENTS = path.join(ROOT, "assignments.json");
+  const KRISTINE_EMPLOYEES = path.join(ROOT, "employees.json");
+  const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
   const REPORTS_DIR = path.join(ROOT, "reports");
 
   async function readJson(file, fallback) {
@@ -22,6 +24,14 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     } catch {
       return fallback;
     }
+  }
+
+  function unwrapArray(value, keys = []) {
+    if (Array.isArray(value)) return value;
+    for (const key of keys) {
+      if (Array.isArray(value?.[key])) return value[key];
+    }
+    return [];
   }
 
   function viennaParts(d = new Date()) {
@@ -104,14 +114,18 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     if (!type) return null;
 
     const matchesDate =
-      String(record.date || "").slice(0, 10) === String(date) ||
-      isDateWithin(date, record.from || record.startDate || record.dateFrom, record.to || record.endDate || record.dateTo);
+      String(record.date || record.day || "").slice(0, 10) === String(date) ||
+      isDateWithin(
+        date,
+        record.from || record.start || record.startDate || record.dateFrom,
+        record.to || record.end || record.endDate || record.dateTo
+      );
     if (!matchesDate) return null;
 
     const minutes = Number(record.minutes) || Number(record.hours) * 60 || 7.8 * 60;
     return {
-      employeeId: String(record.employeeId || record.workerId || record.userId || record.employeeName || record.name || ""),
-      employeeName: String(record.employeeName || record.workerName || record.name || record.employeeId || "Unbekannt"),
+      employeeId: String(record.employeeId || record.workerId || record.userId || record.employee?.id || record.employeeName || record.name || ""),
+      employeeName: String(record.employeeName || record.workerName || record.employee?.name || record.name || record.employeeId || "Unbekannt"),
       type,
       label: type === "vacation" ? "Urlaub" : type === "sick" ? "Krankenstand" : type === "holiday" ? "Feiertag" : "Sonstige Abwesenheit",
       minutes: Math.max(0, Math.round(minutes)),
@@ -446,12 +460,23 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   }
 
   async function collect(date, jobFilter = null) {
-    const [timeEvents, reviewEntries, absences, employeeMaster] = await Promise.all([
+    const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, kristineEmployeesRaw, systemEmployeesRaw] = await Promise.all([
       readJson(TIME_EVENTS, []),
       readJson(REVIEW_ENTRIES, []),
       readJson(ABSENCES, []),
-      readJson(EMPLOYEES, []),
+      readJson(ASSIGNMENTS, []),
+      readJson(KRISTINE_EMPLOYEES, []),
+      readJson(SYSTEM_EMPLOYEES, []),
     ]);
+
+    const timeEvents = unwrapArray(timeEventsRaw, ["events", "rows", "items"]);
+    const reviewEntries = unwrapArray(reviewEntriesRaw, ["entries", "rows", "items"]);
+    const absences = unwrapArray(absencesRaw, ["absences", "rows", "items"]);
+    const assignments = unwrapArray(assignmentsRaw, ["assignments", "rows", "items"]);
+    const employeeMaster = [
+      ...unwrapArray(systemEmployeesRaw, ["employees", "rows", "items"]),
+      ...unwrapArray(kristineEmployeesRaw, ["employees", "rows", "items"]),
+    ];
 
     const byEmployee = new Map();
 
@@ -469,28 +494,34 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       return byEmployee.get(key);
     };
 
-    for (const master of Array.isArray(employeeMaster) ? employeeMaster : []) {
+    for (const master of employeeMaster) {
       const active = master.active !== false && master.isActive !== false && !master.archived;
-      if (!active) continue;
-      ensure(master.id || master.employeeId || master.phone, master.name || master.employeeName);
+      const started = !master.employmentStart || String(master.employmentStart).slice(0, 10) <= String(date);
+      const notEnded = !master.employmentEnd || String(master.employmentEnd).slice(0, 10) >= String(date);
+      if (!active || !started || !notEnded) continue;
+      ensure(
+        master.id || master.employeeId || master.phone || master.mobile,
+        master.name || master.employeeName || [master.firstName, master.lastName].filter(Boolean).join(" ")
+      );
     }
 
-    for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
+    for (const event of timeEvents) {
       if (String(event.date) !== String(date)) continue;
       if (jobFilter && String(event.jobId || "") !== String(jobFilter)) continue;
       ensure(event.employeeId, event.employeeName).events.push(event);
     }
 
-    for (const entry of Array.isArray(reviewEntries) ? reviewEntries : []) {
+    for (const entry of reviewEntries) {
       if (String(entry.date) !== String(date)) continue;
       if (jobFilter && String(entry.jobId || "") !== String(jobFilter)) continue;
       ensure(entry.employeeId, entry.employeeName).reviews.push(entry);
     }
 
     const absenceCandidates = [
-      ...(Array.isArray(absences) ? absences : []),
-      ...(Array.isArray(timeEvents) ? timeEvents : []),
-      ...(Array.isArray(reviewEntries) ? reviewEntries : []),
+      ...absences,
+      ...assignments,
+      ...timeEvents,
+      ...reviewEntries,
     ];
 
     if (!jobFilter) {
@@ -721,22 +752,22 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
             size: 9.5,
             font: bold,
           });
-          page.drawText(
-            `${block.jobId ? "#" + block.jobId + " · " : ""}${block.jobName}`,
-            {
-              x: margin + 76,
-              y,
-              size: 9.5,
-              font,
-              maxWidth: 570,
-            }
-          );
           page.drawText(formatDurationCompact(durationOf(block)), {
-            x: PAGE_W - margin - 38,
+            x: margin + 82,
             y,
             size: 9.2,
             font: bold,
           });
+          page.drawText(
+            `${block.jobId ? "#" + block.jobId + " · " : ""}${block.jobName}`,
+            {
+              x: margin + 126,
+              y,
+              size: 9.5,
+              font,
+              maxWidth: contentWidth - 126,
+            }
+          );
           y -= 14;
         }
       } else if (employee.absence) {
@@ -942,8 +973,8 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         }
 
         page.drawLine({
-          start: { x: margin + 12, y: y + 4 },
-          end: { x: margin + 320, y: y + 4 },
+          start: { x: margin + 12, y: y + 10 },
+          end: { x: margin + 320, y: y + 10 },
           thickness: 0.45,
           color: rgb(0.82, 0.82, 0.82),
         });
@@ -994,6 +1025,12 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
             y -= 11;
           }
 
+          page.drawLine({
+            start: { x: margin + 12, y: y + 10 },
+            end: { x: margin + 320, y: y + 10 },
+            thickness: 0.45,
+            color: rgb(0.82, 0.82, 0.82),
+          });
           page.drawText("Gesamt", {
             x: margin + 12,
             y,
