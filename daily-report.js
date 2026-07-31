@@ -152,8 +152,19 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       record.plannedDate,
       record.startDay
     );
-    const from = firstValue(record.from, record.start, record.startDate, record.dateFrom, record.fromDate, singleDate);
-    const to = firstValue(record.to, record.end, record.endDate, record.dateTo, record.toDate, singleDate);
+    const from = firstValue(
+  record.startDate,
+  record.dateFrom,
+  record.fromDate,
+  singleDate
+);
+
+const to = firstValue(
+  record.endDate,
+  record.dateTo,
+  record.toDate,
+  singleDate
+);
     if (!isDateWithin(date, from, to)) return null;
 
     const employeeId = firstValue(
