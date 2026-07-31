@@ -107,13 +107,19 @@ const block = {
   jobId: isUnproductive ? "" : String(event.jobId || ""),
 
   jobName: isUnproductive
-    ? String(
-        event.upGroup ||
-        event.upReason ||
-        event.jobName ||
-        event.jobId ||
-        "Unproduktiv"
-      )
+    ? (() => {
+        const reason = String(
+          event.upReason ||
+          event.jobName ||
+          event.upGroup ||
+          event.jobId ||
+          ""
+        ).trim();
+
+        return reason && reason.toLowerCase() !== "unproduktiv"
+          ? `Unproduktiv · ${reason}`
+          : "Unproduktiv";
+      })()
     : String(event.jobName || event.jobId || "Ohne Baustelle"),
 
   type: isUnproductive ? "up" : "productive",
