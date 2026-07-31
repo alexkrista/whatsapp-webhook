@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.3 · Tagesreport Feinschliff
+// Datei: daily-report.js · Build 0029.4 · Tagesauswertung kompakt
 "use strict";
 
 const fs = require("fs");
@@ -14,7 +14,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
   const ABSENCES = path.join(ROOT, "absences.json");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
-  const KRISTINE_EMPLOYEES = path.join(ROOT, "employees.json");
+  const EMPLOYEES = path.join(ROOT, "employees.json");
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
   const REPORTS_DIR = path.join(ROOT, "reports");
 
@@ -24,14 +24,6 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     } catch {
       return fallback;
     }
-  }
-
-  function unwrapArray(value, keys = []) {
-    if (Array.isArray(value)) return value;
-    for (const key of keys) {
-      if (Array.isArray(value?.[key])) return value[key];
-    }
-    return [];
   }
 
   function viennaParts(d = new Date()) {
@@ -114,18 +106,14 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     if (!type) return null;
 
     const matchesDate =
-      String(record.date || record.day || "").slice(0, 10) === String(date) ||
-      isDateWithin(
-        date,
-        record.from || record.start || record.startDate || record.dateFrom,
-        record.to || record.end || record.endDate || record.dateTo
-      );
+      String(record.date || "").slice(0, 10) === String(date) ||
+      isDateWithin(date, record.from || record.startDate || record.dateFrom, record.to || record.endDate || record.dateTo);
     if (!matchesDate) return null;
 
     const minutes = Number(record.minutes) || Number(record.hours) * 60 || 7.8 * 60;
     return {
-      employeeId: String(record.employeeId || record.workerId || record.userId || record.employee?.id || record.employeeName || record.name || ""),
-      employeeName: String(record.employeeName || record.workerName || record.employee?.name || record.name || record.employeeId || "Unbekannt"),
+      employeeId: String(record.employeeId || record.workerId || record.userId || record.employeeName || record.name || ""),
+      employeeName: String(record.employeeName || record.workerName || record.name || record.employeeId || "Unbekannt"),
       type,
       label: type === "vacation" ? "Urlaub" : type === "sick" ? "Krankenstand" : type === "holiday" ? "Feiertag" : "Sonstige Abwesenheit",
       minutes: Math.max(0, Math.round(minutes)),
@@ -459,24 +447,30 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     }
   }
 
+  function asArray(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object") return [];
+    for (const key of ["employees", "items", "data", "assignments", "absences", "records"]) {
+      if (Array.isArray(value[key])) return value[key];
+    }
+    return Object.values(value).filter((item) => item && typeof item === "object");
+  }
+
   async function collect(date, jobFilter = null) {
-    const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, kristineEmployeesRaw, systemEmployeesRaw] = await Promise.all([
+    const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, employeeMasterRaw, systemEmployeeMasterRaw] = await Promise.all([
       readJson(TIME_EVENTS, []),
       readJson(REVIEW_ENTRIES, []),
       readJson(ABSENCES, []),
       readJson(ASSIGNMENTS, []),
-      readJson(KRISTINE_EMPLOYEES, []),
+      readJson(EMPLOYEES, []),
       readJson(SYSTEM_EMPLOYEES, []),
     ]);
 
-    const timeEvents = unwrapArray(timeEventsRaw, ["events", "rows", "items"]);
-    const reviewEntries = unwrapArray(reviewEntriesRaw, ["entries", "rows", "items"]);
-    const absences = unwrapArray(absencesRaw, ["absences", "rows", "items"]);
-    const assignments = unwrapArray(assignmentsRaw, ["assignments", "rows", "items"]);
-    const employeeMaster = [
-      ...unwrapArray(systemEmployeesRaw, ["employees", "rows", "items"]),
-      ...unwrapArray(kristineEmployeesRaw, ["employees", "rows", "items"]),
-    ];
+    const timeEvents = asArray(timeEventsRaw);
+    const reviewEntries = asArray(reviewEntriesRaw);
+    const absences = asArray(absencesRaw);
+    const assignments = asArray(assignmentsRaw);
+    const employeeMaster = [...asArray(employeeMasterRaw), ...asArray(systemEmployeeMasterRaw)];
 
     const byEmployee = new Map();
 
@@ -496,13 +490,8 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
 
     for (const master of employeeMaster) {
       const active = master.active !== false && master.isActive !== false && !master.archived;
-      const started = !master.employmentStart || String(master.employmentStart).slice(0, 10) <= String(date);
-      const notEnded = !master.employmentEnd || String(master.employmentEnd).slice(0, 10) >= String(date);
-      if (!active || !started || !notEnded) continue;
-      ensure(
-        master.id || master.employeeId || master.phone || master.mobile,
-        master.name || master.employeeName || [master.firstName, master.lastName].filter(Boolean).join(" ")
-      );
+      if (!active) continue;
+      ensure(master.id || master.employeeId || master.phone, master.name || master.employeeName);
     }
 
     for (const event of timeEvents) {
@@ -753,7 +742,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
             font: bold,
           });
           page.drawText(formatDurationCompact(durationOf(block)), {
-            x: margin + 82,
+            x: margin + 78,
             y,
             size: 9.2,
             font: bold,
@@ -761,11 +750,11 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
           page.drawText(
             `${block.jobId ? "#" + block.jobId + " · " : ""}${block.jobName}`,
             {
-              x: margin + 126,
+              x: margin + 120,
               y,
               size: 9.5,
               font,
-              maxWidth: contentWidth - 126,
+              maxWidth: contentWidth - 120,
             }
           );
           y -= 14;
@@ -938,225 +927,216 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     if (includeDaySummary && employees.length) {
       const day = summarizeDay(employees);
 
-      ensureSpace(40, "TAGESAUSWERTUNG");
-      drawSectionHeading("BAUSTELLENÜBERSICHT");
-
-      for (const job of [...day.jobs.values()].sort((a, b) => b.total - a.total)) {
-        ensureSpace(34 + job.employees.length * 11, "BAUSTELLENÜBERSICHT");
-
-        page.drawText(
-          `${job.jobId ? "#" + job.jobId + " · " : ""}${job.jobName}`,
-          {
-            x: margin,
-            y,
-            size: 10,
-            font: bold,
-            maxWidth: 450,
-          }
-        );
-        y -= 13;
-
-        for (const row of job.employees.sort((a, b) => b.minutes - a.minutes)) {
-          page.drawText(row.employeeName, {
-            x: margin + 12,
-            y,
-            size: 8.5,
-            font,
-          });
-          page.drawText(formatDuration(row.minutes), {
-            x: margin + 260,
-            y,
-            size: 8.5,
-            font: bold,
-          });
-          y -= 11;
-        }
-
-        page.drawLine({
-          start: { x: margin + 12, y: y + 10 },
-          end: { x: margin + 320, y: y + 10 },
-          thickness: 0.45,
-          color: rgb(0.82, 0.82, 0.82),
-        });
-        page.drawText("Gesamt", {
-          x: margin + 12,
-          y,
-          size: 8.7,
-          font: bold,
-        });
-        page.drawText(formatDuration(job.total), {
-          x: margin + 260,
-          y,
-          size: 8.7,
-          font: bold,
-        });
-        y -= 16;
-      }
-
-      if (day.upReasons.size) {
-        drawSectionHeading("UNPRODUKTIV");
-
-        for (const [reason, info] of [...day.upReasons.entries()].sort(
-          (a, b) => b[1].total - a[1].total
-        )) {
-          ensureSpace(34 + info.employees.length * 11, "UNPRODUKTIV");
-
-          page.drawText(reason, {
-            x: margin,
-            y,
-            size: 10,
-            font: bold,
-          });
-          y -= 13;
-
-          for (const row of info.employees.sort((a, b) => b.minutes - a.minutes)) {
-            page.drawText(row.employeeName, {
-              x: margin + 12,
-              y,
-              size: 8.5,
-              font,
-            });
-            page.drawText(formatDuration(row.minutes), {
-              x: margin + 260,
-              y,
-              size: 8.5,
-              font: bold,
-            });
-            y -= 11;
-          }
-
-          page.drawLine({
-            start: { x: margin + 12, y: y + 10 },
-            end: { x: margin + 320, y: y + 10 },
-            thickness: 0.45,
-            color: rgb(0.82, 0.82, 0.82),
-          });
-          page.drawText("Gesamt", {
-            x: margin + 12,
-            y,
-            size: 8.7,
-            font: bold,
-          });
-          page.drawText(formatDuration(info.total), {
-            x: margin + 260,
-            y,
-            size: 8.7,
-            font: bold,
-          });
-          y -= 16;
-        }
-      }
-
-      newPage("BETRIEBSÜBERSICHT");
-      const leftX = margin;
-      const dividerX = margin + 430;
-      const rightX = dividerX + 20;
-      const rowYStart = y;
-
-      page.drawText("Tageskennzahlen", { x: leftX, y, size: 12, font: bold });
-      y -= 20;
-
-      const col = {
-        label: leftX,
-        ist: leftX + 170,
-        plan: leftX + 235,
-        diff: leftX + 300,
-        pct: leftX + 365,
-      };
-      page.drawText("Ist", { x: col.ist, y, size: 8.4, font: bold });
-      page.drawText("Plan", { x: col.plan, y, size: 8.4, font: bold });
-      page.drawText("+/-", { x: col.diff, y, size: 8.4, font: bold });
-      page.drawText("p/M %", { x: col.pct, y, size: 8.4, font: bold });
-      y -= 14;
-
-      const kpiRows = [
-        ["Produktiv", day.productive],
-        ["Unproduktiv", day.unproductive],
-      ];
-      for (const [label, minutes] of kpiRows) {
-        page.drawText(label, { x: col.label, y, size: 9, font });
-        page.drawText(formatDurationCompact(minutes), { x: col.ist, y, size: 9, font: bold });
-        page.drawText("—", { x: col.plan, y, size: 9, font });
-        page.drawText("—", { x: col.diff, y, size: 9, font });
-        page.drawText("—", { x: col.pct, y, size: 9, font });
-        y -= 15;
-      }
-
-      y -= 5;
-      page.drawLine({ start: { x: leftX, y }, end: { x: dividerX - 18, y }, thickness: 0.6, color: rgb(0.82, 0.82, 0.82) });
-      y -= 17;
-      page.drawText("Personal", { x: leftX, y, size: 10, font: bold });
-      y -= 15;
-      const personalRows = [
-        ["Mitarbeiter gesamt", String(day.headcount)],
-        ["Im Einsatz", String(day.activeCount)],
-        ["Urlaub", String(day.absences.vacation.length)],
-        ["Krankenstand", String(day.absences.sick.length)],
-        ["Feiertag", String(day.absences.holiday.length)],
-        ["Sonstige Abwesenheit", String(day.absences.other.length)],
-      ];
-      for (const [label, value] of personalRows) {
-        page.drawText(label, { x: leftX, y, size: 8.6, font });
-        page.drawText(value, { x: leftX + 180, y, size: 8.6, font: bold });
-        y -= 12;
-      }
-
-      function drawAbsenceList(title, rows) {
-        if (!rows.length) return;
-        y -= 5;
-        page.drawText(title, { x: leftX, y, size: 9, font: bold });
-        y -= 12;
-        for (const row of rows) {
-          page.drawText(row.employeeName, { x: leftX + 10, y, size: 8.2, font });
-          page.drawText(formatDurationCompact(row.minutes), { x: leftX + 180, y, size: 8.2, font: bold });
-          y -= 11;
-        }
-      }
-      drawAbsenceList("Urlaub", day.absences.vacation);
-      drawAbsenceList("Krankenstand", day.absences.sick);
-      drawAbsenceList("Feiertag", day.absences.holiday);
-      drawAbsenceList("Sonstige Abwesenheit", day.absences.other);
-
       const unknownBlocks = employees.flatMap((employee) =>
         employee.blocks
           .filter((block) => block.type === "productive" && (!block.jobId || block.jobName === "Ohne Baustelle"))
           .map((block) => ({ employeeName: employee.employeeName, block }))
       );
-      const withoutPhotos = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "photo"));
-      const withoutMaterial = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "material"));
-      const withoutRegie = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "regie"));
-      const checks = [];
-      if (unknownBlocks.length) checks.push(`${unknownBlocks.length} produktive Zeitblöcke ohne eindeutige Baustellennummer`);
-      if (withoutPhotos.length) checks.push(`Keine Fotos erfasst: ${withoutPhotos.map((e) => e.employeeName).join(", ")}`);
-      if (withoutMaterial.length) checks.push(`Kein Material erfasst: ${withoutMaterial.map((e) => e.employeeName).join(", ")}`);
-      if (withoutRegie.length) checks.push(`Keine Regie erfasst: ${withoutRegie.map((e) => e.employeeName).join(", ")}`);
+      const activeEmployees = employees.filter((employee) => employee.summary.workingTotal > 0);
+      const withoutPhotos = activeEmployees.filter((employee) => !employee.reviews.some((entry) => entry.category === "photo"));
+      const withoutMaterial = activeEmployees.filter((employee) => !employee.reviews.some((entry) => entry.category === "material"));
+      const withoutRegie = activeEmployees.filter((employee) => !employee.reviews.some((entry) => entry.category === "regie"));
+
+      newPage();
+      page.drawText("TAGESAUSWERTUNG", { x: margin, y, size: 13, font: bold });
+      y -= 20;
+
+      const leftX = margin;
+      const leftValueX = leftX + 280;
+      const dividerX = margin + 410;
+      const rightX = dividerX + 20;
+      const rightValueX = rightX + 180;
+      const topY = y;
+      const lowerLimit = 190;
+
+      page.drawText("BAUSTELLENÜBERSICHT", { x: leftX, y, size: 12, font: bold });
+      let leftY = y - 20;
+
+      const jobRows = [...day.jobs.values()].sort((a, b) => b.total - a.total);
+      const upRows = [...day.upReasons.entries()].sort((a, b) => b[1].total - a[1].total);
+      let hiddenJobCount = 0;
+
+      for (let jobIndex = 0; jobIndex < jobRows.length; jobIndex++) {
+        const job = jobRows[jobIndex];
+        const needed = 27 + job.employees.length * 11;
+        if (leftY - needed < lowerLimit) {
+          hiddenJobCount = jobRows.length - jobIndex;
+          break;
+        }
+
+        page.drawText(`${job.jobId ? "#" + job.jobId + " · " : ""}${job.jobName}`, {
+          x: leftX,
+          y: leftY,
+          size: 9.4,
+          font: bold,
+          maxWidth: 305,
+        });
+        leftY -= 12;
+
+        for (const row of job.employees.sort((a, b) => b.minutes - a.minutes)) {
+          page.drawText(row.employeeName, { x: leftX + 12, y: leftY, size: 8.1, font });
+          page.drawText(formatDuration(row.minutes), { x: leftValueX, y: leftY, size: 8.1, font });
+          leftY -= 10;
+        }
+
+        page.drawLine({
+          start: { x: leftX + 12, y: leftY + 4 },
+          end: { x: leftValueX + 72, y: leftY + 4 },
+          thickness: 0.4,
+          color: rgb(0.82, 0.82, 0.82),
+        });
+        page.drawText("Gesamt", { x: leftX + 12, y: leftY, size: 8.3, font: bold });
+        page.drawText(formatDuration(job.total), { x: leftValueX, y: leftY, size: 8.3, font: bold });
+        leftY -= 15;
+      }
+
+      if (hiddenJobCount > 0) {
+        page.drawText(`+ ${hiddenJobCount} weitere Baustelle${hiddenJobCount === 1 ? "" : "n"}`, {
+          x: leftX,
+          y: leftY,
+          size: 8.2,
+          font: bold,
+        });
+        leftY -= 14;
+      }
+
+      if (upRows.length && leftY > lowerLimit + 34) {
+        page.drawText("UNPRODUKTIV", { x: leftX, y: leftY, size: 10.5, font: bold });
+        leftY -= 15;
+        for (const [reason, info] of upRows) {
+          const needed = 25 + info.employees.length * 10;
+          if (leftY - needed < lowerLimit) break;
+          page.drawText(reason, { x: leftX, y: leftY, size: 9, font: bold });
+          leftY -= 11;
+          for (const row of info.employees.sort((a, b) => b.minutes - a.minutes)) {
+            page.drawText(row.employeeName, { x: leftX + 12, y: leftY, size: 8.1, font });
+            page.drawText(formatDuration(row.minutes), { x: leftValueX, y: leftY, size: 8.1, font });
+            leftY -= 10;
+          }
+          page.drawLine({
+            start: { x: leftX + 12, y: leftY + 4 },
+            end: { x: leftValueX + 72, y: leftY + 4 },
+            thickness: 0.4,
+            color: rgb(0.82, 0.82, 0.82),
+          });
+          page.drawText("Gesamt", { x: leftX + 12, y: leftY, size: 8.3, font: bold });
+          page.drawText(formatDuration(info.total), { x: leftValueX, y: leftY, size: 8.3, font: bold });
+          leftY -= 15;
+        }
+      }
 
       page.drawLine({
-        start: { x: dividerX, y: rowYStart + 6 },
-        end: { x: dividerX, y: 56 },
-        thickness: 0.55,
+        start: { x: dividerX, y: topY + 4 },
+        end: { x: dividerX, y: lowerLimit },
+        thickness: 0.5,
         color: rgb(0.82, 0.82, 0.82),
       });
-      let checkY = rowYStart;
-      page.drawText("Prüfhinweise", { x: rightX, y: checkY, size: 12, font: bold });
-      checkY -= 20;
-      if (!checks.length) {
-        page.drawText("Keine automatischen Prüfhinweise.", { x: rightX, y: checkY, size: 8.8, font });
-      } else {
-        for (const check of checks) {
-          const lines = wrap(check, 46);
-          lines.forEach((line, index) => {
-            page.drawText(`${index === 0 ? "• " : "  "}${line}`, {
-              x: rightX,
-              y: checkY,
-              size: 8.5,
-              font,
-              maxWidth: PAGE_W - margin - rightX,
-            });
-            checkY -= 11;
-          });
-          checkY -= 4;
+
+      let rightY = topY;
+      page.drawText("BETRIEBSÜBERSICHT", { x: rightX, y: rightY, size: 12, font: bold });
+      rightY -= 20;
+      page.drawText("Tageskennzahlen", { x: rightX, y: rightY, size: 10, font: bold });
+      rightY -= 16;
+
+      const kpiCol = {
+        label: rightX,
+        ist: rightX + 155,
+        plan: rightX + 205,
+        diff: rightX + 250,
+        pct: rightX + 295,
+      };
+      page.drawText("Ist", { x: kpiCol.ist, y: rightY, size: 7.8, font: bold });
+      page.drawText("Plan", { x: kpiCol.plan, y: rightY, size: 7.8, font: bold });
+      page.drawText("+/-", { x: kpiCol.diff, y: rightY, size: 7.8, font: bold });
+      page.drawText("p/M %", { x: kpiCol.pct, y: rightY, size: 7.8, font: bold });
+      rightY -= 13;
+
+      for (const [label, minutes] of [["Produktiv", day.productive], ["Unproduktiv", day.unproductive]]) {
+        page.drawText(label, { x: kpiCol.label, y: rightY, size: 8.5, font });
+        page.drawText(formatDurationCompact(minutes), { x: kpiCol.ist, y: rightY, size: 8.5, font: bold });
+        page.drawText("—", { x: kpiCol.plan, y: rightY, size: 8.5, font });
+        page.drawText("—", { x: kpiCol.diff, y: rightY, size: 8.5, font });
+        page.drawText("—", { x: kpiCol.pct, y: rightY, size: 8.5, font });
+        rightY -= 14;
+      }
+
+      rightY -= 5;
+      page.drawLine({ start: { x: rightX, y: rightY }, end: { x: PAGE_W - margin, y: rightY }, thickness: 0.5, color: rgb(0.82, 0.82, 0.82) });
+      rightY -= 16;
+      page.drawText("Personal", { x: rightX, y: rightY, size: 10, font: bold });
+      rightY -= 15;
+
+      const personalRows = [
+        ["Mitarbeiter gesamt", day.headcount],
+        ["Im Einsatz", day.activeCount],
+        ["Urlaub", day.absences.vacation.length],
+        ["Krankenstand", day.absences.sick.length],
+        ["Feiertag", day.absences.holiday.length],
+        ["Sonstige Abwesenheit", day.absences.other.length],
+      ];
+      for (const [label, value] of personalRows) {
+        page.drawText(label, { x: rightX, y: rightY, size: 8.4, font });
+        page.drawText(String(value), { x: rightValueX, y: rightY, size: 8.4, font: bold });
+        rightY -= 11;
+      }
+
+      function drawNames(title, rows) {
+        if (!rows.length || rightY < lowerLimit + 20) return;
+        rightY -= 3;
+        const names = rows.map((row) => row.employeeName).join(", ");
+        page.drawText(`${title}:`, { x: rightX, y: rightY, size: 8.1, font: bold });
+        const lines = wrap(names, 37).slice(0, 2);
+        lines.forEach((line, index) => {
+          page.drawText(line, { x: rightX + 58, y: rightY - index * 10, size: 7.9, font, maxWidth: 250 });
+        });
+        rightY -= Math.max(11, lines.length * 10);
+      }
+      drawNames("Urlaub", day.absences.vacation);
+      drawNames("Krank", day.absences.sick);
+      drawNames("Feiertag", day.absences.holiday);
+      drawNames("Sonstige", day.absences.other);
+
+      const checksTop = 155;
+      page.drawLine({
+        start: { x: margin, y: checksTop + 15 },
+        end: { x: PAGE_W - margin, y: checksTop + 15 },
+        thickness: 0.65,
+        color: rgb(0.82, 0.82, 0.82),
+      });
+      page.drawText("PRÜFHINWEISE", { x: margin, y: checksTop, size: 10.5, font: bold });
+
+      const checkColumns = [
+        { title: `FOTOS FEHLEN (${withoutPhotos.length})`, rows: withoutPhotos.map((e) => e.employeeName) },
+        { title: `MATERIAL FEHLT (${withoutMaterial.length})`, rows: withoutMaterial.map((e) => e.employeeName) },
+        { title: `REGIE FEHLT (${withoutRegie.length})`, rows: withoutRegie.map((e) => e.employeeName) },
+      ];
+      const colGap = 18;
+      const colWidth = (contentWidth - colGap * 2) / 3;
+      checkColumns.forEach((check, index) => {
+        const x = margin + index * (colWidth + colGap);
+        let checkY = checksTop - 17;
+        page.drawText(check.title, { x, y: checkY, size: 8.5, font: bold });
+        checkY -= 12;
+        if (!check.rows.length) {
+          page.drawText("Keine", { x, y: checkY, size: 8, font });
+          return;
         }
+        for (const name of check.rows.slice(0, 7)) {
+          page.drawText(name, { x, y: checkY, size: 8, font, maxWidth: colWidth });
+          checkY -= 10;
+        }
+        if (check.rows.length > 7) {
+          page.drawText(`+ ${check.rows.length - 7} weitere`, { x, y: checkY, size: 7.8, font: bold });
+        }
+      });
+
+      if (unknownBlocks.length) {
+        page.drawText(`${unknownBlocks.length} Zeitblock${unknownBlocks.length === 1 ? "" : "blöcke"} ohne eindeutige Baustelle`, {
+          x: margin,
+          y: 42,
+          size: 7.8,
+          font: bold,
+        });
       }
     }
 
