@@ -110,13 +110,12 @@ const block = {
     ? (() => {
         const reason = String(
           event.upReason ||
-          event.jobName ||
-          event.upGroup ||
-          event.jobId ||
+          event.reason ||
+          event.detail ||
           ""
         ).trim();
 
-        return reason && reason.toLowerCase() !== "unproduktiv"
+        return reason
           ? `Unproduktiv · ${reason}`
           : "Unproduktiv";
       })()
