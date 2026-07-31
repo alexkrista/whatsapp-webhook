@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.1 · Tagesrapport PRO
+// Datei: daily-report.js · Build 0029.2 · Reporting-Basis
 "use strict";
 
 const fs = require("fs");
@@ -12,6 +12,8 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   const ROOT = path.join(dataDir, "_kristine");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
+  const ABSENCES = path.join(ROOT, "absences.json");
+  const EMPLOYEES = path.join(ROOT, "employees.json");
   const REPORTS_DIR = path.join(ROOT, "reports");
 
   async function readJson(file, fallback) {
@@ -56,6 +58,65 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     const hours = Math.floor(total / 60);
     const mins = total % 60;
     return `${hours} h ${String(mins).padStart(2, "0")} min`;
+  }
+
+  function formatDurationCompact(minutes) {
+    const total = Math.max(0, Math.round(Number(minutes) || 0));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function weekdayForDate(dateStr) {
+    const [year, month, day] = String(dateStr || "").split("-").map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  }
+
+  function requiredCoffeeBreaks(dateStr, hasMorningWork, hasAfternoonWork) {
+    const weekday = weekdayForDate(dateStr);
+    const isWeekday = weekday >= 1 && weekday <= 5;
+    return {
+      morning: isWeekday && hasMorningWork ? 15 : 0,
+      afternoon: weekday >= 1 && weekday <= 4 && hasAfternoonWork ? 5 : 0,
+    };
+  }
+
+  function absenceType(value) {
+    const text = String(value || "").toLowerCase();
+    if (/urlaub|vacation|holiday/.test(text)) return "vacation";
+    if (/krank|krankenstand|sick|illness/.test(text)) return "sick";
+    if (/feiertag|public holiday/.test(text)) return "holiday";
+    if (/zeitausgleich|time off|absence|abwesen/.test(text)) return "other";
+    return null;
+  }
+
+  function isDateWithin(date, from, to) {
+    const target = String(date || "").slice(0, 10);
+    const start = String(from || to || "").slice(0, 10);
+    const end = String(to || from || "").slice(0, 10);
+    return Boolean(target && start && end && target >= start && target <= end);
+  }
+
+  function normalizeAbsence(record, date) {
+    if (!record || typeof record !== "object") return null;
+    const type = absenceType(
+      record.type || record.absenceType || record.category || record.status || record.reason
+    );
+    if (!type) return null;
+
+    const matchesDate =
+      String(record.date || "").slice(0, 10) === String(date) ||
+      isDateWithin(date, record.from || record.startDate || record.dateFrom, record.to || record.endDate || record.dateTo);
+    if (!matchesDate) return null;
+
+    const minutes = Number(record.minutes) || Number(record.hours) * 60 || 7.8 * 60;
+    return {
+      employeeId: String(record.employeeId || record.workerId || record.userId || record.employeeName || record.name || ""),
+      employeeName: String(record.employeeName || record.workerName || record.name || record.employeeId || "Unbekannt"),
+      type,
+      label: type === "vacation" ? "Urlaub" : type === "sick" ? "Krankenstand" : type === "holiday" ? "Feiertag" : "Sonstige Abwesenheit",
+      minutes: Math.max(0, Math.round(minutes)),
+      reason: String(record.reason || record.note || "").trim(),
+    };
   }
 
   function durationOf(block) {
@@ -200,53 +261,107 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     return blocks;
   }
 
-  function summarizeEmployee(employee) {
+  function summarizeEmployee(employee, date) {
     const summary = {
       beforeNoon: 0,
       afterNoon: 0,
       productive: 0,
       unproductive: 0,
       pause: 0,
+      stampedPause: 0,
+      automaticPause: 0,
       lunch: 0,
       workingTotal: 0,
       presenceTotal: 0,
       jobs: new Map(),
       upReasons: new Map(),
+      absence: employee.absence || null,
     };
+
+    const morningEntries = [];
+    const afternoonEntries = [];
+    let stampedMorningPause = 0;
+    let stampedAfternoonPause = 0;
+
+    function addWorkEntry(block, minutes, segment) {
+      if (minutes <= 0) return;
+      const entry = {
+        type: block.type,
+        key: block.type === "productive"
+          ? String(block.jobId || block.jobName || "Ohne Baustelle")
+          : cleanUpReason(block.upReason || block.jobName),
+        jobId: String(block.jobId || ""),
+        jobName: String(block.jobName || block.jobId || "Ohne Baustelle"),
+        minutes,
+        adjusted: minutes,
+      };
+      (segment === "morning" ? morningEntries : afternoonEntries).push(entry);
+    }
 
     for (const block of employee.blocks) {
       const minutes = durationOf(block);
       const split = splitAtNoon(block);
 
       if (block.type === "productive" || block.type === "up") {
-        summary.beforeNoon += split.before;
-        summary.afterNoon += split.after;
-        summary.workingTotal += minutes;
-      }
-
-      if (block.type === "productive") {
-        summary.productive += minutes;
-        const key = String(block.jobId || block.jobName || "Ohne Baustelle");
-        if (!summary.jobs.has(key)) {
-          summary.jobs.set(key, {
-            jobId: String(block.jobId || ""),
-            jobName: String(block.jobName || block.jobId || "Ohne Baustelle"),
-            minutes: 0,
-          });
-        }
-        summary.jobs.get(key).minutes += minutes;
-      } else if (block.type === "up") {
-        summary.unproductive += minutes;
-        const reason = cleanUpReason(block.upReason || block.jobName);
-        summary.upReasons.set(reason, (summary.upReasons.get(reason) || 0) + minutes);
+        addWorkEntry(block, split.before, "morning");
+        addWorkEntry(block, split.after, "afternoon");
       } else if (block.type === "pause") {
-        summary.pause += minutes;
+        stampedMorningPause += split.before;
+        stampedAfternoonPause += split.after;
+        summary.stampedPause += minutes;
       } else if (block.type === "lunch") {
         summary.lunch += minutes;
       }
 
       summary.presenceTotal += minutes;
     }
+
+    const required = requiredCoffeeBreaks(date, morningEntries.length > 0, afternoonEntries.length > 0);
+    const autoMorning = Math.max(0, required.morning - stampedMorningPause);
+    const autoAfternoon = Math.max(0, required.afternoon - stampedAfternoonPause);
+
+    function deduct(entries, minutes) {
+      let remaining = Math.max(0, minutes);
+      for (const entry of [...entries].sort((a, b) => b.adjusted - a.adjusted)) {
+        if (remaining <= 0) break;
+        const deduction = Math.min(entry.adjusted, remaining);
+        entry.adjusted -= deduction;
+        remaining -= deduction;
+      }
+      return minutes - remaining;
+    }
+
+    const deductedMorning = deduct(morningEntries, autoMorning);
+    const deductedAfternoon = deduct(afternoonEntries, autoAfternoon);
+    summary.automaticPause = deductedMorning + deductedAfternoon;
+    summary.pause = summary.stampedPause + summary.automaticPause;
+
+    function aggregate(entries, segment) {
+      for (const entry of entries) {
+        const minutes = Math.max(0, entry.adjusted);
+        if (segment === "morning") summary.beforeNoon += minutes;
+        else summary.afterNoon += minutes;
+        summary.workingTotal += minutes;
+
+        if (entry.type === "productive") {
+          summary.productive += minutes;
+          if (!summary.jobs.has(entry.key)) {
+            summary.jobs.set(entry.key, {
+              jobId: entry.jobId,
+              jobName: entry.jobName,
+              minutes: 0,
+            });
+          }
+          summary.jobs.get(entry.key).minutes += minutes;
+        } else {
+          summary.unproductive += minutes;
+          summary.upReasons.set(entry.key, (summary.upReasons.get(entry.key) || 0) + minutes);
+        }
+      }
+    }
+
+    aggregate(morningEntries, "morning");
+    aggregate(afternoonEntries, "afternoon");
 
     return summary;
   }
@@ -258,52 +373,55 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       productive: 0,
       unproductive: 0,
       pause: 0,
+      stampedPause: 0,
+      automaticPause: 0,
       lunch: 0,
       workingTotal: 0,
       presenceTotal: 0,
       jobs: new Map(),
       upReasons: new Map(),
+      absences: { vacation: [], sick: [], holiday: [], other: [] },
+      headcount: employees.length,
+      activeCount: 0,
     };
 
     for (const employee of employees) {
-      const summary = employee.summary || summarizeEmployee(employee);
+      const summary = employee.summary;
       day.beforeNoon += summary.beforeNoon;
       day.afterNoon += summary.afterNoon;
       day.productive += summary.productive;
       day.unproductive += summary.unproductive;
       day.pause += summary.pause;
+      day.stampedPause += summary.stampedPause;
+      day.automaticPause += summary.automaticPause;
       day.lunch += summary.lunch;
       day.workingTotal += summary.workingTotal;
       day.presenceTotal += summary.presenceTotal;
+      if (summary.workingTotal > 0) day.activeCount += 1;
+
+      if (summary.absence) {
+        day.absences[summary.absence.type]?.push({
+          employeeName: employee.employeeName,
+          minutes: summary.absence.minutes,
+          reason: summary.absence.reason,
+        });
+      }
 
       for (const job of summary.jobs.values()) {
         const key = String(job.jobId || job.jobName);
         if (!day.jobs.has(key)) {
-          day.jobs.set(key, {
-            jobId: job.jobId,
-            jobName: job.jobName,
-            total: 0,
-            employees: [],
-          });
+          day.jobs.set(key, { jobId: job.jobId, jobName: job.jobName, total: 0, employees: [] });
         }
         const target = day.jobs.get(key);
         target.total += job.minutes;
-        target.employees.push({
-          employeeName: employee.employeeName,
-          minutes: job.minutes,
-        });
+        target.employees.push({ employeeName: employee.employeeName, minutes: job.minutes });
       }
 
       for (const [reason, minutes] of summary.upReasons.entries()) {
-        if (!day.upReasons.has(reason)) {
-          day.upReasons.set(reason, { total: 0, employees: [] });
-        }
+        if (!day.upReasons.has(reason)) day.upReasons.set(reason, { total: 0, employees: [] });
         const target = day.upReasons.get(reason);
         target.total += minutes;
-        target.employees.push({
-          employeeName: employee.employeeName,
-          minutes,
-        });
+        target.employees.push({ employeeName: employee.employeeName, minutes });
       }
     }
 
@@ -328,9 +446,11 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   }
 
   async function collect(date, jobFilter = null) {
-    const [timeEvents, reviewEntries] = await Promise.all([
+    const [timeEvents, reviewEntries, absences, employeeMaster] = await Promise.all([
       readJson(TIME_EVENTS, []),
       readJson(REVIEW_ENTRIES, []),
+      readJson(ABSENCES, []),
+      readJson(EMPLOYEES, []),
     ]);
 
     const byEmployee = new Map();
@@ -343,30 +463,52 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
           employeeName: name || key,
           events: [],
           reviews: [],
+          absence: null,
         });
       }
       return byEmployee.get(key);
     };
 
-    for (const event of timeEvents) {
+    for (const master of Array.isArray(employeeMaster) ? employeeMaster : []) {
+      const active = master.active !== false && master.isActive !== false && !master.archived;
+      if (!active) continue;
+      ensure(master.id || master.employeeId || master.phone, master.name || master.employeeName);
+    }
+
+    for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
       if (String(event.date) !== String(date)) continue;
       if (jobFilter && String(event.jobId || "") !== String(jobFilter)) continue;
       ensure(event.employeeId, event.employeeName).events.push(event);
     }
 
-    for (const entry of reviewEntries) {
+    for (const entry of Array.isArray(reviewEntries) ? reviewEntries : []) {
       if (String(entry.date) !== String(date)) continue;
       if (jobFilter && String(entry.jobId || "") !== String(jobFilter)) continue;
       ensure(entry.employeeId, entry.employeeName).reviews.push(entry);
+    }
+
+    const absenceCandidates = [
+      ...(Array.isArray(absences) ? absences : []),
+      ...(Array.isArray(timeEvents) ? timeEvents : []),
+      ...(Array.isArray(reviewEntries) ? reviewEntries : []),
+    ];
+
+    if (!jobFilter) {
+      for (const record of absenceCandidates) {
+        const absence = normalizeAbsence(record, date);
+        if (!absence) continue;
+        const employee = ensure(absence.employeeId, absence.employeeName);
+        if (!employee.absence) employee.absence = absence;
+      }
     }
 
     return [...byEmployee.values()]
       .map((employee) => {
         const blocks = buildBlocks(employee.events);
         const withBlocks = { ...employee, blocks };
-        return { ...withBlocks, summary: summarizeEmployee(withBlocks) };
+        return { ...withBlocks, summary: summarizeEmployee(withBlocks, date) };
       })
-      .filter((employee) => employee.blocks.length || employee.reviews.length)
+      .filter((employee) => employee.blocks.length || employee.reviews.length || employee.absence)
       .sort((a, b) => String(a.employeeName).localeCompare(String(b.employeeName), "de"));
   }
 
@@ -452,87 +594,78 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     }
 
     function drawEmployeeSummary(summary) {
-      ensureSpace(88);
-      page.drawText("Zusammenfassung", {
-        x: margin,
-        y,
-        size: 9,
-        font: bold,
-      });
-      y -= 13;
-
+      const startY = y;
       const leftX = margin;
-      const leftValueX = margin + 92;
-      const rightX = margin + 220;
-      const rightValueX = margin + 326;
+      const dividerX = margin + 365;
+      const rightX = dividerX + 18;
+      const leftValueX = margin + 112;
+      const rightValueX = PAGE_W - margin - 52;
 
-      page.drawText("Bis 12:00", { x: leftX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.beforeNoon), { x: leftValueX, y, size: 8.4, font: bold });
-      page.drawText("Ab 12:00", { x: rightX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.afterNoon), { x: rightValueX, y, size: 8.4, font: bold });
-      y -= 12;
+      const leftRows = [
+        ["Vormittag", formatDurationCompact(summary.beforeNoon)],
+        ["Nachmittag", formatDurationCompact(summary.afterNoon)],
+        ["Produktiv", formatDurationCompact(summary.productive)],
+        ["Unproduktiv", formatDurationCompact(summary.unproductive)],
+        ["Mittag", formatDurationCompact(summary.lunch)],
+        ["Pause", formatDurationCompact(summary.pause)],
+        ["Arbeitszeit", formatDurationCompact(summary.workingTotal)],
+      ];
 
-      page.drawText("Produktiv", { x: leftX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.productive), { x: leftValueX, y, size: 8.4, font: bold });
-      page.drawText("Unproduktiv", { x: rightX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.unproductive), { x: rightValueX, y, size: 8.4, font: bold });
-      y -= 12;
+      const rightRows = [
+        ...[...summary.jobs.values()]
+          .sort((a, b) => b.minutes - a.minutes)
+          .map((job) => [
+            `${job.jobId ? "#" + job.jobId + " · " : ""}${job.jobName}`,
+            formatDurationCompact(job.minutes),
+          ]),
+        ...[...summary.upReasons.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([reason, minutes]) => [`UP · ${reason}`, formatDurationCompact(minutes)]),
+      ];
 
-      page.drawText("Pause", { x: leftX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.pause), { x: leftValueX, y, size: 8.4, font: bold });
-      page.drawText("Mittag", { x: rightX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.lunch), { x: rightValueX, y, size: 8.4, font: bold });
-      y -= 12;
+      const rowCount = Math.max(leftRows.length, Math.max(1, rightRows.length));
+      const height = 21 + rowCount * 12 + (summary.automaticPause > 0 ? 11 : 0);
+      ensureSpace(height + 8);
 
-      page.drawText("Arbeitszeit gesamt", { x: leftX, y, size: 8.4, font });
-      page.drawText(formatDuration(summary.workingTotal), { x: leftValueX, y, size: 8.4, font: bold });
-      y -= 15;
+      page.drawText("Zusammenfassung", { x: leftX, y, size: 9.2, font: bold });
+      page.drawText("Baustellensummen", { x: rightX, y, size: 9.2, font: bold });
+      y -= 14;
+      const rowsTop = y;
 
-      if (summary.jobs.size) {
-        page.drawText("Baustellen", { x: margin, y, size: 8.6, font: bold });
-        y -= 12;
-        for (const job of [...summary.jobs.values()].sort((a, b) => b.minutes - a.minutes)) {
-          ensureSpace(12);
-          const label = `${job.jobId ? "#" + job.jobId + " · " : ""}${job.jobName}`;
-          page.drawText(label, {
-            x: margin + 10,
-            y,
-            size: 8.1,
-            font,
-            maxWidth: 360,
-          });
-          page.drawText(formatDuration(job.minutes), {
-            x: margin + 390,
-            y,
-            size: 8.1,
-            font: bold,
-          });
-          y -= 11;
-        }
+      leftRows.forEach(([label, value], index) => {
+        const rowY = rowsTop - index * 12;
+        page.drawText(label, { x: leftX, y: rowY, size: 8.4, font });
+        page.drawText(value, { x: leftValueX, y: rowY, size: 8.4, font: index === leftRows.length - 1 ? bold : font });
+      });
+
+      if (summary.automaticPause > 0) {
+        const noteY = rowsTop - leftRows.length * 12;
+        page.drawText(`davon automatisch: ${formatDurationCompact(summary.automaticPause)}`, {
+          x: leftX,
+          y: noteY,
+          size: 7.4,
+          font,
+        });
       }
 
-      if (summary.upReasons.size) {
-        ensureSpace(15);
-        page.drawText("Unproduktiv nach Grund", { x: margin, y, size: 8.6, font: bold });
-        y -= 12;
-        for (const [reason, minutes] of [...summary.upReasons.entries()].sort((a, b) => b[1] - a[1])) {
-          ensureSpace(12);
-          page.drawText(reason, {
-            x: margin + 10,
-            y,
-            size: 8.1,
-            font,
-            maxWidth: 360,
-          });
-          page.drawText(formatDuration(minutes), {
-            x: margin + 390,
-            y,
-            size: 8.1,
-            font: bold,
-          });
-          y -= 11;
-        }
+      if (!rightRows.length) {
+        page.drawText("Keine Baustellenzeit", { x: rightX, y: rowsTop, size: 8.2, font });
+      } else {
+        rightRows.forEach(([label, value], index) => {
+          const rowY = rowsTop - index * 12;
+          page.drawText(label, { x: rightX, y: rowY, size: 8.2, font, maxWidth: 300 });
+          page.drawText(value, { x: rightValueX, y: rowY, size: 8.2, font: bold });
+        });
       }
+
+      const bottomY = startY - height + 6;
+      page.drawLine({
+        start: { x: dividerX, y: startY + 2 },
+        end: { x: dividerX, y: bottomY },
+        thickness: 0.45,
+        color: rgb(0.86, 0.86, 0.86),
+      });
+      y = bottomY - 4;
     }
 
     newPage();
@@ -595,11 +728,28 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
               y,
               size: 9.5,
               font,
-              maxWidth: 500,
+              maxWidth: 570,
             }
           );
+          page.drawText(formatDurationCompact(durationOf(block)), {
+            x: PAGE_W - margin - 38,
+            y,
+            size: 9.2,
+            font: bold,
+          });
           y -= 14;
         }
+      } else if (employee.absence) {
+        page.drawText(`${employee.absence.label} · ${formatDurationCompact(employee.absence.minutes)}`, {
+          x: margin,
+          y,
+          size: 9.5,
+          font: bold,
+        });
+        if (employee.absence.reason) {
+          page.drawText(employee.absence.reason, { x: margin + 170, y, size: 9, font, maxWidth: 500 });
+        }
+        y -= 14;
       } else {
         page.drawText("Keine vollständigen Zeitblöcke", {
           x: margin,
@@ -791,6 +941,12 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
           y -= 11;
         }
 
+        page.drawLine({
+          start: { x: margin + 12, y: y + 4 },
+          end: { x: margin + 320, y: y + 4 },
+          thickness: 0.45,
+          color: rgb(0.82, 0.82, 0.82),
+        });
         page.drawText("Gesamt", {
           x: margin + 12,
           y,
@@ -854,93 +1010,115 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         }
       }
 
-      drawSectionHeading("TAGESGESAMT");
-      drawKeyValue("Bis 12:00", formatDuration(day.beforeNoon));
-      drawKeyValue("Ab 12:00", formatDuration(day.afterNoon));
-      drawKeyValue("Produktiv", formatDuration(day.productive));
-      drawKeyValue("Unproduktiv", formatDuration(day.unproductive));
-      drawKeyValue("Pause", formatDuration(day.pause));
-      drawKeyValue("Mittag", formatDuration(day.lunch));
-      drawKeyValue("Arbeitszeit gesamt", formatDuration(day.workingTotal));
+      newPage("BETRIEBSÜBERSICHT");
+      const leftX = margin;
+      const dividerX = margin + 430;
+      const rightX = dividerX + 20;
+      const rowYStart = y;
+
+      page.drawText("Tageskennzahlen", { x: leftX, y, size: 12, font: bold });
+      y -= 20;
+
+      const col = {
+        label: leftX,
+        ist: leftX + 170,
+        plan: leftX + 235,
+        diff: leftX + 300,
+        pct: leftX + 365,
+      };
+      page.drawText("Ist", { x: col.ist, y, size: 8.4, font: bold });
+      page.drawText("Plan", { x: col.plan, y, size: 8.4, font: bold });
+      page.drawText("+/-", { x: col.diff, y, size: 8.4, font: bold });
+      page.drawText("p/M %", { x: col.pct, y, size: 8.4, font: bold });
+      y -= 14;
+
+      const kpiRows = [
+        ["Produktiv", day.productive],
+        ["Unproduktiv", day.unproductive],
+      ];
+      for (const [label, minutes] of kpiRows) {
+        page.drawText(label, { x: col.label, y, size: 9, font });
+        page.drawText(formatDurationCompact(minutes), { x: col.ist, y, size: 9, font: bold });
+        page.drawText("—", { x: col.plan, y, size: 9, font });
+        page.drawText("—", { x: col.diff, y, size: 9, font });
+        page.drawText("—", { x: col.pct, y, size: 9, font });
+        y -= 15;
+      }
+
+      y -= 5;
+      page.drawLine({ start: { x: leftX, y }, end: { x: dividerX - 18, y }, thickness: 0.6, color: rgb(0.82, 0.82, 0.82) });
+      y -= 17;
+      page.drawText("Personal", { x: leftX, y, size: 10, font: bold });
+      y -= 15;
+      const personalRows = [
+        ["Mitarbeiter gesamt", String(day.headcount)],
+        ["Im Einsatz", String(day.activeCount)],
+        ["Urlaub", String(day.absences.vacation.length)],
+        ["Krankenstand", String(day.absences.sick.length)],
+        ["Feiertag", String(day.absences.holiday.length)],
+        ["Sonstige Abwesenheit", String(day.absences.other.length)],
+      ];
+      for (const [label, value] of personalRows) {
+        page.drawText(label, { x: leftX, y, size: 8.6, font });
+        page.drawText(value, { x: leftX + 180, y, size: 8.6, font: bold });
+        y -= 12;
+      }
+
+      function drawAbsenceList(title, rows) {
+        if (!rows.length) return;
+        y -= 5;
+        page.drawText(title, { x: leftX, y, size: 9, font: bold });
+        y -= 12;
+        for (const row of rows) {
+          page.drawText(row.employeeName, { x: leftX + 10, y, size: 8.2, font });
+          page.drawText(formatDurationCompact(row.minutes), { x: leftX + 180, y, size: 8.2, font: bold });
+          y -= 11;
+        }
+      }
+      drawAbsenceList("Urlaub", day.absences.vacation);
+      drawAbsenceList("Krankenstand", day.absences.sick);
+      drawAbsenceList("Feiertag", day.absences.holiday);
+      drawAbsenceList("Sonstige Abwesenheit", day.absences.other);
 
       const unknownBlocks = employees.flatMap((employee) =>
         employee.blocks
-          .filter(
-            (block) =>
-              block.type === "productive" &&
-              (!block.jobId || block.jobName === "Ohne Baustelle")
-          )
-          .map((block) => ({
-            employeeName: employee.employeeName,
-            block,
-          }))
+          .filter((block) => block.type === "productive" && (!block.jobId || block.jobName === "Ohne Baustelle"))
+          .map((block) => ({ employeeName: employee.employeeName, block }))
       );
-
-      const withoutPhotos = employees.filter(
-        (employee) =>
-          employee.summary.productive > 0 &&
-          !employee.reviews.some((entry) => entry.category === "photo")
-      );
-
-      const withoutMaterial = employees.filter(
-        (employee) =>
-          employee.summary.productive > 0 &&
-          !employee.reviews.some((entry) => entry.category === "material")
-      );
-
-      const withoutRegie = employees.filter(
-        (employee) =>
-          employee.summary.productive > 0 &&
-          !employee.reviews.some((entry) => entry.category === "regie")
-      );
-
-      drawSectionHeading("PRÜFHINWEISE");
-
+      const withoutPhotos = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "photo"));
+      const withoutMaterial = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "material"));
+      const withoutRegie = employees.filter((employee) => employee.summary.productive > 0 && !employee.reviews.some((entry) => entry.category === "regie"));
       const checks = [];
+      if (unknownBlocks.length) checks.push(`${unknownBlocks.length} produktive Zeitblöcke ohne eindeutige Baustellennummer`);
+      if (withoutPhotos.length) checks.push(`Keine Fotos erfasst: ${withoutPhotos.map((e) => e.employeeName).join(", ")}`);
+      if (withoutMaterial.length) checks.push(`Kein Material erfasst: ${withoutMaterial.map((e) => e.employeeName).join(", ")}`);
+      if (withoutRegie.length) checks.push(`Keine Regie erfasst: ${withoutRegie.map((e) => e.employeeName).join(", ")}`);
 
-      if (unknownBlocks.length) {
-        checks.push(
-          `${unknownBlocks.length} produktive Zeitblöcke ohne eindeutige Baustellennummer`
-        );
-      }
-      if (withoutPhotos.length) {
-        checks.push(
-          `Keine Fotos erfasst: ${withoutPhotos.map((e) => e.employeeName).join(", ")}`
-        );
-      }
-      if (withoutMaterial.length) {
-        checks.push(
-          `Kein Material erfasst: ${withoutMaterial.map((e) => e.employeeName).join(", ")}`
-        );
-      }
-      if (withoutRegie.length) {
-        checks.push(
-          `Keine Regie erfasst: ${withoutRegie.map((e) => e.employeeName).join(", ")}`
-        );
-      }
-
+      page.drawLine({
+        start: { x: dividerX, y: rowYStart + 6 },
+        end: { x: dividerX, y: 56 },
+        thickness: 0.55,
+        color: rgb(0.82, 0.82, 0.82),
+      });
+      let checkY = rowYStart;
+      page.drawText("Prüfhinweise", { x: rightX, y: checkY, size: 12, font: bold });
+      checkY -= 20;
       if (!checks.length) {
-        page.drawText("Keine automatischen Prüfhinweise.", {
-          x: margin,
-          y,
-          size: 8.8,
-          font,
-        });
-        y -= 12;
+        page.drawText("Keine automatischen Prüfhinweise.", { x: rightX, y: checkY, size: 8.8, font });
       } else {
         for (const check of checks) {
-          const lines = wrap(check, 100);
-          for (const line of lines) {
-            ensureSpace(12, "PRÜFHINWEISE");
-            page.drawText(`• ${line}`, {
-              x: margin,
-              y,
+          const lines = wrap(check, 46);
+          lines.forEach((line, index) => {
+            page.drawText(`${index === 0 ? "• " : "  "}${line}`, {
+              x: rightX,
+              y: checkY,
               size: 8.5,
               font,
-              maxWidth: contentWidth,
+              maxWidth: PAGE_W - margin - rightX,
             });
-            y -= 11;
-          }
+            checkY -= 11;
+          });
+          checkY -= 4;
         }
       }
     }
