@@ -960,7 +960,7 @@ function durationText(minutes){
   const n=Math.max(0,Math.round(Number(minutes||0)));
   return `${Math.floor(n/60)} h ${String(n%60).padStart(2,'0')} min`;
 }
-function employeeDaySegments(employeeId,today,state){
+function employeeDaySegments(employeeIds,today,state){
   const rows=(data.timeEvents||[])
   .filter(x=>{
   const ids=(Array.isArray(employeeIds)?employeeIds:[employeeIds]).map(String);
