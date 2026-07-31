@@ -492,7 +492,7 @@ function updateWorktimeModelSummary(){
   box.innerHTML=`<strong>${h(model.name)}</strong><br>Jänner–März: Mo–Do 07:00–17:00, 45 Min. Pause, Freitag frei.<br>April–Dezember: Mo–Do 07:00–17:00, 45 Min. Pause; Freitag 07:00–14:15, 15 Min. Pause.`;
 }
 async function loadWorktimeModels(){
-  const data=await api('/admin/api/worktime-models'); worktimeModels=data.models||[];
+  const data=await api('/kristine/api/schedule-models'); worktimeModels=data.models||[];
   renderWorktimeModelSelect(document.getElementById('empWorktimeModel')?.value||'krista-standard');
   return worktimeModels;
 }
