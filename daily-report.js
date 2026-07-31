@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0029.6 · Abwesenheitsstunden 7,8 h
+// Datei: daily-report.js · Build 0030.0 · Plan/Ist-Tageskennzahlen
 "use strict";
 
 const fs = require("fs");
@@ -16,6 +16,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const EMPLOYEES = path.join(ROOT, "employees.json");
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
+  const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
   const REPORTS_DIR = path.join(ROOT, "reports");
 
   async function readJson(file, fallback) {
@@ -67,10 +68,79 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
   }
 
+  function formatSignedDuration(minutes) {
+    const value = Math.round(Number(minutes) || 0);
+    if (value === 0) return "0:00";
+    return `${value > 0 ? "+" : "-"}${formatDurationCompact(Math.abs(value))}`;
+  }
+
+  function formatPercent(actual, plan) {
+    const planned = Number(plan || 0);
+    if (planned <= 0) return "—";
+    return `${((Number(actual || 0) / planned) * 100).toFixed(1).replace(".", ",")} %`;
+  }
+
   function weekdayForDate(dateStr) {
     const [year, month, day] = String(dateStr || "").split("-").map(Number);
     if (!year || !month || !day) return null;
     return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  }
+
+  function scheduleForDate(model, dateStr) {
+    const d = new Date(String(dateStr) + "T12:00:00");
+    if (Number.isNaN(d.getTime())) return null;
+    const month = d.getMonth() + 1;
+    const weekday = d.getDay();
+    const season = (model?.seasons || []).find((item) => (item.months || []).includes(month));
+    const rule = season?.weekdays?.[String(weekday)] || {};
+    return {
+      payrollTargetHours: weekday >= 1 && weekday <= 5
+        ? Number(rule.payrollTargetHours ?? model?.payrollTargetHoursWeekday ?? 7.8)
+        : 0,
+    };
+  }
+
+  function employeePlanMinutes(employee, date, worktimeModels) {
+    const master = employee.master || {};
+    const modelId = String(master.worktimeModelId || "krista-standard");
+    const model = worktimeModels.find((item) => String(item?.id) === modelId) || worktimeModels[0] || null;
+    const schedule = scheduleForDate(model, date);
+    const percent = Math.min(100, Math.max(0, Number(master.employmentPercent ?? 100))) / 100;
+    return Math.max(0, Math.round(Number(schedule?.payrollTargetHours || 0) * percent * 60));
+  }
+
+  function assignmentPlanCategory(record) {
+    const text = [record?.jobId, record?.jobName, record?.note, record?.type, record?.category]
+      .filter(Boolean).join(" ").toLowerCase();
+    const absence = absenceType(text);
+    if (absence) return absence;
+    if (/__up__|__unproduktiv__|unproduktiv|werkstatt|lager|büro|buero|intern/.test(text)) return "unproductive";
+    return "productive";
+  }
+
+  function summarizePlan(employee, date, worktimeModels) {
+    const result = { productive: 0, unproductive: 0, vacation: 0, sick: 0, holiday: 0, other: 0 };
+    const assignments = (employee.assignments || []).filter((row) => String(row.date || "") === String(date));
+    if (!assignments.length) return result;
+
+    const target = employeePlanMinutes(employee, date, worktimeModels);
+    const weighted = assignments.map((row) => {
+      const from = minutesFromHM(row.from);
+      const to = minutesFromHM(row.to);
+      return { row, weight: from !== null && to !== null && to > from ? to - from : 1 };
+    });
+    const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0) || 1;
+
+    let distributed = 0;
+    weighted.forEach((item, index) => {
+      const minutes = index === weighted.length - 1
+        ? Math.max(0, target - distributed)
+        : Math.max(0, Math.round(target * item.weight / totalWeight));
+      distributed += minutes;
+      const category = assignmentPlanCategory(item.row);
+      if (Object.prototype.hasOwnProperty.call(result, category)) result[category] += minutes;
+    });
+    return result;
   }
 
   function requiredCoffeeBreaks(dateStr, hasMorningWork, hasAfternoonWork) {
@@ -152,19 +222,8 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       record.plannedDate,
       record.startDay
     );
-    const from = firstValue(
-  record.startDate,
-  record.dateFrom,
-  record.fromDate,
-  singleDate
-);
-
-const to = firstValue(
-  record.endDate,
-  record.dateTo,
-  record.toDate,
-  singleDate
-);
+    const from = firstValue(record.from, record.start, record.startDate, record.dateFrom, record.fromDate, singleDate);
+    const to = firstValue(record.to, record.end, record.endDate, record.dateTo, record.toDate, singleDate);
     if (!isDateWithin(date, from, to)) return null;
 
     const employeeId = firstValue(
@@ -481,6 +540,7 @@ const to = firstValue(
       absences: { vacation: [], sick: [], holiday: [], other: [] },
       headcount: employees.length,
       activeCount: 0,
+      plan: { productive: 0, unproductive: 0, vacation: 0, sick: 0, holiday: 0, other: 0 },
     };
 
     for (const employee of employees) {
@@ -496,6 +556,7 @@ const to = firstValue(
       day.workingTotal += summary.workingTotal;
       day.presenceTotal += summary.presenceTotal;
       if (summary.workingTotal > 0) day.activeCount += 1;
+      for (const key of Object.keys(day.plan)) day.plan[key] += Number(employee.plan?.[key] || 0);
 
       if (summary.absence) {
         day.absences[summary.absence.type]?.push({
@@ -594,19 +655,21 @@ const to = firstValue(
   }
 
   async function collect(date, jobFilter = null) {
-    const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, employeeMasterRaw, systemEmployeeMasterRaw] = await Promise.all([
+    const [timeEventsRaw, reviewEntriesRaw, absencesRaw, assignmentsRaw, employeeMasterRaw, systemEmployeeMasterRaw, worktimeModelsRaw] = await Promise.all([
       readJson(TIME_EVENTS, []),
       readJson(REVIEW_ENTRIES, []),
       readJson(ABSENCES, []),
       readJson(ASSIGNMENTS, []),
       readJson(EMPLOYEES, []),
       readJson(SYSTEM_EMPLOYEES, []),
+      readJson(WORKTIME_MODELS, []),
     ]);
 
     const timeEvents = asArray(timeEventsRaw);
     const reviewEntries = asArray(reviewEntriesRaw);
     const absences = flattenRecords(absencesRaw);
     const assignments = flattenRecords(assignmentsRaw);
+    const worktimeModels = asArray(worktimeModelsRaw);
     const employeeMaster = [
       ...flattenRecords(employeeMasterRaw),
       ...flattenRecords(systemEmployeeMasterRaw),
@@ -633,6 +696,8 @@ const to = firstValue(
           events: [],
           reviews: [],
           absence: null,
+          assignments: [],
+          master: null,
           inEmployeeMaster: false,
         });
       } else if (cleanName && byEmployee.get(key).employeeName === key) {
@@ -654,6 +719,13 @@ const to = firstValue(
         firstValue(master.name, master.employeeName, master.displayName, master.fullName, nested.name)
       );
       employee.inEmployeeMaster = true;
+      employee.master = { ...master, ...nested };
+    }
+
+    for (const assignment of assignments) {
+      if (String(assignment.date || "") !== String(date)) continue;
+      if (jobFilter && String(assignment.jobId || "") !== String(jobFilter)) continue;
+      ensure(assignment.employeeId, assignment.employeeName).assignments.push(assignment);
     }
 
     for (const event of timeEvents) {
@@ -688,7 +760,11 @@ const to = firstValue(
       .map((employee) => {
         const blocks = buildBlocks(employee.events);
         const withBlocks = { ...employee, blocks };
-        return { ...withBlocks, summary: summarizeEmployee(withBlocks, date) };
+        return {
+          ...withBlocks,
+          plan: summarizePlan(withBlocks, date, worktimeModels),
+          summary: summarizeEmployee(withBlocks, date),
+        };
       })
       .filter((employee) => employee.inEmployeeMaster || employee.blocks.length || employee.reviews.length || employee.absence)
       .sort((a, b) => String(a.employeeName).localeCompare(String(b.employeeName), "de"));
@@ -1213,12 +1289,16 @@ const to = firstValue(
       page.drawText("p/M %", { x: kpiCol.pct, y: rightY, size: 7.8, font: bold });
       rightY -= 13;
 
-      for (const [label, minutes] of [["Produktiv", day.productive], ["Unproduktiv", day.unproductive]]) {
+      const kpiRows = [
+        ["Produktiv", day.productive, day.plan.productive],
+        ["Interne Arbeiten", day.unproductive, day.plan.unproductive],
+      ];
+      for (const [label, actual, planned] of kpiRows) {
         page.drawText(label, { x: kpiCol.label, y: rightY, size: 8.5, font });
-        page.drawText(formatDurationCompact(minutes), { x: kpiCol.ist, y: rightY, size: 8.5, font: bold });
-        page.drawText("—", { x: kpiCol.plan, y: rightY, size: 8.5, font });
-        page.drawText("—", { x: kpiCol.diff, y: rightY, size: 8.5, font });
-        page.drawText("—", { x: kpiCol.pct, y: rightY, size: 8.5, font });
+        page.drawText(formatDurationCompact(actual), { x: kpiCol.ist, y: rightY, size: 8.5, font: bold });
+        page.drawText(formatDurationCompact(planned), { x: kpiCol.plan, y: rightY, size: 8.5, font });
+        page.drawText(formatSignedDuration(actual - planned), { x: kpiCol.diff, y: rightY, size: 8.5, font: bold });
+        page.drawText(formatPercent(actual, planned), { x: kpiCol.pct, y: rightY, size: 8.1, font: bold });
         rightY -= 14;
       }
 
