@@ -668,7 +668,16 @@ function renderPlanningPools(){
 }
 function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
-function worktimeModelById(id){return worktimeModels.find(m=>String(m.id)===String(id))||worktimeModels[0]||null}
+function worktimeModelById(id) {
+  const allModels = [
+    ...(data.scheduleModels || []),
+    ...(worktimeModels || [])
+  ];
+
+  return allModels.find(
+    model => String(model.id) === String(id)
+  ) || null;
+}
 function worktimeRule(employeeId, date) {
   const employee = employeeById(employeeId);
   const model = worktimeModelById(employee?.worktimeModelId || '');
