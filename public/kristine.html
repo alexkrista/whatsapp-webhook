@@ -2395,8 +2395,12 @@ main{max-width:1900px}
     const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');
     if(nc)nc.textContent=String(newJobs.length);
     if(rc)rc.textContent=String(running.length);
-    requestAnimationFrame(()=>{updateStickyHeadOffset();updatePlanningStickyOffsets?.()});
-  };
+    requestAnimationFrame(() => {
+  updateStickyHeadOffset();
+  if (typeof updatePlanningStickyOffsets === 'function') {
+    updatePlanningStickyOffsets();
+  }
+});
 
   /* Baustellensicht: echte Baustellen vor Urlaub/UP */
   if(typeof planningSiteRows==='function'){
