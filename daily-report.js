@@ -1348,11 +1348,42 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         ["Feiertag", `${day.absences.holiday.length} · ${formatDurationCompact(absenceTotal(day.absences.holiday))}`],
         ["Sonstige Abwesenheit", `${day.absences.other.length} · ${formatDurationCompact(absenceTotal(day.absences.other))}`],
       ];
-      for (const [label, value] of personalRows) {
-        page.drawText(label, { x: rightX, y: rightY, size: 8.4, font });
-        page.drawText(String(value), { x: rightValueX - 25, y: rightY, size: 8.4, font: bold });
-        rightY -= 11;
-      }
+      function drawNames(title, rows) {
+  if (!rows.length || rightY < lowerLimit + 20) return;
+
+  rightY -= 3;
+
+  const names = rows
+    .map(row => row.employeeName)
+    .filter(Boolean)
+    .join(", ");
+
+  page.drawText(`${title}:`, {
+    x: rightX,
+    y: rightY,
+    size: 8.1,
+    font: bold
+  });
+
+  const lines = wrap(names, 37).slice(0, 3);
+
+  lines.forEach((line, index) => {
+    page.drawText(line, {
+      x: rightX + 58,
+      y: rightY - index * 10,
+      size: 7.9,
+      font,
+      maxWidth: 250
+    });
+  });
+
+  rightY -= Math.max(11, lines.length * 10);
+}
+
+drawNames("Urlaub", day.absences.vacation);
+drawNames("Krank", day.absences.sick);
+drawNames("Feiertag", day.absences.holiday);
+drawNames("Sonstige", day.absences.other);
 
       // Keine Namenslisten bei Urlaub/Krank: Anzahl und Stunden oben genügen.
 
