@@ -1746,11 +1746,23 @@ function renderControl(){
    * für Sortierung, aktuelle Baustelle, Balken und Detailanzeige.
    */
   const employees=canonicalControlEmployees(today)
-  .filter(a=>{
-    const aliasIds=(a.aliasIds||[a.employeeId]).map(String);
-    const master=masterEmployees.find(employee=>aliasIds.includes(String(employee.id)));
-    return !master||master.active!==false;
-  })
+  .filter(a => {
+  const aliasIds = (a.aliasIds || [a.employeeId]).map(String);
+
+  const master = masterEmployees.find(employee =>
+    aliasIds.includes(String(employee.id))
+  );
+
+  return Boolean(
+    master &&
+    master.active !== false &&
+    master.isActive !== false &&
+    master.enabled !== false &&
+    master.hidden !== true &&
+    master.archived !== true &&
+    master.deleted !== true
+  );
+})
   .map(a=>{
     const aliasIds=a.aliasIds||[a.employeeId];
 
