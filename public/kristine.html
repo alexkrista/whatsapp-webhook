@@ -2149,6 +2149,14 @@ Diesen kompletten Block in public/kristine.html DIREKT VOR </body> einfügen.
 Danach speichern, deployen und Strg+F5.
 -->
 <style>
+
+</script>
+<!--
+KRISTA Planung – Sidebar-Patch 0031.0
+Diesen kompletten Block in public/kristine.html DIREKT VOR </body> einfügen.
+Danach speichern, deployen und Strg+F5.
+-->
+<style>
 /* ===== KRISTA Planung Sidebar 0031.0 ===== */
 main{max-width:1900px}
 #planning{--planner-sidebar:330px}
@@ -2395,12 +2403,8 @@ main{max-width:1900px}
     const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');
     if(nc)nc.textContent=String(newJobs.length);
     if(rc)rc.textContent=String(running.length);
-    requestAnimationFrame(() => {
-  updateStickyHeadOffset();
-  if (typeof updatePlanningStickyOffsets === 'function') {
-    updatePlanningStickyOffsets();
-  }
-});
+    requestAnimationFrame(()=>{updateStickyHeadOffset();updatePlanningStickyOffsets?.()});
+  };
 
   /* Baustellensicht: echte Baustellen vor Urlaub/UP */
   if(typeof planningSiteRows==='function'){
@@ -2430,7 +2434,6 @@ main{max-width:1900px}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
   else start();
 })();
-</script>
 </script>
 </body>
 </html>
