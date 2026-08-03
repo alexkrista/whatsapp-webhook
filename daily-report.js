@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0030.0 · Plan/Ist-Tageskennzahlen
+// Datei: daily-report.js · Build 0030.1 · Kompakter Tagesreport + aktive Mitarbeiter
 "use strict";
 
 const fs = require("fs");
@@ -222,29 +222,28 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       record.plannedDate,
       record.startDay
     );
-const isClockTime = (value) =>
-  /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(value || "").trim());
+    // Uhrzeiten wie 07:00–17:00 sind kein Datumsbereich.
+    const isClockTime = (value) =>
+      /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(value || "").trim());
 
-const dateFrom = firstValue(
-  record.startDate,
-  record.dateFrom,
-  record.fromDate,
-  record.startDay,
-  !isClockTime(record.from) ? record.from : null,
-  !isClockTime(record.start) ? record.start : null,
-  singleDate
-);
-
-const dateTo = firstValue(
-  record.endDate,
-  record.dateTo,
-  record.toDate,
-  !isClockTime(record.to) ? record.to : null,
-  !isClockTime(record.end) ? record.end : null,
-  singleDate
-);
-
-if (!isDateWithin(date, dateFrom, dateTo)) return null;
+    const dateFrom = firstValue(
+      record.startDate,
+      record.dateFrom,
+      record.fromDate,
+      record.startDay,
+      !isClockTime(record.from) ? record.from : null,
+      !isClockTime(record.start) ? record.start : null,
+      singleDate
+    );
+    const dateTo = firstValue(
+      record.endDate,
+      record.dateTo,
+      record.toDate,
+      !isClockTime(record.to) ? record.to : null,
+      !isClockTime(record.end) ? record.end : null,
+      singleDate
+    );
+    if (!isDateWithin(date, dateFrom, dateTo)) return null;
 
     const employeeId = firstValue(
       record.employeeId,
@@ -699,6 +698,9 @@ if (!isDateWithin(date, dateFrom, dateTo)) return null;
 
     const byEmployee = new Map();
 
+    // Inaktive/archivierte Mitarbeiter dürfen durch alte Planungs- oder
+    // Abwesenheitsdatensätze nicht wieder in aktuellen Reports auftauchen.
+    const excludedEmployeeKeys = new Set();
     const employeeAliases = new Map();
     const normalizePersonKey = (value) => String(value || "").trim().toLocaleLowerCase("de-AT").replace(/\s+/g, " ");
 
@@ -731,13 +733,16 @@ if (!isDateWithin(date, dateFrom, dateTo)) return null;
 
     for (const master of employeeMaster) {
       if (!master || typeof master !== "object") continue;
-      const active = master.active !== false && master.isActive !== false && master.enabled !== false && !master.archived && !master.deleted;
-      if (!active) continue;
       const nested = master.employee && typeof master.employee === "object" ? master.employee : {};
-      const employee = ensure(
-        firstValue(master.id, master.employeeId, master.workerId, master.userId, master.phone, nested.id),
-        firstValue(master.name, master.employeeName, master.displayName, master.fullName, nested.name)
-      );
+      const masterId = firstValue(master.id, master.employeeId, master.workerId, master.userId, master.phone, nested.id);
+      const masterName = firstValue(master.name, master.employeeName, master.displayName, master.fullName, nested.name);
+      const active = master.active !== false && master.isActive !== false && master.enabled !== false && !master.archived && !master.deleted && master.hidden !== true;
+      if (!active) {
+        if (masterId) excludedEmployeeKeys.add(normalizePersonKey(masterId));
+        if (masterName) excludedEmployeeKeys.add(normalizePersonKey(masterName));
+        continue;
+      }
+      const employee = ensure(masterId, masterName);
       employee.inEmployeeMaster = true;
       employee.master = { ...master, ...nested };
     }
@@ -777,6 +782,10 @@ if (!isDateWithin(date, dateFrom, dateTo)) return null;
     }
 
     return [...byEmployee.values()]
+      .filter((employee) =>
+        !excludedEmployeeKeys.has(normalizePersonKey(employee.employeeId)) &&
+        !excludedEmployeeKeys.has(normalizePersonKey(employee.employeeName))
+      )
       .map((employee) => {
         const blocks = buildBlocks(employee.events);
         const withBlocks = { ...employee, blocks };
@@ -948,7 +957,9 @@ if (!isDateWithin(date, dateFrom, dateTo)) return null;
 
     newPage();
 
-    for (const employee of employees.filter((item) => item.blocks.length || item.reviews.length || item.absence)) {
+    // Abwesenheiten werden nur gesammelt in der Betriebsauswertung gezeigt.
+    // Eigene Mitarbeiterblöcke gibt es nur bei tatsächlichen Zeiten oder Dokumentation.
+    for (const employee of employees.filter((item) => item.blocks.length || item.reviews.length)) {
       const materials = employee.reviews.filter((entry) => entry.category === "material");
       const materialPhotos = materials.filter((entry) => entry.source === "image" || entry.file);
       const photos = employee.reviews.filter((entry) => entry.category === "photo");
@@ -1343,21 +1354,7 @@ if (!isDateWithin(date, dateFrom, dateTo)) return null;
         rightY -= 11;
       }
 
-      function drawNames(title, rows) {
-        if (!rows.length || rightY < lowerLimit + 20) return;
-        rightY -= 3;
-        const names = rows.map((row) => row.employeeName).join(", ");
-        page.drawText(`${title}:`, { x: rightX, y: rightY, size: 8.1, font: bold });
-        const lines = wrap(names, 37).slice(0, 2);
-        lines.forEach((line, index) => {
-          page.drawText(line, { x: rightX + 58, y: rightY - index * 10, size: 7.9, font, maxWidth: 250 });
-        });
-        rightY -= Math.max(11, lines.length * 10);
-      }
-      drawNames("Urlaub", day.absences.vacation);
-      drawNames("Krank", day.absences.sick);
-      drawNames("Feiertag", day.absences.holiday);
-      drawNames("Sonstige", day.absences.other);
+      // Keine Namenslisten bei Urlaub/Krank: Anzahl und Stunden oben genügen.
 
       const checksTop = 155;
       page.drawLine({
