@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0031.2 · KRISTA UI -->
+<!-- Datei: public/kristine.html · Build 0031.4 · KRISTA UI -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -177,7 +177,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.2"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.4"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -482,7 +482,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.2"});
+createKristaTopbar({active:"kristine",build:"0031.4"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -903,9 +903,9 @@ function planningSiteRows(days){
   const specials=Object.entries(CARD_TYPES).filter(([type])=>type!=='site').map(([type,meta])=>({key:'type:'+type,label:meta.icon+' '+meta.label,type,used:data.assignments.some(a=>days.includes(a.date)&&cardTypeOf(a)===type),nextDate:data.assignments.filter(a=>cardTypeOf(a)===type&&a.date).map(a=>a.date).sort()[0]||''}));
   const all=jobs.concat(specials);
   if(siteSort==='assigned')all.sort((a,b)=>{
-    const group=row=>{if(row.job)return 0;const type=String(row.type||'');if(['werkstatt','besprechung','schulung','aufraeumen'].includes(type))return 1;if(['urlaub','krank','arzt','feiertag','betriebsurlaub','za'].includes(type))return 2;return 3};
+    // 1. eingeteilte Baustellen, 2. gebuchte UP, 3. offene Baustellen, 4. unbenutzte UP
+    const group=row=>row.job?(row.used?0:2):(row.used?1:3);
     const gd=group(a)-group(b);if(gd)return gd;
-    const d=Number(b.used)-Number(a.used);if(d)return d;
     const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd;
     return String(a.label).localeCompare(String(b.label),'de')
   });
@@ -1725,7 +1725,13 @@ function renderControl(){
    * Diese aufbereiteten Daten sind anschließend die gemeinsame Wahrheit
    * für Sortierung, aktuelle Baustelle, Balken und Detailanzeige.
    */
-  const employees=canonicalControlEmployees(today).map(a=>{
+  const employees=canonicalControlEmployees(today)
+  .filter(a=>{
+    const aliasIds=(a.aliasIds||[a.employeeId]).map(String);
+    const master=masterEmployees.find(employee=>aliasIds.includes(String(employee.id)));
+    return !master||master.active!==false;
+  })
+  .map(a=>{
     const aliasIds=a.aliasIds||[a.employeeId];
 
     const stateCandidates=aliasIds
@@ -2178,7 +2184,7 @@ setInterval(()=>{ if(document.getElementById('control')?.classList.contains('act
 </script>
 
 <style>
-/* ===== KRISTA Planung Sidebar 0031.1 ===== */
+/* ===== KRISTA Planung Sidebar 0031.4 ===== */
 main{max-width:1900px}
 #planning{--planner-sidebar:330px}
 #planning .notice{display:none!important}
