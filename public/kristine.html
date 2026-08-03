@@ -2143,98 +2143,33 @@ function openDailyReport(date){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||'')))
 
 loadAll().catch(e=>alert(e.message));
 setInterval(()=>{ if(document.getElementById('control')?.classList.contains('active')) loadSilent().catch(()=>{}); else renderControl(); },60000);
-<!--
-KRISTA Planung – Sidebar-Patch 0031.0
-Diesen kompletten Block in public/kristine.html DIREKT VOR </body> einfügen.
-Danach speichern, deployen und Strg+F5.
--->
-<style>
-
 </script>
-<!--
-KRISTA Planung – Sidebar-Patch 0031.0
-Diesen kompletten Block in public/kristine.html DIREKT VOR </body> einfügen.
-Danach speichern, deployen und Strg+F5.
--->
+
 <style>
-/* ===== KRISTA Planung Sidebar 0031.0 ===== */
+/* ===== KRISTA Planung Sidebar 0031.1 ===== */
 main{max-width:1900px}
 #planning{--planner-sidebar:330px}
 #planning .notice{display:none!important}
 #planningAssignPanel{display:none!important}
 
-.planning-workspace{
-  display:grid;
-  grid-template-columns:var(--planner-sidebar) minmax(0,1fr);
-  gap:14px;
-  align-items:start;
-}
-.planning-sidebar{
-  position:sticky;
-  top:10px;
-  max-height:calc(100vh - 20px);
-  overflow:auto;
-  scrollbar-width:thin;
-}
-.planning-sidebar-title{
-  margin:0 0 10px;
-  font-size:20px;
-  font-weight:900;
-}
-.planning-sidebar .planning-top{
-  position:static!important;
-  padding:0!important;
-  box-shadow:none!important;
-  background:transparent!important;
-}
+.planning-workspace{display:grid;grid-template-columns:var(--planner-sidebar) minmax(0,1fr);gap:14px;align-items:start}
+.planning-sidebar{position:sticky;top:10px;max-height:calc(100vh - 20px);overflow:auto;scrollbar-width:thin}
+.planning-sidebar-title{margin:0 0 10px;font-size:20px;font-weight:900}
+.planning-sidebar .planning-top{position:static!important;padding:0!important;box-shadow:none!important;background:transparent!important}
 .planning-sidebar .planning-top-grid{display:block}
-.planning-sidebar .planning-panel{
-  border-radius:16px;
-  overflow:visible;
-}
+.planning-sidebar .planning-panel{border-radius:16px;overflow:visible}
 .planning-sidebar .planning-panel>summary{display:none}
-.planning-sidebar .planning-panel-body{
-  padding:10px;
-  border-top:0;
-}
+.planning-sidebar .planning-panel-body{padding:10px;border-top:0}
 .planning-sidebar .planning-pools{display:grid;gap:10px;padding:0}
-.planning-sidebar .pool-column{
-  padding:10px;
-  border-radius:13px;
-  min-height:0;
-}
+.planning-sidebar .pool-column{padding:10px;border-radius:13px;min-height:0}
 .planning-sidebar .pool-column h4{margin:0 0 8px}
 .planning-sidebar .pool-lane-wrap{display:block}
 .planning-sidebar .pool-scroll-btn{display:none!important}
-.planning-sidebar .pool-list{
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:7px;
-  overflow:visible;
-  padding:0;
-}
-.planning-sidebar .pool-card{
-  width:auto;
-  min-width:0;
-  min-height:54px;
-  padding:7px 8px;
-  border-radius:10px;
-  font-size:11px;
-  line-height:1.2;
-  overflow:hidden;
-}
-.planning-sidebar .pool-card strong{
-  font-size:11px;
-  line-height:1.25;
-  display:block;
-  overflow-wrap:anywhere;
-}
+.planning-sidebar .pool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;overflow:visible;padding:0}
+.planning-sidebar .pool-card{width:auto;min-width:0;min-height:54px;padding:7px 8px;border-radius:10px;font-size:11px;line-height:1.2;overflow:hidden}
+.planning-sidebar .pool-card strong{font-size:11px;line-height:1.25;display:block;overflow-wrap:anywhere}
 .planning-sidebar .pool-card .pool-hours{display:none!important}
-.planning-sidebar .pool-budget{
-  margin-top:6px;
-  gap:5px;
-  font-size:10px;
-}
+.planning-sidebar .pool-budget{margin-top:6px;gap:5px;font-size:10px}
 .planning-sidebar .pool-budget span{white-space:nowrap}
 .planning-sidebar .pool-empty{grid-column:1/-1}
 .planning-sidebar-note{font-size:11px;color:#6b6b6b;margin:8px 2px 0}
@@ -2242,84 +2177,50 @@ main{max-width:1900px}
 
 .planning-main{min-width:0}
 .planning-main .planning-calendar-card{margin-top:0}
-.planning-calendar-toolbar{
-  position:sticky!important;
-  top:0!important;
-  z-index:40!important;
-  border-radius:14px 14px 0 0;
-}
-.planning-matrix{
-  overflow-x:auto!important;
-  overflow-y:visible!important;
-  position:relative;
-}
-.matrix-head{
-  position:sticky!important;
-  top:var(--planning-week-head-top,72px)!important;
-  z-index:31!important;
-  box-shadow:0 6px 9px rgba(243,241,236,.96);
-}
-.matrix-head:first-child{
-  left:0;
-  z-index:34!important;
-}
+.planning-calendar-toolbar{position:sticky!important;top:0!important;z-index:40!important;border-radius:14px 14px 0 0}
+.planning-matrix{overflow-x:auto!important;overflow-y:visible!important;position:relative}
+.matrix-head{position:sticky!important;top:var(--planning-week-head-top,72px)!important;z-index:31!important;box-shadow:0 6px 9px rgba(243,241,236,.96)}
+.matrix-head:first-child{left:0;z-index:34!important}
 .matrix-label{z-index:20!important}
 
-/* Abwesenheit/UP kompakt und zweispaltig */
-#systemCards .pool-card{
-  min-height:38px;
-  display:flex;
-  align-items:center;
-}
+/* Abwesenheit & Betrieb: kompakt, zweispaltig, ohne Stunden */
+#systemCards .pool-card{min-height:38px;display:flex;align-items:center}
 #systemCards .pool-card strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* Baustellenkarten bewusst zweizeilig */
+/* Baustellenkarten: zweizeilig und kompakt */
 #runningJobsPool .pool-card,#newOrdersPool .pool-card{min-height:72px}
-.pool-job-name{
-  display:-webkit-box;
-  -webkit-line-clamp:2;
-  -webkit-box-orient:vertical;
-  overflow:hidden;
-  min-height:28px;
-}
+.pool-job-name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:28px}
 .pool-job-number{font-weight:900;margin-bottom:2px}
 
-@media(max-width:1250px){
-  #planning{--planner-sidebar:290px}
-  .planning-sidebar .pool-list{grid-template-columns:1fr}
-}
-@media(max-width:1000px){
-  .planning-workspace{grid-template-columns:1fr}
-  .planning-sidebar{position:static;max-height:none}
-  .planning-sidebar .pool-list{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .planning-calendar-toolbar{top:0!important}
-  .matrix-head{top:var(--planning-week-head-top,72px)!important}
-}
+@media(max-width:1250px){#planning{--planner-sidebar:290px}.planning-sidebar .pool-list{grid-template-columns:1fr}}
+@media(max-width:1000px){.planning-workspace{grid-template-columns:1fr}.planning-sidebar{position:static;max-height:none}.planning-sidebar .pool-list{grid-template-columns:repeat(2,minmax(0,1fr))}.planning-calendar-toolbar{top:0!important}.matrix-head{top:var(--planning-week-head-top,72px)!important}}
 </style>
 
 <script>
-(() => {
+(function(){
   'use strict';
 
-  const UP_TYPES = ['urlaub','krank','arzt','aufraeumen','werkstatt','schulung','besprechung','za'];
+  const UP_TYPES=['urlaub','krank','arzt','aufraeumen','werkstatt','schulung','besprechung','za'];
 
-  function dateMinusDays(dateStr, days){
+  function dateMinusDays(dateStr,days){
     const d=new Date(String(dateStr||new Date().toISOString().slice(0,10))+'T12:00:00');
     d.setDate(d.getDate()-days);
     return d.toISOString().slice(0,10);
   }
 
   function recentHoursForJob14Days(jobId){
-    const today=String(data?.today||new Date().toISOString().slice(0,10));
+    const today=String((window.data&&window.data.today)||new Date().toISOString().slice(0,10));
     const from=dateMinusDays(today,13);
-    const keys=new Set((data?.timeEvents||[])
+    const events=(window.data&&Array.isArray(window.data.timeEvents))?window.data.timeEvents:[];
+    const keys=new Set(events
       .filter(e=>String(e.date||'')>=from&&String(e.date||'')<=today&&String(e.jobId||'')===String(jobId||''))
       .map(e=>`${e.employeeId}|${e.date}`));
     let minutes=0;
     for(const key of keys){
       const split=key.indexOf('|');
       const employeeId=key.slice(0,split),date=key.slice(split+1);
-      minutes+=employeeDaySegments(employeeId,date,null)
+      const segments=typeof window.employeeDaySegments==='function'?window.employeeDaySegments(employeeId,date,null):[];
+      minutes+=segments
         .filter(seg=>seg.type==='work'&&String(seg.jobId||'')===String(jobId||''))
         .reduce((sum,seg)=>sum+Math.max(0,Number(seg.to||0)-Number(seg.from||0)),0);
     }
@@ -2328,24 +2229,22 @@ main{max-width:1900px}
 
   function installWorkspace(){
     const section=document.getElementById('planning');
-    const top=section?.querySelector('.planning-top');
-    const calendar=section?.querySelector('.planning-calendar-card');
+    const top=section&&section.querySelector('.planning-top');
+    const calendar=section&&section.querySelector('.planning-calendar-card');
     if(!section||!top||!calendar||section.querySelector('.planning-workspace'))return;
 
     const workspace=document.createElement('div');
     workspace.className='planning-workspace';
-
     const sidebar=document.createElement('aside');
     sidebar.className='planning-sidebar';
     sidebar.innerHTML='<h2 class="planning-sidebar-title">Baustellenplanung</h2>';
-
-    const main=document.createElement('div');
-    main.className='planning-main';
+    const mainArea=document.createElement('div');
+    mainArea.className='planning-main';
 
     section.insertBefore(workspace,top);
-    workspace.append(sidebar,main);
+    workspace.append(sidebar,mainArea);
     sidebar.appendChild(top);
-    main.appendChild(calendar);
+    mainArea.appendChild(calendar);
 
     const cards=document.getElementById('planningCardsPanel');
     if(cards)cards.open=true;
@@ -2354,82 +2253,83 @@ main{max-width:1900px}
     note.className='planning-sidebar-note';
     note.innerHTML='Karte ziehen = kopieren. Das Original bleibt stehen.<br>Baustellen: letzte 14 Tage nach Stunden sortiert.';
     sidebar.appendChild(note);
-
     updateStickyHeadOffset();
   }
 
   function updateStickyHeadOffset(){
     const toolbar=document.querySelector('#planning .planning-calendar-toolbar');
     const height=toolbar?Math.ceil(toolbar.getBoundingClientRect().height):62;
-    document.documentElement.style.setProperty('--planning-week-head-top',`${height}px`);
+    document.documentElement.style.setProperty('--planning-week-head-top',height+'px');
   }
 
-  /* Kompakte UP-Karten: zweispaltig, keine Stunden */
-  renderSystemCards = function(){
-    const box=document.getElementById('systemCards');if(!box)return;
-    const types=UP_TYPES.filter(type=>CARD_TYPES[type]);
+  window.renderSystemCards=function(){
+    const box=document.getElementById('systemCards');
+    if(!box)return;
+    const types=UP_TYPES.filter(type=>window.CARD_TYPES&&window.CARD_TYPES[type]);
     box.innerHTML=types.map(type=>{
-      const meta=CARD_TYPES[type];
-      return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')" title="In die Planung ziehen"><strong>${meta.icon} ${esc(meta.label)}</strong></div>`;
+      const meta=window.CARD_TYPES[type];
+      return `<div class="pool-card type-${window.esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${window.esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')" title="In die Planung ziehen"><strong>${meta.icon} ${window.esc(meta.label)}</strong></div>`;
     }).join('');
   };
 
-  /* Zweizeilige Baustellenkarte mit Nummer, Name und G/V/P */
-  planningPoolJobCard = function(job){
+  window.planningPoolJobCard=function(job){
     const number=job.jobId||job.number||'';
     const rawName=String(job.name||'').trim();
     const name=rawName||('#'+number);
-    const total=Number(job?.calculation?.calculatedHours||job?.calculatedHours||job?.plannedHours||0);
-    const used=consumedHoursForJobUntilYesterday(number);
-    const planned=plannedHoursForJobFromToday(number);
+    const total=Number((job.calculation&&job.calculation.calculatedHours)||job.calculatedHours||job.plannedHours||0);
+    const used=window.consumedHoursForJobUntilYesterday(number);
+    const planned=window.plannedHoursForJobFromToday(number);
     const over=total>0&&(used+planned)>total+0.01;
     const metrics=total>0
-      ? `<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${roundedPlanningHours(total)}</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`
-      : `<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`;
-    return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><div class="pool-job-number">${esc(number)}</div><strong class="pool-job-name">${esc(name)}</strong>${metrics}</div>`;
+      ? `<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${window.roundedPlanningHours(total)}</span><span>V ${window.roundedPlanningHours(used)}</span><span>P ${window.roundedPlanningHours(planned)}</span></div>`
+      : `<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${window.roundedPlanningHours(used)}</span><span>P ${window.roundedPlanningHours(planned)}</span></div>`;
+    return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${window.esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><div class="pool-job-number">${window.esc(number)}</div><strong class="pool-job-name">${window.esc(name)}</strong>${metrics}</div>`;
   };
 
-  /* Laufende Baustellen: zuletzt aktive zuerst, gemessen an Ist-Stunden der letzten 14 Tage */
-  renderPlanningPools = function(){
-    renderSystemCards();
+  window.renderPlanningPools=function(){
+    window.renderSystemCards();
+    const jobs=Array.isArray(window.masterJobs)?window.masterJobs:[];
     const alpha=(a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de');
-    const newJobs=masterJobs.filter(isNewOrderJob).sort(alpha);
-    const running=masterJobs.filter(isRunningJob).map(job=>({job,hours14:recentHoursForJob14Days(job.jobId||job.number)}))
+    const newJobs=jobs.filter(window.isNewOrderJob).sort(alpha);
+    const running=jobs.filter(window.isRunningJob)
+      .map(job=>({job,hours14:recentHoursForJob14Days(job.jobId||job.number)}))
       .sort((a,b)=>b.hours14-a.hours14||alpha(a.job,b.job))
       .map(row=>row.job);
     const n=document.getElementById('newOrdersPool'),r=document.getElementById('runningJobsPool');
-    if(n)n.innerHTML=newJobs.length?newJobs.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
-    if(r)r.innerHTML=running.length?running.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
+    if(n)n.innerHTML=newJobs.length?newJobs.map(window.planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
+    if(r)r.innerHTML=running.length?running.map(window.planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
     const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');
     if(nc)nc.textContent=String(newJobs.length);
     if(rc)rc.textContent=String(running.length);
-    requestAnimationFrame(()=>{updateStickyHeadOffset();updatePlanningStickyOffsets?.()});
+    requestAnimationFrame(function(){
+      updateStickyHeadOffset();
+      if(typeof window.updatePlanningStickyOffsets==='function')window.updatePlanningStickyOffsets();
+    });
   };
 
-  /* Baustellensicht: echte Baustellen vor Urlaub/UP */
-  if(typeof planningSiteRows==='function'){
-    const originalPlanningSiteRows=planningSiteRows;
-    planningSiteRows=function(days){
+  if(typeof window.planningSiteRows==='function'){
+    const originalPlanningSiteRows=window.planningSiteRows;
+    window.planningSiteRows=function(days){
       const rows=originalPlanningSiteRows(days)||[];
       const rank=row=>{
-        const key=String(row?.key||'').toLowerCase();
-        if(row?.job||(/^\d{5}/.test(key)&&!key.startsWith('__')))return 0;
+        const key=String((row&&row.key)||'').toLowerCase();
+        if((row&&row.job)||(/^\d{5}/.test(key)&&!key.startsWith('__')))return 0;
         if(key.includes('werkstatt')||key.includes('besprech')||key.includes('schulung')||key.includes('aufraeum'))return 1;
         if(key.includes('urlaub')||key.includes('krank')||key.includes('arzt')||key.includes('feiertag')||key.includes('betriebsurlaub')||key.includes('za'))return 2;
         return 3;
       };
-      return [...rows].sort((a,b)=>rank(a)-rank(b));
+      return rows.slice().sort((a,b)=>rank(a)-rank(b));
     };
   }
 
-  const start=()=>{
+  function start(){
     installWorkspace();
-    renderPlanningPools();
+    window.renderPlanningPools();
     updateStickyHeadOffset();
     window.addEventListener('resize',()=>requestAnimationFrame(updateStickyHeadOffset));
     const toolbar=document.querySelector('#planning .planning-calendar-toolbar');
     if(toolbar&&window.ResizeObserver)new ResizeObserver(updateStickyHeadOffset).observe(toolbar);
-  };
+  }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
   else start();
