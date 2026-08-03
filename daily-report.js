@@ -222,9 +222,29 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       record.plannedDate,
       record.startDay
     );
-    const from = firstValue(record.from, record.start, record.startDate, record.dateFrom, record.fromDate, singleDate);
-    const to = firstValue(record.to, record.end, record.endDate, record.dateTo, record.toDate, singleDate);
-    if (!isDateWithin(date, from, to)) return null;
+const isClockTime = (value) =>
+  /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(value || "").trim());
+
+const dateFrom = firstValue(
+  record.startDate,
+  record.dateFrom,
+  record.fromDate,
+  record.startDay,
+  !isClockTime(record.from) ? record.from : null,
+  !isClockTime(record.start) ? record.start : null,
+  singleDate
+);
+
+const dateTo = firstValue(
+  record.endDate,
+  record.dateTo,
+  record.toDate,
+  !isClockTime(record.to) ? record.to : null,
+  !isClockTime(record.end) ? record.end : null,
+  singleDate
+);
+
+if (!isDateWithin(date, dateFrom, dateTo)) return null;
 
     const employeeId = firstValue(
       record.employeeId,
