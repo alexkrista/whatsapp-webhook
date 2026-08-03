@@ -1083,7 +1083,27 @@ async function addAssignment(){
   document.querySelectorAll('.aEmployeeCheck').forEach(x=>x.checked=false);
   renderWeek();
 }
-function removeAssignment(x){const old=data.assignments.find(a=>a.id===x);data.assignments=data.assignments.filter(a=>a.id!==x);if(old)normalizeEmployeeDaySegments(old.employeeId,old.date);renderWeek()}
+async function removeAssignment(x) {
+  const old = data.assignments.find(
+    a => String(a.id) === String(x)
+  );
+
+  if (!old) return;
+
+  data.assignments = data.assignments.filter(
+    a => String(a.id) !== String(x)
+  );
+
+  normalizeEmployeeDaySegments(old.employeeId, old.date);
+  renderWeek();
+
+  try {
+    await saveAssignments(true);
+  } catch (error) {
+    alert('Löschen konnte nicht gespeichert werden: ' + error.message);
+    await loadAll();
+  }
+}
 async function saveAssignments(silent=false){const r=await api('/kristine/api/assignments',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignments:data.assignments})});data.assignments=r.assignments;renderWeek();renderControl();if(!silent)alert('Planung gespeichert.')}
 function seedDemo(){
   const d=aDate.value||data.today;
