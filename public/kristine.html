@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0023.18 · KRISTA UI -->
+<!-- Datei: public/kristine.html · Build 0031.2 · KRISTA UI -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -177,7 +177,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.34"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.2"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -482,7 +482,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0023.34"});
+createKristaTopbar({active:"kristine",build:"0031.2"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -619,8 +619,8 @@ function scrollPlanningPool(id,direction){
 }
 function renderSystemCards(){
   const box=document.getElementById('systemCards');if(!box)return;
-  const types=Object.keys(CARD_TYPES).filter(type=>type!=='site');
-  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type],showHours=['urlaub','krank','schulung'].includes(type);return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')"><strong>${meta.icon} ${esc(meta.label)}</strong>${showHours?'<div class="pool-hours">7,8 h</div>':''}</div>`}).join('');
+  const types=['urlaub','krank','arzt','aufraeumen','werkstatt','schulung','besprechung','za'].filter(type=>CARD_TYPES[type]);
+  box.innerHTML=types.map(type=>{const meta=CARD_TYPES[type];return `<div class="pool-card type-${esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')" title="In die Planung ziehen"><strong>${meta.icon} ${esc(meta.label)}</strong></div>`}).join('');
 }
 function normalizedJobStatus(job){return String(job?.status||'').trim().toLowerCase()}
 function isNewOrderJob(job){const s=normalizedJobStatus(job);return s==='auftrag'||s.includes('auftrag')||s==='neu'}
@@ -646,21 +646,29 @@ function consumedHoursForJobUntilYesterday(jobId){
   }
   return minutes/60;
 }
+function dateMinusPlanningDays(dateStr,days){
+  const d=new Date(String(dateStr||data.today||iso(new Date()))+'T12:00:00');
+  d.setDate(d.getDate()-days);
+  return iso(d);
+}
+function recentHoursForJob14Days(jobId){
+  const today=String(data.today||iso(new Date())),from=dateMinusPlanningDays(today,13);
+  const keys=new Set((data.timeEvents||[]).filter(e=>String(e.date||'')>=from&&String(e.date||'')<=today&&String(e.jobId||'')===String(jobId||'')).map(e=>`${e.employeeId}|${e.date}`));
+  let minutes=0;
+  for(const key of keys){const split=key.indexOf('|'),employeeId=key.slice(0,split),date=key.slice(split+1);minutes+=employeeDaySegments(employeeId,date,null).filter(seg=>seg.type==='work'&&String(seg.jobId||'')===String(jobId||'')).reduce((sum,seg)=>sum+Math.max(0,Number(seg.to||0)-Number(seg.from||0)),0)}
+  return minutes/60;
+}
 function planningPoolJobCard(job){
-  const number=job.jobId||job.number||'',name=job.name||('#'+number);
-  const total=Number(job?.calculation?.calculatedHours||job?.calculatedHours||job?.plannedHours||0);
-  const used=consumedHoursForJobUntilYesterday(number);
-  const planned=plannedHoursForJobFromToday(number);
-  const over=total>0&&(used+planned)>total+0.01;
-  const metrics=total>0
-    ? `<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${roundedPlanningHours(total)}</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`
-    : `<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`;
-  return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><strong>${esc(number)} · ${esc(name)}</strong>${metrics}</div>`;
+  const number=job.jobId||job.number||'',rawName=String(job.name||'').trim(),name=rawName||('#'+number);
+  const total=Number(job?.calculation?.calculatedHours||job?.calculatedHours||job?.plannedHours||0),used=consumedHoursForJobUntilYesterday(number),planned=plannedHoursForJobFromToday(number),over=total>0&&(used+planned)>total+0.01;
+  const metrics=total>0?`<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${roundedPlanningHours(total)}</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`:`<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${roundedPlanningHours(used)}</span><span>P ${roundedPlanningHours(planned)}</span></div>`;
+  return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><div class="pool-job-number">${esc(number)}</div><strong class="pool-job-name">${esc(name)}</strong>${metrics}</div>`;
 }
 function renderPlanningPools(){
   renderSystemCards();
-  const newJobs=masterJobs.filter(isNewOrderJob).sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));
-  const running=masterJobs.filter(isRunningJob).sort((a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de'));
+  const alpha=(a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de');
+  const newJobs=masterJobs.filter(isNewOrderJob).sort(alpha);
+  const running=masterJobs.filter(isRunningJob).map(job=>({job,hours14:recentHoursForJob14Days(job.jobId||job.number)})).sort((a,b)=>b.hours14-a.hours14||alpha(a.job,b.job)).map(row=>row.job);
   const n=document.getElementById('newOrdersPool'),r=document.getElementById('runningJobsPool');
   if(n)n.innerHTML=newJobs.length?newJobs.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
   if(r)r.innerHTML=running.length?running.map(planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
@@ -894,7 +902,13 @@ function planningSiteRows(days){
   });
   const specials=Object.entries(CARD_TYPES).filter(([type])=>type!=='site').map(([type,meta])=>({key:'type:'+type,label:meta.icon+' '+meta.label,type,used:data.assignments.some(a=>days.includes(a.date)&&cardTypeOf(a)===type),nextDate:data.assignments.filter(a=>cardTypeOf(a)===type&&a.date).map(a=>a.date).sort()[0]||''}));
   const all=jobs.concat(specials);
-  if(siteSort==='assigned')all.sort((a,b)=>{const d=Number(b.used)-Number(a.used);if(d)return d;const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd;return String(a.label).localeCompare(String(b.label),'de')});
+  if(siteSort==='assigned')all.sort((a,b)=>{
+    const group=row=>{if(row.job)return 0;const type=String(row.type||'');if(['werkstatt','besprechung','schulung','aufraeumen'].includes(type))return 1;if(['urlaub','krank','arzt','feiertag','betriebsurlaub','za'].includes(type))return 2;return 3};
+    const gd=group(a)-group(b);if(gd)return gd;
+    const d=Number(b.used)-Number(a.used);if(d)return d;
+    const nd=String(a.nextDate||'9999').localeCompare(String(b.nextDate||'9999'));if(nd)return nd;
+    return String(a.label).localeCompare(String(b.label),'de')
+  });
   return all
 }
 function assignmentMatchesSiteKey(a,key){if(key.startsWith('type:'))return cardTypeOf(a)===key.slice(5);return cardTypeOf(a)==='site'&&String(a.jobId)===key.slice(4)}
@@ -971,17 +985,28 @@ function shiftPlanningPeriod(direction){
 function gotoPlanningToday(){document.getElementById('aDate').value=data.today||iso(new Date());renderPlanning()}
 function updatePlanningButtons(){for(const view of ['day','week','month']){const b=document.getElementById('view'+view[0].toUpperCase()+view.slice(1)+'Btn');if(b)b.className=view===planningView?'':'secondary'}const employeeBtn=document.getElementById('perspectiveEmployeeBtn'),siteBtn=document.getElementById('perspectiveSiteBtn');if(employeeBtn)employeeBtn.className=planningPerspective==='employee'?'':'secondary';if(siteBtn)siteBtn.className=planningPerspective==='site'?'':'secondary'}
 function emptyPlanningCellHtml(date,employeeId){return `<button type="button" class="empty-planning-action" onclick="openQuickPlan(event,'${date}','${esc(employeeId)}')">＋ Baustelle einteilen<br><span>oder neue Baustelle anlegen</span></button>`}
+function employeePlanningRank(employee,sortDay){
+  const rows=(data.assignments||[]).filter(a=>String(a.date||'')===String(sortDay)&&String(a.employeeId)===String(employee.id));
+  if(rows.some(a=>cardTypeOf(a)==='site'))return 0;
+  if(rows.some(a=>['werkstatt','besprechung','schulung','aufraeumen'].includes(cardTypeOf(a))))return 1;
+  if(!rows.length)return 2;
+  if(rows.some(a=>['urlaub','krank','arzt','feiertag','betriebsurlaub','za'].includes(cardTypeOf(a))))return 3;
+  return 2;
+}
 function renderEmployeePlanning(target,title,days){
   const dayMode=days.length===1;
   title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Mitarbeitern · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
   const heads='<div class="matrix-head">Mitarbeiter</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
-  const rows=masterEmployees.map(employee=>{
+  const sortDay=days.includes(String(data.today||''))?String(data.today):days[0];
+  const employees=[...masterEmployees].sort((a,b)=>employeePlanningRank(a,sortDay)-employeePlanningRank(b,sortDay)||String(a.name||'').localeCompare(String(b.name||''),'de'));
+  const rows=employees.map(employee=>{
     const should=employeeShouldHours(employee.id,days),planned=employeePlannedHours(employee.id,days),actual=employeeActualMinutes(employee.id,days)/60,rest=Math.max(0,should-planned),over=Math.max(0,planned-should);
     const label=`<div class="matrix-label">👷 ${esc(employee.name)}<div class="matrix-metrics"><span>Soll</span><strong>${formatHours(should)}</strong><span>Plan</span><strong>${formatHours(planned)}</strong><span>Geleistet</span><strong>${formatHours(actual)}</strong>${over>0?`<span class="over">Überplant</span><strong class="over">+${formatHours(over)}</strong>`:`<span class="rest">Rest</span><strong class="rest">${formatHours(rest)}</strong>`}</div></div>`;
     const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&String(a.employeeId)===String(employee.id)).sort((a,b)=>String(a.from||'').localeCompare(String(b.from||'')));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningEmployeeDrop(event,'${day}','${esc(employee.id)}')">${assignments.length?matrixCardList(assignments):emptyPlanningCellHtml(day,employee.id)}</div>`}).join('');
     return label+cells
   }).join('');
-  target.innerHTML=`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Karte ziehen = Kopie erstellen. Das Original bleibt bestehen; Zielstunden werden aus dem Arbeitsmodell des Zieltags berechnet.</div>`;
+  target.innerHTML=`<div class="planning-matrix-headbar ${dayMode?'day-matrix':''}">${heads}</div><div class="planning-matrix-scroll"><div class="planning-matrix planning-matrix-body ${dayMode?'day-matrix':''}">${rows}</div></div><div class="perspective-note">Hier ist immer eindeutig, für welchen Mitarbeiter eine Karte gilt. Arbeitende Mitarbeiter stehen oben; Urlaub und Krank unten. Sortiert wird nach ${new Date(sortDay+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit'})}.</div>`;
+  setupPlanningHorizontalSync();
 }
 function renderSitePlanning(target,title,days){
   const dayMode=days.length===1,sites=planningSiteRows(days);
@@ -989,7 +1014,13 @@ function renderSitePlanning(target,title,days){
   const sortbar=`<div class="site-sortbar"><label for="siteSortSelect">Sortierung</label><select id="siteSortSelect" onchange="setSiteSort(this.value)"><option value="assigned" ${siteSort==='assigned'?'selected':''}>Eingeteilt</option><option value="status" ${siteSort==='status'?'selected':''}>Status</option><option value="newest" ${siteSort==='newest'?'selected':''}>Neueste</option><option value="oldest" ${siteSort==='oldest'?'selected':''}>Älteste</option><option value="az" ${siteSort==='az'?'selected':''}>A–Z</option><option value="za" ${siteSort==='za'?'selected':''}>Z–A</option></select></div>`;
   const heads='<div class="matrix-head">Baustelle / Karte</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
   const rows=sites.map(site=>{const hours=days.reduce((sum,d)=>sum+data.assignments.filter(a=>a.date===d&&assignmentMatchesSiteKey(a,site.key)).reduce((x,a)=>x+plannedHoursForAssignment(a),0),0);const label=`<div class="matrix-label">${esc(site.label)}<span class="small">${formatHours(hours)} · ${new Set(data.assignments.filter(a=>days.includes(a.date)&&assignmentMatchesSiteKey(a,site.key)).map(a=>String(a.employeeId))).size} MA${site.job?.status?' · '+esc(site.job.status):''}</span></div>`;const cells=days.map(day=>{const assignments=data.assignments.filter(a=>a.date===day&&assignmentMatchesSiteKey(a,site.key)).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de'));return `<div class="matrix-cell dropzone" ondragover="planningDragOver(event)" ondragleave="planningDragLeave(event)" ondrop="planningSiteDrop(event,'${day}','${esc(site.key)}')">${matrixCardList(assignments)}</div>`}).join('');return label+cells}).join('');
-  target.innerHTML=sortbar+`<div class="planning-matrix ${dayMode?'day-matrix':''}">${heads}${rows}</div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten werden beim Ziehen kopiert. Das Original bleibt bestehen; Entfernen erfolgt bewusst über ×.</div>`;
+  target.innerHTML=sortbar+`<div class="planning-matrix-headbar ${dayMode?'day-matrix':''}">${heads}</div><div class="planning-matrix-scroll"><div class="planning-matrix planning-matrix-body ${dayMode?'day-matrix':''}">${rows}</div></div><div class="perspective-note">Diese Sicht beantwortet: Wer arbeitet auf welcher Baustelle? Karten werden beim Ziehen kopiert. Das Original bleibt bestehen; Entfernen erfolgt bewusst über ×.</div>`;setupPlanningHorizontalSync();
+}
+function setupPlanningHorizontalSync(){
+  const head=document.querySelector('#planningView .planning-matrix-headbar'),scroll=document.querySelector('#planningView .planning-matrix-scroll');
+  if(!head||!scroll)return;
+  const sync=()=>{head.scrollLeft=scroll.scrollLeft};
+  scroll.addEventListener('scroll',sync,{passive:true});sync();
 }
 function renderPlanning(){updatePlanningButtons();const target=document.getElementById('planningView');const title=document.getElementById('planningTitle');if(!target)return;
   if(planningView==='month'){
@@ -2175,12 +2206,12 @@ main{max-width:1900px}
 .planning-sidebar-note{font-size:11px;color:#6b6b6b;margin:8px 2px 0}
 .planning-sidebar .planning-panel-body>p.small{display:none}
 
-.planning-main{min-width:0}
-.planning-main .planning-calendar-card{margin-top:0}
+.planning-main{min-width:0;position:relative}
+.planning-main .planning-calendar-card{margin-top:0;overflow:visible}.planning-calendar-toolbar+ #planningView{position:relative}
 .planning-calendar-toolbar{position:sticky!important;top:0!important;z-index:40!important;border-radius:14px 14px 0 0}
-.planning-matrix{overflow-x:auto!important;overflow-y:visible!important;position:relative}
-.matrix-head{position:sticky!important;top:var(--planning-week-head-top,72px)!important;z-index:31!important;box-shadow:0 6px 9px rgba(243,241,236,.96)}
-.matrix-head:first-child{left:0;z-index:34!important}
+.planning-matrix{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;align-items:stretch;min-width:max-content}.planning-matrix.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.planning-matrix-scroll{overflow-x:auto;overflow-y:visible;scrollbar-width:thin}.planning-matrix-headbar{display:grid;grid-template-columns:180px repeat(5,minmax(190px,1fr));gap:7px;min-width:max-content;position:sticky;top:var(--planning-week-head-top,72px);z-index:35;background:#fff;padding:0 0 7px;overflow:hidden}.planning-matrix-headbar.day-matrix{grid-template-columns:180px minmax(320px,1fr)}.planning-matrix-body{overflow:visible!important}.planning-matrix-body .matrix-label{position:sticky;left:0;z-index:20}
+.matrix-head{position:relative!important;top:auto!important;z-index:1!important;box-shadow:0 4px 8px rgba(243,241,236,.9)}
+.matrix-head:first-child{left:auto;z-index:2!important}
 .matrix-label{z-index:20!important}
 
 /* Abwesenheit & Betrieb: kompakt, zweispaltig, ohne Stunden */
@@ -2193,146 +2224,30 @@ main{max-width:1900px}
 .pool-job-number{font-weight:900;margin-bottom:2px}
 
 @media(max-width:1250px){#planning{--planner-sidebar:290px}.planning-sidebar .pool-list{grid-template-columns:1fr}}
-@media(max-width:1000px){.planning-workspace{grid-template-columns:1fr}.planning-sidebar{position:static;max-height:none}.planning-sidebar .pool-list{grid-template-columns:repeat(2,minmax(0,1fr))}.planning-calendar-toolbar{top:0!important}.matrix-head{top:var(--planning-week-head-top,72px)!important}}
+@media(max-width:1000px){.planning-workspace{grid-template-columns:1fr}.planning-sidebar{position:static;max-height:none}.planning-sidebar .pool-list{grid-template-columns:repeat(2,minmax(0,1fr))}.planning-calendar-toolbar{top:0!important}.planning-matrix-headbar{top:var(--planning-week-head-top,72px)}}
 </style>
 
 <script>
 (function(){
   'use strict';
-
-  const UP_TYPES=['urlaub','krank','arzt','aufraeumen','werkstatt','schulung','besprechung','za'];
-
-  function dateMinusDays(dateStr,days){
-    const d=new Date(String(dateStr||new Date().toISOString().slice(0,10))+'T12:00:00');
-    d.setDate(d.getDate()-days);
-    return d.toISOString().slice(0,10);
-  }
-
-  function recentHoursForJob14Days(jobId){
-    const today=String((window.data&&window.data.today)||new Date().toISOString().slice(0,10));
-    const from=dateMinusDays(today,13);
-    const events=(window.data&&Array.isArray(window.data.timeEvents))?window.data.timeEvents:[];
-    const keys=new Set(events
-      .filter(e=>String(e.date||'')>=from&&String(e.date||'')<=today&&String(e.jobId||'')===String(jobId||''))
-      .map(e=>`${e.employeeId}|${e.date}`));
-    let minutes=0;
-    for(const key of keys){
-      const split=key.indexOf('|');
-      const employeeId=key.slice(0,split),date=key.slice(split+1);
-      const segments=typeof window.employeeDaySegments==='function'?window.employeeDaySegments(employeeId,date,null):[];
-      minutes+=segments
-        .filter(seg=>seg.type==='work'&&String(seg.jobId||'')===String(jobId||''))
-        .reduce((sum,seg)=>sum+Math.max(0,Number(seg.to||0)-Number(seg.from||0)),0);
-    }
-    return minutes/60;
-  }
-
-  function installWorkspace(){
-    const section=document.getElementById('planning');
-    const top=section&&section.querySelector('.planning-top');
-    const calendar=section&&section.querySelector('.planning-calendar-card');
-    if(!section||!top||!calendar||section.querySelector('.planning-workspace'))return;
-
-    const workspace=document.createElement('div');
-    workspace.className='planning-workspace';
-    const sidebar=document.createElement('aside');
-    sidebar.className='planning-sidebar';
-    sidebar.innerHTML='<h2 class="planning-sidebar-title">Baustellenplanung</h2>';
-    const mainArea=document.createElement('div');
-    mainArea.className='planning-main';
-
-    section.insertBefore(workspace,top);
-    workspace.append(sidebar,mainArea);
-    sidebar.appendChild(top);
-    mainArea.appendChild(calendar);
-
-    const cards=document.getElementById('planningCardsPanel');
-    if(cards)cards.open=true;
-
-    const note=document.createElement('div');
-    note.className='planning-sidebar-note';
-    note.innerHTML='Karte ziehen = kopieren. Das Original bleibt stehen.<br>Baustellen: letzte 14 Tage nach Stunden sortiert.';
-    sidebar.appendChild(note);
-    updateStickyHeadOffset();
-  }
-
   function updateStickyHeadOffset(){
     const toolbar=document.querySelector('#planning .planning-calendar-toolbar');
     const height=toolbar?Math.ceil(toolbar.getBoundingClientRect().height):62;
     document.documentElement.style.setProperty('--planning-week-head-top',height+'px');
   }
-
-  window.renderSystemCards=function(){
-    const box=document.getElementById('systemCards');
-    if(!box)return;
-    const types=UP_TYPES.filter(type=>window.CARD_TYPES&&window.CARD_TYPES[type]);
-    box.innerHTML=types.map(type=>{
-      const meta=window.CARD_TYPES[type];
-      return `<div class="pool-card type-${window.esc(type)}" draggable="true" ondragstart="poolDragStart(event,'pooltype:${window.esc(type)}')" ondragend="poolDragEnd(event)" onclick="selectSystemCard('${type}')" title="In die Planung ziehen"><strong>${meta.icon} ${window.esc(meta.label)}</strong></div>`;
-    }).join('');
-  };
-
-  window.planningPoolJobCard=function(job){
-    const number=job.jobId||job.number||'';
-    const rawName=String(job.name||'').trim();
-    const name=rawName||('#'+number);
-    const total=Number((job.calculation&&job.calculation.calculatedHours)||job.calculatedHours||job.plannedHours||0);
-    const used=window.consumedHoursForJobUntilYesterday(number);
-    const planned=window.plannedHoursForJobFromToday(number);
-    const over=total>0&&(used+planned)>total+0.01;
-    const metrics=total>0
-      ? `<div class="pool-budget ${over?'over':''}" title="G Gesamt · V verbraucht bis gestern · P geplant ab heute"><span>G ${window.roundedPlanningHours(total)}</span><span>V ${window.roundedPlanningHours(used)}</span><span>P ${window.roundedPlanningHours(planned)}</span></div>`
-      : `<div class="pool-budget" title="Noch keine Gesamtstunden kalkuliert"><span>G –</span><span>V ${window.roundedPlanningHours(used)}</span><span>P ${window.roundedPlanningHours(planned)}</span></div>`;
-    return `<div class="pool-card" draggable="true" ondragstart="poolDragStart(event,'pooljob:${window.esc(number)}')" ondragend="poolDragEnd(event)" title="In die Planung ziehen"><div class="pool-job-number">${window.esc(number)}</div><strong class="pool-job-name">${window.esc(name)}</strong>${metrics}</div>`;
-  };
-
-  window.renderPlanningPools=function(){
-    window.renderSystemCards();
-    const jobs=Array.isArray(window.masterJobs)?window.masterJobs:[];
-    const alpha=(a,b)=>String(a.name||a.jobId).localeCompare(String(b.name||b.jobId),'de');
-    const newJobs=jobs.filter(window.isNewOrderJob).sort(alpha);
-    const running=jobs.filter(window.isRunningJob)
-      .map(job=>({job,hours14:recentHoursForJob14Days(job.jobId||job.number)}))
-      .sort((a,b)=>b.hours14-a.hours14||alpha(a.job,b.job))
-      .map(row=>row.job);
-    const n=document.getElementById('newOrdersPool'),r=document.getElementById('runningJobsPool');
-    if(n)n.innerHTML=newJobs.length?newJobs.map(window.planningPoolJobCard).join(''):'<div class="pool-empty">Keine neuen Aufträge.</div>';
-    if(r)r.innerHTML=running.length?running.map(window.planningPoolJobCard).join(''):'<div class="pool-empty">Keine laufenden Baustellen.</div>';
-    const nc=document.getElementById('newOrdersCount'),rc=document.getElementById('runningJobsCount');
-    if(nc)nc.textContent=String(newJobs.length);
-    if(rc)rc.textContent=String(running.length);
-    requestAnimationFrame(function(){
-      updateStickyHeadOffset();
-      if(typeof window.updatePlanningStickyOffsets==='function')window.updatePlanningStickyOffsets();
-    });
-  };
-
-  if(typeof window.planningSiteRows==='function'){
-    const originalPlanningSiteRows=window.planningSiteRows;
-    window.planningSiteRows=function(days){
-      const rows=originalPlanningSiteRows(days)||[];
-      const rank=row=>{
-        const key=String((row&&row.key)||'').toLowerCase();
-        if((row&&row.job)||(/^\d{5}/.test(key)&&!key.startsWith('__')))return 0;
-        if(key.includes('werkstatt')||key.includes('besprech')||key.includes('schulung')||key.includes('aufraeum'))return 1;
-        if(key.includes('urlaub')||key.includes('krank')||key.includes('arzt')||key.includes('feiertag')||key.includes('betriebsurlaub')||key.includes('za'))return 2;
-        return 3;
-      };
-      return rows.slice().sort((a,b)=>rank(a)-rank(b));
-    };
-  }
-
-  function start(){
-    installWorkspace();
-    window.renderPlanningPools();
+  function installWorkspace(){
+    const section=document.getElementById('planning'),top=section&&section.querySelector('.planning-top'),calendar=section&&section.querySelector('.planning-calendar-card');
+    if(!section||!top||!calendar||section.querySelector('.planning-workspace'))return;
+    const workspace=document.createElement('div');workspace.className='planning-workspace';
+    const sidebar=document.createElement('aside');sidebar.className='planning-sidebar';sidebar.innerHTML='<h2 class="planning-sidebar-title">Baustellenplanung</h2>';
+    const mainArea=document.createElement('div');mainArea.className='planning-main';
+    section.insertBefore(workspace,top);workspace.append(sidebar,mainArea);sidebar.appendChild(top);mainArea.appendChild(calendar);
+    const cards=document.getElementById('planningCardsPanel');if(cards)cards.open=true;
+    const note=document.createElement('div');note.className='planning-sidebar-note';note.innerHTML='Karte ziehen = kopieren. Das Original bleibt stehen.<br>Baustellen: letzte 14 Tage nach Stunden sortiert.';sidebar.appendChild(note);
     updateStickyHeadOffset();
-    window.addEventListener('resize',()=>requestAnimationFrame(updateStickyHeadOffset));
-    const toolbar=document.querySelector('#planning .planning-calendar-toolbar');
-    if(toolbar&&window.ResizeObserver)new ResizeObserver(updateStickyHeadOffset).observe(toolbar);
   }
-
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
-  else start();
+  function start(){installWorkspace();renderPlanningPools();renderPlanning();updateStickyHeadOffset();window.addEventListener('resize',()=>requestAnimationFrame(updateStickyHeadOffset));const toolbar=document.querySelector('#planning .planning-calendar-toolbar');if(toolbar&&window.ResizeObserver)new ResizeObserver(updateStickyHeadOffset).observe(toolbar)}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
 </script>
 </body>
