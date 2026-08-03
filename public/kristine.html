@@ -1,4 +1,4 @@
-<!-- Datei: public/kristine.html · Build 0031.4 · KRISTA UI -->
+<!-- Datei: public/kristine.html · Build 0031.5 · KRISTA UI -->
 <!doctype html>
 <html lang="de">
 <head>
@@ -177,7 +177,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.4"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.5"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -482,7 +482,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.4"});
+createKristaTopbar({active:"kristine",build:"0031.5"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -1083,27 +1083,7 @@ async function addAssignment(){
   document.querySelectorAll('.aEmployeeCheck').forEach(x=>x.checked=false);
   renderWeek();
 }
-async function removeAssignment(x) {
-  const old = data.assignments.find(
-    a => String(a.id) === String(x)
-  );
-
-  if (!old) return;
-
-  data.assignments = data.assignments.filter(
-    a => String(a.id) !== String(x)
-  );
-
-  normalizeEmployeeDaySegments(old.employeeId, old.date);
-  renderWeek();
-
-  try {
-    await saveAssignments(true);
-  } catch (error) {
-    alert('Löschen konnte nicht gespeichert werden: ' + error.message);
-    await loadAll();
-  }
-}
+function removeAssignment(x){const old=data.assignments.find(a=>a.id===x);data.assignments=data.assignments.filter(a=>a.id!==x);if(old)normalizeEmployeeDaySegments(old.employeeId,old.date);renderWeek()}
 async function saveAssignments(silent=false){const r=await api('/kristine/api/assignments',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignments:data.assignments})});data.assignments=r.assignments;renderWeek();renderControl();if(!silent)alert('Planung gespeichert.')}
 function seedDemo(){
   const d=aDate.value||data.today;
@@ -1746,23 +1726,11 @@ function renderControl(){
    * für Sortierung, aktuelle Baustelle, Balken und Detailanzeige.
    */
   const employees=canonicalControlEmployees(today)
-  .filter(a => {
-  const aliasIds = (a.aliasIds || [a.employeeId]).map(String);
-
-  const master = masterEmployees.find(employee =>
-    aliasIds.includes(String(employee.id))
-  );
-
-  return Boolean(
-    master &&
-    master.active !== false &&
-    master.isActive !== false &&
-    master.enabled !== false &&
-    master.hidden !== true &&
-    master.archived !== true &&
-    master.deleted !== true
-  );
-})
+  .filter(a=>{
+    const aliasIds=(a.aliasIds||[a.employeeId]).map(String);
+    const master=masterEmployees.find(employee=>aliasIds.includes(String(employee.id)));
+    return !master||master.active!==false;
+  })
   .map(a=>{
     const aliasIds=a.aliasIds||[a.employeeId];
 
@@ -2325,5 +2293,208 @@ main{max-width:1900px}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
 </script>
+<!-- KRISTA Build 0031.5 · Mobile Tagesplanung -->
+<style>
+.mobile-day-actions,.mobile-entry-backdrop{display:none}
+@media (max-width: 760px){
+  body{background:#f4f2ed}
+  main{padding:8px!important;max-width:none!important}
+  .krista-module-nav{overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px}
+  .krista-module-nav button{flex:0 0 auto;font-size:12px;padding:8px 9px}
+  #planning .planning-workspace{display:block!important}
+  #planning .planning-sidebar,#planning .planning-top{display:none!important}
+  #planning .planning-main{width:100%!important;min-width:0!important}
+  #planning .planning-calendar-card{padding:10px!important;border-radius:16px!important;margin:0!important;box-shadow:none!important}
+  #planning .planning-calendar-toolbar{position:sticky!important;top:0!important;z-index:50!important;padding:8px 0 10px!important;display:block!important;background:#fff!important;box-shadow:0 7px 12px rgba(255,255,255,.97)!important}
+  #planning .planning-heading{display:grid!important;grid-template-columns:42px 1fr 42px;gap:7px;align-items:center;width:100%}
+  #planning .planning-heading .planning-today{display:none!important}
+  #planning .planning-heading h3{grid-column:2;grid-row:1;width:auto!important;min-width:0!important;font-size:17px!important;line-height:1.18;text-align:center!important;margin:0!important}
+  #planning .planning-heading .planning-arrow:first-child{grid-column:1;grid-row:1}
+  #planning .planning-heading .planning-arrow:last-child{grid-column:3;grid-row:1}
+  #planning .planning-calendar-toolbar>div:last-child{display:none!important}
+  #planningView{margin-top:8px!important}
+  #planningView .planning-matrix-headbar{display:none!important}
+  #planningView .planning-matrix-scroll{overflow:visible!important}
+  #planningView .planning-matrix{display:block!important;min-width:0!important}
+  #planningView .matrix-head{display:none!important}
+  #planningView .matrix-label{position:static!important;min-height:0!important;padding:10px 11px 7px!important;border-radius:13px 13px 0 0!important;background:#f6f4ef!important}
+  #planningView .matrix-cell{min-height:54px!important;padding:7px!important;border-radius:0 0 13px 13px!important;margin-bottom:9px!important;background:#ece9e2!important}
+  #planningView .matrix-label+.matrix-cell{margin-top:0!important}
+  #planningView .matrix-label .matrix-metrics{grid-template-columns:auto auto!important;justify-content:start;gap:2px 12px!important}
+  #planningView .monthitem{font-size:12px!important;padding:8px!important;margin:4px 0!important}
+  #planningView .empty-planning-action{min-height:48px!important;font-size:12px!important}
+  .mobile-day-actions{display:grid;grid-template-columns:1fr auto;gap:8px;position:sticky;bottom:8px;z-index:70;margin-top:10px;padding:8px;background:rgba(244,242,237,.96);backdrop-filter:blur(8px);border-radius:16px;box-shadow:0 5px 20px rgba(0,0,0,.12)}
+  .mobile-day-actions button{min-height:48px;font-weight:850}
+  .mobile-copy-btn{background:#fff!important;color:#145829!important;border-color:#9fc2a7!important}
+  .mobile-entry-backdrop{position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.45);padding:12px;align-items:flex-end;justify-content:center}
+  .mobile-entry-backdrop.open{display:flex}
+  .mobile-entry-sheet{width:100%;max-height:90vh;overflow:auto;background:#fff;border-radius:22px 22px 14px 14px;padding:16px;box-shadow:0 -12px 45px rgba(0,0,0,.25)}
+  .mobile-entry-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+  .mobile-entry-head h3{margin:0}
+  .mobile-type-grid{display:grid;gap:9px}
+  .mobile-type-choice{display:flex;align-items:center;gap:12px;width:100%;background:#fff;color:#202020;border:1px solid #ddd8cf;text-align:left;padding:13px;border-radius:14px}
+  .mobile-type-choice strong{display:block}.mobile-type-choice span{font-size:12px;color:#6d6d6d}
+  .mobile-entry-form{display:grid;gap:10px}
+  .mobile-entry-form .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .mobile-entry-note{font-size:12px;color:#6b6b6b}
+}
+</style>
+
+<div id="mobileEntryBackdrop" class="mobile-entry-backdrop" onclick="if(event.target===this)closeMobileEntry()">
+  <div class="mobile-entry-sheet">
+    <div class="mobile-entry-head"><h3 id="mobileEntryTitle">Eintrag hinzufügen</h3><button type="button" class="secondary" onclick="closeMobileEntry()">Schließen</button></div>
+    <div id="mobileEntryBody"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const mq=window.matchMedia('(max-width: 760px)');
+  let mobileType='';
+
+  function isMobile(){return mq.matches}
+  function mobileDate(){return document.getElementById('aDate')?.value||data.today||iso(new Date())}
+  function activeEmployees(){return (masterEmployees||[]).filter(e=>e.active!==false&&e.hidden!==true&&e.archived!==true&&e.deleted!==true)}
+  function selectedEmployee(){return document.getElementById('mobileEmployee')?.value||''}
+
+  function ensureMobileActions(){
+    const planning=document.getElementById('planning');
+    const card=planning?.querySelector('.planning-calendar-card');
+    if(!card||card.querySelector('.mobile-day-actions'))return;
+    const actions=document.createElement('div');
+    actions.className='mobile-day-actions';
+    actions.innerHTML='<button type="button" class="green" onclick="openMobileEntry()">＋ Eintrag hinzufügen</button><button type="button" class="mobile-copy-btn" onclick="copyMobilePreviousDay()">⧉ Vortag</button>';
+    card.appendChild(actions);
+  }
+
+  function applyMobilePlanningMode(){
+    if(!isMobile())return;
+    planningView='day';
+    planningPerspective='employee';
+    ensureMobileActions();
+  }
+
+  window.openMobileEntry=function(){
+    mobileType='';
+    document.getElementById('mobileEntryTitle').textContent='Eintrag hinzufügen';
+    document.getElementById('mobileEntryBody').innerHTML=`
+      <div class="mobile-entry-form">
+        <div><label>Mitarbeiter</label><select id="mobileEmployee">${activeEmployees().map(e=>`<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select></div>
+        <div class="mobile-type-grid">
+          <button type="button" class="mobile-type-choice" onclick="chooseMobileEntryType('site')"><b>🏗️</b><div><strong>Baustelle</strong><span>Bestehende oder neue Baustelle</span></div></button>
+          <button type="button" class="mobile-type-choice" onclick="chooseMobileEntryType('up')"><b>🔧</b><div><strong>Interne Arbeit (UP)</strong><span>Werkstatt, Besprechung, Aufräumen …</span></div></button>
+          <button type="button" class="mobile-type-choice" onclick="chooseMobileEntryType('absence')"><b>🏖️</b><div><strong>Abwesenheit</strong><span>Urlaub, Krank, Arzt, Zeitausgleich …</span></div></button>
+        </div>
+      </div>`;
+    document.getElementById('mobileEntryBackdrop').classList.add('open');
+  };
+
+  window.closeMobileEntry=function(){document.getElementById('mobileEntryBackdrop').classList.remove('open')};
+
+  window.chooseMobileEntryType=function(type){
+    const employeeId=selectedEmployee();
+    if(!employeeId){alert('Bitte einen Mitarbeiter auswählen.');return}
+    mobileType=type;
+    if(type==='site')return renderMobileSite(employeeId);
+    if(type==='up')return renderMobileSpecial(employeeId,false);
+    renderMobileSpecial(employeeId,true);
+  };
+
+  function employeeSelectHtml(selected){return `<select id="mobileEmployee">${activeEmployees().map(e=>`<option value="${esc(e.id)}" ${String(e.id)===String(selected)?'selected':''}>${esc(e.name)}</option>`).join('')}</select>`}
+
+  function renderMobileSite(employeeId){
+    document.getElementById('mobileEntryTitle').textContent='Baustelle';
+    document.getElementById('mobileEntryBody').innerHTML=`<div class="mobile-entry-form">
+      <div><label>Mitarbeiter</label>${employeeSelectHtml(employeeId)}</div>
+      <div><label>Baustelle</label><select id="mobileJob"><option value="">– auswählen –</option>${(masterJobs||[]).filter(j=>normalizedJobStatus(j)!=='geschlossen').map(j=>`<option value="${esc(j.jobId)}">#${esc(j.jobId)} · ${esc(j.name||'ohne Name')}</option>`).join('')}</select></div>
+      <div class="row2"><div><label>Von</label><input id="mobileFrom" type="time" value="07:00"></div><div><label>Bis</label><input id="mobileTo" type="time" value="17:00"></div></div>
+      <div><label>Notiz optional</label><input id="mobileNote" placeholder="z. B. Malerarbeiten EG"></div>
+      <button type="button" class="green" onclick="saveMobileSite()">Speichern</button>
+      <button type="button" class="secondary" onclick="renderMobileNewSite()">＋ Neue Baustelle anlegen</button>
+    </div>`;
+  }
+
+  window.renderMobileNewSite=function(){
+    const employeeId=selectedEmployee();
+    closeMobileEntry();
+    openQuickPlan({preventDefault(){},stopPropagation(){}},mobileDate(),employeeId);
+    setQuickPlanMode('new');
+  };
+
+  window.saveMobileSite=async function(){
+    const employee=employeeById(selectedEmployee());
+    const job=masterJobs.find(j=>String(j.jobId)===String(document.getElementById('mobileJob').value));
+    if(!employee||!job){alert('Bitte Mitarbeiter und Baustelle auswählen.');return}
+    const template={id:id(),cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job),vehicle:'',note:document.getElementById('mobileNote').value.trim()};
+    const placed=await placeSiteAssignment(template,employee,mobileDate(),{forceDialog:siteSegments(employee.id,mobileDate()).length>0});
+    if(!placed)return;
+    await saveAssignments(true);closeMobileEntry();
+  };
+
+  function renderMobileSpecial(employeeId,absence){
+    const options=absence
+      ? [['urlaub','Urlaub'],['krank','Krank'],['arzt','Arzt'],['za','Zeitausgleich'],['feiertag','Feiertag'],['betriebsurlaub','Betriebsurlaub']]
+      : [['werkstatt','Werkstatt'],['besprechung','Besprechung'],['aufraeumen','Aufräumen'],['schulung','Schulung']];
+    document.getElementById('mobileEntryTitle').textContent=absence?'Abwesenheit':'Interne Arbeit';
+    document.getElementById('mobileEntryBody').innerHTML=`<div class="mobile-entry-form">
+      <div><label>Mitarbeiter</label>${employeeSelectHtml(employeeId)}</div>
+      <div><label>Art</label><select id="mobileSpecialType">${options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+      ${absence?'':`<div class="row2"><div><label>Von</label><input id="mobileFrom" type="time" value="08:00"></div><div><label>Bis</label><input id="mobileTo" type="time" value="10:00"></div></div>`}
+      <div><label>Notiz optional</label><input id="mobileNote"></div>
+      <div class="mobile-entry-note">Ganztägige Abwesenheiten übernehmen automatisch die Stunden aus dem Arbeitsmodell.</div>
+      <button type="button" class="green" onclick="saveMobileSpecial(${absence?'true':'false'})">Speichern</button>
+    </div>`;
+  }
+
+  window.saveMobileSpecial=async function(absence){
+    const employee=employeeById(selectedEmployee());
+    const type=document.getElementById('mobileSpecialType').value;
+    if(!employee||!type)return;
+    const meta=CARD_TYPES[type]||{label:type};
+    const template={id:id(),cardType:type,jobId:`__${type}__`,jobName:meta.label,note:document.getElementById('mobileNote').value.trim()||meta.label};
+    if(absence){
+      const rule=worktimeRule(employee.id,mobileDate());
+      const w=modelDayWindow(employee.id,mobileDate());
+      data.assignments.push({...template,date:mobileDate(),employeeId:String(employee.id),employeeName:employee.name,from:w.from||'07:00',to:w.to||'17:00',hours:Math.max(0,Number(rule?.payrollTargetHours??7.8)),fullDay:true});
+    }else{
+      const selected={from:document.getElementById('mobileFrom').value,to:document.getElementById('mobileTo').value};
+      if(hmToMinutes(selected.from)===null||hmToMinutes(selected.to)===null||hmToMinutes(selected.to)<=hmToMinutes(selected.from)){alert('Bitte gültige Zeiten eingeben.');return}
+      data.assignments.push({...template,date:mobileDate(),employeeId:String(employee.id),employeeName:employee.name,from:selected.from,to:selected.to,hours:rawCardHours(selected),fullDay:false});
+    }
+    await saveAssignments(true);closeMobileEntry();
+  };
+
+  window.copyMobilePreviousDay=async function(){
+    const target=mobileDate();
+    const source=addDaysISO(target,-1);
+    const rows=(data.assignments||[]).filter(a=>String(a.date)===String(source));
+    if(!rows.length){alert('Am Vortag gibt es keine Einteilungen.');return}
+    if(!confirm(`Einteilungen vom ${new Date(source+'T12:00:00').toLocaleDateString('de-AT')} auf heute kopieren?`))return;
+    let copied=0;
+    for(const row of rows){
+      const employee=employeeById(row.employeeId);if(!employee||employee.active===false)continue;
+      if(cardTypeOf(row)==='site'){
+        const duplicate=data.assignments.some(a=>String(a.date)===target&&String(a.employeeId)===String(row.employeeId)&&String(a.jobId)===String(row.jobId)&&String(a.from||'')===String(row.from||''));
+        if(duplicate)continue;
+        data.assignments.push({...row,id:id(),date:target});copied++;
+      }else{
+        const created=await createSpecialAssignment(cardTypeOf(row),employee,target,row);if(created)copied++;
+      }
+    }
+    if(!copied){alert('Es gab nichts Neues zu kopieren.');return}
+    await saveAssignments(true);
+  };
+
+  const originalRenderPlanning=window.renderPlanning;
+  window.renderPlanning=function(){applyMobilePlanningMode();const result=originalRenderPlanning.apply(this,arguments);ensureMobileActions();return result};
+  const originalShowTab=window.showTab;
+  window.showTab=function(name){const result=originalShowTab.apply(this,arguments);if(name==='planning'&&isMobile()){applyMobilePlanningMode();requestAnimationFrame(()=>window.renderPlanning())}return result};
+
+  mq.addEventListener?.('change',()=>{if(isMobile()){applyMobilePlanningMode();window.renderPlanning()}else location.reload()});
+  document.addEventListener('DOMContentLoaded',()=>{if(isMobile()){applyMobilePlanningMode();ensureMobileActions()}});
+})();
+</script>
+
 </body>
 </html>
