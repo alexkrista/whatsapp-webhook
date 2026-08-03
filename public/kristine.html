@@ -798,8 +798,12 @@ function worktimeRule(employeeId, date) {
 function isWeekdayDate(date){const d=new Date(String(date)+'T12:00:00');const wd=d.getDay();return wd>=1&&wd<=5}
 function fullDayUnproductiveHours(a){return isWeekdayDate(a.date)?7.8:0}
 function isFullDaySpecialAssignment(a){const type=cardTypeOf(a);if(type==='site')return false;if(['urlaub','krank','schulung','za','feiertag','betriebsurlaub'].includes(type))return true;const rule=worktimeRule(a.employeeId,a.date);if(!rule||rule.free)return false;const from=String(a.from||''),to=String(a.to||'');if(from&&to&&from===String(rule.from||'')&&to===String(rule.to||''))return true;const hours=Number(a.hours);return Number.isFinite(hours)&&Math.abs(hours-7.8)<0.01}
-function specialPlanHours(a){if(isFullDaySpecialAssignment(a)){const rule=worktimeRule(a.employeeId,a.date);return Math.max(0,Number(rule?.payrollTargetHours??fullDayUnproductiveHours(a)))}return rawCardHours(a)}
-
+function specialPlanHours(a){
+  if(isFullDaySpecialAssignment(a)){
+    return fullDayUnproductiveHours(a);
+  }
+  return rawCardHours(a);
+}
 function minutesToHm(value){const n=Math.max(0,Math.round(Number(value||0)));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
 function modelDayWindow(employeeId,date){const rule=worktimeRule(employeeId,date);return {from:rule?.from||'07:00',to:rule?.to||'17:00',fromMin:hmToMinutes(rule?.from||'07:00')??420,toMin:hmToMinutes(rule?.to||'17:00')??1020}}
 function siteSegments(employeeId,date,excludeId=''){return data.assignments.filter(a=>a.date===date&&String(a.employeeId)===String(employeeId)&&cardTypeOf(a)==='site'&&String(a.id)!==String(excludeId)).sort((a,b)=>(hmToMinutes(a.from)||0)-(hmToMinutes(b.from)||0))}
