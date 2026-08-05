@@ -495,14 +495,45 @@ function authenticatedUrl(url) {
       material: {
         title:"Material",
         steps:[
-          {question:"Was wurde verwendet?", type:"text", placeholder:"z. B. Rolling Fog 154"},
-          {question:"Welche Menge?", type:"text", placeholder:"z. B. 4 Liter"},
+          {question:"Was möchtest du machen?", type:"options", options:["Verbrauch dokumentieren","Material fehlt","Neues Material melden"]},
+          {question:"Was und wie viel?", type:"text", placeholder:"z. B. 5 Liter Rolling Fog 154"},
+          {question:"Wann wird es benötigt?", type:"options", options:["Heute dringend","Für morgen","Nur dokumentieren"]},
           {question:"Materialeintrag prüfen", type:"summary"},
         ],
-        save(values) {
-          const summary = [values[0], values[1]].filter(Boolean).join(" · ") || "Kein Material verwendet";
+        async save(values) {
+          const requestType = String(values[0] || "").startsWith("Verbrauch")
+            ? "consumption"
+            : String(values[0] || "").startsWith("Neues")
+              ? "new_material"
+              : "missing";
+          const need = String(values[2] || "").startsWith("Heute")
+            ? "urgent_today"
+            : String(values[2] || "").startsWith("Für morgen")
+              ? "tomorrow"
+              : "document";
+          const a = state.currentAssignment;
+          const result = await api("/kristine/api/material-requests", {
+            method:"POST",
+            body:JSON.stringify({
+              employeeId:employeeId(state.employee),
+              employeeName:employeeName(state.employee),
+              jobId:a?.jobId || "",
+              jobName:a?.jobName || "",
+              materialText:String(values[1] || "").trim(),
+              requestType,
+              need,
+            }),
+          });
+          const summary = `${values[1] || "Material"} · ${values[2] || "dokumentiert"}`;
           saveReview("material", {summary});
-          toast("Material für den Tagesabschluss vorgemerkt.");
+          saveReview("order", {summary: need === "urgent_today" ? "Heute dringend gemeldet" : need === "tomorrow" ? "Für morgen gemeldet" : "Nur dokumentiert"});
+          if (need === "urgent_today") {
+            toast(result.notification?.sent ? "Aufgabe erstellt – WhatsApp sofort gesendet." : "Aufgabe erstellt – WhatsApp konnte nicht gesendet werden.");
+          } else if (need === "tomorrow") {
+            toast(result.notification?.sent ? "Nachmeldung gespeichert und sofort gemeldet." : "Für die 15-Uhr-Meldung gespeichert.");
+          } else {
+            toast("Material dokumentiert.");
+          }
         },
       },
       regie: {
@@ -510,16 +541,31 @@ function authenticatedUrl(url) {
         external: `/public/regie-assistant.html?employeeId=${encodeURIComponent(employeeId(state.employee))}&jobId=${encodeURIComponent(a?.jobId || "")}&date=${encodeURIComponent(state.bootstrap?.today || todayISO())}`,
       },
       order: {
-        title:"Material für morgen",
+        title:"Material",
         steps:[
-          {question:"Wird Material für morgen benötigt?", type:"options", options:["Nein, alles vorhanden","Ja, Material bestellen"]},
-          {question:"Was und wie viel?", type:"text", placeholder:"z. B. 5 Liter Rolling Fog 154"},
-          {question:"Bestellung prüfen", type:"summary"},
+          {question:"Was und wie viel wird benötigt?", type:"text", placeholder:"z. B. 5 Liter Rolling Fog 154"},
+          {question:"Wann wird es benötigt?", type:"options", options:["Heute dringend","Für morgen"]},
+          {question:"Materialanforderung prüfen", type:"summary"},
         ],
-        save(values) {
-          const no = String(values[0] || "").startsWith("Nein");
-          saveReview("order", {summary:no ? "Alles vorhanden" : (values[1] || "Bestellung vorgemerkt")});
-          toast(no ? "Material für morgen ist geklärt." : "Bestellung vorgemerkt.");
+        async save(values) {
+          const a = state.currentAssignment;
+          const need = String(values[1] || "").startsWith("Heute") ? "urgent_today" : "tomorrow";
+          const result = await api("/kristine/api/material-requests", {
+            method:"POST",
+            body:JSON.stringify({
+              employeeId:employeeId(state.employee),
+              employeeName:employeeName(state.employee),
+              jobId:a?.jobId || "",
+              jobName:a?.jobName || "",
+              materialText:String(values[0] || "").trim(),
+              requestType:"missing",
+              need,
+            }),
+          });
+          saveReview("order", {summary: need === "urgent_today" ? "Heute dringend gemeldet" : "Für morgen gemeldet"});
+          toast(need === "urgent_today"
+            ? (result.notification?.sent ? "WhatsApp sofort gesendet." : "Aufgabe gespeichert; WhatsApp nicht gesendet.")
+            : (result.notification?.sent ? "Nachmeldung sofort gesendet." : "Für 15 Uhr gespeichert."));
         },
       },
       finish: {

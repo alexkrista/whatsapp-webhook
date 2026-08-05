@@ -16,6 +16,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const GPS_IMPORTS_DIR = path.join(ROOT, "gps-imports");
   const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
   const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
+  const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
+  const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -980,6 +982,205 @@ function clampOfficialStart(actualTime) {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kontrollzentrum.html"));
   });
+
+
+function materialAlertPhones() {
+  return String(
+    process.env.WHATSAPP_ALERT_PHONES || ""
+  )
+  .split(/[;,]/)
+  .map(value => value.replace(/\D/g, ""))
+  .filter(Boolean);
+}
+
+  function materialNeedLabel(value) {
+    return value === "urgent_today" ? "Heute dringend" : value === "tomorrow" ? "Für morgen" : "Nur dokumentieren";
+  }
+
+  async function sendMaterialAlert(request, mode = "urgent") {
+    const phones = materialAlertPhones();
+    if (!phones.length || typeof sendWhatsApp !== "function") {
+      return { sent: false, reason: !phones.length ? "material_alert_phone_missing" : "whatsapp_not_configured" };
+    }
+    const headline = mode === "late"
+      ? "⚠️ Material-Nachmeldung nach 15 Uhr"
+      : "🚨 Material heute dringend";
+    const lines = [
+      headline,
+      request.jobName ? `🏗️ ${request.jobName}${request.jobId ? ` (#${request.jobId})` : ""}` : "",
+      request.employeeName ? `👷 Von: ${request.employeeName}` : "",
+      `📦 ${request.materialText}`,
+      request.note ? `ℹ️ ${request.note}` : "",
+    ].filter(Boolean);
+    const results = [];
+    for (const phone of phones) {
+      try {
+        await sendWhatsApp({ to: phone, reply: lines.join("\n"), buttons: [] });
+        results.push({ phoneTail: phone.slice(-5), sent: true });
+      } catch (error) {
+        results.push({ phoneTail: phone.slice(-5), sent: false, reason: String(error?.message || error) });
+      }
+    }
+    return { sent: results.some(row => row.sent), results };
+  }
+
+  async function sendMaterialSummary(date = localDateISO()) {
+    const requests = await readJson(MATERIAL_REQUESTS, []);
+    const rows = requests.filter(row =>
+      row.status === "open" &&
+      row.need === "tomorrow" &&
+      String(row.createdDate || "") === String(date) &&
+      !row.summaryNotifiedAt
+    );
+    if (!rows.length) return { sent: false, reason: "nothing_open" };
+
+    const phones = materialAlertPhones();
+    if (!phones.length || typeof sendWhatsApp !== "function") {
+      return { sent: false, reason: "notification_not_configured" };
+    }
+
+    const grouped = new Map();
+    for (const row of rows) {
+      const key = row.jobId || row.jobName || "Ohne Baustelle";
+      if (!grouped.has(key)) grouped.set(key, { title: row.jobName || row.jobId || "Ohne Baustelle", items: [] });
+      grouped.get(key).items.push(row);
+    }
+    const lines = ["📦 Material für morgen"];
+    for (const group of grouped.values()) {
+      lines.push("", `🏗️ ${group.title}`);
+      group.items.forEach(row => lines.push(`• ${row.materialText}${row.employeeName ? ` · ${row.employeeName}` : ""}`));
+    }
+
+    let sent = false;
+    for (const phone of phones) {
+      try {
+        await sendWhatsApp({ to: phone, reply: lines.join("\n"), buttons: [] });
+        sent = true;
+      } catch (error) {
+        console.error("Material-Sammelmeldung fehlgeschlagen:", error);
+      }
+    }
+    if (sent) {
+      const now = new Date().toISOString();
+      const ids = new Set(rows.map(row => row.id));
+      requests.forEach(row => { if (ids.has(row.id)) row.summaryNotifiedAt = now; });
+      await writeJson(MATERIAL_REQUESTS, requests);
+    }
+    return { sent, count: rows.length };
+  }
+
+  app.get("/kristine/api/material-requests", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      res.json({ ok: true, requests: rows });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/material-requests", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const materialText = String(req.body?.materialText || "").trim().slice(0, 600);
+      if (!materialText) return res.status(400).json({ ok: false, error: "Material fehlt." });
+
+      const need = ["urgent_today", "tomorrow", "document"].includes(String(req.body?.need))
+        ? String(req.body.need)
+        : "document";
+      const requestType = ["consumption", "missing", "new_material"].includes(String(req.body?.requestType))
+        ? String(req.body.requestType)
+        : "missing";
+      const now = new Date();
+      const createdDate = localDateISO(now);
+      const createdMinutes = Number(viennaParts(now).hour) * 60 + Number(viennaParts(now).minute);
+
+      const row = {
+        id: `mat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        employeeId: String(req.body?.employeeId || "").slice(0, 100),
+        employeeName: String(req.body?.employeeName || "").trim().slice(0, 140),
+        jobId: String(req.body?.jobId || "").slice(0, 80),
+        jobName: String(req.body?.jobName || "").trim().slice(0, 180),
+        materialText,
+        note: String(req.body?.note || "").trim().slice(0, 500),
+        requestType,
+        need,
+        needLabel: materialNeedLabel(need),
+        status: "open",
+        newMaterial: requestType === "new_material",
+        createdAt: now.toISOString(),
+        createdDate,
+        summaryNotifiedAt: null,
+        directNotifiedAt: null,
+      };
+
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      rows.push(row);
+      await writeJson(MATERIAL_REQUESTS, rows.slice(-5000));
+      await appendEvent({
+        type: "material_request_created",
+        employeeId: row.employeeId,
+        employeeName: row.employeeName,
+        jobId: row.jobId,
+        detail: `${row.needLabel}: ${row.materialText}`,
+      });
+
+      let notification = { sent: false, reason: "not_required" };
+      if (need === "urgent_today") {
+        notification = await sendMaterialAlert(row, "urgent");
+      } else if (need === "tomorrow" && createdMinutes >= 15 * 60) {
+        notification = await sendMaterialAlert(row, "late");
+      }
+      if (notification.sent) {
+        row.directNotifiedAt = new Date().toISOString();
+        const latest = await readJson(MATERIAL_REQUESTS, []);
+        const found = latest.find(item => item.id === row.id);
+        if (found) found.directNotifiedAt = row.directNotifiedAt;
+        await writeJson(MATERIAL_REQUESTS, latest);
+      }
+
+      res.json({ ok: true, request: row, notification });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.patch("/kristine/api/material-requests/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      const row = rows.find(item => String(item.id) === String(req.params.id));
+      if (!row) return res.status(404).json({ ok: false, error: "Materialaufgabe nicht gefunden." });
+      const status = String(req.body?.status || "");
+      if (!["open", "stocked", "ordered"].includes(status)) {
+        return res.status(400).json({ ok: false, error: "Ungültiger Status." });
+      }
+      row.status = status;
+      row.updatedAt = new Date().toISOString();
+      await writeJson(MATERIAL_REQUESTS, rows);
+      res.json({ ok: true, request: row });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  const materialSummaryTimer = setInterval(async () => {
+    try {
+      const p = viennaParts();
+      if (Number(p.hour) !== 15 || Number(p.minute) > 4) return;
+      const state = await readJson(MATERIAL_NOTIFY_STATE, {});
+      const today = localDateISO();
+      if (state.lastSummaryDate === today) return;
+      const result = await sendMaterialSummary(today);
+      if (result.sent || result.reason === "nothing_open") {
+        await writeJson(MATERIAL_NOTIFY_STATE, { ...state, lastSummaryDate: today, updatedAt: new Date().toISOString() });
+      }
+    } catch (error) {
+      console.error("Material-15-Uhr-Prüfung fehlgeschlagen:", error);
+    }
+  }, 60 * 1000);
+  materialSummaryTimer.unref?.();
+
 
   app.get("/kristine/api/bootstrap", async (req, res) => {
     if (!requireAdmin(req, res)) return;

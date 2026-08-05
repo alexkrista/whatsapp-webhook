@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10233f">
   <title>KRISTINE GO</title>
- <link rel="stylesheet" href="/public/ui/krista-ui.css?v=2">
-<link rel="stylesheet" href="/public/kristine-go.css?v=2">
-<script src="/public/kristine-go.js?v=2"></script>
+  <link rel="stylesheet" href="/public/ui/krista-ui.css">
+  <link rel="stylesheet" href="/public/kristine-go.css?v=4">
 </head>
 <body>
   <div class="kg-app">
@@ -116,8 +115,8 @@
             </button>
             <button class="kg-action-card kg-action-attention" data-action="order" type="button">
               <span class="kg-action-icon">🛒</span>
-              <strong>Bestellen</strong>
-              <small>Material für morgen</small>
+              <strong>Materialbedarf</strong>
+              <small>Heute dringend oder morgen</small>
             </button>
           </div>
 
@@ -165,7 +164,7 @@
             </button>
             <button class="kg-review-row" type="button" data-action="order">
               <span id="kgOrderReviewStatus" class="kg-review-status kg-open">!</span>
-              <span class="kg-review-copy"><strong>Material für morgen</strong><small id="kgReviewOrder">Noch nicht beantwortet</small></span>
+              <span class="kg-review-copy"><strong>Materialbedarf</strong><small id="kgReviewOrder">Noch nicht beantwortet</small></span>
               <span>›</span>
             </button>
           </div>
@@ -221,6 +220,6 @@
 
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
-  <script src="/public/kristine-go.js"></script>
+  <script src="/public/kristine-go.js?v=4"></script>
 </body>
 </html>
