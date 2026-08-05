@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KRISTINE · Materialaufgaben</title>
+  <style>
+    :root{font-family:Inter,system-ui,sans-serif;color:#172235;background:#f4f7fa}
+    *{box-sizing:border-box}body{margin:0}.wrap{max-width:900px;margin:auto;padding:20px}
+    h1{margin:0 0 6px}.sub{color:#69768a;margin-bottom:20px}
+    .card{background:white;border-radius:18px;padding:16px;margin-bottom:12px;box-shadow:0 8px 24px rgba(16,35,63,.08)}
+    .head{display:flex;justify-content:space-between;gap:12px}.badge{padding:5px 9px;border-radius:999px;background:#fff2dc;color:#80560b;font-weight:800;font-size:12px}
+    .meta{color:#69768a;font-size:13px;margin:7px 0}.material{font-size:18px;font-weight:900;margin:10px 0}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}
+    input,textarea{width:100%;padding:11px;border:1px solid #dce4ed;border-radius:11px;font:inherit}textarea{min-height:72px}
+    button{min-height:44px;border:0;border-radius:11px;font-weight:900;padding:9px 14px;cursor:pointer}
+    .stock{background:#edf5ff;color:#1559b7}.order{background:#24945f;color:white}
+    .empty{padding:30px;text-align:center;color:#69768a;background:white;border-radius:18px}
+    @media(max-width:600px){.grid{grid-template-columns:1fr}.full{grid-column:auto}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Materialaufgaben</h1>
+  <div class="sub">Offen → Lagernd oder Bestellt. Wann und Info sind freiwillig.</div>
+  <div id="list"></div>
+</div>
+<script>
+const token = new URLSearchParams(location.search).get("token") || "";
+const auth = url => `${url}${url.includes("?")?"&":"?"}token=${encodeURIComponent(token)}`;
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+async function api(url, options={}){
+  const r=await fetch(auth(url),{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
+  const d=await r.json(); if(!r.ok||d.ok===false) throw new Error(d.error||`Fehler ${r.status}`); return d;
+}
+async function load(){
+  const data=await api("/kristine/api/material-requests");
+  const rows=(data.requests||[]).filter(r=>r.status==="open").sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const list=document.getElementById("list");
+  if(!rows.length){list.innerHTML='<div class="empty">Keine offenen Materialaufgaben.</div>';return;}
+  list.innerHTML=rows.map(r=>`<section class="card" data-id="${esc(r.id)}">
+    <div class="head"><strong>${esc(r.jobName||"Ohne Baustelle")}</strong><span class="badge">${esc(r.needLabel||r.need)}</span></div>
+    <div class="meta">${esc(r.employeeName||"")} ${r.jobId?`· #${esc(r.jobId)}`:""}</div>
+    <div class="material">${esc(r.materialText)}</div>
+    <div class="grid">
+      <label>Wann verfügbar?<input class="available" placeholder="z. B. morgen 07:00"></label>
+      <label>Info für Mitarbeiter<input class="note" placeholder="z. B. im Lager abholen"></label>
+      <button class="stock" data-status="stocked">📦 Lagernd</button>
+      <button class="order" data-status="ordered">✅ Bestellt</button>
+    </div>
+  </section>`).join("");
+  document.querySelectorAll("[data-status]").forEach(btn=>btn.onclick=async()=>{
+    const card=btn.closest("[data-id]");
+    btn.disabled=true;
+    try{
+      const d=await api(`/kristine/api/material-requests/${encodeURIComponent(card.dataset.id)}`,{
+        method:"PATCH",
+        body:JSON.stringify({
+          status:btn.dataset.status,
+          availableAt:card.querySelector(".available").value,
+          responseNote:card.querySelector(".note").value,
+          respondedBy:"Büro"
+        })
+      });
+      alert(d.notification?.sent ? "Gespeichert und WhatsApp gesendet." : "Gespeichert. WhatsApp konnte nicht gesendet werden.");
+      await load();
+    }catch(e){alert(e.message);btn.disabled=false;}
+  });
+}
+load().catch(e=>document.getElementById("list").innerHTML=`<div class="empty">${esc(e.message)}</div>`);
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISTINE GO</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
-  <link rel="stylesheet" href="/public/kristine-go.css?v=4">
+  <link rel="stylesheet" href="/public/kristine-go.css?v=5">
 </head>
 <body>
   <div class="kg-app">
@@ -35,6 +35,17 @@
 
       <div id="kgContent" class="kg-hidden">
         <p id="kgGreeting" class="kg-greeting">Guten Morgen.</p>
+
+        <section id="kgMaterialResponseCard" class="kg-material-response-card kg-hidden">
+          <div class="kg-material-response-title">
+            <div>
+              <div class="kg-eyebrow">Service von KRISTINE</div>
+              <h2>Materialmeldung beantwortet</h2>
+            </div>
+            <span id="kgMaterialResponseCount"></span>
+          </div>
+          <div id="kgMaterialResponseList"></div>
+        </section>
 
         <section class="kg-site-card">
           <div class="kg-site-top">
@@ -220,6 +231,6 @@
 
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
-  <script src="/public/kristine-go.js?v=4"></script>
+  <script src="/public/kristine-go.js?v=5"></script>
 </body>
 </html>

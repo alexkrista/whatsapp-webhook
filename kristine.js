@@ -984,17 +984,56 @@ function clampOfficialStart(actualTime) {
   });
 
 
-function materialAlertPhones() {
-  return String(
-    process.env.WHATSAPP_ALERT_PHONES || ""
-  )
-  .split(/[;,]/)
-  .map(value => value.replace(/\D/g, ""))
-  .filter(Boolean);
-}
+  function materialAlertPhones() {
+    return String(process.env.WHATSAPP_ALERT_PHONES || process.env.MATERIAL_ALERT_PHONES || process.env.MATERIAL_ALERT_PHONE || "")
+      .split(/[;,]/)
+      .map(value => value.replace(/\D/g, ""))
+      .filter(Boolean);
+  }
 
   function materialNeedLabel(value) {
     return value === "urgent_today" ? "Heute dringend" : value === "tomorrow" ? "Für morgen" : "Nur dokumentieren";
+  }
+
+  async function materialEmployeePhone(employeeId) {
+    if (typeof readEmployees !== "function") return "";
+    const employees = await readEmployees().catch(() => []);
+    const employee = (employees || []).find(item =>
+      String(item.id || item.employeeId || "") === String(employeeId || "")
+    );
+    return String(
+      employee?.phone ||
+      employee?.phoneNumber ||
+      employee?.whatsapp ||
+      employee?.mobile ||
+      ""
+    ).replace(/\D/g, "");
+  }
+
+  async function sendMaterialResponseToEmployee(request) {
+    if (typeof sendWhatsApp !== "function") return { sent: false, reason: "whatsapp_not_configured" };
+    const phone = await materialEmployeePhone(request.employeeId);
+    if (!phone) return { sent: false, reason: "employee_phone_missing" };
+
+    const statusLabel = request.status === "stocked" ? "📦 Lagernd" : "✅ Bestellt";
+    const lines = [
+      "📦 Materialmeldung beantwortet",
+      "",
+      statusLabel,
+      request.materialText ? `Material: ${request.materialText}` : "",
+      request.jobName ? `Baustelle: ${request.jobName}${request.jobId ? ` (#${request.jobId})` : ""}` : "",
+      request.availableAt ? `Verfügbar: ${request.availableAt}` : "",
+      request.responseNote ? `Info: ${request.responseNote}` : "",
+      "",
+      "KRISTINE kümmert sich."
+    ].filter(Boolean);
+
+    try {
+      await sendWhatsApp({ to: phone, reply: lines.join("\n"), buttons: [] });
+      return { sent: true, phoneTail: phone.slice(-5) };
+    } catch (error) {
+      return { sent: false, reason: String(error?.message || error) };
+    }
   }
 
   async function sendMaterialAlert(request, mode = "urgent") {
@@ -1151,14 +1190,71 @@ function materialAlertPhones() {
       const rows = await readJson(MATERIAL_REQUESTS, []);
       const row = rows.find(item => String(item.id) === String(req.params.id));
       if (!row) return res.status(404).json({ ok: false, error: "Materialaufgabe nicht gefunden." });
+
       const status = String(req.body?.status || "");
       if (!["open", "stocked", "ordered"].includes(status)) {
         return res.status(400).json({ ok: false, error: "Ungültiger Status." });
       }
+
+      const previousStatus = row.status;
       row.status = status;
+      row.availableAt = String(req.body?.availableAt || "").trim().slice(0, 120);
+      row.responseNote = String(req.body?.responseNote || "").trim().slice(0, 500);
+      row.respondedBy = String(req.body?.respondedBy || "").trim().slice(0, 140);
       row.updatedAt = new Date().toISOString();
+
+      let notification = { sent: false, reason: "not_required" };
+      if (["stocked", "ordered"].includes(status)) {
+        row.respondedAt = new Date().toISOString();
+        row.employeeReadAt = null;
+        notification = await sendMaterialResponseToEmployee(row);
+        row.employeeNotifiedAt = notification.sent ? new Date().toISOString() : null;
+        row.employeeNotification = notification;
+      }
+
       await writeJson(MATERIAL_REQUESTS, rows);
-      res.json({ ok: true, request: row });
+      await appendEvent({
+        type: "material_request_updated",
+        employeeId: row.employeeId,
+        employeeName: row.employeeName,
+        jobId: row.jobId,
+        detail: `${previousStatus || "open"} → ${status}: ${row.materialText}`,
+      });
+
+      res.json({ ok: true, request: row, notification });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.get("/kristine/api/material-responses/:employeeId", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      const employeeId = String(req.params.employeeId || "");
+      const responses = rows
+        .filter(row =>
+          String(row.employeeId || "") === employeeId &&
+          ["stocked", "ordered"].includes(String(row.status || "")) &&
+          row.respondedAt &&
+          !row.employeeReadAt
+        )
+        .sort((a, b) => String(b.respondedAt).localeCompare(String(a.respondedAt)));
+      res.json({ ok: true, responses });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/material-responses/:id/read", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      const row = rows.find(item => String(item.id) === String(req.params.id));
+      if (!row) return res.status(404).json({ ok: false, error: "Materialmeldung nicht gefunden." });
+      row.employeeReadAt = new Date().toISOString();
+      await writeJson(MATERIAL_REQUESTS, rows);
+      res.json({ ok: true });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }

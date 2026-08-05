@@ -10,6 +10,7 @@ const KristineGo = (() => {
     timerHandle: null,
     assistant: null,
     localReview: {},
+    materialResponses: [],
   };
   const query = new URLSearchParams(location.search);
 const token = query.get("token") || "";
@@ -33,7 +34,7 @@ function authenticatedUrl(url) {
       "kgScheduleSection","kgScheduleCount","kgSchedule","kgActionHeading","kgPhaseLabel","kgStartPanel",
       "kgStartButton","kgWorkActions","kgQuickActions","kgPauseButton","kgLunchButton","kgSwitchButton",
       "kgAfternoonCard","kgReviewTime","kgReviewPhotos","kgReviewMaterial","kgReviewOrder",
-      "kgPhotoReviewStatus","kgMaterialReviewStatus","kgOrderReviewStatus","kgTomorrowCard",
+      "kgPhotoReviewStatus","kgMaterialReviewStatus","kgOrderReviewStatus","kgMaterialResponseCard","kgMaterialResponseCount","kgMaterialResponseList","kgTomorrowCard",
       "kgTomorrowTitle","kgTomorrowMeta","kgTomorrowNavigation","kgFinishButton","kgEmployeeDialog",
       "kgEmployeeList","kgAssistantDialog","kgAssistantEyebrow","kgAssistantTitle","kgAssistantQuestion",
       "kgAssistantBody","kgAssistantSecondary","kgAssistantPrimary","kgToast"
@@ -428,6 +429,39 @@ function authenticatedUrl(url) {
     element.className = `kg-review-status ${done ? "kg-done" : "kg-open"}`;
   }
 
+  function renderMaterialResponses() {
+    const rows = state.materialResponses || [];
+    elements.kgMaterialResponseCard.classList.toggle("kg-hidden", !rows.length);
+    if (!rows.length) return;
+
+    elements.kgMaterialResponseCount.textContent = `${rows.length} beantwortet`;
+    elements.kgMaterialResponseList.innerHTML = rows.map(row => {
+      const status = row.status === "stocked" ? "📦 Lagernd" : "✅ Bestellt";
+      return `<article class="kg-material-response-item">
+        <div class="kg-material-response-head">
+          <strong>${esc(row.materialText || "Material")}</strong>
+          <span>${esc(status)}</span>
+        </div>
+        ${row.jobName ? `<small>Baustelle: ${esc(row.jobName)}</small>` : ""}
+        ${row.availableAt ? `<div><b>Verfügbar:</b> ${esc(row.availableAt)}</div>` : ""}
+        ${row.responseNote ? `<div><b>Info:</b> ${esc(row.responseNote)}</div>` : ""}
+        <button class="kg-material-read-button" type="button" data-material-read="${esc(row.id)}">Gelesen</button>
+      </article>`;
+    }).join("");
+
+    elements.kgMaterialResponseList.querySelectorAll("[data-material-read]").forEach(button => {
+      button.onclick = async () => {
+        await api(`/kristine/api/material-responses/${encodeURIComponent(button.dataset.materialRead)}/read`, {
+          method:"POST",
+          body:JSON.stringify({}),
+        });
+        state.materialResponses = state.materialResponses.filter(row => row.id !== button.dataset.materialRead);
+        renderMaterialResponses();
+        toast("Materialantwort als gelesen markiert.");
+      };
+    });
+  }
+
   function render() {
     if (!state.employee) return;
     elements.kgGreeting.textContent = `${greeting()}, ${employeeName(state.employee)}.`;
@@ -438,6 +472,7 @@ function authenticatedUrl(url) {
     renderActions();
     renderTomorrow();
     renderReview();
+    renderMaterialResponses();
     restartTimer();
   }
 
@@ -698,6 +733,8 @@ function authenticatedUrl(url) {
         throw new Error("Keine aktiven Mitarbeiter in der Datenbank gefunden.");
       }
       deriveEmployeeData();
+      const materialResponseResult = await api(`/kristine/api/material-responses/${encodeURIComponent(employeeId(state.employee))}`);
+      state.materialResponses = materialResponseResult.responses || [];
       render();
       elements.kgLoading.classList.add("kg-hidden");
       elements.kgError.classList.add("kg-hidden");
