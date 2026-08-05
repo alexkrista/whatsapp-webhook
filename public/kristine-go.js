@@ -11,6 +11,14 @@ const KristineGo = (() => {
     assistant: null,
     localReview: {},
   };
+  const query = new URLSearchParams(location.search);
+const token = query.get("token") || "";
+
+function authenticatedUrl(url) {
+  if (!token) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+}
 
   const $ = (id) => document.getElementById(id);
   const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -33,7 +41,7 @@ const KristineGo = (() => {
   }
 
   async function api(url, options = {}) {
-    const response = await fetch(url, {
+    const response = await fetch(authenticatedUrl(url), {
       credentials: "same-origin",
       ...options,
       headers: {
