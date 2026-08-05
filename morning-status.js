@@ -1,7 +1,7 @@
 "use strict";
 
-// KRISTA: 07:00 Startprüfung + 08:00 Chefstatus
-// Build 0023.17: Erinnerungen nur an tatsächlichen Arbeitstagen.
+// KRISTA: 07:00 Startprüfung + 08:00 Chefstatus + 15:00 Planung morgen
+// Build 0023.18: robuster Scheduler mit Nachholfenstern und 15:30-Nachfassung.
 
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -26,6 +26,19 @@ function localParts(date = new Date()) {
 }
 function localIsoDate(date = new Date()) { const p = localParts(date); return `${p.year}-${p.month}-${p.day}`; }
 function localHm(date = new Date()) { const p = localParts(date); return `${p.hour}:${p.minute}`; }
+function addDaysIso(date, days) {
+  const d = dateAtNoon(date);
+  d.setDate(d.getDate() + Number(days || 0));
+  return localIsoDate(d);
+}
+function hmMinutes(hm) {
+  const value = minutesFromHm(hm);
+  return value == null ? -1 : value;
+}
+function inWindow(hm, from, to) {
+  const value = hmMinutes(hm);
+  return value >= hmMinutes(from) && value <= hmMinutes(to);
+}
 function normalizePhone(value) { return String(value || "").replace(/\D/g, ""); }
 async function readJson(file, fallback) { try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; } }
 async function writeJson(file, value) { await fsp.mkdir(path.dirname(file), { recursive: true }); await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8"); }
@@ -132,6 +145,66 @@ function buildChefReport(statuses,date) {
 }
 function reminderText(employee,assignment) { return [`Guten Morgen ${employee.name}.`,`Du bist heute auf ${jobLabel(assignment)} eingeteilt.`,"","Ich habe noch keinen Arbeitsbeginn erhalten.","Kommst du heute später?"].join("\n"); }
 
+function tomorrowPlanningStatus({ employees, assignments, absences, holidays, companyVacations, worktimeModels, date }) {
+  const active = activeEmployees(employees);
+  const planned = [];
+  const missing = [];
+  const free = [];
+
+  for (const employee of active) {
+    const nonWork = nonWorkContext({
+      employee,
+      assignments,
+      absences,
+      holidays,
+      companyVacations,
+      worktimeModels,
+      date,
+    });
+
+    if (nonWork.nonWork) {
+      free.push({ employee, reason: nonWork.reason });
+      continue;
+    }
+
+    const rows = currentAssignments(assignments, employee.id, date)
+      .filter((row) => !isAbsenceCard(row));
+
+    if (rows.length) {
+      planned.push({ employee, assignments: rows });
+    } else {
+      missing.push(employee);
+    }
+  }
+
+  return { date, activeCount: active.length, planned, missing, free };
+}
+
+function buildPlanningReminder(status, followUp = false) {
+  const title = followUp
+    ? "⚠️ Einteilung morgen weiterhin offen"
+    : "📅 Einteilung für morgen prüfen";
+
+  const lines = [
+    title,
+    "",
+    `Morgen: ${status.date}`,
+    `✅ Eingeteilt: ${status.planned.length}`,
+    `🔵 Frei/abwesend: ${status.free.length}`,
+    `🔴 Noch ohne Einteilung: ${status.missing.length}`,
+  ];
+
+  if (status.missing.length) {
+    lines.push("", "Noch offen:");
+    for (const employee of status.missing) {
+      lines.push(`• ${employee.name || employee.id}`);
+    }
+  }
+
+  lines.push("", "Bitte Planung ergänzen und speichern.");
+  return lines.join("\n");
+}
+
 async function registerMorningStatus({dataDir,readEmployees,sendWhatsApp,chefPhone,phoneNumberId,logger=console}) {
   if (!dataDir) throw new Error("registerMorningStatus: dataDir fehlt");
   if (typeof readEmployees!=="function") throw new Error("registerMorningStatus: readEmployees fehlt");
@@ -158,13 +231,122 @@ async function registerMorningStatus({dataDir,readEmployees,sendWhatsApp,chefPho
     return{sent:missing.length,suppressed:statuses.filter((s)=>s.category==="non_work").length,statuses};
   }
   async function runEightOClock(date=localIsoDate(),force=false){
-    const state=await loadState(); if(!force&&state.scheduler.chefReport===date)return{skipped:true};
+    const state=await loadState();
+    if(!force&&state.scheduler.chefReport===date){
+      logger.log("KRISTA 08:00 Chefstatus übersprungen",{date,reason:"bereits gesendet"});
+      return{skipped:true};
+    }
     const statuses=activeEmployees(state.employees).map((employee)=>statusForEmployee({employee,...state,date}));
     const report=buildChefReport(statuses,date);
-    if(normalizePhone(chefPhone)) await sendWhatsApp({phoneNumberId,to:normalizePhone(chefPhone),reply:report}); else logger.warn("CHEF_PHONE fehlt – Chefbericht nur im Log:",report);
-    await saveRun("chefReport",date,state.scheduler); return{sent:true,statuses,report};
+    if(normalizePhone(chefPhone)){
+      await sendWhatsApp({phoneNumberId,to:normalizePhone(chefPhone),reply:report});
+      logger.log("KRISTA 08:00 Chefstatus gesendet",{date,recipients:1});
+    }else{
+      logger.warn("CHEF_PHONE fehlt – Chefbericht nur im Log:",report);
+    }
+    await saveRun("chefReport",date,state.scheduler);
+    return{sent:true,statuses,report};
   }
-  const timer=setInterval(async()=>{try{const hm=localHm(),date=localIsoDate();if(hm==="07:00")await runSevenOClock(date);if(hm==="08:00")await runEightOClock(date);}catch(error){logger.error("KRISTA Morgenstatus Scheduler:",error);}},60_000); timer.unref?.();
-  return{runSevenOClock,runEightOClock,clampStartTime,dailyTargetHours:DAILY_TARGET_HOURS,files};
+
+  async function runFifteenOClock(date=localIsoDate(),force=false){
+    const state=await loadState();
+    if(!force&&state.scheduler.tomorrowPlanningReminder===date){
+      logger.log("KRISTA 15:00 Planung übersprungen",{date,reason:"bereits geprüft"});
+      return{skipped:true};
+    }
+
+    const tomorrow=addDaysIso(date,1);
+    const status=tomorrowPlanningStatus({...state,date:tomorrow});
+
+    if(status.missing.length&&normalizePhone(chefPhone)){
+      const message=buildPlanningReminder(status,false);
+      await sendWhatsApp({phoneNumberId,to:normalizePhone(chefPhone),reply:message});
+      logger.log("KRISTA 15:00 Planungserinnerung gesendet",{
+        date,
+        tomorrow,
+        missing:status.missing.length,
+        planned:status.planned.length,
+        free:status.free.length
+      });
+    }else{
+      logger.log("KRISTA 15:00 Planung geprüft",{
+        date,
+        tomorrow,
+        reminderNeeded:status.missing.length>0,
+        missing:status.missing.length,
+        planned:status.planned.length,
+        free:status.free.length,
+        chefPhoneConfigured:Boolean(normalizePhone(chefPhone))
+      });
+    }
+
+    await saveRun("tomorrowPlanningReminder",date,state.scheduler);
+    return{sent:status.missing.length>0,status};
+  }
+
+  async function runFifteenThirty(date=localIsoDate(),force=false){
+    const state=await loadState();
+    if(!force&&state.scheduler.tomorrowPlanningFollowUp===date){
+      logger.log("KRISTA 15:30 Nachfassung übersprungen",{date,reason:"bereits geprüft"});
+      return{skipped:true};
+    }
+
+    const tomorrow=addDaysIso(date,1);
+    const status=tomorrowPlanningStatus({...state,date:tomorrow});
+
+    if(status.missing.length&&normalizePhone(chefPhone)){
+      const message=buildPlanningReminder(status,true);
+      await sendWhatsApp({phoneNumberId,to:normalizePhone(chefPhone),reply:message});
+      logger.log("KRISTA 15:30 Planung-Nachfassung gesendet",{
+        date,
+        tomorrow,
+        missing:status.missing.length
+      });
+    }else{
+      logger.log("KRISTA 15:30 Planung-Nachfassung nicht nötig",{
+        date,
+        tomorrow,
+        missing:status.missing.length
+      });
+    }
+
+    await saveRun("tomorrowPlanningFollowUp",date,state.scheduler);
+    return{sent:status.missing.length>0,status};
+  }
+  async function schedulerTick() {
+    try {
+      const hm=localHm();
+      const date=localIsoDate();
+
+      // Nachholfenster: Render-Neustarts oder kurze Schlafphasen verlieren die Ausführung nicht mehr.
+      if(inWindow(hm,"07:00","07:59")) await runSevenOClock(date);
+      if(inWindow(hm,"08:00","11:59")) await runEightOClock(date);
+      if(inWindow(hm,"15:00","15:29")) await runFifteenOClock(date);
+      if(inWindow(hm,"15:30","18:00")) await runFifteenThirty(date);
+    }catch(error){
+      logger.error("KRISTA Status-Scheduler:",error);
+    }
+  }
+
+  const timer=setInterval(schedulerTick,60_000);
+  timer.unref?.();
+
+  // Direkt nach Serverstart prüfen, damit ein Start innerhalb eines Nachholfensters sofort reagiert.
+  setTimeout(schedulerTick,5_000).unref?.();
+
+  logger.log("KRISTA Status-Scheduler registriert",{
+    timezone:TZ,
+    jobs:["07:00 Startprüfung","08:00 Chefstatus","15:00 Planung morgen","15:30 Nachfassung"]
+  });
+
+  return{
+    runSevenOClock,
+    runEightOClock,
+    runFifteenOClock,
+    runFifteenThirty,
+    clampStartTime,
+    dailyTargetHours:DAILY_TARGET_HOURS,
+    files
+  };
 }
 module.exports={registerMorningStatus,clampStartTime,DAILY_TARGET_HOURS,OFFICIAL_START};
