@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0030.2 · Personal-Kennzahlen inkl. Abwesenheiten
+// Datei: daily-report.js · Build 0030.3 · Tagesabschluss inkl. Abwesenheitsstunden
 "use strict";
 
 const fs = require("fs");
@@ -1305,11 +1305,121 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       page.drawText("BETRIEBSÜBERSICHT", { x: rightX, y: rightY, size: 12, font: bold });
       rightY -= 20;
 
-      // Personal zuerst: Auf einen Blick sehen, wie viele Personen heute
-      // im Einsatz bzw. geplant abwesend sind. Im Personalblock zählen
-      // Personen – Stunden bleiben bewusst bei den Tageskennzahlen.
-      page.drawText("PERSONAL", { x: rightX, y: rightY, size: 10, font: bold });
-      rightY -= 16;
+      // Tagesabschluss: Zuerst die wirtschaftlichen Stundenkennzahlen.
+      // Unproduktiv umfasst interne Arbeiten UND geplante Abwesenheiten.
+      const absenceTotal = (rows) =>
+        rows.reduce((sum, row) => sum + Number(row.minutes || 0), 0);
+
+      const vacationMinutes = absenceTotal(day.absences.vacation);
+      const sickMinutes = absenceTotal(day.absences.sick);
+      const holidayMinutes = absenceTotal(day.absences.holiday);
+      const otherAbsenceMinutes = absenceTotal(day.absences.other);
+      const absenceMinutes =
+        vacationMinutes +
+        sickMinutes +
+        holidayMinutes +
+        otherAbsenceMinutes;
+
+      const unproductiveTotal = day.unproductive + absenceMinutes;
+      const accountedTotal = day.productive + unproductiveTotal;
+      const productivityPercent = accountedTotal > 0
+        ? `${((day.productive / accountedTotal) * 100).toFixed(1).replace(".", ",")} %`
+        : "—";
+
+      page.drawText("TAGESKENNZAHLEN", { x: rightX, y: rightY, size: 10, font: bold });
+      rightY -= 17;
+
+      const summaryLabelX = rightX;
+      const summaryValueX = PAGE_W - margin - 54;
+      const summaryRows = [
+        ["Produktiv", formatDurationCompact(day.productive)],
+        ["Unproduktiv", formatDurationCompact(unproductiveTotal)],
+        ["Gesamtstunden", formatDurationCompact(accountedTotal)],
+        ["Produktivität", productivityPercent],
+      ];
+
+      for (const [label, value] of summaryRows) {
+        page.drawText(label, {
+          x: summaryLabelX,
+          y: rightY,
+          size: label === "Gesamtstunden" ? 9 : 8.8,
+          font: label === "Gesamtstunden" ? bold : font,
+        });
+        page.drawText(value, {
+          x: summaryValueX,
+          y: rightY,
+          size: label === "Gesamtstunden" ? 9.3 : 9,
+          font: bold,
+        });
+        rightY -= 14;
+      }
+
+      rightY -= 3;
+      page.drawLine({
+        start: { x: rightX, y: rightY },
+        end: { x: PAGE_W - margin, y: rightY },
+        thickness: 0.5,
+        color: rgb(0.82, 0.82, 0.82),
+      });
+      rightY -= 15;
+
+      page.drawText("UNPRODUKTIV · AUFSCHLÜSSELUNG", {
+        x: rightX,
+        y: rightY,
+        size: 9.5,
+        font: bold,
+      });
+      rightY -= 15;
+
+      const breakdownRows = [
+        ["Interne Arbeiten", day.unproductive, day.activeCount],
+        ["Urlaub", vacationMinutes, day.absences.vacation.length],
+        ["Krankenstand", sickMinutes, day.absences.sick.length],
+        ["Feiertag", holidayMinutes, day.absences.holiday.length],
+        ["Sonstige", otherAbsenceMinutes, day.absences.other.length],
+      ];
+
+      for (const [label, minutes, count] of breakdownRows) {
+        page.drawText(label, { x: rightX, y: rightY, size: 8.3, font });
+        if (count > 0 && label !== "Interne Arbeiten") {
+          page.drawText(`${count} MA`, {
+            x: rightX + 165,
+            y: rightY,
+            size: 7.7,
+            font,
+          });
+        }
+        page.drawText(formatDurationCompact(minutes), {
+          x: summaryValueX,
+          y: rightY,
+          size: 8.5,
+          font: minutes > 0 ? bold : font,
+        });
+        rightY -= 12;
+      }
+
+      page.drawLine({
+        start: { x: rightX, y: rightY + 3 },
+        end: { x: PAGE_W - margin, y: rightY + 3 },
+        thickness: 0.4,
+        color: rgb(0.86, 0.86, 0.86),
+      });
+      page.drawText("Summe unproduktiv", {
+        x: rightX,
+        y: rightY - 7,
+        size: 8.6,
+        font: bold,
+      });
+      page.drawText(formatDurationCompact(unproductiveTotal), {
+        x: summaryValueX,
+        y: rightY - 7,
+        size: 8.8,
+        font: bold,
+      });
+      rightY -= 24;
+
+      page.drawText("PERSONAL", { x: rightX, y: rightY, size: 9.5, font: bold });
+      rightY -= 14;
 
       const personalRows = [
         ["Mitarbeiter gesamt", String(day.headcount)],
@@ -1320,85 +1430,45 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         ["Sonstige", String(day.absences.other.length)],
       ];
 
-      const personalLabelX = rightX;
       const personalValueX = PAGE_W - margin - 22;
       for (const [label, value] of personalRows) {
-        page.drawText(label, { x: personalLabelX, y: rightY, size: 8.8, font });
-        page.drawText(value, { x: personalValueX, y: rightY, size: 9.2, font: bold });
-        rightY -= 14;
+        page.drawText(label, { x: rightX, y: rightY, size: 8.1, font });
+        page.drawText(value, { x: personalValueX, y: rightY, size: 8.4, font: bold });
+        rightY -= 11;
       }
 
       function drawNames(title, rows) {
-        if (!rows.length || rightY < lowerLimit + 20) return;
-
-        rightY -= 2;
-        page.drawText(`${title}:`, {
-          x: rightX,
-          y: rightY,
-          size: 8.1,
-          font: bold,
-        });
+        if (!rows.length || rightY < lowerLimit + 15) return;
 
         const names = rows
           .map((row) => row.employeeName)
           .filter(Boolean)
           .join(", ");
-        const lines = wrap(names, 38).slice(0, 3);
+        const lines = wrap(names, 39).slice(0, 3);
+
+        page.drawText(`${title}:`, {
+          x: rightX,
+          y: rightY,
+          size: 7.7,
+          font: bold,
+        });
 
         lines.forEach((line, index) => {
           page.drawText(line, {
-            x: rightX + 62,
-            y: rightY - index * 10,
-            size: 7.9,
+            x: rightX + 58,
+            y: rightY - index * 9,
+            size: 7.5,
             font,
-            maxWidth: 245,
+            maxWidth: 250,
           });
         });
-        rightY -= Math.max(12, lines.length * 10);
+        rightY -= Math.max(11, lines.length * 9);
       }
 
       drawNames("Urlaub", day.absences.vacation);
       drawNames("Krank", day.absences.sick);
       drawNames("Feiertag", day.absences.holiday);
       drawNames("Sonstige", day.absences.other);
-
-      rightY -= 5;
-      page.drawLine({
-        start: { x: rightX, y: rightY },
-        end: { x: PAGE_W - margin, y: rightY },
-        thickness: 0.5,
-        color: rgb(0.82, 0.82, 0.82),
-      });
-      rightY -= 16;
-
-      page.drawText("TAGESKENNZAHLEN", { x: rightX, y: rightY, size: 10, font: bold });
-      rightY -= 16;
-
-      const kpiCol = {
-        label: rightX,
-        ist: rightX + 155,
-        plan: rightX + 205,
-        diff: rightX + 250,
-        pct: rightX + 295,
-      };
-      page.drawText("Ist", { x: kpiCol.ist, y: rightY, size: 7.8, font: bold });
-      page.drawText("Plan", { x: kpiCol.plan, y: rightY, size: 7.8, font: bold });
-      page.drawText("+/-", { x: kpiCol.diff, y: rightY, size: 7.8, font: bold });
-      page.drawText("p/M %", { x: kpiCol.pct, y: rightY, size: 7.8, font: bold });
-      rightY -= 13;
-
-      const kpiRows = [
-        ["Produktiv", day.productive, day.plan.productive],
-        ["Interne Arbeiten", day.unproductive, day.plan.unproductive],
-      ];
-      for (const [label, actual, planned] of kpiRows) {
-        page.drawText(label, { x: kpiCol.label, y: rightY, size: 8.5, font });
-        page.drawText(formatDurationCompact(actual), { x: kpiCol.ist, y: rightY, size: 8.5, font: bold });
-        page.drawText(formatDurationCompact(planned), { x: kpiCol.plan, y: rightY, size: 8.5, font });
-        page.drawText(formatSignedDuration(actual - planned), { x: kpiCol.diff, y: rightY, size: 8.5, font: bold });
-        page.drawText(formatPercent(actual, planned), { x: kpiCol.pct, y: rightY, size: 8.1, font: bold });
-        rightY -= 14;
-      }
 
       const checksTop = 155;
       page.drawLine({
