@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0030.1 · Kompakter Tagesreport + aktive Mitarbeiter
+// Datei: daily-report.js · Build 0030.2 · Personal-Kennzahlen inkl. Abwesenheiten
 "use strict";
 
 const fs = require("fs");
@@ -1304,7 +1304,74 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       let rightY = topY;
       page.drawText("BETRIEBSÜBERSICHT", { x: rightX, y: rightY, size: 12, font: bold });
       rightY -= 20;
-      page.drawText("Tageskennzahlen", { x: rightX, y: rightY, size: 10, font: bold });
+
+      // Personal zuerst: Auf einen Blick sehen, wie viele Personen heute
+      // im Einsatz bzw. geplant abwesend sind. Im Personalblock zählen
+      // Personen – Stunden bleiben bewusst bei den Tageskennzahlen.
+      page.drawText("PERSONAL", { x: rightX, y: rightY, size: 10, font: bold });
+      rightY -= 16;
+
+      const personalRows = [
+        ["Mitarbeiter gesamt", String(day.headcount)],
+        ["Im Einsatz", String(day.activeCount)],
+        ["Urlaub", String(day.absences.vacation.length)],
+        ["Krankenstand", String(day.absences.sick.length)],
+        ["Feiertag", String(day.absences.holiday.length)],
+        ["Sonstige", String(day.absences.other.length)],
+      ];
+
+      const personalLabelX = rightX;
+      const personalValueX = PAGE_W - margin - 22;
+      for (const [label, value] of personalRows) {
+        page.drawText(label, { x: personalLabelX, y: rightY, size: 8.8, font });
+        page.drawText(value, { x: personalValueX, y: rightY, size: 9.2, font: bold });
+        rightY -= 14;
+      }
+
+      function drawNames(title, rows) {
+        if (!rows.length || rightY < lowerLimit + 20) return;
+
+        rightY -= 2;
+        page.drawText(`${title}:`, {
+          x: rightX,
+          y: rightY,
+          size: 8.1,
+          font: bold,
+        });
+
+        const names = rows
+          .map((row) => row.employeeName)
+          .filter(Boolean)
+          .join(", ");
+        const lines = wrap(names, 38).slice(0, 3);
+
+        lines.forEach((line, index) => {
+          page.drawText(line, {
+            x: rightX + 62,
+            y: rightY - index * 10,
+            size: 7.9,
+            font,
+            maxWidth: 245,
+          });
+        });
+        rightY -= Math.max(12, lines.length * 10);
+      }
+
+      drawNames("Urlaub", day.absences.vacation);
+      drawNames("Krank", day.absences.sick);
+      drawNames("Feiertag", day.absences.holiday);
+      drawNames("Sonstige", day.absences.other);
+
+      rightY -= 5;
+      page.drawLine({
+        start: { x: rightX, y: rightY },
+        end: { x: PAGE_W - margin, y: rightY },
+        thickness: 0.5,
+        color: rgb(0.82, 0.82, 0.82),
+      });
+      rightY -= 16;
+
+      page.drawText("TAGESKENNZAHLEN", { x: rightX, y: rightY, size: 10, font: bold });
       rightY -= 16;
 
       const kpiCol = {
@@ -1332,60 +1399,6 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         page.drawText(formatPercent(actual, planned), { x: kpiCol.pct, y: rightY, size: 8.1, font: bold });
         rightY -= 14;
       }
-
-      rightY -= 5;
-      page.drawLine({ start: { x: rightX, y: rightY }, end: { x: PAGE_W - margin, y: rightY }, thickness: 0.5, color: rgb(0.82, 0.82, 0.82) });
-      rightY -= 16;
-      page.drawText("Personal", { x: rightX, y: rightY, size: 10, font: bold });
-      rightY -= 15;
-
-      const absenceTotal = (rows) => rows.reduce((sum, row) => sum + Number(row.minutes || 0), 0);
-      const personalRows = [
-        ["Mitarbeiter gesamt", String(day.headcount)],
-        ["Im Einsatz", String(day.activeCount)],
-        ["Urlaub", `${day.absences.vacation.length} · ${formatDurationCompact(absenceTotal(day.absences.vacation))}`],
-        ["Krankenstand", `${day.absences.sick.length} · ${formatDurationCompact(absenceTotal(day.absences.sick))}`],
-        ["Feiertag", `${day.absences.holiday.length} · ${formatDurationCompact(absenceTotal(day.absences.holiday))}`],
-        ["Sonstige Abwesenheit", `${day.absences.other.length} · ${formatDurationCompact(absenceTotal(day.absences.other))}`],
-      ];
-      function drawNames(title, rows) {
-  if (!rows.length || rightY < lowerLimit + 20) return;
-
-  rightY -= 3;
-
-  const names = rows
-    .map(row => row.employeeName)
-    .filter(Boolean)
-    .join(", ");
-
-  page.drawText(`${title}:`, {
-    x: rightX,
-    y: rightY,
-    size: 8.1,
-    font: bold
-  });
-
-  const lines = wrap(names, 37).slice(0, 3);
-
-  lines.forEach((line, index) => {
-    page.drawText(line, {
-      x: rightX + 58,
-      y: rightY - index * 10,
-      size: 7.9,
-      font,
-      maxWidth: 250
-    });
-  });
-
-  rightY -= Math.max(11, lines.length * 10);
-}
-
-drawNames("Urlaub", day.absences.vacation);
-drawNames("Krank", day.absences.sick);
-drawNames("Feiertag", day.absences.holiday);
-drawNames("Sonstige", day.absences.other);
-
-      // Keine Namenslisten bei Urlaub/Krank: Anzahl und Stunden oben genügen.
 
       const checksTop = 155;
       page.drawLine({
