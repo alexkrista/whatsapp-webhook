@@ -201,7 +201,11 @@ function buildPlanningReminder(status, followUp = false) {
     }
   }
 
-  lines.push("", "👉 Bitte morgen fertig einteilen.");
+  if (status.missing.length === 1) {
+    lines.push("", "👉 Bitte die Einteilung vervollständigen.");
+} else {
+    lines.push("", "👉 Bitte morgen fertig einteilen.");
+}
   return lines.join("\n");
 }
 
