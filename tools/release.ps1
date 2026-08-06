@@ -1,61 +1,85 @@
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$Project,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$Version
 )
 
-$releaseRoot = "Releases\$Project"
-$releaseName = "${Project}_${Version}"
-$releasePath = Join-Path $releaseRoot "$releaseName.zip"
+$ErrorActionPreference = "Stop"
 
+$releaseRoot = Join-Path "Releases" $Project
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 
-$version = @"
-Projekt : $Project
-Version : $Version
-Datum   : $(Get-Date -Format "dd.MM.yyyy HH:mm")
+$zipBaseName = "${Project}_${Version}"
+$zipPath = Join-Path $releaseRoot "$zipBaseName.zip"
+$tagName = $zipBaseName -replace "[^a-zA-Z0-9._-]", "_"
 
-Freigegeben
-"@
-
-$version | Set-Content Version.txt -Encoding UTF8
-
-$files = @(
-    "public\kristine-go.html",
-    "public\kristine-go.css",
-    "public\kristine-go.js",
-    "README.md",
-    "CHANGELOG.md",
-    "Version.txt"
-)
-
-$existing = $files | Where-Object { Test-Path $_ }
-
-if ($existing.Count -eq 0) {
-    Write-Host ""
-    Write-Host "Keine Dateien gefunden!"
-    exit
+switch ($Project) {
+    "KRISTINE_GO" {
+        $files = @(
+            "public\kristine-go.html",
+            "public\kristine-go.css",
+            "public\kristine-go.js",
+            "README.md",
+            "Version.txt"
+        )
+    }
+    "Tagesreport" {
+        $files = @(
+            "daily-report.js",
+            "README.md",
+            "Version.txt"
+        )
+    }
+    "Materialworkflow" {
+        $files = @(
+            "public\material-admin.html",
+            "public\material-request-admin.html",
+            "material-master.js",
+            "README.md",
+            "Version.txt"
+        )
+    }
+    default {
+        throw "Unknown project: $Project"
+    }
 }
 
-Compress-Archive `
-    -Path $existing `
-    -DestinationPath $releasePath `
-    -Force
+@(
+    "Project: $Project",
+    "Version: $Version",
+    "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+) | Set-Content -Path "Version.txt" -Encoding UTF8
+
+$existingFiles = @($files | Where-Object { Test-Path $_ })
+
+if ($existingFiles.Count -eq 0) {
+    throw "No release files found."
+}
+
+Compress-Archive -Path $existingFiles -DestinationPath $zipPath -Force
 
 git add .
-git commit -m "Release $releaseName"
+git commit -m "Release $zipBaseName"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Git commit failed."
+}
 
 git push
 
-git tag $releaseName
-git push origin $releaseName
+if ($LASTEXITCODE -ne 0) {
+    throw "Git push failed."
+}
+
+if (-not (git tag --list $tagName)) {
+    git tag $tagName
+    git push origin $tagName
+}
 
 Write-Host ""
-Write-Host "========================================="
-Write-Host " Release erstellt"
-Write-Host "-----------------------------------------"
-Write-Host " ZIP : $releasePath"
-Write-Host " TAG : $releaseName"
-Write-Host "========================================="
+Write-Host "RELEASE CREATED"
+Write-Host "ZIP: $zipPath"
+Write-Host "TAG: $tagName"
+Write-Host ""
