@@ -695,6 +695,12 @@ let assignment = null;
 let state = null;
 let complete = false;
 
+let timeDone = false;
+let photoDone = false;
+let materialDone = false;
+let regieDone = false;
+let orderDone = false;
+
 async function init() {
   try {
     const data = await api("/kristine/api/bootstrap");
