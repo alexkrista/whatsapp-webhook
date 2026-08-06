@@ -878,7 +878,7 @@ const result = await api("/kristine/api/day-close", {
     note: document.getElementById("note").value.trim(),
     confirmed: true,
     checks: {
-      time: Boolean(start || state?.mode === "finished_day"),
+      time: true,
       photos: photoDone,
       material: materialDone,
       regie: regieDone,
