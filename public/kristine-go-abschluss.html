@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10233f">
+  <title>KRISTINE GO · Tagesabschluss</title>
+  <style>
+    :root{
+      --navy:#10233f;--blue:#246fd6;--blue2:#1559b7;--green:#24945f;
+      --green-soft:#e8f6ef;--orange:#e79218;--orange-soft:#fff3df;
+      --red:#d54949;--red-soft:#fff0f0;--ink:#172235;--muted:#6d798b;
+      --border:#dde5ee;--bg:#f4f7fa;--card:#fff;
+      --shadow:0 12px 32px rgba(16,35,63,.09);--radius:22px;
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{background:var(--bg)}
+    body{margin:0;background:var(--bg);color:var(--ink)}
+    button,a,textarea{font:inherit;-webkit-tap-highlight-color:transparent}
+    button{cursor:pointer}
+    .hidden{display:none!important}
+    .app{min-height:100dvh;max-width:680px;margin:0 auto;background:var(--bg)}
+    .topbar{
+      position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;
+      gap:12px;padding:16px 17px;background:var(--navy);color:#fff;
+      box-shadow:0 6px 22px rgba(16,35,63,.18)
+    }
+    .brand{font-size:20px;font-weight:950;letter-spacing:.04em}
+    .subbrand{font-size:11px;opacity:.72;margin-top:2px}
+    .back{
+      display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:8px 11px;
+      border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(255,255,255,.08);
+      color:#fff;text-decoration:none;font-size:12px;font-weight:850
+    }
+    main{padding:16px 14px 34px}
+    .hero{
+      position:relative;overflow:hidden;padding:20px;border-radius:26px;
+      background:linear-gradient(145deg,var(--blue),var(--blue2));color:#fff;box-shadow:var(--shadow)
+    }
+    .hero:after{
+      content:"";position:absolute;right:-80px;top:-105px;width:230px;height:230px;
+      border-radius:50%;background:rgba(255,255,255,.07)
+    }
+    .eyebrow{text-transform:uppercase;letter-spacing:.075em;font-size:11px;font-weight:850;opacity:.75}
+    h1{position:relative;z-index:1;margin:7px 0 4px;font-size:29px;line-height:1.05}
+    .hero p{position:relative;z-index:1;margin:0;opacity:.82;font-size:13px}
+    .summary{
+      position:relative;z-index:1;display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:17px
+    }
+    .summary-box{padding:12px;border:1px solid rgba(255,255,255,.17);border-radius:16px;background:rgba(255,255,255,.11)}
+    .summary-box small{display:block;opacity:.75;font-size:10px}
+    .summary-box strong{display:block;margin-top:4px;font-size:15px}
+    .section{margin-top:18px}
+    .section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 3px 10px}
+    .section-head h2{margin:0;font-size:18px}
+    .section-head span{font-size:11px;color:var(--muted);text-align:right}
+    .card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
+    .check-list{overflow:hidden}
+    .check-row{
+      display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;width:100%;
+      padding:15px;border:0;border-bottom:1px solid #edf1f5;background:#fff;color:var(--ink);text-align:left
+    }
+    .check-row:last-child{border-bottom:0}
+    .status{display:grid;place-items:center;width:29px;height:29px;border-radius:50%;font-size:13px;font-weight:950}
+    .status.ok{background:var(--green-soft);color:var(--green)}
+    .status.open{background:var(--orange-soft);color:#a86b08}
+    .row-copy strong{display:block;font-size:14px}
+    .row-copy small{display:block;margin-top:3px;color:var(--muted);font-size:11px}
+    .action-chip{padding:6px 8px;border-radius:999px;background:#f2f5f8;color:var(--blue);font-size:10px;font-weight:900}
+    .note-card{padding:16px}
+    textarea{
+      width:100%;min-height:122px;padding:14px;border:1px solid var(--border);border-radius:15px;
+      background:#fbfcfd;color:var(--ink);resize:vertical;outline:none
+    }
+    textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(36,111,214,.11)}
+    .helper{margin:9px 2px 0;color:var(--muted);font-size:11px}
+    .confirm-card{padding:16px}
+    .confirm-row{display:flex;align-items:flex-start;gap:11px}
+    .confirm-row input{width:22px;height:22px;margin:0;accent-color:var(--green)}
+    .confirm-row label{font-size:13px;line-height:1.45}
+    .warning{
+      margin-top:12px;padding:12px;border-left:4px solid var(--orange);border-radius:12px;
+      background:var(--orange-soft);color:#6f4a0a;font-size:12px;line-height:1.45
+    }
+    .finish{
+      width:100%;min-height:61px;margin-top:16px;border:0;border-radius:19px;
+      background:var(--navy);color:#fff;font-size:16px;font-weight:950;box-shadow:var(--shadow)
+    }
+    .finish:disabled{opacity:.45;cursor:not-allowed}
+    .finish.ready{background:var(--green)}
+    .after{
+      padding:22px;text-align:center
+    }
+    .after-icon{display:grid;place-items:center;width:64px;height:64px;margin:0 auto 13px;border-radius:50%;background:var(--green-soft);font-size:30px}
+    .after h2{margin:0 0 7px}
+    .after p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+    .after a{display:inline-flex;margin-top:16px;color:var(--blue);font-weight:900;text-decoration:none}
+    .toast{
+      position:fixed;left:50%;bottom:22px;z-index:50;max-width:calc(100% - 28px);
+      padding:12px 16px;border-radius:999px;background:var(--navy);color:#fff;
+      font-size:12px;font-weight:850;opacity:0;transform:translate(-50%,18px);transition:.2s
+    }
+    .toast.show{opacity:1;transform:translate(-50%,0)}
+    .loading{display:grid;place-items:center;min-height:60vh;color:var(--muted);font-weight:800}
+    @media(max-width:370px){.summary{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div>
+      <div class="brand">KRISTINE</div>
+      <div class="subbrand">Tagesabschluss</div>
+    </div>
+    <a id="backLink" class="back" href="/public/kristine-go.html">← Arbeitstag</a>
+  </header>
+
+  <main>
+    <div id="loading" class="loading">KRISTINE prüft deinen Tag …</div>
+
+    <div id="content" class="hidden">
+      <section class="hero">
+        <div class="eyebrow">Feierabendkontrolle</div>
+        <h1 id="title">Tag prüfen</h1>
+        <p id="subtitle">Kurz kontrollieren, ergänzen und verbindlich bestätigen.</p>
+
+        <div class="summary">
+          <div class="summary-box">
+            <small>Baustelle</small>
+            <strong id="site">–</strong>
+          </div>
+          <div class="summary-box">
+            <small>Arbeitszeit</small>
+            <strong id="time">–</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Ist alles vollständig?</h2>
+          <span>Fehlendes direkt öffnen</span>
+        </div>
+
+        <div class="card check-list">
+          <button class="check-row" type="button" data-kind="time">
+            <span id="statusTime" class="status ok">✓</span>
+            <span class="row-copy"><strong>Arbeitszeit</strong><small id="textTime">geprüft</small></span>
+            <span class="action-chip">Prüfen</span>
+          </button>
+
+          <button class="check-row" type="button" data-kind="photo">
+            <span id="statusPhoto" class="status open">!</span>
+            <span class="row-copy"><strong>Fotos</strong><small id="textPhoto">noch nicht bestätigt</small></span>
+            <span class="action-chip">Öffnen</span>
+          </button>
+
+          <button class="check-row" type="button" data-kind="material">
+            <span id="statusMaterial" class="status open">!</span>
+            <span class="row-copy"><strong>Material</strong><small id="textMaterial">noch nicht bestätigt</small></span>
+            <span class="action-chip">Öffnen</span>
+          </button>
+
+          <button class="check-row" type="button" data-kind="regie">
+            <span id="statusRegie" class="status ok">✓</span>
+            <span class="row-copy"><strong>Regie</strong><small>direkt bearbeitbar</small></span>
+            <span class="action-chip">Öffnen</span>
+          </button>
+
+          <button class="check-row" type="button" data-kind="order">
+            <span id="statusOrder" class="status open">!</span>
+            <span class="row-copy"><strong>Materialbedarf</strong><small id="textOrder">heute / morgen noch offen</small></span>
+            <span class="action-chip">Öffnen</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Besonderheiten heute</h2>
+          <span>optional</span>
+        </div>
+        <div class="card note-card">
+          <textarea id="note" placeholder="Was soll das Büro oder die nächste Mannschaft wissen?"></textarea>
+          <div class="helper">Die Notiz bleibt baustellen- und tagesbezogen erhalten.</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Verbindlich bestätigen</h2>
+          <span>bearbeitbar bis zur Freigabe</span>
+        </div>
+        <div class="card confirm-card">
+          <div class="confirm-row">
+            <input id="confirm" type="checkbox">
+            <label for="confirm">Ich habe Arbeitszeit, Fotos, Material, Regie und den Materialbedarf geprüft. Meine Angaben sind vollständig.</label>
+          </div>
+          <div id="openWarning" class="warning">Es sind noch offene Punkte vorhanden. Du kannst sie direkt oben öffnen und ergänzen.</div>
+        </div>
+      </section>
+
+      <button id="finish" class="finish" type="button" disabled>Tag bestätigen & Feierabend</button>
+
+      <section id="after" class="card after hidden">
+        <div class="after-icon">✓</div>
+        <h2>Tag abgeschlossen</h2>
+        <p>Dein Tagesabschluss wurde gespeichert. Wird später etwas geändert, erhältst du eine neue Aufforderung zur Bestätigung.</p>
+        <a id="afterBack" href="/public/kristine-go.html">Zurück zu KRISTINE →</a>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+"use strict";
+
+const q = new URLSearchParams(location.search);
+const token = q.get("token") || "";
+const employeeId = q.get("employeeId") || localStorage.getItem("kristineGoEmployeeId") || "";
+const today = new Intl.DateTimeFormat("sv-SE", {
+  timeZone:"Europe/Vienna", year:"numeric", month:"2-digit", day:"2-digit"
+}).format(new Date());
+
+function withParams(path, extra = {}) {
+  const url = new URL(path, location.origin);
+  if (token) url.searchParams.set("token", token);
+  if (employeeId) url.searchParams.set("employeeId", employeeId);
+  Object.entries(extra).forEach(([k,v]) => v && url.searchParams.set(k,v));
+  return url.pathname + url.search;
+}
+
+document.getElementById("backLink").href = withParams("/public/kristine-go.html");
+document.getElementById("afterBack").href = withParams("/public/kristine-go.html");
+
+function review(kind) {
+  try {
+    return JSON.parse(localStorage.getItem(`kg-review:${today}:${employeeId}:${kind}`) || "null");
+  } catch { return null; }
+}
+
+function setStatus(kind, value, fallback) {
+  const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
+  const status = document.getElementById("status" + cap);
+  const text = document.getElementById("text" + cap);
+  const done = Boolean(value);
+  status.textContent = done ? "✓" : "!";
+  status.className = `status ${done ? "ok" : "open"}`;
+  if (text) text.textContent = value?.summary || fallback;
+  return done;
+}
+
+function toast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => el.classList.remove("show"), 2500);
+}
+
+async function api(path, options = {}) {
+  const url = new URL(path, location.origin);
+  if (token) url.searchParams.set("token", token);
+  const response = await fetch(url, {
+    credentials:"same-origin",
+    ...options,
+    headers:{
+      "Accept":"application/json",
+      ...(options.body ? {"Content-Type":"application/json"} : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) throw new Error(data.error || `Serverfehler ${response.status}`);
+  return data;
+}
+
+let employee = null;
+let assignment = null;
+let state = null;
+
+function employeeName(emp) {
+  return emp?.nickname || emp?.rufname || emp?.name || emp?.employeeName || "Mitarbeiter";
+}
+
+function assignmentTitle(a) {
+  if (!a) return "Keine Baustelle";
+  return [a.jobId, a.jobName].filter(Boolean).join(" – ") || "Baustelle";
+}
+
+function currentStartEvent(data) {
+  return (data.timeEvents || [])
+    .filter(e => String(e.employeeId) === String(employeeId) && String(e.date) === today && ["start","weiter"].includes(String(e.type)))
+    .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")))
+    .at(-1);
+}
+
+async function init() {
+  try {
+    const data = await api("/kristine/api/bootstrap");
+    employee = (data.employees || []).find(e => String(e.id || e.employeeId) === String(employeeId)) || null;
+    assignment = (data.assignments || [])
+      .filter(a => String(a.employeeId) === String(employeeId) && String(a.date) === String(data.today || today))
+      .sort((a,b) => String(a.from || "").localeCompare(String(b.from || "")))[0] || null;
+    state = data.states?.[employeeId] || null;
+
+    document.getElementById("title").textContent = `${employeeName(employee)}, dein Tag`;
+    document.getElementById("site").textContent = assignmentTitle(assignment);
+    const start = currentStartEvent(data);
+    document.getElementById("time").textContent = start?.at ? `seit ${start.at} Uhr` : "noch offen";
+    document.getElementById("textTime").textContent =
+      state?.mode === "finished_day" ? "bereits abgeschlossen" :
+      start?.at ? `läuft seit ${start.at} Uhr` : "noch nicht gestartet";
+
+    const photoDone = setStatus("photo", review("photo"), "noch nicht bestätigt");
+    const materialDone = setStatus("material", review("material"), "noch nicht bestätigt");
+    const orderDone = setStatus("order", review("order"), "heute / morgen noch offen");
+
+    const open = !(photoDone && materialDone && orderDone);
+    document.getElementById("openWarning").classList.toggle("hidden", !open);
+
+    const noteKey = `kg-finish-note:${today}:${employeeId}`;
+    document.getElementById("note").value = localStorage.getItem(noteKey) || "";
+    document.getElementById("note").addEventListener("input", e => localStorage.setItem(noteKey, e.target.value));
+
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("content").classList.remove("hidden");
+  } catch (error) {
+    document.getElementById("loading").textContent = `Tagesabschluss konnte nicht geladen werden: ${error.message}`;
+  }
+}
+
+document.querySelectorAll("[data-kind]").forEach(row => {
+  row.addEventListener("click", () => {
+    const kind = row.dataset.kind;
+    if (kind === "regie") {
+      location.href = withParams("/public/regie-assistant.html", {
+        jobId: assignment?.jobId || "",
+        date: today
+      });
+      return;
+    }
+    location.href = withParams("/public/kristine-go.html", { action: kind });
+  });
+});
+
+const confirm = document.getElementById("confirm");
+const finish = document.getElementById("finish");
+
+confirm.addEventListener("change", () => {
+  finish.disabled = !confirm.checked;
+  finish.classList.toggle("ready", confirm.checked);
+});
+
+finish.addEventListener("click", async () => {
+  finish.disabled = true;
+  finish.textContent = "Wird gespeichert …";
+  try {
+    const result = await api("/kristine/api/message", {
+      method:"POST",
+      body:JSON.stringify({
+        employeeId,
+        employeeName:employeeName(employee),
+        text:"Feierabend",
+        date:today,
+        note:document.getElementById("note").value.trim()
+      })
+    });
+    document.getElementById("after").classList.remove("hidden");
+    finish.classList.add("hidden");
+    document.querySelectorAll(".section").forEach(section => section.classList.add("hidden"));
+    toast(result.reply || "Tagesabschluss gespeichert.");
+  } catch (error) {
+    finish.disabled = false;
+    finish.textContent = "Tag bestätigen & Feierabend";
+    toast(error.message);
+  }
+});
+
+init();
+</script>
+</body>
+</html>
