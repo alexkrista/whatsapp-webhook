@@ -1,15 +1,15 @@
-// server.js (CommonJS) – Baustellenprotokoll FINAL + Admin UI
-// ✅ WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
-// ✅ Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
-// ✅ Layout A: Text + Transkripte seitenfüllend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
-// ✅ Deckblatt mit Logo (optional)
-// ✅ Kopf-/Fußzeile: Baustellennummer + Datum + Seitenzahl
-// ✅ Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
+﻿// server.js (CommonJS) â€“ Baustellenprotokoll FINAL + Admin UI
+// âœ… WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
+// âœ… Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
+// âœ… Layout A: Text + Transkripte seitenfÃ¼llend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
+// âœ… Deckblatt mit Logo (optional)
+// âœ… Kopf-/FuÃŸzeile: Baustellennummer + Datum + Seitenzahl
+// âœ… Ordnerstruktur neu: /var/data/<job>/<YYYY>/<MM>/<DD>/...
 //    + Fallback liest auch alte Struktur: /var/data/<job>/<YYYY-MM-DD>/...
-// ✅ Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
-// ✅ Admin: /admin oder /admin/ui + API + PDF View/Download + Akte + Löschen/Umbenennen/Zusammenführen
-// ✅ Mailversand NEU: PDF bleibt am Server, Mail enthält nur Download-Link (kein großer Anhang)
-// ✅ Chef-Protokollmodus: Start nur mit "proto"; @ startet keinen Protokollmodus mehr
+// âœ… Sprachnachricht: Audio speichern + transkribieren + Dialekt "sauber" formulieren (optional)
+// âœ… Admin: /admin oder /admin/ui + API + PDF View/Download + Akte + LÃ¶schen/Umbenennen/ZusammenfÃ¼hren
+// âœ… Mailversand NEU: PDF bleibt am Server, Mail enthÃ¤lt nur Download-Link (kein groÃŸer Anhang)
+// âœ… Chef-Protokollmodus: Start nur mit "proto"; @ startet keinen Protokollmodus mehr
 //
 // Render ENV (wichtig):
 // DATA_DIR=/var/data
@@ -52,6 +52,7 @@ const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
 const { registerRegieAssistant } = require("./regie-assistant");
+const { registerDayClose } = require("./day-close");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -59,7 +60,7 @@ app.use(express.json({ limit: "25mb" }));
 // ===================== Version =====================
 const APP_VERSION = "3.5.3";
 const APP_BUILD = "0025.2-materialsystem-komplett";
-const APP_STATUS = "Materialsystem mit Excel-Import, Preisprüfung und Lern-Inbox";
+const APP_STATUS = "Materialsystem mit Excel-Import, PreisprÃ¼fung und Lern-Inbox";
 const APP_BUILD_DATE = "2026-07-28";
 
 // Static files for Admin UI
@@ -121,7 +122,7 @@ async function rememberWhatsAppSenderId(phoneNumberId) {
     await ensureDir(path.dirname(whatsappSenderConfigPath()));
     await fsp.writeFile(whatsappSenderConfigPath(), JSON.stringify({ phoneNumberId: id, updatedAt: new Date().toISOString() }, null, 2), "utf8");
   } catch (error) {
-    console.error("⚠️ WhatsApp-Sender-ID konnte nicht gespeichert werden:", String(error?.message || error));
+    console.error("âš ï¸ WhatsApp-Sender-ID konnte nicht gespeichert werden:", String(error?.message || error));
   }
 }
 
@@ -135,12 +136,12 @@ function normalizeWhatsAppRecipient(value) {
 }
 
 // ===================== Baustellenprotokoll-Sitzungen =====================
-// Ein Protokoll beginnt ausschließlich beim Chef mit dem Befehl "proto"
-// und bleibt bis zum Befehl "pdf" aktiv. Die Sitzung wird zusätzlich auf Disk
+// Ein Protokoll beginnt ausschlieÃŸlich beim Chef mit dem Befehl "proto"
+// und bleibt bis zum Befehl "pdf" aktiv. Die Sitzung wird zusÃ¤tzlich auf Disk
 // gespeichert, damit ein Render-Neustart sie nicht verliert.
 const PROTOCOL_BY_SENDER = {}; // { wa_id: { siteCode, startedAt } }
-const LATE_TIME_PENDING = {};  // Mitarbeiter wartet auf ungefähre Ankunftszeit
-const PROTOCOL_START_PENDING = {}; // Chef hat "protokoll"/"proto" gestartet und wählt/sucht/erstellt die Baustelle
+const LATE_TIME_PENDING = {};  // Mitarbeiter wartet auf ungefÃ¤hre Ankunftszeit
+const PROTOCOL_START_PENDING = {}; // Chef hat "protokoll"/"proto" gestartet und wÃ¤hlt/sucht/erstellt die Baustelle
 
 function digitsOnly(value) { return String(value || "").replace(/\D/g, ""); }
 function isChefSender(sender) {
@@ -205,7 +206,7 @@ function activeProtocol(sender) {
 }
 function parseProtocolStart(text) {
   // Der alte Start mit @baustelle ist bewusst deaktiviert.
-  // Der Protokollmodus startet ausschließlich durch den geführten Chef-Befehl "proto".
+  // Der Protokollmodus startet ausschlieÃŸlich durch den gefÃ¼hrten Chef-Befehl "proto".
   return null;
 }
 
@@ -235,13 +236,13 @@ function normalizeSiteCode(raw) {
   return String(raw || "")
     .trim()
     .replace(/^[@#]+/, "")
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/Ä/g, "Ae")
-    .replace(/Ö/g, "Oe")
-    .replace(/Ü/g, "Ue")
-    .replace(/ß/g, "ss");
+    .replace(/Ã¤/g, "ae")
+    .replace(/Ã¶/g, "oe")
+    .replace(/Ã¼/g, "ue")
+    .replace(/Ã„/g, "Ae")
+    .replace(/Ã–/g, "Oe")
+    .replace(/Ãœ/g, "Ue")
+    .replace(/ÃŸ/g, "ss");
 }
 
 function parseSiteCodeFromText(text) {
@@ -250,7 +251,7 @@ function parseSiteCodeFromText(text) {
   // Erlaubte Zeichen: Buchstaben, Zahlen, Minus, Unterstrich.
   // Wichtig: E-Mail-Adressen wie alex@krista.at werden NICHT als Baustelle erkannt.
   const s = String(text || "");
-  const re = /(^|[\s(])([@#])([A-Za-z0-9ÄÖÜäöüß_-]{2,80})(?=\s|$|[.,;:!?)]|\])/gu;
+  const re = /(^|[\s(])([@#])([A-Za-z0-9Ã„Ã–ÃœÃ¤Ã¶Ã¼ÃŸ_-]{2,80})(?=\s|$|[.,;:!?)]|\])/gu;
 
   for (const m of s.matchAll(re)) {
     const marker = m[2];
@@ -429,8 +430,8 @@ async function polishGermanTranscript(rawText) {
       {
         role: "system",
         content:
-          "Du bist Baustellen-Protokollant. Formuliere das folgende Transkript in sauberem, sachlichem Hochdeutsch, sinngemäß, kurz und präzise. " +
-          "Keine erfundenen Details. Entferne Füllwörter. Wenn sinnvoll, verwende kurze Sätze. Keine Emojis.",
+          "Du bist Baustellen-Protokollant. Formuliere das folgende Transkript in sauberem, sachlichem Hochdeutsch, sinngemÃ¤ÃŸ, kurz und prÃ¤zise. " +
+          "Keine erfundenen Details. Entferne FÃ¼llwÃ¶rter. Wenn sinnvoll, verwende kurze SÃ¤tze. Keine Emojis.",
       },
       { role: "user", content: String(rawText || "") },
     ],
@@ -480,7 +481,7 @@ async function sendMailWithAttachment({ to, subject, text, filePath }) {
     });
     return info;
   } catch (e) {
-    console.error("❌ Mail send failed:", e?.message || e);
+    console.error("âŒ Mail send failed:", e?.message || e);
     return null;
   }
 }
@@ -494,7 +495,7 @@ async function sendMailWithLink({ to, subject, text, html }) {
     const info = await mailer.sendMail({ from: MAIL_FROM, to, subject, text, html });
     return info;
   } catch (e) {
-    console.error("❌ Mail send failed:", e?.message || e);
+    console.error("âŒ Mail send failed:", e?.message || e);
     return null;
   }
 }
@@ -605,10 +606,10 @@ async function buildPdfForJobDay(jobId, date, dayDir, outPdfPath) {
     page.drawText(`#${jobId}`, { x: 60, y: PAGE_H - 140, size: 24, font: fontBold });
     if (jobDisplayName) page.drawText(jobDisplayName, { x: 60, y: PAGE_H - 170, size: 20, font: fontBold, maxWidth: PAGE_W - 420 });
     page.drawText(`Datum: ${date}`, { x: 60, y: PAGE_H - 205, size: 16, font });
-    page.drawText(`Einträge: ${logs.length}`, { x: 60, y: PAGE_H - 235, size: 16, font });
+    page.drawText(`EintrÃ¤ge: ${logs.length}`, { x: 60, y: PAGE_H - 235, size: 16, font });
     page.drawText(`Fotos: ${imageFiles.length}`, { x: 60, y: PAGE_H - 265, size: 16, font });
 
-    page.drawText("Layout: Text/Transkripte seitenfüllend, danach Fotos (6 pro Seite)", {
+    page.drawText("Layout: Text/Transkripte seitenfÃ¼llend, danach Fotos (6 pro Seite)", {
       x: 60,
       y: 80,
       size: 12,
@@ -721,7 +722,7 @@ for (const entry of logs) {
     const titleH = 40;      // oben Titelbereich
     const captionH = 18;    // pro Kachel Caption
     const gridTop = 95;     // Abstand von oben (unter Headerlinie)
-    const gridBottom = 70;  // Abstand unten (über Footerlinie)
+    const gridBottom = 70;  // Abstand unten (Ã¼ber Footerlinie)
 
     const usableW = PAGE_W - margin * 2 - gutter * (cols - 1);
     const usableH = (PAGE_H - gridTop - gridBottom) - gutter * (rows - 1);
@@ -731,7 +732,7 @@ for (const entry of logs) {
 
     const stamp = entry.raw?.timestamp ? stampDE(entry.raw.timestamp) : "";
 
-    // Seiten in 6er-Blöcken einbetten
+    // Seiten in 6er-BlÃ¶cken einbetten
     for (let start = 0; start < pageCount; start += 6) {
       const idxs = [];
       for (let k = start; k < Math.min(start + 6, pageCount); k++) idxs.push(k);
@@ -793,7 +794,7 @@ for (const entry of logs) {
           maxWidth: targetW,
         });
 
-        // optional: dünner Rahmen
+        // optional: dÃ¼nner Rahmen
         page.drawRectangle({
           x: x0,
           y: yTop - captionH - targetH,
@@ -947,7 +948,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
   const PAGE_H = 841.89;
 
   const days = (await listDaysForJob(jobId)).slice().sort(); // chronologisch
-  if (!days.length) throw new Error(`Keine Tage für #${jobId} gefunden`);
+  if (!days.length) throw new Error(`Keine Tage fÃ¼r #${jobId} gefunden`);
 
   const meta = await readJobMeta(jobId);
   const title = meta.name ? `${meta.name}` : `#${jobId}`;
@@ -968,7 +969,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
     logoImg = null;
   }
 
-  // Tagesdaten vorbereiten: Tages-PDFs erzeugen, Seiten zählen, Statistiken sammeln
+  // Tagesdaten vorbereiten: Tages-PDFs erzeugen, Seiten zÃ¤hlen, Statistiken sammeln
   const dayInfos = [];
   const totalStats = { items: 0, images: 0, audio: 0, pdfs: 0 };
 
@@ -999,7 +1000,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
     dayInfos.push({ day, dayDir, stats, dayPdfPath, pageCount });
   }
 
-  if (!dayInfos.length) throw new Error(`Keine lesbaren Bautage für #${jobId} gefunden`);
+  if (!dayInfos.length) throw new Error(`Keine lesbaren Bautage fÃ¼r #${jobId} gefunden`);
 
   // Inhaltsverzeichnis-Seiten berechnen
   const tocRowsPerPage = 26;
@@ -1082,7 +1083,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
     for (let i = start; i < end; i++) {
       const info = dayInfos[i];
       const rowNo = i + 1;
-      const label = `${String(rowNo).padStart(2, "0")}.  ${shortDateDE(info.day)}  ·  ${info.stats.images} Fotos  ·  ${info.stats.pdfs} PDF  ·  ${info.stats.audio} Audio`;
+      const label = `${String(rowNo).padStart(2, "0")}.  ${shortDateDE(info.day)}  Â·  ${info.stats.images} Fotos  Â·  ${info.stats.pdfs} PDF  Â·  ${info.stats.audio} Audio`;
       page.drawText(label, { x: 80, y, size: 13, font, maxWidth: PAGE_W - 230 });
       page.drawText(`Seite ${info.startPage}`, { x: PAGE_W - 175, y, size: 13, font });
       page.drawLine({ start: { x: 80, y: y - 7 }, end: { x: PAGE_W - 80, y: y - 7 }, thickness: 0.5, color: rgb(0.92,0.92,0.92) });
@@ -1103,7 +1104,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
       page.drawText(formatDateLongDE(info.day), { x: 60, y: center, size: 42, font: fontBold, maxWidth: PAGE_W - 120 });
       page.drawText(title, { x: 60, y: center - 45, size: 18, font, maxWidth: PAGE_W - 120 });
       drawRule(page, center - 75, 0.72);
-      page.drawText(`${info.stats.images} Fotos  ·  ${info.stats.pdfs} PDF  ·  ${info.stats.audio} Audio  ·  ${info.stats.items} Einträge`, {
+      page.drawText(`${info.stats.images} Fotos  Â·  ${info.stats.pdfs} PDF  Â·  ${info.stats.audio} Audio  Â·  ${info.stats.items} EintrÃ¤ge`, {
         x: 60, y: center - 118, size: 14, font, color: rgb(0.25,0.25,0.25),
       });
     }
@@ -1115,21 +1116,21 @@ async function buildAkteForJob(jobId, outPdfPath) {
       copied.forEach((p) => akte.addPage(p));
     } catch (e) {
       const page = akte.addPage([PAGE_W, PAGE_H]);
-      page.drawText(`Fehler beim Einfügen des Tagesprotokolls ${info.day}`, { x: 60, y: PAGE_H - 90, size: 18, font: fontBold });
+      page.drawText(`Fehler beim EinfÃ¼gen des Tagesprotokolls ${info.day}`, { x: 60, y: PAGE_H - 90, size: 18, font: fontBold });
       page.drawText(String(e?.message || e), { x: 60, y: PAGE_H - 130, size: 12, font, maxWidth: PAGE_W - 120 });
     }
   }
 
-  // Abschlussseite / Gesamtübersicht
+  // Abschlussseite / GesamtÃ¼bersicht
   {
     const page = akte.addPage([PAGE_W, PAGE_H]);
-    page.drawText("Gesamtübersicht", { x: 60, y: PAGE_H - 90, size: 32, font: fontBold });
+    page.drawText("GesamtÃ¼bersicht", { x: 60, y: PAGE_H - 90, size: 32, font: fontBold });
     drawRule(page, PAGE_H - 110, 0.82);
     page.drawText(title, { x: 60, y: PAGE_H - 150, size: 20, font: fontBold, maxWidth: PAGE_W - 120 });
 
     const rows = [
       ["Bautage", String(dayInfos.length)],
-      ["Einträge", String(totalStats.items)],
+      ["EintrÃ¤ge", String(totalStats.items)],
       ["Fotos", String(totalStats.images)],
       ["Dokumente/PDF", String(totalStats.pdfs)],
       ["Audio/Transkripte", String(totalStats.audio)],
@@ -1148,7 +1149,7 @@ async function buildAkteForJob(jobId, outPdfPath) {
     drawLogo(page);
   }
 
-  // Kopf-/Fußzeilen und Seitenzahlen
+  // Kopf-/FuÃŸzeilen und Seitenzahlen
   const pages = akte.getPages();
   const total = pages.length;
   for (let i = 0; i < total; i++) {
@@ -1193,18 +1194,18 @@ async function triggerPdfForJobDay({ jobId, date, to }) {
   const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
   const meta = await readJobMeta(jobId);
-  const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
+  const title = meta.name ? `#${jobId} â€“ ${meta.name}` : `#${jobId}`;
   const viewUrl = pdfUrlFor(jobId, date);
   const downloadUrl = pdfDownloadUrlFor(jobId, date);
-  const subject = `Baustellenprotokoll ${title} – ${date}`;
+  const subject = `Baustellenprotokoll ${title} â€“ ${date}`;
   const body =
 `Baustellenprotokoll ${title} wurde erstellt.
 
 Datum: ${date}
 Seiten: ${built.pages}
-Größe: ${fileSizeMB(built.bytes)}
+GrÃ¶ÃŸe: ${fileSizeMB(built.bytes)}
 
-PDF öffnen:
+PDF Ã¶ffnen:
 ${viewUrl}
 
 PDF herunterladen:
@@ -1212,8 +1213,8 @@ ${downloadUrl}
 `;
   const html = `
     <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
-    <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
-    <p><a href="${viewUrl}">PDF öffnen</a></p>
+    <p>Datum: ${date}<br>Seiten: ${built.pages}<br>GrÃ¶ÃŸe: ${fileSizeMB(built.bytes)}</p>
+    <p><a href="${viewUrl}">PDF Ã¶ffnen</a></p>
     <p><a href="${downloadUrl}">PDF herunterladen</a></p>
   `;
 
@@ -1223,7 +1224,7 @@ ${downloadUrl}
 
 
 // ===================== KRISTINE =====================
-let kristine = null;  // Wird später nach sendWhatsAppKristineReply initialisiert
+let kristine = null;  // Wird spÃ¤ter nach sendWhatsAppKristineReply initialisiert
 
 
 // ===================== KRISTOOL Preview =====================
@@ -1239,7 +1240,7 @@ app.get(["/kristool-preview", "/kristool-preview/"], (req, res) => {
 });
 
 // ===================== Base Routes =====================
-app.get("/", (req, res) => res.type("html").send(`webhook läuft ✅<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin öffnen</a>`));
+app.get("/", (req, res) => res.type("html").send(`webhook lÃ¤uft âœ…<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin Ã¶ffnen</a>`));
 
 app.get("/health", (req, res) =>
   res.json({
@@ -1267,7 +1268,7 @@ app.get("/webhook", (req, res) => {
 });
 
 
-// ===================== WhatsApp → Kristine =====================
+// ===================== WhatsApp â†’ Kristine =====================
 function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -1391,7 +1392,7 @@ async function employeeFromWhatsAppSender(sender) {
   return employees.find((employee) => {
     const phone = normalizePhone(employee.phone);
     if (!phone) return false;
-    // Meta liefert üblicherweise ohne führendes +. Auch lokale 0/0043-Schreibweisen tolerieren.
+    // Meta liefert Ã¼blicherweise ohne fÃ¼hrendes +. Auch lokale 0/0043-Schreibweisen tolerieren.
     return phone === wanted || phone.endsWith(wanted) || wanted.endsWith(phone);
   }) || null;
 }
@@ -1418,8 +1419,8 @@ function cleanWhatsAppButtons(buttons) {
 }
 
 function getActiveKristinePhoneNumberId(phoneNumberId = "") {
-  // Die zuletzt tatsächlich von Meta über einen Kristine-Webhook gemeldete Sender-ID
-  // ist die verbindliche Quelle für alle Nachrichten. ENV und Parameter sind nur Fallbacks.
+  // Die zuletzt tatsÃ¤chlich von Meta Ã¼ber einen Kristine-Webhook gemeldete Sender-ID
+  // ist die verbindliche Quelle fÃ¼r alle Nachrichten. ENV und Parameter sind nur Fallbacks.
   return String(
     LAST_WHATSAPP_PHONE_NUMBER_ID ||
     phoneNumberId ||
@@ -1435,7 +1436,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
     throw new Error("WhatsApp phone_number_id fehlt: weder Parameter, Render-ENV noch gespeicherte Webhook-ID vorhanden");
   }
   const recipient = normalizeWhatsAppRecipient(to);
-  if (!recipient) throw new Error("WhatsApp-Empfänger fehlt");
+  if (!recipient) throw new Error("WhatsApp-EmpfÃ¤nger fehlt");
 
   const cleanedButtons = cleanWhatsAppButtons(buttons);
   const payload = cleanedButtons.length
@@ -1464,7 +1465,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
       };
 
   const endpoint = `https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`;
-  console.log("📨 WhatsApp API request", {
+  console.log("ðŸ“¨ WhatsApp API request", {
     senderIdTail: senderId.slice(-6),
     recipientTail: recipient.slice(-6),
     type: payload.type,
@@ -1485,7 +1486,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
 
   if (!response.ok) {
     const metaError = responseJson?.error || {};
-    console.error("❌ WhatsApp API response", {
+    console.error("âŒ WhatsApp API response", {
       status: response.status,
       code: metaError.code || null,
       subcode: metaError.error_subcode || null,
@@ -1503,7 +1504,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
     throw error;
   }
 
-  console.log("✅ WhatsApp API accepted", {
+  console.log("âœ… WhatsApp API accepted", {
     messageId: responseJson?.messages?.[0]?.id || "unbekannt",
     recipientTail: recipient.slice(-6),
     payloadType: payload.type,
@@ -1511,7 +1512,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   return responseJson;
 }
 
-console.log("📡 WhatsApp-Sender-Konfiguration", {
+console.log("ðŸ“¡ WhatsApp-Sender-Konfiguration", {
   envConfigured: Boolean(KRISTINE_PHONE_NUMBER_ID),
   rememberedConfigured: Boolean(LAST_WHATSAPP_PHONE_NUMBER_ID),
   senderIdTail: getActiveKristinePhoneNumberId().slice(-6) || "fehlt",
@@ -1569,14 +1570,14 @@ app.post("/webhook", async (req, res) => {
 
       let protocolSite = protocolAllowed ? activeProtocol(sender) : null;
 
-      // Chefmodus: Nur "proto" startet den geführten Baustellenprotokoll-Dialog.
+      // Chefmodus: Nur "proto" startet den gefÃ¼hrten Baustellenprotokoll-Dialog.
       if (!protocolSite && msg.type === "text" && protocolAllowed && isProtocolCommand(textOrCaption)) {
         PROTOCOL_START_PENDING[sender] = { startedAt: Date.now() };
         try {
           await sendWhatsAppKristineReply({
             phoneNumberId,
             to: sender,
-            reply: "📝 Baustellenprotokoll starten.\nFür welche Baustelle ist das Protokoll?\nBitte Name oder Baustellennummer schreiben. Mit ‚abbrechen‘ beenden."
+            reply: "ðŸ“ Baustellenprotokoll starten.\nFÃ¼r welche Baustelle ist das Protokoll?\nBitte Name oder Baustellennummer schreiben. Mit â€šabbrechenâ€˜ beenden."
           });
         } catch {}
         continue;
@@ -1589,14 +1590,14 @@ app.post("/webhook", async (req, res) => {
 
         if (["abbruch", "abbrechen", "stopp", "stop"].includes(lowerAnswer)) {
           delete PROTOCOL_START_PENDING[sender];
-          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "✅ Protokollstart abgebrochen. Es wurde nichts gespeichert." }); } catch {}
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "âœ… Protokollstart abgebrochen. Es wurde nichts gespeichert." }); } catch {}
           continue;
         }
 
         // "suchen" startet bewusst eine neue Suche. Niemals als Baustellenname interpretieren.
         if (["suchen", "suche"].includes(lowerAnswer)) {
           pending.lastQuery = "";
-          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "🔎 Bitte Baustellenname oder Baustellennummer schreiben. Mit ‚abbruch‘ beenden." }); } catch {}
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "ðŸ”Ž Bitte Baustellenname oder Baustellennummer schreiben. Mit â€šabbruchâ€˜ beenden." }); } catch {}
           continue;
         }
 
@@ -1606,7 +1607,7 @@ app.post("/webhook", async (req, res) => {
         const newMatch = answer.match(/^neu(?:e baustelle)?(?:\s+(.+))?$/i);
         if (newMatch) createName = String(newMatch[1] || pending.lastQuery || "").trim();
         if (newMatch && !createName) {
-          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "➕ Wie soll die neue Baustelle heißen? Bitte Name oder Baustellennummer schreiben. Mit ‚abbruch‘ beenden." }); } catch {}
+          try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "âž• Wie soll die neue Baustelle heiÃŸen? Bitte Name oder Baustellennummer schreiben. Mit â€šabbruchâ€˜ beenden." }); } catch {}
           pending.createNext = true;
           continue;
         }
@@ -1626,7 +1627,7 @@ app.post("/webhook", async (req, res) => {
           try {
             await sendWhatsAppKristineReply({
               phoneNumberId, to: sender,
-              reply: `✅ Neue Baustelle „${createName}“ angelegt.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit ‚pdf‘ abschließen oder mit ‚abbruch‘ ohne PDF beenden.`
+              reply: `âœ… Neue Baustelle â€ž${createName}â€œ angelegt.\nðŸ“ Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit â€špdfâ€˜ abschlieÃŸen oder mit â€šabbruchâ€˜ ohne PDF beenden.`
             });
           } catch {}
           continue;
@@ -1642,7 +1643,7 @@ app.post("/webhook", async (req, res) => {
           try {
             await sendWhatsAppKristineReply({
               phoneNumberId, to: sender,
-              reply: `✅ Baustelle „${selected.name}“ gefunden.\n📍 Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit ‚pdf‘ abschließen oder mit ‚abbruch‘ ohne PDF beenden.`
+              reply: `âœ… Baustelle â€ž${selected.name}â€œ gefunden.\nðŸ“ Baustellenprotokoll gestartet.\nDu kannst jetzt Texte, Fotos, Audios und PDFs senden. Mit â€špdfâ€˜ abschlieÃŸen oder mit â€šabbruchâ€˜ ohne PDF beenden.`
             });
           } catch {}
           continue;
@@ -1654,7 +1655,7 @@ app.post("/webhook", async (req, res) => {
           try {
             await sendWhatsAppKristineReply({
               phoneNumberId, to: sender,
-              reply: `⚠️ Keine eindeutige Baustelle für „${answer}“.\nMögliche Treffer:\n${choices}\n\nBitte den exakten Namen/die Nummer schreiben, „suchen“ für eine neue Suche, „neu“ zum Anlegen von „${answer}“ oder „abbruch“.`
+              reply: `âš ï¸ Keine eindeutige Baustelle fÃ¼r â€ž${answer}â€œ.\nMÃ¶gliche Treffer:\n${choices}\n\nBitte den exakten Namen/die Nummer schreiben, â€žsuchenâ€œ fÃ¼r eine neue Suche, â€žneuâ€œ zum Anlegen von â€ž${answer}â€œ oder â€žabbruchâ€œ.`
             });
           } catch {}
           continue;
@@ -1662,7 +1663,7 @@ app.post("/webhook", async (req, res) => {
         try {
           await sendWhatsAppKristineReply({
             phoneNumberId, to: sender,
-            reply: `⚠️ Baustelle „${answer}“ wurde nicht gefunden.\nAntworte mit:\n• „neu“ – „${answer}“ neu anlegen\n• „suchen“ – anders suchen\n• „abbruch“ – beenden`
+            reply: `âš ï¸ Baustelle â€ž${answer}â€œ wurde nicht gefunden.\nAntworte mit:\nâ€¢ â€žneuâ€œ â€“ â€ž${answer}â€œ neu anlegen\nâ€¢ â€žsuchenâ€œ â€“ anders suchen\nâ€¢ â€žabbruchâ€œ â€“ beenden`
           });
         } catch {}
         continue;
@@ -1675,13 +1676,13 @@ app.post("/webhook", async (req, res) => {
           await sendWhatsAppKristineReply({
             phoneNumberId,
             to: sender,
-            reply: "✅ Baustellenprotokoll abgebrochen. Es wurde kein PDF erstellt. Kristine ist wieder im Mitarbeitermodus."
+            reply: "âœ… Baustellenprotokoll abgebrochen. Es wurde kein PDF erstellt. Kristine ist wieder im Mitarbeitermodus."
           });
         } catch {}
         continue;
       }
 
-      // 3) Im aktiven Protokollmodus wird "pdf" erzeugt und danach zurückgeschaltet.
+      // 3) Im aktiven Protokollmodus wird "pdf" erzeugt und danach zurÃ¼ckgeschaltet.
       if (protocolSite && msg.type === "text" && String(textOrCaption).trim().toLowerCase() === "pdf") {
         if (!isAllowedPdfSender(sender)) continue;
         try {
@@ -1690,17 +1691,17 @@ app.post("/webhook", async (req, res) => {
           await sendWhatsAppKristineReply({
             phoneNumberId,
             to: sender,
-            reply: `✅ PDF für ${protocolSite} erstellt.\nDer Protokollmodus ist beendet. Kristine ist wieder im Mitarbeitermodus.\n${result.downloadUrl || ""}`.trim()
+            reply: `âœ… PDF fÃ¼r ${protocolSite} erstellt.\nDer Protokollmodus ist beendet. Kristine ist wieder im Mitarbeitermodus.\n${result.downloadUrl || ""}`.trim()
           });
         } catch (e) {
-          console.error("❌ pdf command failed:", e?.message || e);
+          console.error("âŒ pdf command failed:", e?.message || e);
           try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `PDF konnte nicht erstellt werden: ${String(e?.message || e)}` }); } catch {}
         }
         continue;
       }
 
       // 3) Medien bekannter Mitarbeiter werden IMMER im Tagesrapport gesichert.
-      // Beim Chef dürfen sie bei aktivem Protokollmodus zusätzlich ins Baustellenprotokoll laufen.
+      // Beim Chef dÃ¼rfen sie bei aktivem Protokollmodus zusÃ¤tzlich ins Baustellenprotokoll laufen.
       if (["image", "video"].includes(msg.type)) {
         const employee = await employeeFromWhatsAppSender(sender);
 
@@ -1708,33 +1709,33 @@ app.post("/webhook", async (req, res) => {
           try {
             const saved = await saveEmployeeReviewMedia({ msg, employee, date, sender });
 
-            // Außerhalb des Chef-Protokollmodus ist die Verarbeitung hier abgeschlossen.
+            // AuÃŸerhalb des Chef-Protokollmodus ist die Verarbeitung hier abgeschlossen.
             if (!protocolSite) {
               const label = saved?.kind === "video" ? "Video" : "Foto";
               const site = saved?.job?.jobId
-                ? `#${saved.job.jobId}${saved.job.jobName ? " · " + saved.job.jobName : ""}`
-                : "dem heutigen Tagesrapport zur Büroprüfung";
+                ? `#${saved.job.jobId}${saved.job.jobName ? " Â· " + saved.job.jobName : ""}`
+                : "dem heutigen Tagesrapport zur BÃ¼roprÃ¼fung";
 
               await sendWhatsAppKristineReply({
                 phoneNumberId,
                 to: sender,
-                reply: `✅ ${label} erhalten und ${site} zugeordnet.`
+                reply: `âœ… ${label} erhalten und ${site} zugeordnet.`
               });
 
               continue;
             }
 
             // Bei aktivem Chef-Protokollmodus bewusst NICHT continue:
-            // Das Medium wird danach zusätzlich im Baustellenprotokoll gespeichert.
+            // Das Medium wird danach zusÃ¤tzlich im Baustellenprotokoll gespeichert.
           } catch (error) {
-            console.error("❌ Mitarbeiter-Medium konnte nicht gespeichert werden:", error?.message || error);
+            console.error("âŒ Mitarbeiter-Medium konnte nicht gespeichert werden:", error?.message || error);
 
             if (!protocolSite) {
               try {
                 await sendWhatsAppKristineReply({
                   phoneNumberId,
                   to: sender,
-                  reply: "Das Medium ist angekommen, konnte aber noch nicht eindeutig zugeordnet werden. Das Büro erhält einen Prüfhinweis."
+                  reply: "Das Medium ist angekommen, konnte aber noch nicht eindeutig zugeordnet werden. Das BÃ¼ro erhÃ¤lt einen PrÃ¼fhinweis."
                 });
               } catch {}
 
@@ -1742,12 +1743,12 @@ app.post("/webhook", async (req, res) => {
             }
 
             // Im Chef-Protokollmodus trotzdem weiterlaufen, damit das Medium
-            // wenigstens im ausgewählten Baustellenprotokoll erhalten bleibt.
+            // wenigstens im ausgewÃ¤hlten Baustellenprotokoll erhalten bleibt.
           }
         }
       }
 
-      // 4) Nur außerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
+      // 4) Nur auÃŸerhalb des Protokollmodus arbeitet ein bekannter Mitarbeiter mit Kristine.
       const kristineText = whatsappTextFromMessage(msg);
       if (!protocolSite && kristineText) {
         const employee = await employeeFromWhatsAppSender(sender);
@@ -1757,9 +1758,9 @@ app.post("/webhook", async (req, res) => {
             const lower = normalizedInput.toLowerCase();
 
             // Dialog der 07:00-Erinnerung
-            if (lower === "komme später" || lower === "komme spaeter") {
+            if (lower === "komme spÃ¤ter" || lower === "komme spaeter") {
               LATE_TIME_PENDING[String(employee.id)] = date;
-              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Alles klar. Ab wann ungefähr? Bitte z. B. 07:30 oder 08:00 schreiben." });
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Alles klar. Ab wann ungefÃ¤hr? Bitte z. B. 07:30 oder 08:00 schreiben." });
               continue;
             }
             if (LATE_TIME_PENDING[String(employee.id)] === date && /^([01]?\d|2[0-3]):[0-5]\d$/.test(normalizedInput)) {
@@ -1769,7 +1770,7 @@ app.post("/webhook", async (req, res) => {
               await ensureDir(path.dirname(p));
               await fsp.writeFile(p, JSON.stringify(rows, null, 2), "utf8");
               delete LATE_TIME_PENDING[String(employee.id)];
-              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `Danke. Späterer Arbeitsbeginn ca. ${normalizedInput} ist eingetragen.` });
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `Danke. SpÃ¤terer Arbeitsbeginn ca. ${normalizedInput} ist eingetragen.` });
               continue;
             }
             if (lower === "heute nicht") {
@@ -1782,7 +1783,7 @@ app.post("/webhook", async (req, res) => {
               rows.push({ employeeId: employee.id, date, type: lower, hours: 7.8, updatedAt: new Date().toISOString() });
               await ensureDir(path.dirname(p));
               await fsp.writeFile(p, JSON.stringify(rows, null, 2), "utf8");
-              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `${normalizedInput} ist für heute mit 7,8 Sollstunden vorgemerkt. Das Büro kann den Eintrag kontrollieren.` });
+              await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: `${normalizedInput} ist fÃ¼r heute mit 7,8 Sollstunden vorgemerkt. Das BÃ¼ro kann den Eintrag kontrollieren.` });
               continue;
             }
 
@@ -1802,15 +1803,15 @@ app.post("/webhook", async (req, res) => {
             const result = await kristine.handleMessage({ employeeId: employee.id, employeeName: employeeEverydayName(employee), text: normalizedInput, date });
             await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: result.reply, buttons: result.buttons });
           } catch (e) {
-            console.error("❌ Kristine WhatsApp failed:", e?.message || e);
+            console.error("âŒ Kristine WhatsApp failed:", e?.message || e);
             try { await sendWhatsAppKristineReply({ phoneNumberId, to: sender, reply: "Entschuldige, da hat bei mir gerade etwas nicht geklappt. Bitte versuche es gleich noch einmal." }); } catch {}
           }
           continue;
         }
       }
 
-      // Im Chef-Protokollmodus gilt ausschließlich die aktiv ausgewählte Baustelle.
-      // Außerhalb bleibt die alte #/@-Kompatibilität nur für unbekannte Absender erhalten.
+      // Im Chef-Protokollmodus gilt ausschlieÃŸlich die aktiv ausgewÃ¤hlte Baustelle.
+      // AuÃŸerhalb bleibt die alte #/@-KompatibilitÃ¤t nur fÃ¼r unbekannte Absender erhalten.
       let siteCode = protocolSite || parseSiteCodeFromText(textOrCaption) || "unknown";
 
       const dayDir = resolveDayDirForWrite(siteCode, date);
@@ -1933,7 +1934,7 @@ app.post("/webhook", async (req, res) => {
         }
       }
 
-      // Legacy-PDF-Trigger nur außerhalb einer aktiven Protokollsitzung.
+      // Legacy-PDF-Trigger nur auÃŸerhalb einer aktiven Protokollsitzung.
       if (!protocolSite && msg.type === "text" && isPdfCommand(textOrCaption)) {
         if (!isAllowedPdfSender(sender)) continue;
 
@@ -1947,12 +1948,12 @@ app.post("/webhook", async (req, res) => {
         try {
           await triggerPdfForJobDay({ jobId, date, to });
         } catch (e) {
-          console.error("❌ pdf command failed:", e?.message || e);
+          console.error("âŒ pdf command failed:", e?.message || e);
         }
       }
     }
   } catch (e) {
-    console.error("❌ webhook error:", e?.message || e);
+    console.error("âŒ webhook error:", e?.message || e);
   }
 });
 
@@ -1967,7 +1968,7 @@ app.get("/admin/test-mail", async (req, res) => {
       from: MAIL_FROM,
       to,
       subject: "Testmail (SMTP)",
-      text: "Wenn du das liest, passt SMTP ✅",
+      text: "Wenn du das liest, passt SMTP âœ…",
     });
     res.json({ ok: true, messageId: info.messageId });
   } catch (e) {
@@ -1998,7 +1999,7 @@ app.get("/admin/check-logo", async (req, res) => {
       sizeBytes: st.size,
       extension: ext,
       isPngSignature: isPng,
-      note: isPng ? "PNG erkannt ✅" : "Nicht-PNG oder PNG-Signatur fehlt (empfohlen: PNG)",
+      note: isPng ? "PNG erkannt âœ…" : "Nicht-PNG oder PNG-Signatur fehlt (empfohlen: PNG)",
     });
   } catch (e) {
     res.status(404).json({
@@ -2034,8 +2035,8 @@ app.get("/admin/run-daily", async (req, res) => {
       const built = await buildPdfForJobDay(jobId, date, dayDir, outPdf);
 
       const meta = await readJobMeta(jobId);
-      const title = meta.name ? `#${jobId} – ${meta.name}` : `#${jobId}`;
-      const subject = `Baustellenprotokoll ${title} – ${date}`;
+      const title = meta.name ? `#${jobId} â€“ ${meta.name}` : `#${jobId}`;
+      const subject = `Baustellenprotokoll ${title} â€“ ${date}`;
       const viewUrl = pdfUrlFor(jobId, date);
       const downloadUrl = pdfDownloadUrlFor(jobId, date);
       const text =
@@ -2043,9 +2044,9 @@ app.get("/admin/run-daily", async (req, res) => {
 
 Datum: ${date}
 Seiten: ${built.pages}
-Größe: ${fileSizeMB(built.bytes)}
+GrÃ¶ÃŸe: ${fileSizeMB(built.bytes)}
 
-PDF öffnen:
+PDF Ã¶ffnen:
 ${viewUrl}
 
 PDF herunterladen:
@@ -2053,8 +2054,8 @@ ${downloadUrl}
 `;
       const html = `
         <p>Baustellenprotokoll <b>${title}</b> wurde erstellt.</p>
-        <p>Datum: ${date}<br>Seiten: ${built.pages}<br>Größe: ${fileSizeMB(built.bytes)}</p>
-        <p><a href="${viewUrl}">PDF öffnen</a></p>
+        <p>Datum: ${date}<br>Seiten: ${built.pages}<br>GrÃ¶ÃŸe: ${fileSizeMB(built.bytes)}</p>
+        <p><a href="${viewUrl}">PDF Ã¶ffnen</a></p>
         <p><a href="${downloadUrl}">PDF herunterladen</a></p>
       `;
 
@@ -2101,7 +2102,7 @@ async function readJobMeta(jobId) {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
-      status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
+      status: ["Angebot", "Auftrag", "Laufend", "Fertig â€“ nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
       street: String(meta.street || "").trim(),
       houseNumber: String(meta.houseNumber || "").trim(),
       postalCode: String(meta.postalCode || "").trim(),
@@ -2153,7 +2154,7 @@ async function writeJobMeta(jobId, patch) {
     name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
-    status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
+    status: ["Angebot", "Auftrag", "Laufend", "Fertig â€“ nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
     street: String(patch.street ?? existing.street ?? "").trim().slice(0, 140),
     houseNumber: String(patch.houseNumber ?? existing.houseNumber ?? "").trim().slice(0, 40),
     postalCode: String(patch.postalCode ?? existing.postalCode ?? "").trim().slice(0, 20),
@@ -2206,8 +2207,8 @@ async function removeEmptyParentsAfterDay(jobId, day) {
 }
 
 async function deleteGeneratedPdfsForJob(jobId) {
-  // Wenn der Baustellenname geändert wird, löschen wir nur die automatisch erzeugten
-  // Protokoll-PDFs. Originale WhatsApp-PDFs bleiben erhalten. Beim nächsten Öffnen
+  // Wenn der Baustellenname geÃ¤ndert wird, lÃ¶schen wir nur die automatisch erzeugten
+  // Protokoll-PDFs. Originale WhatsApp-PDFs bleiben erhalten. Beim nÃ¤chsten Ã–ffnen
   // wird das Protokoll mit dem aktuellen Namen neu erzeugt.
   const base = path.join(DATA_DIR, String(jobId));
   if (!fs.existsSync(base)) return 0;
@@ -2250,7 +2251,7 @@ async function mergeDirectoryContents(srcDir, destDir) {
       continue;
     }
 
-    // log.jsonl wird zusammengeführt; dadurch bleiben alle Einträge chronologisch auswertbar.
+    // log.jsonl wird zusammengefÃ¼hrt; dadurch bleiben alle EintrÃ¤ge chronologisch auswertbar.
     if (ent.name === "log.jsonl") {
       const add = await fsp.readFile(src, "utf8").catch(() => "");
       if (add) await fsp.appendFile(dest, add.endsWith("\n") ? add : add + "\n", "utf8").catch(() => {});
@@ -2258,7 +2259,7 @@ async function mergeDirectoryContents(srcDir, destDir) {
       continue;
     }
 
-    // .meta.json: Ziel-Meta bleibt führend. Falls Ziel keinen Namen hat, übernehmen wir den Quell-Namen.
+    // .meta.json: Ziel-Meta bleibt fÃ¼hrend. Falls Ziel keinen Namen hat, Ã¼bernehmen wir den Quell-Namen.
     if (ent.name === ".meta.json") {
       try {
         const targetMeta = JSON.parse(await fsp.readFile(dest, "utf8"));
@@ -2273,7 +2274,7 @@ async function mergeDirectoryContents(srcDir, destDir) {
       continue;
     }
 
-    // Bei Namenskollision Originale nicht überschreiben.
+    // Bei Namenskollision Originale nicht Ã¼berschreiben.
     const ext = path.extname(ent.name);
     const base = path.basename(ent.name, ext);
     let candidate;
@@ -2394,7 +2395,7 @@ function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
   };
 }
 
-// Admin API: nächste reguläre Baustellennummer (JJ + 3-stellig)
+// Admin API: nÃ¤chste regulÃ¤re Baustellennummer (JJ + 3-stellig)
 app.get("/admin/api/jobs/next-number", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -2417,7 +2418,7 @@ app.post("/admin/api/jobs", async (req, res) => {
     if (!name) return res.status(400).json({ ok: false, error: "Baustellenname fehlt." });
 
     let jobId = String(body.jobId || "").trim() || jobIdFromName(name);
-    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Ungültige Baustellennummer. Erlaubt sind Buchstaben, Zahlen, _ und -." });
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "UngÃ¼ltige Baustellennummer. Erlaubt sind Buchstaben, Zahlen, _ und -." });
     if (fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(409).json({ ok: false, error: `Baustelle #${jobId} existiert bereits.` });
 
     await ensureDir(path.join(DATA_DIR, jobId));
@@ -2585,7 +2586,7 @@ app.get("/admin/api/job/:jobId/history", async (req, res) => {
   }
 });
 
-// Admin API: Baustellennummer ändern (Ordner umbenennen)
+// Admin API: Baustellennummer Ã¤ndern (Ordner umbenennen)
 app.post("/admin/api/job/:jobId/rename", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -2597,7 +2598,7 @@ app.post("/admin/api/job/:jobId/rename", async (req, res) => {
     const oldDir = path.join(DATA_DIR, oldJobId);
     const newDir = path.join(DATA_DIR, newJobId);
     if (!fs.existsSync(oldDir)) return res.status(404).json({ ok: false, error: "Source job not found" });
-    if (fs.existsSync(newDir)) return res.status(409).json({ ok: false, error: "Diese Baustellennummer existiert bereits. Bitte Zusammenführen verwenden." });
+    if (fs.existsSync(newDir)) return res.status(409).json({ ok: false, error: "Diese Baustellennummer existiert bereits. Bitte ZusammenfÃ¼hren verwenden." });
 
     await fsp.rename(oldDir, newDir);
     const deletedGeneratedPdfs = await deleteGeneratedPdfsForJob(newJobId);
@@ -2607,7 +2608,7 @@ app.post("/admin/api/job/:jobId/rename", async (req, res) => {
   }
 });
 
-// Admin API: Baustellen zusammenführen (Quelle in Ziel verschieben)
+// Admin API: Baustellen zusammenfÃ¼hren (Quelle in Ziel verschieben)
 app.post("/admin/api/job/:jobId/merge", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -2889,16 +2890,16 @@ function austrianHolidays(year) {
   const easter = easterSundayUTC(year);
   return cleanHolidayRows([
     {date:`${year}-01-01`,name:"Neujahr"},
-    {date:`${year}-01-06`,name:"Heilige Drei Könige"},
+    {date:`${year}-01-06`,name:"Heilige Drei KÃ¶nige"},
     {date:addUtcDays(easter,1),name:"Ostermontag"},
     {date:`${year}-05-01`,name:"Staatsfeiertag"},
     {date:addUtcDays(easter,39),name:"Christi Himmelfahrt"},
     {date:addUtcDays(easter,50),name:"Pfingstmontag"},
     {date:addUtcDays(easter,60),name:"Fronleichnam"},
-    {date:`${year}-08-15`,name:"Mariä Himmelfahrt"},
+    {date:`${year}-08-15`,name:"MariÃ¤ Himmelfahrt"},
     {date:`${year}-10-26`,name:"Nationalfeiertag"},
     {date:`${year}-11-01`,name:"Allerheiligen"},
-    {date:`${year}-12-08`,name:"Mariä Empfängnis"},
+    {date:`${year}-12-08`,name:"MariÃ¤ EmpfÃ¤ngnis"},
     {date:`${year}-12-25`,name:"Christtag"},
     {date:`${year}-12-26`,name:"Stefanitag"}
   ]);
@@ -3001,10 +3002,10 @@ const DEFAULT_WORKTIME_MODELS = [
     active: true,
     systemProtected: true,
     payrollTargetHoursWeekday: 7.8,
-    description: "Planung nach Modellstunden. Winter: Dezember bis März, Freitag frei. Sommer: April bis November, Freitag 07:00–14:15. Monatlicher Stundenzettel: Montag bis Freitag immer 7,8 Sollstunden.",
+    description: "Planung nach Modellstunden. Winter: Dezember bis MÃ¤rz, Freitag frei. Sommer: April bis November, Freitag 07:00â€“14:15. Monatlicher Stundenzettel: Montag bis Freitag immer 7,8 Sollstunden.",
     seasons: [
       {
-        id: "winter", name: "Winter (Dezember–März)", months: [12,1,2,3],
+        id: "winter", name: "Winter (Dezemberâ€“MÃ¤rz)", months: [12,1,2,3],
         weekdays: {
           "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
           "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
@@ -3014,7 +3015,7 @@ const DEFAULT_WORKTIME_MODELS = [
         }
       },
       {
-        id: "summer", name: "Sommer (April–November)", months: [4,5,6,7,8,9,10,11],
+        id: "summer", name: "Sommer (Aprilâ€“November)", months: [4,5,6,7,8,9,10,11],
         weekdays: {
           "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
           "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
@@ -3037,7 +3038,7 @@ async function readWorktimeModels() {
     const data = JSON.parse(await fsp.readFile(p, "utf8"));
     if (!Array.isArray(data) || !data.length) return DEFAULT_WORKTIME_MODELS;
 
-    // Frühere KRISTA-Standardversion automatisch auf das vereinbarte Jahresmodell bringen.
+    // FrÃ¼here KRISTA-Standardversion automatisch auf das vereinbarte Jahresmodell bringen.
     const upgraded = data.map(model => {
       if (String(model?.id) !== "krista-standard") return model;
       return DEFAULT_WORKTIME_MODELS[0];
@@ -3330,7 +3331,7 @@ app.delete("/admin/api/employees/:employeeId", async (req, res) => {
     const employees = await readEmployees();
     const idx = employees.findIndex(e => String(e.id) === id);
     if (idx < 0) return res.status(404).json({ ok: false, error: "Mitarbeiter nicht gefunden" });
-    // Sicherer als endgültiges Löschen: deaktivieren, damit alte Tageserfassungen nachvollziehbar bleiben.
+    // Sicherer als endgÃ¼ltiges LÃ¶schen: deaktivieren, damit alte Tageserfassungen nachvollziehbar bleiben.
     employees[idx] = { ...employees[idx], active: false, updatedAt: new Date().toISOString() };
     await writeEmployees(employees);
     res.json({ ok: true, employee: employees[idx] });
@@ -3422,7 +3423,7 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
       version: "3.2.0",
       jobId,
       day,
-      status: ["Entwurf", "Geprüft", "Freigegeben", "Abgerechnet"].includes(body.status) ? body.status : "Entwurf",
+      status: ["Entwurf", "GeprÃ¼ft", "Freigegeben", "Abgerechnet"].includes(body.status) ? body.status : "Entwurf",
       employees: Array.isArray(body.employees) ? body.employees.map(cleanEmployee).filter(e => e.name) : [],
       customerText: String(body.customerText || "").trim().slice(0, 12000),
       internalNote: String(body.internalNote || "").trim().slice(0, 12000),
@@ -3440,7 +3441,7 @@ app.put("/admin/api/job/:jobId/day/:day/regie", async (req, res) => {
     await appendJobHistory(jobId, {
       type: "day_report_saved",
       title: "Tagesrapport gespeichert",
-      detail: `${day} · ${regie.employees.length} Mitarbeiter · ${totalHours.toFixed(2)} Std.`,
+      detail: `${day} Â· ${regie.employees.length} Mitarbeiter Â· ${totalHours.toFixed(2)} Std.`,
       source: "admin",
       data: { day, employeeCount: regie.employees.length, totalHours }
     });
@@ -3462,8 +3463,21 @@ registerRegieAssistant(app, {
   requireAdmin,
   publicDir: path.join(process.cwd(), "public"),
 });
-console.log("✅ KRISTINE Materialsystem registriert");
+console.log("âœ… KRISTINE Materialsystem registriert");
 
+
+// ===================== KRISTINE GO Tagesabschluss =====================
+registerDayClose(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  readEmployees,
+  sendWhatsApp: sendWhatsAppKristineReply,
+  phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  logger: console,
+});
+
+console.log("âœ… KRISTINE Tagesabschluss registriert");
 // ===================== Medienmigration =====================
 registerMediaMigration(app, {
   dataDir: DATA_DIR,
@@ -3487,10 +3501,10 @@ registerMorningStatus({
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
 }).then((service) => {
   morningStatus = service;
-  console.log("✅ KRISTA Morgenstatus aktiv");
-}).catch((error) => console.error("❌ Morgenstatus konnte nicht gestartet werden:", error));
+  console.log("âœ… KRISTA Morgenstatus aktiv");
+}).catch((error) => console.error("âŒ Morgenstatus konnte nicht gestartet werden:", error));
 
-// Manueller Test für Admin, ohne auf 07:00/08:00 warten zu müssen.
+// Manueller Test fÃ¼r Admin, ohne auf 07:00/08:00 warten zu mÃ¼ssen.
 app.post("/admin/api/morning-status/test", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   if (!morningStatus) return res.status(503).json({ ok: false, error: "Morgenstatus noch nicht bereit" });
@@ -3508,7 +3522,7 @@ app.post("/admin/api/morning-status/test", async (req, res) => {
 app.use((req, res) => res.status(404).send(`Not found: ${req.method} ${req.path}`));
 
 // ===================== Start =====================
-console.log(`Starting Krista ${APP_VERSION} Build ${APP_BUILD} (${APP_STATUS})…`);
+console.log(`Starting Krista ${APP_VERSION} Build ${APP_BUILD} (${APP_STATUS})â€¦`);
 console.log("DATA_DIR=", DATA_DIR);
 console.log("MAIL_FROM=", MAIL_FROM);
 console.log("MAIL_TO_DEFAULT=", MAIL_TO_DEFAULT);
@@ -3518,4 +3532,5 @@ console.log("TRANSCRIBE_MODEL:", OPENAI_TRANSCRIBE_MODEL);
 console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
-app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT}`));
+app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
+
