@@ -201,7 +201,7 @@ function buildPlanningReminder(status, followUp = false) {
     }
   }
 
-  lines.push("", "Bitte Planung ergänzen und speichern.");
+  lines.push("", "👉 Bitte morgen fertig einteilen.");
   return lines.join("\n");
 }
 
