@@ -867,19 +867,25 @@ finish.addEventListener("click", async () => {
   finish.textContent = "Wird gespeichert …";
 
   try {
-    const result = await api("/kristine/api/message", {
-      method: "POST",
-      body: JSON.stringify({
-        employeeId,
-        employeeName: employeeName(employee),
-        text: "Feierabend",
-        date: today,
-        jobId: assignment?.jobId || "",
-        note: document.getElementById("note").value.trim(),
-        dayCloseConfirmed: true,
-        dayCloseComplete: complete
-      })
-    });
+const result = await api("/kristine/api/day-close", {
+  method: "POST",
+  body: JSON.stringify({
+    employeeId,
+    employeeName: employeeName(employee),
+    date: today,
+    jobId: assignment?.jobId || "",
+    jobName: assignment?.jobName || "",
+    note: document.getElementById("note").value.trim(),
+    confirmed: true,
+    checks: {
+      time: Boolean(start || state?.mode === "finished_day"),
+      photos: photoDone,
+      material: materialDone,
+      regie: regieDone,
+      order: orderDone
+    }
+  })
+});
 
     document.getElementById("after").classList.remove("hidden");
     finish.classList.add("hidden");
