@@ -1,3 +1,3 @@
 ﻿Project: KRISTINE_GO
-Version: 2026.08.06 - Test_Release
-Date: 2026-08-06 18:39
+Version: 2026.08.06 - Tagesabschluss als eigenes Formular
+Date: 2026-08-06 18:43
