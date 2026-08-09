@@ -773,19 +773,60 @@ function authenticatedUrl(url) {
               }
         ],
 
-        async save(values) {
-          const answer = String(values[0] || "").trim();
+      async save(values) {
+  const answer = String(values[0] || "").trim();
+  if (!answer) return;
 
-          if (!answer) return;
+  const response = await sendMessage(answer);
+  const reply = response.reply || "";
+  const buttons = Array.isArray(response.buttons)
+    ? response.buttons
+    : [];
 
-          const response = await sendMessage(answer);
+  // KRISTINE hat mehrere passende Baustellen gefunden:
+  // Auswahl wieder groß im Dialog anzeigen.
+  if (buttons.length) {
+    state.assistant = {
+      kind: "site-switch-choice",
+      def: {
+        title: "Baustelle auswählen",
 
-          if (response.reply) {
-            toast(response.reply);
+        steps: [{
+          question: reply || "Welche Baustelle ist richtig?",
+          type: "options",
+          options: buttons
+        }],
+
+        async save(choiceValues) {
+          const choice = String(choiceValues[0] || "").trim();
+          if (!choice) return;
+
+          const finalResponse = await sendMessage(choice);
+
+          if (finalResponse.reply) {
+            toast(finalResponse.reply);
           }
 
-          setTimeout(() => location.reload(), 400);
+          setTimeout(() => location.reload(), 500);
         }
+      },
+
+      index: 0,
+      values: []
+    };
+
+    renderAssistant();
+    elements.kgAssistantDialog.showModal();
+    return;
+  }
+
+  // Keine Auswahl nötig – Baustelle wurde direkt erkannt.
+  if (reply) {
+    toast(reply);
+  }
+
+  setTimeout(() => location.reload(), 500);
+}  
       },
 
       index: 0,
