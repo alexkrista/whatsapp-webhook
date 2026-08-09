@@ -747,10 +747,25 @@ function authenticatedUrl(url) {
   function bindEvents() {
     elements.kgEmployeeButton.onclick = () => elements.kgEmployeeDialog.showModal();
     elements.kgStartButton.onclick = () => sendMessage("Start").catch(showError);
-    elements.kgWrongSiteButton.onclick = () => sendMessage("Andere Baustelle").then(result => {
-      const reply = result.reply || "";
-      if (reply) toast(reply);
-    }).catch(showError);
+   elements.kgWrongSiteButton.onclick = async () => {
+  try {
+    const result = await sendMessage("Andere Baustelle");
+
+    const reply = result.reply || "Welche Baustelle ist richtig?";
+    const buttons = Array.isArray(result.buttons) ? result.buttons : [];
+
+    openAssistantDialog({
+      title: "Baustelle auswählen",
+      text: reply,
+      buttons: buttons.map((label) => ({
+        label,
+        value: label
+      }))
+    });
+  } catch (error) {
+    showError(error);
+  }
+};
 
     elements.kgPauseButton.onclick = () => {
       const mode = state.employeeState?.mode;
