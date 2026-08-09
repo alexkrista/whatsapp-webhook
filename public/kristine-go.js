@@ -874,7 +874,21 @@ function authenticatedUrl(url) {
     };
     elements.kgLunchButton.onclick = () => sendMessage("Mittag").catch(showError);
     elements.kgSwitchButton.onclick = () => sendMessage("Baustelle wechseln").catch(showError);
-    elements.kgFinishButton.onclick = () => openAssistant("finish");
+    elements.kgFinishButton.onclick = () => {
+  const url = new URL("/public/kristine-go-abschluss.html", location.origin);
+
+  const employeeId = getQueryEmployeeId();
+
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+
+  if (employeeId) {
+    url.searchParams.set("employeeId", employeeId);
+  }
+
+  location.href = url.pathname + url.search;
+};
 
     qsa("[data-action]").forEach(button => {
       button.addEventListener("click", () => openAssistant(button.dataset.action));
