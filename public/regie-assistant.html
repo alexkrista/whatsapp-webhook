@@ -148,8 +148,12 @@ async function init() {
   $("next").disabled = !ctx.segments.length;
 
   // Regie darf den kompletten aktiven Materialstamm sehen.
- const materialData = await api(
-  "/api/regie/materials"
+ const response = await fetch("/api/regie/materials");
+const materialData = await response.json();
+
+if (!response.ok) {
+  throw new Error(materialData.error || `HTTP ${response.status}`);
+}
 );
   materials = (materialData.materials || []).map(m => ({
     ...m,
