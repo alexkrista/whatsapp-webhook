@@ -159,3 +159,6 @@ button,a{-webkit-tap-highlight-color:transparent}
   min-height:126px;
   height:100%;
 }
+#kgGreeting {
+  display: none !important;
+}
