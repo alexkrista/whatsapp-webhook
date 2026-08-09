@@ -657,6 +657,26 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
   });
+  // ---------- KRISTINE Regie: Materialstamm nur lesend ----------
+app.get("/api/regie/materials", async (req, res) => {
+  try {
+    const materials = await readJson(MATERIALS_FILE, []);
+
+    let rows = materials.filter((item) => item.active !== false);
+
+    rows = rows.map(decorate);
+
+    res.json({
+      ok: true,
+      materials: rows.slice(0, 5000),
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: String(error?.message || error),
+    });
+  }
+});
 
   app.get("/admin/api/materials/:materialId", async (req, res) => {
     if (!requireAdmin(req, res)) return;

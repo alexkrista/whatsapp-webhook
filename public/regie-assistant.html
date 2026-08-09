@@ -148,10 +148,9 @@ async function init() {
   $("next").disabled = !ctx.segments.length;
 
   // Regie darf den kompletten aktiven Materialstamm sehen.
-  const materialData = await api(
-    "/admin/api/materials?activeOnly=1&limit=5000"
-  );
-
+ const materialData = await api(
+  "/api/regie/materials"
+);
   materials = (materialData.materials || []).map(m => ({
     ...m,
     _search: searchableText(m)
