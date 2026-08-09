@@ -3525,17 +3525,19 @@ app.post("/admin/api/morning-status/test", async (req, res) => {
     ).trim();
 
     // Sicherheit: 07:00-Test niemals ohne Mitarbeiter-ID ausführen
-    if (type === "7" && !employeeId) {
+    if (["645", "7"].includes(type) && !employeeId) {
       return res.status(400).json({
         ok: false,
         error: "Für den 07:00-Test ist employeeId erforderlich.",
       });
     }
 
-    const result =
-      type === "7"
-        ? await morningStatus.runSevenOClock(date, true, employeeId)
-        : await morningStatus.runEightOClock(date, true);
+   const result =
+  type === "645"
+    ? await morningStatus.runSixFortyFive(date, true, employeeId)
+    : type === "7"
+      ? await morningStatus.runSevenOClock(date, true, employeeId)
+      : await morningStatus.runEightOClock(date, true);
 
     res.json({ ok: true, type, date, employeeId, result });
   } catch (e) {

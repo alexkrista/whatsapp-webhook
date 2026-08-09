@@ -1,9 +1,9 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0024.0
-// KRISTA: 07:00 Startprüfung, 08:00 Chefstatus,
-// 15:00 Planung morgen, 15:30 Nachfassung.
+// Build 0025.0
+// KRISTA: 06:45 Morgenbegrüßung, 07:00 Startprüfung,
+// 08:00 Chefstatus, 15:00 Planung morgen, 15:30 Nachfassung.
 //
 // Bestehende Datenstruktur und Exports bleiben erhalten.
 // Überarbeitet wurden vor allem:
@@ -619,7 +619,7 @@ function buildChefReport(statuses, date) {
   return lines.join("\n");
 }
 
-function reminderText(employee, assignment, kristineUrl) {
+function morningGreetingText(employee, assignment, kristineUrl) {
   const name = displayName(employee);
   const start = String(assignment?.from || OFFICIAL_START).trim();
   const place = [assignment?.city, assignment?.address]
@@ -641,10 +641,17 @@ function reminderText(employee, assignment, kristineUrl) {
   lines.push("");
   lines.push("Los geht’s mit KRISTINE →");
   lines.push(kristineUrl);
-  lines.push("");
-  lines.push("Falls du später kommst oder heute nicht arbeitest, gib bitte kurz Bescheid.");
-
   return lines.join("\n");
+}
+
+function startReminderText(employee, assignment) {
+  const name = displayName(employee);
+  return [
+    `Guten Morgen ${name}.`,
+    `Ich habe noch keinen Arbeitsbeginn bei ${jobLabel(assignment)} erhalten.`,
+    "",
+    "Kommst du heute später oder arbeitest du heute nicht?",
+  ].join("\n");
 }
 
 function tomorrowPlanningStatus({
@@ -865,6 +872,68 @@ async function registerMorningStatus({
     };
   }
 
+async function runSixFortyFive(
+  date = localIsoDate(),
+  force = false,
+  onlyEmployeeId = ""
+) {
+    const state = await loadState();
+
+    if (!force && state.scheduler.morningGreeting === date) {
+      return { skipped: true };
+    }
+
+    const employeesToCheck = onlyEmployeeId
+      ? activeEmployees(state.employees).filter(
+          (employee) => String(employee.id) === String(onlyEmployeeId)
+        )
+      : activeEmployees(state.employees);
+
+    const statuses = employeesToCheck.map(
+      (employee) => statusForEmployee({ employee, ...state, date })
+    );
+
+    const recipients = statuses.filter(
+      (status) => status.category !== "non_work" && Boolean(status.assignment)
+    );
+
+    let sent = 0;
+    for (const status of recipients) {
+      try {
+        await sendWhatsApp({
+          phoneNumberId,
+          to: normalizePhone(status.employee.phone),
+          reply: morningGreetingText(
+            status.employee,
+            status.assignment,
+            kristineGoUrl(status.employee)
+          ),
+        });
+        sent += 1;
+      } catch (error) {
+        logger.error(
+          "06:45 Morgenbegrüßung fehlgeschlagen",
+          displayName(status.employee),
+          error
+        );
+      }
+    }
+
+    await saveRun("morningGreeting", date, state.scheduler);
+
+    logger.log("KRISTA 06:45 Morgenbegrüßung", {
+      date,
+      sent,
+      suppressed: statuses.length - recipients.length,
+    });
+
+    return {
+      sent,
+      suppressed: statuses.length - recipients.length,
+      statuses,
+    };
+  }
+
 async function runSevenOClock(
   date = localIsoDate(),
   force = false,
@@ -905,10 +974,9 @@ const missing = statuses.filter(
         await sendWhatsApp({
           phoneNumberId,
           to: normalizePhone(status.employee.phone),
-          reply: reminderText(
+          reply: startReminderText(
             status.employee,
-            status.assignment,
-            kristineGoUrl(status.employee)
+            status.assignment
           ),
           buttons: [
             "Komme später",
@@ -1112,6 +1180,10 @@ const missing = statuses.filter(
       // Nachholfenster:
       // Render-Neustarts oder kurze Schlafphasen verlieren
       // die Ausführung nicht.
+      if (inWindow(hm, "06:45", "06:59")) {
+        await runSixFortyFive(date);
+      }
+
       if (inWindow(hm, "07:00", "07:59")) {
         await runSevenOClock(date);
       }
@@ -1154,6 +1226,7 @@ const missing = statuses.filter(
     {
       timezone: TZ,
       jobs: [
+        "06:45 Morgenbegrüßung",
         "07:00 Startprüfung",
         "08:00 Chefstatus",
         "15:00 Planung morgen",
@@ -1163,6 +1236,7 @@ const missing = statuses.filter(
   );
 
   return {
+    runSixFortyFive,
     runSevenOClock,
     runEightOClock,
     runFifteenOClock,
