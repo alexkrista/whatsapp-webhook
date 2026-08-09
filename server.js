@@ -3499,6 +3499,8 @@ registerMorningStatus({
   sendWhatsApp: sendWhatsAppKristineReply,
   chefPhone: process.env.CHEF_PHONE || "",
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
+  publicBaseUrl: PUBLIC_BASE_URL,
+adminToken: ADMIN_TOKEN,
 }).then((service) => {
   morningStatus = service;
   console.log("âœ… KRISTA Morgenstatus aktiv");

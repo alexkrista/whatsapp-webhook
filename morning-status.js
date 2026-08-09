@@ -619,16 +619,32 @@ function buildChefReport(statuses, date) {
   return lines.join("\n");
 }
 
-function reminderText(employee, assignment) {
+function reminderText(employee, assignment, kristineUrl) {
   const name = displayName(employee);
+  const start = String(assignment?.from || OFFICIAL_START).trim();
+  const place = [assignment?.city, assignment?.address]
+    .filter(Boolean)
+    .join(" · ");
 
-  return [
-    `Guten Morgen ${name}.`,
-    `Du bist heute auf ${jobLabel(assignment)} eingeteilt.`,
+  const lines = [
+    `Guten Morgen ${name} 👋`,
     "",
-    "Ich habe noch keinen Arbeitsbeginn erhalten.",
-    "Kommst du heute später?",
-  ].join("\n");
+    "Heute geht’s zuerst zu:",
+    `📍 ${jobLabel(assignment)}`,
+  ];
+
+  if (place) {
+    lines.push(place);
+  }
+
+  lines.push(`🕒 Start: ${start} Uhr`);
+  lines.push("");
+  lines.push("Los geht’s mit KRISTINE →");
+  lines.push(kristineUrl);
+  lines.push("");
+  lines.push("Falls du später kommst oder heute nicht arbeitest, gib bitte kurz Bescheid.");
+
+  return lines.join("\n");
 }
 
 function tomorrowPlanningStatus({
@@ -735,6 +751,8 @@ async function registerMorningStatus({
   sendWhatsApp,
   chefPhone,
   phoneNumberId,
+  publicBaseUrl = "https://protokoll.krista.at",
+  adminToken = "",
   logger = console,
 }) {
   if (!dataDir) {
@@ -747,6 +765,17 @@ async function registerMorningStatus({
 
   if (typeof sendWhatsApp !== "function") {
     throw new Error("registerMorningStatus: sendWhatsApp fehlt");
+  }
+
+  function kristineGoUrl(employee) {
+    const base = String(publicBaseUrl || "https://protokoll.krista.at").replace(/\/$/, "");
+    const url = new URL(`${base}/public/kristine-go.html`);
+
+    const id = String(employee?.id || employee?.employeeId || "").trim();
+    if (id) url.searchParams.set("employeeId", id);
+    if (adminToken) url.searchParams.set("token", String(adminToken));
+
+    return url.toString();
   }
 
   const kristineDir = path.join(dataDir, "_kristine");
@@ -871,10 +900,10 @@ async function registerMorningStatus({
           to: normalizePhone(status.employee.phone),
           reply: reminderText(
             status.employee,
-            status.assignment
+            status.assignment,
+            kristineGoUrl(status.employee)
           ),
           buttons: [
-            "Start",
             "Komme später",
             "Heute nicht",
           ],
