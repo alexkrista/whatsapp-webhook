@@ -865,10 +865,11 @@ async function registerMorningStatus({
     };
   }
 
-  async function runSevenOClock(
-    date = localIsoDate(),
-    force = false
-  ) {
+async function runSevenOClock(
+  date = localIsoDate(),
+  force = false,
+  onlyEmployeeId = ""
+) {
     const state = await loadState();
 
     if (
@@ -880,14 +881,20 @@ async function registerMorningStatus({
       };
     }
 
-    const statuses = activeEmployees(state.employees).map(
-      (employee) =>
-        statusForEmployee({
-          employee,
-          ...state,
-          date,
-        })
-    );
+    const employeesToCheck = onlyEmployeeId
+  ? activeEmployees(state.employees).filter(
+      (employee) => String(employee.id) === String(onlyEmployeeId)
+    )
+  : activeEmployees(state.employees);
+
+const statuses = employeesToCheck.map(
+  (employee) =>
+    statusForEmployee({
+      employee,
+      ...state,
+      date,
+    })
+);
 
     const missing = statuses.filter(
       (status) => status.category === "missing"

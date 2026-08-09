@@ -3507,16 +3507,42 @@ adminToken: ADMIN_TOKEN,
 }).catch((error) => console.error("âŒ Morgenstatus konnte nicht gestartet werden:", error));
 
 // Manueller Test fÃ¼r Admin, ohne auf 07:00/08:00 warten zu mÃ¼ssen.
+// Manueller Morgenstatus-Test – sicher auf einzelnen Mitarbeiter begrenzbar
 app.post("/admin/api/morning-status/test", async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  if (!morningStatus) return res.status(503).json({ ok: false, error: "Morgenstatus noch nicht bereit" });
+  if (!morningStatus) {
+    return res.status(503).json({
+      ok: false,
+      error: "Morgenstatus noch nicht bereit",
+    });
+  }
+
   try {
     const date = String(req.body?.date || req.query.date || todayISO());
     const type = String(req.body?.type || req.query.type || "8");
-    const result = type === "7" ? await morningStatus.runSevenOClock(date, true) : await morningStatus.runEightOClock(date, true);
-    res.json({ ok: true, type, date, result });
+    const employeeId = String(
+      req.body?.employeeId || req.query.employeeId || ""
+    ).trim();
+
+    // Sicherheit: 07:00-Test niemals ohne Mitarbeiter-ID ausführen
+    if (type === "7" && !employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Für den 07:00-Test ist employeeId erforderlich.",
+      });
+    }
+
+    const result =
+      type === "7"
+        ? await morningStatus.runSevenOClock(date, true, employeeId)
+        : await morningStatus.runEightOClock(date, true);
+
+    res.json({ ok: true, type, date, employeeId, result });
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    res.status(500).json({
+      ok: false,
+      error: String(e?.message || e),
+    });
   }
 });
 
