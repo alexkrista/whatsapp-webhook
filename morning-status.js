@@ -893,9 +893,9 @@ async function runSixFortyFive(
       (employee) => statusForEmployee({ employee, ...state, date })
     );
 
-    const recipients = statuses.filter(
-      (status) => status.category !== "non_work" && Boolean(status.assignment)
-    );
+  const recipients = statuses.filter(
+  (status) => Boolean(status.assignment)
+);
 
     let sent = 0;
     for (const status of recipients) {
