@@ -238,7 +238,9 @@ function authenticatedUrl(url) {
   }
 
   function renderSite() {
-    const a = state.currentAssignment;
+    const a =
+  state.employeeState?.activeJobOverride ||
+  state.currentAssignment;
     const mode = state.employeeState?.mode || "idle";
     elements.kgSiteTitle.textContent = assignmentTitle(a);
     elements.kgSiteAddress.textContent = assignmentPlace(a) || (a ? "Adresse nicht hinterlegt" : "Für heute ist noch keine Baustelle geplant.");
