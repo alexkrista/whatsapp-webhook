@@ -896,9 +896,12 @@ const statuses = employeesToCheck.map(
     })
 );
 
-    const missing = statuses.filter(
-      (status) => status.category === "missing"
-    );
+   const missing =
+  force && onlyEmployeeId
+    ? statuses
+    : statuses.filter(
+        (status) => status.category === "missing"
+      );
 
     for (const status of missing) {
       try {
