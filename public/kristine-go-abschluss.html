@@ -6,908 +6,199 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISTINE GO · Tagesabschluss</title>
   <style>
-    :root{
-      --navy:#10233f;
-      --blue:#246fd6;
-      --blue-dark:#1559b7;
-      --green:#24945f;
-      --green-soft:#e9f7f0;
-      --orange:#df8a13;
-      --orange-soft:#fff3df;
-      --red:#d64747;
-      --red-soft:#fff0f0;
-      --ink:#172235;
-      --muted:#6d798b;
-      --border:#dde5ee;
-      --bg:#f4f7fa;
-      --card:#ffffff;
-      --shadow:0 12px 32px rgba(16,35,63,.09);
-      --radius:22px;
-      font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    }
-
-    *{box-sizing:border-box}
-    html{background:var(--bg)}
-    body{margin:0;background:var(--bg);color:var(--ink)}
-    button,a,textarea{font:inherit;-webkit-tap-highlight-color:transparent}
-    button{cursor:pointer}
-    .hidden{display:none!important}
-
+    :root{--navy:#10233f;--blue:#246fd6;--blue2:#1559b7;--green:#24945f;--green-soft:#e8f6ef;--orange:#e79218;--orange-soft:#fff3df;--red:#d54949;--red-soft:#fff0f0;--ink:#172235;--muted:#6d798b;--border:#dde5ee;--bg:#f4f7fa;--card:#fff;--shadow:0 12px 32px rgba(16,35,63,.09);--radius:22px;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--ink)}button,a,textarea{font:inherit;-webkit-tap-highlight-color:transparent}button{cursor:pointer}.hidden{display:none!important}
     .app{min-height:100dvh;max-width:680px;margin:0 auto;background:var(--bg)}
-
-    .topbar{
-      position:sticky;
-      top:0;
-      z-index:20;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:16px 17px;
-      background:var(--navy);
-      color:#fff;
-      box-shadow:0 6px 22px rgba(16,35,63,.18);
-    }
-
-    .brand{font-size:20px;font-weight:950;letter-spacing:.04em}
-    .subbrand{font-size:11px;opacity:.72;margin-top:2px}
-
-    .back{
-      display:inline-flex;
-      align-items:center;
-      gap:7px;
-      min-height:40px;
-      padding:8px 11px;
-      border:1px solid rgba(255,255,255,.18);
-      border-radius:999px;
-      background:rgba(255,255,255,.08);
-      color:#fff;
-      text-decoration:none;
-      font-size:12px;
-      font-weight:850;
-    }
-
-    main{padding:16px 14px 34px}
-
-    .hero{
-      position:relative;
-      overflow:hidden;
-      padding:20px;
-      border-radius:26px;
-      background:linear-gradient(145deg,var(--blue),var(--blue-dark));
-      color:#fff;
-      box-shadow:var(--shadow);
-    }
-
-    .hero:after{
-      content:"";
-      position:absolute;
-      right:-80px;
-      top:-105px;
-      width:230px;
-      height:230px;
-      border-radius:50%;
-      background:rgba(255,255,255,.07);
-    }
-
-    .eyebrow{
-      position:relative;
-      z-index:1;
-      text-transform:uppercase;
-      letter-spacing:.075em;
-      font-size:11px;
-      font-weight:850;
-      opacity:.75;
-    }
-
-    h1{
-      position:relative;
-      z-index:1;
-      margin:7px 0 4px;
-      font-size:29px;
-      line-height:1.05;
-    }
-
-    .hero p{
-      position:relative;
-      z-index:1;
-      margin:0;
-      opacity:.82;
-      font-size:13px;
-    }
-
-    .summary{
-      position:relative;
-      z-index:1;
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:9px;
-      margin-top:17px;
-    }
-
-    .summary-box{
-      padding:12px;
-      border:1px solid rgba(255,255,255,.17);
-      border-radius:16px;
-      background:rgba(255,255,255,.11);
-    }
-
-    .summary-box small{display:block;opacity:.75;font-size:10px}
-    .summary-box strong{display:block;margin-top:4px;font-size:15px}
-
-    .progress-wrap{
-      position:relative;
-      z-index:1;
-      margin-top:15px;
-    }
-
-    .progress-head{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:7px;
-      font-size:11px;
-      font-weight:850;
-    }
-
-    .progress{
-      height:10px;
-      border-radius:999px;
-      overflow:hidden;
-      background:rgba(255,255,255,.2);
-    }
-
-    .progress-bar{
-      height:100%;
-      width:0%;
-      border-radius:999px;
-      background:#fff;
-      transition:width .25s ease;
-    }
-
-    .section{margin-top:18px}
-
-    .section-head{
-      display:flex;
-      align-items:end;
-      justify-content:space-between;
-      gap:12px;
-      margin:0 3px 10px;
-    }
-
-    .section-head h2{margin:0;font-size:18px}
-    .section-head span{font-size:11px;color:var(--muted);text-align:right}
-
-    .card{
-      border:1px solid var(--border);
-      border-radius:var(--radius);
-      background:var(--card);
-      box-shadow:var(--shadow);
-    }
-
-    .check-list{overflow:hidden}
-
-    .check-row{
-      display:grid;
-      grid-template-columns:auto 1fr auto;
-      align-items:center;
-      gap:11px;
-      width:100%;
-      padding:15px;
-      border:0;
-      border-bottom:1px solid #edf1f5;
-      background:#fff;
-      color:var(--ink);
-      text-align:left;
-    }
-
-    .check-row:last-child{border-bottom:0}
-
-    .status{
-      display:grid;
-      place-items:center;
-      width:31px;
-      height:31px;
-      border-radius:50%;
-      font-size:13px;
-      font-weight:950;
-    }
-
-    .status.ok{background:var(--green-soft);color:var(--green)}
-    .status.open{background:var(--orange-soft);color:#a86b08}
-    .status.bad{background:var(--red-soft);color:var(--red)}
-
-    .row-copy strong{display:block;font-size:14px}
-    .row-copy small{display:block;margin-top:3px;color:var(--muted);font-size:11px;line-height:1.35}
-
-    .action-chip{
-      padding:6px 8px;
-      border-radius:999px;
-      background:#f2f5f8;
-      color:var(--blue);
-      font-size:10px;
-      font-weight:900;
-      white-space:nowrap;
-    }
-
-    .photo-categories{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px;
-      padding:12px 15px 15px;
-      border-top:1px solid #edf1f5;
-      background:#fbfcfd;
-    }
-
-    .photo-chip{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      padding:9px 10px;
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:#fff;
-      font-size:11px;
-      font-weight:800;
-    }
-
-    .photo-chip b{font-size:11px}
-    .photo-chip.ok b{color:var(--green)}
-    .photo-chip.open b{color:var(--orange)}
-    .photo-chip.bad b{color:var(--red)}
-
-    .note-card{padding:16px}
-
-    textarea{
-      width:100%;
-      min-height:122px;
-      padding:14px;
-      border:1px solid var(--border);
-      border-radius:15px;
-      background:#fbfcfd;
-      color:var(--ink);
-      resize:vertical;
-      outline:none;
-    }
-
-    textarea:focus{
-      border-color:var(--blue);
-      box-shadow:0 0 0 3px rgba(36,111,214,.11);
-    }
-
-    .helper{margin:9px 2px 0;color:var(--muted);font-size:11px}
-
-    .confirm-card{padding:16px}
-
-    .confirm-row{
-      display:flex;
-      align-items:flex-start;
-      gap:11px;
-    }
-
-    .confirm-row input{
-      width:22px;
-      height:22px;
-      margin:0;
-      accent-color:var(--green);
-      flex:0 0 auto;
-    }
-
-    .confirm-row label{font-size:13px;line-height:1.45}
-
-    .warning{
-      margin-top:12px;
-      padding:12px;
-      border-left:4px solid var(--orange);
-      border-radius:12px;
-      background:var(--orange-soft);
-      color:#6f4a0a;
-      font-size:12px;
-      line-height:1.45;
-    }
-
-    .finish{
-      width:100%;
-      min-height:61px;
-      margin-top:16px;
-      border:0;
-      border-radius:19px;
-      background:var(--navy);
-      color:#fff;
-      font-size:16px;
-      font-weight:950;
-      box-shadow:var(--shadow);
-    }
-
-    .finish:disabled{opacity:.45;cursor:not-allowed}
-    .finish.ready{background:var(--green)}
-
-    .after{padding:22px;text-align:center}
-
-    .after-icon{
-      display:grid;
-      place-items:center;
-      width:64px;
-      height:64px;
-      margin:0 auto 13px;
-      border-radius:50%;
-      background:var(--green-soft);
-      font-size:30px;
-    }
-
-    .after h2{margin:0 0 7px}
-    .after p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
-
-    .after a{
-      display:inline-flex;
-      margin-top:16px;
-      color:var(--blue);
-      font-weight:900;
-      text-decoration:none;
-    }
-
-    .toast{
-      position:fixed;
-      left:50%;
-      bottom:22px;
-      z-index:50;
-      max-width:calc(100% - 28px);
-      padding:12px 16px;
-      border-radius:999px;
-      background:var(--navy);
-      color:#fff;
-      font-size:12px;
-      font-weight:850;
-      opacity:0;
-      transform:translate(-50%,18px);
-      transition:.2s;
-    }
-
-    .toast.show{opacity:1;transform:translate(-50%,0)}
-    .loading{display:grid;place-items:center;min-height:60vh;color:var(--muted);font-weight:800}
-
-    @media(max-width:370px){
-      .summary{grid-template-columns:1fr}
-      .photo-categories{grid-template-columns:1fr}
-    }
+    .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px;background:var(--navy);color:#fff;box-shadow:0 6px 22px rgba(16,35,63,.18)}
+    .brand{font-size:20px;font-weight:950;letter-spacing:.04em}.subbrand{font-size:11px;opacity:.72;margin-top:2px}
+    .back{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:8px 11px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(255,255,255,.08);color:#fff;text-decoration:none;font-size:12px;font-weight:850}
+    main{padding:16px 14px 36px}
+    .hero{position:relative;overflow:hidden;padding:20px;border-radius:26px;background:linear-gradient(145deg,var(--blue),var(--blue2));color:#fff;box-shadow:var(--shadow)}
+    .hero:after{content:"";position:absolute;right:-80px;top:-105px;width:230px;height:230px;border-radius:50%;background:rgba(255,255,255,.07)}
+    .eyebrow{position:relative;z-index:1;text-transform:uppercase;letter-spacing:.075em;font-size:11px;font-weight:850;opacity:.75}
+    h1{position:relative;z-index:1;margin:7px 0 4px;font-size:29px;line-height:1.05}.hero p{position:relative;z-index:1;margin:0;opacity:.82;font-size:13px}
+    .summary{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:17px}
+    .summary-box{min-width:0;padding:11px;border:1px solid rgba(255,255,255,.17);border-radius:16px;background:rgba(255,255,255,.11)}
+    .summary-box small{display:block;opacity:.75;font-size:9px}.summary-box strong{display:block;margin-top:4px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .progress-wrap{position:relative;z-index:1;margin-top:14px}.progress-head{display:flex;justify-content:space-between;margin-bottom:7px;font-size:11px;font-weight:850}
+    .progress{height:9px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.2)}.progress-bar{height:100%;width:0;background:#fff;border-radius:999px;transition:width .2s ease}
+    .section{margin-top:18px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 3px 10px}.section-head h2{margin:0;font-size:18px}.section-head span{font-size:11px;color:var(--muted);text-align:right}
+    .card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
+    .day-overview{padding:15px}.overview-top{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}.metric{padding:11px;border-radius:14px;background:#f5f8fb}.metric small{display:block;color:var(--muted);font-size:9px}.metric strong{display:block;margin-top:3px;font-size:13px}
+    .timeline{display:grid}.timeline-row{display:grid;grid-template-columns:52px 18px 1fr;gap:8px;align-items:start;min-height:48px}.timeline-time{padding-top:3px;color:var(--muted);font-size:11px;font-weight:800}.timeline-rail{position:relative;display:flex;justify-content:center;height:100%}.timeline-rail:after{content:"";position:absolute;top:14px;bottom:-7px;width:2px;background:#dce5ee}.timeline-row:last-child .timeline-rail:after{display:none}.timeline-dot{position:relative;z-index:1;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--blue);font-size:8px}.timeline-dot.pause{border-color:var(--orange)}.timeline-dot.end{border-color:var(--green)}.timeline-copy{padding:1px 0 12px}.timeline-copy strong{display:block;font-size:13px}.timeline-copy small{display:block;margin-top:2px;color:var(--muted);font-size:11px;line-height:1.35}.empty-timeline{padding:5px 0;color:var(--muted);font-size:12px}
+    .check-list{overflow:hidden}.check-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;width:100%;padding:15px;border:0;border-bottom:1px solid #edf1f5;background:#fff;color:var(--ink);text-align:left}.check-row:last-child{border-bottom:0}
+    .status{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;font-size:13px;font-weight:950}.status.ok{background:var(--green-soft);color:var(--green)}.status.open{background:var(--orange-soft);color:#a86b08}.status.bad{background:var(--red-soft);color:var(--red)}
+    .row-copy strong{display:block;font-size:14px}.row-copy small{display:block;margin-top:3px;color:var(--muted);font-size:11px;line-height:1.35}.action-chip{padding:6px 8px;border-radius:999px;background:#f2f5f8;color:var(--blue);font-size:10px;font-weight:900;white-space:nowrap}
+    .photo-categories{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 15px 15px;border-top:1px solid #edf1f5;background:#fbfcfd}.photo-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border-radius:12px;border:1px solid var(--border);background:#fff;font-size:11px;font-weight:800}.photo-chip b{font-size:11px}.photo-chip.ok b{color:var(--green)}.photo-chip.bad b{color:var(--red)}
+    .note-card{padding:16px}textarea{width:100%;min-height:112px;padding:14px;border:1px solid var(--border);border-radius:15px;background:#fbfcfd;color:var(--ink);resize:vertical;outline:none}textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(36,111,214,.11)}.helper{margin:9px 2px 0;color:var(--muted);font-size:11px}
+    .confirm-card{padding:16px}.confirm-row{display:flex;align-items:flex-start;gap:11px}.confirm-row input{width:22px;height:22px;margin:0;accent-color:var(--green);flex:0 0 auto}.confirm-row label{font-size:13px;line-height:1.45}.warning{margin-top:12px;padding:12px;border-left:4px solid var(--orange);border-radius:12px;background:var(--orange-soft);color:#6f4a0a;font-size:12px;line-height:1.45}
+    .finish{width:100%;min-height:61px;margin-top:16px;border:0;border-radius:19px;background:var(--navy);color:#fff;font-size:16px;font-weight:950;box-shadow:var(--shadow)}.finish:disabled{opacity:.45;cursor:not-allowed}.finish.ready{background:var(--green)}
+    .after{padding:24px;text-align:center}.after-icon{display:grid;place-items:center;width:68px;height:68px;margin:0 auto 13px;border-radius:50%;background:var(--green-soft);color:var(--green);font-size:32px;font-weight:900}.after h2{margin:0 0 7px}.after p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.after-actions{display:grid;gap:9px;margin-top:17px}.after-actions a{display:flex;align-items:center;justify-content:center;min-height:48px;padding:10px 14px;border-radius:14px;text-decoration:none;font-weight:900}.back-go{background:var(--navy);color:#fff}.open-wa{border:1px solid var(--border);background:#fff;color:var(--green)}.auto-return{margin-top:9px;color:var(--muted);font-size:10px}
+    .toast{position:fixed;left:50%;bottom:22px;z-index:50;max-width:calc(100% - 28px);padding:12px 16px;border-radius:999px;background:var(--navy);color:#fff;font-size:12px;font-weight:850;opacity:0;transform:translate(-50%,18px);transition:.2s}.toast.show{opacity:1;transform:translate(-50%,0)}
+    .loading{display:grid;place-items:center;min-height:60vh;color:var(--muted);font-weight:800;text-align:center;padding:24px}
+    @media(max-width:430px){.summary{grid-template-columns:1fr 1fr}.summary-box:first-child{grid-column:1/-1}.overview-top{grid-template-columns:1fr 1fr}.metric:first-child{grid-column:1/-1}}@media(max-width:370px){.photo-categories{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
 <div class="app">
-  <header class="topbar">
-    <div>
-      <div class="brand">KRISTINE</div>
-      <div class="subbrand">Tagesabschluss</div>
-    </div>
-    <a id="backLink" class="back" href="/public/kristine-go.html">← Arbeitstag</a>
-  </header>
-
-  <main>
-    <div id="loading" class="loading">KRISTINE prüft deinen Tag …</div>
-
-    <div id="content" class="hidden">
-      <section class="hero">
-        <div class="eyebrow">Feierabendkontrolle</div>
-        <h1 id="title">Tag prüfen</h1>
-        <p id="subtitle">Kurz kontrollieren, ergänzen und verbindlich bestätigen.</p>
-
-        <div class="summary">
-          <div class="summary-box">
-            <small>Baustelle</small>
-            <strong id="site">–</strong>
-          </div>
-          <div class="summary-box">
-            <small>Arbeitszeit</small>
-            <strong id="time">–</strong>
-          </div>
-        </div>
-
-        <div class="progress-wrap">
-          <div class="progress-head">
-            <span>Tagesabschluss</span>
-            <span id="progressText">0 %</span>
-          </div>
-          <div class="progress">
-            <div id="progressBar" class="progress-bar"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Ist alles vollständig?</h2>
-          <span>Fehlendes direkt öffnen</span>
-        </div>
-
-        <div class="card check-list">
-          <button class="check-row" type="button" data-kind="time">
-            <span id="statusTime" class="status ok">✓</span>
-            <span class="row-copy">
-              <strong>Arbeitszeit</strong>
-              <small id="textTime">geprüft</small>
-            </span>
-            <span class="action-chip">Prüfen</span>
-          </button>
-
-          <button class="check-row" type="button" data-kind="photo">
-            <span id="statusPhoto" class="status open">!</span>
-            <span class="row-copy">
-              <strong>Fotodokumentation</strong>
-              <small id="textPhoto">Kategorien werden geprüft</small>
-            </span>
-            <span class="action-chip">Öffnen</span>
-          </button>
-
-          <div class="photo-categories">
-            <div id="photoBefore" class="photo-chip open"><span>Vorher</span><b>offen</b></div>
-            <div id="photoProgress" class="photo-chip open"><span>Fortschritt</span><b>offen</b></div>
-            <div id="photoAfter" class="photo-chip open"><span>Nachher</span><b>offen</b></div>
-            <div id="photoComplaint" class="photo-chip open"><span>Reklamation</span><b>offen</b></div>
-          </div>
-
-          <button class="check-row" type="button" data-kind="material">
-            <span id="statusMaterial" class="status open">!</span>
-            <span class="row-copy">
-              <strong>Material</strong>
-              <small id="textMaterial">noch nicht bestätigt</small>
-            </span>
-            <span class="action-chip">Öffnen</span>
-          </button>
-
-          <button class="check-row" type="button" data-kind="regie">
-            <span id="statusRegie" class="status open">!</span>
-            <span class="row-copy">
-              <strong>Regie</strong>
-              <small id="textRegie">noch nicht geprüft</small>
-            </span>
-            <span class="action-chip">Öffnen</span>
-          </button>
-
-          <button class="check-row" type="button" data-kind="order">
-            <span id="statusOrder" class="status open">!</span>
-            <span class="row-copy">
-              <strong>Materialbedarf</strong>
-              <small id="textOrder">heute / morgen noch offen</small>
-            </span>
-            <span class="action-chip">Öffnen</span>
-          </button>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Besonderheiten heute</h2>
-          <span>optional</span>
-        </div>
-
-        <div class="card note-card">
-          <textarea id="note" placeholder="Was soll das Büro oder die nächste Mannschaft wissen?"></textarea>
-          <div class="helper">Die Notiz bleibt baustellen- und tagesbezogen erhalten.</div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Verbindlich bestätigen</h2>
-          <span>bearbeitbar bis zur Freigabe</span>
-        </div>
-
-        <div class="card confirm-card">
-          <div class="confirm-row">
-            <input id="confirm" type="checkbox">
-            <label for="confirm">
-              Ich habe Arbeitszeit, Fotodokumentation, Material, Regie und Materialbedarf geprüft.
-              Meine Angaben sind vollständig.
-            </label>
-          </div>
-
-          <div id="openWarning" class="warning">
-            Es sind noch offene Punkte vorhanden. Du kannst sie direkt oben öffnen und ergänzen.
-          </div>
-        </div>
-      </section>
-
-      <button id="finish" class="finish" type="button" disabled>
-        Tag bestätigen & Feierabend
-      </button>
-
-      <section id="after" class="card after hidden">
-        <div class="after-icon">✓</div>
-        <h2>Tag abgeschlossen</h2>
-        <p>
-          Dein Tagesabschluss wurde gespeichert. Wird später etwas geändert,
-          erhältst du über WhatsApp eine neue Aufforderung zur Bestätigung.
-        </p>
-        <a id="afterBack" href="/public/kristine-go.html">Zurück zu KRISTINE →</a>
-      </section>
-    </div>
-  </main>
+<header class="topbar"><div><div class="brand">KRISTINE</div><div class="subbrand">Tagesabschluss</div></div><a id="backLink" class="back" href="/public/kristine-go.html">← Arbeitstag</a></header>
+<main>
+<div id="loading" class="loading">KRISTINE prüft deinen Tag …</div>
+<div id="content" class="hidden">
+<section class="hero">
+<div class="eyebrow">Feierabendkontrolle</div>
+<h1 id="title">Tag prüfen</h1>
+<p>Kurz kontrollieren, bei Bedarf ändern und verbindlich bestätigen.</p>
+<div class="summary">
+<div class="summary-box"><small>Aktuelle / letzte Baustelle</small><strong id="site">–</strong></div>
+<div class="summary-box"><small>Arbeitszeit</small><strong id="workTotal">–</strong></div>
+<div class="summary-box"><small>Pause</small><strong id="pauseTotal">–</strong></div>
 </div>
+<div class="progress-wrap"><div class="progress-head"><span>Tagesabschluss</span><span id="progressText">0 %</span></div><div class="progress"><div id="progressBar" class="progress-bar"></div></div></div>
+</section>
 
+<section class="section">
+<div class="section-head"><h2>Dein heutiger Verlauf</h2><span>Zeiten & Baustellen auf einen Blick</span></div>
+<div class="card day-overview">
+<div class="overview-top">
+<div class="metric"><small>Erster Start</small><strong id="firstStart">–</strong></div>
+<div class="metric"><small>Baustellen</small><strong id="siteCount">0</strong></div>
+<div class="metric"><small>Letzter Status</small><strong id="lastStatus">–</strong></div>
+</div>
+<div id="timeline" class="timeline"></div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-head"><h2>Ist alles vollständig?</h2><span>Hier kannst du noch ändern</span></div>
+<div class="card check-list">
+<button class="check-row" type="button" data-kind="time"><span id="statusTime" class="status ok">✓</span><span class="row-copy"><strong>Arbeitszeit</strong><small id="textTime">geprüft</small></span><span class="action-chip">Ändern</span></button>
+<button class="check-row" type="button" data-kind="photo"><span id="statusPhoto" class="status open">!</span><span class="row-copy"><strong>Fotodokumentation</strong><small id="textPhoto">noch nicht geprüft</small></span><span class="action-chip">Fotos öffnen</span></button>
+<div class="photo-categories">
+<div id="photoBefore" class="photo-chip ok"><span>Vorher</span><b>optional</b></div>
+<div id="photoProgress" class="photo-chip bad"><span>Fortschritt</span><b>fehlt</b></div>
+<div id="photoAfter" class="photo-chip ok"><span>Nachher</span><b>optional</b></div>
+<div id="photoComplaint" class="photo-chip ok"><span>Reklamation</span><b>optional</b></div>
+</div>
+<button class="check-row" type="button" data-kind="material"><span id="statusMaterial" class="status open">!</span><span class="row-copy"><strong>Materialdokumentation</strong><small id="textMaterial">noch nicht geprüft</small></span><span class="action-chip">Bearbeiten</span></button>
+<button class="check-row" type="button" data-kind="regie"><span id="statusRegie" class="status ok">✓</span><span class="row-copy"><strong>Regie</strong><small id="textRegie">bei Bedarf prüfen</small></span><span class="action-chip">Bearbeiten</span></button>
+<button class="check-row" type="button" data-kind="order"><span id="statusOrder" class="status open">!</span><span class="row-copy"><strong>Bestellung</strong><small id="textOrder">heute / morgen noch offen</small></span><span class="action-chip">Bearbeiten</span></button>
+</div>
+</section>
+
+<section class="section"><div class="section-head"><h2>Besonderheiten heute</h2><span>optional</span></div><div class="card note-card"><textarea id="note" placeholder="Was soll das Büro oder die nächste Mannschaft wissen?"></textarea><div class="helper">Die Notiz bleibt baustellen- und tagesbezogen erhalten.</div></div></section>
+<section class="section"><div class="section-head"><h2>Verbindlich bestätigen</h2><span>letzte Kontrolle</span></div><div class="card confirm-card"><div class="confirm-row"><input id="confirm" type="checkbox"><label for="confirm">Ich habe Arbeitszeit, Fotodokumentation, Materialdokumentation, Regie und Bestellung geprüft.</label></div><div id="openWarning" class="warning">Es sind noch offene Punkte vorhanden. Du kannst sie oben direkt bearbeiten und trotzdem bewusst bestätigen.</div></div></section>
+<button id="finish" class="finish" type="button" disabled>Tag bestätigen & Feierabend</button>
+
+<section id="after" class="card after hidden">
+<div class="after-icon">✓</div><h2>Feierabend</h2><p id="afterText">Tagesabschluss gespeichert. Deine WhatsApp-Bestätigung wird versendet.</p>
+<div class="after-actions"><a id="afterBack" class="back-go" href="/public/kristine-go.html">Zurück zu KRISTINE</a><a class="open-wa" href="https://wa.me/" target="_blank" rel="noopener">WhatsApp öffnen</a></div>
+<div id="autoReturn" class="auto-return">KRISTINE öffnet sich automatisch …</div>
+</section>
+</div>
+</main>
+</div>
 <div id="toast" class="toast"></div>
 
 <script>
 "use strict";
+const q=new URLSearchParams(location.search);
+const token=q.get("token")||"";
+const employeeId=q.get("employeeId")||localStorage.getItem("kristineGoEmployeeId")||"";
+const today=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 
-const params = new URLSearchParams(location.search);
-const token = params.get("token") || "";
-const employeeId =
-  params.get("employeeId") ||
-  localStorage.getItem("kristineGoEmployeeId") ||
-  "";
+function withParams(path,extra={}){const url=new URL(path,location.origin);if(token)url.searchParams.set("token",token);if(employeeId)url.searchParams.set("employeeId",employeeId);Object.entries(extra).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=="")url.searchParams.set(key,value)});return url.pathname+url.search}
+const goUrl=withParams("/public/kristine-go.html");document.getElementById("backLink").href=goUrl;document.getElementById("afterBack").href=goUrl;
 
-const today = new Intl.DateTimeFormat("sv-SE", {
-  timeZone: "Europe/Vienna",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit"
-}).format(new Date());
+function toast(message){const el=document.getElementById("toast");el.textContent=String(message||"");el.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove("show"),2500)}
+async function api(path,options={}){const url=new URL(path,location.origin);if(token)url.searchParams.set("token",token);const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Accept":"application/json",...(options.body?{"Content-Type":"application/json"}:{}),...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok||data.ok===false)throw new Error(data.error||data.message||`Serverfehler ${response.status}`);return data}
+function review(kind){try{return JSON.parse(localStorage.getItem(`kg-review:${today}:${employeeId}:${kind}`)||"null")}catch{return null}}
+function employeeName(emp){return String(emp?.nickname||emp?.rufname||emp?.name||emp?.employeeName||"Mitarbeiter").trim()}
+function assignmentTitle(a){if(!a)return"Keine Baustelle";return[a.jobId,a.jobName].filter(Boolean).join(" – ")||"Baustelle"}
+function minutes(hm){const m=String(hm||"").match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null}
+function nowMinutes(){const parts=Object.fromEntries(new Intl.DateTimeFormat("de-AT",{timeZone:"Europe/Vienna",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date()).map(x=>[x.type,x.value]));return Number(parts.hour)*60+Number(parts.minute)}
+function duration(total){total=Math.max(0,Math.round(Number(total||0)));const h=Math.floor(total/60),m=total%60;return h?`${h} h ${String(m).padStart(2,"0")} min`:`${m} min`}
+function statusLabel(type){return({start:"Start",weiter:"Weiter",pause:"Sonderpause",mittag:"Mittag",ende:"Feierabend"})[String(type||"").toLowerCase()]||String(type||"Status")}
+function eventIcon(type){return({start:"▶",weiter:"▶",pause:"☕",mittag:"🍽",ende:"✓"})[String(type||"").toLowerCase()]||"•"}
 
-function withParams(path, extra = {}) {
-  const url = new URL(path, location.origin);
+function buildDay(events){
+ const rows=events.filter(e=>String(e.employeeId)===String(employeeId)&&String(e.date)===String(today)&&["start","weiter","pause","mittag","ende"].includes(String(e.type||"").toLowerCase())).sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||""))||String(a.at||"").localeCompare(String(b.at||"")));
+ let workMinutes=0,pauseMinutes=0;
+ rows.forEach((event,index)=>{const from=minutes(event.at),next=rows[index+1],to=next?minutes(next.at):nowMinutes();if(from==null||to==null||to<from)return;const delta=to-from,type=String(event.type||"").toLowerCase();if(["start","weiter"].includes(type))workMinutes+=delta;if(["pause","mittag"].includes(type))pauseMinutes+=delta});
+ const sites=[];for(const event of rows){if(!["start","weiter"].includes(String(event.type||"").toLowerCase()))continue;const key=String(event.jobId||event.jobName||"").trim();if(key&&!sites.some(site=>site.key===key))sites.push({key,label:[event.jobId,event.jobName].filter(Boolean).join(" – ")||key})}
+ return{rows,workMinutes,pauseMinutes,sites}
+}
+function setStatus(kind,done,text,bad=false){const cap=kind.charAt(0).toUpperCase()+kind.slice(1),status=document.getElementById("status"+cap),copy=document.getElementById("text"+cap);status.textContent=done?"✓":"!";status.className=`status ${done?"ok":bad?"bad":"open"}`;if(copy)copy.textContent=text}
+function setPhotoChip(id,state,label){const el=document.getElementById(id);el.className=`photo-chip ${state}`;el.querySelector("b").textContent=label}
 
-  if (token) url.searchParams.set("token", token);
-  if (employeeId) url.searchParams.set("employeeId", employeeId);
+let employee=null,assignment=null,employeeState=null,day=null;
+let checks={time:false,photos:false,material:false,regie:false,order:false};
 
-  Object.entries(extra).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value) !== "") {
-      url.searchParams.set(key, value);
-    }
-  });
-
-  return url.pathname + url.search;
+function renderTimeline(){
+ const timeline=document.getElementById("timeline");
+ if(!day.rows.length){timeline.innerHTML='<div class="empty-timeline">Für heute wurden noch keine Zeitereignisse gefunden.</div>';return}
+ timeline.innerHTML=day.rows.map(event=>{const type=String(event.type||"").toLowerCase(),place=[event.jobId,event.jobName].filter(Boolean).join(" – "),detail=["start","weiter"].includes(type)?(place||"Baustelle"):type==="pause"?"Arbeitszeit pausiert":type==="mittag"?"Mittagspause":"Arbeitstag beendet";return `<div class="timeline-row"><div class="timeline-time">${event.at||"–"}</div><div class="timeline-rail"><span class="timeline-dot ${["pause","mittag"].includes(type)?"pause":type==="ende"?"end":""}">${eventIcon(type)}</span></div><div class="timeline-copy"><strong>${statusLabel(type)}</strong><small>${detail}</small></div></div>`}).join("")
 }
 
-document.getElementById("backLink").href = withParams("/public/kristine-go.html");
-document.getElementById("afterBack").href = withParams("/public/kristine-go.html");
+function photoReviewState(currentAssignment){
+ const value=review("photo"),summary=String(value?.summary||"").toLowerCase(),allAssignments=window.__bootstrapAssignments||[];
+ const firstDay=currentAssignment?!allAssignments.some(a=>String(a.employeeId)===String(employeeId)&&String(a.jobId||a.jobName)===String(currentAssignment.jobId||currentAssignment.jobName)&&String(a.date)<today):false;
+ const lastDay=Boolean(currentAssignment?.lastDay||currentAssignment?.isLastDay||currentAssignment?.finalDay);
+ const beforeDone=summary.includes("vorher"),progressDone=summary.includes("fortschritt"),afterDone=summary.includes("nachher"),complaintDone=summary.includes("problem")||summary.includes("schaden")||summary.includes("reklamation");
+ setPhotoChip("photoBefore",firstDay?(beforeDone?"ok":"bad"):"ok",firstDay?(beforeDone?"erledigt":"fehlt"):"optional");
+ setPhotoChip("photoProgress",!firstDay&&!lastDay?(progressDone?"ok":"bad"):"ok",!firstDay&&!lastDay?(progressDone?"erledigt":"fehlt"):"optional");
+ setPhotoChip("photoAfter",lastDay?(afterDone?"ok":"bad"):"ok",lastDay?(afterDone?"erledigt":"fehlt"):"optional");
+ setPhotoChip("photoComplaint","ok",complaintDone?"dokumentiert":"optional");
+ if(firstDay)return{done:beforeDone,text:beforeDone?"Vorher-Fotos vorhanden":"Vorher-Fotos fehlen"};
+ if(lastDay)return{done:afterDone,text:afterDone?"Nachher-Fotos vorhanden":"Nachher-/Abschlussfotos fehlen"};
+ return{done:progressDone,text:progressDone?"Fortschrittsfotos vorhanden":"Fortschrittsfotos fehlen"}
+}
+function updateProgress(){const values=Object.values(checks),done=values.filter(Boolean).length,percent=Math.round(done/values.length*100);document.getElementById("progressBar").style.width=`${percent}%`;document.getElementById("progressText").textContent=`${percent} %`;document.getElementById("openWarning").classList.toggle("hidden",done===values.length)}
 
-function toast(message) {
-  const element = document.getElementById("toast");
-  element.textContent = message;
-  element.classList.add("show");
-
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 2500);
+async function init(){
+ try{
+  const data=await api("/kristine/api/bootstrap");window.__bootstrapAssignments=data.assignments||[];
+  employee=(data.employees||[]).find(e=>String(e.id||e.employeeId)===String(employeeId))||null;
+  employeeState=data.states?.[employeeId]||null;
+  const todayAssignments=(data.assignments||[]).filter(a=>String(a.employeeId)===String(employeeId)&&String(a.date)===String(data.today||today)).sort((a,b)=>String(a.from||"").localeCompare(String(b.from||"")));
+  assignment=employeeState?.activeJobOverride||todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
+  day=buildDay(data.timeEvents||[]);
+  if(!assignment&&day.rows.length){const latestWork=[...day.rows].reverse().find(e=>["start","weiter"].includes(String(e.type||"").toLowerCase())&&(e.jobId||e.jobName));if(latestWork)assignment={jobId:latestWork.jobId||"",jobName:latestWork.jobName||"",city:latestWork.city||"",address:latestWork.address||""}}
+  document.getElementById("title").textContent=`${employeeName(employee)}, dein Tag`;
+  document.getElementById("site").textContent=assignmentTitle(assignment);
+  document.getElementById("workTotal").textContent=duration(day.workMinutes);
+  document.getElementById("pauseTotal").textContent=duration(day.pauseMinutes);
+  const first=day.rows.find(e=>String(e.type||"").toLowerCase()==="start"),last=day.rows.at(-1);
+  document.getElementById("firstStart").textContent=first?.at?`${first.at} Uhr`:"–";
+  document.getElementById("siteCount").textContent=String(day.sites.length||(assignment?1:0));
+  document.getElementById("lastStatus").textContent=last?statusLabel(last.type):"–";
+  renderTimeline();
+  checks.time=day.rows.some(e=>["start","weiter"].includes(String(e.type||"").toLowerCase()));
+  setStatus("time",checks.time,checks.time?`${duration(day.workMinutes)} Arbeit · ${duration(day.pauseMinutes)} Pause`:"noch keine Arbeitszeit");
+  const photo=photoReviewState(assignment);checks.photos=photo.done;setStatus("photo",photo.done,photo.text,!photo.done);
+  const material=review("material");checks.material=Boolean(material);setStatus("material",checks.material,material?.summary||"noch nicht geprüft");
+  checks.regie=true;setStatus("regie",true,"bei Bedarf direkt bearbeiten");
+  const order=review("order");checks.order=Boolean(order);setStatus("order",checks.order,order?.summary||"noch nicht beantwortet");
+  updateProgress();
+  const noteKey=`kg-finish-note:${today}:${employeeId}`,note=document.getElementById("note");note.value=localStorage.getItem(noteKey)||"";note.addEventListener("input",event=>localStorage.setItem(noteKey,event.target.value));
+  document.getElementById("loading").classList.add("hidden");document.getElementById("content").classList.remove("hidden");
+ }catch(error){document.getElementById("loading").textContent=`Tagesabschluss konnte nicht geladen werden: ${error.message}`}
 }
 
-async function api(path, options = {}) {
-  const url = new URL(path, location.origin);
+document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
 
-  if (token) url.searchParams.set("token", token);
-
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      "Accept": "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {})
-    }
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok || data.ok === false) {
-    throw new Error(data.error || `Serverfehler ${response.status}`);
-  }
-
-  return data;
-}
-
-function review(kind) {
-  try {
-    return JSON.parse(
-      localStorage.getItem(`kg-review:${today}:${employeeId}:${kind}`) || "null"
-    );
-  } catch {
-    return null;
-  }
-}
-
-function photoState() {
-  try {
-    return JSON.parse(
-      localStorage.getItem(`kg-photos:${today}:${employeeId}`) || "{}"
-    );
-  } catch {
-    return {};
-  }
-}
-
-function setStatus(kind, value, fallback) {
-  const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
-  const status = document.getElementById("status" + cap);
-  const text = document.getElementById("text" + cap);
-  const done = Boolean(value);
-
-  status.textContent = done ? "✓" : "!";
-  status.className = `status ${done ? "ok" : "open"}`;
-
-  if (text) {
-    text.textContent = value?.summary || fallback;
-  }
-
-  return done;
-}
-
-function setPhotoChip(id, count, required) {
-  const element = document.getElementById(id);
-  const amount = Number(count || 0);
-  const done = amount > 0 || !required;
-
-  element.className = `photo-chip ${done ? "ok" : "bad"}`;
-  element.querySelector("b").textContent =
-    amount > 0 ? `${amount} Foto${amount === 1 ? "" : "s"}` :
-    required ? "fehlt" : "optional";
-
-  return done;
-}
-
-function employeeName(employee) {
-  return (
-    employee?.nickname ||
-    employee?.rufname ||
-    employee?.name ||
-    employee?.employeeName ||
-    "Mitarbeiter"
-  );
-}
-
-function assignmentTitle(assignment) {
-  if (!assignment) return "Keine Baustelle";
-
-  return [assignment.jobId, assignment.jobName]
-    .filter(Boolean)
-    .join(" – ") || "Baustelle";
-}
-
-function currentStartEvent(data) {
-  return (data.timeEvents || [])
-    .filter(event =>
-      String(event.employeeId) === String(employeeId) &&
-      String(event.date) === today &&
-      ["start", "weiter"].includes(String(event.type))
-    )
-    .sort((left, right) =>
-      String(left.createdAt || "").localeCompare(String(right.createdAt || "")) ||
-      String(left.at || "").localeCompare(String(right.at || ""))
-    )
-    .at(-1);
-}
-
-function updateProgress(doneStates) {
-  const values = Object.values(doneStates);
-  const complete = values.filter(Boolean).length;
-  const percent = Math.round((complete / values.length) * 100);
-
-  document.getElementById("progressBar").style.width = `${percent}%`;
-  document.getElementById("progressText").textContent = `${percent} %`;
-
-  const hasOpen = complete !== values.length;
-  document.getElementById("openWarning").classList.toggle("hidden", !hasOpen);
-
-  return !hasOpen;
-}
-
-let employee = null;
-let assignment = null;
-let state = null;
-let complete = false;
-
-let timeDone = false;
-let photoDone = false;
-let materialDone = false;
-let regieDone = false;
-let orderDone = false;
-
-async function init() {
-  try {
-    const data = await api("/kristine/api/bootstrap");
-
-    employee =
-      (data.employees || []).find(item =>
-        String(item.id || item.employeeId) === String(employeeId)
-      ) || null;
-
-    assignment =
-      (data.assignments || [])
-        .filter(item =>
-          String(item.employeeId) === String(employeeId) &&
-          String(item.date) === String(data.today || today)
-        )
-        .sort((left, right) =>
-          String(left.from || "").localeCompare(String(right.from || ""))
-        )[0] || null;
-
-    state = data.states?.[employeeId] || null;
-
-    document.getElementById("title").textContent =
-      `${employeeName(employee)}, dein Tag`;
-
-    document.getElementById("site").textContent =
-      assignmentTitle(assignment);
-
-    const start = currentStartEvent(data);
-
-    document.getElementById("time").textContent =
-      start?.at ? `seit ${start.at} Uhr` : "noch offen";
-
-    document.getElementById("textTime").textContent =
-      state?.mode === "finished_day"
-        ? "bereits abgeschlossen"
-        : start?.at
-          ? `läuft seit ${start.at} Uhr`
-          : "noch nicht gestartet";
-
-    const isFirstDay = Boolean(
-      assignment?.isFirstDay ||
-      assignment?.firstDay ||
-      assignment?.projectFirstDay
-    );
-
-    const isLastDay = Boolean(
-      assignment?.isLastDay ||
-      assignment?.lastDay ||
-      assignment?.projectLastDay
-    );
-
-    const photos = photoState();
-
-    const photoBeforeDone = setPhotoChip(
-      "photoBefore",
-      photos.before,
-      isFirstDay
-    );
-
-    const photoProgressDone = setPhotoChip(
-      "photoProgress",
-      photos.progress,
-      !isFirstDay && !isLastDay
-    );
-
-    const photoAfterDone = setPhotoChip(
-      "photoAfter",
-      photos.after,
-      isLastDay
-    );
-
-    const photoComplaintDone = setPhotoChip(
-      "photoComplaint",
-      photos.complaint,
-      false
-    );
-
-    const photoDone =
-      photoBeforeDone &&
-      photoProgressDone &&
-      photoAfterDone &&
-      photoComplaintDone;
-
-    const photoStatus = document.getElementById("statusPhoto");
-    photoStatus.textContent = photoDone ? "✓" : "!";
-    photoStatus.className = `status ${photoDone ? "ok" : "bad"}`;
-
-    document.getElementById("textPhoto").textContent =
-      isFirstDay && !photoBeforeDone
-        ? "Vorher-Fotos fehlen"
-        : isLastDay && !photoAfterDone
-          ? "Nachher-/Abschlussfotos fehlen"
-          : photoDone
-            ? "Fotodokumentation vollständig"
-            : "Fortschrittsfotos fehlen";
-
-    const materialDone = setStatus(
-      "material",
-      review("material"),
-      "noch nicht bestätigt"
-    );
-
-    const regieDone = setStatus(
-      "regie",
-      review("regie"),
-      "noch nicht geprüft"
-    );
-
-    const orderDone = setStatus(
-      "order",
-      review("order"),
-      "heute / morgen noch offen"
-    );
-
-    complete = updateProgress({
-      time: true,
-      photo: photoDone,
-      material: materialDone,
-      regie: regieDone,
-      order: orderDone
-    });
-
-    const noteKey = `kg-finish-note:${today}:${employeeId}`;
-
-    document.getElementById("note").value =
-      localStorage.getItem(noteKey) || "";
-
-    document.getElementById("note").addEventListener("input", event => {
-      localStorage.setItem(noteKey, event.target.value);
-    });
-
-    document.getElementById("loading").classList.add("hidden");
-    document.getElementById("content").classList.remove("hidden");
-  } catch (error) {
-    document.getElementById("loading").textContent =
-      `Tagesabschluss konnte nicht geladen werden: ${error.message}`;
-  }
-}
-
-document.querySelectorAll("[data-kind]").forEach(row => {
-  row.addEventListener("click", () => {
-    const kind = row.dataset.kind;
-
-    if (kind === "regie") {
-      location.href = withParams("/public/regie-assistant.html", {
-        jobId: assignment?.jobId || "",
-        date: today,
-        returnTo: "/public/kristine-go-abschluss.html"
-      });
-      return;
-    }
-
-    location.href = withParams("/public/kristine-go.html", {
-      action: kind,
-      returnTo: "/public/kristine-go-abschluss.html"
-    });
-  });
+const confirm=document.getElementById("confirm"),finish=document.getElementById("finish");
+confirm.addEventListener("change",()=>{finish.disabled=!confirm.checked;finish.classList.toggle("ready",confirm.checked)});
+finish.addEventListener("click",async()=>{
+ finish.disabled=true;finish.textContent="Wird gespeichert …";
+ try{
+  const result=await api("/kristine/api/day-close",{method:"POST",body:JSON.stringify({employeeId,employeeName:employeeName(employee),date:today,jobId:assignment?.jobId||"",jobName:assignment?.jobName||"",note:document.getElementById("note").value.trim(),confirmed:true,checks:{time:checks.time,photos:checks.photos,material:checks.material,regie:checks.regie,order:checks.order}})});
+  document.querySelectorAll(".section,.hero").forEach(section=>section.classList.add("hidden"));finish.classList.add("hidden");document.getElementById("after").classList.remove("hidden");
+  document.getElementById("afterText").textContent=result.whatsapp?.sent?"Tagesabschluss gespeichert. Die Bestätigung wurde an WhatsApp gesendet.":"Tagesabschluss gespeichert. WhatsApp konnte diesmal nicht bestätigt werden.";
+  let seconds=3;const auto=document.getElementById("autoReturn");auto.textContent=`Zurück zu KRISTINE in ${seconds} Sekunden …`;
+  const timer=setInterval(()=>{seconds-=1;if(seconds<=0){clearInterval(timer);location.href=goUrl;return}auto.textContent=`Zurück zu KRISTINE in ${seconds} Sekunden …`},1000);
+ }catch(error){finish.disabled=false;finish.textContent="Tag bestätigen & Feierabend";toast(error.message)}
 });
-
-const confirm = document.getElementById("confirm");
-const finish = document.getElementById("finish");
-
-confirm.addEventListener("change", () => {
-  finish.disabled = !confirm.checked;
-  finish.classList.toggle("ready", confirm.checked);
-});
-
-finish.addEventListener("click", async () => {
-  finish.disabled = true;
-  finish.textContent = "Wird gespeichert …";
-
-  try {
-const result = await api("/kristine/api/day-close", {
-  method: "POST",
-  body: JSON.stringify({
-    employeeId,
-    employeeName: employeeName(employee),
-    date: today,
-    jobId: assignment?.jobId || "",
-    jobName: assignment?.jobName || "",
-    note: document.getElementById("note").value.trim(),
-    confirmed: true,
-    checks: {
-      time: true,
-      photos: false,
-      material: materialDone,
-      regie: regieDone,
-      order: orderDone
-    }
-  })
-});
-
-    document.getElementById("after").classList.remove("hidden");
-    finish.classList.add("hidden");
-
-    document.querySelectorAll(".section").forEach(section => {
-      section.classList.add("hidden");
-    });
-
-    toast(result.reply || "Tagesabschluss gespeichert.");
-  } catch (error) {
-    finish.disabled = false;
-    finish.textContent = "Tag bestätigen & Feierabend";
-    toast(error.message);
-  }
-});
-
 init();
 </script>
 </body>
