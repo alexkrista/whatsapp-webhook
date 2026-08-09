@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISTINE GO</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
-  <link rel="stylesheet" href="/public/kristine-go.css?v=5">
+  <link rel="stylesheet" href="/public/kristine-go.css?v=6">
 </head>
 <body>
   <div class="kg-app">
@@ -67,7 +67,7 @@
 
           <div class="kg-site-actions">
             <button id="kgWrongSiteButton" class="kg-button kg-button-danger-outline" type="button">
-              ⇄ Falsche Baustelle
+              ⇄ Baustelle wechseln
             </button>
             <a id="kgNavigationButton" class="kg-button kg-button-light" href="#" target="_blank" rel="noopener">
               ➤ Navi
@@ -108,6 +108,12 @@
             </button>
           </div>
 
+          <div id="kgQuickActions" class="kg-quick-actions kg-hidden">
+            <button id="kgPauseButton" class="kg-quick-button" type="button">☕ Sonderpause</button>
+            <button id="kgLunchButton" class="kg-quick-button" type="button">🍽 Mittag</button>
+            <button id="kgSwitchButton" class="kg-quick-button kg-hidden" type="button">⇄ Baustellenwechsel</button>
+          </div>
+
           <div id="kgWorkActions" class="kg-action-grid kg-hidden">
             <button class="kg-action-card kg-action-blue" data-action="photo" type="button">
               <span class="kg-action-icon">📸</span>
@@ -116,7 +122,7 @@
             </button>
             <button class="kg-action-card kg-action-blue" data-action="material" type="button">
               <span class="kg-action-icon">▣</span>
-              <strong>Material</strong>
+              <strong>Materialdokumentation</strong>
               <small>Verbrauch dokumentieren</small>
             </button>
             <button class="kg-action-card kg-action-blue" data-action="regie" type="button">
@@ -126,15 +132,9 @@
             </button>
             <button class="kg-action-card kg-action-attention" data-action="order" type="button">
               <span class="kg-action-icon">🛒</span>
-              <strong>Materialbedarf</strong>
-              <small>Heute dringend oder morgen</small>
+              <strong>Bestellung</strong>
+              <small>Material für Baustelle bestellen</small>
             </button>
-          </div>
-
-          <div id="kgQuickActions" class="kg-quick-actions kg-hidden">
-            <button id="kgPauseButton" class="kg-quick-button" type="button">☕ Sonderpause</button>
-            <button id="kgLunchButton" class="kg-quick-button" type="button">🍽 Mittag</button>
-            <button id="kgSwitchButton" class="kg-quick-button kg-hidden" type="button">⇄ Baustellenwechsel</button>
           </div>
         </section>
 
@@ -165,7 +165,7 @@
             </button>
             <button class="kg-review-row" type="button" data-action="material">
               <span id="kgMaterialReviewStatus" class="kg-review-status kg-open">!</span>
-              <span class="kg-review-copy"><strong>Material</strong><small id="kgReviewMaterial">Noch nicht geprüft</small></span>
+              <span class="kg-review-copy"><strong>Materialdokumentation</strong><small id="kgReviewMaterial">Noch nicht geprüft</small></span>
               <span>›</span>
             </button>
             <button class="kg-review-row" type="button" data-action="regie">
@@ -175,7 +175,7 @@
             </button>
             <button class="kg-review-row" type="button" data-action="order">
               <span id="kgOrderReviewStatus" class="kg-review-status kg-open">!</span>
-              <span class="kg-review-copy"><strong>Materialbedarf</strong><small id="kgReviewOrder">Noch nicht beantwortet</small></span>
+              <span class="kg-review-copy"><strong>Bestellung</strong><small id="kgReviewOrder">Noch nicht beantwortet</small></span>
               <span>›</span>
             </button>
           </div>
@@ -231,6 +231,6 @@
 
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
-  <script src="/public/kristine-go.js?v=5"></script>
+  <script src="/public/kristine-go.js?v=6"></script>
 </body>
 </html>
