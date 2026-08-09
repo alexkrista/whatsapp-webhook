@@ -747,21 +747,54 @@ function authenticatedUrl(url) {
   function bindEvents() {
     elements.kgEmployeeButton.onclick = () => elements.kgEmployeeDialog.showModal();
     elements.kgStartButton.onclick = () => sendMessage("Start").catch(showError);
-   elements.kgWrongSiteButton.onclick = async () => {
+    elements.kgWrongSiteButton.onclick = async () => {
   try {
     const result = await sendMessage("Andere Baustelle");
 
     const reply = result.reply || "Welche Baustelle ist richtig?";
     const buttons = Array.isArray(result.buttons) ? result.buttons : [];
 
-    openAssistantDialog({
-      title: "Baustelle auswählen",
-      text: reply,
-      buttons: buttons.map((label) => ({
-        label,
-        value: label
-      }))
-    });
+    state.assistant = {
+      kind: "site-switch",
+      def: {
+        title: "Baustelle auswählen",
+
+        steps: [
+          buttons.length
+            ? {
+                question: reply,
+                type: "options",
+                options: buttons
+              }
+            : {
+                question: reply,
+                type: "text",
+                placeholder: "Name oder Baustellennummer"
+              }
+        ],
+
+        async save(values) {
+          const answer = String(values[0] || "").trim();
+
+          if (!answer) return;
+
+          const response = await sendMessage(answer);
+
+          if (response.reply) {
+            toast(response.reply);
+          }
+
+          setTimeout(() => location.reload(), 400);
+        }
+      },
+
+      index: 0,
+      values: []
+    };
+
+    renderAssistant();
+    elements.kgAssistantDialog.showModal();
+
   } catch (error) {
     showError(error);
   }
