@@ -821,11 +821,36 @@ function authenticatedUrl(url) {
   }
 
   // Keine Auswahl nötig – Baustelle wurde direkt erkannt.
-  if (reply) {
-    toast(reply);
-  }
+ if (reply) {
+  state.assistant = {
+    kind: "site-switch-search",
+    def: {
+      title: "Baustelle suchen",
+      steps: [{
+        question: reply,
+        type: "text",
+        placeholder: "Name oder Baustellennummer"
+      }],
+      save: async (values) => {
+        const answer = String(values[0] || "").trim();
+        if (!answer) return;
 
-  setTimeout(() => location.reload(), 500);
+        const response = await sendMessage(answer);
+
+        if (response.reply) {
+          toast(response.reply);
+        }
+
+        setTimeout(() => location.reload(), 500);
+      }
+    },
+    index: 0,
+    values: []
+  };
+
+  renderAssistant();
+  elements.kgAssistantDialog.showModal();
+}
 }  
       },
 
