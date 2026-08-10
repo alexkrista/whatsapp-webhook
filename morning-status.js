@@ -1180,7 +1180,7 @@ const missing = statuses.filter(
       // Nachholfenster:
       // Render-Neustarts oder kurze Schlafphasen verlieren
       // die Ausführung nicht.
-      if (inWindow(hm, "06:45", "06:59")) {
+      if (inWindow(hm, "06:40", "06:59")) {
         await runSixFortyFive(date);
       }
 
