@@ -942,6 +942,12 @@ async function runSevenOClock(
   onlyEmployeeId = ""
 ) {
     const state = await loadState();
+    logger.log("DEBUG morning employees", state.employees.map(e => ({
+  id: e.id,
+  name: e.name,
+  active: e.active,
+  phone: e.phone
+})));
 
     if (
       !force &&
