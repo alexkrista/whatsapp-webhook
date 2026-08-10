@@ -969,14 +969,18 @@ const intent = rawText.startsWith("task_call:")
   if (!phone) {
     return {
       reply: `Bei „${open.title}“ ist keine Rückrufnummer hinterlegt.`,
-      buttons: ["Erledigt"],
+      buttons: [
+  { id: `task_done:${open.id}`, title: "Erledigt" }
+],
       state
     };
   }
 
   return {
     reply: `📞 ${open.contactName ? open.contactName + ": " : ""}${phone}`,
-    buttons: ["Erledigt"],
+    buttons: [
+  { id: `task_done:${open.id}`, title: "Erledigt" }
+],
     state
   };
 }
