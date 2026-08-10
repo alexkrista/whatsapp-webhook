@@ -921,7 +921,7 @@ async function runSixFortyFive(
 
     if (!force) {
   await saveRun("morningGreeting", date, state.scheduler);
-
+}
     logger.log("KRISTA 06:45 Morgenbegrüßung", {
       date,
       sent,
