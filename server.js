@@ -1462,19 +1462,39 @@ ${kgoLink}`
 
   const cleanedButtons = cleanWhatsAppButtons(buttons);
   const payload = cleanedButtons.length
+  ? {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: recipient,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: String(reply || "").slice(0, 1024) },
+        action: {
+          buttons: cleanedButtons.map((button) => ({
+            type: "reply",
+            reply: { id: button.id, title: button.title },
+          })),
+        },
+      },
+    }
+  : kgoLink
     ? {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: recipient,
         type: "interactive",
         interactive: {
-          type: "button",
-          body: { text: String(replyWithKgo).slice(0, 1024) },
+          type: "cta_url",
+          body: {
+            text: String(reply || "").slice(0, 1024),
+          },
           action: {
-            buttons: cleanedButtons.map((button) => ({
-              type: "reply",
-              reply: { id: button.id, title: button.title },
-            })),
+            name: "cta_url",
+            parameters: {
+              display_text: "KRISTINE Go öffnen",
+              url: kgoLink,
+            },
           },
         },
       }
@@ -1483,7 +1503,10 @@ ${kgoLink}`
         recipient_type: "individual",
         to: recipient,
         type: "text",
-        text: { preview_url: false, body: String(replyWithKgo).slice(0, 4096) },
+        text: {
+          preview_url: false,
+          body: String(reply || "").slice(0, 4096),
+        },
       };
 
   const endpoint = `https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`;
