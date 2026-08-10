@@ -518,7 +518,21 @@ function clampOfficialStart(actualTime) {
 } else if (state.activeJobOverride) {
   delete state.activeJobOverride;
 }
-    const intent = detectIntent(text);
+    const rawText = String(text || "").trim();
+
+if (rawText.startsWith("task_call:")) {
+  state.taskId = rawText.slice("task_call:".length);
+}
+
+if (rawText.startsWith("task_done:")) {
+  state.taskId = rawText.slice("task_done:".length);
+}
+
+const intent = rawText.startsWith("task_call:")
+  ? "task_call"
+  : rawText.startsWith("task_done:")
+    ? "task_done"
+    : detectIntent(rawText);
     const nowDate = new Date();
     const now = nowDate.toISOString();
     const actualTime = localTimeHM(nowDate);
@@ -929,19 +943,57 @@ function clampOfficialStart(actualTime) {
     }
 
     if (intent === "task_call") {
-      const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
-      if (!open) return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
-      const phone = String(open.contactPhone || "").trim();
-      if (!phone) return { reply: `Bei „${open.title}“ ist keine Rückrufnummer hinterlegt.`, buttons: ["Erledigt"], state };
-      return {
-        reply: `📞 ${open.contactName ? open.contactName + ": " : ""}${phone}`,
-        buttons: ["Erledigt"],
-        state,
-      };
-    }
+  const taskId = String(state?.taskId || "").trim();
+
+  const open = taskId
+    ? tasks.find(t =>
+        String(t.id) === taskId &&
+        String(t.assigneeId) === String(employeeId) &&
+        t.status !== "done"
+      )
+    : tasks.find(t =>
+        String(t.assigneeId) === String(employeeId) &&
+        t.status !== "done"
+      );
+
+  if (!open) {
+    return {
+      reply: "Ich finde diese offene Aufgabe nicht mehr.",
+      buttons: [],
+      state
+    };
+  }
+
+  const phone = String(open.contactPhone || "").trim();
+
+  if (!phone) {
+    return {
+      reply: `Bei „${open.title}“ ist keine Rückrufnummer hinterlegt.`,
+      buttons: ["Erledigt"],
+      state
+    };
+  }
+
+  return {
+    reply: `📞 ${open.contactName ? open.contactName + ": " : ""}${phone}`,
+    buttons: ["Erledigt"],
+    state
+  };
+}
 
     if (intent === "task_done") {
-      const open = tasks.find(t => String(t.assigneeId) === String(employeeId) && t.status !== "done");
+      const taskId = String(state?.taskId || "").trim();
+
+const open = taskId
+  ? tasks.find(t =>
+      String(t.id) === taskId &&
+      String(t.assigneeId) === String(employeeId) &&
+      t.status !== "done"
+    )
+  : tasks.find(t =>
+      String(t.assigneeId) === String(employeeId) &&
+      t.status !== "done"
+    );
       if (!open) {
         return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
       }
@@ -2032,7 +2084,14 @@ function clampOfficialStart(actualTime) {
           });
           console.log("🧪 TASK-WA 4/5 sendWhatsApp wird aufgerufen", { taskId: task.id });
           // Absichtlich ohne eigenen Sonderweg: exakt dieselbe Versandfunktion wie Kristine.
-          await sendWhatsApp({ to: employeePhone, reply: lines.join("\n"), buttons: ["Anrufen", "Erledigt"] });
+          await sendWhatsApp({
+  to: employeePhone,
+  reply: lines.join("\n"),
+  buttons: [
+    { id: `task_call:${task.id}`, title: "Anrufen" },
+    { id: `task_done:${task.id}`, title: "Erledigt" }
+  ]
+});
           console.log("🧪 TASK-WA 5/5 sendWhatsApp erfolgreich beendet", { taskId: task.id });
           notifications.push({ taskId: task.id, sent: true });
           console.log("✅ Aufgaben-WhatsApp versendet", { taskId: task.id, assigneeName: task.assigneeName });
