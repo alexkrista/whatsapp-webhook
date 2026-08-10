@@ -1554,6 +1554,41 @@ ${kgoLink}`
     recipientTail: recipient.slice(-6),
     payloadType: payload.type,
   });
+  if (cleanedButtons.length && kgoLink) {
+  const kgoPayload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: recipient,
+    type: "interactive",
+    interactive: {
+      type: "cta_url",
+      body: {
+        text: "Weiter in KRISTINE Go",
+      },
+      action: {
+        name: "cta_url",
+        parameters: {
+          display_text: "KRISTINE Go öffnen",
+          url: kgoLink,
+        },
+      },
+    },
+  };
+
+  const kgoResponse = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(kgoPayload),
+  });
+
+  if (!kgoResponse.ok) {
+    const kgoErrorText = await kgoResponse.text().catch(() => "");
+    console.error("KRISTINE Go Button fehlgeschlagen", kgoResponse.status, kgoErrorText);
+  }
+}
   return responseJson;
 }
 
