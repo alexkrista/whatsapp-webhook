@@ -707,16 +707,37 @@ const intent = rawText.startsWith("task_call:")
       await saveState();
       return {
         reply: `Welche Baustelle?\n${alternatives.map((assignment, index) => `${index + 1}. ${assignmentLabel(assignment)}`).join("\n")}\nOder schreibe Name bzw. Nummer.`,
-        buttons: alternatives.slice(0, 3).map((assignment, index) => ({
-  id: String(index + 1),
-  title: assignmentLabel(assignment).slice(0, 20)
-})),
-        state,
-      };
+       buttons: [
+       ...alternatives.slice(0, 2).map((assignment, index) => ({
+       id: String(index + 1),
+       title: assignmentLabel(assignment).slice(0, 20)
+       })),
+       {
+       id: "other_site",
+       title: "Andere Baustelle"
+       }
+    ],
+    state,
+    };
     }
 
     if (state.pending?.type === "choose_switch_assignment") {
       const normalized = normalizeText(text);
+      if (text === "other_site") {
+  state.pending = {
+    type: "ask_actual_assignment",
+    forSwitch: true,
+    createdAt: now
+  };
+
+  await saveState();
+
+  return {
+    reply: "Schreib bitte Name oder Nummer der anderen Baustelle.",
+    buttons: [],
+    state
+  };
+}
       const alternatives = dayAssignments.filter((assignment) => state.pending.choices?.includes(assignmentKey(assignment)));
       const number = Number(normalized);
       const selected = Number.isInteger(number) && number > 0 && number <= alternatives.length
