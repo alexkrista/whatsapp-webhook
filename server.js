@@ -1275,15 +1275,17 @@ function normalizePhone(value) {
 
 function whatsappTextFromMessage(msg) {
   if (msg?.type === "text") return String(msg.text?.body || "").trim();
+
   if (msg?.type === "interactive") {
     return String(
-      msg.interactive?.button_reply?.title ||
       msg.interactive?.button_reply?.id ||
-      msg.interactive?.list_reply?.title ||
+      msg.interactive?.button_reply?.title ||
       msg.interactive?.list_reply?.id ||
+      msg.interactive?.list_reply?.title ||
       ""
     ).trim();
   }
+
   return "";
 }
 
