@@ -1396,6 +1396,18 @@ async function employeeFromWhatsAppSender(sender) {
     return phone === wanted || phone.endsWith(wanted) || wanted.endsWith(phone);
   }) || null;
 }
+async function kristineGoLinkForWhatsAppRecipient(to) {
+  const employee = await employeeFromWhatsAppSender(to);
+  if (!employee?.id) return "";
+
+  const url = new URL(
+    "/public/kristine-go.html",
+    PUBLIC_BASE_URL || "https://protokoll.krista.at"
+  );
+
+  url.searchParams.set("employeeId", String(employee.id));
+  return url.toString();
+}
 
 function cleanWhatsAppButtons(buttons) {
   const source = Array.isArray(buttons) ? buttons : [];
@@ -1438,6 +1450,15 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   const recipient = normalizeWhatsAppRecipient(to);
   if (!recipient) throw new Error("WhatsApp-EmpfÃ¤nger fehlt");
 
+  const kgoLink = await kristineGoLinkForWhatsAppRecipient(to);
+
+const replyWithKgo = kgoLink
+  ? `${String(reply || "").trim()}
+
+Weiter in KRISTINE Go →
+${kgoLink}`
+  : String(reply || "");
+
   const cleanedButtons = cleanWhatsAppButtons(buttons);
   const payload = cleanedButtons.length
     ? {
@@ -1447,7 +1468,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
         type: "interactive",
         interactive: {
           type: "button",
-          body: { text: String(reply || "").slice(0, 1024) },
+          body: { text: String(replyWithKgo).slice(0, 1024) },
           action: {
             buttons: cleanedButtons.map((button) => ({
               type: "reply",
@@ -1461,7 +1482,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
         recipient_type: "individual",
         to: recipient,
         type: "text",
-        text: { preview_url: false, body: String(reply || "").slice(0, 4096) },
+        text: { preview_url: false, body: String(replyWithKgo).slice(0, 4096) },
       };
 
   const endpoint = `https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`;
