@@ -707,7 +707,10 @@ const intent = rawText.startsWith("task_call:")
       await saveState();
       return {
         reply: `Welche Baustelle?\n${alternatives.map((assignment, index) => `${index + 1}. ${assignmentLabel(assignment)}`).join("\n")}\nOder schreibe Name bzw. Nummer.`,
-        buttons: alternatives.slice(0, 3).map((assignment, index) => String(index + 1)),
+        buttons: alternatives.slice(0, 3).map((assignment, index) => ({
+  id: String(index + 1),
+  title: assignmentLabel(assignment).slice(0, 20)
+})),
         state,
       };
     }
