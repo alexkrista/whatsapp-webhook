@@ -37,7 +37,7 @@ function authenticatedUrl(url) {
       "kgPhotoReviewStatus","kgMaterialReviewStatus","kgOrderReviewStatus","kgMaterialResponseCard","kgMaterialResponseCount","kgMaterialResponseList","kgTomorrowCard",
       "kgTomorrowTitle","kgTomorrowMeta","kgTomorrowNavigation","kgFinishButton","kgEmployeeDialog",
       "kgEmployeeList","kgAssistantDialog","kgAssistantEyebrow","kgAssistantTitle","kgAssistantQuestion",
-      "kgAssistantBody","kgAssistantSecondary","kgAssistantPrimary","kgToast"
+      "kgAssistantBody","kgAssistantSecondary","kgAssistantPrimary","kgToast","kgNavigationButton","kgCallButton"
     ].forEach(id => elements[id] = $(id));
   }
 
@@ -246,6 +246,18 @@ function authenticatedUrl(url) {
     elements.kgSiteAddress.textContent = assignmentPlace(a) || (a ? "Adresse nicht hinterlegt" : "Für heute ist noch keine Baustelle geplant.");
     elements.kgNavigationButton.href = mapsUrl(a);
     elements.kgNavigationButton.classList.toggle("kg-hidden", !a || mapsUrl(a) === "#");
+    const contactPhone = String(a?.contactPhone || "").trim();
+
+if (contactPhone) {
+  elements.kgCallButton.href = `tel:${contactPhone.replace(/\s+/g, "")}`;
+  elements.kgCallButton.textContent = a?.contactName
+    ? `📞 ${a.contactName} anrufen`
+    : "📞 Anrufen";
+  elements.kgCallButton.classList.remove("kg-hidden");
+} else {
+  elements.kgCallButton.href = "#";
+  elements.kgCallButton.classList.add("kg-hidden");
+}
 
     const labels = {
       idle:"Noch nicht gestartet",

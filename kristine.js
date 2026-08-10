@@ -1548,6 +1548,8 @@ function clampOfficialStart(actualTime) {
         jobName: String(a.jobName || "").trim().slice(0, 140),
         city: String(a.city || "").trim().slice(0, 100),
         address: String(a.address || "").trim().slice(0, 300),
+        contactName: String(a.contactName || "").trim().slice(0, 140),
+        contactPhone: String(a.contactPhone || "").trim().slice(0, 80),
         employeeId: String(a.employeeId || "").slice(0, 100),
         employeeName: String(a.employeeName || "").trim().slice(0, 140),
         vehicle: String(a.vehicle || "").trim().slice(0, 100),
