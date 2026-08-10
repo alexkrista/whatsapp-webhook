@@ -1412,10 +1412,20 @@ async function kristineGoLinkForWhatsAppRecipient(to) {
 
 function cleanWhatsAppButtons(buttons) {
   const source = Array.isArray(buttons) ? buttons : [];
-  return source.slice(0, 3).map((title, index) => {
-    const label = String(title || "").trim().slice(0, 20);
+
+  return source.slice(0, 3).map((button, index) => {
+    // Neue Variante: Button mit eigener ID, z.B. task_call:<taskId>
+    if (button && typeof button === "object") {
+      const title = String(button.title || "").trim().slice(0, 20);
+      const id = String(button.id || `kristine_${index}`).trim().slice(0, 256);
+      return { id, title };
+    }
+
+    // Bisherige Variante bleibt vollständig kompatibel
+    const label = String(button || "").trim().slice(0, 20);
     let id = `kristine_${index}`;
     const lower = label.toLowerCase();
+
     if (lower === "ja" || lower.includes("weiter zu")) id = "ja";
     else if (lower === "nein") id = "nein";
     else if (lower.includes("feierabend")) id = "feierabend";
@@ -1427,8 +1437,9 @@ function cleanWhatsAppButtons(buttons) {
     else if (lower.includes("navigation")) id = "navigation";
     else if (lower.includes("anrufen") || lower === "anruf") id = "anrufen";
     else if (lower.includes("erledigt")) id = "erledigt";
+
     return { id, title: label || `Option ${index + 1}` };
-  }).filter((button) => button.title);
+  }).filter(button => button.title);
 }
 
 function getActiveKristinePhoneNumberId(phoneNumberId = "") {
