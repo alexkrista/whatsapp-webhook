@@ -154,7 +154,7 @@ const materialData = await response.json();
 if (!response.ok) {
   throw new Error(materialData.error || `HTTP ${response.status}`);
 }
-);
+
   materials = (materialData.materials || []).map(m => ({
     ...m,
     _search: searchableText(m)
