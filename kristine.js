@@ -510,7 +510,14 @@ function clampOfficialStart(actualTime) {
     };
     const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
     let current = activeAssignment(dayAssignments, state);
-    if (state.activeJobOverride?.jobId || state.activeJobOverride?.jobName) current = state.activeJobOverride;
+    if (
+  state.activeJobOverride?.date === today &&
+  (state.activeJobOverride?.jobId || state.activeJobOverride?.jobName)
+) {
+  current = state.activeJobOverride;
+} else if (state.activeJobOverride) {
+  delete state.activeJobOverride;
+}
     const intent = detectIntent(text);
     const nowDate = new Date();
     const now = nowDate.toISOString();
@@ -570,7 +577,12 @@ function clampOfficialStart(actualTime) {
         const selected = candidates[0];
         const wasWorking = ["working", "pause", "lunch"].includes(state.mode) || state.pending?.forSwitch;
         state.activeAssignmentKey = null;
-        state.activeJobOverride = { jobId: selected.jobId, jobName: selected.jobName, city: selected.city || "" };
+        state.activeJobOverride = {
+  date: today,
+  jobId: selected.jobId,
+  jobName: selected.jobName,
+  city: selected.city || ""
+};
         state.mode = wasWorking ? "working" : state.mode;
         state.pending = null;
         addTimeline(wasWorking ? "site_switch" : "assignment_deviation", `${wasWorking ? "Baustellenwechsel" : "Abweichende Einteilung"} zu ${assignmentLabel(selected)}`, selected);
@@ -598,7 +610,12 @@ function clampOfficialStart(actualTime) {
       if (!selected) return { reply: "Bitte Nummer oder Baustellenname auswählen.", buttons: choices.slice(0, 3).map((_, index) => String(index + 1)), state };
       const wasWorking = Boolean(state.pending.forSwitch) || ["working", "pause", "lunch"].includes(state.mode);
       state.activeAssignmentKey = null;
-      state.activeJobOverride = { jobId: selected.jobId, jobName: selected.jobName, city: selected.city || "" };
+      state.activeJobOverride = {
+  date: today,
+  jobId: selected.jobId,
+  jobName: selected.jobName,
+  city: selected.city || ""
+};
       state.mode = wasWorking ? "working" : state.mode;
       state.pending = null;
       addTimeline(wasWorking ? "site_switch" : "assignment_deviation", `${wasWorking ? "Baustellenwechsel" : "Abweichende Einteilung"} zu ${assignmentLabel(selected)}`, selected);
