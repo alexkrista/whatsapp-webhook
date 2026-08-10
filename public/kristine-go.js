@@ -662,17 +662,39 @@ if (contactPhone) {
     elements.kgAssistantSecondary.textContent = flow.index === 0 ? "Abbrechen" : "Zurück";
     elements.kgAssistantPrimary.textContent = flow.index === flow.def.steps.length - 1 ? "Speichern" : "Weiter";
 
-    if (step.type === "options") {
-      elements.kgAssistantBody.innerHTML = `<div class="kg-assistant-options">${step.options.map(option =>
-        `<button class="kg-assistant-option ${flow.values[flow.index] === option ? "is-selected" : ""}" type="button" data-option="${esc(option)}">${esc(option)}</button>`
-      ).join("")}</div>`;
-      elements.kgAssistantBody.querySelectorAll("[data-option]").forEach(button => {
-        button.onclick = () => {
-          flow.values[flow.index] = button.dataset.option;
-          renderAssistant();
-        };
-      });
-    } else if (step.type === "text") {
+   if (step.type === "options") {
+  const options = Array.isArray(step.options) ? step.options : [];
+
+  elements.kgAssistantBody.innerHTML =
+    `<div class="kg-assistant-options">${options.map(option => {
+      const value =
+        option && typeof option === "object"
+          ? String(option.id || option.title || "")
+          : String(option || "");
+
+      const label =
+        option && typeof option === "object"
+          ? String(option.title || option.id || "")
+          : String(option || "");
+
+      const selected =
+        String(flow.values[flow.index] || "") === value;
+
+      return `<button
+        class="kg-assistant-option ${selected ? "is-selected" : ""}"
+        type="button"
+        data-option="${esc(value)}"
+      >${esc(label)}</button>`;
+    }).join("")}</div>`;
+
+  elements.kgAssistantBody.querySelectorAll("[data-option]").forEach(button => {
+    button.onclick = () => {
+      flow.values[flow.index] = button.dataset.option;
+      renderAssistant();
+    };
+  });
+} 
+    else if (step.type === "text") {
       elements.kgAssistantBody.innerHTML = `<textarea class="kg-assistant-textarea" placeholder="${esc(step.placeholder || "")}">${esc(flow.values[flow.index] || "")}</textarea>`;
       elements.kgAssistantBody.querySelector("textarea").addEventListener("input", event => {
         flow.values[flow.index] = event.target.value;
@@ -814,6 +836,36 @@ if (contactPhone) {
         async save(choiceValues) {
           const choice = String(choiceValues[0] || "").trim();
           if (!choice) return;
+          if (choice === "other_site") {
+  state.assistant = {
+    kind: "site-switch-manual",
+    def: {
+      title: "Andere Baustelle",
+      steps: [{
+        question: "Welche Baustelle möchtest du wählen?",
+        type: "text",
+        placeholder: "Name oder Baustellennummer"
+      }],
+      async save(values) {
+        const answer = String(values[0] || "").trim();
+        if (!answer) return;
+
+        const response = await sendMessage(answer);
+
+        if (response.reply) {
+          toast(response.reply);
+        }
+
+        setTimeout(() => location.reload(), 500);
+      }
+    },
+    index: 0,
+    values: []
+  };
+
+  renderAssistant();
+  return;
+}
 
           const finalResponse = await sendMessage(choice);
 
