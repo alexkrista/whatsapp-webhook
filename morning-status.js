@@ -878,6 +878,7 @@ async function runSixFortyFive(
   onlyEmployeeId = ""
 ) {
     const state = await loadState();
+    
 
     if (!force && state.scheduler.morningGreeting === date) {
       return { skipped: true };
@@ -928,12 +929,12 @@ async function runSixFortyFive(
       suppressed: statuses.length - recipients.length,
     });
 
-    return {
-      sent,
-      suppressed: statuses.length - recipients.length,
-      statuses,
-    };
-  }
+ return {
+  sent,
+  suppressed: statuses.length - recipients.length,
+  statuses,
+};
+}
 
 async function runSevenOClock(
   date = localIsoDate(),
