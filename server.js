@@ -1406,6 +1406,7 @@ async function kristineGoLinkForWhatsAppRecipient(to) {
   );
 
   url.searchParams.set("employeeId", String(employee.id));
+  if (ADMIN_TOKEN) url.searchParams.set("token", String(ADMIN_TOKEN));
   return url.toString();
 }
 
