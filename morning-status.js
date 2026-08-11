@@ -98,9 +98,15 @@ function inWindow(hm, from, to) {
 function clampStartTime(hm) {
   const value = minutesFromHm(hm);
   const official = minutesFromHm(OFFICIAL_START);
+  const toleranceMinutes = 15;
 
   if (value == null || official == null) return hm;
-  return value < official ? OFFICIAL_START : hm;
+
+  // KRISTA Betriebsregel:
+  // - vor 07:00 Uhr -> 07:00 Uhr
+  // - 07:00 bis einschliesslich 07:15 Uhr -> 07:00 Uhr
+  // - ab 07:16 Uhr -> tatsaechliche Startzeit
+  return value <= official + toleranceMinutes ? OFFICIAL_START : hm;
 }
 
 function normalizePhone(value) {
