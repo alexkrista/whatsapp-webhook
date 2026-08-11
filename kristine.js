@@ -1733,6 +1733,7 @@ const open = taskId
         jobId: String(row.jobId || ""),
         jobName: String(row.jobName || ""),
         reason: String(row.reason || ""),
+        billingType: String(row.billingType || "normal") === "regie" ? "regie" : "normal",
         source: String(row.source || "employee"),
       });
     }
@@ -1875,6 +1876,7 @@ const open = taskId
         jobId: String(segment.jobId || "").slice(0, 80),
         jobName: String(segment.jobName || "").trim().slice(0, 140),
         reason: String(segment.reason || "").trim().slice(0, 140),
+        billingType: segment.type === "work" && String(segment.billingType || "normal") === "regie" ? "regie" : "normal",
       })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
@@ -1932,6 +1934,7 @@ const open = taskId
           jobId: segment.type === "work" ? segment.jobId : null,
           jobName: segment.type === "work" ? segment.jobName : "",
           reason: segment.type === "up" ? segment.reason : "",
+          billingType: segment.type === "work" ? (segment.billingType === "regie" ? "regie" : "normal") : "",
           segmentId: segment.id, source: "office", manual: true, createdAt,
         });
       }

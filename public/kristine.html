@@ -1326,7 +1326,14 @@ function jobOptions(selected=''){
   return '<option value="">– Baustelle wählen –</option>'+jobs.map(j=>{const jid=String(j.jobId||j.id||'');const name=String(j.name||j.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===String(selected)?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`}).join('');
 }
 function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':type==='pause'?'Pause':type==='up'?'Unproduktiv':'Abschnitt'}
-const UP_REASONS=['Werkstatt','Material holen','Besprechung','Schulung','Arzt','Fahrzeugpflege','Lager','Sonstiges'];
+const FINK_REASONS=[
+  {code:'022',label:'Büro'},{code:'900',label:'Urlaub'},{code:'901',label:'Krank'},{code:'902',label:'Arzt'},
+  {code:'903',label:'Berufsschule'},{code:'904',label:'Feiertag'},{code:'905',label:'Schulung extern'},
+  {code:'909',label:'Schulung intern'},{code:'911',label:'Sonderurlaub'},{code:'912',label:'Musterung'},
+  {code:'913',label:'Werkstatt'},{code:'917',label:'Firma aufräumen'},{code:'918',label:'Lehrlingswettbewerb'},
+  {code:'927',label:'Betriebsausflug'},{code:'930',label:'Zeitausgleich'},{code:'945',label:'Quarantäne'},
+  {code:'946',label:'Kurzarbeit'},{code:'9999',label:'Sanierung'}
+];
 function normalizeEditorTime(value){
   const raw=String(value||'').trim();
   if(/^\d{1,2}:\d{2}$/.test(raw)){
@@ -1348,13 +1355,30 @@ function addMinuteToHM(hm){
   const next=(minutes+1)%(24*60);
   return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
 }
-function upReasonOptions(selected=''){
-  return `<option value="" ${!selected?'selected':''}>– Grund auswählen –</option>`+
-    UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
+function finkReasonOptions(selected=''){
+  const known=FINK_REASONS.some(item=>item.label===String(selected||''));
+  const legacy=selected&&!known?`<option value="${esc(selected)}" selected>${esc(selected)} · bisheriger Wert</option>`:'';
+  return `<option value="" ${!selected?'selected':''}>– Finkzeit-Art wählen –</option>`+legacy+
+    FINK_REASONS.map(item=>`<option value="${esc(item.label)}" ${String(selected)===item.label?'selected':''}>${esc(item.code+' · '+item.label)}</option>`).join('');
+}
+function setTimeEditorBilling(index,value){
+  const row=timeEditorSegments[index];if(!row)return;
+  row.billingType=value==='regie'?'regie':'normal';
+  renderTimeEditor();
 }
 function timeEditorContextCell(seg,index){
-  if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
-  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'')}</select>`;
+  if(seg.type==='work'){
+    const billing=seg.billingType==='regie'?'regie':'normal';
+    return `<div style="display:grid;grid-template-columns:minmax(230px,1fr) 120px;gap:7px">
+      <select aria-label="Baustelle" onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>
+      <select aria-label="Normal oder Regie" onchange="setTimeEditorBilling(${index},this.value)">
+        <option value="normal" ${billing==='normal'?'selected':''}>Normal</option>
+        <option value="regie" ${billing==='regie'?'selected':''}>Regie</option>
+      </select>
+    </div>`;
+  }
+  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${finkReasonOptions(seg.reason||'')}</select>`;
+  if(seg.type==='pause'||seg.type==='lunch')return '<span class="segment-badge">003 · Pause / Mittag</span>';
   return '<span class="small">–</span>';
 }
 function renderTimeEditor(){
@@ -1381,7 +1405,7 @@ function renderTimeEditor(){
   const work=timeEditorSegments.filter(x=>x.type==='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
   const breaks=timeEditorSegments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
   const up=timeEditorSegments.filter(x=>x.type==='up').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
-  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / UP-Grund</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
+  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / Finkzeit / Regie</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
 }
 function commitTimeEditorTime(index,key,input){
   const normalized=normalizeEditorTime(input.value);
@@ -1392,8 +1416,8 @@ function updateTimeEditorRow(index,key,value){
   const row=timeEditorSegments[index];if(!row)return;
   row[key]=value;
   if(key==='type'){
-    if(value==='work'){row.reason=''}
-    else{row.jobId='';row.jobName='';if(value==='up'&&!row.reason)row.reason='Werkstatt'}
+    if(value==='work'){row.reason='';row.billingType=row.billingType==='regie'?'regie':'normal'}
+    else{row.jobId='';row.jobName='';row.billingType='';if(value==='up'&&!row.reason)row.reason='Werkstatt'}
   }
   if(key==='to'&&value&&timeEditorSegments[index+1])timeEditorSegments[index+1].from=addMinuteToHM(value);
   renderTimeEditor();
@@ -1403,7 +1427,7 @@ function addTimeEditorRow(type='work'){
   const last=timeEditorSegments.at(-1);
   const from=last?.to?addMinuteToHM(last.to):currentViennaHM();
   const rowType=type==='site'?'work':type;
-  timeEditorSegments.push({id:id(),type:rowType,from,to:'',jobId:'',jobName:'',reason:rowType==='up'?'Werkstatt':''});
+  timeEditorSegments.push({id:id(),type:rowType,from,to:'',jobId:'',jobName:'',reason:rowType==='up'?'Werkstatt':'',billingType:rowType==='work'?'normal':''});
   renderTimeEditor();
 }
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
