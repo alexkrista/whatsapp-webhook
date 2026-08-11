@@ -482,9 +482,21 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
         addWorkEntry(block, split.before, "morning");
         addWorkEntry(block, split.after, "afternoon");
       } else if (block.type === "pause") {
-        stampedMorningPause += split.before;
-        stampedAfternoonPause += split.after;
-        summary.stampedPause += minutes;
+        // KRISTINE-Regel: Wird zur Mittagszeit versehentlich „Pause“ statt
+        // „Mittag“ gedrückt, behandeln wir diesen gestempelten Block als Mittag.
+        // Die automatische 15-Minuten-Kaffeepause bleibt davon getrennt.
+        const from = minutesFromHM(block.from);
+        const to = minutesFromHM(block.to);
+        const midpoint = from !== null && to !== null ? (from + to) / 2 : null;
+        const isLunchTimePause = midpoint !== null && midpoint >= 11 * 60 + 30 && midpoint <= 13 * 60 + 30;
+
+        if (isLunchTimePause) {
+          summary.lunch += minutes;
+        } else {
+          stampedMorningPause += split.before;
+          stampedAfternoonPause += split.after;
+          summary.stampedPause += minutes;
+        }
       } else if (block.type === "lunch") {
         summary.lunch += minutes;
       }
