@@ -203,16 +203,23 @@ function registerDayClose(app, {
       }
 
       const close = closes.find(row => String(row.employeeId) === employeeId && String(row.date) === yesterday) || null;
-      const closeMissing = hasStarted && !close;
-      const closeIncomplete = Boolean(close && !close.complete);
+
+      // Ein bewusst bestätigter Tagesabschluss gilt als ERLEDIGT – auch wenn einzelne
+      // Prüfpunkte (Fotos, Material, Bestellung ...) noch offen waren. Die Abschlussseite
+      // erlaubt ausdrücklich, offene Punkte bewusst zu bestätigen. Deshalb darf
+      // `complete === false` am nächsten Morgen NICHT erneut den Liegestütz-Schirm auslösen.
+      const closeConfirmed = Boolean(close && close.confirmed === true);
+      const closeMissing = hasStarted && !closeConfirmed;
+      const closeIncomplete = Boolean(closeConfirmed && !close.complete);
 
       return res.json({
         ok:true, today, yesterday, hadWork:hasStarted,
         forgotClockOut:hasStarted && !hasEnded,
         autoClosed, autoClosedAt:autoClosed ? "17:00" : null,
         dayCloseMissing:closeMissing,
+        // Nur Information für die Oberfläche; ein bestätigter Abschluss blockiert nicht mehr.
         dayCloseIncomplete:closeIncomplete,
-        needsAttention:Boolean((hasStarted && !hasEnded) || closeMissing || closeIncomplete),
+        needsAttention:Boolean((hasStarted && !hasEnded) || closeMissing),
       });
     } catch (error) {
       logger.error("❌ Morgenprüfung fehlgeschlagen", error);
