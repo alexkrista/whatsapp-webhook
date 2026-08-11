@@ -88,10 +88,10 @@
 
 <section class="section"><div class="section-head"><h2>Besonderheiten heute</h2><span>optional</span></div><div class="card note-card"><textarea id="note" placeholder="Was soll das Büro oder die nächste Mannschaft wissen?"></textarea><div class="helper">Die Notiz bleibt baustellen- und tagesbezogen erhalten.</div></div></section>
 <section class="section"><div class="section-head"><h2>Verbindlich bestätigen</h2><span>letzte Kontrolle</span></div><div class="card confirm-card"><div class="confirm-row"><input id="confirm" type="checkbox"><label for="confirm">Ich habe Arbeitszeit, Fotodokumentation, Materialdokumentation, Regie und Bestellung geprüft.</label></div><div id="openWarning" class="warning">Es sind noch offene Punkte vorhanden. Du kannst sie oben direkt bearbeiten und trotzdem bewusst bestätigen.</div></div></section>
-<button id="finish" class="finish" type="button" disabled>Tag bestätigen & Feierabend</button>
+<button id="finish" class="finish" type="button" disabled>Tagesabschluss bestätigen</button>
 
 <section id="after" class="card after hidden">
-<div class="after-icon">✓</div><h2>Feierabend</h2><p id="afterText">Tagesabschluss gespeichert. Deine WhatsApp-Bestätigung wird versendet.</p>
+<div class="after-icon">✓</div><h2>Tagesabschluss gespeichert</h2><p id="afterText">Der Abschluss wurde gespeichert. Deine Zeiterfassung bleibt davon unberührt.</p>
 <div class="after-actions"><a id="afterBack" class="back-go" href="/public/kristine-go.html">Zurück zu KRISTINE</a><a class="open-wa" href="https://wa.me/" target="_blank" rel="noopener">WhatsApp öffnen</a></div>
 <div id="autoReturn" class="auto-return">KRISTINE öffnet sich automatisch …</div>
 </section>
@@ -164,7 +164,7 @@ async function init(){
   assignment=todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
   day=buildDay(data.timeEvents||[]);
   if(!assignment&&day.rows.length){const latestWork=[...day.rows].reverse().find(e=>["start","weiter"].includes(String(e.type||"").toLowerCase())&&(e.jobId||e.jobName));if(latestWork)assignment={jobId:latestWork.jobId||"",jobName:latestWork.jobName||"",city:latestWork.city||"",address:latestWork.address||""}}
-  document.getElementById("title").textContent=`${employeeName(employee)}, dein Tag`;
+  document.getElementById("title").textContent=`${employeeName(employee)}, Tagesabschluss ${today.split("-").reverse().join(".")}`;
   document.getElementById("site").textContent=assignmentTitle(assignment);
   document.getElementById("workTotal").textContent=duration(day.workMinutes);
   document.getElementById("pauseTotal").textContent=duration(day.pauseMinutes);
@@ -197,7 +197,7 @@ finish.addEventListener("click",async()=>{
   document.getElementById("afterText").textContent=result.whatsapp?.sent?"Tagesabschluss gespeichert. Die Bestätigung wurde an WhatsApp gesendet.":"Tagesabschluss gespeichert. WhatsApp konnte diesmal nicht bestätigt werden.";
   let seconds=3;const auto=document.getElementById("autoReturn");auto.textContent=`Zurück zu KRISTINE in ${seconds} Sekunden …`;
   const timer=setInterval(()=>{seconds-=1;if(seconds<=0){clearInterval(timer);location.href=goUrl;return}auto.textContent=`Zurück zu KRISTINE in ${seconds} Sekunden …`},1000);
- }catch(error){finish.disabled=false;finish.textContent="Tag bestätigen & Feierabend";toast(error.message)}
+ }catch(error){finish.disabled=false;finish.textContent="Tagesabschluss bestätigen";toast(error.message)}
 });
 init();
 </script>

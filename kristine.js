@@ -487,7 +487,41 @@ function clampOfficialStart(actualTime) {
       typeof readEmployees === "function" ? readEmployees() : [],
       readGpsImport("latest"),
     ]);
-    return { assignments, states, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
+    // Status für die Oberfläche immer aus den HEUTIGEN Zeitereignissen ableiten.
+    // states.json ist mitarbeiterbezogen und kann noch den Status vom Vortag enthalten.
+    // Ein nachgeholter Tagesabschluss darf deshalb niemals "Feierabend" für heute vortäuschen.
+    const today = localDateISO();
+    const visibleStates = { ...states };
+    const byEmployee = new Map();
+    for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
+      if (String(event?.date || "") !== today) continue;
+      const type = String(event?.type || "").toLowerCase();
+      if (!["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(type)) continue;
+      const id = String(event?.employeeId || "");
+      if (!id) continue;
+      const rows = byEmployee.get(id) || [];
+      rows.push(event);
+      byEmployee.set(id, rows);
+    }
+    const modeForType = (type) => {
+      type = String(type || "").toLowerCase();
+      if (["start","weiter"].includes(type)) return "working";
+      if (type === "pause") return "pause";
+      if (type === "mittag") return "lunch";
+      if (["ende","fertig","stop","stopp"].includes(type)) return "finished_day";
+      return "idle";
+    };
+    for (const employee of employees || []) {
+      const id = String(employee?.id || employee?.employeeId || "");
+      if (!id) continue;
+      const rows = (byEmployee.get(id) || []).sort((a,b) =>
+        String(a.createdAt || "").localeCompare(String(b.createdAt || "")) ||
+        String(a.at || "").localeCompare(String(b.at || ""))
+      );
+      const base = visibleStates[id] || { employeeId:id, employeeName:employee?.nickname || employee?.name || id, timeline:[] };
+      visibleStates[id] = { ...base, mode: rows.length ? modeForType(rows[rows.length-1].type) : "idle" };
+    }
+    return { assignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {

@@ -135,14 +135,13 @@ function registerDayClose(app, {
     const lines = [
       `✅ Danke ${record.employeeName}.`,
       "",
-      "Dein Arbeitstag wurde abgeschlossen.",
+      "Dein Tagesabschluss wurde gespeichert.",
     ];
 
     if (record.jobName || record.jobId) {
       lines.push(`📍 ${record.jobName || record.jobId}`);
     }
 
-    lines.push(`🕒 Feierabend: ${record.finishedAt} Uhr`);
     lines.push(`📋 Tageskontrolle: ${done}/5 geprüft`);
 
     if (!record.complete) {
@@ -283,12 +282,9 @@ function registerDayClose(app, {
       );
       await writeJson(dayCloseFile, savedDayCloses);
 
-      const timeEvents = await readJson(timeEventsFile, []);
-      const savedTimeEvents = appendFinishEvent(
-        Array.isArray(timeEvents) ? timeEvents : [],
-        record
-      );
-      await writeJson(timeEventsFile, savedTimeEvents);
+      // WICHTIG: Ein Tagesabschluss ist KEIN Ausstempeln.
+      // Er darf niemals ein Zeitereignis "ende" erzeugen – weder heute noch beim Nachtrag.
+      // Die Zeiterfassung wird ausschließlich über Start/Pause/Mittag/Feierabend geführt.
 
       let whatsapp = {
         sent: false,
