@@ -1,0 +1,57 @@
+/* KRISTOOL 0023.31 · Diäten / FL / CH – Zusatzstylesheet
+   Absichtlich separat: der bereits schöne kompakte Kopf in kristool.css bleibt unangetastet. */
+
+.diet-panel{
+  margin:14px 0 0;
+  padding:16px 18px;
+  border:1px solid #d8dfd8;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 7px 22px rgba(23,33,27,.06);
+}
+.diet-panel[hidden]{display:none}
+.diet-head{
+  display:flex;
+  justify-content:space-between;
+  gap:18px;
+  align-items:flex-end;
+  margin-bottom:12px;
+}
+.diet-head h3{margin:0;font-size:17px}
+.diet-head .eyebrow{margin-bottom:3px}
+.diet-head>small{color:#747b75;text-align:right}
+.diet-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+.diet-item{
+  display:grid;
+  grid-template-columns:24px 1fr;
+  gap:10px;
+  align-items:start;
+  padding:13px 14px;
+  border:1px solid #dfe5df;
+  border-radius:13px;
+  background:#fafcf9;
+  cursor:pointer;
+  text-transform:none;
+  letter-spacing:normal;
+}
+.diet-item:hover{border-color:#a9c4ae;background:#f5faf6}
+.diet-item input{
+  width:20px;
+  height:20px;
+  margin:2px 0 0;
+  accent-color:#2f7d4a;
+}
+.diet-item span{display:grid;gap:3px;min-width:0}
+.diet-item b{font-size:12px;color:#58605a}
+.diet-item strong{font-size:19px;color:#1f4d30;line-height:1.1}
+.diet-item small{color:#717871;font-weight:500;line-height:1.35}
+.diet-empty{color:#7a817b;padding:4px 0}
+@media(max-width:900px){
+  .diet-grid{grid-template-columns:1fr}
+  .diet-head{align-items:flex-start;flex-direction:column}
+  .diet-head>small{text-align:left}
+}

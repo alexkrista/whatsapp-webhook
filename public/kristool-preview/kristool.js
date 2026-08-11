@@ -17,6 +17,7 @@ const state = {
   teamJobs: [],
   dayQueue: [],
   activeEmployeeId: "",
+  dietOverride: null,
 };
 
 const $ = id => document.getElementById(id);
@@ -50,6 +51,151 @@ function addDays(iso, delta){
 }
 function uniqueDates(){ return [...new Set(state.groups.map(g=>g.date).filter(Boolean))].sort(); }
 function groupsForDate(date){ return state.groups.filter(g=>g.date===date); }
+
+function hmFromMinutes(total){
+  total=Math.max(0,Math.round(Number(total)||0));
+  return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
+}
+
+/* Mittag ist im KRISTOOL immer mindestens 60 Minuten.
+   Fehlt Zeit, wird der Mittag verlängert und ALLES danach gleich weit nach hinten geschoben. */
+function enforceMinimumLunch(rows){
+  const list=rows||[];
+  let changed=false,totalShift=0;
+  for(let i=0;i<list.length;i++){
+    const row=list[i];
+    if(row.type!=="lunch")continue;
+    const from=minutes(row.from),to=minutes(row.to);
+    if(from===null||to===null||to<=from)continue;
+    const duration=to-from;
+    if(duration>=60)continue;
+    const delta=60-duration;
+    row.to=hmFromMinutes(to+delta);
+    for(let j=i+1;j<list.length;j++){
+      const next=list[j];
+      const nf=minutes(next.from),nt=minutes(next.to);
+      if(nf!==null)next.from=hmFromMinutes(nf+delta);
+      if(nt!==null)next.to=hmFromMinutes(nt+delta);
+    }
+    changed=true;
+    totalShift+=delta;
+  }
+  return {changed,totalShift};
+}
+
+/* Kleine maschinenlesbare Zusatzinfo im bestehenden Korrektur-Notizfeld.
+   Dadurch brauchen wir für die drei Häkchen KEINE neue Backend-Datei/API. */
+const DIET_MARKER_RE=/\s*\[\[DIET:taggeld=(auto|0|1);fl=(auto|0|1);ch=(auto|0|1)\]\]\s*$/i;
+function parseDietOverride(note){
+  const match=String(note||"").match(DIET_MARKER_RE);
+  if(!match)return {taggeld:"auto",fl:"auto",ch:"auto"};
+  return {taggeld:match[1].toLowerCase(),fl:match[2].toLowerCase(),ch:match[3].toLowerCase()};
+}
+function visibleCorrectionNote(note){ return String(note||"").replace(DIET_MARKER_RE,"").trim(); }
+function correctionNoteWithDiet(note){
+  const o=state.dietOverride||{taggeld:"auto",fl:"auto",ch:"auto"};
+  return `${String(note||"").trim()} [[DIET:taggeld=${o.taggeld||"auto"};fl=${o.fl||"auto"};ch=${o.ch||"auto"}]]`.trim();
+}
+function checkedFromOverride(value,automatic){
+  return value==="1"?true:value==="0"?false:Boolean(automatic);
+}
+function overrideFromCheckbox(checked,automatic){
+  return checked===Boolean(automatic)?"auto":(checked?"1":"0");
+}
+function jobAssignmentForSegment(row){
+  const assignments=state.bootstrap?.assignments||[];
+  const id=String(row.jobId||"").trim();
+  const name=String(row.jobName||"").trim().toLowerCase();
+  const sameDay=assignments.filter(a=>String(a.date||a.day||"").slice(0,10)===String(state.activeDate||""));
+  return sameDay.find(a=>id&&String(a.jobId||"")===id)
+    ||sameDay.find(a=>name&&String(a.jobName||"").trim().toLowerCase()===name)
+    ||assignments.find(a=>id&&String(a.jobId||"")===id)
+    ||assignments.find(a=>name&&String(a.jobName||"").trim().toLowerCase()===name)
+    ||null;
+}
+function segmentLocationText(row){
+  const a=jobAssignmentForSegment(row)||{};
+  return [a.address,a.city,a.country,a.countryCode,a.jobName,row.jobName].filter(Boolean).join(" ");
+}
+function countryForSegment(row){
+  const text=segmentLocationText(row)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase();
+  if(/liechtenstein|lichtenstein|\bfl[-\s]?\d{4}\b|\b94(?:8[5-9]|9[0-8])\b/.test(text))return "FL";
+  if(/schweiz|switzerland|suisse|svizzera|\bch[-\s]?\d{4}\b/.test(text))return "CH";
+  return "";
+}
+function hasForeignSiteWork(rows=state.segments){
+  return (rows||[]).some(row=>row.type==="work"&&["FL","CH"].includes(countryForSegment(row)));
+}
+function isInternalWork(row){
+  const text=[row.jobName,row.reason,segmentLocationText(row)].filter(Boolean).join(" ")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase();
+  return /\b(buro|buero|firma|werkstatt|lager|intern)\b/.test(text);
+}
+function dietCalculation(){
+  let siteMinutes=0,flMinutes=0,chMinutes=0;
+  for(const row of state.segments||[]){
+    if(row.type!=="work")continue;
+    const from=minutes(row.from),to=minutes(row.to);
+    if(from===null||to===null||to<=from)continue;
+    const dur=to-from;
+    if(!isInternalWork(row))siteMinutes+=dur;
+    const country=countryForSegment(row);
+    if(country==="FL")flMinutes+=dur;
+    if(country==="CH")chMinutes+=dur;
+  }
+  return {
+    siteMinutes,flMinutes,chMinutes,
+    taggeldAutomatic:siteMinutes>180,
+    flAutomatic:flMinutes>0,
+    chAutomatic:chMinutes>0
+  };
+}
+function renderDietPanel(){
+  const panel=$("dietPanel");
+  if(!panel)return;
+  const employeeId=$("employeeSelect")?.value||"";
+  if(!employeeId||!state.segments.length){
+    panel.innerHTML='<div class="diet-empty">Tagesfolie öffnen – danach werden Taggeld und FL/CH automatisch berechnet.</div>';
+    return;
+  }
+  const c=dietCalculation();
+  const o=state.dietOverride||{taggeld:"auto",fl:"auto",ch:"auto"};
+  const taggeld=checkedFromOverride(o.taggeld,c.taggeldAutomatic);
+  const fl=checkedFromOverride(o.fl,c.flAutomatic);
+  const ch=checkedFromOverride(o.ch,c.chAutomatic);
+  panel.innerHTML=`
+    <div class="diet-head">
+      <div><p class="eyebrow">DIÄTEN & ENTSENDUNG</p><h3>Automatisch aus geprüften Zeitblöcken</h3></div>
+      <small>Haken raus = für diesen Mitarbeiter/Tag nicht übernehmen</small>
+    </div>
+    <div class="diet-grid">
+      <label class="diet-item">
+        <input type="checkbox" data-diet-key="taggeld" ${taggeld?"checked":""}>
+        <span><b>Taggeld</b><strong>${taggeld?"1":"0"}</strong><small>${durationLabel(c.siteMinutes)} Baustelle · Regel &gt; 3:00 h</small></span>
+      </label>
+      <label class="diet-item">
+        <input type="checkbox" data-diet-key="fl" ${fl?"checked":""}>
+        <span><b>Liechtenstein</b><strong>${fl?"1":"0"} Tag · ${durationLabel(c.flMinutes)}</strong><small>FL-Stunden aus Baustellenadresse</small></span>
+      </label>
+      <label class="diet-item">
+        <input type="checkbox" data-diet-key="ch" ${ch?"checked":""}>
+        <span><b>Schweiz</b><strong>${ch?"1":"0"} Tag · ${durationLabel(c.chMinutes)}</strong><small>CH-Stunden aus Baustellenadresse</small></span>
+      </label>
+    </div>`;
+  panel.querySelectorAll("input[data-diet-key]").forEach(input=>{
+    input.addEventListener("change",()=>{
+      const key=input.dataset.dietKey;
+      const automatic=key==="taggeld"?c.taggeldAutomatic:key==="fl"?c.flAutomatic:c.chAutomatic;
+      state.dietOverride=state.dietOverride||{taggeld:"auto",fl:"auto",ch:"auto"};
+      state.dietOverride[key]=overrideFromCheckbox(input.checked,automatic);
+      renderDietPanel();
+      scheduleCorrectionSave(80);
+    });
+  });
+}
 
 async function request(path, options={}){
   const response=await fetch(api(path),{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
@@ -345,7 +491,15 @@ async function loadDay(){
     state.segments=(seg.segments||[]).map(row=>({...row}));
     state.originalSegments=(seg.originalSegments||seg.segments||[]).map(row=>({...row}));
     state.correction=seg.correction||null;
+    state.dietOverride=parseDietOverride(state.correction?.note||"");
+    const lunchFix=hasForeignSiteWork(state.segments)
+      ? enforceMinimumLunch(state.segments)
+      : {changed:false,totalShift:0};
     renderDay(group,date);
+    if(lunchFix.changed){
+      toast(`FL/CH-Tag: Mittag auf mindestens 60 Minuten korrigiert · Tagesende +${lunchFix.totalShift} min.`);
+      scheduleCorrectionSave(120);
+    }
   }catch(error){toast(`Tagesfolie konnte nicht geöffnet werden: ${error.message}`,true)}
 }
 
@@ -355,6 +509,7 @@ function clearDay(){
   state.segments=[];
   state.originalSegments=[];
   state.correction=null;
+  state.dietOverride=null;
   $("personBadge").textContent="?";
   $("dayTitle").textContent=`Tagesfolie ${deDate(state.activeDate)}`;
   $("daySubtitle").textContent="Mitarbeiter auswählen und Tagesfolie öffnen.";
@@ -396,6 +551,7 @@ function renderDay(group,date){
   setPhase("times");
   renderDayQueue();
   loadTeamCandidates();
+  renderDietPanel();
 }
 function normalizeTimeInput(value){
   let raw=String(value||"").trim().replace(/[^0-9:]/g,"");
@@ -498,12 +654,13 @@ function renderSegments(){
     $("correctionToolbar").hidden=true;
     $("segmentActions").hidden=false;
     renderCorrectionHistory();
+    renderDietPanel();
     return;
   }
   $("correctionToolbar").hidden=false;
   $("segmentActions").hidden=false;
   $("correctionReason").value=state.correction?.reason||"";
-  $("correctionNote").value=state.correction?.note||"";
+  $("correctionNote").value=visibleCorrectionNote(state.correction?.note||"");
   box.className="timeline correction-list";
   box.innerHTML=rows.map((row,index)=>{
     const original=originalForSegment(row,index);
@@ -530,6 +687,7 @@ function renderSegments(){
   bindSegmentEditors();
   updateCorrectionTotals();
   renderCorrectionHistory();
+  renderDietPanel();
 }
 function bindSegmentEditors(){
   document.querySelectorAll(".time-input").forEach(input=>{
@@ -562,6 +720,7 @@ function bindSegmentEditors(){
     }else{
       row.jobId=""; row.jobName=""; row.reason=""; row.billingType="";
     }
+    if(row.type==="lunch"&&hasForeignSiteWork(state.segments))enforceMinimumLunch(state.segments);
     renderSegments();
     scheduleCorrectionSave(80);
   }));
@@ -611,11 +770,12 @@ async function saveCorrection(){
   try{
     const data=await request(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`,{
       method:"PUT",
-      body:JSON.stringify({employeeName,segments:state.segments,reason:$("correctionReason").value,note:$("correctionNote").value,correctedBy:"Bettina / Büro"})
+      body:JSON.stringify({employeeName,segments:state.segments,reason:$("correctionReason").value,note:correctionNoteWithDiet($("correctionNote").value),correctedBy:"Bettina / Büro"})
     });
     state.segments=cloneSegments(data.segments);
     state.originalSegments=cloneSegments(data.originalSegments||state.originalSegments);
     state.correction=data.correction||state.correction;
+    state.dietOverride=parseDietOverride(state.correction?.note||correctionNoteWithDiet($("correctionNote").value));
     renderSegments();
     loadTeamCandidates();
     loadDayQueue();
@@ -817,6 +977,8 @@ function setPhase(phase){
   document.querySelectorAll(".phase-button").forEach(button=>{
     button.classList.toggle("active",button.dataset.phase===phase);
   });
+  if($("dietPanel"))$("dietPanel").hidden=phase!=="release";
+  if(phase==="release")renderDietPanel();
 }
 document.querySelectorAll(".phase-button").forEach(button=>{
   button.addEventListener("click",()=>setPhase(button.dataset.phase));
