@@ -11,6 +11,7 @@ const KristineGo = (() => {
     assistant: null,
     localReview: {},
     materialResponses: [],
+    morningCheck: null,
   };
   const query = new URLSearchParams(location.search);
 const token = query.get("token") || "";
@@ -153,6 +154,14 @@ function authenticatedUrl(url) {
     state.employeeState = state.bootstrap?.states?.[id] || {
       employeeId: id, employeeName: employeeName(state.employee), mode: "idle", timeline: []
     };
+    // Statusdatei ist mitarbeiterbezogen, nicht tagesbezogen. Ohne heutiges Zeitevent
+    // darf ein alter Status (z.B. finished_day/working von gestern) den neuen Tag nicht blockieren.
+    const todaysEvents = (state.bootstrap?.timeEvents || []).filter(row =>
+      String(row.employeeId) === id && String(row.date) === today
+    );
+    if (!todaysEvents.length) {
+      state.employeeState = { ...state.employeeState, mode:"idle", pending:null };
+    }
 
     const activeKey = state.employeeState?.activeAssignmentKey;
     state.currentAssignment =
@@ -476,6 +485,64 @@ if (contactPhone) {
     });
   }
 
+  function closeMorningOverlay() {
+    document.getElementById("kgMorningOverlay")?.remove();
+  }
+
+  function openPastDayClose(date) {
+    const url = new URL("/public/kristine-go-abschluss.html", location.origin);
+    if (token) url.searchParams.set("token", token);
+    url.searchParams.set("employeeId", employeeId(state.employee));
+    url.searchParams.set("date", date);
+    location.href = url.pathname + url.search;
+  }
+
+  function showMorningCheck(check) {
+    if (!check?.needsAttention || document.getElementById("kgMorningOverlay")) return;
+    const lines = [];
+    if (check.forgotClockOut) lines.push(`<div class="kg-morning-warning">⚠️ Arbeitszeit nicht beendet <small>automatisch auf 17:00 Uhr gesetzt – bitte prüfen</small></div>`);
+    if (check.dayCloseMissing) lines.push(`<div class="kg-morning-warning">⚠️ Tagesabschluss fehlt</div>`);
+    if (check.dayCloseIncomplete) lines.push(`<div class="kg-morning-warning">⚠️ Tagesabschluss ist noch nicht vollständig</div>`);
+    const overlay = document.createElement("div");
+    overlay.id = "kgMorningOverlay";
+    overlay.className = "kg-morning-overlay";
+    overlay.innerHTML = `<div class="kg-morning-card">
+      <div class="kg-morning-emoji">😈</div>
+      <h2>Guten Morgen, ${esc(employeeName(state.employee))}.</h2>
+      <p class="kg-morning-punish">Du schlimmer Kerl … gestern nicht ganz fertig geworden.<br><strong>10 Liegestütz!</strong></p>
+      <div class="kg-morning-date">Gestern · ${esc(check.yesterday.split("-").reverse().join("."))}</div>
+      <div class="kg-morning-warnings">${lines.join("")}</div>
+      <button type="button" class="kg-morning-primary" id="kgMorningCloseYesterday">Gestern schnell abschließen</button>
+      <button type="button" class="kg-morning-secondary" id="kgMorningStartToday">▶ Trotzdem heute starten</button>
+      <button type="button" class="kg-morning-link" id="kgMorningLater">Später erledigen</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById("kgMorningCloseYesterday").onclick = () => openPastDayClose(check.yesterday);
+    document.getElementById("kgMorningStartToday").onclick = async () => {
+      closeMorningOverlay();
+      await sendMessage("Start").catch(showError);
+    };
+    document.getElementById("kgMorningLater").onclick = closeMorningOverlay;
+  }
+
+  async function runMorningCheck() {
+    const id = employeeId(state.employee);
+    if (!id) return;
+    const check = await api("/kristine/api/morning-check", {
+      method:"POST",
+      body:JSON.stringify({employeeId:id, date:state.bootstrap?.today || todayISO()}),
+    });
+    state.morningCheck = check;
+    // Falls die Morgenprüfung gestern automatisch geschlossen hat, Bootstrap neu laden,
+    // damit die Oberfläche sofort den korrigierten Datenstand kennt.
+    if (check.autoClosed) {
+      state.bootstrap = await api("/kristine/api/bootstrap");
+      deriveEmployeeData();
+      render();
+    }
+    showMorningCheck(check);
+  }
+
   function render() {
     if (!state.employee) return;
     elements.kgGreeting.textContent = `${greeting()}, ${employeeName(state.employee)}.`;
@@ -775,6 +842,7 @@ if (contactPhone) {
       elements.kgLoading.classList.add("kg-hidden");
       elements.kgError.classList.add("kg-hidden");
       elements.kgContent.classList.remove("kg-hidden");
+      if (showLoading) await runMorningCheck();
     } catch (error) {
       showError(error);
     }

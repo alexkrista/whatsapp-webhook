@@ -156,6 +156,71 @@ function registerDayClose(app, {
     return lines.join("\n");
   }
 
+  function previousLocalDate(date) {
+    const d = new Date(`${date}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+
+  app.post("/kristine/api/morning-check", async (req, res) => {
+    if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.body?.employeeId || "").trim();
+      const today = String(req.body?.date || localDate()).trim();
+      if (!employeeId) return res.status(400).json({ ok:false, error:"employeeId fehlt" });
+
+      const yesterday = previousLocalDate(today);
+      const [employees, rawEvents, rawCloses] = await Promise.all([
+        readEmployees(), readJson(timeEventsFile, []), readJson(dayCloseFile, [])
+      ]);
+      const employee = findEmployee(employees, employeeId);
+      if (!employee) return res.status(404).json({ ok:false, error:"Mitarbeiter nicht gefunden" });
+
+      let events = Array.isArray(rawEvents) ? rawEvents : [];
+      const closes = Array.isArray(rawCloses) ? rawCloses : [];
+      const dayEvents = events.filter(e => String(e.employeeId) === employeeId && String(e.date) === yesterday);
+      const hasStarted = dayEvents.some(e => ["start","weiter"].includes(String(e.type||"").toLowerCase()));
+      const hasEnded = dayEvents.some(e => ["ende","fertig","stop","stopp"].includes(String(e.type||"").toLowerCase()));
+      let autoClosed = false;
+
+      if (hasStarted && !hasEnded) {
+        const latestWork = [...dayEvents].reverse().find(e => ["start","weiter"].includes(String(e.type||"").toLowerCase()));
+        events = [...events, {
+          id:`auto_close_${yesterday}_${employeeId}`,
+          employeeId,
+          employeeName:employeeName(employee),
+          date:yesterday,
+          at:"17:00",
+          type:"ende",
+          command:"auto-feierabend",
+          jobId:latestWork?.jobId || null,
+          jobName:latestWork?.jobName || "",
+          source:"kristine-morning-reconcile",
+          automatic:true,
+          createdAt:new Date().toISOString(),
+        }];
+        await writeJson(timeEventsFile, events);
+        autoClosed = true;
+      }
+
+      const close = closes.find(row => String(row.employeeId) === employeeId && String(row.date) === yesterday) || null;
+      const closeMissing = hasStarted && !close;
+      const closeIncomplete = Boolean(close && !close.complete);
+
+      return res.json({
+        ok:true, today, yesterday, hadWork:hasStarted,
+        forgotClockOut:hasStarted && !hasEnded,
+        autoClosed, autoClosedAt:autoClosed ? "17:00" : null,
+        dayCloseMissing:closeMissing,
+        dayCloseIncomplete:closeIncomplete,
+        needsAttention:Boolean((hasStarted && !hasEnded) || closeMissing || closeIncomplete),
+      });
+    } catch (error) {
+      logger.error("❌ Morgenprüfung fehlgeschlagen", error);
+      return res.status(500).json({ok:false,error:String(error?.message||error)});
+    }
+  });
+
   app.post("/kristine/api/day-close", async (req, res) => {
     if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
 

@@ -162,3 +162,8 @@ button,a{-webkit-tap-highlight-color:transparent}
 #kgGreeting {
   display: none !important;
 }
+
+/* KRISTINE Morgencheck */
+.kg-morning-overlay{position:fixed;inset:0;z-index:9999;background:rgba(8,22,38,.72);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px)}
+.kg-morning-card{width:min(100%,430px);background:#fff;border-radius:28px;padding:28px 22px 22px;box-shadow:0 24px 70px rgba(0,0,0,.28);text-align:center;color:#102a43}
+.kg-morning-emoji{font-size:46px;line-height:1;margin-bottom:10px}.kg-morning-card h2{margin:0 0 10px;font-size:25px}.kg-morning-punish{margin:0 0 18px;line-height:1.45;color:#486581}.kg-morning-punish strong{color:#102a43;font-size:20px}.kg-morning-date{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#829ab1;margin-bottom:10px}.kg-morning-warnings{display:grid;gap:8px;margin-bottom:20px;text-align:left}.kg-morning-warning{background:#fff4e5;border:1px solid #ffd8a8;border-radius:14px;padding:11px 12px;font-weight:750}.kg-morning-warning small{display:block;margin:4px 0 0 24px;font-weight:500;color:#7c5b2b}.kg-morning-primary,.kg-morning-secondary,.kg-morning-link{width:100%;border:0;border-radius:15px;padding:14px 16px;font:inherit;font-weight:800;cursor:pointer}.kg-morning-primary{background:#0b5cab;color:#fff;margin-bottom:9px}.kg-morning-secondary{background:#eaf3fb;color:#0b5cab;margin-bottom:5px}.kg-morning-link{background:transparent;color:#627d98;font-weight:650;padding:10px}

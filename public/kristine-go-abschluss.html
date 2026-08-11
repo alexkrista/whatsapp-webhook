@@ -105,7 +105,7 @@
 const q=new URLSearchParams(location.search);
 const token=q.get("token")||"";
 const employeeId=q.get("employeeId")||localStorage.getItem("kristineGoEmployeeId")||"";
-const today=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+const today=q.get("date")||new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 
 function withParams(path,extra={}){const url=new URL(path,location.origin);if(token)url.searchParams.set("token",token);if(employeeId)url.searchParams.set("employeeId",employeeId);Object.entries(extra).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=="")url.searchParams.set(key,value)});return url.pathname+url.search}
 const goUrl=withParams("/public/kristine-go.html");document.getElementById("backLink").href=goUrl;document.getElementById("afterBack").href=goUrl;
@@ -160,8 +160,8 @@ async function init(){
   const data=await api("/kristine/api/bootstrap");window.__bootstrapAssignments=data.assignments||[];
   employee=(data.employees||[]).find(e=>String(e.id||e.employeeId)===String(employeeId))||null;
   employeeState=data.states?.[employeeId]||null;
-  const todayAssignments=(data.assignments||[]).filter(a=>String(a.employeeId)===String(employeeId)&&String(a.date)===String(data.today||today)).sort((a,b)=>String(a.from||"").localeCompare(String(b.from||"")));
-  assignment=employeeState?.activeJobOverride||todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
+  const todayAssignments=(data.assignments||[]).filter(a=>String(a.employeeId)===String(employeeId)&&String(a.date)===String(today)).sort((a,b)=>String(a.from||"").localeCompare(String(b.from||"")));
+  assignment=todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
   day=buildDay(data.timeEvents||[]);
   if(!assignment&&day.rows.length){const latestWork=[...day.rows].reverse().find(e=>["start","weiter"].includes(String(e.type||"").toLowerCase())&&(e.jobId||e.jobName));if(latestWork)assignment={jobId:latestWork.jobId||"",jobName:latestWork.jobName||"",city:latestWork.city||"",address:latestWork.address||""}}
   document.getElementById("title").textContent=`${employeeName(employee)}, dein Tag`;
