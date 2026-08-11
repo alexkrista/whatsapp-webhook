@@ -1607,7 +1607,16 @@ function canonicalControlEmployees(date){
   planned.forEach(a=>add(a,'planning'));
 
   Object.values(data.states||{}).forEach(s=>{
-    if(s?.employeeId)add(s,'state');
+    if(!s?.employeeId)return;
+
+    const stateId=String(s.employeeId);
+    const isActiveMaster=masterEmployees.some(e=>String(e.id)===stateId);
+    const isRelevantToday=planned.some(a=>String(a.employeeId)===stateId) ||
+      dayEvents.some(e=>String(e.employeeId)===stateId);
+
+    // Alte/inaktive Mitarbeiter koennen noch einen gespeicherten State haben.
+    // Der allein darf sie im Leitstand fuer den gewaehlten Tag nicht wieder einblenden.
+    if(isActiveMaster||isRelevantToday)add(s,'state');
   });
 
   /*

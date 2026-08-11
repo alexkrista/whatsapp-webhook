@@ -3183,6 +3183,8 @@ function cleanEmployeeMaster(e, existingId = "") {
     id: String(e?.id || existingId || employeeIdFromName(name)).trim().slice(0, 80),
     name,
     nickname: String(e?.nickname || e?.rufname || "").trim().slice(0, 60),
+    // Als Text speichern: führende Nullen (z. B. 0026) müssen für Finkzeit erhalten bleiben.
+    finkzeitPersonalNumber: String(e?.finkzeitPersonalNumber ?? e?.personalNumberFinkzeit ?? "").trim().slice(0, 30),
     shortCode: String(e?.shortCode || "").trim().slice(0, 20),
     phone: String(e?.phone || "").trim().slice(0, 40),
     role: String(e?.role || "Maler").trim().slice(0, 80),
