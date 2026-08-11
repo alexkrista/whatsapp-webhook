@@ -388,3 +388,62 @@
 
 /* Finkzeit Export */
 .fink-modal{position:fixed;inset:0;background:rgba(16,24,20,.55);display:grid;place-items:center;padding:20px;z-index:1000}.fink-modal[hidden]{display:none}.fink-dialog{width:min(680px,100%);background:#fff;border-radius:24px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.25)}.fink-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.fink-head h2{margin:0}.fink-close{border:0;background:#f0f1ed;border-radius:999px;width:42px;height:42px;font-size:28px;cursor:pointer}.fink-presets{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}.fink-dates{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fink-dates label{display:grid;gap:7px;font-weight:700}.fink-dates input{padding:12px;border:1px solid #d8dcd6;border-radius:12px;font:inherit}.fink-note,.fink-preview{margin-top:16px;padding:14px 16px;border-radius:14px;background:#f4f6f2;line-height:1.45}.fink-preview{background:#edf4ff}.fink-actions{display:flex;justify-content:flex-end;margin-top:18px}@media(max-width:650px){.fink-dates{grid-template-columns:1fr}.fink-dialog{padding:18px;border-radius:18px}}
+
+
+/* 0023.29 · KRISTOOL Tagesprüfung: Baustelle / Finkzeit / Normal-Regie */
+.office-line{
+  grid-template-columns:auto 92px 58px 12px 58px 28px auto;
+}
+.segment-context{
+  grid-column:2/-1;
+  display:flex;
+  align-items:end;
+  gap:8px;
+  padding-top:3px;
+  min-width:0;
+}
+.segment-context label{
+  display:grid;
+  gap:4px;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.04em;
+  color:#677168;
+  text-transform:uppercase;
+  min-width:0;
+}
+.work-context{display:grid;grid-template-columns:minmax(190px,1fr) 112px}
+.work-context label:first-child{min-width:0}
+.segment-job,.segment-billing,.segment-fink-reason{
+  min-height:34px;
+  border:1px solid #c7d5ca;
+  border-radius:8px;
+  background:#fff;
+  padding:5px 8px;
+  color:#202620;
+  font-weight:750;
+  text-transform:none;
+  letter-spacing:normal;
+  width:100%;
+}
+.up-context{display:grid;grid-template-columns:minmax(220px,1fr)}
+.fink-code-badge{
+  display:inline-flex;
+  align-items:center;
+  min-height:32px;
+  padding:5px 10px;
+  border:1px solid #bad8c2;
+  border-radius:999px;
+  background:#eef8f0;
+  color:#285d38;
+  font-size:11px;
+  font-weight:900;
+}
+.segment-editor.up{border-color:#c9d8e8}
+.segment-editor.up .segment-dot{background:#3e7198}
+.segment-editor.up .office-line{background:#f2f7fc}
+@media(max-width:720px){
+  .segment-context{grid-column:1/-1}
+  .work-context{grid-template-columns:1fr}
+  .up-context{grid-template-columns:1fr}
+}

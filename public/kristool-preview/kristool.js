@@ -413,7 +413,78 @@ function workMinutes(rows){
     return sum+(row.type==="work"&&a!==null&&b!==null?Math.max(0,b-a):0);
   },0);
 }
-function segmentLabel(type){ return type==="work"?"Arbeitszeit":type==="lunch"?"Mittag":"Pause"; }
+const KRISTOOL_FINK_REASONS=[
+  ["022","Büro"],["900","Urlaub"],["901","Krank"],["902","Arzt"],
+  ["903","Berufsschule"],["904","Feiertag"],["905","Schulung extern"],
+  ["909","Schulung intern"],["911","Sonderurlaub"],["912","Musterung"],
+  ["913","Werkstatt"],["917","Firma aufräumen"],["918","Lehrlingswettbewerb"],
+  ["927","Betriebsausflug"],["930","Zeitausgleich"],["945","Quarantäne"],
+  ["946","Kurzarbeit"],["9999","Sanierung"]
+];
+
+function segmentLabel(type){
+  return type==="work"?"Arbeitszeit":type==="lunch"?"Mittag":type==="up"?"Unproduktiv":"Pause";
+}
+function availableJobs(){
+  const map=new Map();
+  for(const a of state.bootstrap?.assignments||[]){
+    const jobId=String(a.jobId||"").trim();
+    const jobName=String(a.jobName||"").trim();
+    if(!jobId&&!jobName)continue;
+    const key=jobId||jobName.toLowerCase();
+    if(!map.has(key))map.set(key,{jobId,jobName:jobName||jobId});
+  }
+  for(const row of [...state.originalSegments,...state.segments]){
+    if(row.type!=="work")continue;
+    const jobId=String(row.jobId||"").trim();
+    const jobName=String(row.jobName||"").trim();
+    if(!jobId&&!jobName)continue;
+    const key=jobId||jobName.toLowerCase();
+    if(!map.has(key))map.set(key,{jobId,jobName:jobName||jobId});
+  }
+  return [...map.values()].sort((a,b)=>
+    String(a.jobName||"").localeCompare(String(b.jobName||""),"de",{numeric:true})
+  );
+}
+function jobOptions(row){
+  const selectedId=String(row.jobId||"");
+  const selectedName=String(row.jobName||"");
+  const jobs=availableJobs();
+  const has=jobs.some(j=>(selectedId&&String(j.jobId)===selectedId)||(!selectedId&&selectedName&&j.jobName===selectedName));
+  const legacy=!has&&(selectedId||selectedName)
+    ? `<option value="${esc(selectedId)}" data-name="${esc(selectedName)}" selected>${esc([selectedId,selectedName].filter(Boolean).join(" · "))}</option>`
+    : "";
+  return `<option value="">– Baustelle wählen –</option>${legacy}`+
+    jobs.map(j=>`<option value="${esc(j.jobId)}" data-name="${esc(j.jobName)}" ${selectedId&&String(j.jobId)===selectedId?"selected":(!selectedId&&selectedName===j.jobName?"selected":"")}>${esc([j.jobId,j.jobName].filter(Boolean).join(" · "))}</option>`).join("");
+}
+function finkReasonOptions(row){
+  const selected=String(row.reason||"");
+  const known=KRISTOOL_FINK_REASONS.some(([,label])=>label===selected);
+  const legacy=selected&&!known?`<option value="${esc(selected)}" selected>${esc(selected)} · bisheriger Wert</option>`:"";
+  return `<option value="">– Finkzeit-Art wählen –</option>${legacy}`+
+    KRISTOOL_FINK_REASONS.map(([code,label])=>`<option value="${esc(label)}" ${label===selected?"selected":""}>${esc(code+" · "+label)}</option>`).join("");
+}
+function segmentContext(row,index){
+  if(row.type==="work"){
+    const billing=row.billingType==="regie"?"regie":"normal";
+    return `<div class="segment-context work-context">
+      <label>Baustelle<select class="segment-job" data-index="${index}">${jobOptions(row)}</select></label>
+      <label>Verrechnung<select class="segment-billing" data-index="${index}">
+        <option value="normal" ${billing==="normal"?"selected":""}>Normal</option>
+        <option value="regie" ${billing==="regie"?"selected":""}>Regie</option>
+      </select></label>
+    </div>`;
+  }
+  if(row.type==="pause"||row.type==="lunch"){
+    return `<div class="segment-context"><span class="fink-code-badge">003 · Pause / Mittag</span></div>`;
+  }
+  if(row.type==="up"){
+    return `<div class="segment-context up-context">
+      <label>Finkzeit / Abwesenheit<select class="segment-fink-reason" data-index="${index}">${finkReasonOptions(row)}</select></label>
+    </div>`;
+  }
+  return "";
+}
 function originalForSegment(row,index){
   return state.originalSegments.find(item=>item.id===row.id)||state.originalSegments[index]||null;
 }
@@ -436,17 +507,23 @@ function renderSegments(){
   box.className="timeline correction-list";
   box.innerHTML=rows.map((row,index)=>{
     const original=originalForSegment(row,index);
-    const changed=!original||original.from!==row.from||original.to!==row.to||original.type!==row.type;
+    const changed=!original||
+      original.from!==row.from||original.to!==row.to||original.type!==row.type||
+      String(original.jobId||"")!==String(row.jobId||"")||
+      String(original.jobName||"")!==String(row.jobName||"")||
+      String(original.reason||"")!==String(row.reason||"")||
+      String(original.billingType||"normal")!==String(row.billingType||"normal");
     return `<div class="segment-editor ${row.type} ${changed?"changed":""}" data-index="${index}">
       <div class="source-line"><span class="segment-dot"></span><div><b>Original</b><strong>${esc(original?.from||row.from)}–${esc(original?.to||row.to||"offen")}</strong><small>${esc(original?.jobName||row.jobName||segmentLabel(original?.type||row.type))}</small></div><span class="source-duration">${durationLabel(Math.max(0,(minutes(original?.to)-minutes(original?.from))||0))}</span></div>
       <div class="office-line">
         <div class="office-title"><b>Büro</b><span>${changed?"KORRIGIERT":"UNVERÄNDERT"}</span></div>
-        <select class="segment-type" data-index="${index}" aria-label="Art"><option value="work" ${row.type==="work"?"selected":""}>Arbeit</option><option value="pause" ${row.type==="pause"?"selected":""}>Pause</option><option value="lunch" ${row.type==="lunch"?"selected":""}>Mittag</option></select>
+        <select class="segment-type" data-index="${index}" aria-label="Art"><option value="work" ${row.type==="work"?"selected":""}>Arbeit</option><option value="pause" ${row.type==="pause"?"selected":""}>Pause</option><option value="lunch" ${row.type==="lunch"?"selected":""}>Mittag</option><option value="up" ${row.type==="up"?"selected":""}>Unproduktiv</option></select>
         <input class="time-input" data-field="from" data-index="${index}" value="${esc(row.from)}" inputmode="numeric" aria-label="Von">
         <span>–</span>
         <input class="time-input" data-field="to" data-index="${index}" value="${esc(row.to||"")}" inputmode="numeric" aria-label="Bis">
         <button class="remove-segment" data-index="${index}" title="Zeitblock entfernen">×</button>
         <strong class="office-duration">${durationLabel(Math.max(0,(minutes(row.to)-minutes(row.from))||0))}</strong>
+        ${segmentContext(row,index)}
       </div>
     </div>`;
   }).join("");
@@ -474,8 +551,34 @@ function bindSegmentEditors(){
     });
   });
   document.querySelectorAll(".segment-type").forEach(select=>select.addEventListener("change",()=>{
-    state.segments[Number(select.dataset.index)].type=select.value;
+    const row=state.segments[Number(select.dataset.index)];
+    row.type=select.value;
+    if(row.type==="work"){
+      row.reason="";
+      row.billingType=row.billingType==="regie"?"regie":"normal";
+    }else if(row.type==="up"){
+      row.jobId=""; row.jobName=""; row.billingType="";
+      if(!row.reason)row.reason="Werkstatt";
+    }else{
+      row.jobId=""; row.jobName=""; row.reason=""; row.billingType="";
+    }
     renderSegments();
+    scheduleCorrectionSave(80);
+  }));
+  document.querySelectorAll(".segment-job").forEach(select=>select.addEventListener("change",()=>{
+    const row=state.segments[Number(select.dataset.index)];
+    row.jobId=select.value;
+    row.jobName=select.selectedOptions[0]?.dataset.name||select.selectedOptions[0]?.textContent?.replace(/^\s*[^·]+·\s*/,"")||"";
+    scheduleCorrectionSave(80);
+  }));
+  document.querySelectorAll(".segment-billing").forEach(select=>select.addEventListener("change",()=>{
+    const row=state.segments[Number(select.dataset.index)];
+    row.billingType=select.value==="regie"?"regie":"normal";
+    scheduleCorrectionSave(80);
+  }));
+  document.querySelectorAll(".segment-fink-reason").forEach(select=>select.addEventListener("change",()=>{
+    const row=state.segments[Number(select.dataset.index)];
+    row.reason=select.value;
     scheduleCorrectionSave(80);
   }));
   document.querySelectorAll(".remove-segment").forEach(button=>button.addEventListener("click",()=>{
@@ -530,6 +633,7 @@ $("correctionReason").addEventListener("change",()=>scheduleCorrectionSave(100))
 $("correctionNote").addEventListener("change",()=>scheduleCorrectionSave(100));
 $("addWorkSegment").addEventListener("click",()=>addSegment("work"));
 $("addPauseSegment").addEventListener("click",()=>addSegment("pause"));
+$("addUpSegment")?.addEventListener("click",()=>addSegment("up"));
 $("resetSegments").addEventListener("click",()=>{
   state.segments=cloneSegments(state.originalSegments);
   renderSegments();
@@ -539,7 +643,13 @@ function addSegment(type){
   const last=state.segments.at(-1);
   const from=last?.to||"07:00";
   const to=minutes(from)!==null?`${String(Math.floor((minutes(from)+30)/60)).padStart(2,"0")}:${String((minutes(from)+30)%60).padStart(2,"0")}`:"07:30";
-  state.segments.push({id:`seg_${Date.now()}`,type,from,to,jobId:last?.jobId||"",jobName:type==="work"?(last?.jobName||"Arbeitszeit"):""});
+  state.segments.push({
+    id:`seg_${Date.now()}`,type,from,to,
+    jobId:type==="work"?(last?.jobId||""):"",
+    jobName:type==="work"?(last?.jobName||"Arbeitszeit"):"",
+    reason:type==="up"?"Werkstatt":"",
+    billingType:type==="work"?(last?.billingType==="regie"?"regie":"normal"):""
+  });
   renderSegments();
 }
 function mapsUrl(row){
