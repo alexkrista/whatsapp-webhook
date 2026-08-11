@@ -521,7 +521,33 @@ function clampOfficialStart(actualTime) {
       const base = visibleStates[id] || { employeeId:id, employeeName:employee?.nickname || employee?.name || id, timeline:[] };
       visibleStates[id] = { ...base, mode: rows.length ? modeForType(rows[rows.length-1].type) : "idle" };
     }
-    return { assignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
+    // KRISTOOL braucht für Diäten/Entsendung die echte Baustellenadresse.
+    // Die Planung enthält sie nicht immer. Deshalb nur für die Ausgabe des Bootstrap
+    // mit dem Baustellenstamm anreichern – assignments.json selbst bleibt unverändert.
+    const enrichedAssignments = [];
+    for (const assignment of assignments || []) {
+      const row = { ...assignment };
+      const jobId = String(row.jobId || "").trim();
+      if (jobId && typeof readJobMeta === "function") {
+        try {
+          const jobMeta = await readJobMeta(jobId) || {};
+          const masterAddress = String(
+            jobMeta.address ||
+            [
+              [jobMeta.street, jobMeta.houseNumber].filter(Boolean).join(" "),
+              [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")
+            ].filter(Boolean).join(", ")
+          ).trim();
+          if (masterAddress) row.address = masterAddress;
+          if (jobMeta.city) row.city = String(jobMeta.city);
+          if (jobMeta.country) row.country = String(jobMeta.country);
+          if (jobMeta.countryCode) row.countryCode = String(jobMeta.countryCode);
+        } catch {}
+      }
+      enrichedAssignments.push(row);
+    }
+
+    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
@@ -1733,7 +1759,6 @@ const open = taskId
         jobId: String(row.jobId || ""),
         jobName: String(row.jobName || ""),
         reason: String(row.reason || ""),
-        billingType: String(row.billingType || "normal") === "regie" ? "regie" : "normal",
         source: String(row.source || "employee"),
       });
     }
@@ -1876,7 +1901,6 @@ const open = taskId
         jobId: String(segment.jobId || "").slice(0, 80),
         jobName: String(segment.jobName || "").trim().slice(0, 140),
         reason: String(segment.reason || "").trim().slice(0, 140),
-        billingType: segment.type === "work" && String(segment.billingType || "normal") === "regie" ? "regie" : "normal",
       })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
@@ -1934,7 +1958,6 @@ const open = taskId
           jobId: segment.type === "work" ? segment.jobId : null,
           jobName: segment.type === "work" ? segment.jobName : "",
           reason: segment.type === "up" ? segment.reason : "",
-          billingType: segment.type === "work" ? (segment.billingType === "regie" ? "regie" : "normal") : "",
           segmentId: segment.id, source: "office", manual: true, createdAt,
         });
       }
