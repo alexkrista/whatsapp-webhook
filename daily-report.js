@@ -146,9 +146,12 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   function requiredCoffeeBreaks(dateStr, hasMorningWork, hasAfternoonWork) {
     const weekday = weekdayForDate(dateStr);
     const isWeekday = weekday >= 1 && weekday <= 5;
+    // KRISTINE-Arbeitszeitmodell: insgesamt genau 15 Minuten automatische
+    // Kaffeepause pro Arbeitstag. Die gestempelte Mittagspause wird separat
+    // behandelt und darf die automatische Pause weder ersetzen noch verlaengern.
     return {
-      morning: isWeekday && hasMorningWork ? 15 : 0,
-      afternoon: weekday >= 1 && weekday <= 4 && hasAfternoonWork ? 5 : 0,
+      morning: isWeekday && (hasMorningWork || hasAfternoonWork) ? 15 : 0,
+      afternoon: 0,
     };
   }
 
