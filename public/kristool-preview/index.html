@@ -45,6 +45,7 @@
       <label class="calendar-field">Datum wählen
         <input type="date" id="dateSelect">
       </label>
+      <button class="btn primary" id="openFinkzeitExport" type="button">⬇ Finkzeit CSV</button>
     </section>
 
     <section id="dateMismatch" class="date-mismatch" hidden></section>
@@ -215,5 +216,22 @@
   <div id="toast" class="toast"></div>
   <script src="/public/ui/topbar.js"></script>
   <script src="kristool.js"></script>
+
+  <div class="fink-modal" id="finkzeitModal" hidden>
+    <div class="fink-dialog" role="dialog" aria-modal="true" aria-labelledby="finkzeitTitle">
+      <div class="fink-head"><div><p class="eyebrow">LOHNÜBERGABE</p><h2 id="finkzeitTitle">Finkzeit CSV</h2></div><button class="fink-close" id="closeFinkzeitExport" type="button">×</button></div>
+      <div class="fink-presets">
+        <button class="btn secondary" data-fink-range="week">Diese Woche Mo–So</button>
+        <button class="btn secondary" data-fink-range="lastweek">Letzte Woche</button>
+        <button class="btn secondary" data-fink-range="day">Einzelner Tag</button>
+      </div>
+      <div class="fink-dates"><label>Von<input type="date" id="finkFrom"></label><label>Bis<input type="date" id="finkTo"></label></div>
+      <div class="fink-note">Exportiert Brutto-Zeitblöcke. Die automatische 15-Minuten-Pause von KRISTINE wird <b>nicht</b> exportiert; Finkzeit zieht sie selbst ab. Mittag/Pause wird als <b>003</b> übergeben.</div>
+      <div id="finkPreview" class="fink-preview">Zeitraum wählen.</div>
+      <div class="fink-actions"><button class="btn primary" id="downloadFinkzeitCsv" type="button">CSV erstellen</button></div>
+    </div>
+  </div>
+
+  <script src="finkzeit-export.js"></script>
 </body>
 </html>
