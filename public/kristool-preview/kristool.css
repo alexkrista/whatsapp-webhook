@@ -447,3 +447,257 @@
   .work-context{grid-template-columns:1fr}
   .up-context{grid-template-columns:1fr}
 }
+/* =========================================================
+   KRISTOOL 0023.30 · kompakter Tagesfolien-Kopf
+   NUR DESIGN – keine Funktionsänderung
+   ========================================================= */
+
+.date-workbench{
+  display:grid;
+  grid-template-columns:
+    48px
+    minmax(360px,1fr)
+    48px
+    auto
+    205px
+    auto;
+  align-items:center;
+  gap:12px;
+
+  min-height:92px;
+  padding:14px 18px;
+  margin-bottom:14px;
+
+  background:linear-gradient(135deg,#183c29,#24593b);
+  color:#fff;
+  border-radius:17px;
+  box-shadow:0 10px 28px rgba(24,60,41,.19);
+}
+
+/* Pfeile */
+.date-workbench .date-arrow{
+  width:46px;
+  height:46px;
+  min-width:46px;
+  padding:0;
+
+  display:grid;
+  place-items:center;
+
+  border:1px solid rgba(255,255,255,.25);
+  border-radius:13px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+
+  font-size:30px;
+  line-height:1;
+}
+
+.date-workbench .date-arrow:hover{
+  background:rgba(255,255,255,.16);
+}
+
+
+/* Datum links – jetzt wirklich horizontal kompakt */
+.date-workbench .active-date{
+  min-width:0;
+  text-align:left;
+
+  display:grid;
+  grid-template-columns:auto auto;
+  grid-template-rows:auto auto;
+  column-gap:10px;
+  row-gap:2px;
+  justify-content:start;
+  align-items:center;
+}
+
+/* TAGESFOLIE */
+.date-workbench .active-date > span{
+  grid-column:1 / -1;
+
+  font-size:9px;
+  line-height:1;
+  letter-spacing:.18em;
+  color:rgba(255,255,255,.66);
+  font-weight:900;
+}
+
+/* Montag, 10. August 2026 */
+.date-workbench .active-date > strong{
+  grid-column:1;
+
+  margin:0;
+  font-size:22px;
+  line-height:1.15;
+  font-weight:900;
+  color:#fff;
+  white-space:nowrap;
+}
+
+/* 10.08.2026 ausblenden:
+   Datum steht rechts ohnehin im Datumsfeld */
+.date-workbench .active-date > small > b{
+  display:none;
+}
+
+/* den bisherigen Trenner vor GPS ebenfalls weg */
+.date-workbench .active-date > small > b + *{
+  margin-left:0;
+}
+
+/* GPS-Badge direkt neben dem großen Datum */
+.date-workbench .active-date > small{
+  grid-column:2;
+
+  margin:0;
+  display:flex;
+  align-items:center;
+
+  font-size:12px;
+  line-height:1;
+  color:rgba(255,255,255,.72);
+  white-space:nowrap;
+}
+
+.date-workbench .date-state{
+  display:inline-flex;
+  align-items:center;
+
+  padding:5px 9px;
+  border-radius:999px;
+  font-style:normal;
+  white-space:nowrap;
+}
+
+.date-workbench .date-state.ok{
+  background:rgba(112,203,133,.20);
+  color:#c9f2d2;
+}
+
+.date-workbench .date-state.open{
+  background:rgba(255,255,255,.10);
+  color:#e8ebe8;
+}
+
+
+/* Heute */
+.date-workbench .today-button{
+  width:auto;
+  min-width:82px;
+  height:46px;
+  padding:0 16px;
+
+  background:rgba(255,255,255,.12)!important;
+  border:1px solid rgba(255,255,255,.25)!important;
+  border-radius:12px;
+
+  color:#fff!important;
+  font-weight:900;
+}
+
+
+/* Datum wählen */
+.date-workbench .calendar-field{
+  margin:0;
+
+  display:grid;
+  grid-template-rows:auto 46px;
+  gap:4px;
+
+  color:rgba(255,255,255,.82);
+  font-size:11px;
+  font-weight:900;
+}
+
+.date-workbench .calendar-field input{
+  width:205px;
+  height:46px;
+  min-height:46px;
+  padding:0 13px;
+
+  border:0;
+  border-radius:11px;
+  background:#fff;
+
+  color:#222;
+  font-weight:750;
+}
+
+
+/* Finkzeit – endlich normaler Button statt grüner Turm */
+.date-workbench #openFinkzeitExport{
+  width:auto;
+  min-width:155px;
+  height:46px;
+  padding:0 17px;
+
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;
+
+  background:#438b51;
+  color:#fff;
+
+  font-size:14px;
+  font-weight:900;
+  white-space:nowrap;
+}
+
+.date-workbench #openFinkzeitExport:hover{
+  background:#4c995b;
+}
+
+
+/* Unterkante überall bündig */
+.date-workbench > *{
+  align-self:center;
+}
+
+
+/* ---------------------------------------------------------
+   kleinere Bildschirme
+   --------------------------------------------------------- */
+
+@media(max-width:1050px){
+  .date-workbench{
+    grid-template-columns:46px minmax(280px,1fr) 46px auto 185px;
+  }
+
+  .date-workbench #openFinkzeitExport{
+    grid-column:5;
+  }
+
+  .date-workbench .calendar-field input{
+    width:185px;
+  }
+
+  .date-workbench .active-date > strong{
+    font-size:19px;
+  }
+}
+
+@media(max-width:800px){
+  .date-workbench{
+    grid-template-columns:44px 1fr 44px;
+    gap:9px;
+    padding:12px;
+  }
+
+  .date-workbench .today-button,
+  .date-workbench .calendar-field,
+  .date-workbench #openFinkzeitExport{
+    grid-column:auto / span 1;
+  }
+
+  .date-workbench .calendar-field input{
+    width:100%;
+  }
+
+  .date-workbench .active-date{
+    grid-template-columns:1fr;
+  }
+
+  .date-workbench .active-date > small{
+    grid-column:1;
+  }
+}
