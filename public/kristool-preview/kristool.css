@@ -601,3 +601,15 @@
 .work-queue-item .queue-state.absence{background:#e7eef8;color:#355d8a}
 .work-queue-item .queue-state.warning{background:#f8e0dc;color:#9a3026;font-weight:900}
 .work-queue-item:has(.queue-state.warning){border-color:#d88d83;background:#fff8f6}
+
+
+/* 0023.44 · Abwesenheit als Tagesfolie */
+.segment-card:has(.segment-type:disabled){
+  border-color:#c8d7e7;
+  background:linear-gradient(135deg,#f8fbff,#eef4fa);
+}
+.segment-card:has(.segment-type:disabled) .segment-original-label{color:#416789}
+.segment-card:has(.segment-type:disabled) input:disabled,
+.segment-card:has(.segment-type:disabled) select:disabled{
+  opacity:1;color:#31475c;background:#f6f9fc;cursor:default
+}

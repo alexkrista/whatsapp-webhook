@@ -461,6 +461,38 @@ async function loadDayQueue(){
     renderDayQueue();
   }
 }
+
+function activeQueueItem(){
+  const id=String($("employeeSelect")?.value||state.activeEmployeeId||"");
+  return (state.dayQueue||[]).find(item=>String(item.employeeId)===id)||null;
+}
+function absenceSyntheticSegment(item){
+  const type=String(item?.absenceType||"").toLowerCase();
+  if(!["urlaub","krank","frei","arzt"].includes(type))return null;
+  const label=type==="urlaub"?"Urlaub":type==="krank"?"Krank":type==="arzt"?"Arzt":"Frei";
+  return {
+    id:`absence_${item.employeeId}_${state.activeDate}_${type}`,
+    type:"up",
+    from:"07:00",
+    to:"14:48",
+    jobId:"",
+    jobName:label,
+    reason:label,
+    billingType:"",
+    syntheticAbsence:true,
+    lockedAbsence:true,
+    absenceType:type
+  };
+}
+function applyAbsenceToDaySegments(){
+  const synthetic=absenceSyntheticSegment(activeQueueItem());
+  if(!synthetic)return false;
+  if((state.segments||[]).length)return false;
+  state.segments=[synthetic];
+  state.originalSegments=[{...synthetic}];
+  return true;
+}
+
 function queueStatus(item){
   const absence=String(item.absenceType||item.cardType||"").toLowerCase();
   const isAbsent=["urlaub","krank","frei","arzt"].includes(absence);
@@ -720,6 +752,7 @@ async function loadDay(){
     state.originalSegments=(seg.originalSegments||seg.segments||[]).map(row=>({...row}));
     state.correction=seg.correction||null;
     state.dietOverride=parseDietOverride(state.correction?.note||"");
+    applyAbsenceToDaySegments();
     const lunchFix=hasForeignSiteWork(state.segments)
       ? enforceMinimumLunch(state.segments)
       : {changed:false,totalShift:0};
@@ -857,8 +890,8 @@ function segmentContext(row,index){
   if(row.type==="work"){
     const billing=row.billingType==="regie"?"regie":"normal";
     return `<div class="segment-context work-context">
-      <label>Baustelle<select class="segment-job" data-index="${index}">${jobOptions(row)}</select></label>
-      <label>Verrechnung<select class="segment-billing" data-index="${index}">
+      <label>Baustelle<select class="segment-job" data-index="${index}" ${row.lockedAbsence?"disabled":""}>${jobOptions(row)}</select></label>
+      <label>Verrechnung<select class="segment-billing" data-index="${index}" ${row.lockedAbsence?"disabled":""}>
         <option value="normal" ${billing==="normal"?"selected":""}>Normal</option>
         <option value="regie" ${billing==="regie"?"selected":""}>Regie</option>
       </select></label>
@@ -911,7 +944,7 @@ function renderSegments(){
         <input class="time-input" data-field="from" data-index="${index}" value="${esc(row.from)}" inputmode="numeric" aria-label="Von">
         <span>–</span>
         <input class="time-input" data-field="to" data-index="${index}" value="${esc(row.to||"")}" inputmode="numeric" aria-label="Bis">
-        <button class="remove-segment danger-remove" data-index="${index}" title="Zeitblock löschen" aria-label="Zeitblock löschen">×</button>
+        ${row.lockedAbsence?"":`<button class="remove-segment danger-remove" data-index="${index}" title="Zeitblock löschen" aria-label="Zeitblock löschen">×</button>`}
         <strong class="office-duration">${durationLabel(Math.max(0,(minutes(row.to)-minutes(row.from))||0))}</strong>
         ${segmentContext(row,index)}
       </div>
@@ -1000,6 +1033,7 @@ function updateCorrectionTotals(){
   });
 }
 function scheduleCorrectionSave(delay=450){
+  if((state.segments||[]).length && (state.segments||[]).every(row=>row.lockedAbsence))return;
   clearTimeout(state.saveTimer);
   state.saveTimer=setTimeout(saveCorrection,delay);
 }
