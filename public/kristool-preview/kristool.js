@@ -557,6 +557,30 @@ function queueStatus(item){
   }
   return {label:"noch zuordnen",cls:"waiting"};
 }
+
+function setQueueSummaryCard(id,stateValue){
+  const strong=$(id); if(!strong)return;
+  const card=strong.closest("span");
+  if(!card)return;
+  card.classList.remove("status-ok","status-open","status-na");
+  card.classList.add(stateValue==="ok"?"status-ok":stateValue==="open"?"status-open":"status-na");
+}
+function applyQueueSummaryStatus(drivers,team){
+  const driverState=drivers.length===0?"na":drivers.every(item=>item.released===true)?"ok":"open";
+  const teamState=team.length===0?"na":team.every(item=>item.released===true)?"ok":"open";
+
+  setQueueSummaryCard("queueDriverCount",driverState);
+  setQueueSummaryCard("queueTeamCount",teamState);
+
+  // Regie wird erst mit dem fertigen Regiemodul wirklich ausgewertet.
+  $("queuePreparedCount").textContent="–";
+  setQueueSummaryCard("queuePreparedCount","na");
+
+  const required=[driverState,teamState].filter(x=>x!=="na");
+  const dayDone=required.length>0 && required.every(x=>x==="ok");
+  document.querySelector(".date-workbench")?.classList.toggle("day-complete",dayDone);
+}
+
 function renderDayQueue(){
   const drivers=state.dayQueue
     .filter(item=>item.role==="driver")
@@ -571,7 +595,7 @@ function renderDayQueue(){
 
   $("queueDriverCount").textContent=drivers.length;
   $("queueTeamCount").textContent=team.length;
-  $("queuePreparedCount").textContent=team.filter(item=>item.passengerDrivers?.length||item.copiedCorrection).length;
+  $("queuePreparedCount").textContent="–";
 
   const renderItem=item=>{
     const status=queueStatus(item);
@@ -605,6 +629,7 @@ function renderDayQueue(){
   document.querySelectorAll(".work-queue-item").forEach(button=>{
     button.addEventListener("click",()=>openQueueEmployee(button.dataset.employeeId,button.dataset.driverKey));
   });
+  applyQueueSummaryStatus(drivers,team);
 }
 async function openQueueEmployee(employeeId,driverKey=""){
   if(!employeeId)return toast("Dieser Fahrer konnte keinem Mitarbeiter zugeordnet werden.",true);
@@ -999,10 +1024,10 @@ function renderSegments(){
       String(original.jobName||"")!==String(row.jobName||"")||
       String(original.reason||"")!==String(row.reason||"")||
       String(original.billingType||"normal")!==String(row.billingType||"normal");
-    return `<div class="segment-editor ${row.type} ${changed?"changed":""} ${row.requiresConfirmation?"requires-confirmation":""}" data-index="${index}">
+    return `<div class="segment-editor ${row.type} ${changed?"changed":""} ${row.requiresConfirmation?"requires-confirmation":""}" data-index="${index}" ${row.lockedAbsence?"":"draggable=\"true\""}>
       <div class="source-line"><span class="segment-dot"></span><div><b>${row.requiresConfirmation?"BESTÄTIGUNG":"Original"}</b><strong>${row.requiresConfirmation&&!row.from?"Von/Bis eintragen":`${esc(original?.from||row.from)}–${esc(original?.to||row.to||"offen")}`}</strong><small>${esc(original?.jobName||row.jobName||segmentLabel(original?.type||row.type))}</small></div><span class="source-duration">${row.requiresConfirmation&&!row.from?"nur bestätigte Dauer":durationLabel(Math.max(0,(minutes(original?.to)-minutes(original?.from))||0))}</span></div>
       <div class="office-line">
-        <div class="office-title"><b>Büro</b><span>${changed?"KORRIGIERT":"UNVERÄNDERT"}</span></div>
+        <div class="office-title"><b>${row.lockedAbsence?"Büro":"↕ Büro"}</b><span>${changed?"KORRIGIERT":"UNVERÄNDERT"}</span></div>
         <select class="segment-type" data-index="${index}" aria-label="Art"><option value="work" ${row.type==="work"?"selected":""}>Arbeit</option><option value="pause" ${row.type==="pause"?"selected":""}>Pause</option><option value="lunch" ${row.type==="lunch"?"selected":""}>Mittag</option><option value="up" ${row.type==="up"?"selected":""}>Unproduktiv</option></select>
         <input class="time-input" data-field="from" data-index="${index}" value="${esc(row.from)}" inputmode="numeric" aria-label="Von">
         <span>–</span>
@@ -1014,10 +1039,51 @@ function renderSegments(){
     </div>`;
   }).join("");
   bindSegmentEditors();
+  bindSegmentDragDrop();
   updateCorrectionTotals();
   renderCorrectionHistory();
   renderDietPanel();
 }
+
+let segmentDragIndex=null;
+function moveSegment(fromIndex,toIndex){
+  if(fromIndex===toIndex)return;
+  const rows=state.segments||[];
+  if(fromIndex<0||toIndex<0||fromIndex>=rows.length||toIndex>=rows.length)return;
+  if(rows[fromIndex]?.lockedAbsence)return;
+  const [row]=rows.splice(fromIndex,1);
+  rows.splice(toIndex,0,row);
+  renderSegments();
+  scheduleCorrectionSave(80);
+}
+function bindSegmentDragDrop(){
+  document.querySelectorAll(".segment-editor[draggable='true']").forEach(editor=>{
+    editor.addEventListener("dragstart",event=>{
+      segmentDragIndex=Number(editor.dataset.index);
+      editor.classList.add("dragging");
+      event.dataTransfer.effectAllowed="move";
+      try{event.dataTransfer.setData("text/plain",String(segmentDragIndex));}catch{}
+    });
+    editor.addEventListener("dragend",()=>{
+      segmentDragIndex=null;
+      document.querySelectorAll(".segment-editor").forEach(x=>x.classList.remove("dragging","drag-over"));
+    });
+    editor.addEventListener("dragover",event=>{
+      event.preventDefault();
+      if(segmentDragIndex===null)return;
+      editor.classList.add("drag-over");
+      event.dataTransfer.dropEffect="move";
+    });
+    editor.addEventListener("dragleave",()=>editor.classList.remove("drag-over"));
+    editor.addEventListener("drop",event=>{
+      event.preventDefault();
+      editor.classList.remove("drag-over");
+      if(segmentDragIndex===null)return;
+      moveSegment(segmentDragIndex,Number(editor.dataset.index));
+    });
+  });
+}
+
 function bindSegmentEditors(){
   document.querySelectorAll(".time-input").forEach(input=>{
     input.addEventListener("input",()=>{
