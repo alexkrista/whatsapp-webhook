@@ -842,7 +842,7 @@ function renderSegments(){
         <input class="time-input" data-field="from" data-index="${index}" value="${esc(row.from)}" inputmode="numeric" aria-label="Von">
         <span>–</span>
         <input class="time-input" data-field="to" data-index="${index}" value="${esc(row.to||"")}" inputmode="numeric" aria-label="Bis">
-        <button class="remove-segment" data-index="${index}" title="Zeitblock entfernen">×</button>
+        <button class="remove-segment danger-remove" data-index="${index}" title="Zeitblock löschen" aria-label="Zeitblock löschen">×</button>
         <strong class="office-duration">${durationLabel(Math.max(0,(minutes(row.to)-minutes(row.from))||0))}</strong>
         ${segmentContext(row,index)}
       </div>
@@ -909,7 +909,12 @@ function bindSegmentEditors(){
     scheduleCorrectionSave(80);
   }));
   document.querySelectorAll(".remove-segment").forEach(button=>button.addEventListener("click",()=>{
-    state.segments.splice(Number(button.dataset.index),1);
+    const index=Number(button.dataset.index);
+    const row=state.segments[index];
+    const label=row?.type==="lunch"?"Mittag":row?.type==="pause"?"Pause":row?.type==="up"?"Unproduktiv":"Arbeitsblock";
+    const time=[row?.from,row?.to].filter(Boolean).join("–");
+    if(!confirm(`${label}${time?` ${time}`:""} wirklich löschen?`))return;
+    state.segments.splice(index,1);
     renderSegments();
     scheduleCorrectionSave(80);
   }));
@@ -1348,4 +1353,3 @@ $("applyTeamCorrection").addEventListener("click",async()=>{
 });
 
 init();
-

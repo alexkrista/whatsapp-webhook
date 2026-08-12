@@ -390,314 +390,180 @@
 .fink-modal{position:fixed;inset:0;background:rgba(16,24,20,.55);display:grid;place-items:center;padding:20px;z-index:1000}.fink-modal[hidden]{display:none}.fink-dialog{width:min(680px,100%);background:#fff;border-radius:24px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.25)}.fink-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.fink-head h2{margin:0}.fink-close{border:0;background:#f0f1ed;border-radius:999px;width:42px;height:42px;font-size:28px;cursor:pointer}.fink-presets{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}.fink-dates{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fink-dates label{display:grid;gap:7px;font-weight:700}.fink-dates input{padding:12px;border:1px solid #d8dcd6;border-radius:12px;font:inherit}.fink-note,.fink-preview{margin-top:16px;padding:14px 16px;border-radius:14px;background:#f4f6f2;line-height:1.45}.fink-preview{background:#edf4ff}.fink-actions{display:flex;justify-content:flex-end;margin-top:18px}@media(max-width:650px){.fink-dates{grid-template-columns:1fr}.fink-dialog{padding:18px;border-radius:18px}}
 
 
-/* 0023.29 · KRISTOOL Tagesprüfung: Baustelle / Finkzeit / Normal-Regie */
-.office-line{
-  grid-template-columns:auto 92px 58px 12px 58px 28px auto;
-}
-.segment-context{
-  grid-column:2/-1;
-  display:flex;
-  align-items:end;
-  gap:8px;
-  padding-top:3px;
-  min-width:0;
-}
-.segment-context label{
-  display:grid;
-  gap:4px;
-  font-size:9px;
-  font-weight:900;
-  letter-spacing:.04em;
-  color:#677168;
-  text-transform:uppercase;
-  min-width:0;
-}
-.work-context{display:grid;grid-template-columns:minmax(190px,1fr) 112px}
-.work-context label:first-child{min-width:0}
-.segment-job,.segment-billing,.segment-fink-reason{
-  min-height:34px;
-  border:1px solid #c7d5ca;
-  border-radius:8px;
-  background:#fff;
-  padding:5px 8px;
-  color:#202620;
-  font-weight:750;
-  text-transform:none;
-  letter-spacing:normal;
-  width:100%;
-}
-.up-context{display:grid;grid-template-columns:minmax(220px,1fr)}
-.fink-code-badge{
-  display:inline-flex;
-  align-items:center;
-  min-height:32px;
-  padding:5px 10px;
-  border:1px solid #bad8c2;
-  border-radius:999px;
-  background:#eef8f0;
-  color:#285d38;
-  font-size:11px;
-  font-weight:900;
-}
-.segment-editor.up{border-color:#c9d8e8}
-.segment-editor.up .segment-dot{background:#3e7198}
-.segment-editor.up .office-line{background:#f2f7fc}
-@media(max-width:720px){
-  .segment-context{grid-column:1/-1}
-  .work-context{grid-template-columns:1fr}
-  .up-context{grid-template-columns:1fr}
-}
 /* =========================================================
-   KRISTOOL 0023.30 · kompakter Tagesfolien-Kopf
-   NUR DESIGN – keine Funktionsänderung
+   0023.38 · FREIGABE FINAL – echtes Stylesheet
    ========================================================= */
-
-.date-workbench{
-  display:grid;
-  grid-template-columns:
-    48px
-    minmax(360px,1fr)
-    48px
-    auto
-    205px
-    auto;
-  align-items:center;
-  gap:12px;
-
-  min-height:92px;
-  padding:14px 18px;
-  margin-bottom:14px;
-
-  background:linear-gradient(135deg,#183c29,#24593b);
-  color:#fff;
-  border-radius:17px;
-  box-shadow:0 10px 28px rgba(24,60,41,.19);
+.release-card{
+  overflow:hidden;
 }
-
-/* Pfeile */
-.date-workbench .date-arrow{
-  width:46px;
-  height:46px;
-  min-width:46px;
-  padding:0;
-
-  display:grid;
-  place-items:center;
-
-  border:1px solid rgba(255,255,255,.25);
-  border-radius:13px;
-  background:rgba(255,255,255,.08);
-  color:#fff;
-
-  font-size:30px;
-  line-height:1;
+.release-card .release-summary{
+  padding:18px 18px 12px;
 }
-
-.date-workbench .date-arrow:hover{
-  background:rgba(255,255,255,.16);
-}
-
-
-/* Datum links – jetzt wirklich horizontal kompakt */
-.date-workbench .active-date{
-  min-width:0;
-  text-align:left;
-
-  display:grid;
-  grid-template-columns:auto auto;
-  grid-template-rows:auto auto;
-  column-gap:10px;
-  row-gap:2px;
-  justify-content:start;
-  align-items:center;
-}
-
-/* TAGESFOLIE */
-.date-workbench .active-date > span{
-  grid-column:1 / -1;
-
-  font-size:9px;
-  line-height:1;
-  letter-spacing:.18em;
-  color:rgba(255,255,255,.66);
-  font-weight:900;
-}
-
-/* Montag, 10. August 2026 */
-.date-workbench .active-date > strong{
-  grid-column:1;
-
-  margin:0;
-  font-size:22px;
-  line-height:1.15;
-  font-weight:900;
-  color:#fff;
-  white-space:nowrap;
-}
-
-/* 10.08.2026 ausblenden:
-   Datum steht rechts ohnehin im Datumsfeld */
-.date-workbench .active-date > small > b{
-  display:none;
-}
-
-/* den bisherigen Trenner vor GPS ebenfalls weg */
-.date-workbench .active-date > small > b + *{
-  margin-left:0;
-}
-
-/* GPS-Badge direkt neben dem großen Datum */
-.date-workbench .active-date > small{
-  grid-column:2;
-
-  margin:0;
-  display:flex;
-  align-items:center;
-
-  font-size:12px;
-  line-height:1;
-  color:rgba(255,255,255,.72);
-  white-space:nowrap;
-}
-
-.date-workbench .date-state{
-  display:inline-flex;
-  align-items:center;
-
-  padding:5px 9px;
-  border-radius:999px;
-  font-style:normal;
-  white-space:nowrap;
-}
-
-.date-workbench .date-state.ok{
-  background:rgba(112,203,133,.20);
-  color:#c9f2d2;
-}
-
-.date-workbench .date-state.open{
-  background:rgba(255,255,255,.10);
-  color:#e8ebe8;
-}
-
-
-/* Heute */
-.date-workbench .today-button{
-  width:auto;
-  min-width:82px;
-  height:46px;
-  padding:0 16px;
-
-  background:rgba(255,255,255,.12)!important;
-  border:1px solid rgba(255,255,255,.25)!important;
-  border-radius:12px;
-
-  color:#fff!important;
-  font-weight:900;
-}
-
-
-/* Datum wählen */
-.date-workbench .calendar-field{
-  margin:0;
-
-  display:grid;
-  grid-template-rows:auto 46px;
-  gap:4px;
-
-  color:rgba(255,255,255,.82);
-  font-size:11px;
-  font-weight:900;
-}
-
-.date-workbench .calendar-field input{
-  width:205px;
-  height:46px;
-  min-height:46px;
-  padding:0 13px;
-
-  border:0;
-  border-radius:11px;
-  background:#fff;
-
-  color:#222;
-  font-weight:750;
-}
-
-
-/* Finkzeit – endlich normaler Button statt grüner Turm */
-.date-workbench #openFinkzeitExport{
-  width:auto;
-  min-width:155px;
-  height:46px;
-  padding:0 17px;
-
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:12px;
-
-  background:#438b51;
-  color:#fff;
-
+.release-card .release-summary>strong{
+  display:block;
   font-size:14px;
-  font-weight:900;
-  white-space:nowrap;
+  color:#26332a;
+  margin-bottom:10px;
+}
+.release-card .release-checks{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:4px !important;
+  width:100% !important;
+  margin:0 !important;
+}
+.release-card .release-checks label{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  gap:10px !important;
+  width:100% !important;
+  min-height:32px !important;
+  margin:0 !important;
+  padding:3px 0 !important;
+  text-align:left !important;
+  cursor:pointer;
+}
+.release-card .release-checks label input[type="checkbox"]{
+  display:block !important;
+  position:static !important;
+  float:none !important;
+  order:0 !important;
+  flex:0 0 18px !important;
+  width:18px !important;
+  height:18px !important;
+  margin:0 !important;
+  padding:0 !important;
+  accent-color:var(--green);
+}
+.release-card .release-checks label span{
+  display:block !important;
+  order:1 !important;
+  flex:1 1 auto !important;
+  margin:0 !important;
+  padding:0 !important;
+  font-size:13px;
+  font-weight:760;
+  line-height:1.25;
+  color:#344039;
 }
 
-.date-workbench #openFinkzeitExport:hover{
-  background:#4c995b;
+/* klare Trennung: Prüfliste oben, Kontrolldaten als eigene Karte */
+.release-card .release-meta{
+  display:grid !important;
+  grid-template-columns:minmax(210px,290px) minmax(220px,1fr) !important;
+  gap:18px !important;
+  align-items:end !important;
+  margin:18px 18px 0 !important;
+  padding:15px !important;
+  border:1px solid #dbe5dc !important;
+  border-radius:13px 13px 0 0 !important;
+  background:linear-gradient(135deg,#f8fbf8,#f1f7f2) !important;
+}
+.release-card .release-reviewer,
+.release-card .release-time{
+  display:grid !important;
+  gap:6px !important;
+  margin:0 !important;
+}
+.release-card .release-reviewer span,
+.release-card .release-time span,
+.release-card .release-note>span{
+  display:block;
+  font-size:9px !important;
+  font-weight:900 !important;
+  letter-spacing:.09em !important;
+  color:#55705d !important;
+}
+.release-card .release-reviewer input{
+  width:100% !important;
+  height:40px !important;
+  padding:0 11px !important;
+  border:1px solid #d3ddd5 !important;
+  border-radius:9px !important;
+  background:#fff !important;
+  font-size:13px !important;
+}
+.release-card .release-time{
+  align-self:center !important;
+}
+.release-card .release-time strong{
+  display:block;
+  font-size:13px !important;
+  color:#334138 !important;
+}
+.release-card .release-note{
+  display:grid !important;
+  gap:6px !important;
+  margin:0 18px 10px !important;
+  padding:13px 15px 15px !important;
+  border:1px solid #dbe5dc !important;
+  border-top:0 !important;
+  border-radius:0 0 13px 13px !important;
+  background:#f8fbf8 !important;
+}
+.release-card .release-note textarea{
+  box-sizing:border-box !important;
+  width:100% !important;
+  min-height:92px !important;
+  resize:vertical !important;
+  padding:11px 12px !important;
+  border:1px solid #d3ddd5 !important;
+  border-radius:10px !important;
+  background:#fff !important;
+  font:inherit !important;
+  font-size:13px !important;
+  line-height:1.4 !important;
+}
+.release-card .release-note textarea:focus,
+.release-card .release-reviewer input:focus{
+  outline:2px solid rgba(62,127,73,.16) !important;
+  border-color:#76a881 !important;
+}
+.release-card .release-audit-compact{
+  margin:8px 18px 0 !important;
+  padding:9px 11px !important;
+  border-radius:9px !important;
+  background:#e7f4e9 !important;
+  color:#286339 !important;
+  font-size:11px !important;
+}
+.release-card .release-audit-compact:not([hidden]){
+  display:flex !important;
+  gap:6px !important;
+  align-items:center !important;
+}
+.release-card .release-actions{
+  display:grid !important;
+  grid-template-columns:auto minmax(210px,1fr) auto !important;
+  gap:9px !important;
+  margin:14px 18px 7px !important;
+}
+.release-card .release-position{
+  padding:0 18px 16px !important;
+  color:#667168 !important;
+  font-size:12px !important;
 }
 
-
-/* Unterkante überall bündig */
-.date-workbench > *{
-  align-self:center;
+/* Löschen wirklich rot */
+.remove-segment.danger-remove{
+  color:#b63c30 !important;
+  background:#fff6f4 !important;
+  border:1px solid #edc5bf !important;
+  font-weight:900 !important;
+}
+.remove-segment.danger-remove:hover{
+  background:#fde7e3 !important;
+  border-color:#d56b5d !important;
+  color:#9e2d23 !important;
 }
 
-
-/* ---------------------------------------------------------
-   kleinere Bildschirme
-   --------------------------------------------------------- */
-
-@media(max-width:1050px){
-  .date-workbench{
-    grid-template-columns:46px minmax(280px,1fr) 46px auto 185px;
+@media(max-width:760px){
+  .release-card .release-meta{
+    grid-template-columns:1fr !important;
   }
-
-  .date-workbench #openFinkzeitExport{
-    grid-column:5;
-  }
-
-  .date-workbench .calendar-field input{
-    width:185px;
-  }
-
-  .date-workbench .active-date > strong{
-    font-size:19px;
-  }
-}
-
-@media(max-width:800px){
-  .date-workbench{
-    grid-template-columns:44px 1fr 44px;
-    gap:9px;
-    padding:12px;
-  }
-
-  .date-workbench .today-button,
-  .date-workbench .calendar-field,
-  .date-workbench #openFinkzeitExport{
-    grid-column:auto / span 1;
-  }
-
-  .date-workbench .calendar-field input{
-    width:100%;
-  }
-
-  .date-workbench .active-date{
-    grid-template-columns:1fr;
-  }
-
-  .date-workbench .active-date > small{
-    grid-column:1;
+  .release-card .release-actions{
+    grid-template-columns:1fr !important;
   }
 }
