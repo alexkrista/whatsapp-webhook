@@ -1497,31 +1497,95 @@ const open = taskId
 
 
 
+  // 0023.43 · Finkzeit-Personalnummer = führende Mitarbeiter-Identität.
+  function finkzeitPersonnelNumber(employee) {
+    return String(
+      employee?.finkzeitPersonnelNumber ||
+      employee?.finkzeitPersonalNumber ||
+      employee?.personalnummerFinkzeit ||
+      employee?.personnelNumber ||
+      ""
+    ).trim();
+  }
+
+  function normalizeEmployeeIdentityName(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function findEmployeeMaster(employees, ref = {}) {
+    const wantedFink=String(
+      ref.finkzeitPersonnelNumber ||
+      ref.finkzeitPersonalNumber ||
+      ref.personalnummerFinkzeit ||
+      ref.personnelNumber ||
+      ""
+    ).trim();
+    if(wantedFink){
+      const byFink=(employees||[]).find(e=>finkzeitPersonnelNumber(e)===wantedFink);
+      if(byFink)return byFink;
+    }
+
+    const wantedId=String(ref.employeeId||ref.id||"").trim();
+    if(wantedId){
+      const byId=(employees||[]).find(e=>String(e.id||e.employeeId||"").trim()===wantedId);
+      if(byId)return byId;
+    }
+
+    const wantedName=normalizeEmployeeIdentityName(ref.employeeName||ref.name||"");
+    if(wantedName){
+      const byName=(employees||[]).find(e=>
+        normalizeEmployeeIdentityName(e.name||e.employeeName||e.nickname||"")===wantedName
+      );
+      if(byName)return byName;
+    }
+    return null;
+  }
+
   function assignmentAbsenceType(assignment) {
-    if (!assignment) return "";
-    const raw = [
-      assignment.cardType,
-      assignment.type,
-      assignment.jobId,
-      assignment.jobName,
-      assignment.note,
-    ].map(value => String(value || "").trim().toLowerCase()).join(" ");
+    const raw=[
+      assignment?.cardType, assignment?.assignmentType, assignment?.type,
+      assignment?.category, assignment?.status, assignment?.reason,
+      assignment?.jobId, assignment?.jobName, assignment?.name, assignment?.note
+    ].map(v=>String(v||"").trim().toLowerCase()).join(" ");
 
     if (/(^|[^a-z])urlaub([^a-z]|$)|vacation/.test(raw)) return "urlaub";
-    if (/(^|[^a-z])krank([^a-z]|$)|(^|[^a-z])sick([^a-z]|$)/.test(raw)) return "krank";
+    if (/(^|[^a-z])krank([^a-z]|$)|krankenstand|(^|[^a-z])sick([^a-z]|$)/.test(raw)) return "krank";
     if (/(^|[^a-z])arzt([^a-z]|$)|arzttermin/.test(raw)) return "arzt";
     if (/(^|[^a-z])frei([^a-z]|$)|zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(raw)) return "frei";
     return "";
   }
 
-  function employeeAbsenceForDay(assignments, employeeId, date) {
-    const rows = (assignments || []).filter(a =>
-      String(a.employeeId) === String(employeeId) &&
-      String(a.date || "").slice(0, 10) === String(date)
-    );
-    for (const row of rows) {
-      const type = assignmentAbsenceType(row);
-      if (type) return { type, row };
+  function employeeAbsenceForDay(assignments, employee, date) {
+    const employeeId=String(employee?.id||employee?.employeeId||"").trim();
+    const employeeName=normalizeEmployeeIdentityName(employee?.name||employee?.employeeName||employee?.nickname||"");
+    const fink=finkzeitPersonnelNumber(employee);
+
+    const rows=(assignments||[]).filter(a=>{
+      if(String(a.date||a.day||"").slice(0,10)!==String(date))return false;
+
+      const rowFink=String(
+        a.finkzeitPersonnelNumber ||
+        a.finkzeitPersonalNumber ||
+        a.personalnummerFinkzeit ||
+        a.personnelNumber ||
+        ""
+      ).trim();
+
+      if(fink && rowFink && fink===rowFink)return true;
+      if(employeeId && String(a.employeeId||a.id||"").trim()===employeeId)return true;
+
+      const rowName=normalizeEmployeeIdentityName(a.employeeName||a.name||"");
+      return Boolean(employeeName && rowName && employeeName===rowName);
+    });
+
+    for(const row of rows){
+      const type=assignmentAbsenceType(row);
+      if(type)return {type,row};
     }
     return null;
   }
@@ -1588,10 +1652,14 @@ const open = taskId
         )];
 
         const driverKeys = [...new Set(ownRows.map(row => String(row.driverKey || "")).filter(Boolean))];
+        const employeeFinkzeit=finkzeitPersonnelNumber(employee);
+        const absence=employeeAbsenceForDay(assignments,employee,date);
 
         items.push({
           employeeId,
           employeeName,
+          finkzeitPersonnelNumber: employeeFinkzeit,
+          employeeIdentityKey: employeeFinkzeit ? `fink:${employeeFinkzeit}` : `legacy:${employeeId}`,
           role: ownRows.length ? "driver" : "team",
           driverKey: driverKeys[0] || "",
           ownTripCount: ownRows.length,
@@ -1612,13 +1680,16 @@ const open = taskId
           ),
           corrected: Boolean(correction?.updatedAt),
           released: Boolean((releases || []).find(row =>
-            String(row.employeeId) === employeeId && String(row.date) === date && row.released === true
+            String(row.date)===date &&
+            row.released===true &&
+            (
+              (employeeFinkzeit && String(row.finkzeitPersonnelNumber||"")===employeeFinkzeit) ||
+              String(row.employeeId)===employeeId
+            )
           )),
-          absenceType: employeeAbsenceForDay(assignments, employeeId, date)?.type || "",
-          gpsTripCount: Number((gpsData?.trips||gpsData?.rows||[]).filter(trip =>
-            String(trip.employeeId||trip.driverEmployeeId||"")===employeeId &&
-            String(trip.date||trip.day||"").slice(0,10)===date
-          ).length||0),
+          absenceType: absence?.type || "",
+          absenceLabel: String(absence?.row?.jobName || absence?.row?.reason || absence?.row?.note || ""),
+          gpsTripCount: ownRows.length,
         });
       }
 
@@ -1721,23 +1792,37 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const rows = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
-      const clean = rows.map((a, index) => ({
+      const employeeMaster = typeof readEmployees === "function" ? await readEmployees().catch(()=>[]) : [];
+      const clean = rows.map((a, index) => {
+        const master=findEmployeeMaster(employeeMaster,a)||{};
+        const fink=String(
+          a.finkzeitPersonnelNumber ||
+          a.finkzeitPersonalNumber ||
+          a.personalnummerFinkzeit ||
+          a.personnelNumber ||
+          finkzeitPersonnelNumber(master) ||
+          ""
+        ).trim();
+        return ({
         id: String(a.id || `a_${Date.now()}_${index}`),
         date: String(a.date || "").slice(0, 10),
-        cardType: String(a.cardType || "").trim().toLowerCase().slice(0, 40),
+        cardType: String(a.cardType || a.assignmentType || a.type || "").trim().toLowerCase().slice(0,40),
         jobId: String(a.jobId || "").slice(0, 80),
         jobName: String(a.jobName || "").trim().slice(0, 140),
         city: String(a.city || "").trim().slice(0, 100),
         address: String(a.address || "").trim().slice(0, 300),
         contactName: String(a.contactName || "").trim().slice(0, 140),
         contactPhone: String(a.contactPhone || "").trim().slice(0, 80),
-        employeeId: String(a.employeeId || "").slice(0, 100),
-        employeeName: String(a.employeeName || "").trim().slice(0, 140),
+        employeeId: String(master.id || master.employeeId || a.employeeId || "").slice(0, 100),
+        employeeName: String(master.name || master.employeeName || a.employeeName || "").trim().slice(0, 140),
+        finkzeitPersonnelNumber: fink.slice(0,40),
+        employeeIdentityKey: fink ? `fink:${fink}` : `legacy:${String(master.id || master.employeeId || a.employeeId || "").slice(0,100)}`,
         vehicle: String(a.vehicle || "").trim().slice(0, 100),
         from: String(a.from || "").slice(0, 5),
         to: String(a.to || "").slice(0, 5),
         note: String(a.note || "").trim().slice(0, 500),
-      })).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
+        });
+      }).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
       await writeJson(ASSIGNMENTS, clean);
       if (typeof markJobRunning === "function") {
         for (const jobId of [...new Set(clean.map(a => a.jobId).filter(Boolean))]) {
@@ -1895,14 +1980,23 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.41 · endgültige Tagesfreigabe
+  // KRISTOOL 0023.43 · endgültige Tagesfreigabe
   app.get("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const employeeId=String(req.params.employeeId||"").trim();
       const date=String(req.params.date||localDateISO()).slice(0,10);
+      const employees=typeof readEmployees==="function"?await readEmployees().catch(()=>[]):[];
+      const master=findEmployeeMaster(employees,{employeeId})||{};
+      const fink=finkzeitPersonnelNumber(master);
       const releases=await readJson(DAY_RELEASES,[]);
-      const release=releases.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date)||null;
+      const release=releases.find(row=>
+        String(row.date)===date &&
+        (
+          (fink && String(row.finkzeitPersonnelNumber||"")===fink) ||
+          String(row.employeeId)===employeeId
+        )
+      )||null;
       res.json({ok:true,release});
     } catch(error) {
       res.status(500).json({ok:false,error:String(error?.message||error)});
@@ -1922,14 +2016,29 @@ const open = taskId
       if(!reviewer) return res.status(400).json({ok:false,error:"Name der Kontrolle fehlt."});
       const employeeName=String(req.body?.employeeName||employeeId).trim().slice(0,160);
       const note=String(req.body?.note||"").trim().slice(0,300);
+      const employees=typeof readEmployees==="function"?await readEmployees().catch(()=>[]):[];
+      const master=findEmployeeMaster(employees,{employeeId,employeeName})||{};
+      const fink=finkzeitPersonnelNumber(master);
       const releases=await readJson(DAY_RELEASES,[]);
-      let release=releases.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
+      let release=releases.find(row=>
+        String(row.date)===date &&
+        (
+          (fink && String(row.finkzeitPersonnelNumber||"")===fink) ||
+          String(row.employeeId)===employeeId
+        )
+      );
       const now=new Date().toISOString();
       if(!release){
         release={id:`release_${employeeId}_${date}`,employeeId,date,createdAt:now};
         releases.push(release);
       }
-      Object.assign(release,{employeeName,checks:{...checks},reviewer,note,released:true,releasedAt:now,updatedAt:now});
+      Object.assign(release,{
+        employeeId:String(master.id||master.employeeId||employeeId),
+        employeeName:String(master.name||master.employeeName||employeeName),
+        finkzeitPersonnelNumber:fink,
+        employeeIdentityKey:fink?`fink:${fink}`:`legacy:${String(master.id||master.employeeId||employeeId)}`,
+        checks:{...checks},reviewer,note,released:true,releasedAt:now,updatedAt:now
+      });
       await writeJson(DAY_RELEASES,releases);
       res.json({ok:true,release});
     } catch(error) {
@@ -1965,7 +2074,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.41 · Diätenbericht 16.–15.
+  // KRISTOOL 0023.43 · Diätenbericht 16.–15.
   app.get("/kristine/api/diet-report", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
