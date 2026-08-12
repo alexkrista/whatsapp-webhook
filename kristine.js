@@ -1504,13 +1504,14 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [gpsData, employees, events, states, corrections, releases] = await Promise.all([
+      const [gpsData, employees, events, states, corrections, releases, assignments] = await Promise.all([
         readGpsImport("latest"),
         typeof readEmployees === "function" ? readEmployees() : [],
         readJson(TIME_EVENTS, []),
         readJson(STATES, {}),
         readJson(DAY_CORRECTIONS, []),
         readJson(DAY_RELEASES, []),
+        readJson(ASSIGNMENTS, []),
       ]);
 
       if (gpsData && reconcileGpsMappings(gpsData, employees)) {
@@ -1584,6 +1585,19 @@ const open = taskId
           released: Boolean((releases || []).find(row =>
             String(row.employeeId) === employeeId && String(row.date) === date && row.released === true
           )),
+          absenceType: String((assignments||[]).find(a =>
+            String(a.employeeId)===employeeId &&
+            String(a.date)===date &&
+            ["urlaub","krank","frei","arzt"].includes(String(a.type||a.cardType||"").toLowerCase())
+          )?.type || (assignments||[]).find(a =>
+            String(a.employeeId)===employeeId &&
+            String(a.date)===date &&
+            ["urlaub","krank","frei","arzt"].includes(String(a.type||a.cardType||"").toLowerCase())
+          )?.cardType || ""),
+          gpsTripCount: Number((gpsData?.trips||gpsData?.rows||[]).filter(trip =>
+            String(trip.employeeId||trip.driverEmployeeId||"")===employeeId &&
+            String(trip.date||trip.day||"").slice(0,10)===date
+          ).length||0),
         });
       }
 
@@ -1859,7 +1873,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.35 · endgültige Tagesfreigabe
+  // KRISTOOL 0023.39 · endgültige Tagesfreigabe
   app.get("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1929,7 +1943,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.35 · Diätenbericht 16.–15.
+  // KRISTOOL 0023.39 · Diätenbericht 16.–15.
   app.get("/kristine/api/diet-report", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {

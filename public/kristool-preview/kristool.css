@@ -567,3 +567,37 @@
     grid-template-columns:1fr !important;
   }
 }
+
+
+/* =========================================================
+   0023.39 · Sticky Kopf bis inkl. grünem Tagesblock
+   ========================================================= */
+@media(min-width:761px){
+  #kristaTopbar{
+    position:sticky;
+    top:0;
+    z-index:1200;
+  }
+  .tool-intro{
+    position:sticky;
+    top:var(--kristool-topbar-height, 58px);
+    z-index:1100;
+    background:var(--page,#f5f6f2);
+    padding-top:10px;
+  }
+  .source-banner{
+    position:sticky;
+    top:calc(var(--kristool-topbar-height, 58px) + 104px);
+    z-index:1090;
+    background:var(--page,#f5f6f2);
+  }
+  .date-workbench{
+    position:sticky;
+    top:calc(var(--kristool-topbar-height, 58px) + 104px + 68px);
+    z-index:1080;
+  }
+}
+
+.work-queue-item .queue-state.absence{background:#e7eef8;color:#355d8a}
+.work-queue-item .queue-state.warning{background:#f8e0dc;color:#9a3026;font-weight:900}
+.work-queue-item:has(.queue-state.warning){border-color:#d88d83;background:#fff8f6}

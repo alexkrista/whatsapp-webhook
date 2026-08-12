@@ -139,6 +139,67 @@ function enforceMinimumLunch(rows){
 /* Kleine maschinenlesbare Zusatzinfo im bestehenden Korrektur-Notizfeld.
    Dadurch brauchen wir für die drei Häkchen KEINE neue Backend-Datei/API. */
 const DIET_MARKER_RE=/\s*\[\[DIET:taggeld=(auto|0|1);fl=(auto|0|1);ch=(auto|0|1)\]\]\s*$/i;
+
+function buildDietSummaryRows(employees,from,to,dayRows){
+  const active=reportEmployeesForPeriod(employees,from,to);
+  return active.map(employee=>{
+    const employeeId=String(employee.id||employee.employeeId||"");
+    const rows=(dayRows||[]).filter(row=>
+      String(row.employeeId||row.id||"")===employeeId &&
+      String(row.date||"")>=from &&
+      String(row.date||"")<=to &&
+      dateWithinEmployment(employee,row.date)
+    );
+    const sumMinutes=key=>rows.reduce((sum,row)=>sum+Math.max(0,Number(row[key]||0)),0);
+    const sumFlag=key=>rows.reduce((sum,row)=>sum+(Number(row[key]||0)>0?1:0),0);
+    return {
+      personnelNumber:employeePersonnelNumber(employee)===999999?"":employeePersonnelNumber(employee),
+      employeeId,
+      name:employee.name||employee.employeeName||employeeId,
+      taggeld:sumFlag("dietDay"),
+      flMinutes:sumMinutes("flMinutes"),
+      flDays:sumFlag("flDay"),
+      chMinutes:sumMinutes("chMinutes"),
+      chDays:sumFlag("chDay")
+    };
+  });
+}
+function formatReportMinutes(value){
+  const n=Math.max(0,Math.round(Number(value||0)));
+  return n?`${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`:"–";
+}
+
+
+function employeePersonnelNumber(employee){
+  const raw=employee?.personnelNumber??employee?.personalNumber??employee?.employeeNumber??employee?.persNr??employee?.personnelNo??"";
+  const n=Number(String(raw).replace(/[^\d]/g,""));
+  return Number.isFinite(n)&&n>0?n:999999;
+}
+function employeeEntryDate(employee){
+  return String(employee?.entryDate||employee?.employmentStart||employee?.startDate||employee?.eintrittsdatum||"").slice(0,10);
+}
+function employeeExitDate(employee){
+  return String(employee?.exitDate||employee?.employmentEnd||employee?.endDate||employee?.austrittsdatum||"").slice(0,10);
+}
+function dateWithinEmployment(employee,date){
+  const d=String(date||"").slice(0,10);
+  const from=employeeEntryDate(employee),to=employeeExitDate(employee);
+  if(from&&d<from)return false;
+  if(to&&d>to)return false; // Austrittstag selbst bleibt enthalten
+  return true;
+}
+function clampPeriodToEmployment(employee,from,to){
+  const entry=employeeEntryDate(employee),exit=employeeExitDate(employee);
+  const start=entry&&entry>from?entry:from;
+  const end=exit&&exit<to?exit:to;
+  return start<=end?{from:start,to:end}:null;
+}
+function reportEmployeesForPeriod(employees,from,to){
+  return (employees||[])
+    .filter(employee=>clampPeriodToEmployment(employee,from,to))
+    .sort((a,b)=>employeePersonnelNumber(a)-employeePersonnelNumber(b)||String(a.name||"").localeCompare(String(b.name||""),"de"));
+}
+
 function parseDietOverride(note){
   const match=String(note||"").match(DIET_MARKER_RE);
   if(!match)return {taggeld:"auto",fl:"auto",ch:"auto"};
@@ -401,6 +462,11 @@ async function loadDayQueue(){
   }
 }
 function queueStatus(item){
+  const absence=String(item.absenceType||item.cardType||"").toLowerCase();
+  const isAbsent=["urlaub","krank","frei","arzt"].includes(absence);
+  const gpsCount=Number(item.gpsTripCount||item.tripCount||0);
+  if(isAbsent&&gpsCount>0)return {label:`${absence.toUpperCase()} + GPS`,cls:"warning"};
+  if(isAbsent)return {label:absence==="urlaub"?"Urlaub":absence==="krank"?"Krank":absence==="arzt"?"Arzt":"Frei",cls:"absence"};
   if(item.released)return {label:"Freigegeben",cls:"released"};
   if(item.role==="driver"){
     const plates=(item.vehicles||[]).map(vehicle=>vehicle.licensePlate).filter(Boolean);
@@ -1188,9 +1254,13 @@ function renderRelease(){
 }
 async function loadRelease(){
   const employeeId=$("employeeSelect")?.value;
+  const requestedEmployeeId=String(employeeId||"");
+  state.release=null;
+  renderRelease();
   if(!employeeId||!state.activeDate){state.release=null;renderRelease();return}
   try{
     const data=await request(`/kristine/api/day-release/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`);
+    if(String($("employeeSelect")?.value||"")!==requestedEmployeeId)return;
     state.release=data.release||null;
   }catch(error){state.release=null;console.warn("Freigabestatus konnte nicht geladen werden:",error)}
   renderRelease();
