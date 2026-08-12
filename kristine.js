@@ -1497,6 +1497,35 @@ const open = taskId
 
 
 
+  function assignmentAbsenceType(assignment) {
+    if (!assignment) return "";
+    const raw = [
+      assignment.cardType,
+      assignment.type,
+      assignment.jobId,
+      assignment.jobName,
+      assignment.note,
+    ].map(value => String(value || "").trim().toLowerCase()).join(" ");
+
+    if (/(^|[^a-z])urlaub([^a-z]|$)|vacation/.test(raw)) return "urlaub";
+    if (/(^|[^a-z])krank([^a-z]|$)|(^|[^a-z])sick([^a-z]|$)/.test(raw)) return "krank";
+    if (/(^|[^a-z])arzt([^a-z]|$)|arzttermin/.test(raw)) return "arzt";
+    if (/(^|[^a-z])frei([^a-z]|$)|zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(raw)) return "frei";
+    return "";
+  }
+
+  function employeeAbsenceForDay(assignments, employeeId, date) {
+    const rows = (assignments || []).filter(a =>
+      String(a.employeeId) === String(employeeId) &&
+      String(a.date || "").slice(0, 10) === String(date)
+    );
+    for (const row of rows) {
+      const type = assignmentAbsenceType(row);
+      if (type) return { type, row };
+    }
+    return null;
+  }
+
   // KRISTOOL Tagesarbeitsliste:
   // 1) tatsächliche Fahrer aus GPS
   // 2) danach Teammitglieder ohne eigene Fahrt
@@ -1585,15 +1614,7 @@ const open = taskId
           released: Boolean((releases || []).find(row =>
             String(row.employeeId) === employeeId && String(row.date) === date && row.released === true
           )),
-          absenceType: String((assignments||[]).find(a =>
-            String(a.employeeId)===employeeId &&
-            String(a.date)===date &&
-            ["urlaub","krank","frei","arzt"].includes(String(a.type||a.cardType||"").toLowerCase())
-          )?.type || (assignments||[]).find(a =>
-            String(a.employeeId)===employeeId &&
-            String(a.date)===date &&
-            ["urlaub","krank","frei","arzt"].includes(String(a.type||a.cardType||"").toLowerCase())
-          )?.cardType || ""),
+          absenceType: employeeAbsenceForDay(assignments, employeeId, date)?.type || "",
           gpsTripCount: Number((gpsData?.trips||gpsData?.rows||[]).filter(trip =>
             String(trip.employeeId||trip.driverEmployeeId||"")===employeeId &&
             String(trip.date||trip.day||"").slice(0,10)===date
@@ -1703,6 +1724,7 @@ const open = taskId
       const clean = rows.map((a, index) => ({
         id: String(a.id || `a_${Date.now()}_${index}`),
         date: String(a.date || "").slice(0, 10),
+        cardType: String(a.cardType || "").trim().toLowerCase().slice(0, 40),
         jobId: String(a.jobId || "").slice(0, 80),
         jobName: String(a.jobName || "").trim().slice(0, 140),
         city: String(a.city || "").trim().slice(0, 100),
@@ -1873,7 +1895,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.40 · endgültige Tagesfreigabe
+  // KRISTOOL 0023.41 · endgültige Tagesfreigabe
   app.get("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1943,7 +1965,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.40 · Diätenbericht 16.–15.
+  // KRISTOOL 0023.41 · Diätenbericht 16.–15.
   app.get("/kristine/api/diet-report", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
