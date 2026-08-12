@@ -1370,6 +1370,14 @@ function renderRelease(){
 async function loadRelease(){
   const employeeId=$("employeeSelect")?.value;
   const requestedEmployeeId=String(employeeId||"");
+
+  // Jeder Mitarbeiter startet mit seiner eigenen, leeren Prüfliste.
+  // Die Haken vom zuvor geöffneten Mitarbeiter dürfen nicht im DOM hängen bleiben.
+  document.querySelectorAll("[data-release-check]").forEach(input=>{
+    input.checked=false;
+    input.disabled=false;
+  });
+
   state.release=null;
   renderRelease();
   if(!employeeId||!state.activeDate){state.release=null;renderRelease();return}

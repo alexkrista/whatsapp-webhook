@@ -627,3 +627,85 @@
   color:#8b6417;
   font-weight:800;
 }
+
+
+/* 0023.47 · Zeitkacheln wieder kompakt wie vorher */
+.office-line{
+  display:grid;
+  grid-template-columns:72px minmax(78px,auto) 58px 12px 58px 28px minmax(46px,auto);
+  gap:6px;
+  align-items:center;
+  padding:9px 10px;
+  background:#f0f7f2;
+}
+.office-line .office-title{grid-column:1;grid-row:1}
+.office-line .segment-type{grid-column:2;grid-row:1;min-width:0;width:100%}
+.office-line .time-input:nth-of-type(1){grid-column:3;grid-row:1}
+.office-line .time-separator{grid-column:4;grid-row:1;text-align:center}
+.office-line .time-input:nth-of-type(2){grid-column:5;grid-row:1}
+.office-line .remove-segment{grid-column:6;grid-row:1}
+.office-line .office-duration{grid-column:7;grid-row:1;justify-self:end}
+
+.office-line .job-field{
+  grid-column:2 / span 4;
+  grid-row:2;
+  min-width:0;
+}
+.office-line .billing-field{
+  grid-column:6 / span 2;
+  grid-row:2;
+  min-width:0;
+}
+.office-line .job-field select,
+.office-line .billing-field select{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+}
+.office-line label{min-width:0}
+
+/* Fallback für die tatsächlichen Wrapper-Namen der Felder */
+.office-line > label:has(.segment-job){
+  grid-column:2 / span 4;
+  grid-row:2;
+}
+.office-line > label:has(.segment-billing){
+  grid-column:6 / span 2;
+  grid-row:2;
+}
+
+@media (max-width:1180px){
+  .office-line{
+    grid-template-columns:68px minmax(74px,auto) 56px 10px 56px 28px minmax(42px,auto);
+    gap:5px;
+  }
+}
+
+/* 0023.47b · tatsächliche Kontext-Wrapper */
+.office-line > .segment-context{
+  grid-column:2 / -1;
+  grid-row:2;
+  min-width:0;
+}
+.office-line > .work-context{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(92px,0.34fr);
+  gap:8px;
+  width:100%;
+  min-width:0;
+}
+.office-line > .work-context > label,
+.office-line > .up-context > label{
+  min-width:0;
+}
+.office-line > .work-context select,
+.office-line > .up-context select{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+}
+.office-line > .up-context{
+  display:block;
+  width:100%;
+  min-width:0;
+}
