@@ -1,9 +1,9 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0025.0
-// KRISTA: 06:45 Morgenbegrüßung, 07:00 Startprüfung,
-// 08:00 Chefstatus, 15:00 Planung morgen, 15:30 Nachfassung.
+// Build 0024.0
+// KRISTA: 07:00 Startprüfung, 08:00 Chefstatus,
+// 15:00 Planung morgen, 15:30 Nachfassung.
 //
 // Bestehende Datenstruktur und Exports bleiben erhalten.
 // Überarbeitet wurden vor allem:
@@ -98,15 +98,9 @@ function inWindow(hm, from, to) {
 function clampStartTime(hm) {
   const value = minutesFromHm(hm);
   const official = minutesFromHm(OFFICIAL_START);
-  const toleranceMinutes = 15;
 
   if (value == null || official == null) return hm;
-
-  // KRISTA Betriebsregel:
-  // - vor 07:00 Uhr -> 07:00 Uhr
-  // - 07:00 bis einschliesslich 07:15 Uhr -> 07:00 Uhr
-  // - ab 07:16 Uhr -> tatsaechliche Startzeit
-  return value <= official + toleranceMinutes ? OFFICIAL_START : hm;
+  return value < official ? OFFICIAL_START : hm;
 }
 
 function normalizePhone(value) {
@@ -625,7 +619,7 @@ function buildChefReport(statuses, date) {
   return lines.join("\n");
 }
 
-function morningGreetingText(employee, assignment, kristineUrl) {
+function reminderText(employee, assignment, kristineUrl) {
   const name = displayName(employee);
   const start = String(assignment?.from || OFFICIAL_START).trim();
   const place = [assignment?.city, assignment?.address]
@@ -647,17 +641,19 @@ function morningGreetingText(employee, assignment, kristineUrl) {
   lines.push("");
   lines.push("Los geht’s mit KRISTINE →");
   lines.push(kristineUrl);
+  lines.push("");
+  lines.push("Falls du später kommst oder heute nicht arbeitest, gib bitte kurz Bescheid.");
+
   return lines.join("\n");
 }
 
-function startReminderText(employee, assignment) {
-  const name = displayName(employee);
-  return [
-    `Guten Morgen ${name}.`,
-    `Ich habe noch keinen Arbeitsbeginn bei ${jobLabel(assignment)} erhalten.`,
-    "",
-    "Kommst du heute später oder arbeitest du heute nicht?",
-  ].join("\n");
+function nextPlanningWorkday(date) {
+  let target = addDaysIso(date, 1);
+  // Freitag -> Montag; Samstag/Sonntag werden ebenfalls übersprungen.
+  while ([0, 6].includes(weekdayNumber(target))) {
+    target = addDaysIso(target, 1);
+  }
+  return target;
 }
 
 function tomorrowPlanningStatus({
@@ -720,40 +716,57 @@ function tomorrowPlanningStatus({
 
 function buildPlanningReminder(status, followUp = false) {
   const missingCount = status.missing.length;
+  const grouped = new Map();
 
-  if (missingCount === 0) {
-    return null;
+  for (const item of status.planned) {
+    for (const assignment of item.assignments || []) {
+      const label = jobLabel(assignment);
+      if (!grouped.has(label)) grouped.set(label, []);
+      grouped.get(label).push(displayName(item.employee));
+    }
   }
 
   const title = followUp
-    ? "⚠️ Einteilung morgen weiterhin offen"
-    : "📅 Einteilung für morgen prüfen";
+    ? "⚠️ Einteilung noch nicht bestätigt"
+    : "📅 Einteilung prüfen";
 
   const lines = [
     title,
     "",
-    `Morgen: ${status.date}`,
+    `Für: ${status.date}`,
     "",
-    `🟢 Eingeteilt: ${status.planned.length}`,
-    `🔵 Frei / abwesend: ${status.free.length}`,
-    `🔴 Noch ohne Einteilung: ${missingCount}`,
-    "",
-    "Noch offen:",
   ];
 
-  for (const employee of status.missing) {
-    lines.push(`• ${displayName(employee)}`);
+  for (const [job, names] of grouped) {
+    lines.push(`🟢 ${job}`);
+    lines.push(`   ${[...new Set(names)].join(" · ")}`);
+    lines.push("");
   }
 
-  lines.push("");
-
-  if (missingCount === 1) {
-    lines.push(
-      `👉 Bitte ${displayName(status.missing[0])} noch einteilen.`
-    );
-  } else {
-    lines.push("👉 Bitte morgen fertig einteilen.");
+  if (missingCount) {
+    lines.push("🔴 Ohne Einteilung");
+    for (const employee of status.missing) {
+      lines.push(`   • ${displayName(employee)}`);
+    }
+    lines.push("");
   }
+
+  if (status.free.length) {
+    lines.push("🔵 Frei / abwesend");
+    for (const item of status.free) {
+      lines.push(`   • ${displayName(item.employee)}${item.reason ? ` – ${item.reason}` : ""}`);
+    }
+    lines.push("");
+  }
+
+  if (!missingCount) {
+    lines.push("🟢 Alle verfügbaren Mitarbeiter sind eingeteilt.");
+    lines.push("");
+  }
+
+  lines.push("👉 Bitte kurz kontrollieren.");
+  lines.push("Antwort: PASST");
+  lines.push("Oder Planung in KRISTINE öffnen und ändern.");
 
   return lines.join("\n");
 }
@@ -878,82 +891,11 @@ async function registerMorningStatus({
     };
   }
 
-async function runSixFortyFive(
-  date = localIsoDate(),
-  force = false,
-  onlyEmployeeId = ""
-) {
+  async function runSevenOClock(
+    date = localIsoDate(),
+    force = false
+  ) {
     const state = await loadState();
-    
-
-    if (!force && state.scheduler.morningGreeting === date) {
-      return { skipped: true };
-    }
-
-    const employeesToCheck = onlyEmployeeId
-      ? activeEmployees(state.employees).filter(
-          (employee) => String(employee.id) === String(onlyEmployeeId)
-        )
-      : activeEmployees(state.employees);
-
-    const statuses = employeesToCheck.map(
-      (employee) => statusForEmployee({ employee, ...state, date })
-    );
-
-  const recipients = statuses.filter(
-  (status) => Boolean(status.assignment)
-);
-
-    let sent = 0;
-    for (const status of recipients) {
-      try {
-        await sendWhatsApp({
-          phoneNumberId,
-          to: normalizePhone(status.employee.phone),
-          reply: morningGreetingText(
-            status.employee,
-            status.assignment,
-            kristineGoUrl(status.employee)
-          ),
-        });
-        sent += 1;
-      } catch (error) {
-        logger.error(
-          "06:45 Morgenbegrüßung fehlgeschlagen",
-          displayName(status.employee),
-          error
-        );
-      }
-    }
-
-    if (!force) {
-  await saveRun("morningGreeting", date, state.scheduler);
-}
-    logger.log("KRISTA 06:45 Morgenbegrüßung", {
-      date,
-      sent,
-      suppressed: statuses.length - recipients.length,
-    });
-
- return {
-  sent,
-  suppressed: statuses.length - recipients.length,
-  statuses,
-};
-}
-
-async function runSevenOClock(
-  date = localIsoDate(),
-  force = false,
-  onlyEmployeeId = ""
-) {
-    const state = await loadState();
-    logger.log("DEBUG morning employees", state.employees.map(e => ({
-  id: e.id,
-  name: e.name,
-  active: e.active,
-  phone: e.phone
-})));
 
     if (
       !force &&
@@ -964,33 +906,28 @@ async function runSevenOClock(
       };
     }
 
-    const employeesToCheck = onlyEmployeeId
-  ? activeEmployees(state.employees).filter(
-      (employee) => String(employee.id) === String(onlyEmployeeId)
-    )
-  : activeEmployees(state.employees);
+    const statuses = activeEmployees(state.employees).map(
+      (employee) =>
+        statusForEmployee({
+          employee,
+          ...state,
+          date,
+        })
+    );
 
-const statuses = employeesToCheck.map(
-  (employee) =>
-    statusForEmployee({
-      employee,
-      ...state,
-      date,
-    })
-);
-
-const missing = statuses.filter(
-  (status) => status.category === "missing"
-);
+    const missing = statuses.filter(
+      (status) => status.category === "missing"
+    );
 
     for (const status of missing) {
       try {
         await sendWhatsApp({
           phoneNumberId,
           to: normalizePhone(status.employee.phone),
-          reply: startReminderText(
+          reply: reminderText(
             status.employee,
-            status.assignment
+            status.assignment,
+            kristineGoUrl(status.employee)
           ),
           buttons: [
             "Komme später",
@@ -1116,7 +1053,7 @@ const missing = statuses.filter(
       };
     }
 
-    const tomorrow = addDaysIso(date, 1);
+    const tomorrow = nextPlanningWorkday(date);
 
     const status = tomorrowPlanningStatus({
       ...state,
@@ -1125,15 +1062,13 @@ const missing = statuses.filter(
 
     let sent = false;
 
-    if (status.missing.length > 0) {
-      const message = buildPlanningReminder(
-        status,
-        followUp
-      );
+    const message = buildPlanningReminder(
+      status,
+      followUp
+    );
 
-      const result = await sendToChef(message);
-      sent = result.sent;
-    }
+    const result = await sendToChef(message);
+    sent = result.sent;
 
     logger.log(
       sent
@@ -1194,10 +1129,6 @@ const missing = statuses.filter(
       // Nachholfenster:
       // Render-Neustarts oder kurze Schlafphasen verlieren
       // die Ausführung nicht.
-      if (inWindow(hm, "06:40", "06:59")) {
-        await runSixFortyFive(date);
-      }
-
       if (inWindow(hm, "07:00", "07:59")) {
         await runSevenOClock(date);
       }
@@ -1206,11 +1137,21 @@ const missing = statuses.filter(
         await runEightOClock(date);
       }
 
-      if (inWindow(hm, "15:00", "15:29")) {
+      const weekday = weekdayNumber(date);
+
+      // Freitag endet der Arbeitstag früher:
+      // Montagseinteilung deshalb bereits um 11:00 Uhr kontrollieren.
+      if (weekday === 5 && inWindow(hm, "11:00", "11:29")) {
         await runFifteenOClock(date);
       }
 
-      if (inWindow(hm, "15:30", "18:00")) {
+      // Montag–Donnerstag: Chef-Kontrolle um 15:00 Uhr.
+      if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:00", "15:29")) {
+        await runFifteenOClock(date);
+      }
+
+      // Bestehende Nachfassung nur Montag–Donnerstag.
+      if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:30", "18:00")) {
         await runFifteenThirty(date);
       }
     } catch (error) {
@@ -1240,7 +1181,6 @@ const missing = statuses.filter(
     {
       timezone: TZ,
       jobs: [
-        "06:45 Morgenbegrüßung",
         "07:00 Startprüfung",
         "08:00 Chefstatus",
         "15:00 Planung morgen",
@@ -1250,7 +1190,6 @@ const missing = statuses.filter(
   );
 
   return {
-    runSixFortyFive,
     runSevenOClock,
     runEightOClock,
     runFifteenOClock,
