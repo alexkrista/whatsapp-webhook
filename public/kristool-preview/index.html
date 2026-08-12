@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="kristool-diet.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.35"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.36"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -201,19 +201,26 @@
           </div>
         </div>
 
-        <div class="release-audit">
-          <div><small>KONTROLLIERT & FREIGEGEBEN VON</small><strong id="releaseBy">–</strong></div>
-          <div><small>AM</small><strong id="releaseAt">–</strong></div>
+        <div class="release-meta">
+          <label class="release-reviewer">
+            <span>KONTROLLE DURCH</span>
+            <input id="releaseReviewer" value="Bettina / Büro" maxlength="120">
+          </label>
+          <div class="release-time">
+            <span>FREIGEGEBEN AM</span>
+            <strong id="releaseAt">wird bei Freigabe gesetzt</strong>
+          </div>
         </div>
 
-        <label class="release-reviewer">
-          <span>Name Kontrolle</span>
-          <input id="releaseReviewer" value="Bettina / Büro" maxlength="120">
-        </label>
         <label class="release-note">
-          <span>Notiz (optional)</span>
-          <input id="releaseNote" maxlength="300" placeholder="Notiz zur Kontrolle …">
+          <span>NOTIZ ZUR KONTROLLE <small>optional</small></span>
+          <textarea id="releaseNote" rows="3" maxlength="500" placeholder="Was ist bei diesem Arbeitstag aufgefallen? Besonderheiten, Korrekturen oder Hinweis für die Lohnverrechnung …"></textarea>
         </label>
+
+        <div class="release-audit-compact" id="releaseAuditCompact" hidden>
+          <span>Kontrolliert & freigegeben von</span>
+          <strong id="releaseBy">–</strong>
+        </div>
 
         <div class="release-actions">
           <button class="btn secondary" id="previousEmployee">‹ Vorheriger MA</button>

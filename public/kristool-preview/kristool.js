@@ -62,26 +62,78 @@ function hmFromMinutes(total){
    Fehlt Zeit, wird der Mittag verlängert und ALLES danach gleich weit nach hinten geschoben. */
 function enforceMinimumLunch(rows){
   const list=rows||[];
-  let changed=false,totalShift=0;
-  for(let i=0;i<list.length;i++){
-    const row=list[i];
-    if(row.type!=="lunch")continue;
+  const noonStart=11*60, noonEnd=14*60+30;
+  const isLunchCandidate=row=>{
+    if(!row)return false;
+    if(row.type==="lunch")return true;
+    if(row.type!=="pause")return false;
     const from=minutes(row.from),to=minutes(row.to);
-    if(from===null||to===null||to<=from)continue;
-    const duration=to-from;
-    if(duration>=60)continue;
-    const delta=60-duration;
-    row.to=hmFromMinutes(to+delta);
-    for(let j=i+1;j<list.length;j++){
+    if(from===null||to===null||to<=from)return false;
+    const reason=String(row.reason||"").toLowerCase();
+    return reason.includes("mittag") || (from<noonEnd && to>noonStart);
+  };
+  const shiftFollowing=(fromIndex,delta)=>{
+    for(let j=fromIndex;j<list.length;j++){
       const next=list[j];
       const nf=minutes(next.from),nt=minutes(next.to);
       if(nf!==null)next.from=hmFromMinutes(nf+delta);
       if(nt!==null)next.to=hmFromMinutes(nt+delta);
     }
-    changed=true;
-    totalShift+=delta;
+  };
+
+  // 1) Bestehende Mittag-/Pause im Mittagsfenster auf exakt mindestens 60 Min verlängern.
+  const lunchIndex=list.findIndex(isLunchCandidate);
+  if(lunchIndex>=0){
+    const row=list[lunchIndex];
+    const from=minutes(row.from),to=minutes(row.to);
+    const duration=to-from;
+    if(duration>=60)return {changed:false,totalShift:0,mode:"already_ok"};
+    const delta=60-duration;
+    row.type="lunch";
+    row.to=hmFromMinutes(to+delta);
+    shiftFollowing(lunchIndex+1,delta);
+    return {changed:true,totalShift:delta,mode:"extended"};
   }
-  return {changed,totalShift};
+
+  // 2) Keine Mittagspause vorhanden:
+  //    Arbeitsblock, der 12:00 umfasst, teilen, 60 Min Mittag einfügen
+  //    und den restlichen Tag um 60 Min nach hinten schieben.
+  const noon=12*60;
+  const workIndex=list.findIndex(row=>{
+    if(row.type!=="work")return false;
+    const from=minutes(row.from),to=minutes(row.to);
+    return from!==null&&to!==null&&from<noon&&to>noon;
+  });
+  if(workIndex<0)return {changed:false,totalShift:0,mode:"no_midday_work"};
+
+  const work=list[workIndex];
+  const originalTo=minutes(work.to);
+  const after={
+    ...work,
+    id:`${work.id||"seg"}_after_lunch_${Date.now()}`,
+    from:hmFromMinutes(noon+60),
+    to:hmFromMinutes(originalTo+60)
+  };
+  work.to=hmFromMinutes(noon);
+  const lunch={
+    id:`seg_lunch_${Date.now()}`,
+    type:"lunch",
+    from:hmFromMinutes(noon),
+    to:hmFromMinutes(noon+60),
+    jobId:"",
+    jobName:"",
+    reason:"Mittag",
+    billingType:""
+  };
+
+  // Alle bereits folgenden Segmente ebenfalls +60 verschieben.
+  shiftFollowing(workIndex+1,60);
+  list.splice(workIndex+1,0,lunch,after);
+
+  // Der alte Arbeitsblock-Nachmittag steckt nun in "after"; falls direkt danach
+  // dasselbe alte Segment durch Split-Logik doppelt wäre, gibt es keines – wir
+  // haben nur den einen bestehenden Block geteilt.
+  return {changed:true,totalShift:60,mode:"inserted"};
 }
 
 /* Kleine maschinenlesbare Zusatzinfo im bestehenden Korrektur-Notizfeld.
@@ -607,7 +659,9 @@ async function loadDay(){
       : {changed:false,totalShift:0};
     renderDay(group,date);
     if(lunchFix.changed){
-      toast(`FL/CH-Tag: Mittag auf mindestens 60 Minuten korrigiert · Tagesende +${lunchFix.totalShift} min.`);
+      const action=lunchFix.mode==="inserted"?"60 Minuten Mittag automatisch eingefügt":"Mittag auf 60 Minuten verlängert";
+      toast(`FL/CH-Tag: ${action} · Tagesende +${lunchFix.totalShift} min.`);
+      renderSegments();
       scheduleCorrectionSave(120);
     }
   }catch(error){toast(`Tagesfolie konnte nicht geöffnet werden: ${error.message}`,true)}
@@ -815,6 +869,8 @@ function bindSegmentEditors(){
       if(!normalized){ toast("Bitte eine gültige Uhrzeit eingeben, z. B. 14:15.",true); return renderSegments(); }
       state.segments[Number(input.dataset.index)][input.dataset.field]=normalized;
       input.value=normalized;
+      if(hasForeignSiteWork(state.segments))enforceMinimumLunch(state.segments);
+      renderSegments();
       scheduleCorrectionSave(80);
     });
   });
@@ -838,6 +894,8 @@ function bindSegmentEditors(){
     const row=state.segments[Number(select.dataset.index)];
     row.jobId=select.value;
     row.jobName=select.selectedOptions[0]?.dataset.name||select.selectedOptions[0]?.textContent?.replace(/^\s*[^·]+·\s*/,"")||"";
+    if(hasForeignSiteWork(state.segments))enforceMinimumLunch(state.segments);
+    renderSegments();
     scheduleCorrectionSave(80);
   }));
   document.querySelectorAll(".segment-billing").forEach(select=>select.addEventListener("change",()=>{
@@ -1103,9 +1161,11 @@ function renderRelease(){
   pill.textContent=released?"FREIGEGEBEN":"NICHT FREIGEGEBEN";
   pill.className=`pill ${released?"released":"open"}`;
   $("releaseBy").textContent=released?(release.reviewer||"–"):"–";
-  $("releaseAt").textContent=released?releaseDateTime(release.releasedAt):"–";
+  $("releaseAt").textContent=released?releaseDateTime(release.releasedAt):"wird bei Freigabe gesetzt";
   if(released&&release.reviewer)$("releaseReviewer").value=release.reviewer;
   if(released)$("releaseNote").value=release.note||"";
+  const audit=$("releaseAuditCompact");
+  if(audit)audit.hidden=!released;
   const saved=release?.checks||{};
   document.querySelectorAll("[data-release-check]").forEach(input=>{
     if(released)input.checked=Boolean(saved[input.dataset.releaseCheck]);
