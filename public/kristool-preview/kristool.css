@@ -613,3 +613,17 @@
 .segment-card:has(.segment-type:disabled) select:disabled{
   opacity:1;color:#31475c;background:#f6f9fc;cursor:default
 }
+
+
+/* 0023.46 · Arzt nur laut Bestätigung */
+.segment-editor.requires-confirmation{
+  border-color:#e1bd72;
+  background:linear-gradient(135deg,#fffdf7,#fff7e5);
+}
+.segment-editor.requires-confirmation .source-line b{
+  color:#8b6417;
+}
+.segment-editor.requires-confirmation .source-duration{
+  color:#8b6417;
+  font-weight:800;
+}

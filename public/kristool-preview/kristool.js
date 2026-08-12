@@ -475,6 +475,28 @@ function absenceSyntheticSegment(item){
   const type=String(item?.absenceType||"").toLowerCase();
   if(!["urlaub","krank","feiertag","arzt","za"].includes(type))return null;
   const label=type==="urlaub"?"Urlaub":type==="krank"?"Krank":type==="feiertag"?"Feiertag":type==="arzt"?"Arzt":"ZA";
+
+  // Arzt ist KEINE automatische Ganztags-Abwesenheit:
+  // Es zählt nur die bestätigte Dauer. Von/Bis muss deshalb im Büro eingetragen werden.
+  if(type==="arzt"){
+    return {
+      id:`absence_${item.employeeId}_${state.activeDate}_${type}`,
+      type:"up",
+      from:"",
+      to:"",
+      jobId:"",
+      jobName:label,
+      reason:label,
+      billingType:"",
+      syntheticAbsence:true,
+      lockedAbsence:false,
+      absenceType:type,
+      paidAbsence:true,
+      countsAsWorkTime:true,
+      requiresConfirmation:true
+    };
+  }
+
   return {
     id:`absence_${item.employeeId}_${state.activeDate}_${type}`,
     type:"up",
@@ -487,8 +509,8 @@ function absenceSyntheticSegment(item){
     syntheticAbsence:true,
     lockedAbsence:true,
     absenceType:type,
-    paidAbsence:["urlaub","krank","feiertag","arzt"].includes(type),
-    countsAsWorkTime:["urlaub","krank","feiertag","arzt"].includes(type),
+    paidAbsence:["urlaub","krank","feiertag"].includes(type),
+    countsAsWorkTime:["urlaub","krank","feiertag"].includes(type),
     countsAgainstOvertime:type==="za"
   };
 }
@@ -856,7 +878,18 @@ function cloneSegments(rows){ return (rows||[]).map(row=>({...row})); }
 function workMinutes(rows){
   return (rows||[]).reduce((sum,row)=>{
     const a=minutes(row.from),b=minutes(row.to);
-    return sum+(row.type==="work"&&a!==null&&b!==null?Math.max(0,b-a):0);
+    if(a===null||b===null)return sum;
+    const duration=Math.max(0,b-a);
+
+    // Normale Arbeit zählt immer.
+    if(row.type==="work")return sum+duration;
+
+    // Bezahlte Abwesenheit zählt als Arbeitszeit:
+    // Urlaub, Krank, Feiertag und Arzt NUR für die tatsächlich bestätigte Dauer.
+    if(row.type==="up" && row.countsAsWorkTime===true)return sum+duration;
+
+    // ZA ist bewusst keine Arbeitszeit.
+    return sum;
   },0);
 }
 const KRISTOOL_FINK_REASONS=[
@@ -960,8 +993,8 @@ function renderSegments(){
       String(original.jobName||"")!==String(row.jobName||"")||
       String(original.reason||"")!==String(row.reason||"")||
       String(original.billingType||"normal")!==String(row.billingType||"normal");
-    return `<div class="segment-editor ${row.type} ${changed?"changed":""}" data-index="${index}">
-      <div class="source-line"><span class="segment-dot"></span><div><b>Original</b><strong>${esc(original?.from||row.from)}–${esc(original?.to||row.to||"offen")}</strong><small>${esc(original?.jobName||row.jobName||segmentLabel(original?.type||row.type))}</small></div><span class="source-duration">${durationLabel(Math.max(0,(minutes(original?.to)-minutes(original?.from))||0))}</span></div>
+    return `<div class="segment-editor ${row.type} ${changed?"changed":""} ${row.requiresConfirmation?"requires-confirmation":""}" data-index="${index}">
+      <div class="source-line"><span class="segment-dot"></span><div><b>${row.requiresConfirmation?"BESTÄTIGUNG":"Original"}</b><strong>${row.requiresConfirmation&&!row.from?"Von/Bis eintragen":`${esc(original?.from||row.from)}–${esc(original?.to||row.to||"offen")}`}</strong><small>${esc(original?.jobName||row.jobName||segmentLabel(original?.type||row.type))}</small></div><span class="source-duration">${row.requiresConfirmation&&!row.from?"nur bestätigte Dauer":durationLabel(Math.max(0,(minutes(original?.to)-minutes(original?.from))||0))}</span></div>
       <div class="office-line">
         <div class="office-title"><b>Büro</b><span>${changed?"KORRIGIERT":"UNVERÄNDERT"}</span></div>
         <select class="segment-type" data-index="${index}" aria-label="Art"><option value="work" ${row.type==="work"?"selected":""}>Arbeit</option><option value="pause" ${row.type==="pause"?"selected":""}>Pause</option><option value="lunch" ${row.type==="lunch"?"selected":""}>Mittag</option><option value="up" ${row.type==="up"?"selected":""}>Unproduktiv</option></select>
@@ -1280,10 +1313,21 @@ function releaseComplete(){
   const item=activeQueueItem();
   const absence=String(item?.absenceType||"").toLowerCase();
 
-  // Anerkannte Abwesenheiten sind ein vollständig prüfbarer Arbeitstag.
-  if(["urlaub","krank","feiertag","arzt","za"].includes(absence))return true;
+  // Ganztägig eindeutig: direkt prüfbar.
+  if(["urlaub","krank","feiertag","za"].includes(absence))return true;
 
-  // Sonst braucht es echte oder korrigierte Tagessegmente.
+  // Arzt: nur die tatsächlich bestätigte Dauer zählt.
+  // Freigabe erst, wenn ein Arzt-UP-Block mit gültigem Von/Bis vorhanden ist.
+  if(absence==="arzt"){
+    return (state.segments||[]).some(row=>
+      row.type==="up" &&
+      String(row.reason||row.jobName||"").toLowerCase().includes("arzt") &&
+      minutes(row.from)!==null &&
+      minutes(row.to)!==null &&
+      minutes(row.to)>minutes(row.from)
+    );
+  }
+
   return (state.segments||[]).some(row=>row.from&&row.to);
 }
 function releaseQueueIndex(){
