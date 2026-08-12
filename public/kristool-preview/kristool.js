@@ -18,6 +18,7 @@ const state = {
   dayQueue: [],
   activeEmployeeId: "",
   dietOverride: null,
+  release: null,
 };
 
 const $ = id => document.getElementById(id);
@@ -348,6 +349,7 @@ async function loadDayQueue(){
   }
 }
 function queueStatus(item){
+  if(item.released)return {label:"Freigegeben",cls:"released"};
   if(item.role==="driver"){
     const plates=(item.vehicles||[]).map(vehicle=>vehicle.licensePlate).filter(Boolean);
     return {
@@ -394,7 +396,7 @@ function renderDayQueue(){
         : item.segmentCount
           ? `${item.segmentCount} KRISTINE-Zeitblöcke`
           : "Noch keiner Fahrer-Tagesfolie zugeordnet";
-    return `<button class="work-queue-item ${state.activeEmployeeId===String(item.employeeId)?"active":""}"
+    return `<button class="work-queue-item ${item.released?"released":"unreleased"} ${state.activeEmployeeId===String(item.employeeId)?"active":""}"
       data-employee-id="${esc(item.employeeId)}"
       data-driver-key="${esc(item.driverKey||"")}">
       <span class="queue-avatar">${esc(initials(item.employeeName))}</span>
@@ -1076,6 +1078,97 @@ async function markPrivate(rowId,isPrivate){
 }
 
 
+
+function releaseChecks(){
+  return Object.fromEntries([...document.querySelectorAll("[data-release-check]")].map(input=>[input.dataset.releaseCheck,input.checked]));
+}
+function releaseComplete(){
+  const values=Object.values(releaseChecks());
+  return values.length===6&&values.every(Boolean);
+}
+function releaseQueueIndex(){
+  const id=String($("employeeSelect")?.value||"");
+  return state.dayQueue.findIndex(item=>String(item.employeeId)===id);
+}
+function releaseDateTime(value){
+  if(!value)return "–";
+  try{return new Intl.DateTimeFormat("de-AT",{dateStyle:"short",timeStyle:"short"}).format(new Date(value));}catch{return value}
+}
+function renderRelease(){
+  const card=$("releaseCard"); if(!card)return;
+  const release=state.release;
+  const released=Boolean(release?.released);
+  card.classList.toggle("released",released);
+  const pill=$("releasePill");
+  pill.textContent=released?"FREIGEGEBEN":"NICHT FREIGEGEBEN";
+  pill.className=`pill ${released?"released":"open"}`;
+  $("releaseBy").textContent=released?(release.reviewer||"–"):"–";
+  $("releaseAt").textContent=released?releaseDateTime(release.releasedAt):"–";
+  if(released&&release.reviewer)$("releaseReviewer").value=release.reviewer;
+  if(released)$("releaseNote").value=release.note||"";
+  const saved=release?.checks||{};
+  document.querySelectorAll("[data-release-check]").forEach(input=>{
+    if(released)input.checked=Boolean(saved[input.dataset.releaseCheck]);
+    input.disabled=released;
+  });
+  $("releaseReviewer").disabled=released;
+  $("releaseNote").disabled=released;
+  const btn=$("releaseAndNext");
+  btn.disabled=released||!releaseComplete()||!$("employeeSelect")?.value;
+  btn.textContent=released?"✓ Bereits freigegeben":"✓ Freigeben & nächster MA";
+  const idx=releaseQueueIndex(), total=state.dayQueue.length;
+  $("releasePosition").textContent=idx>=0?`Mitarbeiter ${idx+1} von ${total} · ${$("employeeSelect").selectedOptions[0]?.textContent||""}`:"Mitarbeiter auswählen";
+  $("previousEmployee").disabled=idx<=0;
+  $("nextEmployee").disabled=idx<0||idx>=total-1;
+}
+async function loadRelease(){
+  const employeeId=$("employeeSelect")?.value;
+  if(!employeeId||!state.activeDate){state.release=null;renderRelease();return}
+  try{
+    const data=await request(`/kristine/api/day-release/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`);
+    state.release=data.release||null;
+  }catch(error){state.release=null;console.warn("Freigabestatus konnte nicht geladen werden:",error)}
+  renderRelease();
+}
+async function navigateRelease(direction,{unreleasedOnly=false}={}){
+  const idx=releaseQueueIndex(); if(idx<0)return;
+  let target=null;
+  if(unreleasedOnly){
+    for(let step=1;step<=state.dayQueue.length;step++){
+      const candidate=state.dayQueue[(idx+step)%state.dayQueue.length];
+      if(candidate&&!candidate.released){target=candidate;break}
+    }
+  }else target=state.dayQueue[idx+direction]||null;
+  if(target)await openQueueEmployee(target.employeeId,target.driverKey||"");
+  else toast(unreleasedOnly?"Alle Mitarbeiter dieses Tages sind freigegeben.":"Kein weiterer Mitarbeiter.");
+}
+async function saveReleaseAndNext(){
+  const employeeId=$("employeeSelect")?.value;
+  const employeeName=$("employeeSelect")?.selectedOptions[0]?.textContent||employeeId;
+  const reviewer=$("releaseReviewer").value.trim();
+  if(!releaseComplete())return toast("Bitte alle Kontrollpunkte bestätigen.",true);
+  if(!reviewer)return toast("Bitte Name der Kontrolle eintragen.",true);
+  try{
+    const data=await request(`/kristine/api/day-release/${encodeURIComponent(employeeId)}/${encodeURIComponent(state.activeDate)}`,{
+      method:"PUT",
+      body:JSON.stringify({employeeName,reviewer,note:$("releaseNote").value.trim(),checks:releaseChecks()})
+    });
+    state.release=data.release;
+    const q=state.dayQueue.find(item=>String(item.employeeId)===String(employeeId)); if(q)q.released=true;
+    renderDayQueue(); renderRelease();
+    toast(`${employeeName} kontrolliert und freigegeben.`);
+    await navigateRelease(1,{unreleasedOnly:true});
+  }catch(error){toast(`Freigabe nicht gespeichert: ${error.message}`,true)}
+}
+document.addEventListener("change",event=>{
+  if(event.target?.matches?.("[data-release-check]"))renderRelease();
+});
+document.addEventListener("click",event=>{
+  if(event.target?.id==="releaseAndNext")saveReleaseAndNext();
+  if(event.target?.id==="previousEmployee")navigateRelease(-1);
+  if(event.target?.id==="nextEmployee")navigateRelease(1);
+});
+
 function setPhase(phase){
   if(!["times","regie","release"].includes(phase)) phase="times";
   state.phase=phase;
@@ -1086,7 +1179,7 @@ function setPhase(phase){
     button.classList.toggle("active",button.dataset.phase===phase);
   });
   if($("dietPanel"))$("dietPanel").hidden=phase!=="release";
-  if(phase==="release")renderDietPanel();
+  if(phase==="release"){renderDietPanel();renderRelease();}
 }
 document.querySelectorAll(".phase-button").forEach(button=>{
   button.addEventListener("click",()=>setPhase(button.dataset.phase));

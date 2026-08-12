@@ -16,6 +16,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const GPS_IMPORTS_DIR = path.join(ROOT, "gps-imports");
   const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
   const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
+  const DAY_RELEASES = path.join(ROOT, "day-releases.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
 
@@ -1503,12 +1504,13 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [gpsData, employees, events, states, corrections] = await Promise.all([
+      const [gpsData, employees, events, states, corrections, releases] = await Promise.all([
         readGpsImport("latest"),
         typeof readEmployees === "function" ? readEmployees() : [],
         readJson(TIME_EVENTS, []),
         readJson(STATES, {}),
         readJson(DAY_CORRECTIONS, []),
+        readJson(DAY_RELEASES, []),
       ]);
 
       if (gpsData && reconcileGpsMappings(gpsData, employees)) {
@@ -1579,6 +1581,9 @@ const open = taskId
             )
           ),
           corrected: Boolean(correction?.updatedAt),
+          released: Boolean((releases || []).find(row =>
+            String(row.employeeId) === employeeId && String(row.date) === date && row.released === true
+          )),
         });
       }
 
@@ -1853,6 +1858,49 @@ const open = taskId
     }
   });
 
+
+  // KRISTOOL 0023.35 · endgültige Tagesfreigabe
+  app.get("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId=String(req.params.employeeId||"").trim();
+      const date=String(req.params.date||localDateISO()).slice(0,10);
+      const releases=await readJson(DAY_RELEASES,[]);
+      const release=releases.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date)||null;
+      res.json({ok:true,release});
+    } catch(error) {
+      res.status(500).json({ok:false,error:String(error?.message||error)});
+    }
+  });
+
+  app.put("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId=String(req.params.employeeId||"").trim();
+      const date=String(req.params.date||localDateISO()).slice(0,10);
+      if(!employeeId||!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ok:false,error:"Mitarbeiter oder Datum fehlt."});
+      const checks=req.body?.checks&&typeof req.body.checks==="object"?req.body.checks:{};
+      const required=["times","regie","close","diet","fl","ch"];
+      if(required.some(key=>checks[key]!==true)) return res.status(400).json({ok:false,error:"Bitte alle Kontrollpunkte bestätigen."});
+      const reviewer=String(req.body?.reviewer||"").trim().slice(0,120);
+      if(!reviewer) return res.status(400).json({ok:false,error:"Name der Kontrolle fehlt."});
+      const employeeName=String(req.body?.employeeName||employeeId).trim().slice(0,160);
+      const note=String(req.body?.note||"").trim().slice(0,300);
+      const releases=await readJson(DAY_RELEASES,[]);
+      let release=releases.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
+      const now=new Date().toISOString();
+      if(!release){
+        release={id:`release_${employeeId}_${date}`,employeeId,date,createdAt:now};
+        releases.push(release);
+      }
+      Object.assign(release,{employeeName,checks:{...checks},reviewer,note,released:true,releasedAt:now,updatedAt:now});
+      await writeJson(DAY_RELEASES,releases);
+      res.json({ok:true,release});
+    } catch(error) {
+      res.status(500).json({ok:false,error:String(error?.message||error)});
+    }
+  });
+
   app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1881,7 +1929,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.34 · Diätenbericht 16.–15.
+  // KRISTOOL 0023.35 · Diätenbericht 16.–15.
   app.get("/kristine/api/diet-report", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {

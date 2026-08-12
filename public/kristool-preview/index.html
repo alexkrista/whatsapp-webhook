@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="kristool-diet.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.34"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.35"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -186,19 +186,41 @@
         <footer><span>Regiezeit</span><strong>–</strong></footer>
       </article>
 
-      <article class="release-card">
-        <header><span class="step-number release">4</span><div><h3>FREIGABE</h3><p>Verbindlicher Arbeitstag</p></div><span class="pill open">NOCH OFFEN</span></header>
-        <div class="result-preview">
-          <strong>Nach Freigabe entstehen:</strong>
-          <ul>
-            <li>Baustellen-Tagesbericht</li>
-            <li>Lohn- und Monatsstunden</li>
-            <li>Kilometerbuch</li>
-            <li>Privatfahrten je Mitarbeiter</li>
-            <li>Nachkalkulation und Dokumentation</li>
-          </ul>
+      <article class="release-card" id="releaseCard">
+        <header><span class="step-number release">4</span><div><h3>FREIGABE</h3><p>Endgültige Kontrolle des Arbeitstags</p></div><span class="pill open" id="releasePill">NICHT FREIGEGEBEN</span></header>
+
+        <div class="release-summary">
+          <strong>Vor der Freigabe kontrollieren:</strong>
+          <div class="release-checks">
+            <label><input type="checkbox" data-release-check="times"> Zeiten geprüft</label>
+            <label><input type="checkbox" data-release-check="regie"> Regie geprüft / nicht erforderlich</label>
+            <label><input type="checkbox" data-release-check="close"> Tagesabschluss geprüft</label>
+            <label><input type="checkbox" data-release-check="diet"> Taggeld geprüft</label>
+            <label><input type="checkbox" data-release-check="fl"> FL-Stunden / FL-Tag geprüft</label>
+            <label><input type="checkbox" data-release-check="ch"> CH-Stunden / CH-Tag geprüft</label>
+          </div>
         </div>
-        <button class="btn release-button" disabled>Freigabe folgt nach Regiemodul</button>
+
+        <div class="release-audit">
+          <div><small>KONTROLLIERT & FREIGEGEBEN VON</small><strong id="releaseBy">–</strong></div>
+          <div><small>AM</small><strong id="releaseAt">–</strong></div>
+        </div>
+
+        <label class="release-reviewer">
+          <span>Name Kontrolle</span>
+          <input id="releaseReviewer" value="Bettina / Büro" maxlength="120">
+        </label>
+        <label class="release-note">
+          <span>Notiz (optional)</span>
+          <input id="releaseNote" maxlength="300" placeholder="Notiz zur Kontrolle …">
+        </label>
+
+        <div class="release-actions">
+          <button class="btn secondary" id="previousEmployee">‹ Vorheriger MA</button>
+          <button class="btn primary release-button" id="releaseAndNext" disabled>✓ Freigeben & nächster MA</button>
+          <button class="btn secondary" id="nextEmployee">Nächster MA ›</button>
+        </div>
+        <div class="release-position" id="releasePosition">–</div>
       </article>
     </section>
 
