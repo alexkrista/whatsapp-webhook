@@ -174,15 +174,46 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .daily-report-button{background:#222923!important;color:#fff!important;border-color:#222923!important}
 @media(max-width:700px){.control-date-button{min-width:190px!important}.daily-report-button{width:100%}}
 
+
+/* ===== 0031.7 · Baustellen + Aufgaben neu gedacht ===== */
+.site-page{display:grid;gap:14px}.site-toolbar{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+.site-toolbar-actions{display:flex;gap:8px;align-items:center}.site-toolbar-actions input{min-width:320px}
+.site-plus,.task-plus{width:44px;height:44px;border-radius:12px;font-size:24px;line-height:1;padding:0}
+.site-filter-row{grid-column:1/-1;display:flex;gap:7px;flex-wrap:wrap}.site-filter-row button{padding:7px 11px;border-radius:999px}
+.site-filter-row button.active{background:#24553a;color:#fff;border-color:#24553a}
+.site-list-card{padding:0;overflow:hidden}.site-list-head,.site-row{display:grid;grid-template-columns:90px minmax(180px,1.2fr) minmax(230px,1.7fr) 170px 145px;gap:12px;align-items:center;padding:11px 14px}
+.site-list-head{background:#eef3ef;color:#5d695f;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.site-row{border-top:1px solid #e2e7e3;cursor:pointer}.site-row:hover{background:#f7faf7}.site-row strong{font-size:14px}.site-row .site-address{font-size:12px;color:#657067}
+.site-status{display:inline-flex;width:max-content;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:900;background:#eef2ee}
+.site-status.running{background:#e4f4e8;color:#28673b}.site-status.order{background:#eaf1fb;color:#315c8b}.site-status.offer{background:#f5f1df;color:#796b26}.site-status.closed{background:#ececec;color:#666}
+.site-plan{font-size:11px;color:#5f6a62}.site-address-missing{color:#a44333!important;font-weight:800}
+.site-quick-create{border:2px solid #dce8df}.site-quick-head,.site-detail-head,.task-create-toggle{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.site-quick-grid,.site-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.site-quick-grid .full,.site-detail-grid .full{grid-column:1/-1}
+.site-address-title{padding:10px 12px;border-radius:11px;background:#edf6ef;border:1px solid #cbe0d0;display:grid;gap:3px}.site-address-title small{color:#55705d}
+.site-detail-backdrop{position:fixed;inset:0;background:rgba(18,28,22,.48);z-index:9999;display:none;align-items:center;justify-content:center;padding:18px}
+.site-detail-backdrop.open{display:flex}.site-detail-modal{width:min(880px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;padding:20px;box-shadow:0 24px 70px rgba(0,0,0,.28)}
+.site-detail-head h2{margin:2px 0}.site-detail-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}
+.task-create-card.task-create-collapsed{padding:12px 14px}.task-reminder-levels label:has(input[value="2"]:checked){background:#fff5dc;border-color:#e0bc5a}.task-reminder-levels label:has(input[value="3"]:checked){background:#fde9e5;border-color:#d27b68}
+.task-card-compact{display:grid;grid-template-columns:38px minmax(0,1.5fr) minmax(120px,.8fr) 110px auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid #e4e8e4;cursor:pointer}
+.task-card-compact:hover{background:#f8faf8}.task-reminder-badge{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:900;background:#e8f3ea;color:#2d6a3e}
+.task-reminder-badge.level-2{background:#fff0c8;color:#7a5b11}.task-reminder-badge.level-3{background:#f9ddd7;color:#9a3729}.task-card-title{font-weight:850}.task-card-sub{font-size:11px;color:#69736c}
+@media(max-width:820px){
+ .site-toolbar{grid-template-columns:1fr}.site-toolbar-actions{grid-column:1/-1}.site-toolbar-actions input{min-width:0;width:100%}
+ .site-list-head{display:none}.site-row{grid-template-columns:74px 1fr auto;padding:12px}.site-row .site-address{grid-column:2/-1}.site-row .site-plan{display:none}
+ .site-quick-grid,.site-detail-grid{grid-template-columns:1fr}.site-quick-grid .full,.site-detail-grid .full{grid-column:1}
+ .site-detail-backdrop{padding:0}.site-detail-modal{width:100%;height:100%;max-height:none;border-radius:0;padding:16px}
+ .task-layout{grid-template-columns:1fr!important}.task-card-compact{grid-template-columns:34px 1fr auto}.task-card-compact .task-assignee,.task-card-compact .task-due{display:none}
+}
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.6"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.7"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
+  <button onclick="showTab('sites')">🏗️ Baustellen</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
   <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
   <button class="secondary krista-refresh" onclick="loadAll()">↻ Aktualisieren</button>
@@ -289,10 +320,68 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </div>
 </section>
 
+
+<section id="sites" class="tab">
+  <div class="site-page">
+    <div class="site-toolbar card">
+      <div>
+        <div class="eyebrow">BAUSTELLEN</div>
+        <h2 style="margin:2px 0 0">Schnell sehen. Details erst beim Öffnen.</h2>
+      </div>
+      <div class="site-toolbar-actions">
+        <input id="siteSearch" placeholder="Nummer, Name, Ort, Adresse …" oninput="renderSites()">
+        <button class="secondary site-plus" type="button" onclick="toggleSiteQuickCreate()">＋</button>
+      </div>
+      <div class="site-filter-row" id="siteFilters">
+        <button class="active" data-site-filter="all" onclick="setSiteFilter('all',this)">Alle</button>
+        <button data-site-filter="Angebot" onclick="setSiteFilter('Angebot',this)">Angebot</button>
+        <button data-site-filter="Auftrag" onclick="setSiteFilter('Auftrag',this)">Auftrag</button>
+        <button data-site-filter="Laufend" onclick="setSiteFilter('Laufend',this)">Laufend</button>
+        <button data-site-filter="Fertig nicht abgerechnet" onclick="setSiteFilter('Fertig nicht abgerechnet',this)">Fertig / offen</button>
+        <button data-site-filter="Geschlossen" onclick="setSiteFilter('Geschlossen',this)">Geschlossen</button>
+      </div>
+    </div>
+
+    <div id="siteQuickCreate" class="card site-quick-create" hidden>
+      <div class="site-quick-head">
+        <div><div class="eyebrow">HANDY · SCHNELLBAUSTELLE</div><h3>Nur das Nötigste</h3></div>
+        <button class="secondary" type="button" onclick="toggleSiteQuickCreate(false)">×</button>
+      </div>
+      <div class="site-quick-grid">
+        <div class="full"><label>Baustellenname *</label><input id="sqName" placeholder="z. B. Stark"></div>
+        <div><label>Baustellennummer</label><input id="sqJobId" inputmode="numeric" placeholder="automatisch"></div>
+        <div><label>Status</label><select id="sqStatus"><option>Angebot</option><option selected>Auftrag</option><option>Laufend</option></select></div>
+        <div class="full site-address-title"><strong>Baustellenadresse *</strong><small>Diese Adresse zählt für KRISTINE: Navigation · AT/FL/CH · Entsendung.</small></div>
+        <div><label>Straße *</label><input id="sqStreet"></div>
+        <div><label>Hausnummer</label><input id="sqHouse"></div>
+        <div><label>PLZ *</label><input id="sqPostal" inputmode="numeric"></div>
+        <div><label>Ort *</label><input id="sqCity"></div>
+        <div class="full"><label>Notiz optional</label><textarea id="sqNote" rows="2" placeholder="z. B. Bad EG, Start nächste Woche"></textarea></div>
+      </div>
+      <div class="actions">
+        <button class="secondary" type="button" onclick="checkQuickSiteMaps()">📍 Maps prüfen</button>
+        <button class="green" id="sqSave" type="button" onclick="saveQuickSite()">Baustelle anlegen</button>
+      </div>
+      <div id="sqNotice" class="small" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card site-list-card">
+      <div class="site-list-head">
+        <span>Nr.</span><span>Baustelle</span><span>Baustellenadresse</span><span>Status</span><span>Planung</span>
+      </div>
+      <div id="siteList" class="site-list"></div>
+    </div>
+  </div>
+</section>
+
 <section id="tasks" class="tab">
   <div class="task-layout">
-    <div class="card task-create-card">
-      <h3>📝 Neue Aufgabe</h3>
+    <div class="card task-create-card task-create-collapsed" id="taskCreateCard">
+      <div class="task-create-toggle">
+        <div><div class="eyebrow">AUFGABEN</div><h3 style="margin:2px 0 0">Neue Aufgabe</h3></div>
+        <button type="button" class="secondary task-plus" onclick="toggleTaskCreate()">＋</button>
+      </div>
+      <div id="taskCreateBody" hidden>
       <div class="task-formgrid">
         <div class="full"><label>Aufgabe</label><textarea id="tTitle" class="task-title" rows="2" placeholder="Was ist zu erledigen?"></textarea></div>
         <div class="full"><label>Art der Aufgabe</label><div class="task-type-row">
@@ -312,6 +401,11 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
           <label><input type="radio" name="taskPriority" value="heute">🟡 Heute</label>
           <label><input type="radio" name="taskPriority" value="sofort">🔴 Sofort</label>
         </div></div>
+        <div class="full"><label>Erinnerung</label><div class="task-priority-row task-reminder-levels">
+          <label><input type="radio" name="taskReminderLevel" value="1" checked>① normal</label>
+          <label><input type="radio" name="taskReminderLevel" value="2">② nachfassen</label>
+          <label><input type="radio" name="taskReminderLevel" value="3">③ dringend</label>
+        </div></div>
         <div class="full task-contact-box">
           <strong>Kontakt und Ort</strong><div class="small" style="margin:3px 0 10px">Bei Baustellenbezug werden vorhandene Daten automatisch übernommen. Ohne Baustelle bitte hier eintragen.</div>
           <div class="task-formgrid">
@@ -327,6 +421,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
       <div class="actions" style="margin-top:14px"><button class="green" onclick="addTask()">+ Aufgabe anlegen</button></div>
       <div id="taskSaveNotice" class="task-save-notice"></div>
+      </div>
     </div>
     <div class="card task-list-card"><h3>Aufgaben</h3><div class="task-tabs"><button id="taskTabNewest" class="active" onclick="setTaskFilter('newest')">Neueste</button><button id="taskTabOpen" onclick="setTaskFilter('open')">Offen</button><button id="taskTabDone" onclick="setTaskFilter('done')">Erledigt</button></div><div id="taskList"></div></div>
   </div>
@@ -480,9 +575,45 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   </div>
 </div>
 
+
+<div id="siteDetailBackdrop" class="site-detail-backdrop" onclick="if(event.target===this)closeSiteDetail()">
+  <div class="site-detail-modal">
+    <div class="site-detail-head">
+      <div>
+        <div class="eyebrow">BAUSTELLE</div>
+        <h2 id="sdTitle">–</h2>
+        <div id="sdSubtitle" class="small"></div>
+      </div>
+      <button type="button" class="secondary" onclick="closeSiteDetail()">Schließen</button>
+    </div>
+    <div class="site-detail-grid">
+      <div><label>Baustellennummer</label><input id="sdJobId" disabled></div>
+      <div><label>Status</label><select id="sdStatus"><option>Angebot</option><option>Auftrag</option><option>Laufend</option><option>Fertig nicht abgerechnet</option><option>Geschlossen</option></select></div>
+      <div class="full"><label>Baustellenname *</label><input id="sdName"></div>
+
+      <div class="full site-address-title"><strong>Baustellenadresse *</strong><small>Operative KRISTINE-Adresse – nicht Kunden-/Rechnungsadresse.</small></div>
+      <div><label>Straße *</label><input id="sdStreet"></div>
+      <div><label>Hausnummer</label><input id="sdHouse"></div>
+      <div><label>PLZ *</label><input id="sdPostal"></div>
+      <div><label>Ort *</label><input id="sdCity"></div>
+      <div class="full"><label>Adresszusatz</label><input id="sdAddressExtra"></div>
+
+      <div><label>Ansprechpartner</label><input id="sdContactName"></div>
+      <div><label>Telefon</label><input id="sdContactPhone"></div>
+      <div class="full"><label>Notizen / Baustelleninfos</label><textarea id="sdNotes" rows="4"></textarea></div>
+    </div>
+    <div class="site-detail-actions">
+      <a id="sdMaps" class="navbtn" target="_blank">📍 Navigation</a>
+      <button type="button" class="secondary" onclick="showTab('planning');closeSiteDetail()">📅 Planen</button>
+      <button type="button" class="green" onclick="saveSiteDetail()">Speichern</button>
+    </div>
+    <div id="sdNotice" class="small"></div>
+  </div>
+</div>
+
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.6"});
+createKristaTopbar({active:"kristine",build:"0031.7"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -507,7 +638,7 @@ function updatePlanningStickyOffsets(){
   if(!active)return;
   document.documentElement.style.setProperty('--planning-sticky-top',`${Math.ceil(top.getBoundingClientRect().height)}px`);
 }
-function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.krista-module-nav button').forEach(btn=>btn.classList.toggle('active',String(btn.getAttribute('onclick')||'').includes("'"+id+"'")));if(id==='kristool')renderKristool();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
+function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.krista-module-nav button').forEach(btn=>btn.classList.toggle('active',String(btn.getAttribute('onclick')||'').includes("'"+id+"'")));if(id==='kristool')renderKristool();if(id==='sites')renderSites();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
 async function loadAll(){
   // Kritische Stammdaten getrennt laden: Ein optionaler Fehler darf Aufgaben/Planung nicht blockieren.
   const results=await Promise.allSettled([
@@ -545,10 +676,149 @@ async function loadAll(){
   document.getElementById('aDate').value=data.today;
   document.getElementById('tDueDate').value=data.today;const reportDate=document.getElementById('dailyReportDate');if(reportDate&&!reportDate.value)reportDate.value=data.today;
   renderMasterData();
-  renderWeek();renderControl();renderTasks();renderPlanningPools();renderKristool();
+  renderWeek();renderControl();renderTasks();renderSites();renderPlanningPools();renderKristool();
   renderHolidays();renderCompanyVacations();renderScheduleModels();renderAnnualProductivePlanning();
 }
 function jobAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+let siteFilter='all';
+let activeSiteId='';
+
+function siteStatusClass(status){
+  const x=String(status||'').toLowerCase();
+  if(x.includes('lauf'))return 'running';
+  if(x.includes('auftrag'))return 'order';
+  if(x.includes('angebot'))return 'offer';
+  if(x.includes('geschlossen'))return 'closed';
+  return '';
+}
+function siteNextPlan(jobId){
+  const today=data.today||iso(new Date());
+  const rows=(data.assignments||[]).filter(a=>String(a.jobId)===String(jobId)&&String(a.date||'')>=today).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  if(!rows.length)return 'nicht geplant';
+  const first=rows[0].date;
+  const names=[...new Set(rows.filter(a=>a.date===first).map(a=>a.employeeName).filter(Boolean))];
+  return `${taskDueLabel(first)}${names.length?' · '+names.slice(0,2).join(', ')+(names.length>2?' +'+(names.length-2):''):''}`;
+}
+function setSiteFilter(value,button){
+  siteFilter=value;
+  document.querySelectorAll('#siteFilters button').forEach(b=>b.classList.toggle('active',b===button));
+  renderSites();
+}
+function renderSites(){
+  const box=document.getElementById('siteList');if(!box)return;
+  const q=String(document.getElementById('siteSearch')?.value||'').trim().toLowerCase();
+  let jobs=[...masterJobs];
+  if(siteFilter!=='all')jobs=jobs.filter(j=>String(j.status||'Angebot')===siteFilter);
+  if(q)jobs=jobs.filter(j=>[j.jobId,j.name,j.city,j.street,j.postalCode,jobAddress(j)].join(' ').toLowerCase().includes(q));
+  jobs.sort((a,b)=>String(a.status||'').localeCompare(String(b.status||''),'de')||String(a.jobId).localeCompare(String(b.jobId),'de',{numeric:true}));
+  box.innerHTML=jobs.length?jobs.map(j=>{
+    const address=jobAddress(j);
+    return `<div class="site-row" onclick="openSiteDetail('${esc(j.jobId)}')">
+      <strong>#${esc(j.jobId)}</strong>
+      <div><strong>${esc(j.name||'ohne Name')}</strong><div class="small">${esc(j.contactName||'')}</div></div>
+      <div class="site-address ${address?'':'site-address-missing'}">${address?`📍 ${esc(address)}`:'⚠ Baustellenadresse fehlt'}</div>
+      <span class="site-status ${siteStatusClass(j.status)}">${esc(j.status||'Angebot')}</span>
+      <span class="site-plan">${esc(siteNextPlan(j.jobId))}</span>
+    </div>`;
+  }).join(''):'<div class="small" style="padding:18px">Keine Baustellen gefunden.</div>';
+}
+async function toggleSiteQuickCreate(force){
+  const box=document.getElementById('siteQuickCreate');if(!box)return;
+  const show=typeof force==='boolean'?force:box.hidden;
+  box.hidden=!show;
+  if(show){
+    document.getElementById('sqNotice').textContent='';
+    if(!document.getElementById('sqJobId').value.trim()){
+      try{const d=await api('/admin/api/jobs/next-number');document.getElementById('sqJobId').value=d.nextNumber||''}catch{}
+    }
+    box.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+}
+function checkQuickSiteMaps(){
+  const q=['sqStreet','sqHouse','sqPostal','sqCity'].map(id=>document.getElementById(id).value.trim()).filter(Boolean).join(' ');
+  window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q||'Adresse suchen'),'_blank','noopener');
+}
+async function createSiteCleanupTask(job){
+  const existing=(data.tasks||[]).some(t=>t.status!=='done'&&String(t.jobId)===String(job.jobId)&&String(t.taskType)==='Baustelle sauber anlegen');
+  if(existing)return;
+  const due=new Date();due.setDate(due.getDate()+1);
+  data.tasks=data.tasks||[];
+  data.tasks.push({
+    id:id(),title:`Baustelle ${job.name||job.jobId} sauber anlegen`,
+    taskType:'Baustelle sauber anlegen',priority:'normal',reminderLevel:1,
+    assigneeId:'office',assigneeName:'Bettina / Büro',
+    jobId:String(job.jobId),jobName:job.name||String(job.jobId),
+    dueDate:iso(due),reminder:'Automatisch aus Handy-Schnellanlage erstellt.',
+    creatorId:'system',creatorName:'KRISTINE',
+    address:jobAddress(job),status:'open',createdAt:new Date().toISOString(),completedAt:null
+  });
+  try{await persistTasks()}catch(e){console.warn('Automatische Aufgabe nicht gespeichert',e)}
+}
+async function saveQuickSite(){
+  const ids=['sqName','sqStreet','sqPostal','sqCity'];
+  const missing=ids.filter(id=>!document.getElementById(id).value.trim());
+  if(missing.length){document.getElementById('sqNotice').textContent='Baustellenname, Straße, PLZ und Ort sind Pflicht.';return}
+  const button=document.getElementById('sqSave');button.disabled=true;button.textContent='Legt an …';
+  const body={
+    jobId:document.getElementById('sqJobId').value.trim(),
+    name:document.getElementById('sqName').value.trim(),
+    status:document.getElementById('sqStatus').value,
+    street:document.getElementById('sqStreet').value.trim(),
+    houseNumber:document.getElementById('sqHouse').value.trim(),
+    postalCode:document.getElementById('sqPostal').value.trim(),
+    city:document.getElementById('sqCity').value.trim(),
+    notes:document.getElementById('sqNote').value.trim()
+  };
+  try{
+    const result=await api('/admin/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const fresh=await api('/admin/api/jobs');masterJobs=fresh.jobs||masterJobs;
+    const job=masterJobs.find(j=>String(j.jobId)===String(result.jobId))||{...body,jobId:result.jobId};
+    await createSiteCleanupTask(job);
+    renderMasterData();renderPlanningPools();renderSites();
+    ['sqJobId','sqName','sqStreet','sqHouse','sqPostal','sqCity','sqNote'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('sqNotice').textContent='✓ Baustelle angelegt · Aufgabe „sauber anlegen“ erstellt.';
+    setTimeout(()=>toggleSiteQuickCreate(false),900);
+  }catch(e){document.getElementById('sqNotice').textContent='Fehler: '+e.message}
+  finally{button.disabled=false;button.textContent='Baustelle anlegen'}
+}
+async function openSiteDetail(jobId){
+  activeSiteId=String(jobId);
+  const local=masterJobs.find(j=>String(j.jobId)===activeSiteId)||{};
+  let meta=local;
+  try{const r=await api(`/admin/api/job/${encodeURIComponent(activeSiteId)}/meta`);meta={...local,...(r.meta||{})}}catch{}
+  const set=(id,value)=>{const el=document.getElementById(id);if(el)el.value=value||''};
+  set('sdJobId',activeSiteId);set('sdStatus',meta.status||'Angebot');set('sdName',meta.name);
+  set('sdStreet',meta.street);set('sdHouse',meta.houseNumber);set('sdPostal',meta.postalCode);set('sdCity',meta.city);set('sdAddressExtra',meta.addressExtra);
+  set('sdContactName',meta.contactName);set('sdContactPhone',meta.contactPhone);set('sdNotes',meta.notes);
+  document.getElementById('sdTitle').textContent=`#${activeSiteId} · ${meta.name||'ohne Name'}`;
+  const address=jobAddress(meta);document.getElementById('sdSubtitle').textContent=address||'Baustellenadresse fehlt';
+  const maps=document.getElementById('sdMaps');maps.href=mapsUrl(address);maps.style.display=address?'':'none';
+  document.getElementById('sdNotice').textContent='';
+  document.getElementById('siteDetailBackdrop').classList.add('open');
+}
+function closeSiteDetail(){document.getElementById('siteDetailBackdrop')?.classList.remove('open');activeSiteId=''}
+async function saveSiteDetail(){
+  if(!activeSiteId)return;
+  const name=document.getElementById('sdName').value.trim(),street=document.getElementById('sdStreet').value.trim(),postalCode=document.getElementById('sdPostal').value.trim(),city=document.getElementById('sdCity').value.trim();
+  if(!name||!street||!postalCode||!city){document.getElementById('sdNotice').textContent='Name und Baustellenadresse (Straße, PLZ, Ort) sind Pflicht.';return}
+  const body={name,status:document.getElementById('sdStatus').value,street,houseNumber:document.getElementById('sdHouse').value.trim(),postalCode,city,addressExtra:document.getElementById('sdAddressExtra').value.trim(),contactName:document.getElementById('sdContactName').value.trim(),contactPhone:document.getElementById('sdContactPhone').value.trim(),notes:document.getElementById('sdNotes').value.trim()};
+  try{
+    await api(`/admin/api/job/${encodeURIComponent(activeSiteId)}/meta`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const fresh=await api('/admin/api/jobs');masterJobs=fresh.jobs||masterJobs;renderMasterData();renderPlanningPools();renderSites();
+    document.getElementById('sdNotice').textContent='✓ Baustellendaten gespeichert.';
+    document.getElementById('sdTitle').textContent=`#${activeSiteId} · ${name}`;
+  }catch(e){document.getElementById('sdNotice').textContent='Fehler: '+e.message}
+}
+function toggleTaskCreate(force){
+  const body=document.getElementById('taskCreateBody');if(!body)return;
+  const show=typeof force==='boolean'?force:body.hidden;
+  body.hidden=!show;
+  document.querySelector('#taskCreateCard .task-plus').textContent=show?'×':'＋';
+}
+function selectedTaskReminderLevel(){
+  return Number(document.querySelector('input[name="taskReminderLevel"]:checked')?.value||1);
+}
+
 function mapsUrl(address){return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):''}
 function whatsappUrl(phone){let p=String(phone||'').replace(/\D/g,'');if(p.startsWith('00'))p=p.slice(2);else if(p.startsWith('0'))p='43'+p.slice(1);return p?'https://wa.me/'+p:''}
 function renderMasterData(){
@@ -1057,10 +1327,10 @@ async function assignJobToQuickTarget(job){
 }
 async function assignQuickExistingJob(){const job=masterJobs.find(j=>String(j.jobId)===String(document.getElementById('quickJobSelect').value));if(!job){showQuickPlanError('Bitte eine Baustelle auswählen.');return}await assignJobToQuickTarget(job)}
 async function createAndAssignQuickJob(){
-  const name=document.getElementById('quickNewName').value.trim(),save=document.getElementById('quickNewSave');if(!name){showQuickPlanError('Bitte einen Baustellennamen eingeben.');return}
+  const name=document.getElementById('quickNewName').value.trim(),save=document.getElementById('quickNewSave');if(!name){showQuickPlanError('Bitte einen Baustellennamen eingeben.');return}if(!document.getElementById('quickNewStreet').value.trim()||!document.getElementById('quickNewPostal').value.trim()||!document.getElementById('quickNewCity').value.trim()){showQuickPlanError('Baustellenadresse ist Pflicht: Straße, PLZ und Ort eingeben.');return}
   const body={jobId:document.getElementById('quickNewJobId').value.trim(),name,status:document.getElementById('quickNewStatus').value,street:document.getElementById('quickNewStreet').value.trim(),houseNumber:document.getElementById('quickNewHouse').value.trim(),postalCode:document.getElementById('quickNewPostal').value.trim(),city:document.getElementById('quickNewCity').value.trim(),startDate:quickPlanTarget.date};
   save.disabled=true;save.textContent='Legt an …';document.getElementById('quickPlanError').style.display='none';
-  try{const result=await api('/admin/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const jobsResult=await api('/admin/api/jobs');masterJobs=jobsResult.jobs||masterJobs;renderMasterData();renderPlanningPools();const job=masterJobs.find(j=>String(j.jobId)===String(result.jobId))||{...body,jobId:result.jobId};await assignJobToQuickTarget(job);['quickNewJobId','quickNewName','quickNewStreet','quickNewHouse','quickNewPostal','quickNewCity'].forEach(id=>document.getElementById(id).value='')}
+  try{const result=await api('/admin/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const jobsResult=await api('/admin/api/jobs');masterJobs=jobsResult.jobs||masterJobs;renderMasterData();renderPlanningPools();const job=masterJobs.find(j=>String(j.jobId)===String(result.jobId))||{...body,jobId:result.jobId};await createSiteCleanupTask(job);await assignJobToQuickTarget(job);['quickNewJobId','quickNewName','quickNewStreet','quickNewHouse','quickNewPostal','quickNewCity'].forEach(id=>document.getElementById(id).value='')}
   catch(e){showQuickPlanError(e.message)}finally{save.disabled=false;save.textContent='Anlegen und hier einteilen'}
 }
 
@@ -1326,14 +1596,7 @@ function jobOptions(selected=''){
   return '<option value="">– Baustelle wählen –</option>'+jobs.map(j=>{const jid=String(j.jobId||j.id||'');const name=String(j.name||j.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===String(selected)?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`}).join('');
 }
 function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':type==='pause'?'Pause':type==='up'?'Unproduktiv':'Abschnitt'}
-const FINK_REASONS=[
-  {code:'022',label:'Büro'},{code:'900',label:'Urlaub'},{code:'901',label:'Krank'},{code:'902',label:'Arzt'},
-  {code:'903',label:'Berufsschule'},{code:'904',label:'Feiertag'},{code:'905',label:'Schulung extern'},
-  {code:'909',label:'Schulung intern'},{code:'911',label:'Sonderurlaub'},{code:'912',label:'Musterung'},
-  {code:'913',label:'Werkstatt'},{code:'917',label:'Firma aufräumen'},{code:'918',label:'Lehrlingswettbewerb'},
-  {code:'927',label:'Betriebsausflug'},{code:'930',label:'Zeitausgleich'},{code:'945',label:'Quarantäne'},
-  {code:'946',label:'Kurzarbeit'},{code:'9999',label:'Sanierung'}
-];
+const UP_REASONS=['Werkstatt','Material holen','Besprechung','Schulung','Arzt','Fahrzeugpflege','Lager','Sonstiges'];
 function normalizeEditorTime(value){
   const raw=String(value||'').trim();
   if(/^\d{1,2}:\d{2}$/.test(raw)){
@@ -1355,30 +1618,13 @@ function addMinuteToHM(hm){
   const next=(minutes+1)%(24*60);
   return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
 }
-function finkReasonOptions(selected=''){
-  const known=FINK_REASONS.some(item=>item.label===String(selected||''));
-  const legacy=selected&&!known?`<option value="${esc(selected)}" selected>${esc(selected)} · bisheriger Wert</option>`:'';
-  return `<option value="" ${!selected?'selected':''}>– Finkzeit-Art wählen –</option>`+legacy+
-    FINK_REASONS.map(item=>`<option value="${esc(item.label)}" ${String(selected)===item.label?'selected':''}>${esc(item.code+' · '+item.label)}</option>`).join('');
-}
-function setTimeEditorBilling(index,value){
-  const row=timeEditorSegments[index];if(!row)return;
-  row.billingType=value==='regie'?'regie':'normal';
-  renderTimeEditor();
+function upReasonOptions(selected=''){
+  return `<option value="" ${!selected?'selected':''}>– Grund auswählen –</option>`+
+    UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
 }
 function timeEditorContextCell(seg,index){
-  if(seg.type==='work'){
-    const billing=seg.billingType==='regie'?'regie':'normal';
-    return `<div style="display:grid;grid-template-columns:minmax(230px,1fr) 120px;gap:7px">
-      <select aria-label="Baustelle" onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>
-      <select aria-label="Normal oder Regie" onchange="setTimeEditorBilling(${index},this.value)">
-        <option value="normal" ${billing==='normal'?'selected':''}>Normal</option>
-        <option value="regie" ${billing==='regie'?'selected':''}>Regie</option>
-      </select>
-    </div>`;
-  }
-  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${finkReasonOptions(seg.reason||'')}</select>`;
-  if(seg.type==='pause'||seg.type==='lunch')return '<span class="segment-badge">003 · Pause / Mittag</span>';
+  if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
+  if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'')}</select>`;
   return '<span class="small">–</span>';
 }
 function renderTimeEditor(){
@@ -1405,7 +1651,7 @@ function renderTimeEditor(){
   const work=timeEditorSegments.filter(x=>x.type==='work').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
   const breaks=timeEditorSegments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
   const up=timeEditorSegments.filter(x=>x.type==='up').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
-  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / Finkzeit / Regie</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
+  timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / UP-Grund</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>`;
 }
 function commitTimeEditorTime(index,key,input){
   const normalized=normalizeEditorTime(input.value);
@@ -1416,8 +1662,8 @@ function updateTimeEditorRow(index,key,value){
   const row=timeEditorSegments[index];if(!row)return;
   row[key]=value;
   if(key==='type'){
-    if(value==='work'){row.reason='';row.billingType=row.billingType==='regie'?'regie':'normal'}
-    else{row.jobId='';row.jobName='';row.billingType='';if(value==='up'&&!row.reason)row.reason='Werkstatt'}
+    if(value==='work'){row.reason=''}
+    else{row.jobId='';row.jobName='';if(value==='up'&&!row.reason)row.reason='Werkstatt'}
   }
   if(key==='to'&&value&&timeEditorSegments[index+1])timeEditorSegments[index+1].from=addMinuteToHM(value);
   renderTimeEditor();
@@ -1427,7 +1673,7 @@ function addTimeEditorRow(type='work'){
   const last=timeEditorSegments.at(-1);
   const from=last?.to?addMinuteToHM(last.to):currentViennaHM();
   const rowType=type==='site'?'work':type;
-  timeEditorSegments.push({id:id(),type:rowType,from,to:'',jobId:'',jobName:'',reason:rowType==='up'?'Werkstatt':'',billingType:rowType==='work'?'normal':''});
+  timeEditorSegments.push({id:id(),type:rowType,from,to:'',jobId:'',jobName:'',reason:rowType==='up'?'Werkstatt':''});
   renderTimeEditor();
 }
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
@@ -2094,7 +2340,7 @@ async function addTask(){
   const button=document.querySelector('button[onclick="addTask()"]');
   const oldLabel=button?.textContent;
   const newTask={
-    id:id(),title:tTitle.value.trim(),taskType:selectedTaskType(),priority:selectedTaskPriority(),
+    id:id(),title:tTitle.value.trim(),taskType:selectedTaskType(),priority:selectedTaskPriority(),reminderLevel:selectedTaskReminderLevel(),
     assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
     jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
     dueDate:tDueDate.value,reminder:tReminder.value.trim(),
@@ -2113,7 +2359,8 @@ async function addTask(){
     tAddress.value='';tContactName.value='';tContactPhone.value='';tContactEmail.value='';
     document.querySelector('input[name="taskType"][value="Rückruf"]').checked=true;
     document.querySelector('input[name="taskPriority"][value="normal"]').checked=true;
-    updateTaskSelectionInfo();
+    document.querySelector('input[name="taskReminderLevel"][value="1"]').checked=true;
+    updateTaskSelectionInfo();toggleTaskCreate(false);
     const note=(r.notifications||[]).find(n=>n.taskId===newTask.id)||(r.notifications||[])[0];
     if(note?.sent)showNotice('✓ Aufgabe gespeichert und Mitarbeiter informiert.','ok');
     else if(note?.reason==='no_employee_phone')showNotice('Aufgabe gespeichert. Beim Mitarbeiter fehlt die WhatsApp-Telefonnummer.','warn');
@@ -2135,11 +2382,15 @@ function renderTasks(){
   if(taskFilter==='done')tasks=tasks.filter(t=>t.status==='done');
   tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
-    const j=masterJobs.find(x=>String(x.jobId)===String(t.jobId));
-    const address=t.address||(j&&jobAddress(j))||'';
-    const priority=t.priority==='sofort'?'🔴 Sofort':t.priority==='heute'?'🟡 Heute':'🟢 Normal';
-    return `<div class="assignment"><strong>${esc(t.title)}</strong><div class="task-card-meta"><span class="task-badge">${esc(t.taskType||'Aufgabe')}</span><span class="task-badge">${priority}</span></div><span><strong>Für:</strong> ${esc(t.assigneeName||t.assigneeId)} · <strong>Von:</strong> ${esc(t.creatorName||'Chef / Büro')}</span>${t.jobName?`<br><span class="small">🏗 ${esc(t.jobName)}</span>`:''}<br><span class="small">Fällig ${esc(taskDueLabel(t.dueDate))} · ${esc(taskStatusLabel(t))}</span>${t.reminder?`<br><span class="small">ℹ️ ${esc(t.reminder)}</span>`:''}${address?`<br><span class="small">📍 ${esc(address)}</span>`:''}${t.contactEmail?`<br><span class="small">✉ ${esc(t.contactEmail)}</span>`:''}${t.contactPhone?`<br><a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen · ${esc(t.contactName||t.contactPhone)}</a>`:''}<div class="actions"><button class="secondary" onclick="openTaskListModal('${t.id}')">Details</button>${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">Erledigt</button>`:''}<button class="danger" onclick="removeTask('${t.id}')">×</button></div></div>`
-  }).join(''):'<span class="small">Keine Aufgaben.</span>'
+    const level=Math.max(1,Math.min(3,Number(t.reminderLevel||1)));
+    return `<div class="task-card-compact" onclick="openTaskListModal('${esc(t.id)}')">
+      <span class="task-reminder-badge level-${level}">${level}</span>
+      <div><div class="task-card-title">${esc(t.title)}</div><div class="task-card-sub">${esc(t.jobName||'ohne Baustelle')} · ${esc(t.taskType||'Aufgabe')}</div></div>
+      <div class="task-assignee">${esc(t.assigneeName||t.assigneeId||'–')}</div>
+      <div class="task-due">${esc(taskDueLabel(t.dueDate))}</div>
+      <span class="site-status ${taskIsOverdue(t)?'offer':''}">${taskIsOverdue(t)?'überfällig':esc(taskStatusLabel(t))}</span>
+    </div>`;
+  }).join(''):'<span class="small">Keine Aufgaben.</span>';
 }
 function removeTask(x){data.tasks=data.tasks.filter(t=>t.id!==x);renderTasks();renderControl()}
 async function persistTasks(){
@@ -2152,7 +2403,7 @@ async function saveTasks(){
 }
 function taskDetailHtml(t){
   const address=t.address||(masterJobs.find(x=>String(x.jobId)===String(t.jobId))&&jobAddress(masterJobs.find(x=>String(x.jobId)===String(t.jobId))))||'';
-  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Art</span><strong>${esc(t.taskType||'Aufgabe')}</strong><span>Priorität</span><strong>${esc(t.priority||'normal')}</strong><span>Für</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Von</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong>${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:''}<span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Hinweise</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactEmail?`<span>E-Mail</span><strong>${esc(t.contactEmail)}</strong>`:''}${t.contactPhone?`<span>Rückruf</span><strong>${esc(t.contactName||'')} ${esc(t.contactPhone)}</strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}</div></div>`
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Art</span><strong>${esc(t.taskType||'Aufgabe')}</strong><span>Priorität</span><strong>${esc(t.priority||'normal')}</strong><span>Erinnerung</span><strong>${esc(String(t.reminderLevel||1))}</strong><span>Für</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Von</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong>${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:''}<span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Hinweise</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactEmail?`<span>E-Mail</span><strong>${esc(t.contactEmail)}</strong>`:''}${t.contactPhone?`<span>Rückruf</span><strong>${esc(t.contactName||'')} ${esc(t.contactPhone)}</strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}</div></div>`
 }
 function openTaskListModal(focusId=''){
   const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
