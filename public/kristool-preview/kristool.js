@@ -881,14 +881,20 @@ function workMinutes(rows){
     if(a===null||b===null)return sum;
     const duration=Math.max(0,b-a);
 
-    // Normale Arbeit zählt immer.
+    // Produktive Baustellenarbeit zählt als Arbeitszeit.
     if(row.type==="work")return sum+duration;
 
-    // Bezahlte Abwesenheit zählt als Arbeitszeit:
-    // Urlaub, Krank, Feiertag und Arzt NUR für die tatsächlich bestätigte Dauer.
-    if(row.type==="up" && row.countsAsWorkTime===true)return sum+duration;
+    // UP = unproduktive, aber grundsätzlich bezahlte Arbeitszeit.
+    // Beispiele: Büro, Werkstatt, Schulung, Arzt laut Bestätigung usw.
+    // Ausnahme: ZA ist bewusst KEINE Arbeitszeit.
+    if(row.type==="up"){
+      const reason=String(row.reason||row.jobName||row.absenceType||"").toLowerCase();
+      const isZA=row.countsAgainstOvertime===true || /zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(reason);
+      if(isZA)return sum;
+      return sum+duration;
+    }
 
-    // ZA ist bewusst keine Arbeitszeit.
+    // Pause / Mittag zählen nicht als Arbeitszeit.
     return sum;
   },0);
 }
