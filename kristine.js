@@ -1556,7 +1556,8 @@ const open = taskId
     if (/(^|[^a-z])urlaub([^a-z]|$)|vacation/.test(raw)) return "urlaub";
     if (/(^|[^a-z])krank([^a-z]|$)|krankenstand|(^|[^a-z])sick([^a-z]|$)/.test(raw)) return "krank";
     if (/(^|[^a-z])arzt([^a-z]|$)|arzttermin/.test(raw)) return "arzt";
-    if (/(^|[^a-z])frei([^a-z]|$)|zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(raw)) return "frei";
+    if (/feiertag|holiday/.test(raw)) return "feiertag";
+    if (/zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(raw)) return "za";
     return "";
   }
 

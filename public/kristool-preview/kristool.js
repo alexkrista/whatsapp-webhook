@@ -305,7 +305,12 @@ function renderDietPanel(){
       const automatic=key==="taggeld"?c.taggeldAutomatic:key==="fl"?c.flAutomatic:c.chAutomatic;
       state.dietOverride=state.dietOverride||{taggeld:"auto",fl:"auto",ch:"auto"};
       state.dietOverride[key]=overrideFromCheckbox(input.checked,automatic);
-      renderDietPanel();
+      const truthPill=document.querySelector(".kristine-card .pill, .kristine-card header .pill");
+  if(truthPill && absenceLabel){
+    truthPill.textContent=absenceLabel.toUpperCase();
+    truthPill.classList.remove("gps","open");
+  }
+  renderDietPanel();
       scheduleCorrectionSave(80);
     });
   });
@@ -468,8 +473,8 @@ function activeQueueItem(){
 }
 function absenceSyntheticSegment(item){
   const type=String(item?.absenceType||"").toLowerCase();
-  if(!["urlaub","krank","frei","arzt"].includes(type))return null;
-  const label=type==="urlaub"?"Urlaub":type==="krank"?"Krank":type==="arzt"?"Arzt":"Frei";
+  if(!["urlaub","krank","feiertag","arzt","za"].includes(type))return null;
+  const label=type==="urlaub"?"Urlaub":type==="krank"?"Krank":type==="feiertag"?"Feiertag":type==="arzt"?"Arzt":"ZA";
   return {
     id:`absence_${item.employeeId}_${state.activeDate}_${type}`,
     type:"up",
@@ -481,7 +486,10 @@ function absenceSyntheticSegment(item){
     billingType:"",
     syntheticAbsence:true,
     lockedAbsence:true,
-    absenceType:type
+    absenceType:type,
+    paidAbsence:["urlaub","krank","feiertag","arzt"].includes(type),
+    countsAsWorkTime:["urlaub","krank","feiertag","arzt"].includes(type),
+    countsAgainstOvertime:type==="za"
   };
 }
 function applyAbsenceToDaySegments(){
@@ -495,10 +503,16 @@ function applyAbsenceToDaySegments(){
 
 function queueStatus(item){
   const absence=String(item.absenceType||item.cardType||"").toLowerCase();
-  const isAbsent=["urlaub","krank","frei","arzt"].includes(absence);
+  const isAbsent=["urlaub","krank","feiertag","arzt","za"].includes(absence);
   const gpsCount=Number(item.gpsTripCount||item.tripCount||0);
   if(isAbsent&&gpsCount>0)return {label:`${absence.toUpperCase()} + GPS`,cls:"warning"};
-  if(isAbsent)return {label:absence==="urlaub"?"Urlaub":absence==="krank"?"Krank":absence==="arzt"?"Arzt":"Frei",cls:"absence"};
+  if(isAbsent)return {
+    label:absence==="urlaub"?"Urlaub":
+      absence==="krank"?"Krank":
+      absence==="feiertag"?"Feiertag":
+      absence==="arzt"?"Arzt":"ZA",
+    cls:"absence"
+  };
   if(item.released)return {label:"Freigegeben",cls:"released"};
   if(item.role==="driver"){
     const plates=(item.vehicles||[]).map(vehicle=>vehicle.licensePlate).filter(Boolean);
@@ -800,7 +814,17 @@ function clearDay(){
   state.teamCandidates=[];
 }
 
+
+function absenceLabelForItem(item){
+  const type=String(item?.absenceType||"").toLowerCase();
+  return type==="urlaub"?"Urlaub":
+    type==="krank"?"Krank":
+    type==="feiertag"?"Feiertag":
+    type==="arzt"?"Arzt":
+    type==="za"?"ZA":"";
+}
 function renderDay(group,date){
+  const absenceLabel=absenceLabelForItem(activeQueueItem());
   const employee=$("employeeSelect").selectedOptions[0]?.textContent||group?.driverName||"Mitarbeiter";
   $("personBadge").textContent=initials(employee);
   $("dayTitle").textContent=`${employee} · ${deDate(date)}`;
@@ -1250,7 +1274,17 @@ function releaseChecks(){
 }
 function releaseComplete(){
   const values=Object.values(releaseChecks());
-  return values.length===6&&values.every(Boolean);
+  const checksOk=values.length===6&&values.every(Boolean);
+  if(!checksOk)return false;
+
+  const item=activeQueueItem();
+  const absence=String(item?.absenceType||"").toLowerCase();
+
+  // Anerkannte Abwesenheiten sind ein vollständig prüfbarer Arbeitstag.
+  if(["urlaub","krank","feiertag","arzt","za"].includes(absence))return true;
+
+  // Sonst braucht es echte oder korrigierte Tagessegmente.
+  return (state.segments||[]).some(row=>row.from&&row.to);
 }
 function releaseQueueIndex(){
   const id=String($("employeeSelect")?.value||"");
