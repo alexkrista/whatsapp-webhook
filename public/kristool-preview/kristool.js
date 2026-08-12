@@ -724,6 +724,7 @@ async function loadDay(){
       ? enforceMinimumLunch(state.segments)
       : {changed:false,totalShift:0};
     renderDay(group,date);
+    await loadRelease();
     if(lunchFix.changed){
       const action=lunchFix.mode==="inserted"?"60 Minuten Mittag automatisch eingefügt":"Mittag auf 60 Minuten verlängert";
       toast(`FL/CH-Tag: ${action} · Tagesende +${lunchFix.totalShift} min.`);
@@ -740,6 +741,8 @@ function clearDay(){
   state.originalSegments=[];
   state.correction=null;
   state.dietOverride=null;
+  state.release=null;
+  renderRelease();
   $("personBadge").textContent="?";
   $("dayTitle").textContent=`Tagesfolie ${deDate(state.activeDate)}`;
   $("daySubtitle").textContent="Mitarbeiter auswählen und Tagesfolie öffnen.";

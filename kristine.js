@@ -1873,7 +1873,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.39 · endgültige Tagesfreigabe
+  // KRISTOOL 0023.40 · endgültige Tagesfreigabe
   app.get("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1943,7 +1943,7 @@ const open = taskId
   });
 
 
-  // KRISTOOL 0023.39 · Diätenbericht 16.–15.
+  // KRISTOOL 0023.40 · Diätenbericht 16.–15.
   app.get("/kristine/api/diet-report", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
