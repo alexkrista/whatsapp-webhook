@@ -204,6 +204,113 @@ async function request(path, options={}){
   return data;
 }
 
+
+function dietReportPeriod(dateISO=state.activeDate){
+  const d=new Date(`${dateISO}T12:00:00`);
+  let from,to;
+  if(d.getDate()>=16){
+    from=new Date(d.getFullYear(),d.getMonth(),16,12);
+    to=new Date(d.getFullYear(),d.getMonth()+1,15,12);
+  }else{
+    from=new Date(d.getFullYear(),d.getMonth()-1,16,12);
+    to=new Date(d.getFullYear(),d.getMonth(),15,12);
+  }
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;
+  return {from:iso(from),to:iso(to)};
+}
+
+function dietMinutesLabel(total){
+  total=Math.max(0,Math.round(Number(total)||0));
+  return total ? `${Math.floor(total/60)}:${String(total%60).padStart(2,"0")}` : "–";
+}
+
+function dietPrintReport(data){
+  const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  const dateLabel=iso=>new Intl.DateTimeFormat("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(`${iso}T12:00:00`));
+  const periodLabel=`${shortDate(data.from)} – ${shortDate(data.to)}`;
+
+  const pages=(data.employees||[]).map(employee=>{
+    const total=(employee.rows||[]).reduce((sum,row)=>({
+      taggeld:sum.taggeld+Number(row.taggeld||0),
+      flMinutes:sum.flMinutes+Number(row.flMinutes||0),
+      flDay:sum.flDay+Number(row.flDay||0),
+      chMinutes:sum.chMinutes+Number(row.chMinutes||0),
+      chDay:sum.chDay+Number(row.chDay||0),
+    }),{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+
+    const body=(employee.rows||[]).map(row=>`
+      <tr>
+        <td>${escape(dateLabel(row.date))}</td>
+        <td>${row.taggeld||"–"}</td>
+        <td>${dietMinutesLabel(row.flMinutes)}</td>
+        <td>${row.flDay||"–"}</td>
+        <td>${dietMinutesLabel(row.chMinutes)}</td>
+        <td>${row.chDay||"–"}</td>
+      </tr>`).join("");
+
+    return `<section class="diet-page">
+      <header>
+        <div>
+          <small>FARBEN KRISTA · DIÄTENNACHWEIS</small>
+          <h1>${escape(employee.personalNumber ? employee.personalNumber+" · " : "")}${escape(employee.employeeName)}</h1>
+        </div>
+        <strong>${escape(periodLabel)}</strong>
+      </header>
+
+      <table>
+        <thead><tr>
+          <th>Datum</th><th>Taggeld</th><th>FL Std.</th><th>FL Tag</th><th>CH Std.</th><th>CH Tag</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+        <tfoot><tr>
+          <th>SUMME</th>
+          <th>${total.taggeld}</th>
+          <th>${dietMinutesLabel(total.flMinutes)}</th>
+          <th>${total.flDay}</th>
+          <th>${dietMinutesLabel(total.chMinutes)}</th>
+          <th>${total.chDay}</th>
+        </tr></tfoot>
+      </table>
+    </section>`;
+  }).join("");
+
+  const popup=window.open("","_blank");
+  if(!popup)return toast("Popup blockiert – bitte Popups für KRISTOOL erlauben.",true);
+
+  popup.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8">
+    <title>Diäten ${escape(data.from)} bis ${escape(data.to)}</title>
+    <style>
+      @page{size:A4 portrait;margin:10mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#202620;margin:0}
+      .diet-page{page-break-after:always;min-height:276mm;padding:0 1mm}
+      .diet-page:last-child{page-break-after:auto}
+      header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:3px solid #1f5134;padding:0 0 7px;margin:0 0 8px}
+      header small{font-size:8.5px;letter-spacing:.13em;color:#647168;font-weight:700}
+      h1{font-size:18px;color:#1f5134;margin:3px 0 0}
+      header strong{font-size:11px;white-space:nowrap}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px}
+      th,td{height:6.15mm;padding:2.4px 6px;border-bottom:1px solid #dde2de;text-align:right}
+      th:first-child,td:first-child{text-align:left;width:31%}
+      thead th{background:#eaf1ec;color:#234b32;font-weight:800}
+      tbody tr:nth-child(7n),tbody tr:nth-child(7n+1){background:#fafafa}
+      tfoot th{font-size:10.5px;background:#eff4f0;border-top:2px solid #1f5134;border-bottom:0}
+    </style>
+  </head><body>${pages}<script>setTimeout(()=>window.print(),300)<\/script></body></html>`);
+  popup.document.close();
+}
+
+async function openDietReport(){
+  try{
+    const period=dietReportPeriod();
+    toast(`Diätenbericht ${shortDate(period.from)} – ${shortDate(period.to)} wird erstellt …`);
+    const data=await request(`/kristine/api/diet-report?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`);
+    dietPrintReport(data);
+  }catch(error){
+    toast(`Diätenbericht: ${error.message}`,true);
+  }
+}
+
 async function init(){
   try{
     const data=await request("/kristine/api/bootstrap");
@@ -452,6 +559,7 @@ $("dateSelect").addEventListener("change",e=>setActiveDate(e.target.value));
 $("previousDay").addEventListener("click",()=>setActiveDate(addDays(state.activeDate,-1)));
 $("nextDay").addEventListener("click",()=>setActiveDate(addDays(state.activeDate,1)));
 $("todayDay").addEventListener("click",()=>setActiveDate(state.bootstrap?.today||new Date().toISOString().slice(0,10)));
+$("openDietReport")?.addEventListener("click",openDietReport);
 
 $("saveMapping").addEventListener("click",async()=>{
   const group=selectedGroup(), employeeId=$("employeeSelect").value;

@@ -1880,6 +1880,150 @@ const open = taskId
     }
   });
 
+
+  // KRISTOOL 0023.34 · Diätenbericht 16.–15.
+  app.get("/kristine/api/diet-report", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const from = String(req.query?.from || "").slice(0, 10);
+      const to = String(req.query?.to || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+        return res.status(400).json({ ok:false, error:"Zeitraum prüfen." });
+      }
+
+      const [allEvents, states, corrections, employees] = await Promise.all([
+        readJson(TIME_EVENTS, []),
+        readJson(STATES, {}),
+        readJson(DAY_CORRECTIONS, []),
+        typeof readEmployees === "function" ? readEmployees() : [],
+      ]);
+
+      const dates = [];
+      for (let d = new Date(`${from}T12:00:00`), e = new Date(`${to}T12:00:00`); d <= e; d.setDate(d.getDate()+1)) {
+        dates.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+      }
+
+      const cleanText = value => String(value || "")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      const dietMarker = /\s*\[\[DIET:taggeld=(auto|0|1);fl=(auto|0|1);ch=(auto|0|1)\]\]\s*$/i;
+      const parseOverride = note => {
+        const m = String(note || "").match(dietMarker);
+        return m ? { taggeld:m[1].toLowerCase(), fl:m[2].toLowerCase(), ch:m[3].toLowerCase() }
+                 : { taggeld:"auto", fl:"auto", ch:"auto" };
+      };
+      const finalFlag = (override, automatic) =>
+        override === "1" ? 1 : override === "0" ? 0 : (automatic ? 1 : 0);
+
+      const minutesOf = segment => {
+        const a = minutesFromHM(segment.from);
+        const b = minutesFromHM(segment.to);
+        return a === null || b === null || b <= a ? 0 : b - a;
+      };
+
+      const jobCache = new Map();
+      const jobMetaFor = async jobId => {
+        const key = String(jobId || "").trim();
+        if (!key || typeof readJobMeta !== "function") return {};
+        if (jobCache.has(key)) return jobCache.get(key);
+        let meta = {};
+        try { meta = await readJobMeta(key) || {}; } catch {}
+        jobCache.set(key, meta);
+        return meta;
+      };
+
+      const countryFor = meta => {
+        const text = cleanText([
+          meta.address, meta.street, meta.houseNumber, meta.postalCode,
+          meta.city, meta.country, meta.countryCode
+        ].filter(Boolean).join(" "));
+        if (/liechtenstein|lichtenstein|\bfl[-\s]?\d{4}\b|\b94(?:8[5-9]|9[0-8])\b/.test(text)) return "FL";
+        if (/schweiz|switzerland|suisse|svizzera|\bch[-\s]?\d{4}\b/.test(text)) return "CH";
+        return "";
+      };
+
+      const isInternal = (segment, meta) => {
+        const text = cleanText([
+          segment.jobName, segment.reason, meta.name, meta.jobName,
+          meta.address, meta.city
+        ].filter(Boolean).join(" "));
+        return /\b(buro|buero|firma|werkstatt|lager|intern)\b/.test(text);
+      };
+
+      const personalNo = employee => String(
+        employee.finkzeitPersonnelNumber ||
+        employee.finkzeitPersonalNumber ||
+        employee.personalnummerFinkzeit ||
+        employee.personnelNumber ||
+        employee.personalNumber ||
+        employee.employeeNumber ||
+        employee.number ||
+        ""
+      ).trim();
+
+      const people = [...(employees || [])]
+        .filter(employee => employee && (employee.id || employee.employeeId))
+        .sort((a,b) => {
+          const an = personalNo(a), bn = personalNo(b);
+          const ax = /^\d+$/.test(an) ? Number(an) : Number.MAX_SAFE_INTEGER;
+          const bx = /^\d+$/.test(bn) ? Number(bn) : Number.MAX_SAFE_INTEGER;
+          return ax - bx || an.localeCompare(bn, "de", {numeric:true}) ||
+            String(a.name || "").localeCompare(String(b.name || ""), "de");
+        });
+
+      const reportEmployees = [];
+      for (const employee of people) {
+        const employeeId = String(employee.id || employee.employeeId);
+        const employeeName = String(employee.name || employee.employeeName || employee.nickname || employeeId);
+        const rows = [];
+
+        for (const date of dates) {
+          const segments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
+          let siteMinutes = 0, flMinutes = 0, chMinutes = 0;
+
+          for (const segment of segments) {
+            if (segment.type !== "work") continue;
+            const duration = minutesOf(segment);
+            if (!duration) continue;
+
+            const meta = await jobMetaFor(segment.jobId);
+            if (!isInternal(segment, meta)) siteMinutes += duration;
+
+            const country = countryFor(meta);
+            if (country === "FL") flMinutes += duration;
+            if (country === "CH") chMinutes += duration;
+          }
+
+          const correction = corrections.find(row =>
+            String(row.employeeId) === employeeId && String(row.date) === date
+          );
+          const override = parseOverride(correction?.note || "");
+
+          rows.push({
+            date,
+            taggeld: finalFlag(override.taggeld, siteMinutes > 180),
+            flMinutes,
+            flDay: finalFlag(override.fl, flMinutes > 0),
+            chMinutes,
+            chDay: finalFlag(override.ch, chMinutes > 0),
+          });
+        }
+
+        reportEmployees.push({
+          employeeId,
+          employeeName,
+          personalNumber: personalNo(employee),
+          rows,
+        });
+      }
+
+      res.json({ ok:true, from, to, employees:reportEmployees });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
   app.put("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
