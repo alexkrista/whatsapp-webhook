@@ -98,7 +98,7 @@ function registerArchiveSearch(app) {
     const q = String(req.query.q || "").trim();
 
     // Später kommen diese Daten vom lokalen Kristine-Connector.
-    // Für V0.1 zeigen wir zunächst die fertige Oberfläche.
+    // Projekte kommen im nächsten Schritt aus dem lokalen SQL-Connector.
  const projects = [];
 let documents = [];
 let connectorError = "";
@@ -515,7 +515,7 @@ body {
     </div>
 
     <div class="status">
-      Archivsuche V0.1
+      Archivsuche V0.2
     </div>
 
   </div>
@@ -724,7 +724,7 @@ body {
                   <div class="empty">
                     Noch keine Dokumenttreffer.
                     <div class="hint">
-                      Der lokale PDF-Index wird als Nächstes angeschlossen.
+                      Keine passenden Dokumente gefunden.
                     </div>
                   </div>
                 `
@@ -846,7 +846,7 @@ async function openArchivePdf(path) {
     res.json({
       ok: true,
       module: "archive-search",
-      version: "0.1",
+      version: "0.2",
       sql: "pending-local-connector",
       pdfIndex: ARCHIVE_CONNECTOR
     });
