@@ -613,9 +613,9 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.7"});
+createKristaTopbar({active:"kristine",build:"0031.8"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
-let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
+let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],employeeWorkRules={},companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
 window.addEventListener('DOMContentLoaded',()=>{const cc=document.getElementById('controlCenterLink');if(cc)cc.href='/kontrollzentrum'+(token?'?token='+encodeURIComponent(token):'');
   for(const [panelId,key,defaultOpen] of [['planningAssignPanel','kristaPlanningAssignOpen',false],['planningCardsPanel','kristaPlanningCardsOpen',true]]){
@@ -665,6 +665,7 @@ async function loadAll(){
   const failed=results.map((r,i)=>r.status==='rejected'?['Bootstrap','Baustellen','Mitarbeiter','Fahrzeuge','Feiertage','Betriebsurlaub','Arbeitsmodelle','Zeitmodelle','Betrieb'][i]+': '+r.reason?.message:null).filter(Boolean);
   if(failed.length) console.error('KRISTA Ladefehler',failed);
   data=k;
+  employeeWorkRules=k.employeeWorkRules||{};
   data.holidays=h.holidays||[];
   data.companyVacations=cv.vacations||[];
   data.scheduleModels=sm.models||[];
@@ -946,6 +947,14 @@ function renderPlanningPools(){
 }
 function rawCardHours(a){const [fh,fm]=String(a.from||'').split(':').map(Number),[th,tm]=String(a.to||'').split(':').map(Number);if([fh,fm,th,tm].every(Number.isFinite))return Math.max(0,((th*60+tm)-(fh*60+fm))/60);const explicit=Number(a.hours);return Number.isFinite(explicit)&&explicit>0?explicit:0}
 function employeeById(employeeId){return masterEmployees.find(e=>String(e.id)===String(employeeId))||null}
+function employeePlanningMode(employee){
+  const id=String(employee?.id||employee?.employeeId||'');
+  const rule=employeeWorkRules?.[id]||{};
+  return ['productive','partial','unproductive'].includes(rule.activityMode)?rule.activityMode:'productive';
+}
+function employeeVisibleInPlanning(employee){
+  return employee?.active!==false && employeePlanningMode(employee)!=='unproductive';
+}
 function worktimeModelById(id) {
   const allModels = [
     ...(data.scheduleModels || []),
@@ -1268,7 +1277,7 @@ function renderEmployeePlanning(target,title,days){
   title.innerHTML=(dayMode?'Tagesplanung':'Wochenplanung')+' nach Mitarbeitern · KW '+isoWeekNumber(days[0])+(dayMode?' · '+new Date(days[0]+'T12:00:00').toLocaleDateString('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}):'');
   const heads='<div class="matrix-head">Mitarbeiter</div>'+days.map(day=>`<div class="matrix-head">${new Date(day+'T12:00:00').toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit'})}<br>${planningSummary(day,true)}</div>`).join('');
   const sortDay=days.includes(String(data.today||''))?String(data.today):days[0];
-  const employees=[...masterEmployees].sort((a,b)=>employeePlanningRank(a,sortDay)-employeePlanningRank(b,sortDay)||String(a.name||'').localeCompare(String(b.name||''),'de'));
+  const employees=masterEmployees.filter(employeeVisibleInPlanning).sort((a,b)=>employeePlanningRank(a,sortDay)-employeePlanningRank(b,sortDay)||String(a.name||'').localeCompare(String(b.name||''),'de'));
   const rows=employees.map(employee=>{
     const should=employeeShouldHours(employee.id,days),planned=employeePlannedHours(employee.id,days),actual=employeeActualMinutes(employee.id,days)/60,rest=Math.max(0,should-planned),over=Math.max(0,planned-should);
     const label=`<div class="matrix-label">👷 ${esc(employee.name)}<div class="matrix-metrics"><span>Soll</span><strong>${formatHours(should)}</strong><span>Plan</span><strong>${formatHours(planned)}</strong><span>Geleistet</span><strong>${formatHours(actual)}</strong>${over>0?`<span class="over">Überplant</span><strong class="over">+${formatHours(over)}</strong>`:`<span class="rest">Rest</span><strong class="rest">${formatHours(rest)}</strong>`}</div></div>`;
