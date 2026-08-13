@@ -53,6 +53,7 @@ const { registerMediaMigration } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
 const { registerRegieAssistant } = require("./regie-assistant");
 const { registerDayClose } = require("./day-close");
+const { registerArchiveSearch } = require("./archive-search");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -3578,6 +3579,9 @@ registerMediaMigration(app, {
   dataDir: DATA_DIR,
   requireAdmin,
 });
+// ==================== KRISTINE Archivsuche ====================
+registerArchiveSearch(app);
+console.log("KRISTINE Archivsuche registriert");
 
 // ===================== Tagesreport PDF =====================
 registerDailyReport(app, {
