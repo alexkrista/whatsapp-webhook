@@ -19,6 +19,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
+  const EMPLOYEE_WORK_RULES = path.join(ROOT, "employee-work-rules.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -1591,6 +1592,31 @@ const open = taskId
     return null;
   }
 
+
+  // KRISTOOL · Mitarbeiter-Arbeitslogik.
+  // Fehlende Einträge sind bewusst: Produktiv + BUAK Nein.
+  app.get("/kristine/api/employee-work-rules", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const rules=await readJson(EMPLOYEE_WORK_RULES,{});
+    res.json({ok:true,rules});
+  });
+
+  app.put("/kristine/api/employee-work-rules", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try{
+      const incoming=req.body?.rules&&typeof req.body.rules==="object"?req.body.rules:{};
+      const clean={};
+      for(const [employeeId,row] of Object.entries(incoming)){
+        const id=String(employeeId||"").trim().slice(0,120);
+        if(!id)continue;
+        const activityMode=["productive","partial","unproductive"].includes(row?.activityMode)?row.activityMode:"productive";
+        clean[id]={activityMode,buak:row?.buak===true};
+      }
+      await writeJson(EMPLOYEE_WORK_RULES,clean);
+      res.json({ok:true,rules:clean});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
+  });
+
   // KRISTOOL Tagesarbeitsliste:
   // 1) tatsächliche Fahrer aus GPS
   // 2) danach Teammitglieder ohne eigene Fahrt
@@ -1655,12 +1681,15 @@ const open = taskId
         const driverKeys = [...new Set(ownRows.map(row => String(row.driverKey || "")).filter(Boolean))];
         const employeeFinkzeit=finkzeitPersonnelNumber(employee);
         const absence=employeeAbsenceForDay(assignments,employee,date);
+        const employeeRule=(employeeWorkRules||{})[employeeId]||{activityMode:"productive",buak:false};
 
         items.push({
           employeeId,
           employeeName,
           finkzeitPersonnelNumber: employeeFinkzeit,
           employeeIdentityKey: employeeFinkzeit ? `fink:${employeeFinkzeit}` : `legacy:${employeeId}`,
+          activityMode:employeeRule.activityMode||"productive",
+          buak:employeeRule.buak===true,
           role: ownRows.length ? "driver" : "team",
           driverKey: driverKeys[0] || "",
           ownTripCount: ownRows.length,

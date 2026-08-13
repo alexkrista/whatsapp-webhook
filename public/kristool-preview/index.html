@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="kristool-diet.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.49"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.50"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -49,6 +49,7 @@
       <div class="export-actions" style="display:flex;gap:8px;align-items:center">
         <button class="btn primary" id="openFinkzeitExport" type="button">⬇ Finkzeit CSV</button>
         <button class="btn primary" id="openDietReport" type="button">▤ Diäten PDF</button>
+        <button class="btn secondary" id="openEmployeeLogic" type="button">👷 Arbeitslogik</button>
       </div>
     </section>
 
@@ -271,5 +272,51 @@
   </div>
 
   <script src="finkzeit-export.js"></script>
+
+  <div class="logic-modal" id="employeeLogicModal" hidden>
+    <div class="logic-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeLogicTitle">
+      <div class="logic-head">
+        <div><p class="eyebrow">MITARBEITER-STAMMDATEN</p><h2 id="employeeLogicTitle">Arbeitslogik</h2></div>
+        <button class="logic-close" id="closeEmployeeLogic" type="button">×</button>
+      </div>
+      <div class="logic-note">
+        Bestehende Mitarbeiter sind standardmäßig <b>Produktiv</b> und <b>nicht BUAK</b>.
+        Nur Ausnahmen müssen aktiv geändert werden.
+      </div>
+      <div id="employeeLogicList" class="logic-list"></div>
+      <div class="logic-actions">
+        <span id="employeeLogicStatus"></span>
+        <button class="btn primary" id="saveEmployeeLogic" type="button">Arbeitslogik speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="logic-modal" id="dietReportModal" hidden>
+    <div class="logic-dialog diet-dialog" role="dialog" aria-modal="true" aria-labelledby="dietReportTitle">
+      <div class="logic-head">
+        <div><p class="eyebrow">DIÄTEN & ENTSENDUNG</p><h2 id="dietReportTitle">Diätenbericht</h2></div>
+        <button class="logic-close" id="closeDietReport" type="button">×</button>
+      </div>
+      <div class="diet-report-options">
+        <div class="diet-mode-choice">
+          <label><input type="radio" name="dietMode" value="summary" checked><span><b>Zusammenfassung</b><small>Standard · eine kompakte Seite für alle Mitarbeiter</small></span></label>
+          <label><input type="radio" name="dietMode" value="detail"><span><b>Einzelnachweise</b><small>Zusammenfassung + Detailseite je Mitarbeiter</small></span></label>
+        </div>
+        <div class="diet-range-grid">
+          <label>Von<input type="date" id="dietFrom"></label>
+          <label>Bis<input type="date" id="dietTo"></label>
+        </div>
+        <div class="diet-presets">
+          <button class="btn secondary" type="button" data-diet-preset="period">16. – 15. aktuell</button>
+          <button class="btn secondary" type="button" data-diet-preset="month">Kalendermonat</button>
+        </div>
+      </div>
+      <div class="logic-actions">
+        <span id="dietReportStatus">Standard: nur Zusammenfassung.</span>
+        <button class="btn primary" id="createDietReport" type="button">PDF öffnen</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

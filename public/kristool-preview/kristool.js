@@ -343,93 +343,112 @@ function dietMinutesLabel(total){
   return total ? `${Math.floor(total/60)}:${String(total%60).padStart(2,"0")}` : "–";
 }
 
-function dietPrintReport(data){
+function dietPrintReport(data,{mode="summary"}={}){
   const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const dateLabel=iso=>new Intl.DateTimeFormat("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(`${iso}T12:00:00`));
   const periodLabel=`${shortDate(data.from)} – ${shortDate(data.to)}`;
+  const totalsFor=employee=>(employee.rows||[]).reduce((sum,row)=>({
+    taggeld:sum.taggeld+Number(row.taggeld||0),
+    flMinutes:sum.flMinutes+Number(row.flMinutes||0),
+    flDay:sum.flDay+Number(row.flDay||0),
+    chMinutes:sum.chMinutes+Number(row.chMinutes||0),
+    chDay:sum.chDay+Number(row.chDay||0),
+  }),{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
 
-  const pages=(data.employees||[]).map(employee=>{
-    const total=(employee.rows||[]).reduce((sum,row)=>({
-      taggeld:sum.taggeld+Number(row.taggeld||0),
-      flMinutes:sum.flMinutes+Number(row.flMinutes||0),
-      flDay:sum.flDay+Number(row.flDay||0),
-      chMinutes:sum.chMinutes+Number(row.chMinutes||0),
-      chDay:sum.chDay+Number(row.chDay||0),
-    }),{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  const employees=[...(data.employees||[])].sort((a,b)=>{
+    const na=Number(String(a.personalNumber||"").replace(/\D/g,""))||999999;
+    const nb=Number(String(b.personalNumber||"").replace(/\D/g,""))||999999;
+    return na-nb||String(a.employeeName||"").localeCompare(String(b.employeeName||""),"de");
+  });
 
-    const body=(employee.rows||[]).map(row=>`
-      <tr>
-        <td>${escape(dateLabel(row.date))}</td>
-        <td>${row.taggeld||"–"}</td>
-        <td>${dietMinutesLabel(row.flMinutes)}</td>
-        <td>${row.flDay||"–"}</td>
-        <td>${dietMinutesLabel(row.chMinutes)}</td>
-        <td>${row.chDay||"–"}</td>
-      </tr>`).join("");
+  const summaryRows=employees.map(employee=>{
+    const total=totalsFor(employee);
+    return `<tr>
+      <td>${escape(employee.personalNumber||"–")}</td>
+      <td>${escape(employee.employeeName)}</td>
+      <td>${total.taggeld||"–"}</td>
+      <td>${dietMinutesLabel(total.flMinutes)}</td>
+      <td>${total.flDay||"–"}</td>
+      <td>${dietMinutesLabel(total.chMinutes)}</td>
+      <td>${total.chDay||"–"}</td>
+    </tr>`;
+  }).join("");
 
+  const overall=employees.reduce((sum,e)=>{
+    const t=totalsFor(e);
+    sum.taggeld+=t.taggeld;sum.flMinutes+=t.flMinutes;sum.flDay+=t.flDay;sum.chMinutes+=t.chMinutes;sum.chDay+=t.chDay;
+    return sum;
+  },{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+
+  const summaryPage=`<section class="diet-page summary-page">
+    <header><div><small>FARBEN KRISTA · DIÄTEN & ENTSENDUNG</small><h1>Zusammenfassung</h1></div><strong>${escape(periodLabel)}</strong></header>
+    <table class="summary-table">
+      <thead><tr><th>Pers.Nr.</th><th>Name</th><th>Taggeld</th><th>FL Std.</th><th>FL Tage</th><th>CH Std.</th><th>CH Tage</th></tr></thead>
+      <tbody>${summaryRows}</tbody>
+      <tfoot><tr><th></th><th>GESAMT</th><th>${overall.taggeld||"–"}</th><th>${dietMinutesLabel(overall.flMinutes)}</th><th>${overall.flDay||"–"}</th><th>${dietMinutesLabel(overall.chMinutes)}</th><th>${overall.chDay||"–"}</th></tr></tfoot>
+    </table>
+  </section>`;
+
+  const detailPages=mode==="detail"?employees.map(employee=>{
+    const total=totalsFor(employee);
+    const body=(employee.rows||[]).map(row=>`<tr>
+      <td>${escape(dateLabel(row.date))}</td><td>${row.taggeld||"–"}</td><td>${dietMinutesLabel(row.flMinutes)}</td><td>${row.flDay||"–"}</td><td>${dietMinutesLabel(row.chMinutes)}</td><td>${row.chDay||"–"}</td>
+    </tr>`).join("");
     return `<section class="diet-page">
-      <header>
-        <div>
-          <small>FARBEN KRISTA · DIÄTENNACHWEIS</small>
-          <h1>${escape(employee.personalNumber ? employee.personalNumber+" · " : "")}${escape(employee.employeeName)}</h1>
-        </div>
-        <strong>${escape(periodLabel)}</strong>
-      </header>
-
-      <table>
-        <thead><tr>
-          <th>Datum</th><th>Taggeld</th><th>FL Std.</th><th>FL Tag</th><th>CH Std.</th><th>CH Tag</th>
-        </tr></thead>
-        <tbody>${body}</tbody>
-        <tfoot><tr>
-          <th>SUMME</th>
-          <th>${total.taggeld}</th>
-          <th>${dietMinutesLabel(total.flMinutes)}</th>
-          <th>${total.flDay}</th>
-          <th>${dietMinutesLabel(total.chMinutes)}</th>
-          <th>${total.chDay}</th>
-        </tr></tfoot>
+      <header><div><small>FARBEN KRISTA · DIÄTENNACHWEIS</small><h1>${escape(employee.personalNumber?employee.personalNumber+" · ":"")}${escape(employee.employeeName)}</h1></div><strong>${escape(periodLabel)}</strong></header>
+      <table><thead><tr><th>Datum</th><th>Taggeld</th><th>FL Std.</th><th>FL Tag</th><th>CH Std.</th><th>CH Tag</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><th>SUMME</th><th>${total.taggeld}</th><th>${dietMinutesLabel(total.flMinutes)}</th><th>${total.flDay}</th><th>${dietMinutesLabel(total.chMinutes)}</th><th>${total.chDay}</th></tr></tfoot>
       </table>
     </section>`;
-  }).join("");
+  }).join(""):"";
 
   const popup=window.open("","_blank");
   if(!popup)return toast("Popup blockiert – bitte Popups für KRISTOOL erlauben.",true);
-
   popup.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8">
     <title>Diäten ${escape(data.from)} bis ${escape(data.to)}</title>
     <style>
-      @page{size:A4 portrait;margin:10mm}
-      *{box-sizing:border-box}
+      @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}
       body{font-family:Arial,Helvetica,sans-serif;color:#202620;margin:0}
-      .diet-page{page-break-after:always;min-height:276mm;padding:0 1mm}
-      .diet-page:last-child{page-break-after:auto}
+      .diet-page{page-break-after:always;min-height:276mm;padding:0 1mm}.diet-page:last-child{page-break-after:auto}
       header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:3px solid #1f5134;padding:0 0 7px;margin:0 0 8px}
-      header small{font-size:8.5px;letter-spacing:.13em;color:#647168;font-weight:700}
-      h1{font-size:18px;color:#1f5134;margin:3px 0 0}
-      header strong{font-size:11px;white-space:nowrap}
+      header small{font-size:8.5px;letter-spacing:.13em;color:#647168;font-weight:700}h1{font-size:18px;color:#1f5134;margin:3px 0 0}header strong{font-size:11px;white-space:nowrap}
       table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px}
       th,td{height:6.15mm;padding:2.4px 6px;border-bottom:1px solid #dde2de;text-align:right}
       th:first-child,td:first-child{text-align:left;width:31%}
-      thead th{background:#eaf1ec;color:#234b32;font-weight:800}
-      tbody tr:nth-child(7n),tbody tr:nth-child(7n+1){background:#fafafa}
-      tfoot th{font-size:10.5px;background:#eff4f0;border-top:2px solid #1f5134;border-bottom:0}
-    </style>
-  </head><body>${pages}<script>setTimeout(()=>window.print(),300)<\/script></body></html>`);
+      thead th{background:#eaf1ec;color:#234b32;font-weight:800}tbody tr:nth-child(even){background:#fafafa}
+      tfoot th{font-weight:900;border-top:2px solid #789180;background:#f1f5f2}
+      .summary-table th:nth-child(1),.summary-table td:nth-child(1){width:11%;text-align:left}
+      .summary-table th:nth-child(2),.summary-table td:nth-child(2){width:31%;text-align:left}
+      .summary-page h1{font-size:22px}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body>${summaryPage}${detailPages}</body></html>`);
   popup.document.close();
+  popup.focus();
+  setTimeout(()=>popup.print(),250);
 }
 
-async function openDietReport(){
+function openDietReport(){
+  const period=dietReportPeriod();
+  $("dietFrom").value=period.from;
+  $("dietTo").value=period.to;
+  document.querySelector('input[name="dietMode"][value="summary"]').checked=true;
+  $("dietReportStatus").textContent="Standard: nur Zusammenfassung.";
+  $("dietReportModal").hidden=false;
+}
+function closeDietReport(){ $("dietReportModal").hidden=true; }
+async function createDietReport(){
+  const from=$("dietFrom").value,to=$("dietTo").value;
+  if(!from||!to||from>to)return toast("Zeitraum prüfen.",true);
+  const mode=document.querySelector('input[name="dietMode"]:checked')?.value||"summary";
+  const btn=$("createDietReport");btn.disabled=true;btn.textContent="Bericht wird erstellt …";
   try{
-    const period=dietReportPeriod();
-    toast(`Diätenbericht ${shortDate(period.from)} – ${shortDate(period.to)} wird erstellt …`);
-    const data=await request(`/kristine/api/diet-report?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`);
-    dietPrintReport(data);
-  }catch(error){
-    toast(`Diätenbericht: ${error.message}`,true);
-  }
+    const data=await request(`/kristine/api/diet-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    dietPrintReport(data,{mode});
+    closeDietReport();
+  }catch(error){toast(`Diätenbericht: ${error.message}`,true)}
+  finally{btn.disabled=false;btn.textContent="PDF öffnen"}
 }
-
 async function init(){
   try{
     const data=await request("/kristine/api/bootstrap");
@@ -772,7 +791,7 @@ $("dateSelect").addEventListener("change",e=>setActiveDate(e.target.value));
 $("previousDay").addEventListener("click",()=>setActiveDate(addDays(state.activeDate,-1)));
 $("nextDay").addEventListener("click",()=>setActiveDate(addDays(state.activeDate,1)));
 $("todayDay").addEventListener("click",()=>setActiveDate(state.bootstrap?.today||new Date().toISOString().slice(0,10)));
-$("openDietReport")?.addEventListener("click",openDietReport);
+
 
 $("saveMapping").addEventListener("click",async()=>{
   const group=selectedGroup(), employeeId=$("employeeSelect").value;
@@ -1618,3 +1637,24 @@ $("applyTeamCorrection").addEventListener("click",async()=>{
 });
 
 init();
+
+
+$("openEmployeeLogic")?.addEventListener("click",openEmployeeLogic);
+$("closeEmployeeLogic")?.addEventListener("click",closeEmployeeLogic);
+$("employeeLogicModal")?.addEventListener("click",e=>{if(e.target.id==="employeeLogicModal")closeEmployeeLogic()});
+$("saveEmployeeLogic")?.addEventListener("click",saveEmployeeLogic);
+
+$("openDietReport")?.addEventListener("click",openDietReport);
+$("closeDietReport")?.addEventListener("click",closeDietReport);
+$("dietReportModal")?.addEventListener("click",e=>{if(e.target.id==="dietReportModal")closeDietReport()});
+$("createDietReport")?.addEventListener("click",createDietReport);
+document.querySelectorAll("[data-diet-preset]").forEach(button=>button.addEventListener("click",()=>{
+  const d=new Date(`${state.activeDate}T12:00:00`);
+  if(button.dataset.dietPreset==="period"){
+    const p=dietReportPeriod();$("dietFrom").value=p.from;$("dietTo").value=p.to;
+  }else{
+    const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;
+    $("dietFrom").value=iso(new Date(d.getFullYear(),d.getMonth(),1,12));
+    $("dietTo").value=iso(new Date(d.getFullYear(),d.getMonth()+1,0,12));
+  }
+}));
