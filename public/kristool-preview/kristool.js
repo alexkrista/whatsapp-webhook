@@ -458,6 +458,94 @@ async function createDietReport(){
     toast(`Diätenbericht: ${error.message}`,true);
   }finally{btn.disabled=false;btn.textContent="PDF öffnen"}
 }
+
+// 0023.52 · Mitarbeiter-Arbeitslogik
+function employeeLogicDefaults(employee){
+  const id=String(employee?.id||employee?.employeeId||"");
+  const saved=(state.bootstrap?.employeeWorkRules||{})[id]||{};
+  return {
+    activityMode:["productive","partial","unproductive"].includes(saved.activityMode)
+      ? saved.activityMode
+      : "productive",
+    buak:saved.buak===true
+  };
+}
+
+function renderEmployeeLogic(){
+  const list=$("employeeLogicList");
+  if(!list)return;
+  const employees=(state.bootstrap?.employees||[]).filter(e=>e.active!==false);
+  list.innerHTML=employees.map(employee=>{
+    const id=String(employee.id||employee.employeeId||"");
+    const rule=employeeLogicDefaults(employee);
+    const fink=employee.finkzeitPersonnelNumber||
+      employee.finkzeitPersonalNumber||
+      employee.personalnummerFinkzeit||
+      employee.personnelNumber||
+      employee.personalNumber||"";
+    return `<div class="logic-row" data-employee-id="${esc(id)}">
+      <div class="logic-person">
+        <strong>${esc(employee.name||employee.employeeName||id)}</strong>
+        <small>${fink?`Finkzeit ${esc(fink)}`:"keine Finkzeit-Nr."}</small>
+      </div>
+      <label>TÄTIGKEIT
+        <select data-logic-field="activityMode">
+          <option value="productive" ${rule.activityMode==="productive"?"selected":""}>Produktiv</option>
+          <option value="partial" ${rule.activityMode==="partial"?"selected":""}>Teilproduktiv</option>
+          <option value="unproductive" ${rule.activityMode==="unproductive"?"selected":""}>Unproduktiv</option>
+        </select>
+      </label>
+      <label class="logic-buak">
+        <input type="checkbox" data-logic-field="buak" ${rule.buak?"checked":""}> BUAK
+      </label>
+    </div>`;
+  }).join("");
+}
+
+function openEmployeeLogic(){
+  renderEmployeeLogic();
+  const status=$("employeeLogicStatus");
+  if(status)status.textContent="Produktiv / BUAK Nein ist Standard.";
+  const modal=$("employeeLogicModal");
+  if(modal)modal.hidden=false;
+}
+
+function closeEmployeeLogic(){
+  const modal=$("employeeLogicModal");
+  if(modal)modal.hidden=true;
+}
+
+async function saveEmployeeLogic(){
+  const rules={};
+  document.querySelectorAll(".logic-row[data-employee-id]").forEach(row=>{
+    const id=String(row.dataset.employeeId||"");
+    if(!id)return;
+    rules[id]={
+      activityMode:row.querySelector("[data-logic-field='activityMode']")?.value||"productive",
+      buak:row.querySelector("[data-logic-field='buak']")?.checked===true
+    };
+  });
+
+  const button=$("saveEmployeeLogic");
+  if(button){button.disabled=true;button.textContent="Speichert …";}
+  try{
+    const data=await request("/kristine/api/employee-work-rules",{
+      method:"PUT",
+      body:JSON.stringify({rules})
+    });
+    state.bootstrap.employeeWorkRules=data.rules||{};
+    const status=$("employeeLogicStatus");
+    if(status)status.textContent="Gespeichert.";
+    toast("Mitarbeiter-Arbeitslogik gespeichert.");
+  }catch(error){
+    const status=$("employeeLogicStatus");
+    if(status)status.textContent=error.message;
+    toast(`Arbeitslogik: ${error.message}`,true);
+  }finally{
+    if(button){button.disabled=false;button.textContent="Arbeitslogik speichern";}
+  }
+}
+
 async function init(){
   try{
     const data=await request("/kristine/api/bootstrap");
@@ -1648,13 +1736,7 @@ $("applyTeamCorrection").addEventListener("click",async()=>{
 init();
 
 
-$("closeEmployeeLogic")?.addEventListener("click",closeEmployeeLogic);
-$("employeeLogicModal")?.addEventListener("click",e=>{if(e.target.id==="employeeLogicModal")closeEmployeeLogic()});
-$("saveEmployeeLogic")?.addEventListener("click",saveEmployeeLogic);
 
-$("closeDietReport")?.addEventListener("click",closeDietReport);
-$("dietReportModal")?.addEventListener("click",e=>{if(e.target.id==="dietReportModal")closeDietReport()});
-$("createDietReport")?.addEventListener("click",createDietReport);
 document.querySelectorAll("[data-diet-preset]").forEach(button=>button.addEventListener("click",()=>{
   const d=new Date(`${state.activeDate}T12:00:00`);
   if(button.dataset.dietPreset==="period"){
@@ -1666,11 +1748,40 @@ document.querySelectorAll("[data-diet-preset]").forEach(button=>button.addEventL
   }
 }));
 
-// 0023.51: robuste Event-Delegation für dynamische/neu gerenderte Kopfbuttons.
+// 0023.52: robuste Event-Delegation für dynamische/neu gerenderte Kopfbuttons.
 document.addEventListener("click",(event)=>{
   const button=event.target.closest?.("#openEmployeeLogic,#openDietReport");
   if(!button)return;
   event.preventDefault();
   if(button.id==="openEmployeeLogic")openEmployeeLogic();
   if(button.id==="openDietReport")openDietReport();
+});
+
+
+// 0023.52 · robuste Modals: Öffnen, Schließen, Speichern, PDF.
+document.addEventListener("click",event=>{
+  const target=event.target;
+  const button=target?.closest?.(
+    "#openEmployeeLogic,#closeEmployeeLogic,#saveEmployeeLogic,"+
+    "#openDietReport,#closeDietReport,#createDietReport"
+  );
+
+  if(button){
+    event.preventDefault();
+    if(button.id==="openEmployeeLogic") return openEmployeeLogic();
+    if(button.id==="closeEmployeeLogic") return closeEmployeeLogic();
+    if(button.id==="saveEmployeeLogic") return saveEmployeeLogic();
+    if(button.id==="openDietReport") return openDietReport();
+    if(button.id==="closeDietReport") return closeDietReport();
+    if(button.id==="createDietReport") return createDietReport();
+  }
+
+  if(target?.id==="employeeLogicModal")closeEmployeeLogic();
+  if(target?.id==="dietReportModal")closeDietReport();
+});
+
+document.addEventListener("keydown",event=>{
+  if(event.key!=="Escape")return;
+  if($("employeeLogicModal")&&!$("employeeLogicModal").hidden)closeEmployeeLogic();
+  if($("dietReportModal")&&!$("dietReportModal").hidden)closeDietReport();
 });
