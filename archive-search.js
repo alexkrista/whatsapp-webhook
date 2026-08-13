@@ -2,6 +2,40 @@
 // Kristine Archivsuche – Browser-Oberfläche
 // Datenquellen später: lokaler Connector -> WinWorker SQL + PDF-Index
 
+const ARCHIVE_CONNECTOR =
+  process.env.ARCHIVE_CONNECTOR ||
+  "http://127.0.0.1:5051";
+
+async function searchArchiveConnector(q) {
+  const url =
+    `${ARCHIVE_CONNECTOR}/search?q=${encodeURIComponent(q)}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Archiv-Connector HTTP ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (!data?.ok) {
+    throw new Error(
+      data?.error || "Archiv-Connector meldet Fehler"
+    );
+  }
+
+  return Array.isArray(data.documents)
+    ? data.documents
+    : [];
+}
+
 function esc(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -23,8 +57,18 @@ function registerArchiveSearch(app) {
 
     // Später kommen diese Daten vom lokalen Kristine-Connector.
     // Für V0.1 zeigen wir zunächst die fertige Oberfläche.
-    const projects = [];
-    const documents = [];
+ const projects = [];
+let documents = [];
+let connectorError = "";
+
+if (q) {
+  try {
+    documents = await searchArchiveConnector(q);
+  } catch (err) {
+    connectorError = String(err?.message || err);
+    console.error("Archiv-Connector:", err);
+  }
+}
 
     const html = `
 <!doctype html>
@@ -501,7 +545,7 @@ body {
                   <div class="card">
 
                     <span class="doc-type">
-                      ${esc(d.type)}
+                      ${esc(d.dokumenttyp || "Dokument")}
                     </span>
 
                     <span class="doc-name">
