@@ -1440,7 +1440,11 @@ const open = taskId
   app.get("/kristine/api/bootstrap", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      res.json({ ok: true, ...(await getBootstrap()), today: localDateISO() });
+      const [bootstrap, employeeWorkRules] = await Promise.all([
+        getBootstrap(),
+        readJson(EMPLOYEE_WORK_RULES, {}),
+      ]);
+      res.json({ ok: true, ...bootstrap, employeeWorkRules, today: localDateISO() });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -1624,7 +1628,7 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [gpsData, employees, events, states, corrections, releases, assignments] = await Promise.all([
+      const [gpsData, employees, events, states, corrections, releases, assignments, employeeWorkRules] = await Promise.all([
         readGpsImport("latest"),
         typeof readEmployees === "function" ? readEmployees() : [],
         readJson(TIME_EVENTS, []),
@@ -1632,6 +1636,7 @@ const open = taskId
         readJson(DAY_CORRECTIONS, []),
         readJson(DAY_RELEASES, []),
         readJson(ASSIGNMENTS, []),
+        readJson(EMPLOYEE_WORK_RULES, {}),
       ]);
 
       if (gpsData && reconcileGpsMappings(gpsData, employees)) {

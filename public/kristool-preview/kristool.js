@@ -343,7 +343,7 @@ function dietMinutesLabel(total){
   return total ? `${Math.floor(total/60)}:${String(total%60).padStart(2,"0")}` : "–";
 }
 
-function dietPrintReport(data,{mode="summary"}={}){
+function dietPrintReport(data,{mode="summary",popup=null}={}){
   const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const dateLabel=iso=>new Intl.DateTimeFormat("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(`${iso}T12:00:00`));
   const periodLabel=`${shortDate(data.from)} – ${shortDate(data.to)}`;
@@ -403,8 +403,9 @@ function dietPrintReport(data,{mode="summary"}={}){
     </section>`;
   }).join(""):"";
 
-  const popup=window.open("","_blank");
+  popup=popup||window.open("","_blank");
   if(!popup)return toast("Popup blockiert – bitte Popups für KRISTOOL erlauben.",true);
+  popup.document.open();
   popup.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8">
     <title>Diäten ${escape(data.from)} bis ${escape(data.to)}</title>
     <style>
@@ -441,13 +442,21 @@ async function createDietReport(){
   const from=$("dietFrom").value,to=$("dietTo").value;
   if(!from||!to||from>to)return toast("Zeitraum prüfen.",true);
   const mode=document.querySelector('input[name="dietMode"]:checked')?.value||"summary";
+  // Wichtig: Popup direkt im echten Klick öffnen. Nach einem await blockiert Chrome es sonst.
+  const popup=window.open("","_blank");
+  if(!popup)return toast("Popup blockiert – bitte Popups für KRISTOOL erlauben.",true);
+  popup.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Diätenbericht</title></head><body style="font-family:Arial;padding:30px">Diätenbericht wird erstellt …</body></html>');
+  popup.document.close();
+
   const btn=$("createDietReport");btn.disabled=true;btn.textContent="Bericht wird erstellt …";
   try{
     const data=await request(`/kristine/api/diet-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-    dietPrintReport(data,{mode});
+    dietPrintReport(data,{mode,popup});
     closeDietReport();
-  }catch(error){toast(`Diätenbericht: ${error.message}`,true)}
-  finally{btn.disabled=false;btn.textContent="PDF öffnen"}
+  }catch(error){
+    try{popup.close()}catch{}
+    toast(`Diätenbericht: ${error.message}`,true);
+  }finally{btn.disabled=false;btn.textContent="PDF öffnen"}
 }
 async function init(){
   try{
@@ -1639,12 +1648,10 @@ $("applyTeamCorrection").addEventListener("click",async()=>{
 init();
 
 
-$("openEmployeeLogic")?.addEventListener("click",openEmployeeLogic);
 $("closeEmployeeLogic")?.addEventListener("click",closeEmployeeLogic);
 $("employeeLogicModal")?.addEventListener("click",e=>{if(e.target.id==="employeeLogicModal")closeEmployeeLogic()});
 $("saveEmployeeLogic")?.addEventListener("click",saveEmployeeLogic);
 
-$("openDietReport")?.addEventListener("click",openDietReport);
 $("closeDietReport")?.addEventListener("click",closeDietReport);
 $("dietReportModal")?.addEventListener("click",e=>{if(e.target.id==="dietReportModal")closeDietReport()});
 $("createDietReport")?.addEventListener("click",createDietReport);
@@ -1658,3 +1665,12 @@ document.querySelectorAll("[data-diet-preset]").forEach(button=>button.addEventL
     $("dietTo").value=iso(new Date(d.getFullYear(),d.getMonth()+1,0,12));
   }
 }));
+
+// 0023.51: robuste Event-Delegation für dynamische/neu gerenderte Kopfbuttons.
+document.addEventListener("click",(event)=>{
+  const button=event.target.closest?.("#openEmployeeLogic,#openDietReport");
+  if(!button)return;
+  event.preventDefault();
+  if(button.id==="openEmployeeLogic")openEmployeeLogic();
+  if(button.id==="openDietReport")openDietReport();
+});
