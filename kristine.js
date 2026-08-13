@@ -2334,6 +2334,7 @@ const open = taskId
         });
       }
       const last = segments.at(-1);
+      // WICHTIG: "Bis" leer = laufender Abschnitt. Speichern darf keinen Ende-Event erzeugen.
       if (last?.to) replacement.push({
         employeeId, employeeName, date, type: "ende", at: last.to,
         jobId: last.type === "work" ? last.jobId : null,

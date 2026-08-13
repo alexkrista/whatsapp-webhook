@@ -36,11 +36,27 @@
 
     /* Build 0021.2: Neue Baustelle */
     .new-job-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;align-items:center;justify-content:center;z-index:120;padding:18px}.new-job-backdrop.open{display:flex}.new-job-modal{width:min(720px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 20px 70px rgba(0,0,0,.32)}.new-job-head{position:sticky;top:0;background:#111;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;z-index:2}.new-job-head h2{margin:0;font-size:21px}.new-job-body{padding:20px}.new-job-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.new-job-grid .full{grid-column:1/-1}.new-job-grid label{display:block;color:#555;font-size:13px;margin:0 0 5px}.new-job-grid input,.new-job-grid select,.new-job-grid textarea{width:100%;min-width:0;box-sizing:border-box}.new-job-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}.new-job-error{color:#9b1c1c;font-weight:700;margin-top:10px;display:none}@media(max-width:700px){.new-job-grid{grid-template-columns:1fr}.new-job-grid .full{grid-column:auto}}
+
+    /* Mitarbeiter 0023.33 – Liste + eigener Editor */
+    .employee-modal{inset:5vh 3vw}
+    .employee-list-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 14px}
+    .employee-new-button{background:#24733b;border-color:#24733b;font-weight:800}
+    .employee-editor-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;z-index:90}
+    .employee-editor{position:fixed;inset:4vh 8vw;background:#fff;border-radius:18px;box-shadow:0 18px 70px rgba(0,0,0,.35);z-index:91;display:none;overflow:auto}
+    .employee-editor .employee-modal-head{z-index:4}
+    .employee-editor-body{padding:20px}
+    .employee-editor .employee-form{margin-bottom:0}
+    .employee-editor-titleline{display:flex;flex-direction:column;gap:2px}
+    .employee-identity-note{font-size:12px;color:#ddd}
+    .employee-locked{background:#f1f1f1!important;color:#666!important;font-weight:800}
+    .employee-editor-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+    @media(max-width:760px){.employee-editor{inset:2vh 2vw}}
+
   </style>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="krisadmin" data-krista-build="0023.32"></div>
+  <div id="kristaTopbar" data-krista-active="krisadmin" data-krista-build="0023.33"></div>
   <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008b</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar krista-module-nav">
@@ -86,9 +102,24 @@
 
   <div id="employeeBackdrop" class="drawer-backdrop" onclick="closeEmployees()" style="z-index:60"></div>
   <section id="employeeModal" class="employee-modal" aria-hidden="true">
-    <div class="employee-modal-head"><div><strong>👷 Mitarbeiter-Stammdaten</strong><div class="small" style="color:#ddd">Für Tageserfassung, Teams und spätere Einteilung</div></div><button class="closebtn" onclick="closeEmployees()">×</button></div>
+    <div class="employee-modal-head"><div><strong>👷 Mitarbeiter-Stammdaten</strong><div class="small" style="color:#ddd">Mitarbeiter auswählen oder neu anlegen</div></div><button class="closebtn" onclick="closeEmployees()">×</button></div>
     <div class="employee-modal-body">
       <div id="personalNotices" class="section"><h3>🎂 Geburtstage & 🏆 Jubiläen</h3><div class="small">Wird nach dem Laden der Mitarbeiter aktualisiert.</div></div>
+      <div class="employee-list-toolbar"><button class="employee-new-button" onclick="openNewEmployee()">+ Neuer Mitarbeiter</button></div>
+      <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
+    </div>
+  </section>
+
+  <div id="employeeEditorBackdrop" class="employee-editor-backdrop" onclick="closeEmployeeEditor()"></div>
+  <section id="employeeEditor" class="employee-editor" aria-hidden="true">
+    <div class="employee-modal-head">
+      <div class="employee-editor-titleline">
+        <strong id="employeeEditorTitle">👷 Neuer Mitarbeiter</strong>
+        <div id="employeeEditorIdentity" class="employee-identity-note">Neue interne Identität</div>
+      </div>
+      <button class="closebtn" onclick="closeEmployeeEditor()">×</button>
+    </div>
+    <div class="employee-editor-body">
       <div class="employee-form">
         <input type="hidden" id="empEditId">
         <div><label>Name</label><input id="empName" placeholder="z. B. Edmund Mock"></div>
@@ -123,9 +154,9 @@
           <label class="checkline"><input id="empCanManage" type="checkbox"> darf Team erfassen</label>
           <label class="checkline"><input id="empActive" type="checkbox" checked> Aktiv</label>
         </div>
-        <div class="full actions"><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button><button class="secondary" onclick="resetEmployeeForm()">Neu/Zurücksetzen</button></div>
+        <div class="full employee-editor-actions"><button class="secondary" onclick="closeEmployeeEditor()">Abbrechen</button><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button></div>
       </div>
-      <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
+
     </div>
   </section>
 
@@ -638,7 +669,7 @@ function openEmployees(){
   document.getElementById('employeeModal').style.display='block';
   loadEmployeesView();
 }
-function closeEmployees(){document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
+function closeEmployees(){closeEmployeeEditor();document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
 let employeeDrivingLicenseFrontImage='',employeeDrivingLicenseBackImage='',employeePassportPage1Image='',employeePassportPage2Image='';
 function setPreview(id,data){const img=document.getElementById(id);img.src=data||'';img.style.display=data?'block':'none';}
 async function optimizeImageFile(file,maxPx=1400,quality=.82){const url=URL.createObjectURL(file);try{const img=await new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=fail;i.src=url});const scale=Math.min(1,maxPx/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',quality);}finally{URL.revokeObjectURL(url);}}
@@ -649,6 +680,31 @@ function resetEmployeeForm(){
   ['Tshirt','Polo','Pullover','Jacket','Trousers','Shoes','Gloves'].forEach(x=>document.getElementById('empSize'+x).value='');
   ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
   employeeDrivingLicenseFrontImage='';employeeDrivingLicenseBackImage='';employeePassportPage1Image='';employeePassportPage2Image='';setPreview('empDrivingLicenseFrontPreview','');setPreview('empDrivingLicenseBackPreview','');setPreview('empPassportPage1Preview','');setPreview('empPassportPage2Preview','');
+  const fink=document.getElementById('empFinkzeitPersonalNumber');
+  if(fink){fink.disabled=false;fink.classList.remove('employee-locked');}
+}
+
+function nextFreeFinkzeitNumber(){
+  const used=new Set(employeeMasters.map(e=>String(e.finkzeitPersonalNumber||'').trim()).filter(Boolean));
+  let n=600; while(used.has(String(n)))n++;
+  return String(n);
+}
+function openEmployeeEditor(){
+  document.getElementById('employeeEditorBackdrop').style.display='block';
+  document.getElementById('employeeEditor').style.display='block';
+  document.getElementById('employeeEditor').scrollTo({top:0});
+}
+function closeEmployeeEditor(){
+  document.getElementById('employeeEditorBackdrop').style.display='none';
+  document.getElementById('employeeEditor').style.display='none';
+  resetEmployeeForm();
+}
+function openNewEmployee(){
+  resetEmployeeForm();
+  document.getElementById('empFinkzeitPersonalNumber').value=nextFreeFinkzeitNumber();
+  document.getElementById('employeeEditorTitle').textContent='👷 Neuer Mitarbeiter';
+  document.getElementById('employeeEditorIdentity').textContent='Neue interne ID · Finkzeitnummer bis zum ersten Speichern änderbar';
+  openEmployeeEditor();
 }
 function editEmployeeMaster(id){
   const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
@@ -658,7 +714,11 @@ function editEmployeeMaster(id){
   employeeDrivingLicenseFrontImage=e.drivingLicenseFrontImage||e.drivingLicenseImage||''; employeeDrivingLicenseBackImage=e.drivingLicenseBackImage||''; employeePassportPage1Image=e.passportPage1Image||e.passportImage||''; employeePassportPage2Image=e.passportPage2Image||'';
   setPreview('empDrivingLicenseFrontPreview',employeeDrivingLicenseFrontImage);setPreview('empDrivingLicenseBackPreview',employeeDrivingLicenseBackImage);setPreview('empPassportPage1Preview',employeePassportPage1Image);setPreview('empPassportPage2Preview',employeePassportPage2Image);
   ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('employeeModal').scrollTo({top:0,behavior:'smooth'});
+  const fink=document.getElementById('empFinkzeitPersonalNumber');
+  fink.disabled=true; fink.classList.add('employee-locked');
+  document.getElementById('employeeEditorTitle').textContent='👷 '+(e.nickname||e.name||'Mitarbeiter')+' bearbeiten';
+  document.getElementById('employeeEditorIdentity').textContent='Bestehender Mitarbeiter · Finkzeit '+(e.finkzeitPersonalNumber||'–')+' ist nach Erstanlage geschützt';
+  openEmployeeEditor();
 }
 async function saveEmployeeMaster(){
   const id=document.getElementById('empEditId').value;
@@ -666,7 +726,15 @@ async function saveEmployeeMaster(){
   drivingLicenseLastCheck:document.getElementById('empDrivingLicenseLastCheck').value,passportExpiry:document.getElementById('empPassportExpiry').value,
   drivingLicenseFrontImage:employeeDrivingLicenseFrontImage,drivingLicenseBackImage:employeeDrivingLicenseBackImage,passportPage1Image:employeePassportPage1Image,passportPage2Image:employeePassportPage2Image,clothingSizes:{tshirt:document.getElementById('empSizeTshirt').value,polo:document.getElementById('empSizePolo').value,pullover:document.getElementById('empSizePullover').value,jacket:document.getElementById('empSizeJacket').value,trousers:document.getElementById('empSizeTrousers').value,shoes:document.getElementById('empSizeShoes').value,gloves:document.getElementById('empSizeGloves').value}};
   if(!body.name.trim()){alert('Bitte einen Namen eingeben.');return;}
-  try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetEmployeeForm();await loadEmployeesView();}
+  body.finkzeitPersonalNumber=String(body.finkzeitPersonalNumber||'').trim();
+  if(!body.finkzeitPersonalNumber){alert('Bitte eine Finkzeit-Personalnummer eingeben.');return;}
+  const duplicate=employeeMasters.find(e=>String(e.id)!==String(id||'')&&String(e.finkzeitPersonalNumber||'').trim()===body.finkzeitPersonalNumber);
+  if(duplicate){alert('Finkzeit '+body.finkzeitPersonalNumber+' ist bereits '+(duplicate.nickname||duplicate.name)+' zugeordnet. Speichern abgebrochen.');return;}
+  if(id){
+    const existing=employeeMasters.find(e=>String(e.id)===String(id));
+    if(existing) body.finkzeitPersonalNumber=String(existing.finkzeitPersonalNumber||'').trim();
+  }
+  try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeEmployeeEditor();await loadEmployeesView();}
   catch(e){alert('Speichern fehlgeschlagen: '+e.message);}
 }
 async function deactivateEmployee(id){
