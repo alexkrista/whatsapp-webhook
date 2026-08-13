@@ -36,6 +36,48 @@ async function searchArchiveConnector(q) {
     : [];
 }
 
+async function openArchiveConnector(path) {
+  const response = await fetch(`${ARCHIVE_CONNECTOR}/open`, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ path })
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || `Archiv-Connector HTTP ${response.status}`);
+  }
+
+  return data;
+}
+
+async function loadArchiveThumbnail(path) {
+  const url =
+    `${ARCHIVE_CONNECTOR}/thumb?path=${encodeURIComponent(path)}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Accept": "image/png"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Thumbnail HTTP ${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    contentType: response.headers.get("content-type") || "image/png"
+  };
+}
+
 function esc(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -338,6 +380,73 @@ body {
   cursor: pointer;
 }
 
+.doc-card {
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  transition:
+    transform .08s ease,
+    box-shadow .08s ease,
+    border-color .08s ease;
+}
+
+.doc-card:hover {
+  transform: translateY(-1px);
+  border-color: #bcc3ca;
+  box-shadow: 0 5px 15px rgba(0,0,0,.07);
+}
+
+.doc-preview {
+  width: 150px;
+  min-height: 195px;
+  border: 1px solid #e2e5e9;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #f2f3f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.doc-main {
+  min-width: 0;
+}
+
+.doc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.doc-snippet {
+  margin-top: 12px;
+  padding: 11px 13px;
+  background: #f7f8fa;
+  border-radius: 7px;
+  color: #444;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.connector-error {
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: #fff4f4;
+  border: 1px solid #f1c5c5;
+  border-radius: 8px;
+  color: #8a2f2f;
+  font-size: 13px;
+}
+
 /* ------------------------------------------------------------
    EMPTY
 ------------------------------------------------------------ */
@@ -375,6 +484,15 @@ body {
 
   .sources {
     grid-template-columns: 1fr;
+  }
+
+  .doc-card {
+    grid-template-columns: 1fr;
+  }
+
+  .doc-preview {
+    width: 110px;
+    min-height: 140px;
   }
 
 }
@@ -469,13 +587,18 @@ body {
       </div>
 
       <div class="source-state">
-        Index wird angebunden
+        Index verbunden
       </div>
 
     </div>
 
   </div>
 
+  ${
+    connectorError
+      ? `<div class="connector-error">${esc(connectorError)}</div>`
+      : ""
+  }
 
   ${
     q
@@ -542,18 +665,57 @@ body {
           ${
             documents.length
               ? documents.map(d => `
-                  <div class="card">
+                  <div class="card doc-card"
+                       data-path="${esc(d.path)}"
+                       onclick="openArchivePdf(this.dataset.path)">
 
-                    <span class="doc-type">
-                      ${esc(d.dokumenttyp || "Dokument")}
-                    </span>
+                    <div class="doc-preview">
+                      <img
+                        loading="lazy"
+                        src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
+                        alt="Vorschau ${esc(d.filename)}"
+                        onerror="this.style.display='none'"
+                      >
+                    </div>
 
-                    <span class="doc-name">
-                      ${esc(d.filename)}
-                    </span>
+                    <div class="doc-main">
 
-                    <div class="doc-path">
-                      ${esc(d.path)}
+                      <div class="doc-top">
+
+                        <div>
+                          <span class="doc-type">
+                            ${esc(d.dokumenttyp || "Dokument")}
+                          </span>
+
+                          <span class="doc-name">
+                            ${esc(d.filename)}
+                          </span>
+                        </div>
+
+                        <button
+                          class="open-button"
+                          type="button"
+                          data-path="${esc(d.path)}"
+                          onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">
+                          Öffnen
+                        </button>
+
+                      </div>
+
+                      ${
+                        d.snippet
+                          ? `
+                            <div class="doc-snippet">
+                              ${esc(d.snippet)}
+                            </div>
+                          `
+                          : ""
+                      }
+
+                      <div class="doc-path">
+                        ${esc(d.path)}
+                      </div>
+
                     </div>
 
                   </div>
@@ -591,6 +753,28 @@ body {
 
 </div>
 
+<script>
+async function openArchivePdf(path) {
+  try {
+    const response = await fetch("/api/archive/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ path })
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !data.ok) {
+      alert(data.error || "PDF konnte nicht geöffnet werden.");
+    }
+  } catch (err) {
+    alert("Archiv-Connector nicht erreichbar.");
+  }
+}
+</script>
+
 </body>
 </html>
 `;
@@ -599,6 +783,57 @@ body {
       .status(200)
       .type("html")
       .send(html);
+  });
+
+
+
+  // ============================================================
+  // Lokaler Archiv-Connector: PDF öffnen + Thumbnail
+  // ============================================================
+
+  app.post("/api/archive/open", async (req, res) => {
+    try {
+      const pdfPath = String(req.body?.path || "").trim();
+
+      if (!pdfPath) {
+        return res.status(400).json({
+          ok: false,
+          error: "PDF-Pfad fehlt"
+        });
+      }
+
+      const result = await openArchiveConnector(pdfPath);
+      return res.json(result);
+
+    } catch (err) {
+      console.error("Archiv PDF öffnen:", err);
+
+      return res.status(502).json({
+        ok: false,
+        error: String(err?.message || err)
+      });
+    }
+  });
+
+
+  app.get("/api/archive/thumb", async (req, res) => {
+    try {
+      const pdfPath = String(req.query.path || "").trim();
+
+      if (!pdfPath) {
+        return res.status(400).send("PDF-Pfad fehlt");
+      }
+
+      const thumb = await loadArchiveThumbnail(pdfPath);
+
+      res.setHeader("Content-Type", thumb.contentType);
+      res.setHeader("Cache-Control", "private, max-age=300");
+      return res.send(thumb.buffer);
+
+    } catch (err) {
+      console.error("Archiv Thumbnail:", err);
+      return res.status(404).end();
+    }
   });
 
 
@@ -613,7 +848,7 @@ body {
       module: "archive-search",
       version: "0.1",
       sql: "pending-local-connector",
-      pdfIndex: "pending-local-connector"
+      pdfIndex: ARCHIVE_CONNECTOR
     });
 
   });
