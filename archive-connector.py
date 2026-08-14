@@ -30,7 +30,7 @@ def get_sql_driver():
     raise RuntimeError("Kein geeigneter SQL-Server-ODBC-Treiber gefunden")
 
 
-def sql_connection():
+def sql_connection(database=SQL_DATABASE):
     password = os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()
     if not password:
         raise RuntimeError("KRISTINE_SQL_PASSWORD fehlt")
@@ -39,7 +39,7 @@ def sql_connection():
     return pyodbc.connect(
         f"DRIVER={{{driver}}};"
         f"SERVER={SQL_SERVER};"
-        f"DATABASE={SQL_DATABASE};"
+        f"DATABASE={database};"
         f"UID={SQL_USER};"
         f"PWD={password};"
         "TrustServerCertificate=yes;",
@@ -58,16 +58,20 @@ def clean_date(value):
 
 def project_metrics(project_indices):
     """
-    Echte Projektkennzahlen.
+    Projektkennzahlen V0.9.
 
-    Ist-Stunden:
-      WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung
-      SUM(dStundenErfasst), ausgenommen bNichtAuswerten.
+    IST-STUNDEN
+    -----------
+    Direkte Verbindung zur Datenbank WinWorker_Mitschreibung_Standard.
+    Das vermeidet Cross-DB-Probleme des Reader-Users.
+    SUM(dStundenErfasst), bNichtAuswerten = 0.
 
-    Netto:
-      Pro Projekt + Rechnungsnummer nur die NEUESTE Druck-/Änderungsversion.
-      Neueste Version wird über dzDocDatum ermittelt; gID dient als Tie-Breaker.
-      Danach SUM(Rechnung.cUmsatzNetto).
+    NETTO
+    -----
+    1) Pro Projekt + sBuchNummer nur die neueste Buch-Version.
+       Reihenfolge: Geändert / dzInhaltGeaendert / dzDocDatum / Aufgenommen.
+    2) dbo.Rechnung zusätzlich je gBuchID deduplizieren.
+    3) Erst danach cUmsatzNetto summieren.
     """
     ids = sorted({int(x) for x in project_indices if x is not None})
     if not ids:
@@ -76,68 +80,89 @@ def project_metrics(project_indices):
     placeholders = ",".join("?" for _ in ids)
     result = {pid: {"hoursTotal": None, "netInvoiced": None} for pid in ids}
 
-    # Stunden getrennt laden: falls Rechte/Schema fehlen, bleibt die Archivsuche trotzdem verfügbar.
+    # 1) Echte IST-Stunden
     try:
-        con = sql_connection()
+        con = sql_connection("WinWorker_Mitschreibung_Standard")
         cur = con.cursor()
         sql = f"""
             SELECT
                 sm.ProjektIndex,
                 SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
-            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            FROM dbo.Stundenmitschreibung AS sm
             WHERE sm.ProjektIndex IN ({placeholders})
               AND ISNULL(sm.bNichtAuswerten, 0) = 0
             GROUP BY sm.ProjektIndex
         """
-        rows = cur.execute(sql, ids).fetchall()
+        rows = cur.execute(sql, *ids).fetchall()
         con.close()
+
         for row in rows:
             pid = int(row.ProjektIndex)
             if pid in result:
-                result[pid]["hoursTotal"] = float(row.IstStunden) if row.IstStunden is not None else None
+                result[pid]["hoursTotal"] = (
+                    float(row.IstStunden) if row.IstStunden is not None else None
+                )
     except Exception as e:
-        print("SQL Stunden-Metrik:", e)
+        print("SQL Stunden-Metrik FEHLER:", repr(e))
 
-    # Rechnungen ebenfalls getrennt laden.
+    # 2) Aktueller Netto-Abrechnungsstand
     try:
-        con = sql_connection()
+        con = sql_connection("WinWorker_Projekte_Standard")
         cur = con.cursor()
         sql = f"""
             WITH LatestBooks AS (
                 SELECT
                     b.ProjektIndex,
-                    b.sBuchNummer,
+                    LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
                     b.gID,
-                    b.dzDocDatum,
                     ROW_NUMBER() OVER (
-                        PARTITION BY b.ProjektIndex, b.sBuchNummer
-                        ORDER BY b.dzDocDatum DESC, CONVERT(varchar(100), b.gID) DESC
+                        PARTITION BY b.ProjektIndex, LTRIM(RTRIM(b.sBuchNummer))
+                        ORDER BY
+                            COALESCE(
+                                b.Geändert,
+                                b.dzInhaltGeaendert,
+                                b.dzDocDatum,
+                                b.Aufgenommen
+                            ) DESC,
+                            b.gID DESC
                     ) AS rn
                 FROM dbo.[Bücher] AS b
                 WHERE b.ProjektIndex IN ({placeholders})
                   AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
                   AND ISNULL(b.Storno, 0) = 0
+            ),
+            InvoiceNet AS (
+                SELECT
+                    r.gBuchID,
+                    MAX(CAST(r.cUmsatzNetto AS decimal(18,2))) AS Netto
+                FROM dbo.Rechnung AS r
+                WHERE r.gBuchID IS NOT NULL
+                GROUP BY r.gBuchID
             )
             SELECT
                 lb.ProjektIndex,
-                SUM(CAST(ISNULL(r.cUmsatzNetto, 0) AS decimal(18,2))) AS NettoAbgerechnet
+                SUM(inv.Netto) AS NettoAbgerechnet
             FROM LatestBooks AS lb
-            INNER JOIN dbo.Rechnung AS r
-                ON r.gBuchID = lb.gID
+            INNER JOIN InvoiceNet AS inv
+                ON inv.gBuchID = lb.gID
             WHERE lb.rn = 1
             GROUP BY lb.ProjektIndex
         """
-        rows = cur.execute(sql, ids).fetchall()
+        rows = cur.execute(sql, *ids).fetchall()
         con.close()
+
         for row in rows:
             pid = int(row.ProjektIndex)
             if pid in result:
-                result[pid]["netInvoiced"] = float(row.NettoAbgerechnet) if row.NettoAbgerechnet is not None else None
+                result[pid]["netInvoiced"] = (
+                    float(row.NettoAbgerechnet)
+                    if row.NettoAbgerechnet is not None
+                    else None
+                )
     except Exception as e:
-        print("SQL Rechnungs-Metrik:", e)
+        print("SQL Rechnungs-Metrik FEHLER:", repr(e))
 
     return result
-
 
 def search_projects(terms):
     if not terms:
@@ -395,7 +420,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.8",
+        "version": "0.9",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -404,6 +429,18 @@ def status():
         "sqlPasswordConfigured": bool(os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()),
     })
 
+
+
+@app.get("/project-metrics/<int:project_index>")
+def project_metrics_debug(project_index):
+    try:
+        return jsonify({
+            "ok": True,
+            "projectIndex": project_index,
+            "metrics": project_metrics([project_index]).get(project_index, {})
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.get("/schema-hints")
@@ -499,7 +536,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.8 - SQL + Projekte + Ist-Stunden + Netto aktuell + Dokumentarten")
+    print("Version: 0.9 - SQL + korrigierte Ist-Stunden + Rechnungsversionen")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
