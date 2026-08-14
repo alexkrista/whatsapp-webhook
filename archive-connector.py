@@ -30,7 +30,7 @@ def get_sql_driver():
     raise RuntimeError("Kein geeigneter SQL-Server-ODBC-Treiber gefunden")
 
 
-def sql_connection(database=SQL_DATABASE):
+def sql_connection():
     password = os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()
     if not password:
         raise RuntimeError("KRISTINE_SQL_PASSWORD fehlt")
@@ -39,7 +39,7 @@ def sql_connection(database=SQL_DATABASE):
     return pyodbc.connect(
         f"DRIVER={{{driver}}};"
         f"SERVER={SQL_SERVER};"
-        f"DATABASE={database};"
+        f"DATABASE={SQL_DATABASE};"
         f"UID={SQL_USER};"
         f"PWD={password};"
         "TrustServerCertificate=yes;",
@@ -54,128 +54,6 @@ def clean_date(value):
         return value.date().isoformat()
     return str(value)
 
-
-
-def project_metrics(project_indices):
-    """
-    Projektkennzahlen V0.9.
-
-    IST-STUNDEN
-    -----------
-    Direkte Verbindung zur Datenbank WinWorker_Mitschreibung_Standard.
-    Das vermeidet Cross-DB-Probleme des Reader-Users.
-    SUM(dStundenErfasst), bNichtAuswerten = 0.
-
-    NETTO
-    -----
-    1) Pro Projekt + sBuchNummer nur die neueste Buch-Version.
-       Reihenfolge: Geändert / dzInhaltGeaendert / dzDocDatum / Aufgenommen.
-    2) dbo.Rechnung zusätzlich je gBuchID deduplizieren.
-    3) Erst danach cUmsatzNetto summieren.
-    """
-    ids = sorted({int(x) for x in project_indices if x is not None})
-    if not ids:
-        return {}
-
-    placeholders = ",".join("?" for _ in ids)
-    result = {pid: {"hoursTotal": None, "netInvoiced": None} for pid in ids}
-
-    # 1) Echte IST-Stunden
-    # Wichtig: gleiche Verbindung wie die funktionierende Projektsuche verwenden,
-    # aber die Mitschreibungs-Tabelle vollständig qualifizieren.
-    try:
-        con = sql_connection("WinWorker_Projekte_Standard")
-        cur = con.cursor()
-        sql = f"""
-            SELECT
-                sm.ProjektIndex,
-                SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
-            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
-            WHERE sm.ProjektIndex IN ({placeholders})
-              AND ISNULL(sm.bNichtAuswerten, 0) = 0
-            GROUP BY sm.ProjektIndex
-        """
-        rows = cur.execute(sql, *ids).fetchall()
-        con.close()
-
-        for row in rows:
-            pid = int(row.ProjektIndex)
-            if pid in result:
-                result[pid]["hoursTotal"] = (
-                    float(row.IstStunden) if row.IstStunden is not None else None
-                )
-    except Exception as e:
-        print("SQL Stunden-Metrik FEHLER:", repr(e))
-
-    # 2) Aktueller Netto-Abrechnungsstand
-    #
-    # WinWorker liefert dieselbe Rechnungsnummer mehrfach (z. B. Buchart 6/7
-    # oder neu gedruckte/geänderte Versionen). Für die Archivkarte zählt
-    # JEDE RECHNUNGSNUMMER NUR EINMAL.
-    #
-    # Vorgehen:
-    # - alle Buch-/Rechnungszeilen des Projekts holen
-    # - pro sBuchNummer nur eine aktuelle/eindeutige Netto-Zeile bestimmen
-    # - erst danach summieren
-    try:
-        con = sql_connection("WinWorker_Projekte_Standard")
-        cur = con.cursor()
-        sql = f"""
-            WITH InvoiceRows AS (
-                SELECT
-                    b.ProjektIndex,
-                    LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
-                    r.cUmsatzNetto,
-                    COALESCE(
-                        b.Geändert,
-                        b.dzInhaltGeaendert,
-                        b.dzDocDatum,
-                        b.Aufgenommen
-                    ) AS VersionZeit,
-                    b.gID
-                FROM dbo.[Bücher] AS b
-                INNER JOIN dbo.Rechnung AS r
-                    ON r.gBuchID = b.gID
-                WHERE b.ProjektIndex IN ({placeholders})
-                  AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
-                  AND ISNULL(b.Storno, 0) = 0
-                  AND r.cUmsatzNetto IS NOT NULL
-            ),
-            LatestPerInvoiceNumber AS (
-                SELECT
-                    ProjektIndex,
-                    sBuchNummer,
-                    cUmsatzNetto,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY ProjektIndex, sBuchNummer
-                        ORDER BY
-                            VersionZeit DESC,
-                            gID DESC
-                    ) AS rn
-                FROM InvoiceRows
-            )
-            SELECT
-                ProjektIndex,
-                SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoAbgerechnet
-            FROM LatestPerInvoiceNumber
-            WHERE rn = 1
-            GROUP BY ProjektIndex
-        """
-        rows = cur.execute(sql, *ids).fetchall()
-        con.close()
-
-        for row in rows:
-            pid = int(row.ProjektIndex)
-            if pid in result:
-                result[pid]["netInvoiced"] = (
-                    float(row.NettoAbgerechnet)
-                    if row.NettoAbgerechnet is not None
-                    else None
-                )
-    except Exception as e:
-        print("SQL Rechnungs-Metrik FEHLER:", repr(e))
-
-    return result
 
 def search_projects(terms):
     if not terms:
@@ -299,56 +177,6 @@ def search_projects(terms):
             "lastDate": clean_date(row.LetztesDatum),
         })
 
-
-    metrics = project_metrics([item.get("projectIndex") for item in result])
-    for item in result:
-        project_index = item.get("projectIndex")
-        metric = metrics.get(int(project_index)) if project_index is not None else None
-        item["hoursTotal"] = metric.get("hoursTotal") if metric else None
-        item["netInvoiced"] = metric.get("netInvoiced") if metric else None
-
-    return result
-
-
-
-def discover_metric_columns():
-    """
-    Findet nur Kandidaten für Stunden-/Rechnungsfelder.
-    Es wird noch NICHT automatisch auf unbekannte Tabellen summiert.
-    """
-    con = sql_connection()
-    cur = con.cursor()
-
-    sql = """
-        SELECT
-            TABLE_SCHEMA,
-            TABLE_NAME,
-            COLUMN_NAME,
-            DATA_TYPE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE
-            LOWER(COLUMN_NAME) LIKE '%stund%'
-            OR LOWER(COLUMN_NAME) LIKE '%hour%'
-            OR LOWER(COLUMN_NAME) LIKE '%zeit%'
-            OR LOWER(COLUMN_NAME) LIKE '%netto%'
-            OR LOWER(COLUMN_NAME) LIKE '%rechnung%'
-            OR LOWER(COLUMN_NAME) LIKE '%betrag%'
-            OR LOWER(COLUMN_NAME) LIKE '%summe%'
-            OR LOWER(COLUMN_NAME) LIKE '%umsatz%'
-        ORDER BY TABLE_NAME, ORDINAL_POSITION
-    """
-
-    rows = cur.execute(sql).fetchall()
-    con.close()
-
-    result = []
-    for row in rows:
-        result.append({
-            "schema": row.TABLE_SCHEMA,
-            "table": row.TABLE_NAME,
-            "column": row.COLUMN_NAME,
-            "dataType": row.DATA_TYPE,
-        })
     return result
 
 
@@ -433,7 +261,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.2",
+        "version": "0.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -441,77 +269,6 @@ def status():
         "sqlUser": SQL_USER,
         "sqlPasswordConfigured": bool(os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()),
     })
-
-
-
-@app.get("/project-metrics/<int:project_index>")
-def project_metrics_debug(project_index):
-    try:
-        return jsonify({
-            "ok": True,
-            "projectIndex": project_index,
-            "metrics": project_metrics([project_index]).get(project_index, {})
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.get("/project-invoices/<int:project_index>")
-def project_invoices_debug(project_index):
-    try:
-        con = sql_connection("WinWorker_Projekte_Standard")
-        cur = con.cursor()
-        rows = cur.execute("""
-            SELECT
-                b.sBuchNummer,
-                b.Buchart,
-                b.gID,
-                b.dzDocDatum,
-                b.Geändert,
-                r.cUmsatzNetto,
-                r.dzRechnungsdatum
-            FROM dbo.[Bücher] AS b
-            LEFT JOIN dbo.Rechnung AS r
-                ON r.gBuchID = b.gID
-            WHERE b.ProjektIndex = ?
-              AND ISNULL(b.Storno, 0) = 0
-              AND r.cUmsatzNetto IS NOT NULL
-            ORDER BY
-                b.sBuchNummer,
-                COALESCE(b.Geändert, b.dzInhaltGeaendert, b.dzDocDatum, b.Aufgenommen) DESC,
-                b.gID DESC
-        """, project_index).fetchall()
-        con.close()
-
-        items = []
-        for row in rows:
-            items.append({
-                "sBuchNummer": row.sBuchNummer,
-                "Buchart": row.Buchart,
-                "gID": str(row.gID) if row.gID is not None else None,
-                "dzDocDatum": clean_date(row.dzDocDatum),
-                "Geaendert": clean_date(row.Geändert),
-                "cUmsatzNetto": float(row.cUmsatzNetto) if row.cUmsatzNetto is not None else None,
-                "dzRechnungsdatum": clean_date(row.dzRechnungsdatum),
-            })
-        return jsonify({"ok": True, "projectIndex": project_index, "rows": items})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-
-@app.get("/schema-hints")
-def schema_hints():
-    try:
-        rows = discover_metric_columns()
-        return jsonify({
-            "ok": True,
-            "count": len(rows),
-            "columns": rows,
-            "note": "Diagnose-Endpunkt. V0.8 verwendet bereits Stundenmitschreibung und pro Rechnungsnummer nur die neueste Version."
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.get("/search")
@@ -592,8 +349,7 @@ if __name__ == "__main__":
     print("-------------------------")
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
-    print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.2 - Stundenfix + Netto dedupliziert je Rechnungsnummer")
+    print("Version: 0.6 - SQL + Projekte + Jahre + Dokumentarten")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
