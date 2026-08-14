@@ -81,14 +81,16 @@ def project_metrics(project_indices):
     result = {pid: {"hoursTotal": None, "netInvoiced": None} for pid in ids}
 
     # 1) Echte IST-Stunden
+    # Wichtig: gleiche Verbindung wie die funktionierende Projektsuche verwenden,
+    # aber die Mitschreibungs-Tabelle vollständig qualifizieren.
     try:
-        con = sql_connection("WinWorker_Mitschreibung_Standard")
+        con = sql_connection("WinWorker_Projekte_Standard")
         cur = con.cursor()
         sql = f"""
             SELECT
                 sm.ProjektIndex,
                 SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
-            FROM dbo.Stundenmitschreibung AS sm
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
             WHERE sm.ProjektIndex IN ({placeholders})
               AND ISNULL(sm.bNichtAuswerten, 0) = 0
             GROUP BY sm.ProjektIndex
@@ -420,7 +422,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9",
+        "version": "0.9.1",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -536,7 +538,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9 - SQL + korrigierte Ist-Stunden + Rechnungsversionen")
+    print("Version: 0.9.1 - Stundenfix über qualifizierte Cross-DB-Abfrage")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
