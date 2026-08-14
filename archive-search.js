@@ -1,5 +1,194 @@
 // archive-search.js
-// Kristine Archivsuche – SQL + PDF-Archiv
+// Kristine Gehirn – Projekte + Kunden + Zeiten + Dokumente + Nachkalkulation
+
+const fsp = require("fs/promises");
+const path = require("path");
+
+
+const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const KRISTINE_TIME_EVENTS_FILE =
+  process.env.KRISTINE_TIME_EVENTS_FILE ||
+  path.join(DATA_DIR, "_kristine", "time-events.json");
+
+function brainMinutesFromHM(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 24 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function normalizeJobId(value) {
+  return String(value || "").trim().replace(/^#/, "");
+}
+
+async function readKristineTimeEvents() {
+  try {
+    const raw = await fsp.readFile(KRISTINE_TIME_EVENTS_FILE, "utf8");
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildKristineProjectHours(events) {
+  const groups = new Map();
+
+  for (const row of Array.isArray(events) ? events : []) {
+    const employeeId = String(row?.employeeId || "").trim();
+    const employeeName = String(row?.employeeName || employeeId || "Unbekannt").trim();
+    const date = String(row?.date || "").slice(0, 10);
+    const atMinutes = brainMinutesFromHM(row?.at);
+    if (!employeeId || !date || atMinutes === null) continue;
+
+    const key = `${employeeId}|${date}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({
+      ...row,
+      _employeeId: employeeId,
+      _employeeName: employeeName,
+      _date: date,
+      _minutes: atMinutes,
+    });
+  }
+
+  const projectMap = new Map();
+
+  function ensureProject(jobId) {
+    const id = normalizeJobId(jobId);
+    if (!id) return null;
+    if (!projectMap.has(id)) {
+      projectMap.set(id, {
+        jobId: id,
+        rawMinutes: 0,
+        productiveMinutes: 0,
+        breakMinutesAllocated: 0,
+        employees: new Map(),
+        days: new Set(),
+      });
+    }
+    return projectMap.get(id);
+  }
+
+  for (const rows of groups.values()) {
+    rows.sort((a, b) =>
+      a._minutes - b._minutes ||
+      String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
+    );
+
+    const dayWork = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const type = String(row.type || "").toLowerCase();
+      if (!["start", "weiter"].includes(type)) continue;
+
+      const next = rows[i + 1];
+      if (!next) continue;
+
+      const duration = Math.max(0, next._minutes - row._minutes);
+      const jobId = normalizeJobId(row.jobId);
+      if (!jobId || duration <= 0) continue;
+
+      dayWork.push({
+        employeeId: row._employeeId,
+        employeeName: row._employeeName,
+        date: row._date,
+        jobId,
+        minutes: duration,
+      });
+    }
+
+    const totalDayMinutes = dayWork.reduce((sum, row) => sum + row.minutes, 0);
+    if (totalDayMinutes <= 0) continue;
+
+    const fixedBreak = Math.min(15, totalDayMinutes);
+
+    for (const work of dayWork) {
+      const allocatedBreak = fixedBreak * (work.minutes / totalDayMinutes);
+      const productive = Math.max(0, work.minutes - allocatedBreak);
+
+      const project = ensureProject(work.jobId);
+      if (!project) continue;
+
+      project.rawMinutes += work.minutes;
+      project.productiveMinutes += productive;
+      project.breakMinutesAllocated += allocatedBreak;
+      project.days.add(`${work.employeeId}|${work.date}`);
+
+      if (!project.employees.has(work.employeeId)) {
+        project.employees.set(work.employeeId, {
+          employeeId: work.employeeId,
+          employeeName: work.employeeName,
+          rawMinutes: 0,
+          productiveMinutes: 0,
+          breakMinutesAllocated: 0,
+          days: new Set(),
+        });
+      }
+
+      const employee = project.employees.get(work.employeeId);
+      employee.rawMinutes += work.minutes;
+      employee.productiveMinutes += productive;
+      employee.breakMinutesAllocated += allocatedBreak;
+      employee.days.add(work.date);
+    }
+  }
+
+  const result = new Map();
+  for (const [jobId, row] of projectMap.entries()) {
+    result.set(jobId, {
+      jobId,
+      rawHours: row.rawMinutes / 60,
+      productiveHours: row.productiveMinutes / 60,
+      breakHours: row.breakMinutesAllocated / 60,
+      employeeDays: row.days.size,
+      employees: [...row.employees.values()]
+        .map(emp => ({
+          employeeId: emp.employeeId,
+          employeeName: emp.employeeName,
+          rawHours: emp.rawMinutes / 60,
+          productiveHours: emp.productiveMinutes / 60,
+          breakHours: emp.breakMinutesAllocated / 60,
+          days: emp.days.size,
+        }))
+        .sort((a, b) =>
+          b.productiveHours - a.productiveHours ||
+          a.employeeName.localeCompare(b.employeeName, "de")
+        ),
+    });
+  }
+
+  return result;
+}
+
+function attachKristineHours(projects, kristineHours) {
+  return (projects || []).map(project => {
+    const number = normalizeJobId(project.projectNumber);
+    const kristine = kristineHours.get(number) || {
+      rawHours: 0,
+      productiveHours: 0,
+      breakHours: 0,
+      employeeDays: 0,
+      employees: [],
+    };
+
+    const wwHours = Number(project.hoursTotal);
+    const wwValid = Number.isFinite(wwHours);
+    const combinedCurrent = (wwValid ? wwHours : 0) + Number(kristine.productiveHours || 0);
+
+    return {
+      ...project,
+      kristineHoursRaw: kristine.rawHours,
+      kristineHoursProductive: kristine.productiveHours,
+      kristineBreakHours: kristine.breakHours,
+      kristineEmployeeDays: kristine.employeeDays,
+      kristineEmployees: kristine.employees,
+      combinedHoursCurrent: combinedCurrent,
+    };
+  });
+}
 
 const ARCHIVE_CONNECTOR =
   process.env.ARCHIVE_CONNECTOR ||
@@ -129,7 +318,9 @@ function sumMetrics(projects) {
   let hasNet = false;
 
   for (const p of projects) {
-    const h = Number(p.hoursTotal);
+    const combined = Number(p.combinedHoursCurrent);
+    const ww = Number(p.hoursTotal);
+    const h = Number.isFinite(combined) ? combined : ww;
     const n = Number(p.netInvoiced);
     if (Number.isFinite(h)) { hours += h; hasHours = true; }
     if (Number.isFinite(n)) { net += n; hasNet = true; }
@@ -208,7 +399,7 @@ function refinedProjectQuery(currentQuery, projectNumber) {
 
 function registerArchiveSearch(app) {
 
-  app.get("/archiv", async (req, res) => {
+  app.get("/gehirn", async (req, res) => {
     const q = String(req.query.q || "").trim();
     const selectedCustomerNumber = String(req.query.customer || "").trim();
 
@@ -226,9 +417,13 @@ function registerArchiveSearch(app) {
         sqlError = String(data.sqlError || "");
       } catch (err) {
         connectorError = String(err?.message || err);
-        console.error("Archiv-Connector:", err);
+        console.error("Gehirn-Connector:", err);
       }
     }
+
+    const kristineEvents = await readKristineTimeEvents();
+    const kristineHours = buildKristineProjectHours(kristineEvents);
+    allProjects = attachKristineHours(allProjects, kristineHours);
 
     const customers = uniqueCustomers(allProjects);
 
@@ -253,7 +448,7 @@ function registerArchiveSearch(app) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kristine · Archiv</title>
+<title>Kristine · Gehirn</title>
 <style>
 * { box-sizing: border-box; }
 body {
@@ -347,6 +542,19 @@ body {
   letter-spacing:.45px; margin-bottom:2px;
 }
 .metric-value { font-size:16px; font-weight:800; }
+.metric-box.clickable { cursor:pointer; border:1px solid #434b53; }
+.metric-box.clickable:hover { background:#30363d; }
+.hours-detail {
+  display:none; margin-top:12px; background:#f7f8fa; border:1px solid #e0e4e8;
+  border-radius:10px; padding:12px 14px;
+}
+.hours-detail.open { display:block; }
+.hours-detail-title { font-size:13px; font-weight:800; margin-bottom:8px; }
+.hours-note { font-size:11px; color:#6d747a; margin-top:7px; line-height:1.4; }
+.hours-table { width:100%; border-collapse:collapse; font-size:12px; }
+.hours-table th, .hours-table td { text-align:left; padding:7px 8px; border-bottom:1px solid #e3e6e9; }
+.hours-table th { color:#697077; font-size:10px; text-transform:uppercase; letter-spacing:.4px; }
+.hours-table td.num, .hours-table th.num { text-align:right; white-space:nowrap; }
 .year-metrics {
   margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; align-items:center;
 }
@@ -402,12 +610,12 @@ body {
 </head>
 <body>
 <div class="header"><div class="header-inner">
-  <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.7.0</div>
+  <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
+  <div class="status">Gehirn V0.8.0</div>
 </div></div>
 
 <div class="container">
-<form method="get" action="/archiv" class="search-box">
+<form method="get" action="/gehirn" class="search-box">
   <div class="search-row">
     <input class="search-input" name="q" autofocus autocomplete="off"
       placeholder="Projekt, Kunde, Rechnung, Adresse, Text ..." value="${esc(q)}">
@@ -424,13 +632,13 @@ ${q && projectNumbers.length ? `
   <span class="project-filter-label">Projekte gefunden:</span>
   ${projectNumbers.slice(0, 30).map(number => {
     const refine = refinedProjectQuery(q, number);
-    return `<a class="project-chip" href="/archiv?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
+    return `<a class="project-chip" href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
   }).join("")}
   ${projectNumbers.length > 30 ? `<span class="more-projects">+ ${projectNumbers.length - 30} weitere</span>` : ""}
 </div>` : ""}
 
 ${q && customers.length ? `
-<form method="get" action="/archiv" class="customer-filter">
+<form method="get" action="/gehirn" class="customer-filter">
   <input type="hidden" name="q" value="${esc(q)}">
   <span class="customer-filter-label">Kunde:</span>
   <select class="customer-select" name="customer" onchange="this.form.submit()">
@@ -446,9 +654,9 @@ ${selectedCustomer && customerTotals ? `
 <div class="customer-summary">
   <div class="customer-summary-name">${esc(selectedCustomer.label)}</div>
   <div class="customer-summary-metrics">
-    <span class="customer-summary-chip">Gesamt: <strong>${deHours(customerTotals.hours)}</strong></span>
+    <span class="customer-summary-chip">Stunden aktuell: <strong>${deHours(customerTotals.hours)}</strong></span>
     <span class="customer-summary-chip">Netto: <strong>${deMoney(customerTotals.net)}</strong></span>
-    <span class="customer-summary-chip">Umsatz/Std: <strong>${deRate(customerTotals.net, customerTotals.hours)}</strong></span>
+    <span class="customer-summary-chip">Umsatz/Std aktuell: <strong>${deRate(customerTotals.net, customerTotals.hours)}</strong></span>
   </div>
 </div>` : ""}
 ` : ""}
@@ -462,7 +670,7 @@ ${q && projects.length ? `
         <div class="project-card selectable ${i === 0 ? "primary" : ""}"
              role="button"
              tabindex="0"
-             data-href="/archiv?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}"
+             data-href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}"
              onclick="location.href=this.dataset.href"
              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href=this.dataset.href}">
           <div class="project-top">
@@ -482,16 +690,58 @@ ${q && projects.length ? `
               </div>
               <div class="project-metrics">
                 <div class="metric-box">
-                  <span class="metric-label">Ist-Stunden</span>
+                  <span class="metric-label">WW Stunden</span>
                   <span class="metric-value">${deHours(p.hoursTotal)}</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-label">Kristine produktiv</span>
+                  <span class="metric-value">${deHours(p.kristineHoursProductive)}</span>
+                </div>
+                <div class="metric-box clickable"
+                     onclick="event.stopPropagation(); toggleHoursDetail('hours-${esc(p.projectIndex)}')"
+                     title="Mitarbeiterdetails anzeigen">
+                  <span class="metric-label">Gesamt aktuell</span>
+                  <span class="metric-value">${deHours(p.combinedHoursCurrent)}</span>
                 </div>
                 <div class="metric-box">
                   <span class="metric-label">Netto abgerechnet</span>
                   <span class="metric-value">${deMoney(p.netInvoiced)}</span>
                 </div>
                 <div class="metric-box">
-                  <span class="metric-label">Umsatz / Std</span>
-                  <span class="metric-value">${deRate(p.netInvoiced, p.hoursTotal)}</span>
+                  <span class="metric-label">Umsatz / Std aktuell</span>
+                  <span class="metric-value">${deRate(p.netInvoiced, p.combinedHoursCurrent)}</span>
+                </div>
+              </div>
+              <div id="hours-${esc(p.projectIndex)}" class="hours-detail" onclick="event.stopPropagation()">
+                <div class="hours-detail-title">Kristine · Mitarbeiterzeiten Projekt ${esc(p.projectNumber)}</div>
+                ${
+                  Array.isArray(p.kristineEmployees) && p.kristineEmployees.length
+                    ? `<table class="hours-table">
+                        <thead>
+                          <tr>
+                            <th>Mitarbeiter</th>
+                            <th class="num">Roh</th>
+                            <th class="num">15 Min anteilig</th>
+                            <th class="num">Produktiv</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${p.kristineEmployees.map(emp => `
+                            <tr>
+                              <td>${esc(emp.employeeName)}</td>
+                              <td class="num">${deHours(emp.rawHours)}</td>
+                              <td class="num">− ${deHours(emp.breakHours)}</td>
+                              <td class="num"><strong>${deHours(emp.productiveHours)}</strong></td>
+                            </tr>
+                          `).join("")}
+                        </tbody>
+                      </table>`
+                    : `<div class="hours-note">Noch keine Kristine-Zeitblöcke mit exakt dieser Projektnummer gefunden.</div>`
+                }
+                <div class="hours-note">
+                  Kristine: Mittag/erfasste Pausen liegen außerhalb der Arbeitsblöcke.
+                  Zusätzlich werden 15 Minuten einmal je Mitarbeiter/Tag proportional auf dessen Projekte verteilt.
+                  WW enthält die 15-Minuten-Pause derzeit noch; deshalb ist „Gesamt aktuell“ noch vor der WW-Pausenkorrektur.
                 </div>
               </div>
             </div>
@@ -545,7 +795,7 @@ ${years.map(([year, docs]) => `
   </div>
 </section>
 `).join("")}
-` : q ? `<div class="empty">Keine passenden Dokumente gefunden.</div>` : `<div class="empty">Suche im Kristine-Archiv</div>`}
+` : q ? `<div class="empty">Keine passenden Dokumente gefunden.</div>` : `<div class="empty">Suche im Kristine-Gehirn</div>`}
 </div>
 
 <div id="pdfHoverPreview" class="pdf-hover-preview" aria-hidden="true">
@@ -553,6 +803,12 @@ ${years.map(([year, docs]) => `
 </div>
 
 <script>
+function toggleHoursDetail(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("open");
+}
+
 function showPdfHover(src) {
   if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
   const box = document.getElementById("pdfHoverPreview");
@@ -617,10 +873,16 @@ async function openArchivePdf(path) {
   app.get("/api/archive/status", (req, res) => {
     res.json({
       ok:true,
-      module:"archive-search",
-      version:"0.7.0",
-      connector:ARCHIVE_CONNECTOR
+      module:"kristine-brain",
+      version:"0.8.0",
+      connector:ARCHIVE_CONNECTOR,
+      timeEventsFile:KRISTINE_TIME_EVENTS_FILE
     });
+  });
+
+  app.get("/archiv", (req, res) => {
+    const qs = new URLSearchParams(req.query || {}).toString();
+    res.redirect(302, "/gehirn" + (qs ? "?" + qs : ""));
   });
 }
 

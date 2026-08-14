@@ -519,6 +519,61 @@ def schema_hints():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+
+@app.get("/ww-hours-schema")
+def ww_hours_schema():
+    try:
+        con = sql_connection("WinWorker_Mitschreibung_Standard")
+        cur = con.cursor()
+        rows = cur.execute("""
+            SELECT COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'dbo'
+              AND TABLE_NAME = 'Stundenmitschreibung'
+            ORDER BY ORDINAL_POSITION
+        """).fetchall()
+        con.close()
+        return jsonify({
+            "ok": True,
+            "table": "WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung",
+            "columns": [
+                {"name": row.COLUMN_NAME, "dataType": row.DATA_TYPE, "position": row.ORDINAL_POSITION}
+                for row in rows
+            ],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/ww-hours-sample/<int:project_index>")
+def ww_hours_sample(project_index):
+    try:
+        con = sql_connection("WinWorker_Mitschreibung_Standard")
+        cur = con.cursor()
+        cur.execute("""
+            SELECT TOP 5 *
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung
+            WHERE ProjektIndex = ?
+        """, project_index)
+        columns = [desc[0] for desc in cur.description]
+        rows = cur.fetchall()
+        con.close()
+
+        def safe(value):
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+            return str(value)
+
+        return jsonify({
+            "ok": True,
+            "projectIndex": project_index,
+            "columns": columns,
+            "rows": [{columns[i]: safe(row[i]) for i in range(len(columns))} for row in rows],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/search")
 def search():
     q = str(request.args.get("q", "")).strip()
