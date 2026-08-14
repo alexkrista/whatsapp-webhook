@@ -32,16 +32,22 @@ def get_sql_driver():
 
 
 def sql_connection():
+    password = os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()
+
+    if not password:
+        raise RuntimeError("KRISTINE_SQL_PASSWORD fehlt")
+
     driver = get_sql_driver()
-    parts = [
-        f"DRIVER={{{driver}}}",
-        f"SERVER={SQL_SERVER}",
-        f"DATABASE={SQL_DATABASE}",
-        "Trusted_Connection=yes",
-    ]
-    if driver.startswith("ODBC Driver"):
-        parts.append("TrustServerCertificate=yes")
-    return pyodbc.connect(";".join(parts) + ";", timeout=5)
+
+    return pyodbc.connect(
+        f"DRIVER={{{driver}}};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={SQL_DATABASE};"
+        "UID=kristine_reader;"
+        f"PWD={password};"
+        "TrustServerCertificate=yes;",
+        timeout=5
+    )
 
 
 def iso_date(value):
