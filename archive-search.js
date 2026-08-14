@@ -463,7 +463,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.6.3,
+      version:"0.6.3",
       connector:ARCHIVE_CONNECTOR
     });
   });
