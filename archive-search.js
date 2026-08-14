@@ -263,7 +263,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.9.1</div>
+  <div class="status">Archivsuche V0.9.2</div>
 </div></div>
 
 <div class="container">
@@ -425,7 +425,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.9.1",
+      version:"0.9.2",
       connector:ARCHIVE_CONNECTOR
     });
   });

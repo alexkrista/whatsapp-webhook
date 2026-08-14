@@ -108,47 +108,58 @@ def project_metrics(project_indices):
         print("SQL Stunden-Metrik FEHLER:", repr(e))
 
     # 2) Aktueller Netto-Abrechnungsstand
+    #
+    # WinWorker liefert dieselbe Rechnungsnummer mehrfach (z. B. Buchart 6/7
+    # oder neu gedruckte/geänderte Versionen). Für die Archivkarte zählt
+    # JEDE RECHNUNGSNUMMER NUR EINMAL.
+    #
+    # Vorgehen:
+    # - alle Buch-/Rechnungszeilen des Projekts holen
+    # - pro sBuchNummer nur eine aktuelle/eindeutige Netto-Zeile bestimmen
+    # - erst danach summieren
     try:
         con = sql_connection("WinWorker_Projekte_Standard")
         cur = con.cursor()
         sql = f"""
-            WITH LatestBooks AS (
+            WITH InvoiceRows AS (
                 SELECT
                     b.ProjektIndex,
                     LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
-                    b.gID,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY b.ProjektIndex, LTRIM(RTRIM(b.sBuchNummer))
-                        ORDER BY
-                            COALESCE(
-                                b.Geändert,
-                                b.dzInhaltGeaendert,
-                                b.dzDocDatum,
-                                b.Aufgenommen
-                            ) DESC,
-                            b.gID DESC
-                    ) AS rn
+                    r.cUmsatzNetto,
+                    COALESCE(
+                        b.Geändert,
+                        b.dzInhaltGeaendert,
+                        b.dzDocDatum,
+                        b.Aufgenommen
+                    ) AS VersionZeit,
+                    b.gID
                 FROM dbo.[Bücher] AS b
+                INNER JOIN dbo.Rechnung AS r
+                    ON r.gBuchID = b.gID
                 WHERE b.ProjektIndex IN ({placeholders})
                   AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
                   AND ISNULL(b.Storno, 0) = 0
+                  AND r.cUmsatzNetto IS NOT NULL
             ),
-            InvoiceNet AS (
+            LatestPerInvoiceNumber AS (
                 SELECT
-                    r.gBuchID,
-                    MAX(CAST(r.cUmsatzNetto AS decimal(18,2))) AS Netto
-                FROM dbo.Rechnung AS r
-                WHERE r.gBuchID IS NOT NULL
-                GROUP BY r.gBuchID
+                    ProjektIndex,
+                    sBuchNummer,
+                    cUmsatzNetto,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ProjektIndex, sBuchNummer
+                        ORDER BY
+                            VersionZeit DESC,
+                            gID DESC
+                    ) AS rn
+                FROM InvoiceRows
             )
             SELECT
-                lb.ProjektIndex,
-                SUM(inv.Netto) AS NettoAbgerechnet
-            FROM LatestBooks AS lb
-            INNER JOIN InvoiceNet AS inv
-                ON inv.gBuchID = lb.gID
-            WHERE lb.rn = 1
-            GROUP BY lb.ProjektIndex
+                ProjektIndex,
+                SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoAbgerechnet
+            FROM LatestPerInvoiceNumber
+            WHERE rn = 1
+            GROUP BY ProjektIndex
         """
         rows = cur.execute(sql, *ids).fetchall()
         con.close()
@@ -422,7 +433,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.1",
+        "version": "0.9.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -443,6 +454,50 @@ def project_metrics_debug(project_index):
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/project-invoices/<int:project_index>")
+def project_invoices_debug(project_index):
+    try:
+        con = sql_connection("WinWorker_Projekte_Standard")
+        cur = con.cursor()
+        rows = cur.execute("""
+            SELECT
+                b.sBuchNummer,
+                b.Buchart,
+                b.gID,
+                b.dzDocDatum,
+                b.Geändert,
+                r.cUmsatzNetto,
+                r.dzRechnungsdatum
+            FROM dbo.[Bücher] AS b
+            LEFT JOIN dbo.Rechnung AS r
+                ON r.gBuchID = b.gID
+            WHERE b.ProjektIndex = ?
+              AND ISNULL(b.Storno, 0) = 0
+              AND r.cUmsatzNetto IS NOT NULL
+            ORDER BY
+                b.sBuchNummer,
+                COALESCE(b.Geändert, b.dzInhaltGeaendert, b.dzDocDatum, b.Aufgenommen) DESC,
+                b.gID DESC
+        """, project_index).fetchall()
+        con.close()
+
+        items = []
+        for row in rows:
+            items.append({
+                "sBuchNummer": row.sBuchNummer,
+                "Buchart": row.Buchart,
+                "gID": str(row.gID) if row.gID is not None else None,
+                "dzDocDatum": clean_date(row.dzDocDatum),
+                "Geaendert": clean_date(row.Geändert),
+                "cUmsatzNetto": float(row.cUmsatzNetto) if row.cUmsatzNetto is not None else None,
+                "dzRechnungsdatum": clean_date(row.dzRechnungsdatum),
+            })
+        return jsonify({"ok": True, "projectIndex": project_index, "rows": items})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 @app.get("/schema-hints")
@@ -538,7 +593,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.1 - Stundenfix über qualifizierte Cross-DB-Abfrage")
+    print("Version: 0.9.2 - Stundenfix + Netto dedupliziert je Rechnungsnummer")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
