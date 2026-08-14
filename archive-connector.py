@@ -5,6 +5,7 @@ from io import BytesIO
 from datetime import datetime
 import os
 import re
+import json
 
 import pymupdf
 import pyodbc
@@ -15,6 +16,8 @@ DB = Path(r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
 SQL_SERVER = r"SRV-DB01\WINWORKER"
 SQL_DATABASE = "WinWorker_Projekte_Standard"
 SQL_USER = "kristine_reader"
+
+SCHEMA_INDEX_FILE = DB.parent / "winworker_sql_structure_index.json"
 
 
 def get_sql_driver():
@@ -53,6 +56,245 @@ def clean_date(value):
     if hasattr(value, "date"):
         return value.date().isoformat()
     return str(value)
+
+
+
+
+def _schema_safe_name(value):
+    value = str(value or "")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", value):
+        raise ValueError(f"Unsicherer SQL-Name: {value}")
+    return value
+
+
+def build_winworker_schema_index():
+    """
+    Baut einen reinen STRUKTURINDEX der WinWorker-SQL-Landschaft.
+    Keine Geschäftsdaten werden kopiert.
+
+    Erfasst – soweit der Reader darauf zugreifen darf:
+    - Datenbanken WinWorker_*
+    - Tabellen und Views
+    - Spalten + Datentyp + NULL
+    - Primärschlüssel
+    - Fremdschlüssel
+    - normale/unique Indizes
+
+    Nicht erreichbare Datenbanken werden protokolliert und übersprungen.
+    """
+    master = sql_connection("master")
+    cur = master.cursor()
+    db_rows = cur.execute("""
+        SELECT name
+        FROM sys.databases
+        WHERE name LIKE 'WinWorker[_]%'
+          AND state_desc = 'ONLINE'
+        ORDER BY name
+    """).fetchall()
+    master.close()
+
+    db_names = [str(row.name) for row in db_rows]
+    result = {
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "server": SQL_SERVER,
+        "databaseCount": len(db_names),
+        "databases": [],
+        "errors": [],
+    }
+
+    for db_name in db_names:
+        db_name = _schema_safe_name(db_name)
+        db_item = {
+            "name": db_name,
+            "objects": [],
+            "foreignKeys": [],
+            "indexes": [],
+        }
+        try:
+            con = sql_connection(db_name)
+            cur = con.cursor()
+
+            # Tables + views + columns + PK flag.
+            rows = cur.execute("""
+                SELECT
+                    s.name AS schema_name,
+                    o.name AS object_name,
+                    CASE o.type WHEN 'U' THEN 'TABLE' WHEN 'V' THEN 'VIEW' ELSE o.type_desc END AS object_type,
+                    c.column_id,
+                    c.name AS column_name,
+                    t.name AS data_type,
+                    c.max_length,
+                    c.precision,
+                    c.scale,
+                    c.is_nullable,
+                    CASE WHEN pk.column_id IS NULL THEN 0 ELSE 1 END AS is_primary_key
+                FROM sys.objects o
+                JOIN sys.schemas s ON s.schema_id = o.schema_id
+                JOIN sys.columns c ON c.object_id = o.object_id
+                JOIN sys.types t ON t.user_type_id = c.user_type_id
+                LEFT JOIN (
+                    SELECT ic.object_id, ic.column_id
+                    FROM sys.indexes i
+                    JOIN sys.index_columns ic
+                      ON ic.object_id = i.object_id
+                     AND ic.index_id = i.index_id
+                    WHERE i.is_primary_key = 1
+                ) pk
+                  ON pk.object_id = c.object_id
+                 AND pk.column_id = c.column_id
+                WHERE o.type IN ('U','V')
+                  AND o.is_ms_shipped = 0
+                ORDER BY s.name, o.name, c.column_id
+            """).fetchall()
+
+            object_map = {}
+            for row in rows:
+                key = (str(row.schema_name), str(row.object_name), str(row.object_type))
+                if key not in object_map:
+                    object_map[key] = {
+                        "schema": key[0],
+                        "name": key[1],
+                        "type": key[2],
+                        "columns": [],
+                    }
+                object_map[key]["columns"].append({
+                    "ordinal": int(row.column_id),
+                    "name": str(row.column_name),
+                    "dataType": str(row.data_type),
+                    "maxLength": int(row.max_length) if row.max_length is not None else None,
+                    "precision": int(row.precision) if row.precision is not None else None,
+                    "scale": int(row.scale) if row.scale is not None else None,
+                    "nullable": bool(row.is_nullable),
+                    "primaryKey": bool(row.is_primary_key),
+                })
+            db_item["objects"] = list(object_map.values())
+
+            # Foreign keys.
+            fk_rows = cur.execute("""
+                SELECT
+                    fk.name AS fk_name,
+                    ps.name AS parent_schema,
+                    pt.name AS parent_table,
+                    pc.name AS parent_column,
+                    rs.name AS ref_schema,
+                    rt.name AS ref_table,
+                    rc.name AS ref_column
+                FROM sys.foreign_keys fk
+                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
+                JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+                JOIN sys.columns pc
+                  ON pc.object_id = fkc.parent_object_id
+                 AND pc.column_id = fkc.parent_column_id
+                JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+                JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+                JOIN sys.columns rc
+                  ON rc.object_id = fkc.referenced_object_id
+                 AND rc.column_id = fkc.referenced_column_id
+                ORDER BY fk.name, fkc.constraint_column_id
+            """).fetchall()
+            db_item["foreignKeys"] = [{
+                "name": str(r.fk_name),
+                "from": f"{r.parent_schema}.{r.parent_table}.{r.parent_column}",
+                "to": f"{r.ref_schema}.{r.ref_table}.{r.ref_column}",
+            } for r in fk_rows]
+
+            # Indexes: useful for identifying stable keys even where no FK exists.
+            idx_rows = cur.execute("""
+                SELECT
+                    s.name AS schema_name,
+                    t.name AS table_name,
+                    i.name AS index_name,
+                    i.is_unique,
+                    i.is_primary_key,
+                    c.name AS column_name,
+                    ic.key_ordinal
+                FROM sys.indexes i
+                JOIN sys.tables t ON t.object_id = i.object_id
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                JOIN sys.index_columns ic
+                  ON ic.object_id = i.object_id
+                 AND ic.index_id = i.index_id
+                JOIN sys.columns c
+                  ON c.object_id = ic.object_id
+                 AND c.column_id = ic.column_id
+                WHERE i.name IS NOT NULL
+                  AND i.is_hypothetical = 0
+                ORDER BY s.name, t.name, i.name, ic.key_ordinal, c.column_id
+            """).fetchall()
+            idx_map = {}
+            for r in idx_rows:
+                key = (str(r.schema_name), str(r.table_name), str(r.index_name))
+                idx_map.setdefault(key, {
+                    "schema": key[0],
+                    "table": key[1],
+                    "name": key[2],
+                    "unique": bool(r.is_unique),
+                    "primaryKey": bool(r.is_primary_key),
+                    "columns": [],
+                })
+                idx_map[key]["columns"].append(str(r.column_name))
+            db_item["indexes"] = list(idx_map.values())
+
+            con.close()
+        except Exception as e:
+            db_item["error"] = str(e)
+            result["errors"].append({"database": db_name, "error": str(e)})
+
+        db_item["objectCount"] = len(db_item["objects"])
+        db_item["columnCount"] = sum(len(obj["columns"]) for obj in db_item["objects"])
+        result["databases"].append(db_item)
+
+    SCHEMA_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SCHEMA_INDEX_FILE.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    return result
+
+
+def load_winworker_schema_index():
+    if not SCHEMA_INDEX_FILE.exists():
+        return None
+    try:
+        return json.loads(SCHEMA_INDEX_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def search_winworker_schema_index(query, limit=100):
+    index = load_winworker_schema_index()
+    if not index:
+        return {"ok": False, "error": "SQL-Strukturindex fehlt. Zuerst /schema-index/rebuild aufrufen."}
+
+    terms = [t for t in re.split(r"\\s+", str(query or "").strip().lower()) if t]
+    if not terms:
+        return {"ok": True, "query": query, "hits": [], "generatedAt": index.get("generatedAt")}
+
+    hits = []
+    for db in index.get("databases", []):
+        db_name = str(db.get("name") or "")
+        for obj in db.get("objects", []):
+            schema = str(obj.get("schema") or "")
+            name = str(obj.get("name") or "")
+            for col in obj.get("columns", []):
+                col_name = str(col.get("name") or "")
+                hay = f"{db_name} {schema} {name} {col_name} {col.get('dataType','')}".lower()
+                if all(term in hay for term in terms):
+                    hits.append({
+                        "database": db_name,
+                        "schema": schema,
+                        "object": name,
+                        "objectType": obj.get("type"),
+                        "column": col_name,
+                        "dataType": col.get("dataType"),
+                        "nullable": col.get("nullable"),
+                        "primaryKey": col.get("primaryKey"),
+                    })
+                    if len(hits) >= max(1, min(int(limit or 100), 500)):
+                        return {"ok": True, "query": query, "hits": hits, "generatedAt": index.get("generatedAt")}
+
+    return {"ok": True, "query": query, "hits": hits, "generatedAt": index.get("generatedAt")}
 
 
 
@@ -438,7 +680,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.4",
+        "version": "0.9.5",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -653,7 +895,9 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.4 - Kunde + Stunden + Netto + Kundenjahr")
+    print("Version: 0.9.5 - Kunde + Stunden + Netto + SQL-Strukturindex")
+    print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
+    print("Schema-Index search : http://127.0.0.1:5051/schema-index/search?q=personalnummer")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
