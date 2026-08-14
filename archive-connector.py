@@ -438,7 +438,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.3",
+        "version": "0.9.4",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -598,7 +598,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.3 - Kundennummer-Sortierung + Stunden + Netto")
+    print("Version: 0.9.4 - Kunde + Stunden + Netto + Kundenjahr")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)

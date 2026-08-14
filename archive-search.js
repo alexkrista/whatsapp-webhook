@@ -84,6 +84,81 @@ function deMoney(value) {
   });
 }
 
+function deRate(net, hours) {
+  const n = Number(net);
+  const h = Number(hours);
+  if (!Number.isFinite(n) || !Number.isFinite(h) || h <= 0) return "–";
+  return (n / h).toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }) + "/h";
+}
+
+function customerLabel(p) {
+  const number = String(p.customerNumber ?? "").trim();
+  const name = String(p.company || p.customer || "").trim();
+  const address = [p.street, p.postalCode, p.city]
+    .map(x => String(x || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return [number, name, address].filter(Boolean).join(" · ");
+}
+
+function uniqueCustomers(projects) {
+  const map = new Map();
+  for (const p of projects) {
+    const number = String(p.customerNumber ?? "").trim();
+    if (!number) continue;
+    if (!map.has(number)) map.set(number, p);
+  }
+  return [...map.entries()]
+    .map(([number, p]) => ({ number, label: customerLabel(p) }))
+    .sort((a, b) => {
+      const an = Number(a.number), bn = Number(b.number);
+      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      return a.number.localeCompare(b.number, "de");
+    });
+}
+
+function sumMetrics(projects) {
+  let hours = 0;
+  let net = 0;
+  let hasHours = false;
+  let hasNet = false;
+
+  for (const p of projects) {
+    const h = Number(p.hoursTotal);
+    const n = Number(p.netInvoiced);
+    if (Number.isFinite(h)) { hours += h; hasHours = true; }
+    if (Number.isFinite(n)) { net += n; hasNet = true; }
+  }
+
+  return {
+    hours: hasHours ? hours : null,
+    net: hasNet ? net : null,
+    rate: hasHours && hasNet && hours > 0 ? net / hours : null
+  };
+}
+
+function metricsByLastDateYear(projects) {
+  const map = new Map();
+  for (const p of projects) {
+    const m = String(p.lastDate || "").match(/^(\\d{4})/);
+    if (!m) continue;
+    const year = m[1];
+    if (!map.has(year)) map.set(year, []);
+    map.get(year).push(p);
+  }
+
+  const result = new Map();
+  for (const [year, rows] of map.entries()) {
+    result.set(year, sumMetrics(rows));
+  }
+  return result;
+}
+
 function groupDocuments(documents) {
   const byYear = new Map();
   for (const d of documents) {
@@ -135,7 +210,9 @@ function registerArchiveSearch(app) {
 
   app.get("/archiv", async (req, res) => {
     const q = String(req.query.q || "").trim();
+    const selectedCustomerNumber = String(req.query.customer || "").trim();
 
+    let allProjects = [];
     let projects = [];
     let documents = [];
     let sqlError = "";
@@ -144,7 +221,7 @@ function registerArchiveSearch(app) {
     if (q) {
       try {
         const data = await searchArchiveConnector(q);
-        projects = Array.isArray(data.projects) ? data.projects : [];
+        allProjects = Array.isArray(data.projects) ? data.projects : [];
         documents = Array.isArray(data.documents) ? data.documents : [];
         sqlError = String(data.sqlError || "");
       } catch (err) {
@@ -153,9 +230,22 @@ function registerArchiveSearch(app) {
       }
     }
 
+    const customers = uniqueCustomers(allProjects);
+
+    projects = selectedCustomerNumber
+      ? allProjects.filter(p => String(p.customerNumber ?? "").trim() === selectedCustomerNumber)
+      : allProjects;
+
     const years = groupDocuments(documents);
     const typeCounts = countDocumentTypes(documents);
     const projectNumbers = uniqueProjectNumbers(projects);
+
+    const selectedCustomer = selectedCustomerNumber
+      ? customers.find(c => c.number === selectedCustomerNumber)
+      : null;
+
+    const customerTotals = selectedCustomer ? sumMetrics(projects) : null;
+    const customerYearMetrics = selectedCustomer ? metricsByLastDateYear(projects) : new Map();
 
     const html = `
 <!doctype html>
@@ -228,16 +318,42 @@ body {
 .project-dates { display:flex; gap:22px; flex-wrap:wrap; color:#555; font-size:14px; }
 .date-box { background:#f6f7f8; border-radius:8px; padding:9px 12px; min-width:130px; }
 .date-label { display:block; color:#8a8f95; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
-.project-metrics { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.more-projects { margin-top:7px; color:#777; font-size:13px; }
+
+.customer-filter {
+  margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+}
+.customer-filter-label { font-size:13px; font-weight:750; color:#62686e; }
+.customer-select {
+  min-width:min(680px,100%); max-width:100%; border:1px solid #d1d7dc; border-radius:9px;
+  background:white; padding:9px 12px; font-size:13px; color:#28323b;
+}
+.customer-summary {
+  margin-top:12px; background:#20242a; color:white; border-radius:12px; padding:14px 16px;
+  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+}
+.customer-summary-name { font-size:14px; font-weight:800; }
+.customer-summary-metrics { display:flex; gap:10px; flex-wrap:wrap; }
+.customer-summary-chip {
+  background:#30363d; border:1px solid #424a52; border-radius:8px; padding:7px 10px;
+  font-size:12px; white-space:nowrap;
+}
+.project-metrics { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
 .metric-box {
-  background:#20242a; color:white; border-radius:9px; padding:9px 12px; min-width:145px;
+  background:#20242a; color:white; border-radius:8px; padding:8px 10px; min-width:126px;
 }
 .metric-label {
-  display:block; color:#bfc6cc; font-size:11px; text-transform:uppercase;
-  letter-spacing:.5px; margin-bottom:2px;
+  display:block; color:#bfc6cc; font-size:10px; text-transform:uppercase;
+  letter-spacing:.45px; margin-bottom:2px;
 }
-.metric-value { font-size:17px; font-weight:800; }
-.more-projects { margin-top:7px; color:#777; font-size:13px; }
+.metric-value { font-size:16px; font-weight:800; }
+.year-metrics {
+  margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; align-items:center;
+}
+.year-metric {
+  background:#20242a; color:white; border-radius:999px; padding:5px 9px;
+  font-size:11px; white-space:nowrap;
+}
 
 .doc-summary { margin:26px 0 18px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
 .summary-title { font-weight:750; margin-right:5px; }
@@ -287,7 +403,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.6.3</div>
+  <div class="status">Archivsuche V0.7.0</div>
 </div></div>
 
 <div class="container">
@@ -308,10 +424,34 @@ ${q && projectNumbers.length ? `
   <span class="project-filter-label">Projekte gefunden:</span>
   ${projectNumbers.slice(0, 30).map(number => {
     const refine = refinedProjectQuery(q, number);
-    return `<a class="project-chip" href="/archiv?q=${encodeURIComponent(refine)}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
+    return `<a class="project-chip" href="/archiv?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
   }).join("")}
   ${projectNumbers.length > 30 ? `<span class="more-projects">+ ${projectNumbers.length - 30} weitere</span>` : ""}
 </div>` : ""}
+
+${q && customers.length ? `
+<form method="get" action="/archiv" class="customer-filter">
+  <input type="hidden" name="q" value="${esc(q)}">
+  <span class="customer-filter-label">Kunde:</span>
+  <select class="customer-select" name="customer" onchange="this.form.submit()">
+    <option value="">Alle Kunden (${customers.length})</option>
+    ${customers.map(c => `
+      <option value="${esc(c.number)}" ${c.number === selectedCustomerNumber ? "selected" : ""}>
+        ${esc(c.label)}
+      </option>
+    `).join("")}
+  </select>
+</form>
+${selectedCustomer && customerTotals ? `
+<div class="customer-summary">
+  <div class="customer-summary-name">${esc(selectedCustomer.label)}</div>
+  <div class="customer-summary-metrics">
+    <span class="customer-summary-chip">Gesamt: <strong>${deHours(customerTotals.hours)}</strong></span>
+    <span class="customer-summary-chip">Netto: <strong>${deMoney(customerTotals.net)}</strong></span>
+    <span class="customer-summary-chip">Umsatz/Std: <strong>${deRate(customerTotals.net, customerTotals.hours)}</strong></span>
+  </div>
+</div>` : ""}
+` : ""}
 
 ${q && projects.length ? `
 <div class="project-section">
@@ -322,7 +462,7 @@ ${q && projects.length ? `
         <div class="project-card selectable ${i === 0 ? "primary" : ""}"
              role="button"
              tabindex="0"
-             data-href="/archiv?q=${encodeURIComponent(refine)}"
+             data-href="/archiv?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}"
              onclick="location.href=this.dataset.href"
              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href=this.dataset.href}">
           <div class="project-top">
@@ -349,6 +489,10 @@ ${q && projects.length ? `
                   <span class="metric-label">Netto abgerechnet</span>
                   <span class="metric-value">${deMoney(p.netInvoiced)}</span>
                 </div>
+                <div class="metric-box">
+                  <span class="metric-label">Umsatz / Std</span>
+                  <span class="metric-value">${deRate(p.netInvoiced, p.hoursTotal)}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -366,7 +510,18 @@ ${q && documents.length ? `
 
 ${years.map(([year, docs]) => `
 <section class="year-section">
-  <div class="year-heading"><div class="year-number">${esc(year)}</div><div class="year-count">${docs.length} Dokumente · letzter Druck zuerst</div></div>
+  <div class="year-heading">
+    <div class="year-number">${esc(year)}</div>
+    <div class="year-count">${docs.length} Dokumente · letzter Druck zuerst</div>
+    ${selectedCustomer && customerYearMetrics.has(String(year)) ? (() => {
+      const ym = customerYearMetrics.get(String(year));
+      return `<div class="year-metrics">
+        <span class="year-metric">${deHours(ym.hours)}</span>
+        <span class="year-metric">${deMoney(ym.net)}</span>
+        <span class="year-metric">${deRate(ym.net, ym.hours)}</span>
+      </div>`;
+    })() : ""}
+  </div>
   <div class="doc-grid">
     ${docs.map(d => `
       <article class="doc-card" data-path="${esc(d.path)}" onclick="openArchivePdf(this.dataset.path)">
@@ -463,7 +618,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.6.3",
+      version:"0.7.0",
       connector:ARCHIVE_CONNECTOR
     });
   });
