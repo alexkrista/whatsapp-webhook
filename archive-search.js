@@ -10,6 +10,10 @@ const KRISTINE_TIME_EVENTS_FILE =
   process.env.KRISTINE_TIME_EVENTS_FILE ||
   path.join(DATA_DIR, "_kristine", "time-events.json");
 
+const KRISTINE_EMPLOYEES_FILE =
+  process.env.KRISTINE_EMPLOYEES_FILE ||
+  path.join(DATA_DIR, "_system", "employees.json");
+
 function brainMinutesFromHM(value) {
   const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
   if (!m) return null;
@@ -33,12 +37,66 @@ async function readKristineTimeEvents() {
   }
 }
 
-function buildKristineProjectHours(events) {
+
+async function readKristineEmployees() {
+  try {
+    const raw = await fsp.readFile(KRISTINE_EMPLOYEES_FILE, "utf8");
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function finkNumberOf(employee) {
+  return String(
+    employee?.finkzeitPersonnelNumber ||
+    employee?.finkzeitPersonalNumber ||
+    employee?.personalnummerFinkzeit ||
+    employee?.personalNumberFinkzeit ||
+    employee?.personnelNumber ||
+    employee?.personalNumber ||
+    ""
+  ).trim();
+}
+
+function normalizeFinkKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d+$/.test(raw)) return raw.replace(/^0+(?=\d)/, "");
+  return raw.toLowerCase();
+}
+
+function buildEmployeeIdentityMap(employees) {
+  const byId = new Map();
+  for (const employee of Array.isArray(employees) ? employees : []) {
+    const id = String(employee?.id || employee?.employeeId || "").trim();
+    if (!id) continue;
+    byId.set(id, {
+      employeeId: id,
+      employeeName: String(employee?.nickname || employee?.name || employee?.employeeName || id).trim(),
+      finkNumber: finkNumberOf(employee),
+      finkKey: normalizeFinkKey(finkNumberOf(employee)),
+    });
+  }
+  return byId;
+}
+
+
+function buildKristineProjectHours(events, employeeIdentityMap) {
   const groups = new Map();
 
   for (const row of Array.isArray(events) ? events : []) {
     const employeeId = String(row?.employeeId || "").trim();
-    const employeeName = String(row?.employeeName || employeeId || "Unbekannt").trim();
+    const identity = employeeIdentityMap?.get(employeeId) || null;
+    const employeeName = String(
+      row?.employeeName ||
+      identity?.employeeName ||
+      employeeId ||
+      "Unbekannt"
+    ).trim();
+    const finkNumber = String(identity?.finkNumber || "").trim();
+    const finkKey = String(identity?.finkKey || "").trim();
     const date = String(row?.date || "").slice(0, 10);
     const atMinutes = brainMinutesFromHM(row?.at);
     if (!employeeId || !date || atMinutes === null) continue;
@@ -49,6 +107,8 @@ function buildKristineProjectHours(events) {
       ...row,
       _employeeId: employeeId,
       _employeeName: employeeName,
+      _finkNumber: finkNumber,
+      _finkKey: finkKey,
       _date: date,
       _minutes: atMinutes,
     });
@@ -94,6 +154,8 @@ function buildKristineProjectHours(events) {
       dayWork.push({
         employeeId: row._employeeId,
         employeeName: row._employeeName,
+        finkNumber: row._finkNumber,
+        finkKey: row._finkKey,
         date: row._date,
         jobId,
         minutes: duration,
@@ -121,6 +183,8 @@ function buildKristineProjectHours(events) {
         project.employees.set(work.employeeId, {
           employeeId: work.employeeId,
           employeeName: work.employeeName,
+          finkNumber: work.finkNumber,
+          finkKey: work.finkKey,
           rawMinutes: 0,
           productiveMinutes: 0,
           breakMinutesAllocated: 0,
@@ -148,6 +212,8 @@ function buildKristineProjectHours(events) {
         .map(emp => ({
           employeeId: emp.employeeId,
           employeeName: emp.employeeName,
+          finkNumber: emp.finkNumber,
+          finkKey: emp.finkKey,
           rawHours: emp.rawMinutes / 60,
           productiveHours: emp.productiveMinutes / 60,
           breakHours: emp.breakMinutesAllocated / 60,
@@ -160,10 +226,90 @@ function buildKristineProjectHours(events) {
     });
   }
 
-  return result;
+  const dayPresence = new Set();
+  for (const rows of groups.values()) {
+    const first = rows[0];
+    if (!first) continue;
+    const finkKey = String(first._finkKey || "").trim();
+    if (finkKey) dayPresence.add(`${finkKey}|${first._date}`);
+  }
+
+  return { projectHours: result, dayPresence };
 }
 
-function attachKristineHours(projects, kristineHours) {
+async function loadWwHoursFusionSource(projects) {
+  const projectIndices = [...new Set(
+    (projects || [])
+      .map(p => Number(p.projectIndex))
+      .filter(Number.isInteger)
+  )];
+
+  if (!projectIndices.length) return [];
+
+  const response = await fetch(`${ARCHIVE_CONNECTOR}/hours-fusion-source`, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ projectIndices })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || `Stundenfusion HTTP ${response.status}`);
+  }
+  return Array.isArray(data.rows) ? data.rows : [];
+}
+
+function groupWwFusionRows(rows, kristineDayPresence) {
+  const byProjectIndex = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const projectIndex = Number(row?.projectIndex);
+    if (!Number.isInteger(projectIndex)) continue;
+
+    const finkKey = normalizeFinkKey(row?.finkNumber);
+    const date = String(row?.date || "").slice(0, 10);
+    const overriddenByKristine = Boolean(
+      finkKey && date && kristineDayPresence?.has(`${finkKey}|${date}`)
+    );
+
+    if (!byProjectIndex.has(projectIndex)) {
+      byProjectIndex.set(projectIndex, {
+        rawHours: 0,
+        netHoursBeforeOverride: 0,
+        breakHours: 0,
+        effectiveHours: 0,
+        overriddenHours: 0,
+        rows: [],
+      });
+    }
+
+    const group = byProjectIndex.get(projectIndex);
+    const rawHours = Number(row?.rawHours || 0);
+    const netHours = Number(row?.netHours || 0);
+    const breakHours = Number(row?.breakHours || 0);
+
+    group.rawHours += rawHours;
+    group.netHoursBeforeOverride += netHours;
+    group.breakHours += breakHours;
+
+    if (overriddenByKristine) group.overriddenHours += netHours;
+    else group.effectiveHours += netHours;
+
+    group.rows.push({
+      ...row,
+      finkKey,
+      overriddenByKristine,
+    });
+  }
+
+  return byProjectIndex;
+}
+
+function attachKristineHours(projects, kristineBundle, wwFusionByProject) {
+  const kristineHours = kristineBundle?.projectHours || new Map();
   return (projects || []).map(project => {
     const number = normalizeJobId(project.projectNumber);
     const kristine = kristineHours.get(number) || {
@@ -174,12 +320,27 @@ function attachKristineHours(projects, kristineHours) {
       employees: [],
     };
 
-    const wwHours = Number(project.hoursTotal);
-    const wwValid = Number.isFinite(wwHours);
-    const combinedCurrent = (wwValid ? wwHours : 0) + Number(kristine.productiveHours || 0);
+    const ww = wwFusionByProject?.get(Number(project.projectIndex)) || {
+      rawHours: Number(project.hoursTotal || 0),
+      netHoursBeforeOverride: Number(project.hoursTotal || 0),
+      breakHours: 0,
+      effectiveHours: Number(project.hoursTotal || 0),
+      overriddenHours: 0,
+      rows: [],
+    };
+
+    const combinedCurrent =
+      Number(ww.effectiveHours || 0) +
+      Number(kristine.productiveHours || 0);
 
     return {
       ...project,
+      wwHoursRaw: ww.rawHours,
+      wwHoursAfterBreak: ww.netHoursBeforeOverride,
+      wwBreakHours: ww.breakHours,
+      wwHoursEffective: ww.effectiveHours,
+      wwHoursOverriddenByKristine: ww.overriddenHours,
+      wwFusionRows: ww.rows,
       kristineHoursRaw: kristine.rawHours,
       kristineHoursProductive: kristine.productiveHours,
       kristineBreakHours: kristine.breakHours,
@@ -421,9 +582,33 @@ function registerArchiveSearch(app) {
       }
     }
 
-    const kristineEvents = await readKristineTimeEvents();
-    const kristineHours = buildKristineProjectHours(kristineEvents);
-    allProjects = attachKristineHours(allProjects, kristineHours);
+    const [kristineEvents, kristineEmployees] = await Promise.all([
+      readKristineTimeEvents(),
+      readKristineEmployees(),
+    ]);
+    const employeeIdentityMap = buildEmployeeIdentityMap(kristineEmployees);
+    const kristineBundle = buildKristineProjectHours(kristineEvents, employeeIdentityMap);
+
+    let wwFusionRows = [];
+    if (allProjects.length) {
+      try {
+        wwFusionRows = await loadWwHoursFusionSource(allProjects);
+      } catch (err) {
+        const msg = String(err?.message || err);
+        sqlError = [sqlError, `Stundenfusion: ${msg}`].filter(Boolean).join(" · ");
+        console.error("Gehirn-Stundenfusion:", err);
+      }
+    }
+
+    const wwFusionByProject = groupWwFusionRows(
+      wwFusionRows,
+      kristineBundle.dayPresence
+    );
+    allProjects = attachKristineHours(
+      allProjects,
+      kristineBundle,
+      wwFusionByProject
+    );
 
     const customers = uniqueCustomers(allProjects);
 
@@ -611,7 +796,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
-  <div class="status">Gehirn V0.8.0</div>
+  <div class="status">Gehirn V0.10.1 · Stundenfusion</div>
 </div></div>
 
 <div class="container">
@@ -690,8 +875,8 @@ ${q && projects.length ? `
               </div>
               <div class="project-metrics">
                 <div class="metric-box">
-                  <span class="metric-label">WW Stunden</span>
-                  <span class="metric-value">${deHours(p.hoursTotal)}</span>
+                  <span class="metric-label">WW netto</span>
+                  <span class="metric-value">${deHours(p.wwHoursEffective)}</span>
                 </div>
                 <div class="metric-box">
                   <span class="metric-label">Kristine produktiv</span>
@@ -713,7 +898,38 @@ ${q && projects.length ? `
                 </div>
               </div>
               <div id="hours-${esc(p.projectIndex)}" class="hours-detail" onclick="event.stopPropagation()">
-                <div class="hours-detail-title">Kristine · Mitarbeiterzeiten Projekt ${esc(p.projectNumber)}</div>
+                <div class="hours-detail-title">Stundenfusion · Projekt ${esc(p.projectNumber)}</div>
+                ${
+                  Array.isArray(p.wwFusionRows) && p.wwFusionRows.length
+                    ? `<div class="hours-detail-title" style="margin-top:4px">WinWorker</div>
+                       <table class="hours-table">
+                        <thead>
+                          <tr>
+                            <th>MA</th>
+                            <th>Tag</th>
+                            <th class="num">Roh</th>
+                            <th class="num">15 Min anteilig</th>
+                            <th class="num">WW netto</th>
+                            <th>Wertung</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${p.wwFusionRows.map(row => `
+                            <tr>
+                              <td>${esc(row.employeeName || ("MAIndex " + row.maIndex))}${row.finkNumber ? ` · #${esc(row.finkNumber)}` : ""}</td>
+                              <td>${deDate(row.date)}</td>
+                              <td class="num">${deHours(row.rawHours)}</td>
+                              <td class="num">− ${deHours(row.breakHours)}</td>
+                              <td class="num">${deHours(row.netHours)}</td>
+                              <td>${row.overriddenByKristine ? "<strong>KRISTINE gewinnt</strong>" : "WW zählt"}</td>
+                            </tr>
+                          `).join("")}
+                        </tbody>
+                       </table>`
+                    : `<div class="hours-note">Keine WinWorker-Stunden für dieses Projekt gefunden.</div>`
+                }
+
+                <div class="hours-detail-title" style="margin-top:14px">KRISTINE</div>
                 ${
                   Array.isArray(p.kristineEmployees) && p.kristineEmployees.length
                     ? `<table class="hours-table">
@@ -739,9 +955,10 @@ ${q && projects.length ? `
                     : `<div class="hours-note">Noch keine Kristine-Zeitblöcke mit exakt dieser Projektnummer gefunden.</div>`
                 }
                 <div class="hours-note">
-                  Kristine: Mittag/erfasste Pausen liegen außerhalb der Arbeitsblöcke.
-                  Zusätzlich werden 15 Minuten einmal je Mitarbeiter/Tag proportional auf dessen Projekte verteilt.
-                  WW enthält die 15-Minuten-Pause derzeit noch; deshalb ist „Gesamt aktuell“ noch vor der WW-Pausenkorrektur.
+                  Fusion: WinWorker erhält zuerst den 15-Minuten-Abzug einmal je Mitarbeiter/Tag,
+                  proportional auf dessen produktive Projekte verteilt. Existiert derselbe Mitarbeiter/Tag
+                  in KRISTINE (Abgleich über Fink-Personalnummer), wird dieser WW-Tag nicht gezählt;
+                  die korrigierte KRISTINE-Zeit gewinnt. Dadurch gibt es keine Doppelzählung.
                 </div>
               </div>
             </div>

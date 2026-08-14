@@ -298,6 +298,143 @@ def search_winworker_schema_index(query, limit=100):
 
 
 
+
+def ww_hours_fusion_source(project_indices):
+    """
+    Liefert WinWorker-Stunden als Rohmaterial für die Fusion mit KRISTINE.
+
+    Regel:
+    - relevante Mitarbeiter/Tage werden über die angefragten Projekte bestimmt
+    - für diese Mitarbeiter/Tage werden ALLE produktiven Projektstunden des Tages
+      berücksichtigt, damit die 15 Minuten korrekt proportional verteilt werden
+    - pro MA + Tag werden maximal 0,25 h abgezogen
+    - die Mitarbeiteridentität kommt über
+      Stundenmitschreibung.MAIndex = LohnEmpfaenger.StammIndex
+      und LohnEmpfaenger.sMANr = Fink-Personalnummer
+    """
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return []
+
+    placeholders = ",".join("?" for _ in ids)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+
+    sql = f"""
+        WITH RelevantDays AS (
+            SELECT DISTINCT
+                sm.MAIndex,
+                CAST(sm.Tag AS date) AS Arbeitstag
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            WHERE sm.ProjektIndex IN ({placeholders})
+              AND sm.MAIndex IS NOT NULL
+              AND sm.Tag IS NOT NULL
+              AND ISNULL(sm.bNichtAuswerten, 0) = 0
+        ),
+        DayProject AS (
+            SELECT
+                sm.MAIndex,
+                CAST(sm.Tag AS date) AS Arbeitstag,
+                sm.ProjektIndex,
+                SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,6))) AS RawHours
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            INNER JOIN RelevantDays AS rd
+                ON rd.MAIndex = sm.MAIndex
+               AND rd.Arbeitstag = CAST(sm.Tag AS date)
+            WHERE sm.ProjektIndex IS NOT NULL
+              AND ISNULL(sm.bNichtAuswerten, 0) = 0
+              AND ISNULL(sm.bUnproduktiv, 0) = 0
+            GROUP BY
+                sm.MAIndex,
+                CAST(sm.Tag AS date),
+                sm.ProjektIndex
+        ),
+        DayTotals AS (
+            SELECT
+                MAIndex,
+                Arbeitstag,
+                SUM(RawHours) AS TotalRawHours
+            FROM DayProject
+            GROUP BY MAIndex, Arbeitstag
+        )
+        SELECT
+            dp.MAIndex,
+            LTRIM(RTRIM(ISNULL(le.sMANr, ''))) AS FinkNumber,
+            LTRIM(RTRIM(ISNULL(le.sVorname, ''))) AS FirstName,
+            LTRIM(RTRIM(ISNULL(le.sName, ''))) AS LastName,
+            dp.Arbeitstag,
+            dp.ProjektIndex,
+            p.sProjektNummer,
+            CAST(dp.RawHours AS decimal(18,6)) AS RawHours,
+            CAST(dt.TotalRawHours AS decimal(18,6)) AS TotalDayHours,
+            CAST(
+                CASE
+                    WHEN dt.TotalRawHours <= 0 THEN dp.RawHours
+                    ELSE dp.RawHours
+                       - (
+                           CASE
+                               WHEN dt.TotalRawHours < CAST(0.25 AS decimal(18,6))
+                                   THEN dt.TotalRawHours
+                               ELSE CAST(0.25 AS decimal(18,6))
+                           END
+                           * (dp.RawHours / dt.TotalRawHours)
+                         )
+                END
+                AS decimal(18,6)
+            ) AS NetHours,
+            CAST(
+                CASE
+                    WHEN dt.TotalRawHours <= 0 THEN 0
+                    ELSE (
+                        CASE
+                            WHEN dt.TotalRawHours < CAST(0.25 AS decimal(18,6))
+                                THEN dt.TotalRawHours
+                            ELSE CAST(0.25 AS decimal(18,6))
+                        END
+                        * (dp.RawHours / dt.TotalRawHours)
+                    )
+                END
+                AS decimal(18,6)
+            ) AS BreakHours
+        FROM DayProject AS dp
+        INNER JOIN DayTotals AS dt
+            ON dt.MAIndex = dp.MAIndex
+           AND dt.Arbeitstag = dp.Arbeitstag
+        LEFT JOIN WinWorker_Personal_Standard.dbo.LohnEmpfaenger AS le
+            ON le.StammIndex = dp.MAIndex
+        LEFT JOIN dbo.Projekte AS p
+            ON p.ProjektIndex = dp.ProjektIndex
+        WHERE dp.ProjektIndex IN ({placeholders})
+        ORDER BY
+            dp.Arbeitstag,
+            dp.MAIndex,
+            dp.ProjektIndex
+    """
+
+    rows = cur.execute(sql, *(ids + ids)).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "maIndex": int(row.MAIndex) if row.MAIndex is not None else None,
+            "finkNumber": row.FinkNumber or "",
+            "employeeName": " ".join(
+                x for x in [row.FirstName or "", row.LastName or ""] if x
+            ).strip(),
+            "date": clean_date(row.Arbeitstag),
+            "projectIndex": int(row.ProjektIndex) if row.ProjektIndex is not None else None,
+            "projectNumber": row.sProjektNummer or "",
+            "rawHours": float(row.RawHours or 0),
+            "totalDayHours": float(row.TotalDayHours or 0),
+            "netHours": float(row.NetHours or 0),
+            "breakHours": float(row.BreakHours or 0),
+        })
+
+    return result
+
+
+
 def project_metrics(project_indices):
     """
     Projektkennzahlen V0.9.
@@ -680,7 +817,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.6",
+        "version": "0.9.7",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -826,6 +963,22 @@ def schema_index_table():
         "matches": matches,
         "generatedAt": data.get("generatedAt"),
     })
+
+
+
+@app.post("/hours-fusion-source")
+def hours_fusion_source():
+    try:
+        data = request.get_json(silent=True) or {}
+        project_indices = data.get("projectIndices") or []
+        rows = ww_hours_fusion_source(project_indices)
+        return jsonify({
+            "ok": True,
+            "rows": rows,
+            "count": len(rows),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.get("/schema-hints")
@@ -976,11 +1129,12 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.6 - SQL-Strukturindex Routen registriert")
+    print("Version: 0.9.7 - Stundenfusion WW + KRISTINE")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
     print("Schema-Index search : http://127.0.0.1:5051/schema-index/search?q=personalnummer")
     print("Schema-Index table  : http://127.0.0.1:5051/schema-index/table?db=WinWorker_Mitschreibung_Standard&table=Stundenmitschreibung")
+    print("Hours fusion        : POST http://127.0.0.1:5051/hours-fusion-source")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
