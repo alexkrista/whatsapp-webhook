@@ -66,6 +66,24 @@ function deDate(value) {
   return m ? `${m[3]}.${m[2]}.${m[1]}` : esc(value);
 }
 
+function deHours(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "–";
+  return n.toLocaleString("de-DE", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 2
+  }) + " h";
+}
+
+function deMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "–";
+  return n.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR"
+  });
+}
+
 function groupDocuments(documents) {
   const byYear = new Map();
   for (const d of documents) {
@@ -210,6 +228,15 @@ body {
 .project-dates { display:flex; gap:22px; flex-wrap:wrap; color:#555; font-size:14px; }
 .date-box { background:#f6f7f8; border-radius:8px; padding:9px 12px; min-width:130px; }
 .date-label { display:block; color:#8a8f95; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+.project-metrics { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.metric-box {
+  background:#20242a; color:white; border-radius:9px; padding:9px 12px; min-width:145px;
+}
+.metric-label {
+  display:block; color:#bfc6cc; font-size:11px; text-transform:uppercase;
+  letter-spacing:.5px; margin-bottom:2px;
+}
+.metric-value { font-size:17px; font-weight:800; }
 .more-projects { margin-top:7px; color:#777; font-size:13px; }
 
 .doc-summary { margin:26px 0 18px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
@@ -260,7 +287,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.6.1</div>
+  <div class="status">Archivsuche V0.6.3</div>
 </div></div>
 
 <div class="container">
@@ -303,11 +330,26 @@ ${q && projects.length ? `
               <div class="project-number">Projekt ${esc(p.projectNumber)}</div>
               <div class="project-title">${esc(p.title || p.site || "")}</div>
               <div class="project-customer">${esc(p.company || p.customer || "")}</div>
+              ${p.customerNumber !== null && p.customerNumber !== undefined
+                ? `<div class="project-address"><strong>Kundennr. ${esc(p.customerNumber)}</strong></div>`
+                : ""}
               <div class="project-address">${esc(p.address || "")}</div>
             </div>
-            <div class="project-dates">
-              <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
-              <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
+            <div>
+              <div class="project-dates">
+                <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
+                <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
+              </div>
+              <div class="project-metrics">
+                <div class="metric-box">
+                  <span class="metric-label">Ist-Stunden</span>
+                  <span class="metric-value">${deHours(p.hoursTotal)}</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-label">Netto abgerechnet</span>
+                  <span class="metric-value">${deMoney(p.netInvoiced)}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -421,7 +463,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.6.1",
+      version:"0.6.3,
       connector:ARCHIVE_CONNECTOR
     });
   });

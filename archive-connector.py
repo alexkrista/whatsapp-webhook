@@ -221,6 +221,8 @@ def search_projects(terms):
         order_params.extend(numeric_terms)
 
     order_parts.extend([
+        "CASE WHEN k.lKundenNr IS NULL THEN 1 ELSE 0 END",
+        "k.lKundenNr ASC",
         "MAX(b.dzDocDatum) DESC",
         "p.ProjektIndex DESC",
     ])
@@ -234,6 +236,7 @@ def search_projects(terms):
             p.sBaustelle,
             p.sBauvorhaben,
             p.KundenIndex,
+            k.lKundenNr,
             k.sFirma,
             k.sName,
             k.sVorname,
@@ -255,6 +258,7 @@ def search_projects(terms):
             p.sBaustelle,
             p.sBauvorhaben,
             p.KundenIndex,
+            k.lKundenNr,
             k.sFirma,
             k.sName,
             k.sVorname,
@@ -287,6 +291,7 @@ def search_projects(terms):
             "site": row.sBaustelle or "",
             "projectDescription": row.sBauvorhaben or "",
             "customerIndex": row.KundenIndex,
+            "customerNumber": row.lKundenNr,
             "company": row.sFirma or "",
             "firstName": row.sVorname or "",
             "lastName": row.sName or "",
@@ -433,7 +438,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.2",
+        "version": "0.9.3",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -593,7 +598,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.2 - Stundenfix + Netto dedupliziert je Rechnungsnummer")
+    print("Version: 0.9.3 - Kundennummer-Sortierung + Stunden + Netto")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
