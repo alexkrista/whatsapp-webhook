@@ -3579,34 +3579,42 @@ registerMediaMigration(app, {
   dataDir: DATA_DIR,
   requireAdmin,
 });
+// ==================== KRISTINE Archivsuche ====================
+registerArchiveSearch(app);
+console.log("KRISTINE Archivsuche registriert");
+
+
 // ==================== KRISTINE Brain-Stundenquelle ====================
-// Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
-// Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
+// Liefert dem Gehirn die KRISTINE-Zeitdaten direkt aus dem produktiven DATA_DIR.
+// Geschützt mit dem bestehenden ADMIN_TOKEN (x-admin-token oder ?token=...).
 app.get("/kristine/api/brain-hours-source", async (req, res) => {
   if (!requireAdmin(req, res)) return;
+
   try {
     const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
     const events = fs.existsSync(timeEventsPath)
       ? JSON.parse(await fsp.readFile(timeEventsPath, "utf8"))
       : [];
+
     const employees = await readEmployees();
 
     res.json({
       ok: true,
-      events: Array.isArray(events) ? events : [],
-      employees: Array.isArray(employees) ? employees : [],
       source: "KRISTINE_RENDER",
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      eventCount: Array.isArray(events) ? events.length : 0,
+      employeeCount: Array.isArray(employees) ? employees.length : 0,
+      events: Array.isArray(events) ? events : [],
+      employees: Array.isArray(employees) ? employees : []
     });
   } catch (error) {
     console.error("KRISTINE Brain-Stundenquelle:", error);
-    res.status(500).json({ ok: false, error: String(error?.message || error) });
+    res.status(500).json({
+      ok: false,
+      error: String(error?.message || error)
+    });
   }
 });
-
-// ==================== KRISTINE Archivsuche ====================
-registerArchiveSearch(app);
-console.log("KRISTINE Archivsuche registriert");
 
 // ===================== Tagesreport PDF =====================
 registerDailyReport(app, {

@@ -5,6 +5,16 @@ const fsp = require("fs/promises");
 const path = require("path");
 
 
+const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const KRISTINE_TIME_EVENTS_FILE =
+  process.env.KRISTINE_TIME_EVENTS_FILE ||
+  path.join(DATA_DIR, "_kristine", "time-events.json");
+
+const KRISTINE_EMPLOYEES_FILE =
+  process.env.KRISTINE_EMPLOYEES_FILE ||
+  path.join(DATA_DIR, "_system", "employees.json");
+
+
 const KRISTINE_API_BASE = String(
   process.env.KRISTINE_API_BASE || "https://protokoll.krista.at"
 ).replace(/\/$/, "");
@@ -14,26 +24,75 @@ const KRISTINE_ADMIN_TOKEN =
   process.env.ADMIN_TOKEN ||
   "";
 
-async function loadKristineBrainSource() {
+async function loadKristineBrainSource(runtimeToken = "") {
+  const token = String(
+    KRISTINE_ADMIN_TOKEN ||
+    runtimeToken ||
+    ""
+  ).trim();
+
   const response = await fetch(`${KRISTINE_API_BASE}/kristine/api/brain-hours-source`, {
     method: "GET",
     headers: {
       "Accept": "application/json",
-      ...(KRISTINE_ADMIN_TOKEN ? { "x-admin-token": KRISTINE_ADMIN_TOKEN } : {})
+      ...(token ? { "x-admin-token": token } : {})
     }
   });
 
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch {}
+
   if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || `KRISTINE API HTTP ${response.status}`);
+    const detail =
+      response.status === 403
+        ? "ADMIN_TOKEN fehlt oder ist falsch"
+        : (data?.error || text || `HTTP ${response.status}`);
+    throw new Error(`KRISTINE API HTTP ${response.status}: ${detail}`);
   }
 
   return {
     events: Array.isArray(data.events) ? data.events : [],
-    employees: Array.isArray(data.employees) ? data.employees : []
+    employees: Array.isArray(data.employees) ? data.employees : [],
+    eventCount: Number(data.eventCount || 0),
+    employeeCount: Number(data.employeeCount || 0),
+    source: String(data.source || "KRISTINE"),
   };
 }
 
+function brainMinutesFromHM(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 24 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function normalizeJobId(value) {
+  return String(value || "").trim().replace(/^#/, "");
+}
+
+async function readKristineTimeEvents() {
+  try {
+    const raw = await fsp.readFile(KRISTINE_TIME_EVENTS_FILE, "utf8");
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+
+async function readKristineEmployees() {
+  try {
+    const raw = await fsp.readFile(KRISTINE_EMPLOYEES_FILE, "utf8");
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
 
 function finkNumberOf(employee) {
   return String(
@@ -556,6 +615,9 @@ function registerArchiveSearch(app) {
     let documents = [];
     let sqlError = "";
     let connectorError = "";
+    let kristineError = "";
+    const runtimeToken = String(req.query.token || "").trim();
+    const tokenSuffix = runtimeToken ? `&token=${encodeURIComponent(runtimeToken)}` : "";
 
     if (q) {
       try {
@@ -571,15 +633,23 @@ function registerArchiveSearch(app) {
 
     let kristineEvents = [];
     let kristineEmployees = [];
+
     try {
-      const kristineSource = await loadKristineBrainSource();
+      const kristineSource = await loadKristineBrainSource(runtimeToken);
       kristineEvents = kristineSource.events;
       kristineEmployees = kristineSource.employees;
     } catch (err) {
-      const msg = String(err?.message || err);
-      sqlError = [sqlError, `KRISTINE: ${msg}`].filter(Boolean).join(" · ");
+      kristineError = String(err?.message || err);
       console.error("Gehirn-KRISTINE-API:", err);
+
+      // Nur als lokaler Fallback. Auf dem Windows-Client sind diese Dateien
+      // normalerweise nicht vorhanden; wichtig ist, dass das Gehirn NICHT crasht.
+      [kristineEvents, kristineEmployees] = await Promise.all([
+        readKristineTimeEvents(),
+        readKristineEmployees(),
+      ]);
     }
+
     const employeeIdentityMap = buildEmployeeIdentityMap(kristineEmployees);
     const kristineBundle = buildKristineProjectHours(kristineEvents, employeeIdentityMap);
 
@@ -790,11 +860,12 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
-  <div class="status">Gehirn V0.10.2 · KRISTINE live + Stundenfusion</div>
+  <div class="status">Gehirn V0.10.3 · KRISTINE live + Token-Fix</div>
 </div></div>
 
 <div class="container">
 <form method="get" action="/gehirn" class="search-box">
+  ${runtimeToken ? `<input type="hidden" name="token" value="${esc(runtimeToken)}">` : ""}
   <div class="search-row">
     <input class="search-input" name="q" autofocus autocomplete="off"
       placeholder="Projekt, Kunde, Rechnung, Adresse, Text ..." value="${esc(q)}">
@@ -805,13 +876,14 @@ body {
 
 ${connectorError ? `<div class="alert error">Connector: ${esc(connectorError)}</div>` : ""}
 ${sqlError ? `<div class="alert warn">PDF-Suche funktioniert. SQL: ${esc(sqlError)}</div>` : ""}
+${kristineError ? `<div class="alert warn">KRISTINE live: ${esc(kristineError)}${!runtimeToken && !KRISTINE_ADMIN_TOKEN ? ` · Öffne das Gehirn einmal mit <strong>?token=DEIN_ADMIN_TOKEN</strong>.` : ""}</div>` : ""}
 
 ${q && projectNumbers.length ? `
 <div class="project-filter">
   <span class="project-filter-label">Projekte gefunden:</span>
   ${projectNumbers.slice(0, 30).map(number => {
     const refine = refinedProjectQuery(q, number);
-    return `<a class="project-chip" href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
+    return `<a class="project-chip" href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}${tokenSuffix}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
   }).join("")}
   ${projectNumbers.length > 30 ? `<span class="more-projects">+ ${projectNumbers.length - 30} weitere</span>` : ""}
 </div>` : ""}
@@ -819,6 +891,7 @@ ${q && projectNumbers.length ? `
 ${q && customers.length ? `
 <form method="get" action="/gehirn" class="customer-filter">
   <input type="hidden" name="q" value="${esc(q)}">
+  ${runtimeToken ? `<input type="hidden" name="token" value="${esc(runtimeToken)}">` : ""}
   <span class="customer-filter-label">Kunde:</span>
   <select class="customer-select" name="customer" onchange="this.form.submit()">
     <option value="">Alle Kunden (${customers.length})</option>
@@ -849,7 +922,7 @@ ${q && projects.length ? `
         <div class="project-card selectable ${i === 0 ? "primary" : ""}"
              role="button"
              tabindex="0"
-             data-href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}"
+             data-href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}${tokenSuffix}"
              onclick="location.href=this.dataset.href"
              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href=this.dataset.href}">
           <div class="project-top">
@@ -1085,9 +1158,11 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"kristine-brain",
-      version:"0.8.0",
+      version:"0.10.3",
       connector:ARCHIVE_CONNECTOR,
-      timeEventsFile:KRISTINE_TIME_EVENTS_FILE
+      kristineApiBase:KRISTINE_API_BASE,
+      kristineTokenConfigured:Boolean(KRISTINE_ADMIN_TOKEN),
+      localFallbackTimeEventsFile:KRISTINE_TIME_EVENTS_FILE
     });
   });
 
