@@ -153,7 +153,7 @@ body {
 }
 
 .header-inner {
-  max-width: 1250px;
+  max-width: 1480px;
   margin: auto;
   display: flex;
   align-items: center;
@@ -181,7 +181,7 @@ body {
 ------------------------------------------------------------ */
 
 .container {
-  max-width: 1250px;
+  max-width: 1480px;
   margin: 34px auto;
   padding: 0 20px 60px;
 }
@@ -380,61 +380,76 @@ body {
   cursor: pointer;
 }
 
+.document-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
 .doc-card {
   cursor: pointer;
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+  padding: 12px;
+  margin-bottom: 0;
+  overflow: hidden;
   transition:
-    transform .08s ease,
-    box-shadow .08s ease,
-    border-color .08s ease;
+    transform .10s ease,
+    box-shadow .10s ease,
+    border-color .10s ease;
 }
 
 .doc-card:hover {
-  transform: translateY(-1px);
-  border-color: #bcc3ca;
-  box-shadow: 0 5px 15px rgba(0,0,0,.07);
+  transform: translateY(-2px);
+  border-color: #aeb6bf;
+  box-shadow: 0 8px 22px rgba(0,0,0,.09);
 }
 
 .doc-preview {
-  width: 150px;
-  min-height: 195px;
+  width: 100%;
+  aspect-ratio: 210 / 297;
   border: 1px solid #e2e5e9;
-  border-radius: 7px;
+  border-radius: 8px;
   overflow: hidden;
   background: #f2f3f5;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
 }
 
 .doc-preview img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
+  background: white;
 }
 
 .doc-main {
   min-width: 0;
+  padding: 12px 3px 2px;
 }
 
 .doc-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 15px;
+  gap: 10px;
 }
 
-.doc-snippet {
-  margin-top: 12px;
-  padding: 11px 13px;
-  background: #f7f8fa;
-  border-radius: 7px;
-  color: #444;
-  font-size: 14px;
-  line-height: 1.45;
+.doc-title {
+  min-width: 0;
+}
+
+.doc-name {
+  display: block;
+  margin-top: 7px;
+  font-size: 15px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.open-button {
+  margin-top: 0;
+  flex: 0 0 auto;
 }
 
 .connector-error {
@@ -472,6 +487,12 @@ body {
    MOBILE
 ------------------------------------------------------------ */
 
+@media (max-width: 1100px) {
+  .document-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 700px) {
 
   .search-row {
@@ -486,13 +507,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .doc-card {
+  .document-grid {
     grid-template-columns: 1fr;
-  }
-
-  .doc-preview {
-    width: 110px;
-    min-height: 140px;
   }
 
 }
@@ -515,7 +531,7 @@ body {
     </div>
 
     <div class="status">
-      Archivsuche V0.2
+      Archivsuche V0.3
     </div>
 
   </div>
@@ -664,62 +680,48 @@ body {
 
           ${
             documents.length
-              ? documents.map(d => `
-                  <div class="card doc-card"
-                       data-path="${esc(d.path)}"
-                       onclick="openArchivePdf(this.dataset.path)">
+              ? `
+                  <div class="document-grid">
+                    ${documents.map(d => `
+                      <div class="card doc-card"
+                           data-path="${esc(d.path)}"
+                           onclick="openArchivePdf(this.dataset.path)">
 
-                    <div class="doc-preview">
-                      <img
-                        loading="lazy"
-                        src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
-                        alt="Vorschau ${esc(d.filename)}"
-                        onerror="this.style.display='none'"
-                      >
-                    </div>
-
-                    <div class="doc-main">
-
-                      <div class="doc-top">
-
-                        <div>
-                          <span class="doc-type">
-                            ${esc(d.dokumenttyp || "Dokument")}
-                          </span>
-
-                          <span class="doc-name">
-                            ${esc(d.filename)}
-                          </span>
+                        <div class="doc-preview">
+                          <img
+                            loading="lazy"
+                            src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
+                            alt="Vorschau ${esc(d.filename)}"
+                            onerror="this.style.display='none'"
+                          >
                         </div>
 
-                        <button
-                          class="open-button"
-                          type="button"
-                          data-path="${esc(d.path)}"
-                          onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">
-                          Öffnen
-                        </button>
+                        <div class="doc-main">
+                          <div class="doc-top">
+                            <div class="doc-title">
+                              <span class="doc-type">
+                                ${esc(d.dokumenttyp || "Dokument")}
+                              </span>
 
-                      </div>
-
-                      ${
-                        d.snippet
-                          ? `
-                            <div class="doc-snippet">
-                              ${esc(d.snippet)}
+                              <span class="doc-name">
+                                ${esc(d.filename)}
+                              </span>
                             </div>
-                          `
-                          : ""
-                      }
 
-                      <div class="doc-path">
-                        ${esc(d.path)}
+                            <button
+                              class="open-button"
+                              type="button"
+                              data-path="${esc(d.path)}"
+                              onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">
+                              Öffnen
+                            </button>
+                          </div>
+                        </div>
+
                       </div>
-
-                    </div>
-
+                    `).join("")}
                   </div>
-                `).join("")
+                `
               : `
                   <div class="empty">
                     Noch keine Dokumenttreffer.
@@ -846,7 +848,7 @@ async function openArchivePdf(path) {
     res.json({
       ok: true,
       module: "archive-search",
-      version: "0.2",
+      version: "0.3",
       sql: "pending-local-connector",
       pdfIndex: ARCHIVE_CONNECTOR
     });
