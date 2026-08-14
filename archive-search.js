@@ -31,23 +31,43 @@ async function loadKristineBrainSource(runtimeToken = "") {
     ""
   ).trim();
 
-  const response = await fetch(`${KRISTINE_API_BASE}/kristine/api/brain-hours-source`, {
+  const url = new URL(
+    "/kristine/api/brain-hours-source",
+    KRISTINE_API_BASE
+  );
+
+  // Browser-Test hat bestätigt: Render akzeptiert den bestehenden ADMIN_TOKEN
+  // zuverlässig als Query-Parameter. Deshalb hier bewusst dieselbe Variante.
+  if (token) url.searchParams.set("token", token);
+
+  const response = await fetch(url, {
     method: "GET",
     headers: {
-      "Accept": "application/json",
-      ...(token ? { "x-admin-token": token } : {})
+      "Accept": "application/json"
     }
   });
 
   const text = await response.text();
+
   let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch {}
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    // Keine komplette Render-HTML-Seite ins Gehirn kippen.
+    const compact = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 240);
+    throw new Error(
+      `KRISTINE API HTTP ${response.status}: ${compact || response.statusText || "keine JSON-Antwort"}`
+    );
+  }
 
   if (!response.ok || !data?.ok) {
     const detail =
       response.status === 403
         ? "ADMIN_TOKEN fehlt oder ist falsch"
-        : (data?.error || text || `HTTP ${response.status}`);
+        : String(data?.error || `HTTP ${response.status}`);
     throw new Error(`KRISTINE API HTTP ${response.status}: ${detail}`);
   }
 
@@ -59,6 +79,7 @@ async function loadKristineBrainSource(runtimeToken = "") {
     source: String(data.source || "KRISTINE"),
   };
 }
+
 
 function brainMinutesFromHM(value) {
   const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
@@ -860,7 +881,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
-  <div class="status">Gehirn V0.10.3 · KRISTINE live + Token-Fix</div>
+  <div class="status">Gehirn V0.10.4 · KRISTINE live · Render-Fix</div>
 </div></div>
 
 <div class="container">
