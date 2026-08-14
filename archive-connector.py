@@ -55,6 +55,90 @@ def clean_date(value):
     return str(value)
 
 
+
+def project_metrics(project_indices):
+    """
+    Echte Projektkennzahlen.
+
+    Ist-Stunden:
+      WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung
+      SUM(dStundenErfasst), ausgenommen bNichtAuswerten.
+
+    Netto:
+      Pro Projekt + Rechnungsnummer nur die NEUESTE Druck-/Änderungsversion.
+      Neueste Version wird über dzDocDatum ermittelt; gID dient als Tie-Breaker.
+      Danach SUM(Rechnung.cUmsatzNetto).
+    """
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in ids)
+    result = {pid: {"hoursTotal": None, "netInvoiced": None} for pid in ids}
+
+    # Stunden getrennt laden: falls Rechte/Schema fehlen, bleibt die Archivsuche trotzdem verfügbar.
+    try:
+        con = sql_connection()
+        cur = con.cursor()
+        sql = f"""
+            SELECT
+                sm.ProjektIndex,
+                SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            WHERE sm.ProjektIndex IN ({placeholders})
+              AND ISNULL(sm.bNichtAuswerten, 0) = 0
+            GROUP BY sm.ProjektIndex
+        """
+        rows = cur.execute(sql, ids).fetchall()
+        con.close()
+        for row in rows:
+            pid = int(row.ProjektIndex)
+            if pid in result:
+                result[pid]["hoursTotal"] = float(row.IstStunden) if row.IstStunden is not None else None
+    except Exception as e:
+        print("SQL Stunden-Metrik:", e)
+
+    # Rechnungen ebenfalls getrennt laden.
+    try:
+        con = sql_connection()
+        cur = con.cursor()
+        sql = f"""
+            WITH LatestBooks AS (
+                SELECT
+                    b.ProjektIndex,
+                    b.sBuchNummer,
+                    b.gID,
+                    b.dzDocDatum,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY b.ProjektIndex, b.sBuchNummer
+                        ORDER BY b.dzDocDatum DESC, CONVERT(varchar(100), b.gID) DESC
+                    ) AS rn
+                FROM dbo.[Bücher] AS b
+                WHERE b.ProjektIndex IN ({placeholders})
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+                  AND ISNULL(b.Storno, 0) = 0
+            )
+            SELECT
+                lb.ProjektIndex,
+                SUM(CAST(ISNULL(r.cUmsatzNetto, 0) AS decimal(18,2))) AS NettoAbgerechnet
+            FROM LatestBooks AS lb
+            INNER JOIN dbo.Rechnung AS r
+                ON r.gBuchID = lb.gID
+            WHERE lb.rn = 1
+            GROUP BY lb.ProjektIndex
+        """
+        rows = cur.execute(sql, ids).fetchall()
+        con.close()
+        for row in rows:
+            pid = int(row.ProjektIndex)
+            if pid in result:
+                result[pid]["netInvoiced"] = float(row.NettoAbgerechnet) if row.NettoAbgerechnet is not None else None
+    except Exception as e:
+        print("SQL Rechnungs-Metrik:", e)
+
+    return result
+
+
 def search_projects(terms):
     if not terms:
         return []
@@ -176,6 +260,14 @@ def search_projects(terms):
             "firstDate": clean_date(row.ErstesDatum),
             "lastDate": clean_date(row.LetztesDatum),
         })
+
+
+    metrics = project_metrics([item.get("projectIndex") for item in result])
+    for item in result:
+        project_index = item.get("projectIndex")
+        metric = metrics.get(int(project_index)) if project_index is not None else None
+        item["hoursTotal"] = metric.get("hoursTotal") if metric else None
+        item["netInvoiced"] = metric.get("netInvoiced") if metric else None
 
     return result
 
@@ -303,7 +395,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.7",
+        "version": "0.8",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -322,7 +414,7 @@ def schema_hints():
             "ok": True,
             "count": len(rows),
             "columns": rows,
-            "note": "Nur Kandidaten. Noch keine automatische Summenlogik."
+            "note": "Diagnose-Endpunkt. V0.8 verwendet bereits Stundenmitschreibung und pro Rechnungsnummer nur die neueste Version."
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -407,7 +499,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.7 - SQL + Projekte + SQL-Schema-Hinweise + Dokumentarten")
+    print("Version: 0.8 - SQL + Projekte + Ist-Stunden + Netto aktuell + Dokumentarten")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)

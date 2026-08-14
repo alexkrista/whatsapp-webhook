@@ -1,6 +1,6 @@
 // archive-search.js
 // Kristine Archivsuche – SQL + PDF-Archiv
-// Build V0.7 – kompakte Projektkarten + SQL-Metrikvorbereitung
+// Build V0.8 – echte Ist-Stunden + aktueller Netto-Abrechnungsstand
 
 const ARCHIVE_CONNECTOR =
   process.env.ARCHIVE_CONNECTOR ||
@@ -263,7 +263,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.7</div>
+  <div class="status">Archivsuche V0.8</div>
 </div></div>
 
 <div class="container">
@@ -307,11 +307,11 @@ ${q && projects.length ? `
           </div>
           <div class="fact-box">
             <span class="fact-label">Stunden</span>
-            <span class="fact-value ${Number.isFinite(Number(p.hoursTotal)) ? "" : "muted"}">${Number.isFinite(Number(p.hoursTotal)) ? deNumber(p.hoursTotal,1)+" h" : "wird ermittelt"}</span>
+            <span class="fact-value ${Number.isFinite(Number(p.hoursTotal)) ? "" : "muted"}">${Number.isFinite(Number(p.hoursTotal)) ? deNumber(p.hoursTotal,1)+" h" : "keine Stunden"}</span>
           </div>
           <div class="fact-box">
             <span class="fact-label">Netto abgerechnet</span>
-            <span class="fact-value ${Number.isFinite(Number(p.netInvoiced)) ? "" : "muted"}">${Number.isFinite(Number(p.netInvoiced)) ? euro(p.netInvoiced) : "wird ermittelt"}</span>
+            <span class="fact-value ${Number.isFinite(Number(p.netInvoiced)) ? "" : "muted"}">${Number.isFinite(Number(p.netInvoiced)) ? euro(p.netInvoiced) : "noch nicht abgerechnet"}</span>
           </div>
         </div>
       </div>
@@ -425,7 +425,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.7",
+      version:"0.8",
       connector:ARCHIVE_CONNECTOR
     });
   });
