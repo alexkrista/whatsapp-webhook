@@ -180,6 +180,48 @@ def search_projects(terms):
     return result
 
 
+
+def discover_metric_columns():
+    """
+    Findet nur Kandidaten für Stunden-/Rechnungsfelder.
+    Es wird noch NICHT automatisch auf unbekannte Tabellen summiert.
+    """
+    con = sql_connection()
+    cur = con.cursor()
+
+    sql = """
+        SELECT
+            TABLE_SCHEMA,
+            TABLE_NAME,
+            COLUMN_NAME,
+            DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE
+            LOWER(COLUMN_NAME) LIKE '%stund%'
+            OR LOWER(COLUMN_NAME) LIKE '%hour%'
+            OR LOWER(COLUMN_NAME) LIKE '%zeit%'
+            OR LOWER(COLUMN_NAME) LIKE '%netto%'
+            OR LOWER(COLUMN_NAME) LIKE '%rechnung%'
+            OR LOWER(COLUMN_NAME) LIKE '%betrag%'
+            OR LOWER(COLUMN_NAME) LIKE '%summe%'
+            OR LOWER(COLUMN_NAME) LIKE '%umsatz%'
+        ORDER BY TABLE_NAME, ORDINAL_POSITION
+    """
+
+    rows = cur.execute(sql).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "schema": row.TABLE_SCHEMA,
+            "table": row.TABLE_NAME,
+            "column": row.COLUMN_NAME,
+            "dataType": row.DATA_TYPE,
+        })
+    return result
+
+
 def parse_print_time(filename, modified):
     # WinWorker benennt Kundenexemplare z.B.
     # 2205110 (2022-05-10 11.36.47).pdf
@@ -261,7 +303,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.6",
+        "version": "0.7",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -269,6 +311,21 @@ def status():
         "sqlUser": SQL_USER,
         "sqlPasswordConfigured": bool(os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()),
     })
+
+
+
+@app.get("/schema-hints")
+def schema_hints():
+    try:
+        rows = discover_metric_columns()
+        return jsonify({
+            "ok": True,
+            "count": len(rows),
+            "columns": rows,
+            "note": "Nur Kandidaten. Noch keine automatische Summenlogik."
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.get("/search")
@@ -349,7 +406,8 @@ if __name__ == "__main__":
     print("-------------------------")
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
-    print("Version: 0.6 - SQL + Projekte + Jahre + Dokumentarten")
+    print("Schema : http://127.0.0.1:5051/schema-hints")
+    print("Version: 0.7 - SQL + Projekte + SQL-Schema-Hinweise + Dokumentarten")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)

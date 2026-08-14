@@ -1,5 +1,6 @@
 // archive-search.js
 // Kristine Archivsuche – SQL + PDF-Archiv
+// Build V0.7 – kompakte Projektkarten + SQL-Metrikvorbereitung
 
 const ARCHIVE_CONNECTOR =
   process.env.ARCHIVE_CONNECTOR ||
@@ -113,6 +114,19 @@ function refinedProjectQuery(currentQuery, projectNumber) {
   return [projectNumber, ...descriptive].join(" ").trim();
 }
 
+
+function deNumber(value, digits=1) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "–";
+  return n.toLocaleString("de-AT", {minimumFractionDigits:digits, maximumFractionDigits:digits});
+}
+
+function euro(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "noch offen";
+  return `${n.toLocaleString("de-AT", {minimumFractionDigits:2, maximumFractionDigits:2})} €`;
+}
+
 function registerArchiveSearch(app) {
 
   app.get("/archiv", async (req, res) => {
@@ -182,20 +196,22 @@ body {
 }
 .project-chip:hover { transform:translateY(-1px); border-color:#9faab4; background:#f9fafb; }
 
-.project-section { margin-top:22px; }
+.project-section { margin-top:18px; }
 .project-card {
-  background:white; border:1px solid #dde2e7; border-radius:13px; padding:20px 22px;
-  box-shadow:0 3px 14px rgba(0,0,0,.045); margin-bottom:12px;
+  background:white; border:1px solid #dde2e7; border-radius:11px; padding:11px 14px;
+  box-shadow:0 2px 9px rgba(0,0,0,.035); margin-bottom:8px;
 }
 .project-card.primary { border-color:#aeb9c3; }
-.project-top { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
-.project-number { font-size:27px; font-weight:800; letter-spacing:-.4px; }
-.project-title { font-size:17px; font-weight:650; margin-top:3px; }
-.project-customer { margin-top:11px; font-size:15px; }
-.project-address { color:#555; margin-top:4px; }
-.project-dates { display:flex; gap:22px; flex-wrap:wrap; color:#555; font-size:14px; }
-.date-box { background:#f6f7f8; border-radius:8px; padding:9px 12px; min-width:130px; }
-.date-label { display:block; color:#8a8f95; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+.project-top { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; }
+.project-number { font-size:20px; font-weight:800; letter-spacing:-.25px; line-height:1.1; }
+.project-title { font-size:15px; font-weight:700; margin-top:2px; line-height:1.2; }
+.project-customer { margin-top:5px; font-size:13px; line-height:1.2; }
+.project-address { color:#5e6267; margin-top:2px; font-size:13px; line-height:1.2; }
+.project-facts { display:grid; grid-template-columns:repeat(3,minmax(105px,auto)); gap:7px; }
+.fact-box { background:#f6f7f8; border-radius:7px; padding:6px 9px; min-width:105px; }
+.fact-label { display:block; color:#8a8f95; font-size:9px; text-transform:uppercase; letter-spacing:.45px; margin-bottom:1px; }
+.fact-value { font-size:13px; font-weight:750; white-space:nowrap; }
+.fact-value.muted { color:#888; font-weight:600; }
 .more-projects { margin-top:7px; color:#777; font-size:13px; }
 
 .doc-summary { margin:26px 0 18px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
@@ -237,7 +253,8 @@ body {
 @media (max-width:700px) {
   .search-row { flex-direction:column; }
   .search-button { height:52px; }
-  .project-top { flex-direction:column; }
+  .project-top { grid-template-columns:1fr; }
+  .project-facts { grid-template-columns:repeat(3,minmax(0,1fr)); width:100%; }
   .doc-grid { grid-template-columns:1fr; }
   .doc-preview { height:420px; }
 }
@@ -246,7 +263,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.6</div>
+  <div class="status">Archivsuche V0.7</div>
 </div></div>
 
 <div class="container">
@@ -283,9 +300,19 @@ ${q && projects.length ? `
           <div class="project-customer">${esc(p.company || p.customer || "")}</div>
           <div class="project-address">${esc(p.address || "")}</div>
         </div>
-        <div class="project-dates">
-          <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
-          <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
+        <div class="project-facts">
+          <div class="fact-box">
+            <span class="fact-label">Zeitraum</span>
+            <span class="fact-value">${deDate(p.firstDate)} – ${deDate(p.lastDate)}</span>
+          </div>
+          <div class="fact-box">
+            <span class="fact-label">Stunden</span>
+            <span class="fact-value ${Number.isFinite(Number(p.hoursTotal)) ? "" : "muted"}">${Number.isFinite(Number(p.hoursTotal)) ? deNumber(p.hoursTotal,1)+" h" : "wird ermittelt"}</span>
+          </div>
+          <div class="fact-box">
+            <span class="fact-label">Netto abgerechnet</span>
+            <span class="fact-value ${Number.isFinite(Number(p.netInvoiced)) ? "" : "muted"}">${Number.isFinite(Number(p.netInvoiced)) ? euro(p.netInvoiced) : "wird ermittelt"}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -398,7 +425,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.6",
+      version:"0.7",
       connector:ARCHIVE_CONNECTOR
     });
   });
