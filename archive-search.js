@@ -183,11 +183,25 @@ body {
 .project-chip:hover { transform:translateY(-1px); border-color:#9faab4; background:#f9fafb; }
 
 .project-section { margin-top:22px; }
+.project-list {
+  max-height: 58vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+.project-list::-webkit-scrollbar { width: 10px; }
+.project-list::-webkit-scrollbar-track { background: #eef1f3; border-radius: 999px; }
+.project-list::-webkit-scrollbar-thumb { background: #b8c0c7; border-radius: 999px; border: 2px solid #eef1f3; }
+.project-list::-webkit-scrollbar-thumb:hover { background: #929ca5; }
 .project-card {
   background:white; border:1px solid #dde2e7; border-radius:13px; padding:20px 22px;
   box-shadow:0 3px 14px rgba(0,0,0,.045); margin-bottom:12px;
 }
 .project-card.primary { border-color:#aeb9c3; }
+.project-card.selectable { cursor:pointer; transition:transform .08s ease, box-shadow .08s ease, border-color .08s ease; }
+.project-card.selectable:hover { transform:translateY(-1px); border-color:#9faab4; box-shadow:0 7px 18px rgba(0,0,0,.07); }
 .project-top { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
 .project-number { font-size:27px; font-weight:800; letter-spacing:-.4px; }
 .project-title { font-size:17px; font-weight:650; margin-top:3px; }
@@ -246,7 +260,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.6</div>
+  <div class="status">Archivsuche V0.6.1</div>
 </div></div>
 
 <div class="container">
@@ -274,23 +288,32 @@ ${q && projectNumbers.length ? `
 
 ${q && projects.length ? `
 <div class="project-section">
-  ${projects.slice(0, 5).map((p, i) => `
-    <div class="project-card ${i === 0 ? "primary" : ""}">
-      <div class="project-top">
-        <div>
-          <div class="project-number">Projekt ${esc(p.projectNumber)}</div>
-          <div class="project-title">${esc(p.title || p.site || "")}</div>
-          <div class="project-customer">${esc(p.company || p.customer || "")}</div>
-          <div class="project-address">${esc(p.address || "")}</div>
+  <div class="project-list" id="projectList">
+    ${projects.map((p, i) => {
+      const refine = refinedProjectQuery(q, p.projectNumber);
+      return `
+        <div class="project-card selectable ${i === 0 ? "primary" : ""}"
+             role="button"
+             tabindex="0"
+             data-href="/archiv?q=${encodeURIComponent(refine)}"
+             onclick="location.href=this.dataset.href"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href=this.dataset.href}">
+          <div class="project-top">
+            <div>
+              <div class="project-number">Projekt ${esc(p.projectNumber)}</div>
+              <div class="project-title">${esc(p.title || p.site || "")}</div>
+              <div class="project-customer">${esc(p.company || p.customer || "")}</div>
+              <div class="project-address">${esc(p.address || "")}</div>
+            </div>
+            <div class="project-dates">
+              <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
+              <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
+            </div>
+          </div>
         </div>
-        <div class="project-dates">
-          <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
-          <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
-        </div>
-      </div>
-    </div>
-  `).join("")}
-  ${projects.length > 5 ? `<div class="more-projects">+ ${projects.length - 5} weitere SQL-Treffer</div>` : ""}
+      `;
+    }).join("")}
+  </div>
 </div>` : ""}
 
 ${q && documents.length ? `
@@ -398,7 +421,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.6",
+      version:"0.6.1",
       connector:ARCHIVE_CONNECTOR
     });
   });
