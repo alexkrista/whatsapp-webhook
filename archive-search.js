@@ -5,48 +5,35 @@ const fsp = require("fs/promises");
 const path = require("path");
 
 
-const DATA_DIR = process.env.DATA_DIR || "/var/data";
-const KRISTINE_TIME_EVENTS_FILE =
-  process.env.KRISTINE_TIME_EVENTS_FILE ||
-  path.join(DATA_DIR, "_kristine", "time-events.json");
+const KRISTINE_API_BASE = String(
+  process.env.KRISTINE_API_BASE || "https://protokoll.krista.at"
+).replace(/\/$/, "");
 
-const KRISTINE_EMPLOYEES_FILE =
-  process.env.KRISTINE_EMPLOYEES_FILE ||
-  path.join(DATA_DIR, "_system", "employees.json");
+const KRISTINE_ADMIN_TOKEN =
+  process.env.KRISTINE_ADMIN_TOKEN ||
+  process.env.ADMIN_TOKEN ||
+  "";
 
-function brainMinutesFromHM(value) {
-  const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 24 || mm < 0 || mm > 59) return null;
-  return hh * 60 + mm;
-}
+async function loadKristineBrainSource() {
+  const response = await fetch(`${KRISTINE_API_BASE}/kristine/api/brain-hours-source`, {
+    method: "GET",
+    headers: {
+      "Accept": "application/json",
+      ...(KRISTINE_ADMIN_TOKEN ? { "x-admin-token": KRISTINE_ADMIN_TOKEN } : {})
+    }
+  });
 
-function normalizeJobId(value) {
-  return String(value || "").trim().replace(/^#/, "");
-}
-
-async function readKristineTimeEvents() {
-  try {
-    const raw = await fsp.readFile(KRISTINE_TIME_EVENTS_FILE, "utf8");
-    const rows = JSON.parse(raw);
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || `KRISTINE API HTTP ${response.status}`);
   }
+
+  return {
+    events: Array.isArray(data.events) ? data.events : [],
+    employees: Array.isArray(data.employees) ? data.employees : []
+  };
 }
 
-
-async function readKristineEmployees() {
-  try {
-    const raw = await fsp.readFile(KRISTINE_EMPLOYEES_FILE, "utf8");
-    const rows = JSON.parse(raw);
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
 
 function finkNumberOf(employee) {
   return String(
@@ -582,10 +569,17 @@ function registerArchiveSearch(app) {
       }
     }
 
-    const [kristineEvents, kristineEmployees] = await Promise.all([
-      readKristineTimeEvents(),
-      readKristineEmployees(),
-    ]);
+    let kristineEvents = [];
+    let kristineEmployees = [];
+    try {
+      const kristineSource = await loadKristineBrainSource();
+      kristineEvents = kristineSource.events;
+      kristineEmployees = kristineSource.employees;
+    } catch (err) {
+      const msg = String(err?.message || err);
+      sqlError = [sqlError, `KRISTINE: ${msg}`].filter(Boolean).join(" · ");
+      console.error("Gehirn-KRISTINE-API:", err);
+    }
     const employeeIdentityMap = buildEmployeeIdentityMap(kristineEmployees);
     const kristineBundle = buildKristineProjectHours(kristineEvents, employeeIdentityMap);
 
@@ -796,7 +790,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
-  <div class="status">Gehirn V0.10.1 · Stundenfusion</div>
+  <div class="status">Gehirn V0.10.2 · KRISTINE live + Stundenfusion</div>
 </div></div>
 
 <div class="container">
