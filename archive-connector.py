@@ -89,12 +89,20 @@ def search_projects(terms):
     # Numerische Suchbegriffe werden nur zur Sortierung genutzt:
     # exakte Projektnummer zuerst, flexible Suche bleibt vollständig erhalten.
     numeric_terms = [t for t in terms if re.fullmatch(r"\d+", t)]
-    exact_sort = "1"
     order_params = []
+    order_parts = []
     if numeric_terms:
         placeholders = ",".join("?" for _ in numeric_terms)
-        exact_sort = f"CASE WHEN p.sProjektNummer IN ({placeholders}) THEN 0 ELSE 1 END"
+        order_parts.append(
+            f"CASE WHEN p.sProjektNummer IN ({placeholders}) THEN 0 ELSE 1 END"
+        )
         order_params.extend(numeric_terms)
+
+    order_parts.extend([
+        "MAX(b.dzDocDatum) DESC",
+        "p.ProjektIndex DESC",
+    ])
+    order_by = ",\n            ".join(order_parts)
 
     sql = f"""
         SELECT TOP 100
@@ -132,9 +140,7 @@ def search_projects(terms):
             k.sPLZ,
             k.sOrt
         ORDER BY
-            {exact_sort},
-            MAX(b.dzDocDatum) DESC,
-            p.ProjektIndex DESC
+            {order_by}
     """
 
     cur.execute(sql, params + order_params)
@@ -255,7 +261,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.5",
+        "version": "0.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -343,7 +349,7 @@ if __name__ == "__main__":
     print("-------------------------")
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
-    print("Version: 0.5 - SQL + Jahre + Dokumentarten")
+    print("Version: 0.6 - SQL + Projekte + Jahre + Dokumentarten")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)

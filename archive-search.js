@@ -90,6 +90,29 @@ function countDocumentTypes(documents) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+function uniqueProjectNumbers(projects) {
+  const seen = new Set();
+  const result = [];
+  for (const p of projects) {
+    const number = String(p.projectNumber || "").trim();
+    if (!number || seen.has(number)) continue;
+    seen.add(number);
+    result.push(number);
+  }
+  return result;
+}
+
+function refinedProjectQuery(currentQuery, projectNumber) {
+  const terms = String(currentQuery || "")
+    .split(/\s+/)
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  // Vorhandene reine Nummern/Projektcodes ersetzen, Name/Freitext bleibt erhalten.
+  const descriptive = terms.filter(t => !/^\d+(?:[-./]\d+)*$/.test(t));
+  return [projectNumber, ...descriptive].join(" ").trim();
+}
+
 function registerArchiveSearch(app) {
 
   app.get("/archiv", async (req, res) => {
@@ -114,6 +137,7 @@ function registerArchiveSearch(app) {
 
     const years = groupDocuments(documents);
     const typeCounts = countDocumentTypes(documents);
+    const projectNumbers = uniqueProjectNumbers(projects);
 
     const html = `
 <!doctype html>
@@ -148,6 +172,15 @@ body {
 .alert { margin-top:16px; padding:12px 14px; border-radius:8px; font-size:13px; }
 .alert.error { background:#fff4f4; border:1px solid #efc6c6; color:#8a2f2f; }
 .alert.warn { background:#fff9e8; border:1px solid #eadba2; color:#705c15; }
+
+.project-filter { margin-top:18px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.project-filter-label { font-size:13px; font-weight:750; color:#62686e; margin-right:2px; }
+.project-chip {
+  display:inline-flex; align-items:center; text-decoration:none; color:#28323b; background:white;
+  border:1px solid #d7dde2; border-radius:999px; padding:7px 12px; font-size:13px; font-weight:750;
+  box-shadow:0 1px 2px rgba(0,0,0,.025); transition:transform .08s ease,border-color .08s ease,background .08s ease;
+}
+.project-chip:hover { transform:translateY(-1px); border-color:#9faab4; background:#f9fafb; }
 
 .project-section { margin-top:22px; }
 .project-card {
@@ -188,6 +221,16 @@ body {
 .doc-date { color:#7c8288; font-size:12px; white-space:nowrap; }
 .doc-name { margin-top:8px; font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .open-button { margin-top:11px; border:0; border-radius:6px; padding:8px 12px; background:#343a40; color:white; cursor:pointer; }
+
+.pdf-hover-preview {
+  position:fixed; z-index:5000; right:24px; top:50%; transform:translateY(-50%);
+  width:min(48vw,820px); height:min(90vh,1080px); display:none; pointer-events:none;
+  padding:10px; background:rgba(30,34,38,.94); border-radius:14px;
+  box-shadow:0 24px 70px rgba(0,0,0,.34);
+}
+.pdf-hover-preview.visible { display:flex; align-items:center; justify-content:center; }
+.pdf-hover-preview img { width:100%; height:100%; object-fit:contain; background:white; border-radius:7px; }
+
 .empty { margin-top:25px; background:white; border:1px dashed #ccd1d6; border-radius:10px; padding:35px 20px; text-align:center; color:#777; }
 
 @media (max-width:1000px) { .doc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
@@ -203,7 +246,7 @@ body {
 <body>
 <div class="header"><div class="header-inner">
   <div><div class="brand">Kristine · Archiv</div><div class="subtitle">WinWorker SQL + Dokumentenarchiv</div></div>
-  <div class="status">Archivsuche V0.5</div>
+  <div class="status">Archivsuche V0.6</div>
 </div></div>
 
 <div class="container">
@@ -218,6 +261,16 @@ body {
 
 ${connectorError ? `<div class="alert error">Connector: ${esc(connectorError)}</div>` : ""}
 ${sqlError ? `<div class="alert warn">PDF-Suche funktioniert. SQL: ${esc(sqlError)}</div>` : ""}
+
+${q && projectNumbers.length ? `
+<div class="project-filter">
+  <span class="project-filter-label">Projekte gefunden:</span>
+  ${projectNumbers.slice(0, 30).map(number => {
+    const refine = refinedProjectQuery(q, number);
+    return `<a class="project-chip" href="/archiv?q=${encodeURIComponent(refine)}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
+  }).join("")}
+  ${projectNumbers.length > 30 ? `<span class="more-projects">+ ${projectNumbers.length - 30} weitere</span>` : ""}
+</div>` : ""}
 
 ${q && projects.length ? `
 <div class="project-section">
@@ -254,7 +307,9 @@ ${years.map(([year, docs]) => `
       <article class="doc-card" data-path="${esc(d.path)}" onclick="openArchivePdf(this.dataset.path)">
         <div class="doc-preview">
           <img loading="lazy" src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
-               alt="Vorschau ${esc(d.filename)}" onerror="this.style.display='none'">
+               alt="Vorschau ${esc(d.filename)}"
+               onmouseenter="showPdfHover(this.src)" onmouseleave="hidePdfHover()"
+               onerror="this.style.display='none'">
         </div>
         <div class="doc-info">
           <div class="doc-line">
@@ -273,7 +328,26 @@ ${years.map(([year, docs]) => `
 ` : q ? `<div class="empty">Keine passenden Dokumente gefunden.</div>` : `<div class="empty">Suche im Kristine-Archiv</div>`}
 </div>
 
+<div id="pdfHoverPreview" class="pdf-hover-preview" aria-hidden="true">
+  <img id="pdfHoverImage" alt="Vergrößerte PDF-Vorschau">
+</div>
+
 <script>
+function showPdfHover(src) {
+  if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+  const box = document.getElementById("pdfHoverPreview");
+  const img = document.getElementById("pdfHoverImage");
+  img.src = src;
+  box.classList.add("visible");
+  box.setAttribute("aria-hidden", "false");
+}
+
+function hidePdfHover() {
+  const box = document.getElementById("pdfHoverPreview");
+  box.classList.remove("visible");
+  box.setAttribute("aria-hidden", "true");
+}
+
 async function openArchivePdf(path) {
   try {
     const response = await fetch("/api/archive/open", {
@@ -324,7 +398,7 @@ async function openArchivePdf(path) {
     res.json({
       ok:true,
       module:"archive-search",
-      version:"0.5",
+      version:"0.6",
       connector:ARCHIVE_CONNECTOR
     });
   });
