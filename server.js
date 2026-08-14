@@ -1,4 +1,4 @@
-﻿// server.js (CommonJS) â€“ Baustellenprotokoll FINAL + Admin UI
+// server.js (CommonJS) â€“ Baustellenprotokoll FINAL + Admin UI
 // âœ… WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // âœ… Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
 // âœ… Layout A: Text + Transkripte seitenfÃ¼llend, danach Fotos (6 pro Seite), WhatsApp-PDFs (Seite 1) eingebettet
@@ -3579,6 +3579,31 @@ registerMediaMigration(app, {
   dataDir: DATA_DIR,
   requireAdmin,
 });
+// ==================== KRISTINE Brain-Stundenquelle ====================
+// Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
+// Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
+app.get("/kristine/api/brain-hours-source", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
+    const events = fs.existsSync(timeEventsPath)
+      ? JSON.parse(await fsp.readFile(timeEventsPath, "utf8"))
+      : [];
+    const employees = await readEmployees();
+
+    res.json({
+      ok: true,
+      events: Array.isArray(events) ? events : [],
+      employees: Array.isArray(employees) ? employees : [],
+      source: "KRISTINE_RENDER",
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("KRISTINE Brain-Stundenquelle:", error);
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
 // ==================== KRISTINE Archivsuche ====================
 registerArchiveSearch(app);
 console.log("KRISTINE Archivsuche registriert");
@@ -3662,4 +3687,3 @@ console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
 app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
-
