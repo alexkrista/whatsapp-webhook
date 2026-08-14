@@ -1,7 +1,7 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0024.0
+// Build 0024.1
 // KRISTA: 07:00 Startprüfung, 08:00 Chefstatus,
 // 15:00 Planung morgen, 15:30 Nachfassung.
 //
@@ -865,6 +865,21 @@ async function registerMorningStatus({
     await writeJson(files.scheduler, scheduler);
   }
 
+  async function saveAttempt(key, scheduler, patch = {}) {
+    scheduler._delivery = scheduler._delivery && typeof scheduler._delivery === "object"
+      ? scheduler._delivery
+      : {};
+    const current = scheduler._delivery[key] && typeof scheduler._delivery[key] === "object"
+      ? scheduler._delivery[key]
+      : {};
+    scheduler._delivery[key] = {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeJson(files.scheduler, scheduler);
+  }
+
   async function sendToChef(reply) {
     const to = normalizePhone(chefPhone);
 
@@ -919,6 +934,18 @@ async function registerMorningStatus({
       (status) => status.category === "missing"
     );
 
+    let sentCount = 0;
+    const failedEmployees = [];
+
+    await saveAttempt("startReminder", state.scheduler, {
+      date,
+      lastAttempt: new Date().toISOString(),
+      requested: missing.length,
+      sent: 0,
+      failed: 0,
+      lastError: "",
+    });
+
     for (const status of missing) {
       try {
         await sendWhatsApp({
@@ -934,7 +961,9 @@ async function registerMorningStatus({
             "Heute nicht",
           ],
         });
+        sentCount += 1;
       } catch (error) {
+        failedEmployees.push(displayName(status.employee));
         logger.error(
           "07:00 Erinnerung fehlgeschlagen",
           displayName(status.employee),
@@ -943,11 +972,26 @@ async function registerMorningStatus({
       }
     }
 
-    await saveRun(
-      "startReminder",
-      date,
-      state.scheduler
-    );
+    if (failedEmployees.length === 0) {
+      await saveRun("startReminder", date, state.scheduler);
+      await saveAttempt("startReminder", state.scheduler, {
+        date,
+        lastSuccess: new Date().toISOString(),
+        requested: missing.length,
+        sent: sentCount,
+        failed: 0,
+        lastError: "",
+      });
+    } else {
+      await saveAttempt("startReminder", state.scheduler, {
+        date,
+        requested: missing.length,
+        sent: sentCount,
+        failed: failedEmployees.length,
+        failedEmployees,
+        lastError: `WhatsApp-Versand fehlgeschlagen für: ${failedEmployees.join(", ")}`,
+      });
+    }
 
     const suppressed = statuses.filter(
       (status) => status.category === "non_work"
@@ -955,12 +999,14 @@ async function registerMorningStatus({
 
     logger.log("KRISTA 07:00 Prüfung", {
       date,
-      reminded: missing.length,
+      reminded: sentCount,
+      failed: failedEmployees.length,
       suppressed,
     });
 
     return {
-      sent: missing.length,
+      sent: sentCount,
+      failed: failedEmployees,
       suppressed,
       statuses,
     };
@@ -999,6 +1045,13 @@ async function registerMorningStatus({
     );
 
     const report = buildChefReport(statuses, date);
+
+    await saveAttempt("chefReport", state.scheduler, {
+      date,
+      lastAttempt: new Date().toISOString(),
+      lastError: "",
+    });
+
     const result = await sendToChef(report);
 
     if (result.sent) {
@@ -1009,13 +1062,24 @@ async function registerMorningStatus({
           recipients: 1,
         }
       );
+      await saveRun("chefReport", date, state.scheduler);
+      await saveAttempt("chefReport", state.scheduler, {
+        date,
+        lastSuccess: new Date().toISOString(),
+        sent: true,
+        lastError: "",
+      });
+    } else {
+      await saveAttempt("chefReport", state.scheduler, {
+        date,
+        sent: false,
+        lastError: result.reason || "Versand nicht bestätigt",
+      });
+      logger.warn("KRISTA 08:00 Chefstatus NICHT als gesendet markiert", {
+        date,
+        reason: result.reason || "Versand nicht bestätigt",
+      });
     }
-
-    await saveRun(
-      "chefReport",
-      date,
-      state.scheduler
-    );
 
     return {
       sent: result.sent,
@@ -1067,13 +1131,20 @@ async function registerMorningStatus({
       followUp
     );
 
+    await saveAttempt(schedulerKey, state.scheduler, {
+      date,
+      tomorrow,
+      lastAttempt: new Date().toISOString(),
+      lastError: "",
+    });
+
     const result = await sendToChef(message);
     sent = result.sent;
 
     logger.log(
       sent
         ? `${label} gesendet`
-        : `${label} geprüft`,
+        : `${label} NICHT gesendet`,
       {
         date,
         tomorrow,
@@ -1084,14 +1155,27 @@ async function registerMorningStatus({
         chefPhoneConfigured: Boolean(
           normalizePhone(chefPhone)
         ),
+        reason: result.reason || "",
       }
     );
 
-    await saveRun(
-      schedulerKey,
-      date,
-      state.scheduler
-    );
+    if (sent) {
+      await saveRun(schedulerKey, date, state.scheduler);
+      await saveAttempt(schedulerKey, state.scheduler, {
+        date,
+        tomorrow,
+        lastSuccess: new Date().toISOString(),
+        sent: true,
+        lastError: "",
+      });
+    } else {
+      await saveAttempt(schedulerKey, state.scheduler, {
+        date,
+        tomorrow,
+        sent: false,
+        lastError: result.reason || "Versand nicht bestätigt",
+      });
+    }
 
     return {
       sent,
