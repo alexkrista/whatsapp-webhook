@@ -680,7 +680,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.5",
+        "version": "0.9.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -745,6 +745,87 @@ def project_invoices_debug(project_index):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+
+
+@app.route("/schema-index/rebuild", methods=["GET", "POST"])
+def schema_index_rebuild():
+    try:
+        data = build_winworker_schema_index()
+        return jsonify({
+            "ok": True,
+            "generatedAt": data.get("generatedAt"),
+            "databaseCount": data.get("databaseCount"),
+            "indexedDatabases": len(data.get("databases", [])),
+            "errors": data.get("errors", []),
+            "file": str(SCHEMA_INDEX_FILE),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/schema-index/status")
+def schema_index_status():
+    data = load_winworker_schema_index()
+    if not data:
+        return jsonify({"ok": True, "exists": False, "file": str(SCHEMA_INDEX_FILE)})
+
+    return jsonify({
+        "ok": True,
+        "exists": True,
+        "generatedAt": data.get("generatedAt"),
+        "databaseCount": data.get("databaseCount"),
+        "indexedDatabases": len(data.get("databases", [])),
+        "errors": data.get("errors", []),
+        "file": str(SCHEMA_INDEX_FILE),
+    })
+
+
+@app.get("/schema-index/search")
+def schema_index_search():
+    q = str(request.args.get("q") or "").strip()
+    limit = request.args.get("limit", 100)
+    try:
+        return jsonify(search_winworker_schema_index(q, limit))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/schema-index/table")
+def schema_index_table():
+    db_name = str(request.args.get("db") or "").strip().lower()
+    table_name = str(request.args.get("table") or "").strip().lower()
+    data = load_winworker_schema_index()
+    if not data:
+        return jsonify({"ok": False, "error": "SQL-Strukturindex fehlt."}), 404
+
+    matches = []
+    for db in data.get("databases", []):
+        if db_name and str(db.get("name") or "").lower() != db_name:
+            continue
+        for obj in db.get("objects", []):
+            if table_name and str(obj.get("name") or "").lower() != table_name:
+                continue
+            obj_name = str(obj.get("name") or "")
+            matches.append({
+                "database": db.get("name"),
+                **obj,
+                "foreignKeys": [
+                    fk for fk in db.get("foreignKeys", [])
+                    if f".{obj_name}." in str(fk.get("from"))
+                    or f".{obj_name}." in str(fk.get("to"))
+                ],
+                "indexes": [
+                    idx for idx in db.get("indexes", [])
+                    if str(idx.get("table") or "").lower() == obj_name.lower()
+                ],
+            })
+
+    return jsonify({
+        "ok": True,
+        "matches": matches,
+        "generatedAt": data.get("generatedAt"),
+    })
 
 
 @app.get("/schema-hints")
@@ -895,9 +976,11 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.5 - Kunde + Stunden + Netto + SQL-Strukturindex")
+    print("Version: 0.9.6 - SQL-Strukturindex Routen registriert")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
+    print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
     print("Schema-Index search : http://127.0.0.1:5051/schema-index/search?q=personalnummer")
+    print("Schema-Index table  : http://127.0.0.1:5051/schema-index/table?db=WinWorker_Mitschreibung_Standard&table=Stundenmitschreibung")
     print()
 
     app.run(host="127.0.0.1", port=5051, debug=False)
