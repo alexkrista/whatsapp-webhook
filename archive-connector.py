@@ -6,11 +6,72 @@ from datetime import datetime
 import os
 import re
 import json
+import hmac
 
 import pymupdf
 import pyodbc
+from waitress import serve
 
 app = Flask(__name__)
+
+# ---------------------------------------------------------------------------
+# HANDY-ZUGANG / SICHERHEIT
+# ---------------------------------------------------------------------------
+# Der Dienst lauscht nur auf localhost UND auf der Tailscale-IP dieses PCs.
+# Er wird NICHT auf 0.0.0.0 geöffnet.
+TAILSCALE_IP = os.environ.get("KRISTINE_TAILSCALE_IP", "100.98.155.39").strip()
+ARCHIVE_USER = os.environ.get("KRISTINE_ARCHIVE_USER", "kristine").strip()
+ARCHIVE_PASSWORD = os.environ.get("KRISTINE_ARCHIVE_PASSWORD", "").strip()
+
+# Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
+# Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
+MOBILE_ALLOWED_PATHS = {"/status", "/search", "/thumb", "/pdf"}
+
+
+def _request_is_local():
+    return (request.remote_addr or "") in {"127.0.0.1", "::1"}
+
+
+@app.before_request
+def protect_remote_archive_access():
+    # Bestehende lokale KRISTINE-Aufrufe auf 127.0.0.1 bleiben unverändert.
+    if _request_is_local():
+        return None
+
+    # Über Tailscale nur die minimale Handy-API freigeben.
+    if request.path not in MOBILE_ALLOWED_PATHS:
+        return jsonify({"ok": False, "error": "Nicht verfügbar"}), 404
+
+    # Fail closed: Ohne gesetztes Passwort gibt es KEINEN Remote-Zugriff.
+    if not ARCHIVE_PASSWORD:
+        return jsonify({
+            "ok": False,
+            "error": "Remote-Zugriff gesperrt: KRISTINE_ARCHIVE_PASSWORD fehlt."
+        }), 503
+
+    auth = request.authorization
+    username_ok = bool(auth) and hmac.compare_digest(auth.username or "", ARCHIVE_USER)
+    password_ok = bool(auth) and hmac.compare_digest(auth.password or "", ARCHIVE_PASSWORD)
+
+    if not (username_ok and password_ok):
+        response = jsonify({"ok": False, "error": "Anmeldung erforderlich"})
+        response.status_code = 401
+        response.headers["WWW-Authenticate"] = 'Basic realm="KRISTINE Archive", charset="UTF-8"'
+        return response
+
+    return None
+
+
+@app.after_request
+def archive_security_headers(response):
+    # Keine sensiblen Archivantworten im Browser-/Proxy-Cache behalten.
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    return response
 
 DB = Path(r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
 SQL_SERVER = r"SRV-DB01\WINWORKER"
@@ -812,12 +873,34 @@ def validate_pdf_path(raw_path):
     return path
 
 
+def validate_indexed_pdf_path(raw_path):
+    """
+    Remote-Ausgabe nur für PDFs, die tatsächlich im KRISTINE-PDF-Index stehen.
+    Dadurch kann ein Client nicht einfach irgendeinen anderen PDF-Pfad des PCs
+    erraten und abrufen.
+    """
+    path = validate_pdf_path(raw_path)
+
+    con = sqlite3.connect(DB)
+    try:
+        row = con.execute(
+            "SELECT 1 FROM pdf_index WHERE path = ? LIMIT 1",
+            (str(path),)
+        ).fetchone()
+    finally:
+        con.close()
+
+    if not row:
+        raise PermissionError("PDF ist nicht im KRISTINE-Archivindex")
+    return path
+
+
 @app.get("/status")
 def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.7",
+        "version": "0.9.8",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -1106,7 +1189,7 @@ def open_pdf():
 @app.get("/thumb")
 def thumbnail():
     try:
-        path = validate_pdf_path(request.args.get("path"))
+        path = validate_indexed_pdf_path(request.args.get("path"))
         with pymupdf.open(path) as doc:
             if len(doc) < 1:
                 raise ValueError("PDF hat keine Seiten")
@@ -1115,11 +1198,34 @@ def thumbnail():
             png = pix.tobytes("png")
 
         return send_file(BytesIO(png), mimetype="image/png", max_age=300)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, FileNotFoundError, PermissionError):
         return ("", 404)
     except Exception as e:
         print("Thumbnail-Fehler:", e)
         return ("", 500)
+
+
+@app.get("/pdf")
+def pdf_inline():
+    """
+    Liefert ein im KRISTINE-Index vorhandenes PDF direkt an Handy/Browser.
+    /open bleibt lokal und öffnet weiterhin nur am Windows-PC.
+    """
+    try:
+        path = validate_indexed_pdf_path(request.args.get("path"))
+        return send_file(
+            path,
+            mimetype="application/pdf",
+            as_attachment=False,
+            download_name=path.name,
+            conditional=True,
+            max_age=0,
+        )
+    except (ValueError, FileNotFoundError, PermissionError):
+        return jsonify({"ok": False, "error": "PDF nicht gefunden"}), 404
+    except Exception as e:
+        print("PDF-Ausgabe-Fehler:", e)
+        return jsonify({"ok": False, "error": "PDF konnte nicht geöffnet werden"}), 500
 
 
 if __name__ == "__main__":
@@ -1129,7 +1235,8 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.7 - Stundenfusion WW + KRISTINE")
+    print("Version: 0.9.8 - Sicherer Handy-Zugang via Tailscale")
+    print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
     print("Schema-Index search : http://127.0.0.1:5051/schema-index/search?q=personalnummer")
@@ -1137,4 +1244,18 @@ if __name__ == "__main__":
     print("Hours fusion        : POST http://127.0.0.1:5051/hours-fusion-source")
     print()
 
-    app.run(host="127.0.0.1", port=5051, debug=False)
+    if not TAILSCALE_IP:
+        raise RuntimeError("KRISTINE_TAILSCALE_IP fehlt")
+
+    # Zwei gezielte Listener:
+    # 1) localhost für bestehende interne KRISTINE-Aufrufe
+    # 2) nur die private Tailscale-IP für das Handy
+    # Niemals 0.0.0.0 verwenden.
+    serve(
+        app,
+        listen=f"127.0.0.1:5051 {TAILSCALE_IP}:5051",
+        threads=8,
+        expose_tracebacks=False,
+        clear_untrusted_proxy_headers=True,
+        ident="KRISTINE",
+    )
