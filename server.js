@@ -1622,6 +1622,7 @@ kristine = registerKristine(app, {
   chefPhoneNumber: CHEF_PHONE,
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
   readEmployees,
+  readWorktimeModels,
   readJobMeta,
   markJobRunning: async (jobId, source = "system") => {
     const id = String(jobId || "").trim();
@@ -3178,8 +3179,76 @@ function employeeIdFromName(name) {
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "employee";
   return `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
+
+const EMPLOYEE_DOC_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+]);
+
+function cleanEmployeeDocument(value, legacyImage = "", fallbackName = "Dokument") {
+  const source = value && typeof value === "object" ? value : {};
+  const data = String(source.data || legacyImage || "");
+  if (!data) return null;
+
+  const match = data.match(/^data:([^;,]+);base64,/i);
+  const mime = String(source.type || match?.[1] || "").toLowerCase();
+  if (!match || !EMPLOYEE_DOC_MIME_TYPES.has(mime)) return null;
+
+  // ca. 4 MB Rohdatei + Base64-Overhead. Server-JSON bleibt damit beherrschbar.
+  if (data.length > 6000000) return null;
+
+  const ext =
+    mime === "application/pdf" ? ".pdf" :
+    mime === "application/msword" ? ".doc" :
+    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? ".docx" :
+    mime === "image/png" ? ".png" :
+    mime === "image/webp" ? ".webp" : ".jpg";
+
+  let name = String(source.name || fallbackName || "Dokument").trim().slice(0, 180);
+  if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) name += ext;
+
+  return { name, type: mime, data };
+}
+
+function normalizeDailyAllowanceModel(value, role = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (["maler", "buak", "site6", "none"].includes(raw)) return raw;
+  // Bestehende Mitarbeiter bleiben ohne manuelle Nacharbeit sinnvoll:
+  return /\bmaler\b/i.test(String(role || "")) ? "maler" : "none";
+}
+
 function cleanEmployeeMaster(e, existingId = "") {
   const name = String(e?.name || "").trim().slice(0, 120);
+  const role = String(e?.role || "Maler").trim().slice(0, 80);
+
+  const drivingLicenseFrontDocument = cleanEmployeeDocument(
+    e?.drivingLicenseFrontDocument,
+    e?.drivingLicenseFrontImage || e?.drivingLicenseImage || "",
+    "Führerschein Vorderseite"
+  );
+  const drivingLicenseBackDocument = cleanEmployeeDocument(
+    e?.drivingLicenseBackDocument,
+    e?.drivingLicenseBackImage || "",
+    "Führerschein Rückseite"
+  );
+  const passportPage1Document = cleanEmployeeDocument(
+    e?.passportPage1Document,
+    e?.passportPage1Image || e?.passportImage || "",
+    "Pass Seite 1"
+  );
+  const passportPage2Document = cleanEmployeeDocument(
+    e?.passportPage2Document,
+    e?.passportPage2Image || "",
+    "Pass Seite 2"
+  );
+
+  const legacyImage = doc =>
+    doc?.type?.startsWith("image/") ? String(doc.data || "").slice(0, 6000000) : "";
+
   return {
     id: String(e?.id || existingId || employeeIdFromName(name)).trim().slice(0, 80),
     name,
@@ -3188,8 +3257,9 @@ function cleanEmployeeMaster(e, existingId = "") {
     finkzeitPersonalNumber: String(e?.finkzeitPersonalNumber ?? e?.personalNumberFinkzeit ?? "").trim().slice(0, 30),
     shortCode: String(e?.shortCode || "").trim().slice(0, 20),
     phone: String(e?.phone || "").trim().slice(0, 40),
-    role: String(e?.role || "Maler").trim().slice(0, 80),
+    role,
     team: String(e?.team || "").trim().slice(0, 80),
+    dailyAllowanceModel: normalizeDailyAllowanceModel(e?.dailyAllowanceModel, role),
     specialties: Array.isArray(e?.specialties)
       ? e.specialties.map(x => String(x || "").trim()).filter(Boolean).slice(0, 30)
       : String(e?.specialties || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 30),
@@ -3203,10 +3273,19 @@ function cleanEmployeeMaster(e, existingId = "") {
     employmentEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentEnd || "")) ? String(e.employmentEnd) : "",
     birthDate: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.birthDate || "")) ? String(e.birthDate) : "",
     drivingLicenseLastCheck: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.drivingLicenseLastCheck || "")) ? String(e.drivingLicenseLastCheck) : "",
-    drivingLicenseFrontImage: String(e?.drivingLicenseFrontImage || e?.drivingLicenseImage || "").startsWith("data:image/") ? String(e.drivingLicenseFrontImage || e.drivingLicenseImage).slice(0, 3500000) : "",
-    drivingLicenseBackImage: String(e?.drivingLicenseBackImage || "").startsWith("data:image/") ? String(e.drivingLicenseBackImage).slice(0, 3500000) : "",
-    passportPage1Image: String(e?.passportPage1Image || e?.passportImage || "").startsWith("data:image/") ? String(e.passportPage1Image || e.passportImage).slice(0, 3500000) : "",
-    passportPage2Image: String(e?.passportPage2Image || "").startsWith("data:image/") ? String(e.passportPage2Image).slice(0, 3500000) : "",
+
+    // Neue Dokumentfelder: Bild, PDF, Word DOC/DOCX.
+    drivingLicenseFrontDocument,
+    drivingLicenseBackDocument,
+    passportPage1Document,
+    passportPage2Document,
+
+    // Legacy-Bildfelder bleiben für ältere Oberflächen lesbar.
+    drivingLicenseFrontImage: legacyImage(drivingLicenseFrontDocument),
+    drivingLicenseBackImage: legacyImage(drivingLicenseBackDocument),
+    passportPage1Image: legacyImage(passportPage1Document),
+    passportPage2Image: legacyImage(passportPage2Document),
+
     passportExpiry: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.passportExpiry || "")) ? String(e.passportExpiry) : "",
     clothingSizes: {
       tshirt: String(e?.clothingSizes?.tshirt || "").trim().slice(0, 12),
@@ -3231,6 +3310,7 @@ function cleanEmployeeMaster(e, existingId = "") {
     updatedAt: new Date().toISOString()
   };
 }
+
 async function readEmployees() {
   const p = employeesPath();
   if (!fs.existsSync(p)) return [];
@@ -3579,42 +3659,34 @@ registerMediaMigration(app, {
   dataDir: DATA_DIR,
   requireAdmin,
 });
-// ==================== KRISTINE Archivsuche ====================
-registerArchiveSearch(app);
-console.log("KRISTINE Archivsuche registriert");
-
-
 // ==================== KRISTINE Brain-Stundenquelle ====================
-// Liefert dem Gehirn die KRISTINE-Zeitdaten direkt aus dem produktiven DATA_DIR.
-// Geschützt mit dem bestehenden ADMIN_TOKEN (x-admin-token oder ?token=...).
+// Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
+// Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
 app.get("/kristine/api/brain-hours-source", async (req, res) => {
   if (!requireAdmin(req, res)) return;
-
   try {
     const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
     const events = fs.existsSync(timeEventsPath)
       ? JSON.parse(await fsp.readFile(timeEventsPath, "utf8"))
       : [];
-
     const employees = await readEmployees();
 
     res.json({
       ok: true,
-      source: "KRISTINE_RENDER",
-      generatedAt: new Date().toISOString(),
-      eventCount: Array.isArray(events) ? events.length : 0,
-      employeeCount: Array.isArray(employees) ? employees.length : 0,
       events: Array.isArray(events) ? events : [],
-      employees: Array.isArray(employees) ? employees : []
+      employees: Array.isArray(employees) ? employees : [],
+      source: "KRISTINE_RENDER",
+      generatedAt: new Date().toISOString()
     });
   } catch (error) {
     console.error("KRISTINE Brain-Stundenquelle:", error);
-    res.status(500).json({
-      ok: false,
-      error: String(error?.message || error)
-    });
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
   }
 });
+
+// ==================== KRISTINE Archivsuche ====================
+registerArchiveSearch(app);
+console.log("KRISTINE Archivsuche registriert");
 
 // ===================== Tagesreport PDF =====================
 registerDailyReport(app, {

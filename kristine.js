@@ -5,7 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readJobMeta }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readWorktimeModels, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -1621,6 +1621,70 @@ const open = taskId
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
 
+
+  function employeeScheduleForDate(employee, worktimeModels, date) {
+    const modelId = String(employee?.worktimeModelId || "krista-standard");
+    const models = Array.isArray(worktimeModels) ? worktimeModels : [];
+    const model = models.find(row => String(row?.id || "") === modelId) || models[0] || null;
+    const d = new Date(`${date}T12:00:00`);
+    if (!model || Number.isNaN(d.getTime())) {
+      return { scheduledFree:false, targetHours:null, modelName:model?.name || modelId };
+    }
+
+    const weekday = d.getDay(); // 0 So ... 6 Sa
+
+    // Neues/administratives Modell: days[] Montag ... Sonntag.
+    if (Array.isArray(model.days) && model.days.length) {
+      const index = (weekday + 6) % 7;
+      const rule = model.days[index] || {};
+      const target = Number(rule.shouldHours ?? rule.targetHours ?? 0);
+      return {
+        scheduledFree: rule.isWorkDay === false || target <= 0,
+        targetHours: Math.max(0, target),
+        modelName: String(model.name || modelId)
+      };
+    }
+
+    // Bestehendes Modell: seasons[].weekdays.
+    const month = d.getMonth() + 1;
+    const season = (model.seasons || []).find(row => (row.months || []).includes(month));
+    const rule = season?.weekdays?.[String(weekday)] || {};
+    const target = Number(rule.targetHours ?? 0);
+    return {
+      scheduledFree: rule.free === true || !rule.from || !rule.to || target <= 0,
+      targetHours: Math.max(0, target),
+      modelName: String(model.name || modelId)
+    };
+  }
+
+  function dailyAllowanceModelOf(employee, employeeRule = null) {
+    const direct = String(employee?.dailyAllowanceModel || "").trim().toLowerCase();
+    if (["maler","buak","site6","none"].includes(direct)) return direct;
+    if (employeeRule?.buak === true) return "buak";
+    return /\bmaler\b/i.test(String(employee?.role || "")) ? "maler" : "none";
+  }
+
+  function dailyAllowanceFor(model, siteMinutes) {
+    const minutes = Math.max(0, Number(siteMinutes || 0));
+    if (model === "buak") {
+      if (minutes >= 540) return { eligible:true, type:"buak_gross", label:"BUAK groß" };
+      if (minutes >= 180) return { eligible:true, type:"buak_klein", label:"BUAK klein" };
+      return { eligible:false, type:"buak", label:"BUAK" };
+    }
+    if (model === "site6") {
+      return minutes >= 360
+        ? { eligible:true, type:"site6", label:"Baustelle ≥ 6 Std." }
+        : { eligible:false, type:"site6", label:"Baustelle ≥ 6 Std." };
+    }
+    if (model === "maler") {
+      // Bestehende Maler-Regel unverändert lassen.
+      return minutes > 180
+        ? { eligible:true, type:"maler", label:"Maler · Taggeld" }
+        : { eligible:false, type:"maler", label:"Maler · Taggeld" };
+    }
+    return { eligible:false, type:"none", label:"Kein Taggeld" };
+  }
+
   // KRISTOOL Tagesarbeitsliste:
   // 1) tatsächliche Fahrer aus GPS
   // 2) danach Teammitglieder ohne eigene Fahrt
@@ -1628,7 +1692,7 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [gpsData, employees, events, states, corrections, releases, assignments, employeeWorkRules] = await Promise.all([
+      const [gpsData, employees, events, states, corrections, releases, assignments, employeeWorkRules, worktimeModels] = await Promise.all([
         readGpsImport("latest"),
         typeof readEmployees === "function" ? readEmployees() : [],
         readJson(TIME_EVENTS, []),
@@ -1637,6 +1701,7 @@ const open = taskId
         readJson(DAY_RELEASES, []),
         readJson(ASSIGNMENTS, []),
         readJson(EMPLOYEE_WORK_RULES, {}),
+        typeof readWorktimeModels === "function" ? readWorktimeModels() : [],
       ]);
 
       if (gpsData && reconcileGpsMappings(gpsData, employees)) {
@@ -1687,6 +1752,8 @@ const open = taskId
         const employeeFinkzeit=finkzeitPersonnelNumber(employee);
         const absence=employeeAbsenceForDay(assignments,employee,date);
         const employeeRule=(employeeWorkRules||{})[employeeId]||{activityMode:"productive",buak:false};
+        const schedule=employeeScheduleForDate(employee,worktimeModels,date);
+        const dailyAllowanceModel=dailyAllowanceModelOf(employee,employeeRule);
 
         items.push({
           employeeId,
@@ -1695,6 +1762,10 @@ const open = taskId
           employeeIdentityKey: employeeFinkzeit ? `fink:${employeeFinkzeit}` : `legacy:${employeeId}`,
           activityMode:employeeRule.activityMode||"productive",
           buak:employeeRule.buak===true,
+          dailyAllowanceModel,
+          scheduledFree:schedule.scheduledFree===true,
+          scheduledTargetHours:schedule.targetHours,
+          worktimeModelName:schedule.modelName,
           role: ownRows.length ? "driver" : "team",
           driverKey: driverKeys[0] || "",
           ownTripCount: ownRows.length,
@@ -2204,6 +2275,7 @@ const open = taskId
       for (const employee of people) {
         const employeeId = String(employee.id || employee.employeeId);
         const employeeName = String(employee.name || employee.employeeName || employee.nickname || employeeId);
+        const allowanceModel = dailyAllowanceModelOf(employee);
         const rows = [];
 
         for (const date of dates) {
@@ -2228,9 +2300,15 @@ const open = taskId
           );
           const override = parseOverride(correction?.note || "");
 
+          const allowance = dailyAllowanceFor(allowanceModel, siteMinutes);
+          const taggeld = finalFlag(override.taggeld, allowance.eligible);
           rows.push({
             date,
-            taggeld: finalFlag(override.taggeld, siteMinutes > 180),
+            taggeld,
+            taggeldModel: allowanceModel,
+            taggeldType: allowance.type,
+            taggeldLabel: allowance.label,
+            siteMinutes,
             flMinutes,
             flDay: finalFlag(override.fl, flMinutes > 0),
             chMinutes,
@@ -2242,6 +2320,7 @@ const open = taskId
           employeeId,
           employeeName,
           personalNumber: personalNo(employee),
+          dailyAllowanceModel: allowanceModel,
           rows,
         });
       }

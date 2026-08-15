@@ -23,6 +23,10 @@
     .calcbox{background:#f7f7f7;border:1px solid #e3e3e3;border-radius:12px;padding:12px;margin-top:12px}.calcgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:7px 14px}.calcgrid .value{text-align:right;font-weight:700}.calcgrid .total{border-top:1px solid #ccc;padding-top:7px;margin-top:3px}.progress{height:10px;background:#ddd;border-radius:999px;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:#111}.negative{color:#9b1c1c}.positive{color:#2d6a2d}.warning{color:#9a5b00}
     .job-summary{margin-top:12px;border-top:1px solid #eee;padding-top:10px}
     .doc-preview{max-width:180px;max-height:110px;border-radius:8px;border:1px solid #ddd;display:block;margin-top:6px}
+    .doc-file-meta{margin-top:8px;font-size:12px;color:#555;line-height:1.45}
+    .doc-file-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+    .doc-file-actions a{display:inline-flex;text-decoration:none;padding:6px 8px;border-radius:7px;background:#eee;color:#111;font-weight:700}
+    .doc-file-actions a:hover{background:#ddd}
     .employee-docs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;background:#fff;padding:12px;border:1px solid #e3e3e3;border-radius:10px}
     .readonly-highlight{background:#fffbe8;font-weight:800}
     .toolbar-select{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;min-width:180px}.reload-icon{width:42px;height:42px;padding:0;border-radius:50%;font-size:22px;display:inline-flex;align-items:center;justify-content:center}.status-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;margin-top:8px;background:#eee}.job-address{margin-top:8px;line-height:1.45}.nav-link{display:inline-flex;align-items:center;gap:5px;margin-top:6px;text-decoration:none;font-weight:750;color:#17662f}.history-list{max-height:58vh;overflow:auto}.history-entry{padding:12px 0;border-bottom:1px solid #eee}.history-entry:last-child{border-bottom:0}.history-time{font-size:12px;color:#777}.rapport-launch{width:min(760px,96vw)!important}.rapport-launch #rapportJob{font-size:18px;padding:14px;min-height:54px}
@@ -36,36 +40,11 @@
 
     /* Build 0021.2: Neue Baustelle */
     .new-job-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;align-items:center;justify-content:center;z-index:120;padding:18px}.new-job-backdrop.open{display:flex}.new-job-modal{width:min(720px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 20px 70px rgba(0,0,0,.32)}.new-job-head{position:sticky;top:0;background:#111;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;z-index:2}.new-job-head h2{margin:0;font-size:21px}.new-job-body{padding:20px}.new-job-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.new-job-grid .full{grid-column:1/-1}.new-job-grid label{display:block;color:#555;font-size:13px;margin:0 0 5px}.new-job-grid input,.new-job-grid select,.new-job-grid textarea{width:100%;min-width:0;box-sizing:border-box}.new-job-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}.new-job-error{color:#9b1c1c;font-weight:700;margin-top:10px;display:none}@media(max-width:700px){.new-job-grid{grid-template-columns:1fr}.new-job-grid .full{grid-column:auto}}
-
-    /* Mitarbeiter 0023.34 – Liste + eigener Editor */
-    .employee-modal{inset:5vh 3vw}
-    .employee-list-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 14px}
-    .employee-new-button{background:#24733b;border-color:#24733b;font-weight:800}
-    .employee-editor-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;z-index:90}
-    .employee-editor{position:fixed;inset:4vh 8vw;background:#fff;border-radius:18px;box-shadow:0 18px 70px rgba(0,0,0,.35);z-index:91;display:none;overflow:auto}
-    .employee-editor .employee-modal-head{z-index:4}
-    .employee-editor-body{padding:20px}
-    .employee-editor .employee-form{margin-bottom:0}
-    .employee-editor-titleline{display:flex;flex-direction:column;gap:2px}
-    .employee-identity-note{font-size:12px;color:#ddd}
-    .employee-locked{background:#f1f1f1!important;color:#666!important;font-weight:800}
-    .employee-editor-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
-    @media(max-width:760px){.employee-editor{inset:2vh 2vw}}
-
-  
-    .inactive-employees-wrap{margin-top:18px;padding-top:14px;border-top:1px solid #ddd}
-    .inactive-employees-title{font-size:11px;font-weight:900;color:#777;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-    .inactive-employees-grid{display:flex;flex-wrap:wrap;gap:7px}
-    .inactive-employee-tile{border:1px solid #d4d4d4;background:#ededed;color:#555;border-radius:9px;padding:7px 10px;font-size:11px;cursor:pointer;box-shadow:none}
-    .inactive-employee-tile:hover{background:#e3e3e3}
-    .inactive-employee-tile strong{color:#333}
-    .inactive-employee-tile .inactive-tag{font-size:9px;font-weight:900;color:#888;margin-left:5px}
-
-</style>
+  </style>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="krisadmin" data-krista-build="0023.34"></div>
+  <div id="kristaTopbar" data-krista-active="krisadmin" data-krista-build="0023.32"></div>
   <header><h1>Krista Baustellenmanager</h1><div class="sub">Version <span id="appVersion">3.4.0</span> · Build <span id="appBuild">0008b</span> · <span id="appStatus">Stable</span></div></header>
   <main>
     <div class="bar krista-module-nav">
@@ -111,33 +90,23 @@
 
   <div id="employeeBackdrop" class="drawer-backdrop" onclick="closeEmployees()" style="z-index:60"></div>
   <section id="employeeModal" class="employee-modal" aria-hidden="true">
-    <div class="employee-modal-head"><div><strong>👷 Mitarbeiter-Stammdaten</strong><div class="small" style="color:#ddd">Mitarbeiter auswählen oder neu anlegen</div></div><button class="closebtn" onclick="closeEmployees()">×</button></div>
+    <div class="employee-modal-head"><div><strong>👷 Mitarbeiter-Stammdaten</strong><div class="small" style="color:#ddd">Für Tageserfassung, Teams und spätere Einteilung</div></div><button class="closebtn" onclick="closeEmployees()">×</button></div>
     <div class="employee-modal-body">
       <div id="personalNotices" class="section"><h3>🎂 Geburtstage & 🏆 Jubiläen</h3><div class="small">Wird nach dem Laden der Mitarbeiter aktualisiert.</div></div>
-      <div class="employee-list-toolbar"><button class="employee-new-button" onclick="openNewEmployee()">+ Neuer Mitarbeiter</button></div>
-      <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
-    </div>
-  </section>
-
-  <div id="employeeEditorBackdrop" class="employee-editor-backdrop" onclick="closeEmployeeEditor()"></div>
-  <section id="employeeEditor" class="employee-editor" aria-hidden="true">
-    <div class="employee-modal-head">
-      <div class="employee-editor-titleline">
-        <strong id="employeeEditorTitle">👷 Neuer Mitarbeiter</strong>
-        <div id="employeeEditorIdentity" class="employee-identity-note">Neue interne Identität</div>
-      </div>
-      <button class="closebtn" onclick="closeEmployeeEditor()">×</button>
-    </div>
-    <div class="employee-editor-body">
       <div class="employee-form">
         <input type="hidden" id="empEditId">
         <div><label>Name</label><input id="empName" placeholder="z. B. Edmund Mock"></div>
-        <div><label>Nickname</label><input id="empNickname" placeholder="z. B. Edi"><div class="small">Für Alltag, KRISTINE Go, WhatsApp und kompakte Anzeigen. Der offizielle Name bleibt unverändert.</div></div>
-        <div><label>Personalnummer Finkzeit</label><input id="empFinkzeitPersonalNumber" inputmode="numeric" autocomplete="off" placeholder="z. B. 26"><div class="small">Wird exakt als Text gespeichert und später für den Finkzeit-CSV-Export verwendet.</div></div>
+        <div><label>Rufname</label><input id="empNickname" placeholder="z. B. Edi"><div class="small">Für Alltag, KRISTINE und GPS. Der offizielle Name bleibt unverändert.</div></div>
         <div><label>Kürzel</label><input id="empShort" placeholder="MA"></div>
         <div><label>Telefon/WhatsApp</label><input id="empPhone" placeholder="+43 …"></div>
         <div><label>Rolle</label><input id="empRole" value="Maler" placeholder="Maler, Lehrling, Büro"></div>
         <div><label>Team</label><input id="empTeam" placeholder="Team 1"></div>
+        <div><label>Taggeldmodell</label><select id="empDailyAllowanceModel">
+          <option value="maler">Maler · Taggeld</option>
+          <option value="buak">BUAK · klein / groß</option>
+          <option value="site6">Baustelle ≥ 6 Std.</option>
+          <option value="none">Kein Taggeld</option>
+        </select></div>
         <div><label>Arbeitszeitmodell</label><select id="empWorktimeModel" class="wide"></select></div>
         <div><label>Monatslohn brutto €</label><input id="empGrossSalary" type="number" min="0" step="0.01"></div>
         <div><label>Beschäftigung %</label><input id="empEmploymentPercent" type="number" min="0" max="100" step="1" value="100"></div>
@@ -149,10 +118,10 @@
         <div class="employee-docs full">
           <strong>📄 Dokumente</strong>
           <div class="doc-grid">
-            <div class="doc-box"><label>Führerschein Vorderseite</label><input id="empDrivingLicenseFrontFile" type="file" accept="image/*" capture="environment"><img id="empDrivingLicenseFrontPreview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Führerschein Rückseite</label><input id="empDrivingLicenseBackFile" type="file" accept="image/*" capture="environment"><img id="empDrivingLicenseBackPreview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Pass Seite 1</label><input id="empPassportPage1File" type="file" accept="image/*" capture="environment"><img id="empPassportPage1Preview" class="doc-preview" style="display:none"></div>
-            <div class="doc-box"><label>Pass Seite 2</label><input id="empPassportPage2File" type="file" accept="image/*" capture="environment"><img id="empPassportPage2Preview" class="doc-preview" style="display:none"></div>
+            <div class="doc-box"><label>Führerschein Vorderseite</label><input id="empDrivingLicenseFrontFile" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><img id="empDrivingLicenseFrontPreview" class="doc-preview" style="display:none"><div id="empDrivingLicenseFrontMeta" class="doc-file-meta"></div></div>
+            <div class="doc-box"><label>Führerschein Rückseite</label><input id="empDrivingLicenseBackFile" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><img id="empDrivingLicenseBackPreview" class="doc-preview" style="display:none"><div id="empDrivingLicenseBackMeta" class="doc-file-meta"></div></div>
+            <div class="doc-box"><label>Pass Seite 1</label><input id="empPassportPage1File" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><img id="empPassportPage1Preview" class="doc-preview" style="display:none"><div id="empPassportPage1Meta" class="doc-file-meta"></div></div>
+            <div class="doc-box"><label>Pass Seite 2</label><input id="empPassportPage2File" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"><img id="empPassportPage2Preview" class="doc-preview" style="display:none"><div id="empPassportPage2Meta" class="doc-file-meta"></div></div>
           </div>
         </div>
         <div class="employee-sizes"><div class="full"><strong>📏 Arbeitskleidungsgrößen</strong></div><div><label>T-Shirt</label><input id="empSizeTshirt"></div><div><label>Poloshirt</label><input id="empSizePolo"></div><div><label>Pullover</label><input id="empSizePullover"></div><div><label>Jacke</label><input id="empSizeJacket"></div><div><label>Hose</label><input id="empSizeTrousers"></div><div><label>Schuhe</label><input id="empSizeShoes"></div><div><label>Handschuhe</label><input id="empSizeGloves"></div></div>
@@ -163,9 +132,9 @@
           <label class="checkline"><input id="empCanManage" type="checkbox"> darf Team erfassen</label>
           <label class="checkline"><input id="empActive" type="checkbox" checked> Aktiv</label>
         </div>
-        <div class="full employee-editor-actions"><button class="secondary" onclick="closeEmployeeEditor()">Abbrechen</button><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button></div>
+        <div class="full actions"><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button><button class="secondary" onclick="resetEmployeeForm()">Neu/Zurücksetzen</button></div>
       </div>
-
+      <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
     </div>
   </section>
 
@@ -533,7 +502,7 @@ function updateWorktimeModelSummary(){
   box.innerHTML=`<strong>${h(model.name)}</strong><br>Jänner–März: Mo–Do 07:00–17:00, 45 Min. Pause, Freitag frei.<br>April–Dezember: Mo–Do 07:00–17:00, 45 Min. Pause; Freitag 07:00–14:15, 15 Min. Pause.`;
 }
 async function loadWorktimeModels(){
-  const data=await api('/kristine/api/schedule-models'); worktimeModels=data.models||[];
+  const data=await api('/admin/api/worktime-models'); worktimeModels=data.models||[];
   renderWorktimeModelSelect(document.getElementById('empWorktimeModel')?.value||'krista-standard');
   return worktimeModels;
 }
@@ -678,95 +647,124 @@ function openEmployees(){
   document.getElementById('employeeModal').style.display='block';
   loadEmployeesView();
 }
-function closeEmployees(){closeEmployeeEditor();document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
-let employeeDrivingLicenseFrontImage='',employeeDrivingLicenseBackImage='',employeePassportPage1Image='',employeePassportPage2Image='';
-function setPreview(id,data){const img=document.getElementById(id);img.src=data||'';img.style.display=data?'block':'none';}
-async function optimizeImageFile(file,maxPx=1400,quality=.82){const url=URL.createObjectURL(file);try{const img=await new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=fail;i.src=url});const scale=Math.min(1,maxPx/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',quality);}finally{URL.revokeObjectURL(url);}}
-async function readEmployeeImage(input,target){const file=input.files?.[0];if(!file)return;try{const data=await optimizeImageFile(file,1400,.82);if(target==='licenseFront'){employeeDrivingLicenseFrontImage=data;setPreview('empDrivingLicenseFrontPreview',data);}else if(target==='licenseBack'){employeeDrivingLicenseBackImage=data;setPreview('empDrivingLicenseBackPreview',data);}else if(target==='passport1'){employeePassportPage1Image=data;setPreview('empPassportPage1Preview',data);}else{employeePassportPage2Image=data;setPreview('empPassportPage2Preview',data);}}catch(e){alert('Bild konnte nicht verarbeitet werden: '+e.message);input.value='';}}
+function closeEmployees(){document.getElementById('employeeBackdrop').style.display='none';document.getElementById('employeeModal').style.display='none';}
+let employeeDrivingLicenseFrontDocument=null,employeeDrivingLicenseBackDocument=null,employeePassportPage1Document=null,employeePassportPage2Document=null;
+
+function employeeLegacyDocument(data,name){
+  if(!String(data||"").startsWith("data:image/"))return null;
+  const type=(String(data).match(/^data:([^;,]+)/i)||[])[1]||"image/jpeg";
+  return {name,type,data:String(data)};
+}
+function documentForTarget(target){
+  if(target==="licenseFront")return employeeDrivingLicenseFrontDocument;
+  if(target==="licenseBack")return employeeDrivingLicenseBackDocument;
+  if(target==="passport1")return employeePassportPage1Document;
+  return employeePassportPage2Document;
+}
+function setDocumentForTarget(target,doc){
+  if(target==="licenseFront")employeeDrivingLicenseFrontDocument=doc;
+  else if(target==="licenseBack")employeeDrivingLicenseBackDocument=doc;
+  else if(target==="passport1")employeePassportPage1Document=doc;
+  else employeePassportPage2Document=doc;
+}
+function documentUiIds(target){
+  if(target==="licenseFront")return ["empDrivingLicenseFrontPreview","empDrivingLicenseFrontMeta"];
+  if(target==="licenseBack")return ["empDrivingLicenseBackPreview","empDrivingLicenseBackMeta"];
+  if(target==="passport1")return ["empPassportPage1Preview","empPassportPage1Meta"];
+  return ["empPassportPage2Preview","empPassportPage2Meta"];
+}
+function setPreview(id,data){
+  const img=document.getElementById(id);
+  if(!img)return;
+  img.src=data||"";
+  img.style.display=data?"block":"none";
+}
+function renderEmployeeDocument(target){
+  const doc=documentForTarget(target);
+  const [previewId,metaId]=documentUiIds(target);
+  const meta=document.getElementById(metaId);
+  const image=doc?.type?.startsWith("image/")?doc.data:"";
+  setPreview(previewId,image);
+  if(!meta)return;
+  if(!doc?.data){
+    meta.innerHTML='<span class="small">Noch kein Dokument gespeichert.</span>';
+    return;
+  }
+  const safeName=h(doc.name||"Dokument");
+  meta.innerHTML=`<strong>${safeName}</strong><div class="doc-file-actions">
+    <a href="${doc.data}" download="${safeName}">⬇ Herunterladen</a>
+    ${doc.type==="application/pdf"||doc.type?.startsWith("image/")?`<a href="${doc.data}" target="_blank" rel="noopener">↗ Öffnen</a>`:""}
+    <a href="#" onclick="removeEmployeeDocument('${target}');return false;">✕ Entfernen</a>
+  </div>`;
+}
+function removeEmployeeDocument(target){
+  setDocumentForTarget(target,null);
+  renderEmployeeDocument(target);
+}
+async function optimizeImageFile(file,maxPx=1400,quality=.82){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=fail;i.src=url});
+    const scale=Math.min(1,maxPx/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement("canvas");
+    c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    return c.toDataURL("image/jpeg",quality);
+  }finally{URL.revokeObjectURL(url)}
+}
+function readFileDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=()=>reject(r.error||new Error("Datei konnte nicht gelesen werden"));r.readAsDataURL(file);
+  });
+}
+async function readEmployeeDocument(input,target){
+  const file=input.files?.[0];if(!file)return;
+  const allowed=[
+    "image/jpeg","image/png","image/webp","application/pdf","application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ];
+  if(!allowed.includes(file.type)){
+    alert("Erlaubt sind JPG/PNG/WEBP, PDF, DOC und DOCX.");input.value="";return;
+  }
+  if(file.size>4*1024*1024){
+    alert("Dokument ist größer als 4 MB. Bitte vorher verkleinern.");input.value="";return;
+  }
+  try{
+    const data=file.type.startsWith("image/")?await optimizeImageFile(file,1400,.82):await readFileDataUrl(file);
+    setDocumentForTarget(target,{name:file.name,type:file.type,data});
+    renderEmployeeDocument(target);
+  }catch(e){
+    alert("Dokument konnte nicht verarbeitet werden: "+e.message);input.value="";
+  }
+}
 function resetEmployeeForm(){
-  document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empNickname').value=''; document.getElementById('empFinkzeitPersonalNumber').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; renderWorktimeModelSelect('krista-standard'); document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true; document.getElementById('empGrossSalary').value=''; document.getElementById('empEmploymentPercent').value='100'; document.getElementById('empEmploymentStart').value=''; document.getElementById('empEmploymentEnd').value=''; document.getElementById('empBirthDate').value='';
+  document.getElementById('empEditId').value=''; document.getElementById('empName').value=''; document.getElementById('empNickname').value=''; document.getElementById('empShort').value=''; document.getElementById('empPhone').value=''; document.getElementById('empRole').value='Maler'; document.getElementById('empTeam').value=''; document.getElementById('empDailyAllowanceModel').value='maler'; renderWorktimeModelSelect('krista-standard'); document.getElementById('empSpecialties').value=''; document.getElementById('empForeman').checked=false; document.getElementById('empCanManage').checked=false; document.getElementById('empActive').checked=true; document.getElementById('empGrossSalary').value=''; document.getElementById('empEmploymentPercent').value='100'; document.getElementById('empEmploymentStart').value=''; document.getElementById('empEmploymentEnd').value=''; document.getElementById('empBirthDate').value='';
   document.getElementById('empDrivingLicenseLastCheck').value=''; document.getElementById('empPassportExpiry').value='';
   ['Tshirt','Polo','Pullover','Jacket','Trousers','Shoes','Gloves'].forEach(x=>document.getElementById('empSize'+x).value='');
   ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
-  employeeDrivingLicenseFrontImage='';employeeDrivingLicenseBackImage='';employeePassportPage1Image='';employeePassportPage2Image='';setPreview('empDrivingLicenseFrontPreview','');setPreview('empDrivingLicenseBackPreview','');setPreview('empPassportPage1Preview','');setPreview('empPassportPage2Preview','');
-  const fink=document.getElementById('empFinkzeitPersonalNumber');
-  if(fink){fink.disabled=false;fink.classList.remove('employee-locked');}
-}
-
-function nextFreeFinkzeitNumber(){
-  const used=new Set(employeeMasters.map(e=>String(e.finkzeitPersonalNumber||'').trim()).filter(Boolean));
-  let n=600; while(used.has(String(n)))n++;
-  return String(n);
-}
-function openEmployeeEditor(){
-  document.getElementById('employeeEditorBackdrop').style.display='block';
-  document.getElementById('employeeEditor').style.display='block';
-  document.getElementById('employeeEditor').scrollTo({top:0});
-}
-function closeEmployeeEditor(){
-  document.getElementById('employeeEditorBackdrop').style.display='none';
-  document.getElementById('employeeEditor').style.display='none';
-  resetEmployeeForm();
-}
-function openNewEmployee(){
-  resetEmployeeForm();
-  updateEmployeeDeleteButton(null);
-  document.getElementById('empFinkzeitPersonalNumber').value=nextFreeFinkzeitNumber();
-  document.getElementById('employeeEditorTitle').textContent='👷 Neuer Mitarbeiter';
-  document.getElementById('employeeEditorIdentity').textContent='Neue interne ID · Finkzeitnummer bis zum ersten Speichern änderbar';
-  openEmployeeEditor();
-}
-
-async function permanentlyDeleteEmployee(id){
-  const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
-  updateEmployeeDeleteButton(e);
-  if(!confirm(`"${e.nickname||e.name}" wirklich ENDGÜLTIG löschen?`))return;
-  if(!confirm(`WIRKLICH WIRKLICH?\n\n"${e.nickname||e.name}" dauerhaft aus dem Mitarbeiterstamm löschen?`))return;
-  try{
-    await api(`/admin/api/employees/${encodeURIComponent(id)}?permanent=1`,{method:'DELETE'});
-    closeEmployeeEditor(); await loadEmployeesView();
-  }catch(err){alert('Endgültiges Löschen ist serverseitig noch nicht freigeschaltet: '+err.message);}
-}
-function updateEmployeeDeleteButton(e){
-  let btn=document.getElementById('employeePermanentDelete');
-  const actions=document.querySelector('#employeeEditor .employee-editor-actions');
-  if(!actions)return;
-  if(!btn){
-    btn=document.createElement('button'); btn.id='employeePermanentDelete'; btn.className='danger'; btn.type='button';
-    btn.textContent='🗑 Endgültig löschen'; actions.insertBefore(btn,actions.firstChild);
-  }
-  btn.style.display=(e&&e.active===false)?'':'none';
-  btn.onclick=(e&&e.active===false)?()=>permanentlyDeleteEmployee(e.id):null;
+  employeeDrivingLicenseFrontDocument=null;employeeDrivingLicenseBackDocument=null;employeePassportPage1Document=null;employeePassportPage2Document=null;['licenseFront','licenseBack','passport1','passport2'].forEach(renderEmployeeDocument);
 }
 function editEmployeeMaster(id){
   const e=employeeMasters.find(x=>String(x.id)===String(id)); if(!e)return;
-  document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empNickname').value=e.nickname||''; document.getElementById('empFinkzeitPersonalNumber').value=e.finkzeitPersonalNumber||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; renderWorktimeModelSelect(e.worktimeModelId||'krista-standard'); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('empGrossSalary').value=e.grossMonthlySalary||''; document.getElementById('empEmploymentPercent').value=e.employmentPercent??100; document.getElementById('empEmploymentStart').value=e.employmentStart||''; document.getElementById('empEmploymentEnd').value=e.employmentEnd||''; document.getElementById('empBirthDate').value=e.birthDate||'';
+  document.getElementById('empEditId').value=e.id; document.getElementById('empName').value=e.name||''; document.getElementById('empNickname').value=e.nickname||''; document.getElementById('empShort').value=e.shortCode||''; document.getElementById('empPhone').value=e.phone||''; document.getElementById('empRole').value=e.role||''; document.getElementById('empTeam').value=e.team||''; document.getElementById('empDailyAllowanceModel').value=e.dailyAllowanceModel||(/maler/i.test(e.role||'')?'maler':'none'); renderWorktimeModelSelect(e.worktimeModelId||'krista-standard'); document.getElementById('empSpecialties').value=(e.specialties||[]).join(', '); document.getElementById('empForeman').checked=!!e.foreman; document.getElementById('empCanManage').checked=!!e.canManageTeam; document.getElementById('empActive').checked=e.active!==false; document.getElementById('empGrossSalary').value=e.grossMonthlySalary||''; document.getElementById('empEmploymentPercent').value=e.employmentPercent??100; document.getElementById('empEmploymentStart').value=e.employmentStart||''; document.getElementById('empEmploymentEnd').value=e.employmentEnd||''; document.getElementById('empBirthDate').value=e.birthDate||'';
   document.getElementById('empDrivingLicenseLastCheck').value=e.drivingLicenseLastCheck||''; document.getElementById('empPassportExpiry').value=e.passportExpiry||'';
   const sz=e.clothingSizes||{}; document.getElementById('empSizeTshirt').value=sz.tshirt||'';document.getElementById('empSizePolo').value=sz.polo||'';document.getElementById('empSizePullover').value=sz.pullover||'';document.getElementById('empSizeJacket').value=sz.jacket||'';document.getElementById('empSizeTrousers').value=sz.trousers||'';document.getElementById('empSizeShoes').value=sz.shoes||'';document.getElementById('empSizeGloves').value=sz.gloves||'';
-  employeeDrivingLicenseFrontImage=e.drivingLicenseFrontImage||e.drivingLicenseImage||''; employeeDrivingLicenseBackImage=e.drivingLicenseBackImage||''; employeePassportPage1Image=e.passportPage1Image||e.passportImage||''; employeePassportPage2Image=e.passportPage2Image||'';
-  setPreview('empDrivingLicenseFrontPreview',employeeDrivingLicenseFrontImage);setPreview('empDrivingLicenseBackPreview',employeeDrivingLicenseBackImage);setPreview('empPassportPage1Preview',employeePassportPage1Image);setPreview('empPassportPage2Preview',employeePassportPage2Image);
+  employeeDrivingLicenseFrontDocument=e.drivingLicenseFrontDocument||employeeLegacyDocument(e.drivingLicenseFrontImage||e.drivingLicenseImage||'','Führerschein Vorderseite.jpg');
+  employeeDrivingLicenseBackDocument=e.drivingLicenseBackDocument||employeeLegacyDocument(e.drivingLicenseBackImage||'','Führerschein Rückseite.jpg');
+  employeePassportPage1Document=e.passportPage1Document||employeeLegacyDocument(e.passportPage1Image||e.passportImage||'','Pass Seite 1.jpg');
+  employeePassportPage2Document=e.passportPage2Document||employeeLegacyDocument(e.passportPage2Image||'','Pass Seite 2.jpg');
+  ['licenseFront','licenseBack','passport1','passport2'].forEach(renderEmployeeDocument);
   ['empDrivingLicenseFrontFile','empDrivingLicenseBackFile','empPassportPage1File','empPassportPage2File'].forEach(id=>document.getElementById(id).value='');
-  const fink=document.getElementById('empFinkzeitPersonalNumber');
-  fink.disabled=true; fink.classList.add('employee-locked');
-  document.getElementById('employeeEditorTitle').textContent='👷 '+(e.nickname||e.name||'Mitarbeiter')+' bearbeiten';
-  document.getElementById('employeeEditorIdentity').textContent='Bestehender Mitarbeiter · Finkzeit '+(e.finkzeitPersonalNumber||'–')+' ist nach Erstanlage geschützt';
-  openEmployeeEditor();
+  document.getElementById('employeeModal').scrollTo({top:0,behavior:'smooth'});
 }
 async function saveEmployeeMaster(){
   const id=document.getElementById('empEditId').value;
-  const body={name:document.getElementById('empName').value,nickname:document.getElementById('empNickname').value,finkzeitPersonalNumber:document.getElementById('empFinkzeitPersonalNumber').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,worktimeModelId:document.getElementById('empWorktimeModel').value,specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked,grossMonthlySalary:Number(document.getElementById('empGrossSalary').value||0),employmentPercent:Number(document.getElementById('empEmploymentPercent').value||0),employmentStart:document.getElementById('empEmploymentStart').value,employmentEnd:document.getElementById('empEmploymentEnd').value,birthDate:document.getElementById('empBirthDate').value,
+  const body={name:document.getElementById('empName').value,nickname:document.getElementById('empNickname').value,shortCode:document.getElementById('empShort').value,phone:document.getElementById('empPhone').value,role:document.getElementById('empRole').value,team:document.getElementById('empTeam').value,dailyAllowanceModel:document.getElementById('empDailyAllowanceModel').value,worktimeModelId:document.getElementById('empWorktimeModel').value,specialties:document.getElementById('empSpecialties').value,foreman:document.getElementById('empForeman').checked,canManageTeam:document.getElementById('empCanManage').checked,active:document.getElementById('empActive').checked,grossMonthlySalary:Number(document.getElementById('empGrossSalary').value||0),employmentPercent:Number(document.getElementById('empEmploymentPercent').value||0),employmentStart:document.getElementById('empEmploymentStart').value,employmentEnd:document.getElementById('empEmploymentEnd').value,birthDate:document.getElementById('empBirthDate').value,
   drivingLicenseLastCheck:document.getElementById('empDrivingLicenseLastCheck').value,passportExpiry:document.getElementById('empPassportExpiry').value,
-  drivingLicenseFrontImage:employeeDrivingLicenseFrontImage,drivingLicenseBackImage:employeeDrivingLicenseBackImage,passportPage1Image:employeePassportPage1Image,passportPage2Image:employeePassportPage2Image,clothingSizes:{tshirt:document.getElementById('empSizeTshirt').value,polo:document.getElementById('empSizePolo').value,pullover:document.getElementById('empSizePullover').value,jacket:document.getElementById('empSizeJacket').value,trousers:document.getElementById('empSizeTrousers').value,shoes:document.getElementById('empSizeShoes').value,gloves:document.getElementById('empSizeGloves').value}};
+  drivingLicenseFrontDocument:employeeDrivingLicenseFrontDocument,drivingLicenseBackDocument:employeeDrivingLicenseBackDocument,passportPage1Document:employeePassportPage1Document,passportPage2Document:employeePassportPage2Document,
+  drivingLicenseFrontImage:employeeDrivingLicenseFrontDocument?.type?.startsWith('image/')?employeeDrivingLicenseFrontDocument.data:'',drivingLicenseBackImage:employeeDrivingLicenseBackDocument?.type?.startsWith('image/')?employeeDrivingLicenseBackDocument.data:'',passportPage1Image:employeePassportPage1Document?.type?.startsWith('image/')?employeePassportPage1Document.data:'',passportPage2Image:employeePassportPage2Document?.type?.startsWith('image/')?employeePassportPage2Document.data:'',clothingSizes:{tshirt:document.getElementById('empSizeTshirt').value,polo:document.getElementById('empSizePolo').value,pullover:document.getElementById('empSizePullover').value,jacket:document.getElementById('empSizeJacket').value,trousers:document.getElementById('empSizeTrousers').value,shoes:document.getElementById('empSizeShoes').value,gloves:document.getElementById('empSizeGloves').value}};
   if(!body.name.trim()){alert('Bitte einen Namen eingeben.');return;}
-  body.finkzeitPersonalNumber=String(body.finkzeitPersonalNumber||'').trim();
-  if(!body.finkzeitPersonalNumber){alert('Bitte eine Finkzeit-Personalnummer eingeben.');return;}
-  const duplicate=employeeMasters.find(e=>String(e.id)!==String(id||'')&&String(e.finkzeitPersonalNumber||'').trim()===body.finkzeitPersonalNumber);
-  if(duplicate){alert('Finkzeit '+body.finkzeitPersonalNumber+' ist bereits '+(duplicate.nickname||duplicate.name)+' zugeordnet. Speichern abgebrochen.');return;}
-  if(id){
-    const existing=employeeMasters.find(e=>String(e.id)===String(id));
-    if(existing) body.finkzeitPersonalNumber=String(existing.finkzeitPersonalNumber||'').trim();
-  }
-  try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeEmployeeEditor();await loadEmployeesView();}
+  try{await api(id?`/admin/api/employees/${encodeURIComponent(id)}`:'/admin/api/employees',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetEmployeeForm();await loadEmployeesView();}
   catch(e){alert('Speichern fehlgeschlagen: '+e.message);}
 }
 async function deactivateEmployee(id){
@@ -794,14 +792,11 @@ async function loadEmployeesView(){
     await loadEmployeeMasters(); renderPersonalNotices();
     if(!employeeMasters.length){box.textContent='Noch keine Mitarbeiter angelegt.';return;}
     box.className='';
-    const activeEmployees=employeeMasters.filter(e=>e.active!==false);
-    const inactiveEmployees=employeeMasters.filter(e=>e.active===false);
-    box.innerHTML=`<table class="employee-table"><thead><tr><th>Name</th><th>Rolle/Team</th><th>Beschäftigung</th><th>Kalkulation</th><th>Personal & Dokumente</th><th>Status</th><th></th></tr></thead><tbody>${activeEmployees.map(e=>{
+    box.innerHTML=`<table class="employee-table"><thead><tr><th>Name</th><th>Rolle/Team</th><th>Beschäftigung</th><th>Kalkulation</th><th>Personal & Dokumente</th><th>Status</th><th></th></tr></thead><tbody>${employeeMasters.map(e=>{
       const birthday=e.birthDate?new Date(e.birthDate+'T12:00:00').toLocaleDateString('de-AT',{day:'2-digit',month:'2-digit'}):'–';
       const ann=Number(e.anniversaryYears||0);
       const license=e.drivingLicenseLastCheck?`Kontrolle ${h(e.drivingLicenseLastCheck)}<br>Nächste ${h(e.nextDrivingLicenseCheck||'–')} ${e.drivingLicenseCheckDue?'<strong class="negative">FÄLLIG</strong>':''}`:'keine Führerscheinkontrolle';
-      return `<tr><td><strong>${h(e.nickname?`${e.nickname} · ${e.name}`:e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}<br>Finkzeit: <strong>${h(e.finkzeitPersonalNumber||'–')}</strong></span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${Number(e.employmentPercent??100).toFixed(0)} %<br><span class="small">${h(e.employmentStart||'kein Eintritt')} – ${h(e.employmentEnd||'offen')}</span></td><td><span class="small">Brutto ${money(e.grossMonthlySalary)}<br>Lohn ${money(e.calculation?.salaryCostRate)}/h<br>Voll ${money(e.calculation?.fullCostRate)}/h<br>${num(e.calculation?.productiveHours)} Std./Jahr</span></td><td><span class="small">🎂 ${birthday}<br>🏆 ${ann} Jahre<br>🚗 ${license}<br>🪪 Pass ${h(e.passportExpiry||'–')}<br>👕 ${h(Object.values(e.clothingSizes||{}).filter(Boolean).join(' · ')||'Größen fehlen')}<br>${(e.drivingLicenseFrontImage||e.drivingLicenseImage)&&e.drivingLicenseBackImage?'✅ Führerschein komplett':'🟠 Führerschein unvollständig'} · ${(e.passportPage1Image||e.passportImage)&&e.passportPage2Image?'✅ Pass komplett':'🟠 Pass unvollständig'}</span></td><td>🟢 aktiv</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button><button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button></td></tr>`}).join('')}</tbody></table>
-      ${inactiveEmployees.length?`<div class="inactive-employees-wrap"><div class="inactive-employees-title">Inaktive Mitarbeiter</div><div class="inactive-employees-grid">${inactiveEmployees.map(e=>`<button class="inactive-employee-tile" onclick="editEmployeeMaster('${h(e.id)}')"><strong>${h(e.nickname||e.name)}</strong> · Nr. ${h(e.finkzeitPersonalNumber||'–')} <span class="inactive-tag">INAKTIV</span></button>`).join('')}</div></div>`:''}`;
+      return `<tr><td><strong>${h(e.nickname?`${e.nickname} · ${e.name}`:e.name)}</strong><br><span class="small">${h(e.shortCode||'')} ${h(e.phone||'')}</span></td><td>${h(e.role||'')}<br><span class="small">${h(e.team||'')}</span><br><span class="small">⏱ ${h(worktimeModelById(e.worktimeModelId)?.name||'Krista Standard')}</span></td><td>${Number(e.employmentPercent??100).toFixed(0)} %<br><span class="small">${h(e.employmentStart||'kein Eintritt')} – ${h(e.employmentEnd||'offen')}</span></td><td><span class="small">Brutto ${money(e.grossMonthlySalary)}<br>Lohn ${money(e.calculation?.salaryCostRate)}/h<br>Voll ${money(e.calculation?.fullCostRate)}/h<br>${num(e.calculation?.productiveHours)} Std./Jahr</span></td><td><span class="small">🎂 ${birthday}<br>🏆 ${ann} Jahre<br>🚗 ${license}<br>🪪 Pass ${h(e.passportExpiry||'–')}<br>👕 ${h(Object.values(e.clothingSizes||{}).filter(Boolean).join(' · ')||'Größen fehlen')}<br>${(e.drivingLicenseFrontDocument?.data||e.drivingLicenseFrontImage||e.drivingLicenseImage)&&(e.drivingLicenseBackDocument?.data||e.drivingLicenseBackImage)?'✅ Führerschein komplett':'🟠 Führerschein unvollständig'} · ${(e.passportPage1Document?.data||e.passportPage1Image||e.passportImage)&&(e.passportPage2Document?.data||e.passportPage2Image)?'✅ Pass komplett':'🟠 Pass unvollständig'}</span></td><td>${e.active!==false?'🟢 aktiv':'⚪ inaktiv'}</td><td class="actions"><button class="secondary" onclick="editEmployeeMaster('${h(e.id)}')">Bearbeiten</button>${e.active!==false?`<button class="danger" onclick="deactivateEmployee('${h(e.id)}')">Deaktivieren</button>`:''}</td></tr>`}).join('')}</tbody></table>`;
   }catch(e){box.className='error';box.textContent='Fehler: '+e.message;}
 }
 
@@ -820,10 +815,10 @@ document.getElementById('reload').addEventListener('click', loadJobs);
 document.getElementById('search').addEventListener('input', render);
 document.getElementById('sortJobs').addEventListener('change',render);
 document.getElementById('empWorktimeModel').addEventListener('change',updateWorktimeModelSummary);
-document.getElementById('empDrivingLicenseFrontFile').addEventListener('change',e=>readEmployeeImage(e.target,'licenseFront'));
-document.getElementById('empDrivingLicenseBackFile').addEventListener('change',e=>readEmployeeImage(e.target,'licenseBack'));
-document.getElementById('empPassportPage1File').addEventListener('change',e=>readEmployeeImage(e.target,'passport1'));
-document.getElementById('empPassportPage2File').addEventListener('change',e=>readEmployeeImage(e.target,'passport2'));
+document.getElementById('empDrivingLicenseFrontFile').addEventListener('change',e=>readEmployeeDocument(e.target,'licenseFront'));
+document.getElementById('empDrivingLicenseBackFile').addEventListener('change',e=>readEmployeeDocument(e.target,'licenseBack'));
+document.getElementById('empPassportPage1File').addEventListener('change',e=>readEmployeeDocument(e.target,'passport1'));
+document.getElementById('empPassportPage2File').addEventListener('change',e=>readEmployeeDocument(e.target,'passport2'));
 ['vehicleLeasingRate','vehicleKmPerYear','vehicleKmRate'].forEach(id=>document.getElementById(id).addEventListener('input',updateVehicleCosts));
 document.getElementById('vehicleRegistrationFile').addEventListener('change',async e=>{const f=e.target.files?.[0];if(f){vehicleRegistrationImage=await optimizeImageFile(f,1400,.82);setPreview('vehicleRegistrationPreview',vehicleRegistrationImage);}});
 bindMoneyInputs();

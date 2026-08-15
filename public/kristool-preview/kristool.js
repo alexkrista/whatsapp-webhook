@@ -248,6 +248,30 @@ function isInternalWork(row){
     .toLowerCase();
   return /\b(buro|buero|firma|werkstatt|lager|intern)\b/.test(text);
 }
+
+function currentEmployeeMaster(){
+  const id=String($("employeeSelect")?.value||"");
+  return (state.bootstrap?.employees||[]).find(row=>String(row.id||row.employeeId||"")===id)||null;
+}
+function currentAllowanceModel(){
+  const item=activeQueueItem();
+  const employee=currentEmployeeMaster();
+  const direct=String(employee?.dailyAllowanceModel||item?.dailyAllowanceModel||"").trim().toLowerCase();
+  if(["maler","buak","site6","none"].includes(direct))return direct;
+  if(item?.buak===true)return "buak";
+  return /\bmaler\b/i.test(String(employee?.role||""))?"maler":"none";
+}
+function allowanceForMinutes(model,siteMinutes){
+  const m=Math.max(0,Number(siteMinutes||0));
+  if(model==="buak"){
+    if(m>=540)return {eligible:true,type:"buak_gross",label:"BUAK groß",rule:"ab 9:00 h Baustelle"};
+    if(m>=180)return {eligible:true,type:"buak_klein",label:"BUAK klein",rule:"ab 3:00 h Baustelle"};
+    return {eligible:false,type:"buak",label:"BUAK",rule:"klein ab 3:00 h · groß ab 9:00 h"};
+  }
+  if(model==="site6")return {eligible:m>=360,type:"site6",label:"Baustelle ≥ 6 Std.",rule:"ab 6:00 h Baustelle"};
+  if(model==="maler")return {eligible:m>180,type:"maler",label:"Maler · Taggeld",rule:"bestehende Maler-Regel > 3:00 h"};
+  return {eligible:false,type:"none",label:"Kein Taggeld",rule:"für diese Mitarbeitergruppe kein Taggeld"};
+}
 function dietCalculation(){
   let siteMinutes=0,flMinutes=0,chMinutes=0;
   for(const row of state.segments||[]){
@@ -260,9 +284,12 @@ function dietCalculation(){
     if(country==="FL")flMinutes+=dur;
     if(country==="CH")chMinutes+=dur;
   }
+  const allowanceModel=currentAllowanceModel();
+  const allowance=allowanceForMinutes(allowanceModel,siteMinutes);
   return {
     siteMinutes,flMinutes,chMinutes,
-    taggeldAutomatic:siteMinutes>180,
+    allowanceModel,allowance,
+    taggeldAutomatic:allowance.eligible,
     flAutomatic:flMinutes>0,
     chAutomatic:chMinutes>0
   };
@@ -288,7 +315,7 @@ function renderDietPanel(){
     <div class="diet-grid">
       <label class="diet-item">
         <input type="checkbox" data-diet-key="taggeld" ${taggeld?"checked":""}>
-        <span><b>Taggeld</b><strong>${taggeld?"1":"0"}</strong><small>${durationLabel(c.siteMinutes)} Baustelle · Regel &gt; 3:00 h</small></span>
+        <span><b>Taggeld · ${esc(c.allowance.label)}</b><strong>${taggeld?"1":"0"}</strong><small>${durationLabel(c.siteMinutes)} Baustelle · ${esc(c.allowance.rule)}</small></span>
       </label>
       <label class="diet-item">
         <input type="checkbox" data-diet-key="fl" ${fl?"checked":""}>
@@ -365,7 +392,7 @@ function dietPrintReport(data,{mode="summary",popup=null}={}){
     const total=totalsFor(employee);
     return `<tr>
       <td>${escape(employee.personalNumber||"–")}</td>
-      <td>${escape(employee.employeeName)}</td>
+      <td>${escape(employee.employeeName)}<br><small>${escape(({maler:"Maler · Taggeld",buak:"BUAK",site6:"Baustelle ≥ 6 Std.",none:"Kein Taggeld"})[employee.dailyAllowanceModel]||"")}</small></td>
       <td>${total.taggeld||"–"}</td>
       <td>${dietMinutesLabel(total.flMinutes)}</td>
       <td>${total.flDay||"–"}</td>
@@ -1490,13 +1517,68 @@ async function markPrivate(rowId,isPrivate){
 
 
 
-function releaseChecks(){
-  return Object.fromEntries([...document.querySelectorAll("[data-release-check]")].map(input=>[input.dataset.releaseCheck,input.checked]));
+
+function ensureCompactReleaseControls(){
+  const card=$("releaseCard");
+  if(!card)return;
+
+  const legacy=[...document.querySelectorAll("[data-release-check]")];
+  legacy.forEach(input=>{
+    const row=input.closest("label")||input.parentElement;
+    if(row)row.style.display="none";
+  });
+
+  let master=$("releaseMasterCheck");
+  if(!master){
+    const label=document.createElement("label");
+    label.className="release-master-check";
+    label.style.cssText="display:flex;align-items:center;gap:10px;padding:12px 14px;margin:12px 0;border:1px solid #d9ddd9;border-radius:10px;background:#f6faf6;cursor:pointer;font-weight:800";
+    label.innerHTML='<input id="releaseMasterCheck" type="checkbox" style="width:auto;cursor:pointer"> <span>Angaben geprüft und vollständig</span>';
+    const reviewer=$("releaseReviewer");
+    (reviewer?.closest("label")||reviewer||$("releaseAndNext"))?.before(label);
+    master=$("releaseMasterCheck");
+    master?.addEventListener("change",renderRelease);
+  }
+
+  let free=$("releaseModelFreeCheck");
+  if(!free){
+    const label=document.createElement("label");
+    label.id="releaseModelFreeWrap";
+    label.style.cssText="display:none;align-items:center;gap:10px;padding:10px 14px;margin:8px 0;border:1px solid #ddd;border-radius:10px;background:#f8f8f8;cursor:pointer";
+    label.innerHTML='<input id="releaseModelFreeCheck" type="checkbox" style="width:auto;cursor:pointer"> <span><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
+    const masterWrap=$("releaseMasterCheck")?.closest("label");
+    masterWrap?.after(label);
+    free=$("releaseModelFreeCheck");
+    free?.addEventListener("change",renderRelease);
+  }
+
+  const item=activeQueueItem();
+  const hasRealTime=(state.segments||[]).some(row=>row.from&&row.to);
+  const showFree=Boolean(item?.scheduledFree)&&!hasRealTime;
+  const wrap=$("releaseModelFreeWrap");
+  if(wrap)wrap.style.display=showFree?"flex":"none";
+  if(!showFree&&free)free.checked=false;
+
+  return {master,free,showFree};
 }
+function releaseChecks(){
+  const {master}=ensureCompactReleaseControls()||{};
+  const checked=Boolean(master?.checked);
+  // Backend-Kompatibilität: bisherige sechs Kontrollpunkte bleiben gespeichert,
+  // die Oberfläche verlangt aber nur noch eine Bestätigung.
+  return {
+    times:checked,
+    gps:checked,
+    regie:checked,
+    diet:checked,
+    completeness:checked,
+    final:checked
+  };
+}
+
 function releaseComplete(){
-  const values=Object.values(releaseChecks());
-  const checksOk=values.length===6&&values.every(Boolean);
-  if(!checksOk)return false;
+  const controls=ensureCompactReleaseControls()||{};
+  if(!controls.master?.checked)return false;
 
   const item=activeQueueItem();
   const absence=String(item?.absenceType||"").toLowerCase();
@@ -1505,7 +1587,6 @@ function releaseComplete(){
   if(["urlaub","krank","feiertag","za"].includes(absence))return true;
 
   // Arzt: nur die tatsächlich bestätigte Dauer zählt.
-  // Freigabe erst, wenn ein Arzt-UP-Block mit gültigem Von/Bis vorhanden ist.
   if(absence==="arzt"){
     return (state.segments||[]).some(row=>
       row.type==="up" &&
@@ -1516,8 +1597,16 @@ function releaseComplete(){
     );
   }
 
-  return (state.segments||[]).some(row=>row.from&&row.to);
+  const hasTime=(state.segments||[]).some(row=>row.from&&row.to);
+  if(hasTime)return true;
+
+  // Dunja / Gerald / Judith etc.: planmäßig 0 Stunden.
+  // Sie dürfen trotzdem arbeiten; dann greift oben hasTime.
+  if(controls.showFree)return Boolean(controls.free?.checked);
+
+  return false;
 }
+
 function releaseQueueIndex(){
   const id=String($("employeeSelect")?.value||"");
   return state.dayQueue.findIndex(item=>String(item.employeeId)===id);
@@ -1528,6 +1617,7 @@ function releaseDateTime(value){
 }
 function renderRelease(){
   const card=$("releaseCard"); if(!card)return;
+  const compactControls=ensureCompactReleaseControls()||{};
   const release=state.release;
   const released=Boolean(release?.released);
   card.classList.toggle("released",released);
@@ -1541,15 +1631,25 @@ function renderRelease(){
   const audit=$("releaseAuditCompact");
   if(audit)audit.hidden=!released;
   const saved=release?.checks||{};
-  document.querySelectorAll("[data-release-check]").forEach(input=>{
-    if(released)input.checked=Boolean(saved[input.dataset.releaseCheck]);
-    input.disabled=released;
-  });
+  const savedValues=Object.values(saved);
+  const savedComplete=savedValues.length? savedValues.every(Boolean) : released;
+  if(compactControls.master){
+    if(released)compactControls.master.checked=savedComplete;
+    compactControls.master.disabled=released;
+    compactControls.master.closest("label").style.cursor=released?"default":"pointer";
+  }
+  if(compactControls.free){
+    compactControls.free.disabled=released;
+    compactControls.free.closest("label").style.cursor=released?"default":"pointer";
+  }
+  document.querySelectorAll("[data-release-check]").forEach(input=>{input.disabled=released;});
   $("releaseReviewer").disabled=released;
   $("releaseNote").disabled=released;
   const btn=$("releaseAndNext");
   btn.disabled=released||!releaseComplete()||!$("employeeSelect")?.value;
   btn.textContent=released?"✓ Bereits freigegeben":"✓ Freigeben & nächster MA";
+  // Kein irreführender roter Verbots-Cursor: klickbar = Hand, gesperrt = neutral.
+  btn.style.cursor=btn.disabled?"default":"pointer";
   const idx=releaseQueueIndex(), total=state.dayQueue.length;
   $("releasePosition").textContent=idx>=0?`Mitarbeiter ${idx+1} von ${total} · ${$("employeeSelect").selectedOptions[0]?.textContent||""}`:"Mitarbeiter auswählen";
   $("previousEmployee").disabled=idx<=0;
@@ -1565,6 +1665,9 @@ async function loadRelease(){
     input.checked=false;
     input.disabled=false;
   });
+  ensureCompactReleaseControls();
+  if($("releaseMasterCheck")){$("releaseMasterCheck").checked=false;$("releaseMasterCheck").disabled=false}
+  if($("releaseModelFreeCheck")){$("releaseModelFreeCheck").checked=false;$("releaseModelFreeCheck").disabled=false}
 
   state.release=null;
   renderRelease();
