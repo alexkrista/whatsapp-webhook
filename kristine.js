@@ -481,13 +481,14 @@ function clampOfficialStart(actualTime) {
   }
 
   async function getBootstrap() {
-    const [assignments, states, tasks, timeEvents, employees, latestGps] = await Promise.all([
+    const [assignments, states, tasks, timeEvents, employees, latestGps, worktimeModels] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
       readJson(TIME_EVENTS, []),
       typeof readEmployees === "function" ? readEmployees() : [],
       readGpsImport("latest"),
+      typeof readWorktimeModels === "function" ? readWorktimeModels() : [],
     ]);
     // Status für die Oberfläche immer aus den HEUTIGEN Zeitereignissen ableiten.
     // states.json ist mitarbeiterbezogen und kann noch den Status vom Vortag enthalten.
@@ -549,7 +550,7 @@ function clampOfficialStart(actualTime) {
       enrichedAssignments.push(row);
     }
 
-    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
+    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, worktimeModels, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
