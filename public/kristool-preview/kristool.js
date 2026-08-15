@@ -1557,43 +1557,38 @@ async function markPrivate(rowId,isPrivate){
 
 
 function ensureCompactReleaseControls(){
-  const card=$("releaseCard");
-  if(!card)return {};
+  const card=$("releaseCard"); if(!card)return {};
 
-  // Die sechs alten Kontrollzeilen bleiben nur als lesbare Aufzählung.
-  // Die originalen Checkbox-Zeilen werden vollständig ausgeblendet.
   const legacy=[...document.querySelectorAll("[data-release-check]")];
   legacy.forEach(input=>{
     const row=input.closest("label")||input.parentElement;
     if(row)row.style.setProperty("display","none","important");
-    input.disabled=true;
-    input.tabIndex=-1;
+    input.disabled=true; input.tabIndex=-1;
   });
 
   let grid=$("releaseCompactGrid");
   if(!grid){
     grid=document.createElement("div");
     grid.id="releaseCompactGrid";
-    grid.style.cssText="display:grid;grid-template-columns:minmax(320px,1fr) minmax(260px,.8fr);gap:22px;align-items:start;margin:10px 0 16px";
+    grid.style.cssText="display:grid;grid-template-columns:minmax(320px,1fr) minmax(260px,.8fr);gap:18px 22px;align-items:start;margin:10px 0 16px";
 
     const list=document.createElement("div");
     list.id="releaseCheckSummary";
     list.style.cssText="display:grid;gap:10px;padding:4px 0";
     list.innerHTML=[
-      "Zeiten geprüft",
-      "Regie geprüft / nicht erforderlich",
-      "Tagesabschluss geprüft",
-      "Taggeld geprüft",
-      "FL-Stunden / FL-Tag geprüft",
-      "CH-Stunden / CH-Tag geprüft"
+      "Zeiten geprüft","Regie geprüft / nicht erforderlich","Tagesabschluss geprüft",
+      "Taggeld geprüft","FL-Stunden / FL-Tag geprüft","CH-Stunden / CH-Tag geprüft"
     ].map(text=>`<div style="display:flex;gap:8px;align-items:center;font-weight:700;color:#404840"><span style="color:#2f8c4c;font-size:18px;font-weight:900">•</span><span>${esc(text)}</span></div>`).join("");
 
-    const masterWrap=document.createElement("div");
-    masterWrap.id="releaseMasterSide";
-    masterWrap.style.cssText="display:flex;align-items:stretch";
+    const side=document.createElement("div");
+    side.id="releaseMasterSide";
+    side.style.cssText="display:flex;align-items:stretch";
 
-    grid.appendChild(list);
-    grid.appendChild(masterWrap);
+    const freeWrap=document.createElement("div");
+    freeWrap.id="releaseModelFreeWrap";
+    freeWrap.style.cssText="display:none;grid-column:1/-1";
+
+    grid.append(list,side,freeWrap);
 
     const oldContainer=legacy[0]?.closest("label")?.parentElement;
     if(oldContainer)oldContainer.parentElement?.insertBefore(grid,oldContainer);
@@ -1606,38 +1601,31 @@ function ensureCompactReleaseControls(){
   let master=$("releaseMasterCheck");
   if(!master){
     const label=document.createElement("label");
-    label.className="release-master-check";
-    label.style.cssText="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:84px;padding:14px 16px;border:1px solid #d9ddd9;border-radius:12px;background:#f6faf6;cursor:pointer;font-weight:900;text-align:left";
-    label.innerHTML='<input id="releaseMasterCheck" type="checkbox" style="width:auto;cursor:pointer;pointer-events:auto"> <span>Angaben geprüft<br>und vollständig</span>';
+    label.style.cssText="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:84px;padding:14px 16px;border:1px solid #d9ddd9;border-radius:12px;background:#f6faf6;cursor:pointer;font-weight:900";
+    label.innerHTML='<input id="releaseMasterCheck" type="checkbox" style="width:auto;cursor:pointer"> <span>Angaben geprüft<br>und vollständig</span>';
     $("releaseMasterSide")?.appendChild(label);
     master=$("releaseMasterCheck");
     master?.addEventListener("change",renderRelease);
   }
 
-  // Modell-Leertag: bewusst als eigener klickbarer Bestätigungsschalter.
-  // Kein disabled/DOM-Checkbox-Zustand mehr, der beim Rendern verloren gehen kann.
   let freeButton=$("releaseModelFreeButton");
   if(!freeButton){
     freeButton=document.createElement("button");
-    freeButton.type="button";
-    freeButton.id="releaseModelFreeButton";
-    freeButton.style.cssText="display:none;width:100%;text-align:left;color:#202020;background:#f8f8f8;border:1px solid #ddd;border-radius:10px;padding:10px 14px;margin:8px 0 12px;cursor:pointer";
-    freeButton.innerHTML='<span id="releaseModelFreeMark" style="display:inline-block;width:22px;font-size:20px;vertical-align:top">☐</span><span style="display:inline-block"><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
-    grid.after(freeButton);
+    freeButton.type="button"; freeButton.id="releaseModelFreeButton";
+    freeButton.style.cssText="display:flex;width:100%;align-items:center;gap:10px;text-align:left;color:#202020;background:#f8f8f8;border:1px solid #ddd;border-radius:10px;padding:10px 14px;cursor:pointer";
+    freeButton.innerHTML='<span id="releaseModelFreeMark" style="width:22px;font-size:20px">☐</span><span><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
+    $("releaseModelFreeWrap")?.appendChild(freeButton);
     freeButton.addEventListener("click",()=>{
+      if(freeButton.disabled)return;
       state.modelFreeConfirmed=!state.modelFreeConfirmed;
-      const mark=$("releaseModelFreeMark");
-      if(mark)mark.textContent=state.modelFreeConfirmed?"☑":"☐";
       renderRelease();
     });
   }
 
   const hasRealTime=(state.segments||[]).some(row=>row.from&&row.to);
-  const showFree=selectedEmployeeScheduledFree() && !hasRealTime;
-
-  freeButton.style.display=showFree?"block":"none";
-  freeButton.disabled=false;
-  freeButton.style.cursor="pointer";
+  const showFree=selectedEmployeeScheduledFree()&&!hasRealTime;
+  const wrap=$("releaseModelFreeWrap");
+  if(wrap)wrap.style.display=showFree?"block":"none";
   if(!showFree)state.modelFreeConfirmed=false;
   const mark=$("releaseModelFreeMark");
   if(mark)mark.textContent=state.modelFreeConfirmed?"☑":"☐";
@@ -1662,7 +1650,7 @@ function releaseChecks(){
 function releaseComplete(){
   const {master,showFree}=ensureCompactReleaseControls();
   if(!master?.checked)return false;
-  if(showFree)return state.modelFreeConfirmed===true;
+  if(showFree&&!state.modelFreeConfirmed)return false;
   return true;
 }
 function releaseQueueIndex(){
