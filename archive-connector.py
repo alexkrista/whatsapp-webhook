@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template_string
 import sqlite3
 from pathlib import Path
 from io import BytesIO
@@ -25,7 +25,7 @@ ARCHIVE_PASSWORD = os.environ.get("KRISTINE_ARCHIVE_PASSWORD", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/status", "/search", "/thumb", "/pdf"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/status", "/search", "/thumb", "/pdf"}
 
 
 def _request_is_local():
@@ -895,12 +895,205 @@ def validate_indexed_pdf_path(raw_path):
     return path
 
 
+
+MOBILE_PAGE = r"""
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>KRISTINE · The Brain</title>
+<style>
+:root{
+  --bg:#0e0f11;
+  --panel:#17191d;
+  --panel2:#20232a;
+  --text:#f5f7fa;
+  --muted:#aab0bb;
+  --line:#2c313a;
+  --accent:#ffffff;
+  --good:#9fe0b4;
+  --warn:#ffd38a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+body{min-height:100vh}
+.wrap{max-width:760px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px calc(34px + env(safe-area-inset-bottom))}
+.brand{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:18px}
+.brand h1{margin:0;font-size:28px;letter-spacing:-.7px}
+.brand small{color:var(--muted);font-weight:600}
+.hero{background:linear-gradient(180deg,var(--panel),#131519);border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 14px 40px rgba(0,0,0,.22)}
+.searchrow{display:flex;gap:10px}
+input[type=search]{width:100%;border:1px solid var(--line);background:#0d0f12;color:var(--text);border-radius:16px;padding:15px 16px;font-size:17px;outline:none}
+input[type=search]:focus{border-color:#5f6774}
+button{border:0;border-radius:16px;padding:0 18px;background:var(--accent);color:#111;font-size:16px;font-weight:800}
+.meta{margin-top:10px;color:var(--muted);font-size:13px;min-height:18px}
+.section{margin-top:18px}
+.section h2{font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:#d7dbe1;margin:0 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:10px}
+.project-title{font-size:18px;font-weight:800;line-height:1.2}
+.project-no{display:inline-block;margin-top:5px;font-size:12px;font-weight:800;background:var(--panel2);padding:5px 8px;border-radius:999px;color:#dfe3e8}
+.sub{color:var(--muted);margin-top:8px;font-size:14px;line-height:1.45}
+.metrics{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pill{background:#111318;border:1px solid var(--line);border-radius:999px;padding:7px 9px;font-size:12px;color:#dfe3e8}
+.doc{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:start}
+.thumb{width:76px;height:102px;border-radius:10px;object-fit:cover;background:#0d0f12;border:1px solid var(--line)}
+.docname{font-weight:750;line-height:1.3;word-break:break-word}
+.doctype{margin-top:4px;color:#c8cdd5;font-size:13px}
+.docmeta{margin-top:6px;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:8px;margin-top:10px}
+a.action{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#f5f5f5;color:#111;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:800}
+.empty{color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:16px;padding:18px}
+.loader{display:none;margin-top:12px;color:var(--muted)}
+.error{color:#ffb3b3}
+.footer{margin-top:24px;text-align:center;color:#6f7681;font-size:12px}
+@media (max-width:480px){
+  .brand h1{font-size:25px}
+  .searchrow{display:grid;grid-template-columns:1fr}
+  button{height:50px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div>
+      <small>KRISTINE</small>
+      <h1>The Brain</h1>
+    </div>
+    <small>Archiv · mobil</small>
+  </div>
+
+  <div class="hero">
+    <div class="searchrow">
+      <input id="q" type="search" placeholder="Baustelle, Kunde, Nummer, Adresse …" autocomplete="off">
+      <button id="go">Suchen</button>
+    </div>
+    <div class="meta" id="meta">WinWorker + PDF-Archiv</div>
+    <div class="loader" id="loader">Suche läuft …</div>
+  </div>
+
+  <div class="section" id="projectsSection" hidden>
+    <h2>Projekte</h2>
+    <div id="projects"></div>
+  </div>
+
+  <div class="section" id="docsSection" hidden>
+    <h2>Dokumente</h2>
+    <div id="docs"></div>
+  </div>
+
+  <div class="footer">Privater Zugriff über Tailscale</div>
+</div>
+
+<script>
+const q = document.getElementById('q');
+const go = document.getElementById('go');
+const meta = document.getElementById('meta');
+const loader = document.getElementById('loader');
+const projects = document.getElementById('projects');
+const docs = document.getElementById('docs');
+const ps = document.getElementById('projectsSection');
+const ds = document.getElementById('docsSection');
+
+function esc(v){
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function money(v){
+  if(v===null || v===undefined || v==='') return null;
+  try { return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v)); }
+  catch { return v; }
+}
+function num(v){
+  if(v===null || v===undefined || v==='') return null;
+  return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v));
+}
+function urlFor(path, p){
+  return path + '?path=' + encodeURIComponent(p);
+}
+function renderProject(p){
+  const title = p.title || p.site || p.projectDescription || p.customer || 'Projekt';
+  const customer = [p.company, p.customer].filter(Boolean).join(' · ');
+  const addr = p.address || '';
+  const h = num(p.hoursTotal);
+  const n = money(p.netInvoiced);
+  let metrics = '';
+  if(h) metrics += `<span class="pill">${esc(h)} h IST</span>`;
+  if(n) metrics += `<span class="pill">${esc(n)} netto</span>`;
+  return `<div class="card">
+    <div class="project-title">${esc(title)}</div>
+    ${p.projectNumber ? `<span class="project-no">${esc(p.projectNumber)}</span>` : ''}
+    ${customer ? `<div class="sub">${esc(customer)}</div>` : ''}
+    ${addr ? `<div class="sub">${esc(addr)}</div>` : ''}
+    ${metrics ? `<div class="metrics">${metrics}</div>` : ''}
+  </div>`;
+}
+function renderDoc(d){
+  const pd = d.printDate ? d.printDate.split('-').reverse().join('.') : '';
+  return `<div class="card doc">
+    <img class="thumb" loading="lazy" src="${urlFor('/thumb', d.path)}" alt="">
+    <div>
+      <div class="docname">${esc(d.filename || 'Dokument')}</div>
+      ${d.dokumenttyp ? `<div class="doctype">${esc(d.dokumenttyp)}</div>` : ''}
+      ${pd ? `<div class="docmeta">${esc(pd)}</div>` : ''}
+      <div class="actions">
+        <a class="action" href="${urlFor('/pdf', d.path)}" target="_blank" rel="noopener">PDF öffnen</a>
+      </div>
+    </div>
+  </div>`;
+}
+async function search(){
+  const term = q.value.trim();
+  if(!term){ q.focus(); return; }
+  loader.style.display='block';
+  meta.textContent='Suche läuft …';
+  ps.hidden=true; ds.hidden=true;
+  projects.innerHTML=''; docs.innerHTML='';
+  try{
+    const r = await fetch('/search?q='+encodeURIComponent(term), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    if(!data.ok) throw new Error(data.error || 'Fehler');
+
+    const pp = data.projects || [];
+    const dd = data.documents || [];
+    meta.textContent = `${pp.length} Projekte · ${dd.length} Dokumente`;
+
+    ps.hidden=false; ds.hidden=false;
+    projects.innerHTML = pp.length ? pp.map(renderProject).join('') : '<div class="empty">Keine Projekte gefunden.</div>';
+    docs.innerHTML = dd.length ? dd.map(renderDoc).join('') : '<div class="empty">Keine Dokumente gefunden.</div>';
+  }catch(e){
+    meta.innerHTML='<span class="error">Suche fehlgeschlagen: '+esc(e.message)+'</span>';
+  }finally{
+    loader.style.display='none';
+  }
+}
+go.addEventListener('click', search);
+q.addEventListener('keydown', e => { if(e.key==='Enter') search(); });
+q.focus();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/")
+def mobile_home():
+    return render_template_string(MOBILE_PAGE)
+
+
+@app.get("/mobile")
+def mobile_home_alias():
+    return render_template_string(MOBILE_PAGE)
+
+
 @app.get("/status")
 def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.8",
+        "version": "0.9.9",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "sqlServer": SQL_SERVER,
@@ -1235,7 +1428,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.8 - Sicherer Handy-Zugang via Tailscale")
+    print("Version: 0.9.9 - Mobile The Brain Oberfläche")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
