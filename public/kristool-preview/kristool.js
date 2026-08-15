@@ -19,6 +19,7 @@ const state = {
   activeEmployeeId: "",
   dietOverride: null,
   release: null,
+  modelFreeConfirmed: false,
 };
 
 const $ = id => document.getElementById(id);
@@ -1559,59 +1560,25 @@ function ensureCompactReleaseControls(){
   const card=$("releaseCard");
   if(!card)return {};
 
+  // Die sechs alten Kontrollzeilen bleiben nur als lesbare Aufzählung.
+  // Die originalen Checkbox-Zeilen werden vollständig ausgeblendet.
   const legacy=[...document.querySelectorAll("[data-release-check]")];
+  legacy.forEach(input=>{
+    const row=input.closest("label")||input.parentElement;
+    if(row)row.style.setProperty("display","none","important");
+    input.disabled=true;
+    input.tabIndex=-1;
+  });
+
   let grid=$("releaseCompactGrid");
-
-  if(!grid && legacy.length){
-    const firstRow=legacy[0].closest("label")||legacy[0].parentElement;
-    const parent=firstRow?.parentElement||card;
-
+  if(!grid){
     grid=document.createElement("div");
     grid.id="releaseCompactGrid";
-    grid.style.cssText="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,.9fr);gap:16px;align-items:start;margin:10px 0 16px";
+    grid.style.cssText="display:grid;grid-template-columns:minmax(320px,1fr) minmax(260px,.8fr);gap:22px;align-items:start;margin:10px 0 16px";
 
     const list=document.createElement("div");
     list.id="releaseCheckSummary";
-    list.style.cssText="display:grid;gap:8px";
-
-    const masterWrap=document.createElement("div");
-    masterWrap.id="releaseMasterSide";
-    masterWrap.style.cssText="display:flex;align-items:stretch";
-
-    grid.appendChild(list);
-    grid.appendChild(masterWrap);
-    parent.insertBefore(grid,firstRow);
-
-    legacy.forEach(input=>{
-      const row=input.closest("label")||input.parentElement;
-      if(!row)return;
-      input.style.display="none";
-      input.tabIndex=-1;
-      row.style.display="flex";
-      row.style.alignItems="center";
-      row.style.gap="8px";
-      row.style.margin="0";
-      row.style.padding="0";
-      row.style.border="0";
-      row.style.background="transparent";
-      row.style.cursor="default";
-      row.style.fontWeight="700";
-      row.style.color="#404840";
-      if(!row.querySelector(".release-list-dot")){
-        const dot=document.createElement("span");
-        dot.className="release-list-dot";
-        dot.textContent="•";
-        dot.style.cssText="color:#2f8c4c;font-weight:900;font-size:18px;line-height:1";
-        row.insertBefore(dot,row.firstChild);
-      }
-      list.appendChild(row);
-    });
-  }else if(!grid && !legacy.length){
-    grid=document.createElement("div");
-    grid.id="releaseCompactGrid";
-    grid.style.cssText="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,.9fr);gap:16px;align-items:start;margin:10px 0 16px";
-    const list=document.createElement("div");
-    list.id="releaseCheckSummary";
+    list.style.cssText="display:grid;gap:10px;padding:4px 0";
     list.innerHTML=[
       "Zeiten geprüft",
       "Regie geprüft / nicht erforderlich",
@@ -1619,63 +1586,63 @@ function ensureCompactReleaseControls(){
       "Taggeld geprüft",
       "FL-Stunden / FL-Tag geprüft",
       "CH-Stunden / CH-Tag geprüft"
-    ].map(text=>`<div style="font-weight:700;color:#404840">• ${esc(text)}</div>`).join("");
+    ].map(text=>`<div style="display:flex;gap:8px;align-items:center;font-weight:700;color:#404840"><span style="color:#2f8c4c;font-size:18px;font-weight:900">•</span><span>${esc(text)}</span></div>`).join("");
+
     const masterWrap=document.createElement("div");
     masterWrap.id="releaseMasterSide";
+    masterWrap.style.cssText="display:flex;align-items:stretch";
+
     grid.appendChild(list);
     grid.appendChild(masterWrap);
-    const reviewer=$("releaseReviewer");
-    (reviewer?.closest("label")||reviewer||$("releaseAndNext"))?.before(grid);
+
+    const oldContainer=legacy[0]?.closest("label")?.parentElement;
+    if(oldContainer)oldContainer.parentElement?.insertBefore(grid,oldContainer);
+    else {
+      const reviewer=$("releaseReviewer");
+      (reviewer?.closest("label")||reviewer||$("releaseAndNext"))?.before(grid);
+    }
   }
 
   let master=$("releaseMasterCheck");
   if(!master){
     const label=document.createElement("label");
     label.className="release-master-check";
-    label.style.cssText="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:84px;padding:14px 16px;border:1px solid #d9ddd9;border-radius:12px;background:#f6faf6;cursor:pointer;font-weight:900;text-align:center";
-    label.innerHTML='<input id="releaseMasterCheck" type="checkbox" style="width:auto;cursor:pointer"> <span>Angaben geprüft<br>und vollständig</span>';
-    ($("releaseMasterSide")||grid||card).appendChild(label);
+    label.style.cssText="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:84px;padding:14px 16px;border:1px solid #d9ddd9;border-radius:12px;background:#f6faf6;cursor:pointer;font-weight:900;text-align:left";
+    label.innerHTML='<input id="releaseMasterCheck" type="checkbox" style="width:auto;cursor:pointer;pointer-events:auto"> <span>Angaben geprüft<br>und vollständig</span>';
+    $("releaseMasterSide")?.appendChild(label);
     master=$("releaseMasterCheck");
     master?.addEventListener("change",renderRelease);
-  }else{
-    const side=$("releaseMasterSide");
-    const label=master.closest("label");
-    if(side && label && label.parentElement!==side)side.appendChild(label);
   }
 
-  let free=$("releaseModelFreeCheck");
-  if(!free){
-    const label=document.createElement("label");
-    label.id="releaseModelFreeWrap";
-    label.style.cssText="display:none;align-items:center;gap:10px;padding:10px 14px;margin:8px 0 12px;border:1px solid #ddd;border-radius:10px;background:#f8f8f8;cursor:pointer";
-    label.innerHTML='<input id="releaseModelFreeCheck" type="checkbox" style="width:auto;cursor:pointer"> <span><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
-    grid?.after(label);
-    free=$("releaseModelFreeCheck");
-    free?.addEventListener("change",()=>{
-      const btn=$("releaseAndNext");
-      if(btn){
-        const released=!!activeQueueItem()?.release?.releasedAt;
-        btn.disabled=released||!releaseComplete()||!$("employeeSelect")?.value;
-        btn.style.cursor=btn.disabled?"default":"pointer";
-      }
+  // Modell-Leertag: bewusst als eigener klickbarer Bestätigungsschalter.
+  // Kein disabled/DOM-Checkbox-Zustand mehr, der beim Rendern verloren gehen kann.
+  let freeButton=$("releaseModelFreeButton");
+  if(!freeButton){
+    freeButton=document.createElement("button");
+    freeButton.type="button";
+    freeButton.id="releaseModelFreeButton";
+    freeButton.style.cssText="display:none;width:100%;text-align:left;color:#202020;background:#f8f8f8;border:1px solid #ddd;border-radius:10px;padding:10px 14px;margin:8px 0 12px;cursor:pointer";
+    freeButton.innerHTML='<span id="releaseModelFreeMark" style="display:inline-block;width:22px;font-size:20px;vertical-align:top">☐</span><span style="display:inline-block"><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
+    grid.after(freeButton);
+    freeButton.addEventListener("click",()=>{
+      state.modelFreeConfirmed=!state.modelFreeConfirmed;
+      const mark=$("releaseModelFreeMark");
+      if(mark)mark.textContent=state.modelFreeConfirmed?"☑":"☐";
+      renderRelease();
     });
   }
 
   const hasRealTime=(state.segments||[]).some(row=>row.from&&row.to);
   const showFree=selectedEmployeeScheduledFree() && !hasRealTime;
-  const wrap=$("releaseModelFreeWrap");
-  if(wrap)wrap.style.display=showFree?"flex":"none";
-  if(free){
-    free.disabled=false;
-    free.style.pointerEvents="auto";
-    if(!showFree)free.checked=false;
-  }
-  if(wrap){
-    wrap.style.pointerEvents="auto";
-    wrap.style.cursor=showFree?"pointer":"default";
-  }
 
-  return {master,free,showFree};
+  freeButton.style.display=showFree?"block":"none";
+  freeButton.disabled=false;
+  freeButton.style.cursor="pointer";
+  if(!showFree)state.modelFreeConfirmed=false;
+  const mark=$("releaseModelFreeMark");
+  if(mark)mark.textContent=state.modelFreeConfirmed?"☑":"☐";
+
+  return {master,freeButton,showFree};
 }
 function releaseChecks(){
   const {master}=ensureCompactReleaseControls()||{};
@@ -1693,12 +1660,11 @@ function releaseChecks(){
 }
 
 function releaseComplete(){
-  const {master,free,showFree}=ensureCompactReleaseControls();
+  const {master,showFree}=ensureCompactReleaseControls();
   if(!master?.checked)return false;
-  if(showFree)return !!free?.checked;
+  if(showFree)return state.modelFreeConfirmed===true;
   return true;
 }
-
 function releaseQueueIndex(){
   const id=String($("employeeSelect")?.value||"");
   return state.dayQueue.findIndex(item=>String(item.employeeId)===id);
@@ -1730,9 +1696,9 @@ function renderRelease(){
     compactControls.master.disabled=released;
     compactControls.master.closest("label").style.cursor=released?"default":"pointer";
   }
-  if(compactControls.free){
-    compactControls.free.disabled=released;
-    compactControls.free.closest("label").style.cursor=released?"default":"pointer";
+  if(compactControls.freeButton){
+    compactControls.freeButton.disabled=released;
+    compactControls.freeButton.style.cursor=released?"default":"pointer";
   }
   document.querySelectorAll("[data-release-check]").forEach(input=>{input.disabled=released;});
   $("releaseReviewer").disabled=released;
@@ -1745,8 +1711,8 @@ function renderRelease(){
   if(compactControls.master){
     compactControls.master.closest("label").style.cursor=released?"default":"pointer";
   }
-  if(compactControls.free){
-    compactControls.free.closest("label").style.cursor=released?"default":"pointer";
+  if(compactControls.freeButton){
+    compactControls.freeButton.style.cursor=released?"default":"pointer";
   }
   const idx=releaseQueueIndex(), total=state.dayQueue.length;
   $("releasePosition").textContent=idx>=0?`Mitarbeiter ${idx+1} von ${total} · ${$("employeeSelect").selectedOptions[0]?.textContent||""}`:"Mitarbeiter auswählen";
@@ -1765,7 +1731,7 @@ async function loadRelease(){
   });
   ensureCompactReleaseControls();
   if($("releaseMasterCheck")){$("releaseMasterCheck").checked=false;$("releaseMasterCheck").disabled=false}
-  if($("releaseModelFreeCheck")){$("releaseModelFreeCheck").checked=false;$("releaseModelFreeCheck").disabled=false}
+  state.modelFreeConfirmed=false;
 
   state.release=null;
   renderRelease();
