@@ -1651,14 +1651,29 @@ function ensureCompactReleaseControls(){
     label.innerHTML='<input id="releaseModelFreeCheck" type="checkbox" style="width:auto;cursor:pointer"> <span><strong>Heute laut Arbeitszeitmodell kein Arbeitstag</strong><br><small>0:00 h · keine Abwesenheit und kein ZA</small></span>';
     grid?.after(label);
     free=$("releaseModelFreeCheck");
-    free?.addEventListener("change",renderRelease);
+    free?.addEventListener("change",()=>{
+      const btn=$("releaseAndNext");
+      if(btn){
+        const released=!!activeQueueItem()?.release?.releasedAt;
+        btn.disabled=released||!releaseComplete()||!$("employeeSelect")?.value;
+        btn.style.cursor=btn.disabled?"default":"pointer";
+      }
+    });
   }
 
   const hasRealTime=(state.segments||[]).some(row=>row.from&&row.to);
   const showFree=selectedEmployeeScheduledFree() && !hasRealTime;
   const wrap=$("releaseModelFreeWrap");
   if(wrap)wrap.style.display=showFree?"flex":"none";
-  if(!showFree&&free)free.checked=false;
+  if(free){
+    free.disabled=false;
+    free.style.pointerEvents="auto";
+    if(!showFree)free.checked=false;
+  }
+  if(wrap){
+    wrap.style.pointerEvents="auto";
+    wrap.style.cursor=showFree?"pointer":"default";
+  }
 
   return {master,free,showFree};
 }
@@ -1678,34 +1693,10 @@ function releaseChecks(){
 }
 
 function releaseComplete(){
-  const controls=ensureCompactReleaseControls()||{};
-  if(!controls.master?.checked)return false;
-
-  const item=activeQueueItem();
-  const absence=String(item?.absenceType||"").toLowerCase();
-
-  // Ganztägig eindeutig: direkt prüfbar.
-  if(["urlaub","krank","feiertag","za"].includes(absence))return true;
-
-  // Arzt: nur die tatsächlich bestätigte Dauer zählt.
-  if(absence==="arzt"){
-    return (state.segments||[]).some(row=>
-      row.type==="up" &&
-      String(row.reason||row.jobName||"").toLowerCase().includes("arzt") &&
-      minutes(row.from)!==null &&
-      minutes(row.to)!==null &&
-      minutes(row.to)>minutes(row.from)
-    );
-  }
-
-  const hasTime=(state.segments||[]).some(row=>row.from&&row.to);
-  if(hasTime)return true;
-
-  // Dunja / Gerald / Judith etc.: planmäßig 0 Stunden.
-  // Sie dürfen trotzdem arbeiten; dann greift oben hasTime.
-  if(controls.showFree)return Boolean(controls.free?.checked);
-
-  return false;
+  const {master,free,showFree}=ensureCompactReleaseControls();
+  if(!master?.checked)return false;
+  if(showFree)return !!free?.checked;
+  return true;
 }
 
 function releaseQueueIndex(){
