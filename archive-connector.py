@@ -35,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/ww-suppliers", "/ww-supplier-invoices"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices"}
 
 
 def _request_is_local():
@@ -1140,256 +1140,6 @@ def _extract_supplier_identity(text, query=""):
     }
 
 
-
-def ww_supplier_search(query, limit=30):
-    """
-    Masterquelle fuer Lieferanten:
-    WinWorker_Adressen_Standard.dbo.Lieferanten
-    """
-    q = str(query or "").strip()
-    if len(q) < 2:
-        return []
-
-    con = sql_connection("WinWorker_Adressen_Standard")
-    cur = con.cursor()
-    try:
-        like = f"%{q}%"
-        sql = """
-            SELECT TOP (?)
-                StammIndex,
-                sFirma,
-                sName,
-                sStraße,
-                sPLZ,
-                sOrt,
-                sStaat,
-                sKdnNr,
-                sFibuKtoNr,
-                sEMail,
-                sTelefon,
-                sMobil
-            FROM dbo.Lieferanten
-            WHERE
-                ISNULL(sFirma,'') LIKE ?
-                OR ISNULL(sName,'') LIKE ?
-                OR ISNULL(sStraße,'') LIKE ?
-                OR ISNULL(sPLZ,'') LIKE ?
-                OR ISNULL(sOrt,'') LIKE ?
-                OR ISNULL(sKdnNr,'') LIKE ?
-                OR ISNULL(sFibuKtoNr,'') LIKE ?
-            ORDER BY
-                CASE WHEN ISNULL(sFirma,'') LIKE ? THEN 0 ELSE 1 END,
-                ISNULL(sFirma,''),
-                ISNULL(sName,''),
-                StammIndex
-        """
-        rows = cur.execute(
-            sql,
-            int(max(1, min(limit, 100))),
-            like, like, like, like, like, like, like,
-            like
-        ).fetchall()
-
-        result = []
-        for row in rows:
-            company = str(getattr(row, "sFirma", "") or "").strip()
-            name = str(getattr(row, "sName", "") or "").strip()
-            label = company or name or f"Lieferant {getattr(row,'StammIndex', '')}"
-
-            street = str(getattr(row, "sStraße", "") or "").strip()
-            plz = str(getattr(row, "sPLZ", "") or "").strip()
-            city = str(getattr(row, "sOrt", "") or "").strip()
-            country = str(getattr(row, "sStaat", "") or "").strip()
-
-            cityline = " ".join(x for x in [plz, city] if x)
-            address = ", ".join(x for x in [street, cityline, country] if x)
-
-            result.append({
-                "stammIndex": int(row.StammIndex),
-                "name": label,
-                "company": company,
-                "contactName": name,
-                "street": street,
-                "postalCode": plz,
-                "city": city,
-                "country": country,
-                "address": address,
-                "customerNumber": str(getattr(row, "sKdnNr", "") or "").strip(),
-                "fibuAccount": str(getattr(row, "sFibuKtoNr", "") or "").strip(),
-                "email": str(getattr(row, "sEMail", "") or "").strip(),
-                "phone": str(getattr(row, "sTelefon", "") or "").strip(),
-                "mobile": str(getattr(row, "sMobil", "") or "").strip(),
-            })
-        return result
-    finally:
-        con.close()
-
-
-def _supplier_match_tokens(supplier):
-    """
-    Tokens aus strukturierten WW-Stammdaten zur Zuordnung der Dokman-PDFs.
-    """
-    company = _norm_supplier(supplier.get("company") or supplier.get("name"))
-    company = re.sub(
-        r"\b(gmbh|ges m b h|ges mbh|gesellschaft|ag|kg|ohg|co)\b",
-        " ",
-        company
-    )
-    company_tokens = [
-        x for x in company.split()
-        if len(x) >= 3 and x not in {"und","der","die","das"}
-    ]
-
-    address_bits = " ".join([
-        str(supplier.get("street") or ""),
-        str(supplier.get("postalCode") or ""),
-        str(supplier.get("city") or "")
-    ])
-    address_tokens = [
-        x for x in _norm_supplier(address_bits).split()
-        if len(x) >= 3
-    ]
-
-    customer_no = _norm_supplier(supplier.get("customerNumber") or "")
-    fibu = _norm_supplier(supplier.get("fibuAccount") or "")
-
-    return {
-        "company": company_tokens,
-        "address": address_tokens,
-        "customerNumber": customer_no,
-        "fibuAccount": fibu,
-    }
-
-
-def incoming_invoices_for_ww_supplier(stamm_index, text_query=""):
-    suppliers = ww_supplier_search(str(stamm_index), limit=100)
-    supplier = next(
-        (s for s in suppliers if int(s.get("stammIndex") or -1) == int(stamm_index)),
-        None
-    )
-
-    if supplier is None:
-        # Direkter Lookup nach StammIndex.
-        con = sql_connection("WinWorker_Adressen_Standard")
-        cur = con.cursor()
-        try:
-            row = cur.execute("""
-                SELECT TOP 1
-                    StammIndex, sFirma, sName, sStraße, sPLZ, sOrt, sStaat,
-                    sKdnNr, sFibuKtoNr, sEMail, sTelefon, sMobil
-                FROM dbo.Lieferanten
-                WHERE StammIndex = ?
-            """, int(stamm_index)).fetchone()
-            if not row:
-                return None, []
-
-            company = str(getattr(row, "sFirma", "") or "").strip()
-            name = str(getattr(row, "sName", "") or "").strip()
-            label = company or name or f"Lieferant {row.StammIndex}"
-            street = str(getattr(row, "sStraße", "") or "").strip()
-            plz = str(getattr(row, "sPLZ", "") or "").strip()
-            city = str(getattr(row, "sOrt", "") or "").strip()
-            country = str(getattr(row, "sStaat", "") or "").strip()
-            cityline = " ".join(x for x in [plz, city] if x)
-            address = ", ".join(x for x in [street, cityline, country] if x)
-
-            supplier = {
-                "stammIndex": int(row.StammIndex),
-                "name": label,
-                "company": company,
-                "contactName": name,
-                "street": street,
-                "postalCode": plz,
-                "city": city,
-                "country": country,
-                "address": address,
-                "customerNumber": str(getattr(row, "sKdnNr", "") or "").strip(),
-                "fibuAccount": str(getattr(row, "sFibuKtoNr", "") or "").strip(),
-                "email": str(getattr(row, "sEMail", "") or "").strip(),
-                "phone": str(getattr(row, "sTelefon", "") or "").strip(),
-                "mobile": str(getattr(row, "sMobil", "") or "").strip(),
-            }
-        finally:
-            con.close()
-
-    tokens = _supplier_match_tokens(supplier)
-    query_tokens = [x for x in _norm_supplier(text_query).split() if x]
-
-    result = []
-    for item in _incoming_catalog():
-        raw = str(item.get("_raw_text") or "")
-        raw_norm = _norm_supplier(raw)
-        header_norm = item.get("_header_norm") or _norm_supplier(raw[:2200])
-
-        score = 0
-
-        company_tokens = tokens["company"]
-        if company_tokens:
-            company_hits = sum(1 for t in company_tokens if t in header_norm)
-            if company_hits == len(company_tokens):
-                score += 6
-            elif company_hits >= max(1, len(company_tokens) - 1):
-                score += 4
-            elif company_hits:
-                score += 2
-
-        address_tokens = tokens["address"]
-        if address_tokens:
-            addr_hits = sum(1 for t in address_tokens if t in header_norm)
-            if addr_hits >= min(2, len(address_tokens)):
-                score += 3
-            elif addr_hits:
-                score += 1
-
-        if tokens["customerNumber"] and tokens["customerNumber"] in header_norm:
-            score += 5
-
-        if tokens["fibuAccount"] and tokens["fibuAccount"] in header_norm:
-            score += 2
-
-        # Mindestens Firmenbezug oder eindeutige Nummer nötig.
-        if score < 4:
-            continue
-
-        if query_tokens and not all(t in raw_norm for t in query_tokens):
-            continue
-
-        compact = " ".join(raw.split())
-        snippet = compact[:420]
-        if query_tokens:
-            low = compact.lower()
-            poss = [low.find(t.lower()) for t in query_tokens if low.find(t.lower()) >= 0]
-            if poss:
-                pos = min(poss)
-                snippet = compact[max(0,pos-140):min(len(compact),pos+500)]
-
-        result.append({
-            "filename": item.get("filename"),
-            "path": item.get("path"),
-            "dokumenttyp": item.get("dokumenttyp") or "Eingangsrechnung",
-            "modified": item.get("modified"),
-            "logical_id": item.get("logical_id"),
-            "invoiceDate": item.get("invoiceDate"),
-            "printDate": item.get("invoiceDate"),
-            "invoiceDateTime": item.get("invoiceDateTime"),
-            "year": item.get("year"),
-            "month": item.get("month"),
-            "monthName": item.get("monthName"),
-            "day": item.get("day"),
-            "amount": item.get("amount"),
-            "snippet": snippet,
-            "matchScore": score,
-        })
-
-    result.sort(
-        key=lambda x: (
-            x.get("invoiceDateTime") or "",
-            x.get("filename") or ""
-        ),
-        reverse=True
-    )
-    return supplier, result
-
 def _incoming_catalog():
     """
     Cache der 6.000+ Eingangsrechnungen, damit Lieferantenauswahl,
@@ -2079,8 +1829,8 @@ function setSearchMode(mode){
   incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
 
   if(mode==='incoming'){
-    q.placeholder='Lieferant, Adresse oder Kundennr. suchen, z. B. Sto …';
-    meta.textContent='Schritt 1: Lieferant aus WinWorker-Stamm auswählen';
+    q.placeholder='Lieferant oder Adresse suchen, z. B. Sto …';
+    meta.textContent='Schritt 1: Lieferant/Adresse auswählen · noch keine Rechnungstextsuche';
   }else{
     q.placeholder='Baustelle, Kunde, Nummer, Adresse …';
     meta.textContent='WinWorker + PDF-Archiv';
@@ -2104,10 +1854,10 @@ function renderSupplierCandidates(){
       <div class="card supplier-choice" data-supplier="${i}">
         <div class="project-title">${esc(s.name||'Lieferant')}</div>
         ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
+        ${s.supplierNumber?`<div class="sub">Nr. ${esc(s.supplierNumber)}</div>`:''}
         <div class="supplier-meta">
-          ${s.customerNumber?`<span class="pill">Kundennr. ${esc(s.customerNumber)}</span>`:''}
-          ${s.fibuAccount?`<span class="pill">Fibu ${esc(s.fibuAccount)}</span>`:''}
-          <span class="pill">WW #${esc(s.stammIndex)}</span>
+          <span class="pill">${Number(s.count||0)} Rechnungen</span>
+          ${(s.years||[]).slice(0,5).map(y=>`<span class="pill">${esc(y)}</span>`).join('')}
         </div>
       </div>`).join('')
     : '<div class="empty">Kein passender Lieferant gefunden.</div>';
@@ -2127,17 +1877,17 @@ async function runIncomingSupplierSearch(term){
   loader.style.display='block';
   ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
   incomingSection.hidden=true;incomingSupplierSection.hidden=true;
-  meta.textContent='Suche im WinWorker-Lieferantenstamm …';
+  meta.textContent='Suche passende Lieferanten / Adressen …';
 
   try{
-    const r=await fetch('/ww-suppliers?q='+encodeURIComponent(term),{cache:'no-store'});
+    const r=await fetch('/incoming/suppliers?q='+encodeURIComponent(term),{cache:'no-store'});
     const data=await r.json();
     if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
 
     incomingCandidates=data.suppliers||[];
     renderSupplierCandidates();
     meta.textContent=incomingCandidates.length+
-      ' passende Lieferanten aus WinWorker · bitte aktiv auswählen';
+      ' passende Lieferanten/Adressen · bitte aktiv auswählen';
   }catch(e){
     meta.innerHTML='<span class="error">Lieferantensuche fehlgeschlagen: '+esc(e.message)+'</span>';
   }finally{
@@ -2154,11 +1904,9 @@ async function selectIncomingSupplier(supplier){
 
   incomingTitle.textContent=supplier.name||'Lieferant';
   incomingSupplierAddress.textContent=supplier.address||'';
-  incomingSupplierNumber.textContent=[
-    supplier.customerNumber?'Kundennr. '+supplier.customerNumber:'',
-    supplier.fibuAccount?'Fibu '+supplier.fibuAccount:'',
-    supplier.stammIndex?'WW #'+supplier.stammIndex:''
-  ].filter(Boolean).join(' · ');
+  incomingSupplierNumber.textContent=supplier.supplierNumber
+    ? 'Lieferant/Kundennr. '+supplier.supplierNumber
+    : '';
   incomingSub.textContent='Rechnungen werden geladen …';
   incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
   incomingTextQ.value='';
@@ -2254,11 +2002,11 @@ async function loadSupplierInvoices(textQuery=''){
 
   try{
     const params=new URLSearchParams({
-      stammIndex:String(selectedSupplier.stammIndex||''),
+      key:selectedSupplier.key||'',
       q:textQuery||''
     });
 
-    const r=await fetch('/ww-supplier-invoices?'+params.toString(),{cache:'no-store'});
+    const r=await fetch('/incoming/invoices?'+params.toString(),{cache:'no-store'});
     const data=await r.json();
     if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
 
@@ -2287,7 +2035,7 @@ backToSuppliers.onclick=()=>{
   incomingSection.hidden=true;
   incomingSupplierSection.hidden=false;
   meta.textContent=incomingCandidates.length+
-    ' passende Lieferanten aus WinWorker · bitte aktiv auswählen';
+    ' passende Lieferanten/Adressen · bitte aktiv auswählen';
   incomingSupplierSection.scrollIntoView({behavior:'smooth',block:'start'});
 };
 
@@ -2387,7 +2135,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.0",
+        "version": "0.11.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -2698,48 +2446,6 @@ def kristine_job_create():
 
 
 
-@app.get("/ww-suppliers")
-def ww_suppliers():
-    q = str(request.args.get("q", "")).strip()
-    if len(q) < 2:
-        return jsonify({"ok": False, "error": "Bitte mindestens 2 Zeichen eingeben."}), 400
-    try:
-        suppliers = ww_supplier_search(q)
-        return jsonify({
-            "ok": True,
-            "query": q,
-            "suppliers": suppliers,
-            "count": len(suppliers),
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.get("/ww-supplier-invoices")
-def ww_supplier_invoices():
-    raw_index = str(request.args.get("stammIndex", "")).strip()
-    text_query = str(request.args.get("q", "")).strip()
-
-    if not raw_index.isdigit():
-        return jsonify({"ok": False, "error": "Ungültiger Lieferant."}), 400
-
-    try:
-        supplier, documents = incoming_invoices_for_ww_supplier(int(raw_index), text_query)
-        if supplier is None:
-            return jsonify({"ok": False, "error": "Lieferant nicht gefunden."}), 404
-
-        return jsonify({
-            "ok": True,
-            "supplier": supplier,
-            "textQuery": text_query,
-            "documents": documents,
-            "count": len(documents),
-            "years": incoming_year_summary(documents),
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @app.get("/incoming/suppliers")
 def incoming_suppliers():
     q = str(request.args.get("q", "")).strip()
@@ -2846,7 +2552,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.0 - WinWorker-Lieferantenstamm als Masterquelle")
+    print("Version: 0.11.2 - Lieferantenfilter präzise + Auswahl schnell + Dubletten reduziert")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
