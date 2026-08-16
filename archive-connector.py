@@ -1007,69 +1007,127 @@ def _extract_invoice_date(text, modified=None, doc_year=None):
 
 def _extract_supplier_identity(text, query=""):
     """
-    Findet den Lieferanten im Kopf der Rechnung.
-    Der erste Brain-Suchschritt sucht bewusst nur im Kopfbereich:
-    Lieferantenname / Lieferantenadresse, NICHT im Artikeltext.
+    Lieferant aus dem RECHNUNGSKOPF erkennen.
+    Wichtig: nicht im ganzen Rechnungstext suchen, sonst findet "Sto"
+    z.B. auch andere Lieferanten, die irgendwo einen Sto-Artikel erwähnen.
     """
     raw = str(text or "")
-    lines = [re.sub(r"\s+", " ", x).strip() for x in raw[:4500].splitlines()]
+    lines = [re.sub(r"\s+", " ", x).strip() for x in raw[:2200].splitlines()]
     lines = [x for x in lines if x]
 
-    q = _norm_supplier(query)
-    qtokens = [x for x in q.split() if len(x) >= 2]
+    # Eigene Firma ist auf Eingangsrechnungen typischerweise Empfänger,
+    # niemals Lieferant.
+    own_company = re.compile(
+        r"(?i)\b(farben\s+krista|malerische\s+wohnideen)\b"
+    )
 
-    # Zeile mit Suchbegriff als Lieferantenname bevorzugen.
-    name_idx = None
-    if qtokens:
-        for i, line in enumerate(lines[:45]):
-            nl = _norm_supplier(line)
-            if all(t in nl for t in qtokens):
-                # typische Rechnungsfeld-Zeilen nicht als Firma nehmen
-                if not re.search(r"(?i)rechnung|rechnungsnr|datum|kundennr|lieferdatum|seite", line):
-                    name_idx = i
-                    break
+    bad_meta = re.compile(
+        r"(?i)\b(iban|bic|uid|ust[- ]?id|firmenbuch|handelsgericht|gericht|"
+        r"dvr|konto|bank|telefon|tel\.|fax|e-?mail|www\.|seite\s+\d|"
+        r"rechnungsnr|rechnungsnummer|kundennr|kunden-?ust)\b"
+    )
 
-    if name_idx is None:
-        # Fallback: erste plausible Firmenzeile.
-        for i, line in enumerate(lines[:20]):
-            if re.search(r"(?i)\b(gmbh|ges\.?m\.?b\.?h|ag|kg|ohg|gmbh\s*&\s*co|sarl|sa)\b", line):
-                name_idx = i
-                break
+    legal = re.compile(
+        r"(?i)\b(gmbh|ges\.?\s*m\.?\s*b\.?\s*h\.?|ag|kg|ohg|"
+        r"gmbh\s*&\s*co|sarl|sa|limited|ltd)\b"
+    )
 
-    if name_idx is None:
+    # 1) Lieferantenname: möglichst frühe plausible Firmenzeile.
+    candidates = []
+    for i, line in enumerate(lines[:28]):
+        if own_company.search(line):
+            continue
+        if bad_meta.search(line):
+            continue
+        if len(line) < 3 or len(line) > 160:
+            continue
+
+        score = 0
+        if legal.search(line):
+            score += 5
+        if i < 8:
+            score += 3
+        elif i < 15:
+            score += 1
+        if re.search(r"[A-Za-zÄÖÜäöü]{3}", line):
+            score += 1
+        # reine Adresse / Zahl nicht als Name
+        if re.search(r"\b\d{4}\b", line) and not legal.search(line):
+            score -= 2
+
+        if score > 0:
+            candidates.append((score, -i, i, line))
+
+    if not candidates:
         return None
 
-    name = lines[name_idx][:180]
+    candidates.sort(reverse=True)
+    name_idx = candidates[0][2]
+    name = candidates[0][3][:180]
 
-    # Adresse im Umfeld des Lieferantennamens.
-    address = ""
-    postal_idx = None
-    for j in range(max(0, name_idx - 3), min(len(lines), name_idx + 10)):
-        if re.search(r"\b(?:A-|AT-|CH-|FL-)?\d{4}\s+\S+", lines[j], re.I):
-            postal_idx = j
+    # 2) Adresse: nur Zeilen im direkten Umfeld NACH dem Firmennamen.
+    #    Finanz-/Firmenbuchdaten ausdrücklich ausschließen.
+    address_lines = []
+    postal_line = ""
+    street_line = ""
+
+    for j in range(name_idx + 1, min(len(lines), name_idx + 9)):
+        line = lines[j]
+        if own_company.search(line) or bad_meta.search(line):
+            continue
+
+        # PLZ + Ort
+        if re.search(r"\b(?:A-|AT-|CH-|FL-)?\d{4}\s+[A-Za-zÄÖÜäöü]", line, re.I):
+            postal_line = line
+            # direkte Zeile davor als Straße, wenn sie plausibel ist
+            for k in range(j - 1, name_idx, -1):
+                prev = lines[k]
+                if own_company.search(prev) or bad_meta.search(prev):
+                    continue
+                if re.search(r"\d", prev) and len(prev) <= 120:
+                    street_line = prev
+                    break
             break
 
-    if postal_idx is not None:
-        parts = []
-        if postal_idx - 1 >= 0:
-            prev = lines[postal_idx - 1]
-            if re.search(r"\d", prev) and len(prev) <= 120:
-                parts.append(prev)
-        parts.append(lines[postal_idx])
-        address = ", ".join(parts)[:220]
+    if street_line:
+        address_lines.append(street_line)
+    if postal_line:
+        address_lines.append(postal_line)
 
-    # Lieferanten-/Kunden-/Kreditornummer.
+    address = ", ".join(address_lines)[:220]
+
+    # 3) Nummer im Kopf - nur echte Nummernfelder, keine IBAN/FN etc.
     supplier_no = ""
-    header = "\n".join(lines[:60])
+    header = "\n".join(lines[:45])
     m = re.search(
         r"(?i)(?:lieferanten?(?:nummer|nr\.?)|kreditor(?:ennummer|nr\.?)|"
-        r"kunden(?:nummer|nr\.?))\s*[:#\-]?\s*([A-Z0-9./\-]{2,30})",
+        r"kundennummer|kunden-?nr\.?)\s*[:#\-]?\s*([A-Z0-9./\-]{2,30})",
         header
     )
     if m:
         supplier_no = m.group(1).strip()
 
-    key_raw = _norm_supplier(name) + "|" + _norm_supplier(address)
+    # 4) Stabile Identität: Name normalisiert + PLZ/Ort.
+    #    Rechtsformen und Schreibweisen wie "Straße/Strasse" sollen nicht
+    #    zu künstlichen Dubletten führen.
+    name_norm = _norm_supplier(name)
+    for token in (
+        "gesellschaft mit beschrankter haftung",
+        "gesellschaft mbh", "ges mbh", "gmbh", "ag", "kg", "ohg",
+        "ges m b h", "co"
+    ):
+        name_norm = re.sub(rf"\b{re.escape(token)}\b", " ", name_norm)
+    name_norm = " ".join(name_norm.split())
+
+    address_norm = _norm_supplier(address)
+    postal = ""
+    city = ""
+    m = re.search(r"\b(?:a|at|ch|fl)?\s*(\d{4})\s+([a-zäöü][a-zäöü \-]+)", address_norm)
+    if m:
+        postal = m.group(1)
+        city = m.group(2).strip()
+
+    key_raw = "|".join([name_norm, postal, city])
     supplier_key = hashlib.sha1(key_raw.encode("utf-8", errors="ignore")).hexdigest()[:18]
 
     return {
@@ -1077,6 +1135,8 @@ def _extract_supplier_identity(text, query=""):
         "name": name,
         "address": address,
         "supplierNumber": supplier_no,
+        "nameNorm": name_norm,
+        "addressNorm": address_norm,
     }
 
 
@@ -1136,7 +1196,8 @@ def _incoming_catalog():
         amount = _extract_invoice_amount(raw)
 
         item["_raw_text"] = raw
-        item["_header_norm"] = _norm_supplier(raw[:4500])
+        item["_header_norm"] = _norm_supplier(raw[:2200])
+        item["_supplier"] = _extract_supplier_identity(raw)
         item["invoiceDate"] = dt.date().isoformat() if dt else None
         item["invoiceDateTime"] = dt.isoformat(timespec="seconds") if dt else None
         item["year"] = dt.year if dt else (int(doc_year) if doc_year else None)
@@ -1153,8 +1214,8 @@ def _incoming_catalog():
 
 def incoming_supplier_candidates(query, limit=20):
     """
-    Schritt 1: Lieferant/Adresse vorschlagen.
-    Gesucht wird NUR im Rechnungskopf, nicht im Rechnungstext/Artikelbereich.
+    Schritt 1: nur Lieferant/Adresse.
+    Kein Treffer mehr, nur weil 'Sto' irgendwo im Artikeltext einer Hilti-Rechnung steht.
     """
     q = str(query or "").strip()
     nq = _norm_supplier(q)
@@ -1165,23 +1226,36 @@ def incoming_supplier_candidates(query, limit=20):
     grouped = {}
 
     for item in _incoming_catalog():
-        header = item.get("_header_norm") or ""
-        if not all(t in header for t in tokens):
-            continue
-
-        ident = _extract_supplier_identity(item.get("_raw_text"), q)
+        ident = item.get("_supplier")
         if not ident:
             continue
 
+        searchable = " ".join([
+            ident.get("nameNorm") or "",
+            ident.get("addressNorm") or "",
+            _norm_supplier(ident.get("supplierNumber") or ""),
+        ])
+
+        if not all(t in searchable for t in tokens):
+            continue
+
         g = grouped.setdefault(ident["key"], {
-            **ident,
+            "key": ident["key"],
+            "name": ident.get("name") or "",
+            "address": ident.get("address") or "",
+            "supplierNumber": ident.get("supplierNumber") or "",
             "count": 0,
             "years": set(),
-            "samplePath": item.get("path"),
         })
         g["count"] += 1
         if item.get("year"):
             g["years"].add(int(item["year"]))
+
+        # Wenn spätere Rechnung eine bessere Adresse/Nummer liefert, nachziehen.
+        if not g["address"] and ident.get("address"):
+            g["address"] = ident["address"]
+        if not g["supplierNumber"] and ident.get("supplierNumber"):
+            g["supplierNumber"] = ident["supplierNumber"]
 
     rows = []
     for g in grouped.values():
@@ -1192,56 +1266,45 @@ def incoming_supplier_candidates(query, limit=20):
     return rows[:max(1, min(int(limit or 20), 50))]
 
 
-def incoming_supplier_invoices(supplier_name, supplier_address="", text_query=""):
+def incoming_supplier_invoices(supplier_key, text_query=""):
     """
-    Schritt 2: Nach aktiver Lieferantenauswahl nur dessen Rechnungen.
-    Optionaler text_query durchsucht dann den VOLLEN Rechnungstext.
+    Schritt 2: direkte Auswahl über den bereits erkannten Supplier-Key.
+    Dadurch kein erneutes Parsen aller 6.475 PDFs beim Klick -> deutlich schneller.
     """
-    supplier_name = str(supplier_name or "").strip()
-    supplier_address = str(supplier_address or "").strip()
+    supplier_key = str(supplier_key or "").strip()
     text_query = str(text_query or "").strip()
 
-    if not supplier_name:
+    if not supplier_key:
         return []
 
-    name_tokens = [
-        x for x in _norm_supplier(supplier_name).split()
-        if len(x) >= 3 and x not in {"gmbh","ges","mbh","ag","kg","co","und"}
-    ]
-    if not name_tokens:
-        name_tokens = [x for x in _norm_supplier(supplier_name).split() if len(x) >= 2]
-
-    addr_norm = _norm_supplier(supplier_address)
     query_tokens = [x for x in _norm_supplier(text_query).split() if x]
-
     result = []
+
     for item in _incoming_catalog():
-        header = item.get("_header_norm") or ""
-        if not all(t in header for t in name_tokens):
+        ident = item.get("_supplier")
+        if not ident or ident.get("key") != supplier_key:
             continue
 
-        ident = _extract_supplier_identity(item.get("_raw_text"), supplier_name)
-        if not ident:
-            continue
+        raw = str(item.get("_raw_text") or "")
+        raw_norm = _norm_supplier(raw)
 
-        # Wenn eine Adresse gewählt wurde, soll sie den Lieferanten wirklich eingrenzen.
-        if addr_norm:
-            item_addr = _norm_supplier(ident.get("address"))
-            if item_addr and item_addr != addr_norm and addr_norm not in header:
-                continue
-
-        raw_norm = _norm_supplier(item.get("_raw_text"))
         if query_tokens and not all(t in raw_norm for t in query_tokens):
             continue
 
-        raw = " ".join(str(item.get("_raw_text") or "").split())
-        snippet = raw[:420]
+        snippet = " ".join(raw.split())[:420]
         if query_tokens:
             low = raw.lower()
             positions = [low.find(t.lower()) for t in query_tokens if low.find(t.lower()) >= 0]
             if positions:
                 pos = min(positions)
-                snippet = raw[max(0, pos-140):min(len(raw), pos+500)]
+                compact = " ".join(raw.split())
+                # Für Snippet robust nochmal im kompakten Text suchen.
+                low_compact = compact.lower()
+                pos2 = min(
+                    [low_compact.find(t.lower()) for t in query_tokens if low_compact.find(t.lower()) >= 0]
+                    or [0]
+                )
+                snippet = compact[max(0, pos2-140):min(len(compact), pos2+500)]
 
         result.append({
             "filename": item.get("filename"),
@@ -1845,6 +1908,7 @@ async function selectIncomingSupplier(supplier){
     ? 'Lieferant/Kundennr. '+supplier.supplierNumber
     : '';
   incomingSub.textContent='Rechnungen werden geladen …';
+  incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
   incomingTextQ.value='';
   incomingTextMeta.textContent='';
   incomingGrouped.innerHTML='';
@@ -1938,8 +2002,7 @@ async function loadSupplierInvoices(textQuery=''){
 
   try{
     const params=new URLSearchParams({
-      name:selectedSupplier.name||'',
-      address:selectedSupplier.address||'',
+      key:selectedSupplier.key||'',
       q:textQuery||''
     });
 
@@ -2072,7 +2135,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.1",
+        "version": "0.11.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -2405,21 +2468,17 @@ def incoming_suppliers():
 
 @app.get("/incoming/invoices")
 def incoming_invoices():
-    name = str(request.args.get("name", "")).strip()
-    address = str(request.args.get("address", "")).strip()
+    supplier_key = str(request.args.get("key", "")).strip()
     text_query = str(request.args.get("q", "")).strip()
 
-    if not name:
-        return jsonify({"ok": False, "error": "Lieferant fehlt."}), 400
+    if not supplier_key:
+        return jsonify({"ok": False, "error": "Lieferantenschlüssel fehlt."}), 400
 
     try:
-        documents = incoming_supplier_invoices(name, address, text_query)
+        documents = incoming_supplier_invoices(supplier_key, text_query)
         return jsonify({
             "ok": True,
-            "supplier": {
-                "name": name,
-                "address": address,
-            },
+            "supplierKey": supplier_key,
             "textQuery": text_query,
             "documents": documents,
             "count": len(documents),
@@ -2493,7 +2552,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.1 - Lieferantenauswahl + Jahresumsatz + Rechnungstextsuche")
+    print("Version: 0.11.2 - Lieferantenfilter präzise + Auswahl schnell + Dubletten reduziert")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
