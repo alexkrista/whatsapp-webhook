@@ -6,7 +6,29 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISTINE GO</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
-  <link rel="stylesheet" href="/public/kristine-go.css?v=6">
+  <link rel="stylesheet" href="/public/kristine-go.css?v=7">
+
+  <style>
+    .kg-brain-card{margin:12px 0 18px}
+    .kg-brain-card.kg-hidden{display:none!important}
+    .kg-brain-button{
+      width:100%;display:flex;align-items:center;gap:12px;
+      border:1px solid rgba(16,35,63,.14);border-radius:18px;
+      padding:14px 16px;background:#fff;color:#10233f;
+      box-shadow:0 8px 24px rgba(16,35,63,.08);
+      text-align:left;cursor:pointer
+    }
+    .kg-brain-icon{
+      width:44px;height:44px;display:grid;place-items:center;
+      border-radius:13px;background:#10233f;color:#fff;font-size:23px;
+      flex:0 0 auto
+    }
+    .kg-brain-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+    .kg-brain-copy strong{font-size:16px;line-height:1.15}
+    .kg-brain-copy small{font-size:12px;color:#657387}
+    .kg-brain-arrow{font-size:28px;line-height:1;color:#657387}
+  </style>
+
 </head>
 <body>
   <div class="kg-app">
@@ -35,6 +57,17 @@
 
       <div id="kgContent" class="kg-hidden">
         <p id="kgGreeting" class="kg-greeting">Guten Morgen.</p>
+
+        <section id="kgBrainCard" class="kg-brain-card kg-hidden" aria-label="The Brain">
+          <button id="kgBrainButton" class="kg-brain-button" type="button">
+            <span class="kg-brain-icon">🧠</span>
+            <span class="kg-brain-copy">
+              <strong>The Brain</strong>
+              <small>Firmenwissen durchsuchen</small>
+            </span>
+            <span class="kg-brain-arrow">›</span>
+          </button>
+        </section>
 
         <section id="kgMaterialResponseCard" class="kg-material-response-card kg-hidden">
           <div class="kg-material-response-title">
@@ -235,6 +268,6 @@
 
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
-  <script src="/public/kristine-go.js?v=6"></script>
+  <script src="/public/kristine-go.js?v=7"></script>
 </body>
 </html>

@@ -16,6 +16,12 @@ const KristineGo = (() => {
   const query = new URLSearchParams(location.search);
 const token = query.get("token") || "";
 
+// THE BRAIN
+// Nur über Tailscale erreichbar. Die Oberfläche selbst bleibt zusätzlich
+// durch die Authentifizierung des Brain-Connectors geschützt.
+const BRAIN_URL = "http://100.98.155.39:5051/";
+
+
 function authenticatedUrl(url) {
   if (!token) return url;
   const separator = url.includes("?") ? "&" : "?";
@@ -38,7 +44,7 @@ function authenticatedUrl(url) {
       "kgPhotoReviewStatus","kgMaterialReviewStatus","kgOrderReviewStatus","kgMaterialResponseCard","kgMaterialResponseCount","kgMaterialResponseList","kgTomorrowCard",
       "kgTomorrowTitle","kgTomorrowMeta","kgTomorrowNavigation","kgFinishButton","kgEmployeeDialog",
       "kgEmployeeList","kgAssistantDialog","kgAssistantEyebrow","kgAssistantTitle","kgAssistantQuestion",
-      "kgAssistantBody","kgAssistantSecondary","kgAssistantPrimary","kgToast","kgNavigationButton","kgCallButton"
+      "kgAssistantBody","kgAssistantSecondary","kgAssistantPrimary","kgToast","kgNavigationButton","kgCallButton","kgBrainCard","kgBrainButton"
     ].forEach(id => elements[id] = $(id));
   }
 
@@ -100,6 +106,45 @@ function authenticatedUrl(url) {
 
   function employeeName(employee) {
     return String(employee?.nickname || employee?.rufname || employee?.name || employee?.employeeName || employeeId(employee) || "Mitarbeiter").trim();
+  }
+
+
+  function brainAllowed(employee) {
+    if (!employee) return false;
+
+    // Zukunftssicher: sobald im Mitarbeiterstamm explizit gesetzt, gilt dieses Feld.
+    if (employee.brainAccess === true || employee.canUseBrain === true) return true;
+    if (employee.brainAccess === false || employee.canUseBrain === false) return false;
+
+    // Aktuell: The Brain in KGO nur für Alex/Alexander.
+    const identity = [
+      employee.nickname,
+      employee.rufname,
+      employee.firstName,
+      employee.vorname,
+      employee.name,
+      employee.employeeName
+    ].filter(Boolean).join(" ")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    return /(^|\s)(alex|alexander)(\s|$)/.test(identity);
+  }
+
+  function renderBrainAccess() {
+    if (!elements.kgBrainCard || !elements.kgBrainButton) return;
+    const allowed = brainAllowed(state.employee);
+    elements.kgBrainCard.classList.toggle("kg-hidden", !allowed);
+    elements.kgBrainButton.disabled = !allowed;
+  }
+
+  function openBrain() {
+    if (!brainAllowed(state.employee)) {
+      toast("The Brain ist für diesen Benutzer nicht freigeschaltet.");
+      return;
+    }
+    // KGO bleibt offen; Brain startet in einem eigenen Browser-Tab/Fenster.
+    window.open(BRAIN_URL, "_blank", "noopener");
   }
 
   function assignmentKey(a) {
@@ -561,6 +606,7 @@ if (contactPhone) {
     renderTomorrow();
     renderReview();
     renderMaterialResponses();
+    renderBrainAccess();
     restartTimer();
   }
 
@@ -857,6 +903,7 @@ if (contactPhone) {
 
   function bindEvents() {
     elements.kgEmployeeButton.onclick = () => elements.kgEmployeeDialog.showModal();
+    if (elements.kgBrainButton) elements.kgBrainButton.onclick = openBrain;
     elements.kgStartButton.onclick = () => sendMessage("Start").catch(showError);
     elements.kgWrongSiteButton.onclick = async () => {
   try {
@@ -1048,5 +1095,5 @@ if (contactPhone) {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  return { reload, openAssistant };
+  return { reload, openAssistant, openBrain };
 })();
