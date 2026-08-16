@@ -143,8 +143,9 @@ function authenticatedUrl(url) {
       toast("The Brain ist für diesen Benutzer nicht freigeschaltet.");
       return;
     }
-    // KGO bleibt offen; Brain startet in einem eigenen Browser-Tab/Fenster.
-    window.open(BRAIN_URL, "_blank", "noopener");
+    // Direkte Navigation ist auf iPhone/Safari/KGO zuverlässiger als window.open().
+    // Der Zurück-Button bringt anschließend wieder zu KGO.
+    window.location.assign(BRAIN_URL);
   }
 
   function assignmentKey(a) {
