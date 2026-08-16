@@ -1644,11 +1644,11 @@ function releaseChecks(){
   // die Oberfläche verlangt aber nur noch eine Bestätigung.
   return {
     times:checked,
-    gps:checked,
     regie:checked,
+    close:checked,
     diet:checked,
-    completeness:checked,
-    final:checked
+    fl:checked,
+    ch:checked
   };
 }
 
