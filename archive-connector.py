@@ -1055,7 +1055,10 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 
   <div class="section" id="projectsSection" hidden>
     <div class="section-head">
-      <h2>Projekte / Aufträge</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button id="backToProjects" class="dark" type="button" hidden>← Zurück</button>
+        <h2 id="projectsTitle">Projekte / Aufträge</h2>
+      </div>
       <button id="newFromSelection" class="plus" type="button">＋ Neue Baustelle</button>
     </div>
     <div id="projects"></div>
@@ -1120,10 +1123,11 @@ const ps=document.getElementById('projectsSection'),ds=document.getElementById('
 const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
 const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
 const newFromSelection=document.getElementById('newFromSelection');
+const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='';
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null;
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -1195,10 +1199,82 @@ function renderProjects(){
   projects.innerHTML=currentProjects.length?currentProjects.map(renderProject).join(''):'<div class="empty">Keine Projekte gefunden.</div>';
   projects.querySelectorAll('.project-card').forEach(card=>card.onclick=e=>{
     if(e.target.closest('.create-from-project'))return;
-    selectedProject=currentProjects[Number(card.dataset.project)]||null;renderProjects();
+    const p=currentProjects[Number(card.dataset.project)]||null;
+    if(p) openProjectDetail(p);
   });
   projects.querySelectorAll('.create-from-project').forEach(btn=>btn.onclick=()=>openNewJob(currentProjects[Number(btn.dataset.project)]||null));
 }
+
+
+async function openProjectDetail(p){
+  if(!p)return;
+  previousView={
+    projects:[...currentProjects],
+    docs:[...currentDocs],
+    selectedAddress:selectedAddress,
+    meta:meta.textContent,
+    baseQuery:baseQuery
+  };
+  projectDetailMode=true;
+  selectedProject=p;
+  const no=String(p.projectNumber||'').trim();
+  const term=no||[p.title,p.company,p.customer].filter(Boolean).join(' ');
+  loader.style.display='block';
+  addressBar.hidden=true;
+  summary.hidden=true;
+  projectsTitle.textContent=no?`Projekt ${no}`:'Projekt';
+  backToProjects.hidden=false;
+  try{
+    const r=await fetch('/search?q='+encodeURIComponent(term),{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();if(!data.ok)throw new Error(data.error||'Fehler');
+
+    // Genau den gewählten Auftrag anzeigen.
+    const exact=(data.projects||[]).filter(x=>
+      no && String(x.projectNumber||'').trim()===no
+    );
+    currentProjects=exact.length?exact:[p];
+
+    // Dokumente aus der Projektnummer-Suche gehören zum gewählten Auftrag.
+    currentDocs=data.documents||[];
+    selectedProject=currentProjects[0]||p;
+    currentDocType='';
+
+    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente`;
+    ps.hidden=false;ds.hidden=false;
+    renderProjects();
+    renderSummary(currentProjects,currentDocs);
+    renderDocumentTypes();
+    ps.scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){
+    meta.innerHTML='<span class="error">Projekt konnte nicht geöffnet werden: '+esc(e.message)+'</span>';
+  }finally{
+    loader.style.display='none';
+  }
+}
+
+function restorePreviousView(){
+  if(!previousView)return;
+  currentProjects=previousView.projects||[];
+  currentDocs=previousView.docs||[];
+  selectedAddress=previousView.selectedAddress||null;
+  baseQuery=previousView.baseQuery||baseQuery;
+  selectedProject=currentProjects[0]||null;
+  currentDocType='';
+  projectDetailMode=false;
+  meta.textContent=previousView.meta||`${currentProjects.length} Projekte · ${currentDocs.length} Dokumente`;
+  previousView=null;
+  backToProjects.hidden=true;
+  projectsTitle.textContent='Projekte / Aufträge';
+  renderAddressChoices(currentProjects);
+  renderSummary(currentProjects,currentDocs);
+  ps.hidden=false;ds.hidden=false;
+  renderProjects();
+  renderDocumentTypes();
+  ps.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+backToProjects.onclick=restorePreviousView;
 
 function renderDoc(d){
   const pd=d.printDate?d.printDate.split('-').reverse().join('.'):'';
@@ -1231,7 +1307,12 @@ function renderDocumentTypes(sourceFilter=''){
 
 async function runSearch(term,isRefined=false){
   term=String(term||'').trim();if(!term){q.focus();return}
-  if(!isRefined){baseQuery=term;selectedAddress=null}
+  if(!isRefined){
+    baseQuery=term;selectedAddress=null;
+    projectDetailMode=false;previousView=null;
+    backToProjects.hidden=true;
+    projectsTitle.textContent='Projekte / Aufträge';
+  }
   loader.style.display='block';meta.textContent='Suche läuft …';
   ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
   projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
@@ -1319,7 +1400,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.10.0",
+        "version": "0.10.1",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -1693,7 +1774,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.10.0 - Brain Suche + Adresse + Dokumenttypen + Baustelle anlegen")
+    print("Version: 0.10.1 - Klickbarer Auftrag + Projektdokumente + Baustelle anlegen")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
