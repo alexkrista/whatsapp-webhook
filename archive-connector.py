@@ -7,6 +7,9 @@ import os
 import re
 import json
 import hmac
+import urllib.request
+import urllib.error
+import urllib.parse
 
 import pymupdf
 import pyodbc
@@ -23,9 +26,15 @@ TAILSCALE_IP = os.environ.get("KRISTINE_TAILSCALE_IP", "100.98.155.39").strip()
 ARCHIVE_USER = os.environ.get("KRISTINE_ARCHIVE_USER", "kristine").strip()
 ARCHIVE_PASSWORD = os.environ.get("KRISTINE_ARCHIVE_PASSWORD", "").strip()
 
+KRISTINE_API_BASE = os.environ.get(
+    "KRISTINE_API_BASE",
+    "https://protokoll.krista.at"
+).rstrip("/")
+KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
+
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create"}
 
 
 def _request_is_local():
@@ -82,6 +91,39 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     return response
+
+
+def kristine_api_request(path, method="GET", payload=None):
+    """Serverseitiger, gleich-origin sicherer Proxy zu KRISTINE/Render."""
+    if not KRISTINE_ADMIN_TOKEN:
+        raise RuntimeError("KRISTINE_ADMIN_TOKEN fehlt am Brain-Connector")
+
+    sep = "&" if "?" in path else "?"
+    url = f"{KRISTINE_API_BASE}{path}{sep}token={urllib.parse.quote(KRISTINE_ADMIN_TOKEN)}"
+    body = None
+    headers = {"Accept": "application/json"}
+
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            data = json.loads(raw or "{}")
+            if not data.get("ok", True):
+                raise RuntimeError(data.get("error") or f"KRISTINE HTTP {response.status}")
+            return data
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(raw or "{}")
+            detail = data.get("error") or raw
+        except Exception:
+            detail = raw
+        raise RuntimeError(f"KRISTINE HTTP {e.code}: {detail or e.reason}") from e
+
 
 DB = Path(r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
 SQL_SERVER = r"SRV-DB01\WINWORKER"
@@ -916,63 +958,83 @@ MOBILE_PAGE = r"""
 <title>KRISTINE · The Brain</title>
 <style>
 :root{
-  --bg:#0e0f11;
-  --panel:#17191d;
-  --panel2:#20232a;
-  --text:#f5f7fa;
-  --muted:#aab0bb;
-  --line:#2c313a;
-  --accent:#ffffff;
-  --good:#9fe0b4;
-  --warn:#ffd38a;
+  --bg:#0e0f11;--panel:#17191d;--panel2:#20232a;--text:#f5f7fa;
+  --muted:#aab0bb;--line:#2c313a;--accent:#fff;--good:#9fe0b4;
+  --warn:#ffd38a;--blue:#7bb7ff
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
 body{min-height:100vh}
-.wrap{max-width:760px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px calc(34px + env(safe-area-inset-bottom))}
+.wrap{max-width:820px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px calc(34px + env(safe-area-inset-bottom))}
 .brand{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:18px}
 .brand h1{margin:0;font-size:28px;letter-spacing:-.7px}
 .brand small{color:var(--muted);font-weight:600}
 .hero{background:linear-gradient(180deg,var(--panel),#131519);border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 14px 40px rgba(0,0,0,.22)}
 .searchrow{display:flex;gap:10px}
-input[type=search]{width:100%;border:1px solid var(--line);background:#0d0f12;color:var(--text);border-radius:16px;padding:15px 16px;font-size:17px;outline:none}
-input[type=search]:focus{border-color:#5f6774}
-button{border:0;border-radius:16px;padding:0 18px;background:var(--accent);color:#111;font-size:16px;font-weight:800}
+input[type=search],input[type=text],select{width:100%;border:1px solid var(--line);background:#0d0f12;color:var(--text);border-radius:14px;padding:13px 14px;font-size:16px;outline:none}
+input:focus,select:focus{border-color:#5f6774}
+button{border:0;border-radius:14px;padding:0 18px;background:var(--accent);color:#111;font-size:15px;font-weight:800;cursor:pointer}
+button.dark{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+button.plus{background:#fff;color:#111}
 .meta{margin-top:10px;color:var(--muted);font-size:13px;min-height:18px}
-.section{margin-top:18px}
-.section h2{font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:#d7dbe1;margin:0 0 10px}
+.loader{display:none;margin-top:12px;color:var(--muted)}
+.error{color:#ffb3b3}
+.section{margin-top:18px;scroll-margin-top:14px}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.section h2{font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:#d7dbe1;margin:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:10px}
+.project-card{cursor:pointer}
+.project-card.selected{border-color:#8d98a8;box-shadow:0 0 0 2px rgba(255,255,255,.06)}
 .project-title{font-size:18px;font-weight:800;line-height:1.2}
 .project-no{display:inline-block;margin-top:5px;font-size:12px;font-weight:800;background:var(--panel2);padding:5px 8px;border-radius:999px;color:#dfe3e8}
 .sub{color:var(--muted);margin-top:8px;font-size:14px;line-height:1.45}
-.metrics{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.pill{background:#111318;border:1px solid var(--line);border-radius:999px;padding:7px 9px;font-size:12px;color:#dfe3e8}
+.metrics,.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pill,.chip{background:#111318;border:1px solid var(--line);border-radius:999px;padding:7px 10px;font-size:12px;color:#dfe3e8;text-decoration:none}
+.chip{cursor:pointer}
+.chip.active,.chip:hover{background:#f5f5f5;color:#111}
+.addressbar{margin-top:14px}
+.addressbar-title{font-size:12px;color:var(--muted);font-weight:750;margin-bottom:8px}
+.summary{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.summary .chip strong{margin-left:4px}
+.source-block{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.type-list{display:flex;gap:8px;flex-wrap:wrap}
+.doc-list{margin-top:12px}
 .doc{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:start}
 .thumb{width:76px;height:102px;border-radius:10px;object-fit:cover;background:#0d0f12;border:1px solid var(--line)}
 .docname{font-weight:750;line-height:1.3;word-break:break-word}
 .doctype{margin-top:4px;color:#c8cdd5;font-size:13px}
 .docmeta{margin-top:6px;color:var(--muted);font-size:12px}
-.actions{display:flex;gap:8px;margin-top:10px}
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 a.action{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#f5f5f5;color:#111;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:800}
 .empty{color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:16px;padding:18px}
-.loader{display:none;margin-top:12px;color:var(--muted)}
-.error{color:#ffb3b3}
 .footer{margin-top:24px;text-align:center;color:#6f7681;font-size:12px}
-@media (max-width:480px){
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;z-index:50;padding:16px}
+.modal.open{display:flex}
+.modal-card{width:min(720px,100%);max-height:88vh;overflow:auto;background:#17191d;border:1px solid #343a44;border-radius:22px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+.modal-head{display:flex;justify-content:space-between;gap:14px;align-items:center}
+.modal-head h3{margin:0;font-size:20px}
+.close{background:#2a2e35;color:#fff;width:40px;height:40px;padding:0}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.formgrid .full{grid-column:1/-1}
+.formlabel{font-size:11px;color:var(--muted);margin:0 0 5px 3px}
+.save-row{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.save-row button{height:48px}
+.notice{font-size:12px;color:var(--warn)}
+.success{color:var(--good)}
+@media (max-width:520px){
   .brand h1{font-size:25px}
   .searchrow{display:grid;grid-template-columns:1fr}
-  button{height:50px}
+  .searchrow button{height:50px}
+  .formgrid{grid-template-columns:1fr}
+  .formgrid .full{grid-column:auto}
 }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="brand">
-    <div>
-      <small>KRISTINE</small>
-      <h1>The Brain</h1>
-    </div>
-    <small>Archiv · mobil</small>
+    <div><small>KRISTINE</small><h1>The Brain</h1></div>
+    <small>Firmenwissen</small>
   </div>
 
   <div class="hero">
@@ -982,105 +1044,259 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     </div>
     <div class="meta" id="meta">WinWorker + PDF-Archiv</div>
     <div class="loader" id="loader">Suche läuft …</div>
+
+    <div class="addressbar" id="addressBar" hidden>
+      <div class="addressbar-title">Adresse eingrenzen</div>
+      <div class="chips" id="addresses"></div>
+    </div>
+
+    <div class="summary" id="summary" hidden></div>
   </div>
 
   <div class="section" id="projectsSection" hidden>
-    <h2>Projekte</h2>
+    <div class="section-head">
+      <h2>Projekte / Aufträge</h2>
+      <button id="newFromSelection" class="plus" type="button">＋ Neue Baustelle</button>
+    </div>
     <div id="projects"></div>
   </div>
 
   <div class="section" id="docsSection" hidden>
-    <h2>Dokumente</h2>
+    <div class="section-head"><h2>Dokumente & Quellen</h2></div>
+    <div id="sourceTypes"></div>
     <div id="docs"></div>
   </div>
 
   <div class="footer">Privater Zugriff über Tailscale</div>
 </div>
 
-<script>
-const q = document.getElementById('q');
-const go = document.getElementById('go');
-const meta = document.getElementById('meta');
-const loader = document.getElementById('loader');
-const projects = document.getElementById('projects');
-const docs = document.getElementById('docs');
-const ps = document.getElementById('projectsSection');
-const ds = document.getElementById('docsSection');
+<div id="newJobModal" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>＋ Neue Baustelle in KRISTINE</h3>
+      <button id="closeModal" class="close" type="button">×</button>
+    </div>
+    <div class="formgrid">
+      <div>
+        <div class="formlabel">Baustellennummer</div>
+        <input id="newJobId" type="text" placeholder="z. B. 26086">
+      </div>
+      <div>
+        <div class="formlabel">Status</div>
+        <select id="newJobStatus"><option>Auftrag</option><option>Angebot</option></select>
+      </div>
+      <div class="full">
+        <div class="formlabel">Baustellenname</div>
+        <input id="newJobName" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Straße</div>
+        <input id="newJobStreet" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Hausnummer</div>
+        <input id="newJobHouse" type="text">
+      </div>
+      <div>
+        <div class="formlabel">PLZ</div>
+        <input id="newJobPostal" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Ort</div>
+        <input id="newJobCity" type="text">
+      </div>
+    </div>
+    <div class="save-row">
+      <button id="saveNewJob" type="button">Baustelle anlegen</button>
+      <span id="newJobMsg" class="notice"></span>
+    </div>
+  </div>
+</div>
 
-function esc(v){
-  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+<script>
+const q=document.getElementById('q'),go=document.getElementById('go'),meta=document.getElementById('meta');
+const loader=document.getElementById('loader'),projects=document.getElementById('projects'),docs=document.getElementById('docs');
+const ps=document.getElementById('projectsSection'),ds=document.getElementById('docsSection');
+const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
+const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
+const newFromSelection=document.getElementById('newFromSelection');
+const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
+const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
+
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='';
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
+function num(v){if(v===null||v===undefined||v==='')return null;return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v))}
+function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
+function norm(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ')}
+function addressLabel(p){return [p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+function addressKey(p){return norm([p.street,p.postalCode,p.city].filter(Boolean).join('|'))}
+
+function docSource(d){
+  const s=norm([d.path,d.filename,d.dokumenttyp].filter(Boolean).join(' '));
+  if(s.includes('moser'))return 'MOSER';
+  if(/eingangs?rechnung|kreditor|kredi/.test(s))return 'Eingangsrechnungen';
+  if(/archiv|altarchiv|scanarchiv/.test(s))return 'Archiv';
+  return 'Dokumente';
 }
-function money(v){
-  if(v===null || v===undefined || v==='') return null;
-  try { return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v)); }
-  catch { return v; }
+function docType(d){return String(d.dokumenttyp||'Sonstige / nicht erkannt').trim()||'Sonstige / nicht erkannt'}
+
+function groupCounts(list,fn){
+  const m=new Map(); list.forEach(x=>{const k=fn(x);m.set(k,(m.get(k)||0)+1)}); return [...m.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'de'));
 }
-function num(v){
-  if(v===null || v===undefined || v==='') return null;
-  return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v));
+
+function renderAddressChoices(pp){
+  const map=new Map();
+  pp.forEach(p=>{
+    const key=addressKey(p),label=addressLabel(p);
+    if(!key||!label)return;
+    if(!map.has(key))map.set(key,{key,label,p,count:0});
+    map.get(key).count++;
+  });
+  const rows=[...map.values()].sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'de'));
+  addressBar.hidden=rows.length<2;
+  addresses.innerHTML=rows.map(a=>`<button class="chip ${selectedAddress?.key===a.key?'active':''}" type="button" data-address="${esc(a.key)}">${esc(a.label)} <strong>${a.count}</strong></button>`).join('');
+  addresses.querySelectorAll('[data-address]').forEach(btn=>btn.onclick=()=>{
+    const row=rows.find(x=>x.key===btn.dataset.address);if(!row)return;
+    selectedAddress=row;
+    const p=row.p;
+    const refined=[baseQuery,p.street,p.postalCode,p.city].filter(Boolean).join(' ');
+    runSearch(refined,true);
+  });
 }
-function urlFor(path, p){
-  return path + '?path=' + encodeURIComponent(p);
+
+function renderSummary(pp,dd){
+  const sourceCounts=groupCounts(dd,docSource);
+  summary.hidden=false;
+  summary.innerHTML=
+    `<a class="chip" href="#projectsSection">Projekte <strong>${pp.length}</strong></a>`+
+    `<a class="chip" href="#docsSection">Dokumente <strong>${dd.length}</strong></a>`+
+    sourceCounts.filter(([s])=>s!=='Dokumente').map(([s,c])=>`<a class="chip" href="#docsSection" data-source="${esc(s)}">${esc(s)} <strong>${c}</strong></a>`).join('');
+  summary.querySelectorAll('[data-source]').forEach(a=>a.onclick=e=>{e.preventDefault();renderDocumentTypes(a.dataset.source);ds.scrollIntoView({behavior:'smooth'})});
 }
-function renderProject(p){
-  const title = p.title || p.site || p.projectDescription || p.customer || 'Projekt';
-  const customer = [p.company, p.customer].filter(Boolean).join(' · ');
-  const addr = p.address || '';
-  const h = num(p.hoursTotal);
-  const n = money(p.netInvoiced);
-  let metrics = '';
-  if(h) metrics += `<span class="pill">${esc(h)} h IST</span>`;
-  if(n) metrics += `<span class="pill">${esc(n)} netto</span>`;
-  return `<div class="card">
+
+function renderProject(p,index){
+  const title=p.title||p.site||p.projectDescription||p.customer||'Projekt';
+  const customer=[p.company,p.customer].filter(Boolean).join(' · ');
+  const addr=p.address||addressLabel(p);
+  const h=num(p.hoursTotal),n=money(p.netInvoiced);
+  let metrics='';if(h)metrics+=`<span class="pill">${esc(h)} h IST</span>`;if(n)metrics+=`<span class="pill">${esc(n)} netto</span>`;
+  return `<div class="card project-card ${selectedProject===p?'selected':''}" data-project="${index}">
     <div class="project-title">${esc(title)}</div>
-    ${p.projectNumber ? `<span class="project-no">${esc(p.projectNumber)}</span>` : ''}
-    ${customer ? `<div class="sub">${esc(customer)}</div>` : ''}
-    ${addr ? `<div class="sub">${esc(addr)}</div>` : ''}
-    ${metrics ? `<div class="metrics">${metrics}</div>` : ''}
+    ${p.projectNumber?`<span class="project-no">${esc(p.projectNumber)}</span>`:''}
+    ${customer?`<div class="sub">${esc(customer)}</div>`:''}
+    ${addr?`<div class="sub">${esc(addr)}</div>`:''}
+    ${metrics?`<div class="metrics">${metrics}</div>`:''}
+    <div class="actions"><button class="dark create-from-project" type="button" data-project="${index}">＋ Neue Baustelle daraus</button></div>
   </div>`;
 }
+function renderProjects(){
+  projects.innerHTML=currentProjects.length?currentProjects.map(renderProject).join(''):'<div class="empty">Keine Projekte gefunden.</div>';
+  projects.querySelectorAll('.project-card').forEach(card=>card.onclick=e=>{
+    if(e.target.closest('.create-from-project'))return;
+    selectedProject=currentProjects[Number(card.dataset.project)]||null;renderProjects();
+  });
+  projects.querySelectorAll('.create-from-project').forEach(btn=>btn.onclick=()=>openNewJob(currentProjects[Number(btn.dataset.project)]||null));
+}
+
 function renderDoc(d){
-  const pd = d.printDate ? d.printDate.split('-').reverse().join('.') : '';
+  const pd=d.printDate?d.printDate.split('-').reverse().join('.'):'';
   return `<div class="card doc">
-    <img class="thumb" loading="lazy" src="${urlFor('/thumb', d.path)}" alt="">
+    <img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
     <div>
-      <div class="docname">${esc(d.filename || 'Dokument')}</div>
-      ${d.dokumenttyp ? `<div class="doctype">${esc(d.dokumenttyp)}</div>` : ''}
-      ${pd ? `<div class="docmeta">${esc(pd)}</div>` : ''}
-      <div class="actions">
-        <a class="action" href="${urlFor('/pdf', d.path)}" target="_blank" rel="noopener">PDF öffnen</a>
-      </div>
+      <div class="docname">${esc(d.filename||'Dokument')}</div>
+      <div class="doctype">${esc(docType(d))}</div>
+      ${pd?`<div class="docmeta">${esc(pd)}</div>`:''}
+      <div class="actions"><a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a></div>
     </div>
   </div>`;
 }
-async function search(){
-  const term = q.value.trim();
-  if(!term){ q.focus(); return; }
-  loader.style.display='block';
-  meta.textContent='Suche läuft …';
-  ps.hidden=true; ds.hidden=true;
-  projects.innerHTML=''; docs.innerHTML='';
-  try{
-    const r = await fetch('/search?q='+encodeURIComponent(term), {cache:'no-store'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const data = await r.json();
-    if(!data.ok) throw new Error(data.error || 'Fehler');
 
-    const pp = data.projects || [];
-    const dd = data.documents || [];
-    meta.textContent = `${pp.length} Projekte · ${dd.length} Dokumente`;
-
-    ps.hidden=false; ds.hidden=false;
-    projects.innerHTML = pp.length ? pp.map(renderProject).join('') : '<div class="empty">Keine Projekte gefunden.</div>';
-    docs.innerHTML = dd.length ? dd.map(renderDoc).join('') : '<div class="empty">Keine Dokumente gefunden.</div>';
-  }catch(e){
-    meta.innerHTML='<span class="error">Suche fehlgeschlagen: '+esc(e.message)+'</span>';
-  }finally{
-    loader.style.display='none';
-  }
+function renderDocumentTypes(sourceFilter=''){
+  const sourceDocs=sourceFilter?currentDocs.filter(d=>docSource(d)===sourceFilter):currentDocs;
+  const sourceTitle=sourceFilter?`<div class="sub" style="margin-bottom:8px">${esc(sourceFilter)} · ${sourceDocs.length} Treffer</div>`:'';
+  const types=groupCounts(sourceDocs,docType);
+  sourceTypes.innerHTML=sourceTitle+`<div class="type-list">`+
+    types.map(([t,c])=>`<button class="chip ${currentDocType===t?'active':''}" type="button" data-type="${esc(t)}">${esc(t)} <strong>${c}</strong></button>`).join('')+
+    `</div>`;
+  docs.innerHTML='<div class="empty">Dokumenttyp anklicken.</div>';
+  sourceTypes.querySelectorAll('[data-type]').forEach(btn=>btn.onclick=()=>{
+    currentDocType=btn.dataset.type;
+    const filtered=sourceDocs.filter(d=>docType(d)===currentDocType);
+    renderDocumentTypes(sourceFilter);
+    docs.innerHTML=filtered.length?filtered.map(renderDoc).join(''):'<div class="empty">Keine Dokumente.</div>';
+  });
 }
-go.addEventListener('click', search);
-q.addEventListener('keydown', e => { if(e.key==='Enter') search(); });
+
+async function runSearch(term,isRefined=false){
+  term=String(term||'').trim();if(!term){q.focus();return}
+  if(!isRefined){baseQuery=term;selectedAddress=null}
+  loader.style.display='block';meta.textContent='Suche läuft …';
+  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
+  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
+  try{
+    const r=await fetch('/search?q='+encodeURIComponent(term),{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();if(!data.ok)throw new Error(data.error||'Fehler');
+    currentProjects=data.projects||[];currentDocs=data.documents||[];selectedProject=currentProjects[0]||null;currentDocType='';
+    meta.textContent=`${currentProjects.length} Projekte · ${currentDocs.length} Dokumente${selectedAddress?' · '+selectedAddress.label:''}`;
+    renderAddressChoices(currentProjects);renderSummary(currentProjects,currentDocs);
+    ps.hidden=false;ds.hidden=false;renderProjects();renderDocumentTypes();
+  }catch(e){meta.innerHTML='<span class="error">Suche fehlgeschlagen: '+esc(e.message)+'</span>'}
+  finally{loader.style.display='none'}
+}
+
+function splitStreet(raw){
+  const s=String(raw||'').trim();const m=s.match(/^(.*?)(?:\s+)(\d+[A-Za-z]?[-\/]?\d*[A-Za-z]?)$/);
+  return m?{street:m[1],house:m[2]}:{street:s,house:''};
+}
+async function openNewJob(project){
+  const p=project||selectedProject||(selectedAddress&&selectedAddress.p)||currentProjects[0]||{};
+  const sh=splitStreet(p.street||'');
+  document.getElementById('newJobName').value=p.title||p.site||p.projectDescription||p.company||p.customer||'';
+  document.getElementById('newJobStreet').value=sh.street;
+  document.getElementById('newJobHouse').value=sh.house;
+  document.getElementById('newJobPostal').value=p.postalCode||'';
+  document.getElementById('newJobCity').value=p.city||'';
+  document.getElementById('newJobStatus').value='Auftrag';
+  document.getElementById('newJobId').value='';
+  newJobMsg.textContent='Lade nächste Baustellennummer …';newJobMsg.className='notice';
+  modal.classList.add('open');
+  try{
+    const r=await fetch('/kristine-job-next',{cache:'no-store'}),d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Nummer konnte nicht geladen werden');
+    document.getElementById('newJobId').value=d.nextNumber||'';
+    newJobMsg.textContent='';
+  }catch(e){newJobMsg.textContent=e.message}
+}
+newFromSelection.onclick=()=>openNewJob();
+closeModal.onclick=()=>modal.classList.remove('open');
+modal.onclick=e=>{if(e.target===modal)modal.classList.remove('open')};
+
+saveNewJob.onclick=async()=>{
+  const body={
+    jobId:document.getElementById('newJobId').value.trim(),
+    name:document.getElementById('newJobName').value.trim(),
+    status:document.getElementById('newJobStatus').value,
+    street:document.getElementById('newJobStreet').value.trim(),
+    houseNumber:document.getElementById('newJobHouse').value.trim(),
+    postalCode:document.getElementById('newJobPostal').value.trim(),
+    city:document.getElementById('newJobCity').value.trim()
+  };
+  if(!body.name){newJobMsg.textContent='Baustellenname fehlt.';return}
+  saveNewJob.disabled=true;newJobMsg.textContent='KRISTINE legt die Baustelle an …';newJobMsg.className='notice';
+  try{
+    const r=await fetch('/kristine-job-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Anlegen fehlgeschlagen');
+    newJobMsg.textContent=`✓ Baustelle ${d.jobId} angelegt`;newJobMsg.className='success';
+    setTimeout(()=>modal.classList.remove('open'),1100);
+  }catch(e){newJobMsg.textContent=e.message;newJobMsg.className='notice'}
+  finally{saveNewJob.disabled=false}
+};
+
+go.onclick=()=>runSearch(q.value,false);
+q.addEventListener('keydown',e=>{if(e.key==='Enter')runSearch(q.value,false)});
 q.focus();
 </script>
 </body>
@@ -1103,9 +1319,10 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.9.10",
+        "version": "0.10.0",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
+        "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
         "sqlServer": SQL_SERVER,
         "sqlDatabase": SQL_DATABASE,
         "sqlUser": SQL_USER,
@@ -1374,6 +1591,44 @@ def search():
     })
 
 
+
+@app.get("/kristine-job-next")
+def kristine_job_next():
+    try:
+        data = kristine_api_request("/admin/api/jobs/next-number")
+        return jsonify({
+            "ok": True,
+            "nextNumber": str(data.get("nextNumber") or "")
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.post("/kristine-job-create")
+def kristine_job_create():
+    try:
+        body = request.get_json(silent=True) or {}
+        allowed = {
+            "jobId": str(body.get("jobId") or "").strip(),
+            "name": str(body.get("name") or "").strip(),
+            "status": str(body.get("status") or "Auftrag").strip(),
+            "street": str(body.get("street") or "").strip(),
+            "houseNumber": str(body.get("houseNumber") or "").strip(),
+            "postalCode": str(body.get("postalCode") or "").strip(),
+            "city": str(body.get("city") or "").strip(),
+        }
+        if not allowed["name"]:
+            return jsonify({"ok": False, "error": "Baustellenname fehlt"}), 400
+        data = kristine_api_request("/admin/api/jobs", method="POST", payload=allowed)
+        return jsonify({
+            "ok": True,
+            "jobId": str(data.get("jobId") or allowed["jobId"]),
+            "name": str(data.get("name") or allowed["name"])
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.post("/open")
 def open_pdf():
     try:
@@ -1438,7 +1693,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.9.10 - Mobile The Brain Oberfläche")
+    print("Version: 0.10.0 - Brain Suche + Adresse + Dokumenttypen + Baustelle anlegen")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
