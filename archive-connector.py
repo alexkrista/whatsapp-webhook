@@ -998,9 +998,9 @@ button.plus{background:#fff;color:#111}
 .summary .chip strong{margin-left:4px}
 .source-block{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
 .type-list{display:flex;gap:8px;flex-wrap:wrap}
-.doc-list{margin-top:12px}
-.doc{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:start}
-.thumb{width:76px;height:102px;border-radius:10px;object-fit:cover;background:#0d0f12;border:1px solid var(--line)}
+.doc-list{margin-top:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.doc{display:flex;flex-direction:column;gap:12px;align-items:stretch;margin-bottom:0;min-width:0}
+.thumb{width:100%;height:auto;aspect-ratio:210/297;border-radius:12px;object-fit:contain;background:#fff;border:1px solid var(--line)}
 .docname{font-weight:750;line-height:1.3;word-break:break-word}
 .doctype{margin-top:4px;color:#c8cdd5;font-size:13px}
 .docmeta{margin-top:6px;color:var(--muted);font-size:12px}
@@ -1021,12 +1021,18 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .save-row button{height:48px}
 .notice{font-size:12px;color:var(--warn)}
 .success{color:var(--good)}
+@media (max-width:900px){
+  .doc-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media (max-width:520px){
   .brand h1{font-size:25px}
   .searchrow{display:grid;grid-template-columns:1fr}
   .searchrow button{height:50px}
   .formgrid{grid-template-columns:1fr}
   .formgrid .full{grid-column:auto}
+  .doc-list{grid-template-columns:1fr}
+  .doc{padding:12px}
+  .thumb{width:100%;aspect-ratio:210/297}
 }
 </style>
 </head>
@@ -1400,7 +1406,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.10.1",
+        "version": "0.10.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -1774,7 +1780,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.10.1 - Klickbarer Auftrag + Projektdokumente + Baustelle anlegen")
+    print("Version: 0.10.2 - Grosse Dokumentvorschau Desktop + Mobile 1-spaltig")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
