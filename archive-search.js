@@ -602,6 +602,77 @@ function countDocumentTypes(documents) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+
+function normalizedAddressKey(p) {
+  return [p.street, p.postalCode, p.city]
+    .map(x => String(x || "").trim())
+    .filter(Boolean)
+    .join(" · ")
+    .toLowerCase();
+}
+
+function uniqueAddresses(projects) {
+  const map = new Map();
+  for (const p of projects || []) {
+    const street = String(p.street || "").trim();
+    const postalCode = String(p.postalCode || "").trim();
+    const city = String(p.city || "").trim();
+    if (!street && !city) continue;
+    const key = [street, postalCode, city].filter(Boolean).join(" · ").toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        street,
+        postalCode,
+        city,
+        label: [street, [postalCode, city].filter(Boolean).join(" ")].filter(Boolean).join(", "),
+        projectCount: 0
+      });
+    }
+    map.get(key).projectCount += 1;
+  }
+  return [...map.values()].sort((a,b) =>
+    b.projectCount - a.projectCount || a.label.localeCompare(b.label, "de")
+  );
+}
+
+function addressRefinedQuery(currentQuery, address) {
+  const base = String(currentQuery || "").trim();
+  const add = [address.street, address.postalCode, address.city]
+    .map(x => String(x || "").trim())
+    .filter(Boolean);
+  return [base, ...add].join(" ").replace(/\s+/g, " ").trim();
+}
+
+function sourceOfDocument(d) {
+  const hay = [d?.path, d?.filename, d?.dokumenttyp]
+    .map(x => String(x || "").toLowerCase())
+    .join(" ");
+
+  if (/\bmoser\b/.test(hay)) return "MOSER";
+  if (/eingangs?rechnung|kreditor|kredi\b/.test(hay)) return "Eingangsrechnungen";
+  if (/\barchiv\b|altarchiv|scanarchiv/.test(hay)) return "Archiv";
+  return "Dokumente";
+}
+
+function groupDocumentsBySource(documents) {
+  const map = new Map();
+  for (const d of documents || []) {
+    const source = sourceOfDocument(d);
+    if (!map.has(source)) map.set(source, []);
+    map.get(source).push(d);
+  }
+  return map;
+}
+
+function sourceAnchorId(source) {
+  return "source-" + String(source || "dokumente")
+    .toLowerCase()
+    .replace(/ä/g,"ae").replace(/ö/g,"oe").replace(/ü/g,"ue").replace(/ß/g,"ss")
+    .replace(/[^a-z0-9]+/g,"-")
+    .replace(/^-|-$/g,"");
+}
+
 function uniqueProjectNumbers(projects) {
   const seen = new Set();
   const result = [];
@@ -630,6 +701,7 @@ function registerArchiveSearch(app) {
   app.get("/gehirn", async (req, res) => {
     const q = String(req.query.q || "").trim();
     const selectedCustomerNumber = String(req.query.customer || "").trim();
+    const selectedAddressKey = String(req.query.address || "").trim().toLowerCase();
 
     let allProjects = [];
     let projects = [];
@@ -696,6 +768,7 @@ function registerArchiveSearch(app) {
     );
 
     const customers = uniqueCustomers(allProjects);
+    const addresses = uniqueAddresses(allProjects);
 
     projects = selectedCustomerNumber
       ? allProjects.filter(p => String(p.customerNumber ?? "").trim() === selectedCustomerNumber)
@@ -703,6 +776,7 @@ function registerArchiveSearch(app) {
 
     const years = groupDocuments(documents);
     const typeCounts = countDocumentTypes(documents);
+    const documentSources = groupDocumentsBySource(documents);
     const projectNumbers = uniqueProjectNumbers(projects);
 
     const selectedCustomer = selectedCustomerNumber
@@ -760,6 +834,35 @@ body {
 .alert.error { background:#fff4f4; border:1px solid #efc6c6; color:#8a2f2f; }
 .alert.warn { background:#fff9e8; border:1px solid #eadba2; color:#705c15; }
 
+.brain-overview {
+  margin-top:18px; background:#20242a; color:white; border-radius:12px; padding:14px 16px;
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.brain-overview-title { font-weight:800; margin-right:5px; }
+.jump-chip {
+  display:inline-flex; align-items:center; gap:5px; text-decoration:none;
+  background:#30363d; border:1px solid #46505a; color:white;
+  border-radius:999px; padding:7px 11px; font-size:12px; font-weight:750;
+}
+.jump-chip:hover { background:#3a434c; border-color:#6d7882; }
+.address-filter { margin-top:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.address-label { font-size:13px; font-weight:800; color:#62686e; margin-right:2px; }
+.address-chip {
+  display:inline-flex; align-items:center; text-decoration:none; color:#28323b; background:white;
+  border:1px solid #d7dde2; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:750;
+}
+.address-chip:hover, .address-chip.active { background:#20242a; color:white; border-color:#20242a; }
+.source-section { scroll-margin-top:18px; margin-top:30px; }
+.source-heading { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.source-title { font-size:24px; font-weight:850; }
+.source-count { color:#777; font-size:13px; }
+.type-jump-row { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 16px; }
+.type-jump {
+  border:1px solid #d7dde2; background:white; border-radius:999px; padding:7px 11px;
+  color:#28323b; font-size:12px; font-weight:750; cursor:pointer;
+}
+.type-jump:hover, .type-jump.active { background:#20242a; color:white; border-color:#20242a; }
+.doc-card.type-hidden { display:none; }
 .project-filter { margin-top:18px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .project-filter-label { font-size:13px; font-weight:750; color:#62686e; margin-right:2px; }
 .project-chip {
@@ -900,7 +1003,7 @@ body {
   <div>
     <div class="brand">Kristine · Gehirn</div>
     <div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div>
-    <div class="status" style="margin-top:7px">Gehirn V0.10.5 · KRISTINE live · Render-Fix</div>
+    <div class="status" style="margin-top:7px">Gehirn V0.11.0 · KRISTINE live · Render-Fix</div>
   </div>
   <div class="header-actions">
     <a class="header-action" href="/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}">← Zurück zu KRISTINE</a>
@@ -932,8 +1035,36 @@ ${connectorError ? `<div class="alert error">Connector: ${esc(connectorError)}</
 ${sqlError ? `<div class="alert warn">PDF-Suche funktioniert. SQL: ${esc(sqlError)}</div>` : ""}
 ${kristineError ? `<div class="alert warn">KRISTINE live: ${esc(kristineError)}${!runtimeToken && !KRISTINE_ADMIN_TOKEN ? ` · Öffne das Gehirn einmal mit <strong>?token=DEIN_ADMIN_TOKEN</strong>.` : ""}</div>` : ""}
 
+${q ? `
+<div class="brain-overview">
+  <span class="brain-overview-title">${esc(q)}</span>
+  <a class="jump-chip" href="#projects">Projekte <strong>${projects.length}</strong></a>
+  <a class="jump-chip" href="#documents">Dokumente <strong>${documents.length}</strong></a>
+  ${["Archiv","MOSER","Eingangsrechnungen"].map(source => {
+    const count = (documentSources.get(source) || []).length;
+    return count
+      ? `<a class="jump-chip" href="#${sourceAnchorId(source)}">${esc(source)} <strong>${count}</strong></a>`
+      : "";
+  }).join("")}
+</div>
+
+${addresses.length > 1 ? `
+<div class="address-filter">
+  <span class="address-label">Adresse eingrenzen:</span>
+  ${addresses.slice(0, 12).map(a => {
+    const refined = addressRefinedQuery(q, a);
+    const active = selectedAddressKey && selectedAddressKey === a.key;
+    return `<a class="address-chip ${active ? "active" : ""}"
+      href="/gehirn?q=${encodeURIComponent(refined)}&address=${encodeURIComponent(a.key)}${runtimeToken ? `&token=${encodeURIComponent(runtimeToken)}` : ""}">
+      ${esc(a.label)} <strong>${a.projectCount}</strong>
+    </a>`;
+  }).join("")}
+  ${addresses.length > 12 ? `<span class="more-projects">+ ${addresses.length - 12} weitere Adressen</span>` : ""}
+</div>` : ""}
+` : ""}
+
 ${q && projectNumbers.length ? `
-<div class="project-filter">
+<div class="project-filter" id="projects">
   <span class="project-filter-label">Projekte gefunden:</span>
   ${projectNumbers.slice(0, 30).map(number => {
     const refine = refinedProjectQuery(q, number);
@@ -1091,48 +1222,66 @@ ${q && projects.length ? `
 </div>` : ""}
 
 ${q && documents.length ? `
-<div class="doc-summary">
+<div id="documents" class="doc-summary" style="scroll-margin-top:18px">
   <span class="summary-title">${documents.length} Dokumente</span>
-  ${typeCounts.map(([type,count]) => `<span class="type-chip">${esc(type)} <strong>${count}</strong></span>`).join("")}
+  ${typeCounts.map(([type,count]) =>
+    `<button class="type-chip" type="button" onclick="filterAllDocuments('${encodeURIComponent(type)}')">${esc(type)} <strong>${count}</strong></button>`
+  ).join("")}
+  <button class="type-chip" type="button" onclick="filterAllDocuments('')">Alle anzeigen</button>
 </div>
 
-${years.map(([year, docs]) => `
-<section class="year-section">
-  <div class="year-heading">
-    <div class="year-number">${esc(year)}</div>
-    <div class="year-count">${docs.length} Dokumente · letzter Druck zuerst</div>
-    ${selectedCustomer && customerYearMetrics.has(String(year)) ? (() => {
-      const ym = customerYearMetrics.get(String(year));
-      return `<div class="year-metrics">
-        <span class="year-metric">${deHours(ym.hours)}</span>
-        <span class="year-metric">${deMoney(ym.net)}</span>
-        <span class="year-metric">${deRate(ym.net, ym.hours)}</span>
-      </div>`;
-    })() : ""}
-  </div>
-  <div class="doc-grid">
-    ${docs.map(d => `
-      <article class="doc-card" data-path="${esc(d.path)}" onclick="openArchivePdf(this.dataset.path)">
-        <div class="doc-preview">
-          <img loading="lazy" src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
-               alt="Vorschau ${esc(d.filename)}"
-               onmouseenter="showPdfHover(this.src)" onmouseleave="hidePdfHover()"
-               onerror="this.style.display='none'">
+${[...documentSources.entries()].map(([source, sourceDocs]) => {
+  const sourceTypes = countDocumentTypes(sourceDocs);
+  return `
+  <section class="source-section" id="${sourceAnchorId(source)}">
+    <div class="source-heading">
+      <div class="source-title">${esc(source)}</div>
+      <div class="source-count">${sourceDocs.length} Treffer</div>
+    </div>
+    <div class="type-jump-row">
+      ${sourceTypes.map(([type,count]) => `
+        <button class="type-jump" type="button"
+          onclick="filterSourceDocuments('${sourceAnchorId(source)}','${encodeURIComponent(type)}',this)">
+          ${esc(type)} <strong>${count}</strong>
+        </button>`).join("")}
+      <button class="type-jump" type="button"
+        onclick="filterSourceDocuments('${sourceAnchorId(source)}','',this)">Alle</button>
+    </div>
+
+    ${groupDocuments(sourceDocs).map(([year, docs]) => `
+      <div class="year-section">
+        <div class="year-heading">
+          <div class="year-number">${esc(year)}</div>
+          <div class="year-count">${docs.length} Dokumente · letzter Druck zuerst</div>
         </div>
-        <div class="doc-info">
-          <div class="doc-line">
-            <span class="doc-type">${esc(d.dokumenttyp || "Dokument")}</span>
-            <span class="doc-date">${deDate(d.printDate)}</span>
-          </div>
-          <div class="doc-name" title="${esc(d.filename)}">${esc(d.filename)}</div>
-          <button class="open-button" type="button" data-path="${esc(d.path)}"
-            onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">Öffnen</button>
+        <div class="doc-grid">
+          ${docs.map(d => `
+            <article class="doc-card"
+              data-doc-type="${encodeURIComponent(String(d.dokumenttyp || "Dokument").trim() || "Dokument")}"
+              data-path="${esc(d.path)}"
+              onclick="openArchivePdf(this.dataset.path)">
+              <div class="doc-preview">
+                <img loading="lazy" src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
+                     alt="Vorschau ${esc(d.filename)}"
+                     onmouseenter="showPdfHover(this.src)" onmouseleave="hidePdfHover()"
+                     onerror="this.style.display='none'">
+              </div>
+              <div class="doc-info">
+                <div class="doc-line">
+                  <span class="doc-type">${esc(d.dokumenttyp || "Dokument")}</span>
+                  <span class="doc-date">${deDate(d.printDate)}</span>
+                </div>
+                <div class="doc-name" title="${esc(d.filename)}">${esc(d.filename)}</div>
+                <button class="open-button" type="button" data-path="${esc(d.path)}"
+                  onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">Öffnen</button>
+              </div>
+            </article>
+          `).join("")}
         </div>
-      </article>
+      </div>
     `).join("")}
-  </div>
-</section>
-`).join("")}
+  </section>`;
+}).join("")}
 ` : q ? `<div class="empty">Keine passenden Dokumente gefunden.</div>` : `<div class="empty">Suche im Kristine-Gehirn</div>`}
 </div>
 
@@ -1160,6 +1309,29 @@ function hidePdfHover() {
   const box = document.getElementById("pdfHoverPreview");
   box.classList.remove("visible");
   box.setAttribute("aria-hidden", "true");
+}
+
+
+function filterSourceDocuments(sectionId, encodedType, button) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const type = decodeURIComponent(encodedType || "");
+  section.querySelectorAll(".doc-card").forEach(card => {
+    const cardType = decodeURIComponent(card.dataset.docType || "");
+    card.classList.toggle("type-hidden", Boolean(type) && cardType !== type);
+  });
+  section.querySelectorAll(".type-jump").forEach(b => b.classList.remove("active"));
+  if (button) button.classList.add("active");
+  section.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function filterAllDocuments(encodedType) {
+  const type = decodeURIComponent(encodedType || "");
+  document.querySelectorAll(".doc-card").forEach(card => {
+    const cardType = decodeURIComponent(card.dataset.docType || "");
+    card.classList.toggle("type-hidden", Boolean(type) && cardType !== type);
+  });
+  document.getElementById("documents")?.scrollIntoView({behavior:"smooth", block:"start"});
 }
 
 async function openArchivePdf(path) {
