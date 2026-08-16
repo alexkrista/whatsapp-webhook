@@ -19,7 +19,7 @@ const token = query.get("token") || "";
 // THE BRAIN
 // Nur über Tailscale erreichbar. Die Oberfläche selbst bleibt zusätzlich
 // durch die Authentifizierung des Brain-Connectors geschützt.
-const BRAIN_URL = "http://100.98.155.39:5051/";
+const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";
 
 
 function authenticatedUrl(url) {
@@ -143,9 +143,8 @@ function authenticatedUrl(url) {
       toast("The Brain ist für diesen Benutzer nicht freigeschaltet.");
       return;
     }
-    // Direkte Navigation ist auf iPhone/Safari/KGO zuverlässiger als window.open().
-    // Der Zurück-Button bringt anschließend wieder zu KGO.
-    window.location.assign(BRAIN_URL);
+    // KGO bleibt offen; Brain startet in einem eigenen Browser-Tab/Fenster.
+    window.open(BRAIN_URL, "_blank", "noopener");
   }
 
   function assignmentKey(a) {
