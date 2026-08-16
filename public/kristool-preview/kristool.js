@@ -269,8 +269,13 @@ function selectedDateWeekday(){
 }
 function selectedEmployeeScheduledFree(){
   const item=activeQueueItem();
+
+  // true aus der Tagesliste ist eindeutig.
   if(item?.scheduledFree===true)return true;
-  if(item?.scheduledFree===false)return false;
+
+  // scheduledFree:false darf die Prüfung des Arbeitszeitmodells nicht abbrechen.
+  // Sonst verschwindet der Leertag trotz 0 Sollstunden.
+  if(Number(item?.scheduledTargetHours)===0)return true;
 
   const employee=currentEmployeeMaster();
   const modelId=String(employee?.worktimeModelId||"").trim();
