@@ -709,13 +709,13 @@ body{margin:0;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Sego
 
     <div class="actions">
       <div class="brain-wrap">
-        <a id="openBrain" class="brain-button disabled" href="${esc(BRAIN_PUBLIC_URL)}/" target="_blank" rel="noopener">🧠 THE BRAIN ÖFFNEN</a>
+        <a id="openBrain" class="brain-button" href="${esc(BRAIN_PUBLIC_URL)}/" target="_blank" rel="noopener">🧠 THE BRAIN ÖFFNEN</a>
         <div id="tailNote" class="tail-note">⚠ Private Verbindung wird geprüft.</div>
       </div>
       <button class="refresh" type="button" onclick="checkBrain()">↻ Status neu prüfen</button>
     </div>
 
-    <div class="tech">Die Ampeln zeigen nur bestätigte Zustände. Noch nicht angebundene Quellen werden gelb statt fälschlich grün angezeigt.</div>
+    <div class="tech">Die Ampeln zeigen nur bestätigte Zustände. Kann der Browser den privaten Status nicht prüfen, bleibt The Brain trotzdem direkt öffnbar.</div>
   </section>
 </div>
 
@@ -751,7 +751,6 @@ async function checkBrain() {
 
   overall.className = "overall";
   overall.querySelector("span:last-child").textContent = "Status wird geprüft …";
-  openBrain.classList.add("disabled");
 
   try {
     const response = await fetch(BRAIN_URL + "/status", {method:"GET",cache:"no-store"});
@@ -783,18 +782,23 @@ async function checkBrain() {
     overall.querySelector("span:last-child").textContent =
       hasBad || hasWarn ? "Brain bereit · Quellen teilweise eingeschränkt" : "Brain bereit · alle Quellen online";
 
-    openBrain.classList.remove("disabled");
     tailNote.innerHTML = 'Private Verbindung aktiv · <a class="tail-link" href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener">Tailscale öffnen ↗</a>';
   } catch (err) {
-    setSource("src-brain","bad","Nicht erreichbar");
-    setSource("src-ww","warn","Status unbekannt");
-    setSource("src-archive","warn","Status unbekannt");
-    setSource("src-moser","warn","Status unbekannt");
-    setSource("src-fink","warn","Status unbekannt");
+    // Ein Browser-Fetch von protokoll.krista.at auf eine private Tailscale-Adresse
+    // kann durch Browser/CORS/Private-Network-Regeln blockiert werden, obwohl Brain
+    // beim direkten Öffnen funktioniert. Deshalb NICHT fälschlich "offline" anzeigen.
+    setSource("src-brain","warn","Status hier nicht automatisch prüfbar");
+    setSource("src-ww","warn","Status im Brain prüfen");
+    setSource("src-archive","warn","Status im Brain prüfen");
+    setSource("src-moser","warn","Status im Brain prüfen");
+    setSource("src-fink","warn","Status im Brain prüfen");
 
-    overall.classList.add("bad");
-    overall.querySelector("span:last-child").textContent = "The Brain nicht erreichbar";
-    tailNote.innerHTML = '🔴 Private Verbindung nicht erreichbar · <a class="tail-link" href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener">Tailscale öffnen ↗</a>';
+    overall.classList.add("warn");
+    overall.querySelector("span:last-child").textContent = "Brain direkt öffnen und prüfen";
+    tailNote.innerHTML =
+      '⚠ Automatischer Statuscheck im Browser nicht möglich · ' +
+      '<a class="tail-link" href="https://login.tailscale.com/admin/machines" ' +
+      'target="_blank" rel="noopener">Tailscale öffnen ↗</a>';
   }
 }
 checkBrain();
