@@ -732,6 +732,20 @@ body {
 .brand { font-size:24px; font-weight:750; }
 .subtitle { color:#adb5bd; font-size:13px; margin-top:3px; }
 .status { color:#b8c0c8; font-size:13px; }
+.header-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+.header-action {
+  display:inline-flex; align-items:center; justify-content:center; min-height:40px;
+  padding:9px 14px; border-radius:9px; border:1px solid #555e67;
+  color:white; background:#30363d; text-decoration:none; font-size:13px; font-weight:750;
+  cursor:pointer;
+}
+.header-action:hover { background:#3a424a; border-color:#707b85; }
+.header-action.brain-external { background:#f5f6f8; color:#20242a; border-color:#d7dce1; }
+.header-action.brain-external:hover { background:white; border-color:#aeb7bf; }
+.external-wrap { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.tailscale-note { color:#adb5bd; font-size:11px; line-height:1.25; }
+.tailscale-link { color:#d7dde3; text-decoration:underline; text-underline-offset:2px; }
+.tailscale-link:hover { color:white; }
 .container { max-width:1380px; margin:30px auto; padding:0 20px 70px; }
 .search-box {
   background:white; padding:20px; border-radius:12px;
@@ -870,6 +884,9 @@ body {
 
 @media (max-width:1000px) { .doc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:700px) {
+  .header { padding:18px 16px; }
+  .header-inner { align-items:flex-start; gap:16px; flex-direction:column; }
+  .header-actions { width:100%; justify-content:flex-start; }
   .search-row { flex-direction:column; }
   .search-button { height:52px; }
   .project-top { flex-direction:column; }
@@ -880,8 +897,24 @@ body {
 </head>
 <body>
 <div class="header"><div class="header-inner">
-  <div><div class="brand">Kristine · Gehirn</div><div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div></div>
-  <div class="status">Gehirn V0.10.4 · KRISTINE live · Render-Fix</div>
+  <div>
+    <div class="brand">Kristine · Gehirn</div>
+    <div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div>
+    <div class="status" style="margin-top:7px">Gehirn V0.10.5 · KRISTINE live · Render-Fix</div>
+  </div>
+  <div class="header-actions">
+    <a class="header-action" href="/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}">← Zurück zu KRISTINE</a>
+    <div class="external-wrap">
+      <a class="header-action brain-external"
+         href="https://pc-alex02.tail610122.ts.net/"
+         target="_blank" rel="noopener">🧠 The Brain extern ↗</a>
+      <div class="tailscale-note">
+        ⚠ Tailscale muss verbunden sein ·
+        <a class="tailscale-link" href="https://login.tailscale.com/admin/machines"
+           target="_blank" rel="noopener">Tailscale öffnen ↗</a>
+      </div>
+    </div>
+  </div>
 </div></div>
 
 <div class="container">
