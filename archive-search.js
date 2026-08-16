@@ -422,6 +422,10 @@ const ARCHIVE_CONNECTOR =
   process.env.ARCHIVE_CONNECTOR ||
   "http://127.0.0.1:5051";
 
+const BRAIN_PUBLIC_URL =
+  process.env.BRAIN_PUBLIC_URL ||
+  "https://pc-alex02.tail610122.ts.net";
+
 async function searchArchiveConnector(q) {
   const url = `${ARCHIVE_CONNECTOR}/search?q=${encodeURIComponent(q)}`;
   const response = await fetch(url, {
@@ -602,77 +606,6 @@ function countDocumentTypes(documents) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-
-function normalizedAddressKey(p) {
-  return [p.street, p.postalCode, p.city]
-    .map(x => String(x || "").trim())
-    .filter(Boolean)
-    .join(" · ")
-    .toLowerCase();
-}
-
-function uniqueAddresses(projects) {
-  const map = new Map();
-  for (const p of projects || []) {
-    const street = String(p.street || "").trim();
-    const postalCode = String(p.postalCode || "").trim();
-    const city = String(p.city || "").trim();
-    if (!street && !city) continue;
-    const key = [street, postalCode, city].filter(Boolean).join(" · ").toLowerCase();
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
-        street,
-        postalCode,
-        city,
-        label: [street, [postalCode, city].filter(Boolean).join(" ")].filter(Boolean).join(", "),
-        projectCount: 0
-      });
-    }
-    map.get(key).projectCount += 1;
-  }
-  return [...map.values()].sort((a,b) =>
-    b.projectCount - a.projectCount || a.label.localeCompare(b.label, "de")
-  );
-}
-
-function addressRefinedQuery(currentQuery, address) {
-  const base = String(currentQuery || "").trim();
-  const add = [address.street, address.postalCode, address.city]
-    .map(x => String(x || "").trim())
-    .filter(Boolean);
-  return [base, ...add].join(" ").replace(/\s+/g, " ").trim();
-}
-
-function sourceOfDocument(d) {
-  const hay = [d?.path, d?.filename, d?.dokumenttyp]
-    .map(x => String(x || "").toLowerCase())
-    .join(" ");
-
-  if (/\bmoser\b/.test(hay)) return "MOSER";
-  if (/eingangs?rechnung|kreditor|kredi\b/.test(hay)) return "Eingangsrechnungen";
-  if (/\barchiv\b|altarchiv|scanarchiv/.test(hay)) return "Archiv";
-  return "Dokumente";
-}
-
-function groupDocumentsBySource(documents) {
-  const map = new Map();
-  for (const d of documents || []) {
-    const source = sourceOfDocument(d);
-    if (!map.has(source)) map.set(source, []);
-    map.get(source).push(d);
-  }
-  return map;
-}
-
-function sourceAnchorId(source) {
-  return "source-" + String(source || "dokumente")
-    .toLowerCase()
-    .replace(/ä/g,"ae").replace(/ö/g,"oe").replace(/ü/g,"ue").replace(/ß/g,"ss")
-    .replace(/[^a-z0-9]+/g,"-")
-    .replace(/^-|-$/g,"");
-}
-
 function uniqueProjectNumbers(projects) {
   const seen = new Set();
   const result = [];
@@ -699,92 +632,8 @@ function refinedProjectQuery(currentQuery, projectNumber) {
 function registerArchiveSearch(app) {
 
   app.get("/gehirn", async (req, res) => {
-    const q = String(req.query.q || "").trim();
-    const selectedCustomerNumber = String(req.query.customer || "").trim();
-    const selectedAddressKey = String(req.query.address || "").trim().toLowerCase();
-
-    let allProjects = [];
-    let projects = [];
-    let documents = [];
-    let sqlError = "";
-    let connectorError = "";
-    let kristineError = "";
     const runtimeToken = String(req.query.token || "").trim();
-    const tokenSuffix = runtimeToken ? `&token=${encodeURIComponent(runtimeToken)}` : "";
-
-    if (q) {
-      try {
-        const data = await searchArchiveConnector(q);
-        allProjects = Array.isArray(data.projects) ? data.projects : [];
-        documents = Array.isArray(data.documents) ? data.documents : [];
-        sqlError = String(data.sqlError || "");
-      } catch (err) {
-        connectorError = String(err?.message || err);
-        console.error("Gehirn-Connector:", err);
-      }
-    }
-
-    let kristineEvents = [];
-    let kristineEmployees = [];
-
-    try {
-      const kristineSource = await loadKristineBrainSource(runtimeToken);
-      kristineEvents = kristineSource.events;
-      kristineEmployees = kristineSource.employees;
-    } catch (err) {
-      kristineError = String(err?.message || err);
-      console.error("Gehirn-KRISTINE-API:", err);
-
-      // Nur als lokaler Fallback. Auf dem Windows-Client sind diese Dateien
-      // normalerweise nicht vorhanden; wichtig ist, dass das Gehirn NICHT crasht.
-      [kristineEvents, kristineEmployees] = await Promise.all([
-        readKristineTimeEvents(),
-        readKristineEmployees(),
-      ]);
-    }
-
-    const employeeIdentityMap = buildEmployeeIdentityMap(kristineEmployees);
-    const kristineBundle = buildKristineProjectHours(kristineEvents, employeeIdentityMap);
-
-    let wwFusionRows = [];
-    if (allProjects.length) {
-      try {
-        wwFusionRows = await loadWwHoursFusionSource(allProjects);
-      } catch (err) {
-        const msg = String(err?.message || err);
-        sqlError = [sqlError, `Stundenfusion: ${msg}`].filter(Boolean).join(" · ");
-        console.error("Gehirn-Stundenfusion:", err);
-      }
-    }
-
-    const wwFusionByProject = groupWwFusionRows(
-      wwFusionRows,
-      kristineBundle.dayPresence
-    );
-    allProjects = attachKristineHours(
-      allProjects,
-      kristineBundle,
-      wwFusionByProject
-    );
-
-    const customers = uniqueCustomers(allProjects);
-    const addresses = uniqueAddresses(allProjects);
-
-    projects = selectedCustomerNumber
-      ? allProjects.filter(p => String(p.customerNumber ?? "").trim() === selectedCustomerNumber)
-      : allProjects;
-
-    const years = groupDocuments(documents);
-    const typeCounts = countDocumentTypes(documents);
-    const documentSources = groupDocumentsBySource(documents);
-    const projectNumbers = uniqueProjectNumbers(projects);
-
-    const selectedCustomer = selectedCustomerNumber
-      ? customers.find(c => c.number === selectedCustomerNumber)
-      : null;
-
-    const customerTotals = selectedCustomer ? sumMetrics(projects) : null;
-    const customerYearMetrics = selectedCustomer ? metricsByLastDateYear(projects) : new Map();
+    const backUrl = `/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}`;
 
     const html = `
 <!doctype html>
@@ -792,561 +641,163 @@ function registerArchiveSearch(app) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kristine · Gehirn</title>
+<title>KRISTINE · The Brain</title>
 <style>
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f5f6f8;
-  color: #202124;
-}
-.header { background:#20242a; color:white; padding:22px 32px; }
-.header-inner { max-width:1380px; margin:auto; display:flex; justify-content:space-between; align-items:center; }
-.brand { font-size:24px; font-weight:750; }
-.subtitle { color:#adb5bd; font-size:13px; margin-top:3px; }
-.status { color:#b8c0c8; font-size:13px; }
-.header-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
-.header-action {
-  display:inline-flex; align-items:center; justify-content:center; min-height:40px;
-  padding:9px 14px; border-radius:9px; border:1px solid #555e67;
-  color:white; background:#30363d; text-decoration:none; font-size:13px; font-weight:750;
-  cursor:pointer;
-}
-.header-action:hover { background:#3a424a; border-color:#707b85; }
-.header-action.brain-external { background:#f5f6f8; color:#20242a; border-color:#d7dce1; }
-.header-action.brain-external:hover { background:white; border-color:#aeb7bf; }
-.external-wrap { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
-.tailscale-note { color:#adb5bd; font-size:11px; line-height:1.25; }
-.tailscale-link { color:#d7dde3; text-decoration:underline; text-underline-offset:2px; }
-.tailscale-link:hover { color:white; }
-.container { max-width:1380px; margin:30px auto; padding:0 20px 70px; }
-.search-box {
-  background:white; padding:20px; border-radius:12px;
-  box-shadow:0 2px 5px rgba(0,0,0,.05),0 8px 25px rgba(0,0,0,.04);
-}
-.search-row { display:flex; gap:10px; }
-.search-input { flex:1; border:1px solid #cfd4da; border-radius:9px; padding:16px 18px; font-size:20px; outline:none; }
-.search-input:focus { border-color:#667788; box-shadow:0 0 0 3px rgba(80,100,120,.10); }
-.search-button { border:0; border-radius:9px; padding:0 28px; background:#20242a; color:white; font-size:16px; font-weight:650; cursor:pointer; }
-.examples { margin-top:11px; color:#777; font-size:13px; }
-.alert { margin-top:16px; padding:12px 14px; border-radius:8px; font-size:13px; }
-.alert.error { background:#fff4f4; border:1px solid #efc6c6; color:#8a2f2f; }
-.alert.warn { background:#fff9e8; border:1px solid #eadba2; color:#705c15; }
-
-.brain-overview {
-  margin-top:18px; background:#20242a; color:white; border-radius:12px; padding:14px 16px;
-  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-}
-.brain-overview-title { font-weight:800; margin-right:5px; }
-.jump-chip {
-  display:inline-flex; align-items:center; gap:5px; text-decoration:none;
-  background:#30363d; border:1px solid #46505a; color:white;
-  border-radius:999px; padding:7px 11px; font-size:12px; font-weight:750;
-}
-.jump-chip:hover { background:#3a434c; border-color:#6d7882; }
-.address-filter { margin-top:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.address-label { font-size:13px; font-weight:800; color:#62686e; margin-right:2px; }
-.address-chip {
-  display:inline-flex; align-items:center; text-decoration:none; color:#28323b; background:white;
-  border:1px solid #d7dde2; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:750;
-}
-.address-chip:hover, .address-chip.active { background:#20242a; color:white; border-color:#20242a; }
-.source-section { scroll-margin-top:18px; margin-top:30px; }
-.source-heading { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
-.source-title { font-size:24px; font-weight:850; }
-.source-count { color:#777; font-size:13px; }
-.type-jump-row { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 16px; }
-.type-jump {
-  border:1px solid #d7dde2; background:white; border-radius:999px; padding:7px 11px;
-  color:#28323b; font-size:12px; font-weight:750; cursor:pointer;
-}
-.type-jump:hover, .type-jump.active { background:#20242a; color:white; border-color:#20242a; }
-.doc-card.type-hidden { display:none; }
-.project-filter { margin-top:18px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.project-filter-label { font-size:13px; font-weight:750; color:#62686e; margin-right:2px; }
-.project-chip {
-  display:inline-flex; align-items:center; text-decoration:none; color:#28323b; background:white;
-  border:1px solid #d7dde2; border-radius:999px; padding:7px 12px; font-size:13px; font-weight:750;
-  box-shadow:0 1px 2px rgba(0,0,0,.025); transition:transform .08s ease,border-color .08s ease,background .08s ease;
-}
-.project-chip:hover { transform:translateY(-1px); border-color:#9faab4; background:#f9fafb; }
-
-.project-section { margin-top:22px; }
-.project-list {
-  max-height: 58vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 8px;
-  scroll-behavior: smooth;
-  scrollbar-gutter: stable;
-}
-.project-list::-webkit-scrollbar { width: 10px; }
-.project-list::-webkit-scrollbar-track { background: #eef1f3; border-radius: 999px; }
-.project-list::-webkit-scrollbar-thumb { background: #b8c0c7; border-radius: 999px; border: 2px solid #eef1f3; }
-.project-list::-webkit-scrollbar-thumb:hover { background: #929ca5; }
-.project-card {
-  background:white; border:1px solid #dde2e7; border-radius:13px; padding:20px 22px;
-  box-shadow:0 3px 14px rgba(0,0,0,.045); margin-bottom:12px;
-}
-.project-card.primary { border-color:#aeb9c3; }
-.project-card.selectable { cursor:pointer; transition:transform .08s ease, box-shadow .08s ease, border-color .08s ease; }
-.project-card.selectable:hover { transform:translateY(-1px); border-color:#9faab4; box-shadow:0 7px 18px rgba(0,0,0,.07); }
-.project-top { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
-.project-number { font-size:27px; font-weight:800; letter-spacing:-.4px; }
-.project-title { font-size:17px; font-weight:650; margin-top:3px; }
-.project-customer { margin-top:11px; font-size:15px; }
-.project-address { color:#555; margin-top:4px; }
-.project-dates { display:flex; gap:22px; flex-wrap:wrap; color:#555; font-size:14px; }
-.date-box { background:#f6f7f8; border-radius:8px; padding:9px 12px; min-width:130px; }
-.date-label { display:block; color:#8a8f95; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
-.more-projects { margin-top:7px; color:#777; font-size:13px; }
-
-.customer-filter {
-  margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-}
-.customer-filter-label { font-size:13px; font-weight:750; color:#62686e; }
-.customer-select {
-  min-width:min(680px,100%); max-width:100%; border:1px solid #d1d7dc; border-radius:9px;
-  background:white; padding:9px 12px; font-size:13px; color:#28323b;
-}
-.customer-summary {
-  margin-top:12px; background:#20242a; color:white; border-radius:12px; padding:14px 16px;
-  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
-}
-.customer-summary-name { font-size:14px; font-weight:800; }
-.customer-summary-metrics { display:flex; gap:10px; flex-wrap:wrap; }
-.customer-summary-chip {
-  background:#30363d; border:1px solid #424a52; border-radius:8px; padding:7px 10px;
-  font-size:12px; white-space:nowrap;
-}
-.project-metrics { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.metric-box {
-  background:#20242a; color:white; border-radius:8px; padding:8px 10px; min-width:126px;
-}
-.metric-label {
-  display:block; color:#bfc6cc; font-size:10px; text-transform:uppercase;
-  letter-spacing:.45px; margin-bottom:2px;
-}
-.metric-value { font-size:16px; font-weight:800; }
-.metric-box.clickable { cursor:pointer; border:1px solid #434b53; }
-.metric-box.clickable:hover { background:#30363d; }
-.hours-detail {
-  display:none; margin-top:12px; background:#f7f8fa; border:1px solid #e0e4e8;
-  border-radius:10px; padding:12px 14px;
-}
-.hours-detail.open { display:block; }
-.hours-detail-title { font-size:13px; font-weight:800; margin-bottom:8px; }
-.hours-note { font-size:11px; color:#6d747a; margin-top:7px; line-height:1.4; }
-.hours-table { width:100%; border-collapse:collapse; font-size:12px; }
-.hours-table th, .hours-table td { text-align:left; padding:7px 8px; border-bottom:1px solid #e3e6e9; }
-.hours-table th { color:#697077; font-size:10px; text-transform:uppercase; letter-spacing:.4px; }
-.hours-table td.num, .hours-table th.num { text-align:right; white-space:nowrap; }
-.year-metrics {
-  margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; align-items:center;
-}
-.year-metric {
-  background:#20242a; color:white; border-radius:999px; padding:5px 9px;
-  font-size:11px; white-space:nowrap;
-}
-
-.doc-summary { margin:26px 0 18px; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
-.summary-title { font-weight:750; margin-right:5px; }
-.type-chip { background:white; border:1px solid #dce1e5; border-radius:999px; padding:7px 11px; font-size:13px; }
-.type-chip strong { margin-left:5px; }
-
-.year-section { margin-top:28px; }
-.year-heading { display:flex; align-items:baseline; gap:10px; margin:0 0 13px 2px; }
-.year-number { font-size:24px; font-weight:800; }
-.year-count { color:#888; font-size:13px; }
-.doc-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
-.doc-card {
-  background:white; border:1px solid #e0e4e8; border-radius:12px; overflow:hidden;
-  cursor:pointer; transition:transform .08s ease,box-shadow .08s ease,border-color .08s ease;
-}
-.doc-card:hover { transform:translateY(-2px); border-color:#b8c1c9; box-shadow:0 8px 20px rgba(0,0,0,.08); }
-.doc-preview { width:100%; height:390px; background:#eef0f2; overflow:hidden; display:flex; align-items:flex-start; justify-content:center; }
-.doc-preview img { width:100%; height:100%; object-fit:contain; background:white; }
-.doc-info { padding:13px 14px 15px; }
-.doc-line { display:flex; justify-content:space-between; gap:10px; align-items:center; }
-.doc-type { display:inline-block; background:#edf0f2; color:#555; border-radius:5px; padding:4px 8px; font-size:12px; font-weight:700; }
-.doc-date { color:#7c8288; font-size:12px; white-space:nowrap; }
-.doc-name { margin-top:8px; font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.open-button { margin-top:11px; border:0; border-radius:6px; padding:8px 12px; background:#343a40; color:white; cursor:pointer; }
-
-.pdf-hover-preview {
-  position:fixed; z-index:5000; right:24px; top:50%; transform:translateY(-50%);
-  width:min(48vw,820px); height:min(90vh,1080px); display:none; pointer-events:none;
-  padding:10px; background:rgba(30,34,38,.94); border-radius:14px;
-  box-shadow:0 24px 70px rgba(0,0,0,.34);
-}
-.pdf-hover-preview.visible { display:flex; align-items:center; justify-content:center; }
-.pdf-hover-preview img { width:100%; height:100%; object-fit:contain; background:white; border-radius:7px; }
-
-.empty { margin-top:25px; background:white; border:1px dashed #ccd1d6; border-radius:10px; padding:35px 20px; text-align:center; color:#777; }
-
-@media (max-width:1000px) { .doc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:700px) {
-  .header { padding:18px 16px; }
-  .header-inner { align-items:flex-start; gap:16px; flex-direction:column; }
-  .header-actions { width:100%; justify-content:flex-start; }
-  .search-row { flex-direction:column; }
-  .search-button { height:52px; }
-  .project-top { flex-direction:column; }
-  .doc-grid { grid-template-columns:1fr; }
-  .doc-preview { height:420px; }
-}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f6f8;color:#202124}
+.header{background:#20242a;color:white;padding:22px 32px}
+.header-inner{max-width:1120px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.brand{font-size:24px;font-weight:800}
+.subtitle{color:#adb5bd;font-size:13px;margin-top:3px}
+.back{display:inline-flex;align-items:center;min-height:40px;padding:9px 14px;border-radius:9px;border:1px solid #555e67;color:white;background:#30363d;text-decoration:none;font-size:13px;font-weight:750}
+.container{max-width:1120px;margin:34px auto;padding:0 20px 70px}
+.hero{background:white;border:1px solid #dde2e7;border-radius:16px;padding:26px;box-shadow:0 5px 24px rgba(0,0,0,.055)}
+.hero-top{display:flex;justify-content:space-between;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.hero h1{font-size:30px;margin:0 0 5px}
+.hero p{margin:0;color:#697077}
+.overall{display:inline-flex;align-items:center;gap:9px;border-radius:999px;padding:9px 13px;background:#eef1f3;font-size:13px;font-weight:800}
+.dot,.source-dot{width:11px;height:11px;border-radius:50%;background:#9aa1a8;box-shadow:0 0 0 4px rgba(154,161,168,.13)}
+.overall.ok .dot,.source.ok .source-dot{background:#2f9e62}
+.overall.warn .dot,.source.warn .source-dot{background:#e0a21a}
+.overall.bad .dot,.source.bad .source-dot{background:#d64545}
+.sources{margin-top:22px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.source{border:1px solid #e0e4e8;border-radius:12px;padding:14px;background:#fafbfc;display:flex;align-items:center;gap:11px;min-height:72px}
+.source-dot{flex:0 0 auto}
+.source-name{font-weight:800;font-size:14px}
+.source-detail{color:#7b8288;font-size:11px;margin-top:3px;line-height:1.3}
+.actions{margin-top:24px;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.brain-wrap{display:flex;flex-direction:column;gap:6px}
+.brain-button{display:inline-flex;align-items:center;justify-content:center;min-height:54px;padding:0 24px;border-radius:11px;background:#20242a;color:white;text-decoration:none;font-size:16px;font-weight:850}
+.brain-button.disabled{opacity:.42;pointer-events:none}
+.tail-note{font-size:11px;color:#777}
+.tail-link{color:#4d5964;text-decoration:underline;text-underline-offset:2px}
+.refresh{min-height:42px;padding:0 14px;border:1px solid #d5dbe0;border-radius:9px;background:white;color:#30363d;font-weight:750;cursor:pointer}
+.tech{margin-top:18px;color:#90969b;font-size:11px}
+@media(max-width:800px){.sources{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.header{padding:18px 16px}.header-inner{align-items:flex-start;flex-direction:column}.container{margin-top:20px}.hero{padding:19px}.sources{grid-template-columns:1fr}.brain-button{width:100%}.brain-wrap{width:100%}}
 </style>
 </head>
 <body>
-<div class="header"><div class="header-inner">
-  <div>
-    <div class="brand">Kristine · Gehirn</div>
-    <div class="subtitle">Projekte · Kunden · Zeiten · Dokumente · Nachkalkulation</div>
-    <div class="status" style="margin-top:7px">Gehirn V0.11.0 · KRISTINE live · Render-Fix</div>
-  </div>
-  <div class="header-actions">
-    <a class="header-action" href="/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}">← Zurück zu KRISTINE</a>
-    <div class="external-wrap">
-      <a class="header-action brain-external"
-         href="https://pc-alex02.tail610122.ts.net/"
-         target="_blank" rel="noopener">🧠 The Brain extern ↗</a>
-      <div class="tailscale-note">
-        ⚠ Tailscale muss verbunden sein ·
-        <a class="tailscale-link" href="https://login.tailscale.com/admin/machines"
-           target="_blank" rel="noopener">Tailscale öffnen ↗</a>
-      </div>
+<div class="header">
+  <div class="header-inner">
+    <div>
+      <div class="brand">KRISTINE · The Brain</div>
+      <div class="subtitle">Zentrale Wissensquellen</div>
     </div>
+    <a class="back" href="${backUrl}">← Zurück zu KRISTINE</a>
   </div>
-</div></div>
+</div>
 
 <div class="container">
-<form method="get" action="/gehirn" class="search-box">
-  ${runtimeToken ? `<input type="hidden" name="token" value="${esc(runtimeToken)}">` : ""}
-  <div class="search-row">
-    <input class="search-input" name="q" autofocus autocomplete="off"
-      placeholder="Projekt, Kunde, Rechnung, Adresse, Text ..." value="${esc(q)}">
-    <button class="search-button">Suchen</button>
-  </div>
-  <div class="examples">Beispiele: 6844 Fusonic · 202205010 · 26085 · Innenmalerarbeiten</div>
-</form>
-
-${connectorError ? `<div class="alert error">Connector: ${esc(connectorError)}</div>` : ""}
-${sqlError ? `<div class="alert warn">PDF-Suche funktioniert. SQL: ${esc(sqlError)}</div>` : ""}
-${kristineError ? `<div class="alert warn">KRISTINE live: ${esc(kristineError)}${!runtimeToken && !KRISTINE_ADMIN_TOKEN ? ` · Öffne das Gehirn einmal mit <strong>?token=DEIN_ADMIN_TOKEN</strong>.` : ""}</div>` : ""}
-
-${q ? `
-<div class="brain-overview">
-  <span class="brain-overview-title">${esc(q)}</span>
-  <a class="jump-chip" href="#projects">Projekte <strong>${projects.length}</strong></a>
-  <a class="jump-chip" href="#documents">Dokumente <strong>${documents.length}</strong></a>
-  ${["Archiv","MOSER","Eingangsrechnungen"].map(source => {
-    const count = (documentSources.get(source) || []).length;
-    return count
-      ? `<a class="jump-chip" href="#${sourceAnchorId(source)}">${esc(source)} <strong>${count}</strong></a>`
-      : "";
-  }).join("")}
-</div>
-
-${addresses.length > 1 ? `
-<div class="address-filter">
-  <span class="address-label">Adresse eingrenzen:</span>
-  ${addresses.slice(0, 12).map(a => {
-    const refined = addressRefinedQuery(q, a);
-    const active = selectedAddressKey && selectedAddressKey === a.key;
-    return `<a class="address-chip ${active ? "active" : ""}"
-      href="/gehirn?q=${encodeURIComponent(refined)}&address=${encodeURIComponent(a.key)}${runtimeToken ? `&token=${encodeURIComponent(runtimeToken)}` : ""}">
-      ${esc(a.label)} <strong>${a.projectCount}</strong>
-    </a>`;
-  }).join("")}
-  ${addresses.length > 12 ? `<span class="more-projects">+ ${addresses.length - 12} weitere Adressen</span>` : ""}
-</div>` : ""}
-` : ""}
-
-${q && projectNumbers.length ? `
-<div class="project-filter" id="projects">
-  <span class="project-filter-label">Projekte gefunden:</span>
-  ${projectNumbers.slice(0, 30).map(number => {
-    const refine = refinedProjectQuery(q, number);
-    return `<a class="project-chip" href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}${tokenSuffix}" title="Suche auf Projekt ${esc(number)} einschränken">${esc(number)}</a>`;
-  }).join("")}
-  ${projectNumbers.length > 30 ? `<span class="more-projects">+ ${projectNumbers.length - 30} weitere</span>` : ""}
-</div>` : ""}
-
-${q && customers.length ? `
-<form method="get" action="/gehirn" class="customer-filter">
-  <input type="hidden" name="q" value="${esc(q)}">
-  ${runtimeToken ? `<input type="hidden" name="token" value="${esc(runtimeToken)}">` : ""}
-  <span class="customer-filter-label">Kunde:</span>
-  <select class="customer-select" name="customer" onchange="this.form.submit()">
-    <option value="">Alle Kunden (${customers.length})</option>
-    ${customers.map(c => `
-      <option value="${esc(c.number)}" ${c.number === selectedCustomerNumber ? "selected" : ""}>
-        ${esc(c.label)}
-      </option>
-    `).join("")}
-  </select>
-</form>
-${selectedCustomer && customerTotals ? `
-<div class="customer-summary">
-  <div class="customer-summary-name">${esc(selectedCustomer.label)}</div>
-  <div class="customer-summary-metrics">
-    <span class="customer-summary-chip">Stunden aktuell: <strong>${deHours(customerTotals.hours)}</strong></span>
-    <span class="customer-summary-chip">Netto: <strong>${deMoney(customerTotals.net)}</strong></span>
-    <span class="customer-summary-chip">Umsatz/Std aktuell: <strong>${deRate(customerTotals.net, customerTotals.hours)}</strong></span>
-  </div>
-</div>` : ""}
-` : ""}
-
-${q && projects.length ? `
-<div class="project-section">
-  <div class="project-list" id="projectList">
-    ${projects.map((p, i) => {
-      const refine = refinedProjectQuery(q, p.projectNumber);
-      return `
-        <div class="project-card selectable ${i === 0 ? "primary" : ""}"
-             role="button"
-             tabindex="0"
-             data-href="/gehirn?q=${encodeURIComponent(refine)}${selectedCustomerNumber ? `&customer=${encodeURIComponent(selectedCustomerNumber)}` : ""}${tokenSuffix}"
-             onclick="location.href=this.dataset.href"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href=this.dataset.href}">
-          <div class="project-top">
-            <div>
-              <div class="project-number">Projekt ${esc(p.projectNumber)}</div>
-              <div class="project-title">${esc(p.title || p.site || "")}</div>
-              <div class="project-customer">${esc(p.company || p.customer || "")}</div>
-              ${p.customerNumber !== null && p.customerNumber !== undefined
-                ? `<div class="project-address"><strong>Kundennr. ${esc(p.customerNumber)}</strong></div>`
-                : ""}
-              <div class="project-address">${esc(p.address || "")}</div>
-            </div>
-            <div>
-              <div class="project-dates">
-                <div class="date-box"><span class="date-label">Erstes Datum</span>${deDate(p.firstDate)}</div>
-                <div class="date-box"><span class="date-label">Letztes Datum</span>${deDate(p.lastDate)}</div>
-              </div>
-              <div class="project-metrics">
-                <div class="metric-box">
-                  <span class="metric-label">WW netto</span>
-                  <span class="metric-value">${deHours(p.wwHoursEffective)}</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-label">Kristine produktiv</span>
-                  <span class="metric-value">${deHours(p.kristineHoursProductive)}</span>
-                </div>
-                <div class="metric-box clickable"
-                     onclick="event.stopPropagation(); toggleHoursDetail('hours-${esc(p.projectIndex)}')"
-                     title="Mitarbeiterdetails anzeigen">
-                  <span class="metric-label">Gesamt aktuell</span>
-                  <span class="metric-value">${deHours(p.combinedHoursCurrent)}</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-label">Netto abgerechnet</span>
-                  <span class="metric-value">${deMoney(p.netInvoiced)}</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-label">Umsatz / Std aktuell</span>
-                  <span class="metric-value">${deRate(p.netInvoiced, p.combinedHoursCurrent)}</span>
-                </div>
-              </div>
-              <div id="hours-${esc(p.projectIndex)}" class="hours-detail" onclick="event.stopPropagation()">
-                <div class="hours-detail-title">Stundenfusion · Projekt ${esc(p.projectNumber)}</div>
-                ${
-                  Array.isArray(p.wwFusionRows) && p.wwFusionRows.length
-                    ? `<div class="hours-detail-title" style="margin-top:4px">WinWorker</div>
-                       <table class="hours-table">
-                        <thead>
-                          <tr>
-                            <th>MA</th>
-                            <th>Tag</th>
-                            <th class="num">Roh</th>
-                            <th class="num">15 Min anteilig</th>
-                            <th class="num">WW netto</th>
-                            <th>Wertung</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${p.wwFusionRows.map(row => `
-                            <tr>
-                              <td>${esc(row.employeeName || ("MAIndex " + row.maIndex))}${row.finkNumber ? ` · #${esc(row.finkNumber)}` : ""}</td>
-                              <td>${deDate(row.date)}</td>
-                              <td class="num">${deHours(row.rawHours)}</td>
-                              <td class="num">− ${deHours(row.breakHours)}</td>
-                              <td class="num">${deHours(row.netHours)}</td>
-                              <td>${row.overriddenByKristine ? "<strong>KRISTINE gewinnt</strong>" : "WW zählt"}</td>
-                            </tr>
-                          `).join("")}
-                        </tbody>
-                       </table>`
-                    : `<div class="hours-note">Keine WinWorker-Stunden für dieses Projekt gefunden.</div>`
-                }
-
-                <div class="hours-detail-title" style="margin-top:14px">KRISTINE</div>
-                ${
-                  Array.isArray(p.kristineEmployees) && p.kristineEmployees.length
-                    ? `<table class="hours-table">
-                        <thead>
-                          <tr>
-                            <th>Mitarbeiter</th>
-                            <th class="num">Roh</th>
-                            <th class="num">15 Min anteilig</th>
-                            <th class="num">Produktiv</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${p.kristineEmployees.map(emp => `
-                            <tr>
-                              <td>${esc(emp.employeeName)}</td>
-                              <td class="num">${deHours(emp.rawHours)}</td>
-                              <td class="num">− ${deHours(emp.breakHours)}</td>
-                              <td class="num"><strong>${deHours(emp.productiveHours)}</strong></td>
-                            </tr>
-                          `).join("")}
-                        </tbody>
-                      </table>`
-                    : `<div class="hours-note">Noch keine Kristine-Zeitblöcke mit exakt dieser Projektnummer gefunden.</div>`
-                }
-                <div class="hours-note">
-                  Fusion: WinWorker erhält zuerst den 15-Minuten-Abzug einmal je Mitarbeiter/Tag,
-                  proportional auf dessen produktive Projekte verteilt. Existiert derselbe Mitarbeiter/Tag
-                  in KRISTINE (Abgleich über Fink-Personalnummer), wird dieser WW-Tag nicht gezählt;
-                  die korrigierte KRISTINE-Zeit gewinnt. Dadurch gibt es keine Doppelzählung.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join("")}
-  </div>
-</div>` : ""}
-
-${q && documents.length ? `
-<div id="documents" class="doc-summary" style="scroll-margin-top:18px">
-  <span class="summary-title">${documents.length} Dokumente</span>
-  ${typeCounts.map(([type,count]) =>
-    `<button class="type-chip" type="button" onclick="filterAllDocuments('${encodeURIComponent(type)}')">${esc(type)} <strong>${count}</strong></button>`
-  ).join("")}
-  <button class="type-chip" type="button" onclick="filterAllDocuments('')">Alle anzeigen</button>
-</div>
-
-${[...documentSources.entries()].map(([source, sourceDocs]) => {
-  const sourceTypes = countDocumentTypes(sourceDocs);
-  return `
-  <section class="source-section" id="${sourceAnchorId(source)}">
-    <div class="source-heading">
-      <div class="source-title">${esc(source)}</div>
-      <div class="source-count">${sourceDocs.length} Treffer</div>
-    </div>
-    <div class="type-jump-row">
-      ${sourceTypes.map(([type,count]) => `
-        <button class="type-jump" type="button"
-          onclick="filterSourceDocuments('${sourceAnchorId(source)}','${encodeURIComponent(type)}',this)">
-          ${esc(type)} <strong>${count}</strong>
-        </button>`).join("")}
-      <button class="type-jump" type="button"
-        onclick="filterSourceDocuments('${sourceAnchorId(source)}','',this)">Alle</button>
-    </div>
-
-    ${groupDocuments(sourceDocs).map(([year, docs]) => `
-      <div class="year-section">
-        <div class="year-heading">
-          <div class="year-number">${esc(year)}</div>
-          <div class="year-count">${docs.length} Dokumente · letzter Druck zuerst</div>
-        </div>
-        <div class="doc-grid">
-          ${docs.map(d => `
-            <article class="doc-card"
-              data-doc-type="${encodeURIComponent(String(d.dokumenttyp || "Dokument").trim() || "Dokument")}"
-              data-path="${esc(d.path)}"
-              onclick="openArchivePdf(this.dataset.path)">
-              <div class="doc-preview">
-                <img loading="lazy" src="/api/archive/thumb?path=${encodeURIComponent(d.path)}"
-                     alt="Vorschau ${esc(d.filename)}"
-                     onmouseenter="showPdfHover(this.src)" onmouseleave="hidePdfHover()"
-                     onerror="this.style.display='none'">
-              </div>
-              <div class="doc-info">
-                <div class="doc-line">
-                  <span class="doc-type">${esc(d.dokumenttyp || "Dokument")}</span>
-                  <span class="doc-date">${deDate(d.printDate)}</span>
-                </div>
-                <div class="doc-name" title="${esc(d.filename)}">${esc(d.filename)}</div>
-                <button class="open-button" type="button" data-path="${esc(d.path)}"
-                  onclick="event.stopPropagation(); openArchivePdf(this.dataset.path)">Öffnen</button>
-              </div>
-            </article>
-          `).join("")}
-        </div>
+  <section class="hero">
+    <div class="hero-top">
+      <div>
+        <h1>🧠 The Brain</h1>
+        <p>WinWorker · Archiv · MOSER · Finkzeit · KRISTINE</p>
       </div>
-    `).join("")}
-  </section>`;
-}).join("")}
-` : q ? `<div class="empty">Keine passenden Dokumente gefunden.</div>` : `<div class="empty">Suche im Kristine-Gehirn</div>`}
-</div>
+      <div id="overall" class="overall"><span class="dot"></span><span>Status wird geprüft …</span></div>
+    </div>
 
-<div id="pdfHoverPreview" class="pdf-hover-preview" aria-hidden="true">
-  <img id="pdfHoverImage" alt="Vergrößerte PDF-Vorschau">
+    <div class="sources">
+      <div id="src-brain" class="source"><span class="source-dot"></span><div><div class="source-name">Brain-Dienst</div><div class="source-detail">Verbindung wird geprüft …</div></div></div>
+      <div id="src-ww" class="source"><span class="source-dot"></span><div><div class="source-name">WinWorker</div><div class="source-detail">Status vom Brain</div></div></div>
+      <div id="src-archive" class="source"><span class="source-dot"></span><div><div class="source-name">PDF-Archiv</div><div class="source-detail">Status vom Brain</div></div></div>
+      <div id="src-moser" class="source"><span class="source-dot"></span><div><div class="source-name">MOSER</div><div class="source-detail">Status vom Brain</div></div></div>
+      <div id="src-fink" class="source"><span class="source-dot"></span><div><div class="source-name">Finkzeit</div><div class="source-detail">Status vom Brain</div></div></div>
+      <div id="src-kristine" class="source ok"><span class="source-dot"></span><div><div class="source-name">KRISTINE</div><div class="source-detail">Weboberfläche erreichbar</div></div></div>
+    </div>
+
+    <div class="actions">
+      <div class="brain-wrap">
+        <a id="openBrain" class="brain-button disabled" href="${esc(BRAIN_PUBLIC_URL)}/" target="_blank" rel="noopener">🧠 THE BRAIN ÖFFNEN</a>
+        <div id="tailNote" class="tail-note">⚠ Private Verbindung wird geprüft.</div>
+      </div>
+      <button class="refresh" type="button" onclick="checkBrain()">↻ Status neu prüfen</button>
+    </div>
+
+    <div class="tech">Die Ampeln zeigen nur bestätigte Zustände. Noch nicht angebundene Quellen werden gelb statt fälschlich grün angezeigt.</div>
+  </section>
 </div>
 
 <script>
-function toggleHoursDetail(id) {
+const BRAIN_URL = ${JSON.stringify(BRAIN_PUBLIC_URL)};
+
+function setSource(id, state, detail) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.toggle("open");
+  el.classList.remove("ok","warn","bad");
+  el.classList.add(state);
+  const detailEl = el.querySelector(".source-detail");
+  if (detailEl) detailEl.textContent = detail || "";
 }
 
-function showPdfHover(src) {
-  if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
-  const box = document.getElementById("pdfHoverPreview");
-  const img = document.getElementById("pdfHoverImage");
-  img.src = src;
-  box.classList.add("visible");
-  box.setAttribute("aria-hidden", "false");
+function sourceState(value) {
+  if (value === true || value === "ok" || value === "online" || value === "connected" || value === "ready") return "ok";
+  if (value === false || value === "error" || value === "offline" || value === "failed") return "bad";
+  return "warn";
 }
 
-function hidePdfHover() {
-  const box = document.getElementById("pdfHoverPreview");
-  box.classList.remove("visible");
-  box.setAttribute("aria-hidden", "true");
+function sourceDetail(value, fallback) {
+  if (value && typeof value === "object") {
+    return String(value.detail || value.message || value.status || fallback || "");
+  }
+  return fallback || String(value ?? "");
 }
 
+async function checkBrain() {
+  const overall = document.getElementById("overall");
+  const openBrain = document.getElementById("openBrain");
+  const tailNote = document.getElementById("tailNote");
 
-function filterSourceDocuments(sectionId, encodedType, button) {
-  const section = document.getElementById(sectionId);
-  if (!section) return;
-  const type = decodeURIComponent(encodedType || "");
-  section.querySelectorAll(".doc-card").forEach(card => {
-    const cardType = decodeURIComponent(card.dataset.docType || "");
-    card.classList.toggle("type-hidden", Boolean(type) && cardType !== type);
-  });
-  section.querySelectorAll(".type-jump").forEach(b => b.classList.remove("active"));
-  if (button) button.classList.add("active");
-  section.scrollIntoView({behavior:"smooth", block:"start"});
-}
+  overall.className = "overall";
+  overall.querySelector("span:last-child").textContent = "Status wird geprüft …";
+  openBrain.classList.add("disabled");
 
-function filterAllDocuments(encodedType) {
-  const type = decodeURIComponent(encodedType || "");
-  document.querySelectorAll(".doc-card").forEach(card => {
-    const cardType = decodeURIComponent(card.dataset.docType || "");
-    card.classList.toggle("type-hidden", Boolean(type) && cardType !== type);
-  });
-  document.getElementById("documents")?.scrollIntoView({behavior:"smooth", block:"start"});
-}
-
-async function openArchivePdf(path) {
   try {
-    const response = await fetch("/api/archive/open", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({path})
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) alert(data.error || "PDF konnte nicht geöffnet werden.");
+    const response = await fetch(BRAIN_URL + "/status", {method:"GET",cache:"no-store"});
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const data = await response.json();
+
+    setSource("src-brain","ok","Brain erreichbar" + (data.version ? " · V" + data.version : ""));
+
+    const sources = data.sources || {};
+    const defs = [
+      ["src-ww", sources.winworker ?? sources.ww, "Vom Connector noch nicht separat geprüft"],
+      ["src-archive", sources.archive ?? (data.pdfIndexExists === true ? true : undefined), data.pdfIndexExists === true ? "PDF-Index bereit" : "Vom Connector noch nicht separat geprüft"],
+      ["src-moser", sources.moser, "Noch nicht angebunden"],
+      ["src-fink", sources.fink ?? sources.finkzeit, "Noch nicht angebunden"]
+    ];
+
+    let hasBad = false;
+    let hasWarn = false;
+
+    for (const [id,value,fallback] of defs) {
+      const raw = value && typeof value === "object" ? (value.ok ?? value.status) : value;
+      const state = sourceState(raw);
+      if (state === "bad") hasBad = true;
+      if (state === "warn") hasWarn = true;
+      setSource(id,state,sourceDetail(value,fallback));
+    }
+
+    overall.classList.add(hasBad || hasWarn ? "warn" : "ok");
+    overall.querySelector("span:last-child").textContent =
+      hasBad || hasWarn ? "Brain bereit · Quellen teilweise eingeschränkt" : "Brain bereit · alle Quellen online";
+
+    openBrain.classList.remove("disabled");
+    tailNote.innerHTML = 'Private Verbindung aktiv · <a class="tail-link" href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener">Tailscale öffnen ↗</a>';
   } catch (err) {
-    alert("Archiv-Connector nicht erreichbar.");
+    setSource("src-brain","bad","Nicht erreichbar");
+    setSource("src-ww","warn","Status unbekannt");
+    setSource("src-archive","warn","Status unbekannt");
+    setSource("src-moser","warn","Status unbekannt");
+    setSource("src-fink","warn","Status unbekannt");
+
+    overall.classList.add("bad");
+    overall.querySelector("span:last-child").textContent = "The Brain nicht erreichbar";
+    tailNote.innerHTML = '🔴 Private Verbindung nicht erreichbar · <a class="tail-link" href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener">Tailscale öffnen ↗</a>';
   }
 }
+checkBrain();
 </script>
 </body>
 </html>`;
