@@ -7,6 +7,7 @@ import os
 import re
 import json
 import hmac
+import hashlib
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -34,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices"}
 
 
 def _request_is_local():
@@ -915,12 +916,183 @@ def search_pdf(terms):
 
 
 
-def search_incoming_invoices(query, limit=500):
-    q = str(query or "").strip()
-    if len(q) < 2:
-        return []
 
-    terms = [x.strip() for x in re.split(r"\s+", q) if x.strip()]
+_INCOMING_CACHE = {"stamp": None, "rows": []}
+
+MONTH_NAMES_DE = {
+    1:"Januar", 2:"Februar", 3:"März", 4:"April", 5:"Mai", 6:"Juni",
+    7:"Juli", 8:"August", 9:"September", 10:"Oktober", 11:"November", 12:"Dezember"
+}
+
+
+def _norm_supplier(value):
+    value = str(value or "").lower()
+    value = value.replace("ß", "ss")
+    value = re.sub(r"[^a-z0-9äöü]+", " ", value)
+    return " ".join(value.split())
+
+
+def _money_to_float(raw):
+    s = str(raw or "").strip().replace("€", "").replace("EUR", "").replace(" ", "")
+    if not s:
+        return None
+    # Österreich/DE: 12.345,67
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # Englische/technische Schreibweise nur dann als Dezimalpunkt interpretieren,
+        # wenn genau 1 Punkt und max. 2 Nachkommastellen vorhanden sind.
+        if s.count(".") > 1:
+            s = s.replace(".", "")
+    try:
+        value = float(s)
+        return value if value >= 0 else None
+    except Exception:
+        return None
+
+
+def _extract_invoice_amount(text):
+    """
+    Best-effort Rechnungsbetrag aus dem PDF-Text.
+    Bevorzugt eindeutige Endsumme-Bezeichnungen.
+    """
+    raw = str(text or "")
+    patterns = [
+        r"(?i)(?:rechnungsbetrag|zahlbetrag|endbetrag|gesamtbetrag|bruttobetrag|zu\s+zahlen)"
+        r"[^\d]{0,35}(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})",
+        r"(?i)(?:gesamt|summe)\s*(?:brutto)?[^\d]{0,30}"
+        r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})",
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, raw)
+        if matches:
+            # Bei wiederholten Summen steht die Endsumme meist zuletzt.
+            for candidate in reversed(matches):
+                value = _money_to_float(candidate)
+                if value is not None:
+                    return value
+    return None
+
+
+def _extract_invoice_date(text, modified=None, doc_year=None):
+    raw = str(text or "")
+    patterns = [
+        r"(?i)(?:rechnungsdatum|belegdatum|datum)\s*[:\-]?\s*"
+        r"(\d{1,2})[./-](\d{1,2})[./-](20\d{2})",
+        r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, raw[:7000])
+        if m:
+            try:
+                day, month, year = map(int, m.groups())
+                return datetime(year, month, day)
+            except Exception:
+                pass
+
+    try:
+        dt = datetime.fromtimestamp(float(modified))
+        # doc_year aus Dokman ist verlässlicher als mtime-Jahr, wenn vorhanden.
+        if doc_year and int(doc_year) != dt.year:
+            return datetime(int(doc_year), dt.month, min(dt.day, 28))
+        return dt
+    except Exception:
+        if doc_year:
+            try:
+                return datetime(int(doc_year), 1, 1)
+            except Exception:
+                pass
+    return None
+
+
+def _extract_supplier_identity(text, query=""):
+    """
+    Findet den Lieferanten im Kopf der Rechnung.
+    Der erste Brain-Suchschritt sucht bewusst nur im Kopfbereich:
+    Lieferantenname / Lieferantenadresse, NICHT im Artikeltext.
+    """
+    raw = str(text or "")
+    lines = [re.sub(r"\s+", " ", x).strip() for x in raw[:4500].splitlines()]
+    lines = [x for x in lines if x]
+
+    q = _norm_supplier(query)
+    qtokens = [x for x in q.split() if len(x) >= 2]
+
+    # Zeile mit Suchbegriff als Lieferantenname bevorzugen.
+    name_idx = None
+    if qtokens:
+        for i, line in enumerate(lines[:45]):
+            nl = _norm_supplier(line)
+            if all(t in nl for t in qtokens):
+                # typische Rechnungsfeld-Zeilen nicht als Firma nehmen
+                if not re.search(r"(?i)rechnung|rechnungsnr|datum|kundennr|lieferdatum|seite", line):
+                    name_idx = i
+                    break
+
+    if name_idx is None:
+        # Fallback: erste plausible Firmenzeile.
+        for i, line in enumerate(lines[:20]):
+            if re.search(r"(?i)\b(gmbh|ges\.?m\.?b\.?h|ag|kg|ohg|gmbh\s*&\s*co|sarl|sa)\b", line):
+                name_idx = i
+                break
+
+    if name_idx is None:
+        return None
+
+    name = lines[name_idx][:180]
+
+    # Adresse im Umfeld des Lieferantennamens.
+    address = ""
+    postal_idx = None
+    for j in range(max(0, name_idx - 3), min(len(lines), name_idx + 10)):
+        if re.search(r"\b(?:A-|AT-|CH-|FL-)?\d{4}\s+\S+", lines[j], re.I):
+            postal_idx = j
+            break
+
+    if postal_idx is not None:
+        parts = []
+        if postal_idx - 1 >= 0:
+            prev = lines[postal_idx - 1]
+            if re.search(r"\d", prev) and len(prev) <= 120:
+                parts.append(prev)
+        parts.append(lines[postal_idx])
+        address = ", ".join(parts)[:220]
+
+    # Lieferanten-/Kunden-/Kreditornummer.
+    supplier_no = ""
+    header = "\n".join(lines[:60])
+    m = re.search(
+        r"(?i)(?:lieferanten?(?:nummer|nr\.?)|kreditor(?:ennummer|nr\.?)|"
+        r"kunden(?:nummer|nr\.?))\s*[:#\-]?\s*([A-Z0-9./\-]{2,30})",
+        header
+    )
+    if m:
+        supplier_no = m.group(1).strip()
+
+    key_raw = _norm_supplier(name) + "|" + _norm_supplier(address)
+    supplier_key = hashlib.sha1(key_raw.encode("utf-8", errors="ignore")).hexdigest()[:18]
+
+    return {
+        "key": supplier_key,
+        "name": name,
+        "address": address,
+        "supplierNumber": supplier_no,
+    }
+
+
+def _incoming_catalog():
+    """
+    Cache der 6.000+ Eingangsrechnungen, damit Lieferantenauswahl,
+    Jahresansicht und Textsuche flott bleiben.
+    """
+    try:
+        stamp = DB.stat().st_mtime_ns
+    except Exception:
+        stamp = None
+
+    if _INCOMING_CACHE["stamp"] == stamp and _INCOMING_CACHE["rows"]:
+        return _INCOMING_CACHE["rows"]
+
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     try:
@@ -930,56 +1102,191 @@ def search_incoming_invoices(query, limit=500):
         has_logical = "logical_id" in cols
 
         select = ["filename","path","dokumenttyp","modified","text"]
-        if has_source: select.append("source")
-        if has_year: select.append("doc_year")
-        if has_logical: select.append("logical_id")
+        if has_source:
+            select.append("source")
+        if has_year:
+            select.append("doc_year")
+        if has_logical:
+            select.append("logical_id")
 
         sql = "SELECT " + ",".join(select) + " FROM pdf_index WHERE 1=1 "
         if has_source:
             sql += " AND source='EINGANG' "
         else:
             sql += r" AND path LIKE '%\Dokman\%' "
+        sql += " ORDER BY modified DESC"
 
-        params = []
-        for term in terms:
-            like = f"%{term}%"
-            sql += " AND (text LIKE ? OR filename LIKE ?) "
-            params.extend([like, like])
-
-        sql += " ORDER BY modified DESC LIMIT ?"
-        params.append(max(1, min(int(limit or 500), 1000)))
-
-        rows = con.execute(sql, params).fetchall()
-        result, seen = [], set()
-
-        for row in rows:
-            item = dict(row)
-            logical = str(item.get("logical_id") or "").strip()
-            key = logical or str(item.get("path") or "")
-            if key in seen:
-                continue
-            seen.add(key)
-
-            dt = parse_print_time(item.get("filename"), item.get("modified"))
-            item["printDate"] = dt.date().isoformat() if dt else None
-            item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
-            item["year"] = item.get("doc_year") or (dt.year if dt else None)
-
-            raw = " ".join(str(item.get("text") or "").split())
-            low = raw.lower()
-            positions = [low.find(t.lower()) for t in terms if low.find(t.lower()) >= 0]
-            if positions:
-                pos = min(positions)
-                item["snippet"] = raw[max(0,pos-120):min(len(raw),pos+420)]
-            else:
-                item["snippet"] = raw[:420]
-
-            item.pop("text", None)
-            result.append(item)
-
-        return result
+        dbrows = con.execute(sql).fetchall()
     finally:
         con.close()
+
+    result = []
+    seen = set()
+    for row in dbrows:
+        item = dict(row)
+        logical = str(item.get("logical_id") or "").strip()
+        unique = logical or str(item.get("path") or "")
+        if unique in seen:
+            continue
+        seen.add(unique)
+
+        raw = str(item.get("text") or "")
+        doc_year = item.get("doc_year")
+        dt = _extract_invoice_date(raw, item.get("modified"), doc_year)
+        amount = _extract_invoice_amount(raw)
+
+        item["_raw_text"] = raw
+        item["_header_norm"] = _norm_supplier(raw[:4500])
+        item["invoiceDate"] = dt.date().isoformat() if dt else None
+        item["invoiceDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+        item["year"] = dt.year if dt else (int(doc_year) if doc_year else None)
+        item["month"] = dt.month if dt else None
+        item["monthName"] = MONTH_NAMES_DE.get(dt.month, "") if dt else ""
+        item["day"] = dt.day if dt else None
+        item["amount"] = amount
+        result.append(item)
+
+    _INCOMING_CACHE["stamp"] = stamp
+    _INCOMING_CACHE["rows"] = result
+    return result
+
+
+def incoming_supplier_candidates(query, limit=20):
+    """
+    Schritt 1: Lieferant/Adresse vorschlagen.
+    Gesucht wird NUR im Rechnungskopf, nicht im Rechnungstext/Artikelbereich.
+    """
+    q = str(query or "").strip()
+    nq = _norm_supplier(q)
+    if len(nq) < 2:
+        return []
+
+    tokens = [x for x in nq.split() if len(x) >= 2]
+    grouped = {}
+
+    for item in _incoming_catalog():
+        header = item.get("_header_norm") or ""
+        if not all(t in header for t in tokens):
+            continue
+
+        ident = _extract_supplier_identity(item.get("_raw_text"), q)
+        if not ident:
+            continue
+
+        g = grouped.setdefault(ident["key"], {
+            **ident,
+            "count": 0,
+            "years": set(),
+            "samplePath": item.get("path"),
+        })
+        g["count"] += 1
+        if item.get("year"):
+            g["years"].add(int(item["year"]))
+
+    rows = []
+    for g in grouped.values():
+        g["years"] = sorted(g["years"], reverse=True)
+        rows.append(g)
+
+    rows.sort(key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower()))
+    return rows[:max(1, min(int(limit or 20), 50))]
+
+
+def incoming_supplier_invoices(supplier_name, supplier_address="", text_query=""):
+    """
+    Schritt 2: Nach aktiver Lieferantenauswahl nur dessen Rechnungen.
+    Optionaler text_query durchsucht dann den VOLLEN Rechnungstext.
+    """
+    supplier_name = str(supplier_name or "").strip()
+    supplier_address = str(supplier_address or "").strip()
+    text_query = str(text_query or "").strip()
+
+    if not supplier_name:
+        return []
+
+    name_tokens = [
+        x for x in _norm_supplier(supplier_name).split()
+        if len(x) >= 3 and x not in {"gmbh","ges","mbh","ag","kg","co","und"}
+    ]
+    if not name_tokens:
+        name_tokens = [x for x in _norm_supplier(supplier_name).split() if len(x) >= 2]
+
+    addr_norm = _norm_supplier(supplier_address)
+    query_tokens = [x for x in _norm_supplier(text_query).split() if x]
+
+    result = []
+    for item in _incoming_catalog():
+        header = item.get("_header_norm") or ""
+        if not all(t in header for t in name_tokens):
+            continue
+
+        ident = _extract_supplier_identity(item.get("_raw_text"), supplier_name)
+        if not ident:
+            continue
+
+        # Wenn eine Adresse gewählt wurde, soll sie den Lieferanten wirklich eingrenzen.
+        if addr_norm:
+            item_addr = _norm_supplier(ident.get("address"))
+            if item_addr and item_addr != addr_norm and addr_norm not in header:
+                continue
+
+        raw_norm = _norm_supplier(item.get("_raw_text"))
+        if query_tokens and not all(t in raw_norm for t in query_tokens):
+            continue
+
+        raw = " ".join(str(item.get("_raw_text") or "").split())
+        snippet = raw[:420]
+        if query_tokens:
+            low = raw.lower()
+            positions = [low.find(t.lower()) for t in query_tokens if low.find(t.lower()) >= 0]
+            if positions:
+                pos = min(positions)
+                snippet = raw[max(0, pos-140):min(len(raw), pos+500)]
+
+        result.append({
+            "filename": item.get("filename"),
+            "path": item.get("path"),
+            "dokumenttyp": item.get("dokumenttyp") or "Eingangsrechnung",
+            "modified": item.get("modified"),
+            "logical_id": item.get("logical_id"),
+            "invoiceDate": item.get("invoiceDate"),
+            "printDate": item.get("invoiceDate"),
+            "invoiceDateTime": item.get("invoiceDateTime"),
+            "year": item.get("year"),
+            "month": item.get("month"),
+            "monthName": item.get("monthName"),
+            "day": item.get("day"),
+            "amount": item.get("amount"),
+            "snippet": snippet,
+        })
+
+    result.sort(
+        key=lambda x: (
+            x.get("invoiceDateTime") or "",
+            x.get("filename") or ""
+        ),
+        reverse=True
+    )
+    return result
+
+
+def incoming_year_summary(documents):
+    summary = {}
+    for d in documents:
+        year = str(d.get("year") or "ohne Jahr")
+        row = summary.setdefault(year, {
+            "count": 0,
+            "amount": 0.0,
+            "amountCount": 0,
+        })
+        row["count"] += 1
+        if d.get("amount") is not None:
+            row["amount"] += float(d["amount"])
+            row["amountCount"] += 1
+
+    for row in summary.values():
+        row["amount"] = round(row["amount"], 2)
+    return summary
 
 
 def validate_pdf_path(raw_path):
@@ -1092,6 +1399,25 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .save-row button{height:48px}
 .notice{font-size:12px;color:var(--warn)}
 .success{color:var(--good)}
+
+.supplier-card{margin-bottom:14px}
+.supplier-choice{cursor:pointer}
+.supplier-choice:hover{border-color:#788292}
+.supplier-choice .project-title{font-size:17px}
+.supplier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.invoice-text-search{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.year-block{margin-top:20px}
+.year-header{display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px}
+.year-name{font-size:24px;font-weight:900}
+.year-total{text-align:right}
+.year-total strong{font-size:18px}
+.year-total small{display:block;color:var(--muted);margin-top:2px}
+.month-block{margin-top:17px}
+.month-title{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#cbd1d9;margin:0 0 9px}
+.day-date{font-weight:850;font-size:14px;margin-bottom:4px}
+.invoice-amount{font-size:15px;font-weight:850;margin-top:7px}
+.invoice-snippet{font-size:12px;color:var(--muted);line-height:1.35;margin-top:7px;max-height:4.1em;overflow:hidden}
+
 @media (max-width:900px){
   .doc-list{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
@@ -1152,14 +1478,37 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     <div id="sourceTypes"></div>
     <div id="docs"></div>
   </div>
+  <div class="section" id="incomingSupplierSection" hidden>
+    <div class="section-head"><h2>Lieferant auswählen</h2></div>
+    <div id="incomingSuppliers"></div>
+  </div>
+
   <div class="section" id="incomingSection" hidden>
-    <div class="section-head"><h2>Eingangsrechnungen</h2></div>
-    <div class="card">
-      <div class="project-title" id="incomingTitle">Lieferant</div>
-      <div class="sub" id="incomingSub"></div>
-      <div class="chips" id="incomingYears"></div>
+    <div class="section-head">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button id="backToSuppliers" class="dark" type="button">← Lieferant wechseln</button>
+        <h2>Eingangsrechnungen</h2>
+      </div>
     </div>
-    <div class="doc-list" id="incomingDocs"></div>
+
+    <div class="card supplier-card">
+      <div class="project-title" id="incomingTitle">Lieferant</div>
+      <div class="sub" id="incomingSupplierAddress"></div>
+      <div class="sub" id="incomingSupplierNumber"></div>
+      <div class="sub" id="incomingSub"></div>
+
+      <div class="invoice-text-search">
+        <div class="formlabel">Was suche ich in den Rechnungen?</div>
+        <div class="searchrow">
+          <input id="incomingTextQ" type="search"
+                 placeholder="Artikel, Artikelnummer, Text …" autocomplete="off">
+          <button id="incomingTextGo" type="button">In Rechnungen suchen</button>
+        </div>
+        <div class="meta" id="incomingTextMeta"></div>
+      </div>
+    </div>
+
+    <div id="incomingGrouped"></div>
   </div>
 
   <div class="footer">Privater Zugriff über Tailscale</div>
@@ -1216,13 +1565,17 @@ const addressBar=document.getElementById('addressBar'),addresses=document.getEle
 const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
 const newFromSelection=document.getElementById('newFromSelection');
 const modeProjects=document.getElementById('modeProjects'),modeIncoming=document.getElementById('modeIncoming');
-const incomingSection=document.getElementById('incomingSection'),incomingDocs=document.getElementById('incomingDocs');
-const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub'),incomingYears=document.getElementById('incomingYears');
+const incomingSupplierSection=document.getElementById('incomingSupplierSection'),incomingSuppliers=document.getElementById('incomingSuppliers');
+const incomingSection=document.getElementById('incomingSection'),incomingGrouped=document.getElementById('incomingGrouped');
+const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub');
+const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
+const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextMeta=document.getElementById('incomingTextMeta');
+const backToSuppliers=document.getElementById('backToSuppliers');
 const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[];
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null;
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -1406,13 +1759,15 @@ function setSearchMode(mode){
   modeProjects.classList.toggle('active',mode==='projects');
   modeIncoming.classList.toggle('active',mode==='incoming');
 
-  ps.hidden=true;ds.hidden=true;incomingSection.hidden=true;
+  ps.hidden=true;ds.hidden=true;
+  incomingSupplierSection.hidden=true;incomingSection.hidden=true;
   addressBar.hidden=true;summary.hidden=true;
-  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';incomingDocs.innerHTML='';
+  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
+  incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
 
   if(mode==='incoming'){
-    q.placeholder='Lieferant suchen, z. B. Sto …';
-    meta.textContent='Nur Eingangsrechnungen · Suche nach Lieferantennamen';
+    q.placeholder='Lieferant oder Adresse suchen, z. B. Sto …';
+    meta.textContent='Schritt 1: Lieferant/Adresse auswählen · noch keine Rechnungstextsuche';
   }else{
     q.placeholder='Baustelle, Kunde, Nummer, Adresse …';
     meta.textContent='WinWorker + PDF-Archiv';
@@ -1423,66 +1778,204 @@ function setSearchMode(mode){
 modeProjects.onclick=()=>setSearchMode('projects');
 modeIncoming.onclick=()=>setSearchMode('incoming');
 
-function renderIncomingYear(year='all'){
-  const rows=year==='all'
-    ? incomingAll
-    : incomingAll.filter(d=>String(d.year||'ohne Jahr')===String(year));
+function invoiceMoney(v){
+  if(v===null||v===undefined||v==='')return '';
+  try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}
+  catch{return ''}
+}
 
-  incomingDocs.innerHTML=rows.length
-    ? rows.map(renderDoc).join('')
-    : '<div class="empty">Keine Eingangsrechnungen gefunden.</div>';
+function renderSupplierCandidates(){
+  incomingSupplierSection.hidden=false;
+  incomingSuppliers.innerHTML=incomingCandidates.length
+    ? incomingCandidates.map((s,i)=>`
+      <div class="card supplier-choice" data-supplier="${i}">
+        <div class="project-title">${esc(s.name||'Lieferant')}</div>
+        ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
+        ${s.supplierNumber?`<div class="sub">Nr. ${esc(s.supplierNumber)}</div>`:''}
+        <div class="supplier-meta">
+          <span class="pill">${Number(s.count||0)} Rechnungen</span>
+          ${(s.years||[]).slice(0,5).map(y=>`<span class="pill">${esc(y)}</span>`).join('')}
+        </div>
+      </div>`).join('')
+    : '<div class="empty">Kein passender Lieferant gefunden.</div>';
 
-  incomingYears.querySelectorAll('[data-year]').forEach(b=>{
-    b.classList.toggle('active',b.dataset.year===String(year));
+  incomingSuppliers.querySelectorAll('[data-supplier]').forEach(card=>{
+    card.onclick=()=>selectIncomingSupplier(incomingCandidates[Number(card.dataset.supplier)]);
   });
 }
 
-async function runIncomingSearch(term){
+async function runIncomingSupplierSearch(term){
   term=String(term||'').trim();
-
   if(term.length<2){
-    meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen vom Lieferantennamen eingeben.</span>';
-    q.focus();
-    return;
+    meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen vom Lieferanten oder der Adresse eingeben.</span>';
+    q.focus();return;
   }
 
   loader.style.display='block';
-  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;incomingSection.hidden=true;
-  meta.textContent='Suche nur in Eingangsrechnungen …';
+  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
+  incomingSection.hidden=true;incomingSupplierSection.hidden=true;
+  meta.textContent='Suche passende Lieferanten / Adressen …';
 
   try{
-    const r=await fetch('/search-incoming?q='+encodeURIComponent(term),{cache:'no-store'});
+    const r=await fetch('/incoming/suppliers?q='+encodeURIComponent(term),{cache:'no-store'});
     const data=await r.json();
     if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
 
-    incomingAll=data.documents||[];
-
-    const years=Object.entries(data.years||{}).sort((a,b)=>{
-      if(a[0]==='ohne Jahr')return 1;
-      if(b[0]==='ohne Jahr')return -1;
-      return Number(b[0])-Number(a[0]);
-    });
-
-    incomingTitle.textContent='Lieferant: '+term;
-    incomingSub.textContent=incomingAll.length+' Eingangsrechnungen gefunden · nur Rechnungseingang';
-
-    incomingYears.innerHTML=
-      '<button class="chip active" type="button" data-year="all">Alle <strong>'+incomingAll.length+'</strong></button>'+
-      years.map(([y,c])=>'<button class="chip" type="button" data-year="'+esc(y)+'">'+esc(y)+' <strong>'+c+'</strong></button>').join('');
-
-    incomingYears.querySelectorAll('[data-year]').forEach(btn=>{
-      btn.onclick=()=>renderIncomingYear(btn.dataset.year);
-    });
-
-    renderIncomingYear('all');
-    incomingSection.hidden=false;
-    meta.textContent=incomingAll.length+' Eingangsrechnungen · Lieferantensuche "'+term+'"';
+    incomingCandidates=data.suppliers||[];
+    renderSupplierCandidates();
+    meta.textContent=incomingCandidates.length+
+      ' passende Lieferanten/Adressen · bitte aktiv auswählen';
   }catch(e){
-    meta.innerHTML='<span class="error">Eingangsrechnungssuche fehlgeschlagen: '+esc(e.message)+'</span>';
+    meta.innerHTML='<span class="error">Lieferantensuche fehlgeschlagen: '+esc(e.message)+'</span>';
   }finally{
     loader.style.display='none';
   }
 }
+
+async function selectIncomingSupplier(supplier){
+  if(!supplier)return;
+  selectedSupplier=supplier;
+
+  incomingSupplierSection.hidden=true;
+  incomingSection.hidden=false;
+
+  incomingTitle.textContent=supplier.name||'Lieferant';
+  incomingSupplierAddress.textContent=supplier.address||'';
+  incomingSupplierNumber.textContent=supplier.supplierNumber
+    ? 'Lieferant/Kundennr. '+supplier.supplierNumber
+    : '';
+  incomingSub.textContent='Rechnungen werden geladen …';
+  incomingTextQ.value='';
+  incomingTextMeta.textContent='';
+  incomingGrouped.innerHTML='';
+
+  await loadSupplierInvoices('');
+  incomingSection.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function monthLabel(month, fallback){
+  const names=['','Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  return names[Number(month)||0]||fallback||'Ohne Monat';
+}
+
+function renderIncomingDoc(d){
+  const date=d.invoiceDate
+    ? d.invoiceDate.split('-').reverse().join('.')
+    : '';
+  return `<div class="card doc">
+    <img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
+    <div>
+      ${date?`<div class="day-date">${esc(date)}</div>`:''}
+      <div class="docname">${esc(d.filename||'Eingangsrechnung')}</div>
+      ${d.amount!==null&&d.amount!==undefined
+        ? `<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
+      ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
+      <div class="actions">
+        <a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderIncomingGrouped(rows, yearSummary){
+  if(!rows.length){
+    incomingGrouped.innerHTML='<div class="empty">Keine Rechnungen für diese Auswahl gefunden.</div>';
+    return;
+  }
+
+  const years=new Map();
+  rows.forEach(d=>{
+    const y=String(d.year||'ohne Jahr');
+    if(!years.has(y))years.set(y,new Map());
+    const m=String(d.month||0);
+    if(!years.get(y).has(m))years.get(y).set(m,[]);
+    years.get(y).get(m).push(d);
+  });
+
+  const yearKeys=[...years.keys()].sort((a,b)=>{
+    if(a==='ohne Jahr')return 1;if(b==='ohne Jahr')return -1;
+    return Number(b)-Number(a);
+  });
+
+  incomingGrouped.innerHTML=yearKeys.map(y=>{
+    const ys=yearSummary?.[y]||{};
+    const totalKnown=Number(ys.amountCount||0);
+    const totalCount=Number(ys.count||0);
+    const yearAmount=Number(ys.amount||0);
+
+    const months=years.get(y);
+    const monthKeys=[...months.keys()].sort((a,b)=>Number(b)-Number(a));
+
+    const monthHtml=monthKeys.map(m=>{
+      const docsForMonth=months.get(m);
+      const title=monthLabel(m,docsForMonth[0]?.monthName);
+      return `<div class="month-block">
+        <div class="month-title">${esc(title)} · ${docsForMonth.length}</div>
+        <div class="doc-list">${docsForMonth.map(renderIncomingDoc).join('')}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="year-block">
+      <div class="year-header">
+        <div class="year-name">${esc(y)}</div>
+        <div class="year-total">
+          <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
+          <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
+        </div>
+      </div>
+      ${monthHtml}
+    </div>`;
+  }).join('');
+}
+
+async function loadSupplierInvoices(textQuery=''){
+  if(!selectedSupplier)return;
+
+  loader.style.display='block';
+  incomingTextMeta.textContent=textQuery
+    ? 'Suche innerhalb der Rechnungen …'
+    : 'Lade Lieferantenakte …';
+
+  try{
+    const params=new URLSearchParams({
+      name:selectedSupplier.name||'',
+      address:selectedSupplier.address||'',
+      q:textQuery||''
+    });
+
+    const r=await fetch('/incoming/invoices?'+params.toString(),{cache:'no-store'});
+    const data=await r.json();
+    if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+
+    incomingAll=data.documents||[];
+    incomingSub.textContent=incomingAll.length+' Eingangsrechnungen'+
+      (textQuery?' · Textfilter: "'+textQuery+'"':'');
+    incomingTextMeta.textContent=textQuery
+      ? incomingAll.length+' Treffer innerhalb dieses Lieferanten'
+      : 'Eigene Textsuche nur innerhalb der Rechnungen dieses Lieferanten';
+
+    renderIncomingGrouped(incomingAll,data.years||{});
+  }catch(e){
+    incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
+  }finally{
+    loader.style.display='none';
+  }
+}
+
+incomingTextGo.onclick=()=>loadSupplierInvoices(incomingTextQ.value.trim());
+incomingTextQ.addEventListener('keydown',e=>{
+  if(e.key==='Enter')loadSupplierInvoices(incomingTextQ.value.trim());
+});
+
+backToSuppliers.onclick=()=>{
+  selectedSupplier=null;
+  incomingSection.hidden=true;
+  incomingSupplierSection.hidden=false;
+  meta.textContent=incomingCandidates.length+
+    ' passende Lieferanten/Adressen · bitte aktiv auswählen';
+  incomingSupplierSection.scrollIntoView({behavior:'smooth',block:'start'});
+};
+
 
 async function runSearch(term,isRefined=false){
   term=String(term||'').trim();if(!term){q.focus();return}
@@ -1555,8 +2048,8 @@ saveNewJob.onclick=async()=>{
   finally{saveNewJob.disabled=false}
 };
 
-go.onclick=()=>searchMode==='incoming'?runIncomingSearch(q.value):runSearch(q.value,false);
-q.addEventListener('keydown',e=>{if(e.key==='Enter'){searchMode==='incoming'?runIncomingSearch(q.value):runSearch(q.value,false)}});
+go.onclick=()=>searchMode==='incoming'?runIncomingSupplierSearch(q.value):runSearch(q.value,false);
+q.addEventListener('keydown',e=>{if(e.key==='Enter'){searchMode==='incoming'?runIncomingSupplierSearch(q.value):runSearch(q.value,false)}});
 q.focus();
 </script>
 </body>
@@ -1579,7 +2072,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.0",
+        "version": "0.11.1",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -1890,23 +2383,47 @@ def kristine_job_create():
 
 
 
-@app.get("/search-incoming")
-def search_incoming():
+@app.get("/incoming/suppliers")
+def incoming_suppliers():
     q = str(request.args.get("q", "")).strip()
     if len(q) < 2:
-        return jsonify({"ok": False, "error": "Bitte mindestens 2 Zeichen vom Lieferantennamen eingeben."}), 400
+        return jsonify({
+            "ok": False,
+            "error": "Bitte mindestens 2 Zeichen vom Lieferanten oder der Adresse eingeben."
+        }), 400
     try:
-        documents = search_incoming_invoices(q)
-        years = {}
-        for d in documents:
-            y = str(d.get("year") or "ohne Jahr")
-            years[y] = years.get(y, 0) + 1
+        suppliers = incoming_supplier_candidates(q)
         return jsonify({
             "ok": True,
             "query": q,
+            "suppliers": suppliers,
+            "count": len(suppliers),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/incoming/invoices")
+def incoming_invoices():
+    name = str(request.args.get("name", "")).strip()
+    address = str(request.args.get("address", "")).strip()
+    text_query = str(request.args.get("q", "")).strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "Lieferant fehlt."}), 400
+
+    try:
+        documents = incoming_supplier_invoices(name, address, text_query)
+        return jsonify({
+            "ok": True,
+            "supplier": {
+                "name": name,
+                "address": address,
+            },
+            "textQuery": text_query,
             "documents": documents,
             "count": len(documents),
-            "years": years
+            "years": incoming_year_summary(documents),
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -1976,7 +2493,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.0 - Projekte/Firmenwissen + eigener Eingangsrechnungsmodus")
+    print("Version: 0.11.1 - Lieferantenauswahl + Jahresumsatz + Rechnungstextsuche")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
@@ -1995,7 +2512,7 @@ if __name__ == "__main__":
     serve(
         app,
         listen=f"127.0.0.1:5051 {TAILSCALE_IP}:5051",
-        threads=8,
+        threads=16,
         expose_tracebacks=False,
         clear_untrusted_proxy_headers=True,
         ident="KRISTINE",
