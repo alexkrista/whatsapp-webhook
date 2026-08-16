@@ -34,7 +34,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming"}
 
 
 def _request_is_local():
@@ -914,6 +914,74 @@ def search_pdf(terms):
     return result
 
 
+
+def search_incoming_invoices(query, limit=500):
+    q = str(query or "").strip()
+    if len(q) < 2:
+        return []
+
+    terms = [x.strip() for x in re.split(r"\s+", q) if x.strip()]
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        has_source = "source" in cols
+        has_year = "doc_year" in cols
+        has_logical = "logical_id" in cols
+
+        select = ["filename","path","dokumenttyp","modified","text"]
+        if has_source: select.append("source")
+        if has_year: select.append("doc_year")
+        if has_logical: select.append("logical_id")
+
+        sql = "SELECT " + ",".join(select) + " FROM pdf_index WHERE 1=1 "
+        if has_source:
+            sql += " AND source='EINGANG' "
+        else:
+            sql += r" AND path LIKE '%\Dokman\%' "
+
+        params = []
+        for term in terms:
+            like = f"%{term}%"
+            sql += " AND (text LIKE ? OR filename LIKE ?) "
+            params.extend([like, like])
+
+        sql += " ORDER BY modified DESC LIMIT ?"
+        params.append(max(1, min(int(limit or 500), 1000)))
+
+        rows = con.execute(sql, params).fetchall()
+        result, seen = [], set()
+
+        for row in rows:
+            item = dict(row)
+            logical = str(item.get("logical_id") or "").strip()
+            key = logical or str(item.get("path") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+
+            dt = parse_print_time(item.get("filename"), item.get("modified"))
+            item["printDate"] = dt.date().isoformat() if dt else None
+            item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+            item["year"] = item.get("doc_year") or (dt.year if dt else None)
+
+            raw = " ".join(str(item.get("text") or "").split())
+            low = raw.lower()
+            positions = [low.find(t.lower()) for t in terms if low.find(t.lower()) >= 0]
+            if positions:
+                pos = min(positions)
+                item["snippet"] = raw[max(0,pos-120):min(len(raw),pos+420)]
+            else:
+                item["snippet"] = raw[:420]
+
+            item.pop("text", None)
+            result.append(item)
+
+        return result
+    finally:
+        con.close()
+
+
 def validate_pdf_path(raw_path):
     path = Path(str(raw_path or "").strip())
     if not str(path):
@@ -970,6 +1038,9 @@ body{min-height:100vh}
 .brand h1{margin:0;font-size:28px;letter-spacing:-.7px}
 .brand small{color:var(--muted);font-weight:600}
 .hero{background:linear-gradient(180deg,var(--panel),#131519);border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 14px 40px rgba(0,0,0,.22)}
+.mode-switch{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.mode{background:#20232a;color:#dfe3e8;border:1px solid var(--line);min-height:40px;padding:8px 13px}
+.mode.active{background:#fff;color:#111}
 .searchrow{display:flex;gap:10px}
 input[type=search],input[type=text],select{width:100%;border:1px solid var(--line);background:#0d0f12;color:var(--text);border-radius:14px;padding:13px 14px;font-size:16px;outline:none}
 input:focus,select:focus{border-color:#5f6774}
@@ -1026,6 +1097,8 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 }
 @media (max-width:520px){
   .brand h1{font-size:25px}
+  .mode-switch{display:grid;grid-template-columns:1fr}
+  .mode{width:100%}
   .searchrow{display:grid;grid-template-columns:1fr}
   .searchrow button{height:50px}
   .formgrid{grid-template-columns:1fr}
@@ -1044,6 +1117,10 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
   </div>
 
   <div class="hero">
+    <div class="mode-switch">
+      <button id="modeProjects" class="mode active" type="button">🧠 Projekte / Firmenwissen</button>
+      <button id="modeIncoming" class="mode" type="button">🧾 Eingangsrechnungen</button>
+    </div>
     <div class="searchrow">
       <input id="q" type="search" placeholder="Baustelle, Kunde, Nummer, Adresse …" autocomplete="off">
       <button id="go">Suchen</button>
@@ -1074,6 +1151,15 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     <div class="section-head"><h2>Dokumente & Quellen</h2></div>
     <div id="sourceTypes"></div>
     <div id="docs"></div>
+  </div>
+  <div class="section" id="incomingSection" hidden>
+    <div class="section-head"><h2>Eingangsrechnungen</h2></div>
+    <div class="card">
+      <div class="project-title" id="incomingTitle">Lieferant</div>
+      <div class="sub" id="incomingSub"></div>
+      <div class="chips" id="incomingYears"></div>
+    </div>
+    <div class="doc-list" id="incomingDocs"></div>
   </div>
 
   <div class="footer">Privater Zugriff über Tailscale</div>
@@ -1129,11 +1215,14 @@ const ps=document.getElementById('projectsSection'),ds=document.getElementById('
 const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
 const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
 const newFromSelection=document.getElementById('newFromSelection');
+const modeProjects=document.getElementById('modeProjects'),modeIncoming=document.getElementById('modeIncoming');
+const incomingSection=document.getElementById('incomingSection'),incomingDocs=document.getElementById('incomingDocs');
+const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub'),incomingYears=document.getElementById('incomingYears');
 const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null;
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[];
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -1311,6 +1400,90 @@ function renderDocumentTypes(sourceFilter=''){
   });
 }
 
+
+function setSearchMode(mode){
+  searchMode=mode;
+  modeProjects.classList.toggle('active',mode==='projects');
+  modeIncoming.classList.toggle('active',mode==='incoming');
+
+  ps.hidden=true;ds.hidden=true;incomingSection.hidden=true;
+  addressBar.hidden=true;summary.hidden=true;
+  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';incomingDocs.innerHTML='';
+
+  if(mode==='incoming'){
+    q.placeholder='Lieferant suchen, z. B. Sto …';
+    meta.textContent='Nur Eingangsrechnungen · Suche nach Lieferantennamen';
+  }else{
+    q.placeholder='Baustelle, Kunde, Nummer, Adresse …';
+    meta.textContent='WinWorker + PDF-Archiv';
+  }
+  q.focus();
+}
+
+modeProjects.onclick=()=>setSearchMode('projects');
+modeIncoming.onclick=()=>setSearchMode('incoming');
+
+function renderIncomingYear(year='all'){
+  const rows=year==='all'
+    ? incomingAll
+    : incomingAll.filter(d=>String(d.year||'ohne Jahr')===String(year));
+
+  incomingDocs.innerHTML=rows.length
+    ? rows.map(renderDoc).join('')
+    : '<div class="empty">Keine Eingangsrechnungen gefunden.</div>';
+
+  incomingYears.querySelectorAll('[data-year]').forEach(b=>{
+    b.classList.toggle('active',b.dataset.year===String(year));
+  });
+}
+
+async function runIncomingSearch(term){
+  term=String(term||'').trim();
+
+  if(term.length<2){
+    meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen vom Lieferantennamen eingeben.</span>';
+    q.focus();
+    return;
+  }
+
+  loader.style.display='block';
+  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;incomingSection.hidden=true;
+  meta.textContent='Suche nur in Eingangsrechnungen …';
+
+  try{
+    const r=await fetch('/search-incoming?q='+encodeURIComponent(term),{cache:'no-store'});
+    const data=await r.json();
+    if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+
+    incomingAll=data.documents||[];
+
+    const years=Object.entries(data.years||{}).sort((a,b)=>{
+      if(a[0]==='ohne Jahr')return 1;
+      if(b[0]==='ohne Jahr')return -1;
+      return Number(b[0])-Number(a[0]);
+    });
+
+    incomingTitle.textContent='Lieferant: '+term;
+    incomingSub.textContent=incomingAll.length+' Eingangsrechnungen gefunden · nur Rechnungseingang';
+
+    incomingYears.innerHTML=
+      '<button class="chip active" type="button" data-year="all">Alle <strong>'+incomingAll.length+'</strong></button>'+
+      years.map(([y,c])=>'<button class="chip" type="button" data-year="'+esc(y)+'">'+esc(y)+' <strong>'+c+'</strong></button>').join('');
+
+    incomingYears.querySelectorAll('[data-year]').forEach(btn=>{
+      btn.onclick=()=>renderIncomingYear(btn.dataset.year);
+    });
+
+    renderIncomingYear('all');
+    incomingSection.hidden=false;
+    meta.textContent=incomingAll.length+' Eingangsrechnungen · Lieferantensuche "'+term+'"';
+  }catch(e){
+    meta.innerHTML='<span class="error">Eingangsrechnungssuche fehlgeschlagen: '+esc(e.message)+'</span>';
+  }finally{
+    loader.style.display='none';
+  }
+}
+
 async function runSearch(term,isRefined=false){
   term=String(term||'').trim();if(!term){q.focus();return}
   if(!isRefined){
@@ -1382,8 +1555,8 @@ saveNewJob.onclick=async()=>{
   finally{saveNewJob.disabled=false}
 };
 
-go.onclick=()=>runSearch(q.value,false);
-q.addEventListener('keydown',e=>{if(e.key==='Enter')runSearch(q.value,false)});
+go.onclick=()=>searchMode==='incoming'?runIncomingSearch(q.value):runSearch(q.value,false);
+q.addEventListener('keydown',e=>{if(e.key==='Enter'){searchMode==='incoming'?runIncomingSearch(q.value):runSearch(q.value,false)}});
 q.focus();
 </script>
 </body>
@@ -1406,7 +1579,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.10.2",
+        "version": "0.11.0",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -1716,6 +1889,29 @@ def kristine_job_create():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+
+@app.get("/search-incoming")
+def search_incoming():
+    q = str(request.args.get("q", "")).strip()
+    if len(q) < 2:
+        return jsonify({"ok": False, "error": "Bitte mindestens 2 Zeichen vom Lieferantennamen eingeben."}), 400
+    try:
+        documents = search_incoming_invoices(q)
+        years = {}
+        for d in documents:
+            y = str(d.get("year") or "ohne Jahr")
+            years[y] = years.get(y, 0) + 1
+        return jsonify({
+            "ok": True,
+            "query": q,
+            "documents": documents,
+            "count": len(documents),
+            "years": years
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.post("/open")
 def open_pdf():
     try:
@@ -1780,7 +1976,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.10.2 - Grosse Dokumentvorschau Desktop + Mobile 1-spaltig")
+    print("Version: 0.11.0 - Projekte/Firmenwissen + eigener Eingangsrechnungsmodus")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
