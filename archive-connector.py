@@ -215,13 +215,23 @@ def ww_address_search(query, limit=25):
             k.sOrt,
             k.lLieferantenNr,
             k.sUStIDNr,
-            k.sL_KdnNr
+            k.sL_KdnNr,
+            ISNULL(eb.cnt, 0) AS IncomingCount,
+            eb.LastIncomingDate
         FROM dbo.Kunden AS k
+        OUTER APPLY (
+            SELECT
+                COUNT(*) AS cnt,
+                MAX(e.dzBelegdatum) AS LastIncomingDate
+            FROM WinWorker_Projekte_Standard.dbo.Eingangsbelege AS e
+            WHERE e.lVonAdrIndex = k.StammIndex
+        ) AS eb
         WHERE {" AND ".join(conditions)}
         ORDER BY
+            CASE WHEN ISNULL(eb.cnt,0) > 0 THEN 0 ELSE 1 END,
+            ISNULL(eb.cnt,0) DESC,
             CASE WHEN ISNULL(k.sFirma,'') LIKE ? THEN 0 ELSE 1 END,
-            CASE WHEN k.lKundenNr IS NULL THEN 1 ELSE 0 END,
-            k.lKundenNr,
+            CASE WHEN k.lLieferantenNr IS NULL THEN 1 ELSE 0 END,
             k.sFirma,
             k.sName,
             k.sOrt
@@ -247,6 +257,8 @@ def ww_address_search(query, limit=25):
             "supplierNumber": str(r.lLieferantenNr or ""),
             "vatId": str(r.sUStIDNr or "").strip(),
             "ourCustomerNumber": str(r.sL_KdnNr or "").strip(),
+            "incomingCount": int(r.IncomingCount or 0),
+            "lastIncomingDate": _iso_date(r.LastIncomingDate),
             "address": ", ".join(
                 x for x in [
                     (r.sStrasse or "").strip(),
@@ -2702,6 +2714,9 @@ function renderSupplierCandidates(){
         <div class="project-title">${esc(s.name||'Adresse')}</div>
         ${s.person&&s.person!==s.name?`<div class="sub">${esc(s.person)}</div>`:''}
         ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
+        ${Number(s.incomingCount||0)>0
+          ? `<div class="payment-ok">${Number(s.incomingCount)} WW-Eingangsbelege${s.lastIncomingDate?' · zuletzt '+esc(s.lastIncomingDate.split('-').reverse().join('.')):''}</div>`
+          : `<div class="sub">Keine WW-Eingangsbelege auf dieser Adresse</div>`}
         ${s.supplierNumber?`<div class="sub">Lieferantennr. ${esc(s.supplierNumber)}</div>`:''}
         ${s.ourCustomerNumber?`<div class="sub">Unsere KundenNr. dort: ${esc(s.ourCustomerNumber)}</div>`:''}
         ${s.vatId?`<div class="sub">UID ${esc(s.vatId)}</div>`:''}
@@ -3191,7 +3206,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.0",
+        "version": "0.12.1",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3749,7 +3764,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.0 - WW Eingangsbelege als Wahrheit + Stammdatenwaechter")
+    print("Version: 0.12.1 - WW Lieferantenadressen nach echten Eingangsbelegen sortiert")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
