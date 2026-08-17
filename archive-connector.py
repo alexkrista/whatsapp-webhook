@@ -2461,6 +2461,37 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
   .doc{padding:12px}
   .thumb{width:100%;aspect-ratio:210/297}
 }
+
+/* 0.12.6: Jahresübersicht lesbar – keine überlappenden Pills */
+#incomingYears{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+  margin-top:10px;
+  overflow:visible !important;
+}
+#incomingYears .year-pill,
+#incomingYears button,
+#incomingYears > *{
+  width:100%;
+  min-width:0;
+  height:auto !important;
+  min-height:42px;
+  margin:0 !important;
+  padding:9px 12px;
+  white-space:normal !important;
+  overflow:visible !important;
+  line-height:1.25;
+  text-align:left;
+  box-sizing:border-box;
+}
+@media(max-width:700px){
+  #incomingYears{
+    grid-template-columns:1fr;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -3292,7 +3323,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.5",
+        "version": "0.12.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3850,7 +3881,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.5 - PDF exakt via gDMID und sDocID")
+    print("Version: 0.12.6 - Jahresuebersicht responsive ohne Ueberlagerung")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
