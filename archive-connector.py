@@ -2492,6 +2492,31 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
   }
 }
 
+
+.year-summary-grid{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+  margin-top:10px;
+  overflow:visible !important;
+}
+.year-summary-grid .year-summary-pill{
+  display:block;
+  width:100%;
+  min-width:0;
+  margin:0 !important;
+  padding:9px 12px;
+  white-space:normal !important;
+  line-height:1.3;
+  box-sizing:border-box;
+}
+@media(max-width:700px){
+  .year-summary-grid{
+    grid-template-columns:1fr;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -2832,6 +2857,7 @@ function setSearchMode(mode){
   addressBar.hidden=true;summary.hidden=true;
   projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
   incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
+  incomingTextMeta.classList.remove('year-summary-grid');
 
   if(mode==='incoming'){
     q.placeholder='Lieferant oder Adresse in WinWorker suchen, z. B. Morscher …';
@@ -3118,12 +3144,13 @@ async function loadSupplierInvoices(textQuery=''){
       `<span class="ww-truth">WW-Eingangsbelege</span>`+
       (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
 
+    incomingTextMeta.classList.toggle('year-summary-grid',!textQuery);
     incomingTextMeta.innerHTML=textQuery
       ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
       : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
           const s=yearly[y]||{};
-          return `<span class="pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))}</span>`;
-        }).join(' ');
+          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))}</span>`;
+        }).join('');
 
     renderIncomingGrouped(incomingAll,data.years||{});
   }catch(e){
@@ -3323,7 +3350,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.6",
+        "version": "0.12.7",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3881,7 +3908,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.6 - Jahresuebersicht responsive ohne Ueberlagerung")
+    print("Version: 0.12.7 - Jahresuebersicht echter DOM-Fix")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
