@@ -35,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/supplier-links", "/incoming/supplier-links/connect"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/unassigned"}
 
 
 def _request_is_local():
@@ -133,95 +133,278 @@ SQL_USER = "kristine_reader"
 
 SCHEMA_INDEX_FILE = DB.parent / "winworker_sql_structure_index.json"
 
-SUPPLIER_LINKS_FILE = DB.parent / "brain_supplier_links.json"
+BRAIN_SUPPLIER_MAP_FILE = DB.parent / "brain_supplier_map.json"
 
 
-def _load_supplier_links():
+def _load_brain_supplier_map():
     """
-    Persistente, rein additive Brain-Zuordnung:
-    Original-Supplier-Keys bleiben unverändert; wir speichern nur Verbindungen darüber.
-    Format:
-      {"groups": {"canonicalKey": ["keyA","keyB", ...]}}
+    Persistente Brain-Zuordnung.
+    - addressLinks: erkannter PDF-Supplier-Key -> WW-StammIndex
+    - invoiceLinks: einzelne Rechnung/logical_id/path -> WW-StammIndex
+    Originaldaten werden nie verändert.
     """
-    if not SUPPLIER_LINKS_FILE.exists():
-        return {"groups": {}}
+    if not BRAIN_SUPPLIER_MAP_FILE.exists():
+        return {"addressLinks": {}, "invoiceLinks": {}}
     try:
-        data = json.loads(SUPPLIER_LINKS_FILE.read_text(encoding="utf-8"))
-        groups = data.get("groups") if isinstance(data, dict) else {}
-        if not isinstance(groups, dict):
-            groups = {}
-        clean = {}
-        for canonical, keys in groups.items():
-            vals = sorted({str(x).strip() for x in (keys or []) if str(x).strip()})
-            if vals:
-                canonical = str(canonical or vals[0]).strip() or vals[0]
-                clean[canonical] = vals
-        return {"groups": clean}
+        data = json.loads(BRAIN_SUPPLIER_MAP_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "addressLinks": dict(data.get("addressLinks") or {}),
+            "invoiceLinks": dict(data.get("invoiceLinks") or {}),
+        }
     except Exception:
-        return {"groups": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}}
 
 
-def _save_supplier_links(data):
-    SUPPLIER_LINKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = SUPPLIER_LINKS_FILE.with_suffix(".tmp")
+def _save_brain_supplier_map(data):
+    BRAIN_SUPPLIER_MAP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = BRAIN_SUPPLIER_MAP_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(SUPPLIER_LINKS_FILE)
+    tmp.replace(BRAIN_SUPPLIER_MAP_FILE)
 
 
-def _supplier_link_index():
-    data = _load_supplier_links()
-    key_to_canonical = {}
-    groups = {}
-    for canonical, keys in data.get("groups", {}).items():
-        all_keys = sorted(set([canonical, *keys]))
-        groups[canonical] = all_keys
-        for key in all_keys:
-            key_to_canonical[key] = canonical
-    return data, key_to_canonical, groups
+def _invoice_identity(item):
+    return str(item.get("logical_id") or item.get("path") or "").strip()
 
 
-def _canonical_supplier_key(raw_key):
-    key = str(raw_key or "").strip()
-    if not key:
-        return ""
-    _, key_to_canonical, _ = _supplier_link_index()
-    return key_to_canonical.get(key, key)
+def ww_address_search(query, limit=25):
+    """
+    Echte WinWorker-Adressen als Master.
+    Dieselbe Adresswelt wie bei Projekten; unabhängig davon, ob bereits
+    eine Rechnung richtig erkannt wurde.
+    """
+    q = str(query or "").strip()
+    if len(q) < 2:
+        return []
+
+    terms = [x for x in re.split(r"\s+", q) if x]
+    con = sql_connection("WinWorker_Adressen_Standard")
+    cur = con.cursor()
+
+    conditions = []
+    params = []
+    for term in terms:
+        like = f"%{term}%"
+        conditions.append("""
+            (
+                ISNULL(k.sFirma,'') LIKE ?
+                OR ISNULL(k.sName,'') LIKE ?
+                OR ISNULL(k.sVorname,'') LIKE ?
+                OR ISNULL(k.sStrasse,'') LIKE ?
+                OR ISNULL(k.sPLZ,'') LIKE ?
+                OR ISNULL(k.sOrt,'') LIKE ?
+                OR CAST(ISNULL(k.lKundenNr,0) AS varchar(40)) LIKE ?
+            )
+        """)
+        params.extend([like] * 7)
+
+    sql = f"""
+        SELECT TOP {max(1, min(int(limit or 25), 100))}
+            k.StammIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+        FROM dbo.Kunden AS k
+        WHERE {" AND ".join(conditions)}
+        ORDER BY
+            CASE WHEN ISNULL(k.sFirma,'') LIKE ? THEN 0 ELSE 1 END,
+            CASE WHEN k.lKundenNr IS NULL THEN 1 ELSE 0 END,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sOrt
+    """
+    exact_like = f"%{q}%"
+    rows = cur.execute(sql, *(params + [exact_like])).fetchall()
+    con.close()
+
+    out = []
+    for r in rows:
+        name = (r.sFirma or "").strip()
+        person = " ".join(x for x in [r.sVorname or "", r.sName or ""] if x).strip()
+        if not name:
+            name = person or f"Adresse {r.StammIndex}"
+        out.append({
+            "addressId": str(r.StammIndex),
+            "customerNumber": str(r.lKundenNr or ""),
+            "name": name,
+            "person": person,
+            "street": r.sStrasse or "",
+            "postalCode": r.sPLZ or "",
+            "city": r.sOrt or "",
+            "address": ", ".join(
+                x for x in [
+                    (r.sStrasse or "").strip(),
+                    " ".join(x for x in [(r.sPLZ or "").strip(), (r.sOrt or "").strip()] if x)
+                ] if x
+            ),
+        })
+    return out
 
 
-def _supplier_group_keys(raw_key):
-    key = str(raw_key or "").strip()
-    if not key:
-        return set()
-    _, key_to_canonical, groups = _supplier_link_index()
-    canonical = key_to_canonical.get(key, key)
-    return set(groups.get(canonical, [key]))
+def _address_tokens(address):
+    tokens = []
+    for value in (
+        address.get("name"), address.get("person"), address.get("street"),
+        address.get("postalCode"), address.get("city"), address.get("customerNumber")
+    ):
+        nv = _norm_supplier(value)
+        tokens.extend([x for x in nv.split() if len(x) >= 3])
+    # noisy generic words should not drive matching
+    stop = {"gmbh","ges","mbh","kg","und","co","strasse","straße","austria","osterreich","österreich"}
+    return [x for x in dict.fromkeys(tokens) if x not in stop]
 
 
-def _connect_supplier_keys(keys):
-    wanted = [str(x or "").strip() for x in keys if str(x or "").strip()]
-    wanted = list(dict.fromkeys(wanted))
-    if len(wanted) < 2:
-        raise ValueError("Mindestens zwei Lieferanten/Adressen auswählen.")
+def _invoice_linked_address_id(item, supplier_map):
+    iid = _invoice_identity(item)
+    if iid and iid in supplier_map.get("invoiceLinks", {}):
+        return str(supplier_map["invoiceLinks"][iid])
 
-    data, key_to_canonical, groups = _supplier_link_index()
+    ident = item.get("_supplier") or {}
+    skey = str(ident.get("key") or "")
+    if skey and skey in supplier_map.get("addressLinks", {}):
+        return str(supplier_map["addressLinks"][skey])
+    return ""
 
-    merged = set(wanted)
-    touched_canonicals = set()
-    for key in wanted:
-        canonical = key_to_canonical.get(key)
-        if canonical:
-            touched_canonicals.add(canonical)
-            merged.update(groups.get(canonical, []))
 
-    # Stabiler Canonical-Key: bestehende Gruppe bevorzugen, sonst erster gewählter Key.
-    canonical = next(iter(sorted(touched_canonicals)), wanted[0])
+def incoming_for_address(address_id, text_query=""):
+    address_id = str(address_id or "").strip()
+    if not address_id:
+        return []
 
-    for old in touched_canonicals:
-        data["groups"].pop(old, None)
+    supplier_map = _load_brain_supplier_map()
+    qtokens = [x for x in _norm_supplier(text_query).split() if x]
+    result = []
 
-    data.setdefault("groups", {})[canonical] = sorted(merged)
-    _save_supplier_links(data)
-    return canonical, sorted(merged)
+    for item in _incoming_catalog():
+        if _invoice_linked_address_id(item, supplier_map) != address_id:
+            continue
+        raw = str(item.get("_raw_text") or "")
+        if qtokens:
+            nr = _norm_supplier(raw)
+            if not all(t in nr for t in qtokens):
+                continue
+        result.append(_incoming_public_item(item))
+
+    result.sort(key=lambda x: (x.get("invoiceDateTime") or "", x.get("filename") or ""), reverse=True)
+    return result
+
+
+def _incoming_public_item(item):
+    raw = str(item.get("_raw_text") or "")
+    compact = " ".join(raw.split())
+    ident = item.get("_supplier") or {}
+    return {
+        "filename": item.get("filename"),
+        "path": item.get("path"),
+        "logical_id": item.get("logical_id"),
+        "invoiceId": _invoice_identity(item),
+        "dokumenttyp": item.get("dokumenttyp") or "Eingangsrechnung",
+        "invoiceDate": item.get("invoiceDate"),
+        "invoiceDateTime": item.get("invoiceDateTime"),
+        "year": item.get("year"),
+        "month": item.get("month"),
+        "monthName": item.get("monthName"),
+        "day": item.get("day"),
+        "amount": item.get("amount"),
+        "snippet": compact[:420],
+        "detectedSupplierKey": ident.get("key") or "",
+        "detectedSupplierName": ident.get("name") or "",
+        "detectedSupplierAddress": ident.get("address") or "",
+        "detectedSupplierNumber": ident.get("supplierNumber") or "",
+    }
+
+
+def unassigned_invoice_candidates(address, limit=80):
+    """
+    Kandidaten nach Auswahl einer echten WW-Adresse.
+    Wichtig: Nur Vorschläge. Verheiratet wird erst durch Klick.
+    Enthält:
+      - nicht zugeordnete Rechnungen mit brauchbaren Namens/Adresssignalen
+      - zusätzlich jüngste unzugeordnete Rechnungen, damit Fälle wie Morscher
+        (Briefkopf nur als Bild) manuell sichtbar und zuordenbar bleiben.
+    """
+    supplier_map = _load_brain_supplier_map()
+    tokens = _address_tokens(address)
+    scored = []
+
+    for item in _incoming_catalog():
+        if _invoice_linked_address_id(item, supplier_map):
+            continue
+
+        ident = item.get("_supplier") or {}
+        hay = _norm_supplier(" ".join([
+            ident.get("name") or "",
+            ident.get("address") or "",
+            ident.get("supplierNumber") or "",
+            str(item.get("_raw_text") or "")[:2500],
+            item.get("filename") or "",
+        ]))
+
+        score = 0
+        matched = []
+        for t in tokens:
+            if t and t in hay:
+                score += 3 if len(t) >= 6 else 1
+                matched.append(t)
+
+        # PLZ/Ort are particularly useful.
+        for field in ("postalCode", "city"):
+            t = _norm_supplier(address.get(field))
+            if t and t in hay:
+                score += 4
+
+        scored.append((score, item, matched))
+
+    scored.sort(key=lambda row: (
+        -row[0],
+        -(float(row[1].get("modified") or 0)),
+        str(row[1].get("filename") or "")
+    ))
+
+    positives = [x for x in scored if x[0] > 0][:max(1, min(int(limit or 80), 120))]
+    # Always append a small "unassigned latest" tail for image-header PDFs.
+    if len(positives) < 20:
+        seen = {_invoice_identity(x[1]) for x in positives}
+        for row in scored:
+            iid = _invoice_identity(row[1])
+            if iid in seen:
+                continue
+            positives.append(row)
+            seen.add(iid)
+            if len(positives) >= 20:
+                break
+
+    out = []
+    for score, item, matched in positives:
+        pub = _incoming_public_item(item)
+        pub["matchScore"] = score
+        pub["matchTerms"] = matched[:8]
+        out.append(pub)
+    return out
+
+
+def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=""):
+    address_id = str(address_id or "").strip()
+    invoice_id = str(invoice_id or "").strip()
+    supplier_key = str(supplier_key or "").strip()
+    if not address_id:
+        raise ValueError("WW-Adresse fehlt.")
+    if not invoice_id and not supplier_key:
+        raise ValueError("Rechnung oder erkannte Lieferantenvariante fehlt.")
+
+    data = _load_brain_supplier_map()
+    if supplier_key:
+        data.setdefault("addressLinks", {})[supplier_key] = address_id
+    if invoice_id:
+        data.setdefault("invoiceLinks", {})[invoice_id] = address_id
+    _save_brain_supplier_map(data)
+    return data
 
 
 def get_sql_driver():
@@ -1305,8 +1488,7 @@ def _incoming_catalog():
 def incoming_supplier_candidates(query, limit=20):
     """
     Schritt 1: nur Lieferant/Adresse.
-    Bereits manuell verbundene Varianten werden zu EINER Brain-Identität zusammengeführt.
-    Die Original-Keys bleiben als aliases erhalten.
+    Kein Treffer mehr, nur weil 'Sto' irgendwo im Artikeltext einer Hilti-Rechnung steht.
     """
     q = str(query or "").strip()
     nq = _norm_supplier(q)
@@ -1315,7 +1497,6 @@ def incoming_supplier_candidates(query, limit=20):
 
     tokens = [x for x in nq.split() if len(x) >= 2]
     grouped = {}
-    _, key_to_canonical, groups = _supplier_link_index()
 
     for item in _incoming_catalog():
         ident = item.get("_supplier")
@@ -1327,37 +1508,23 @@ def incoming_supplier_candidates(query, limit=20):
             ident.get("addressNorm") or "",
             _norm_supplier(ident.get("supplierNumber") or ""),
         ])
+
         if not all(t in searchable for t in tokens):
             continue
 
-        raw_key = ident["key"]
-        canonical = key_to_canonical.get(raw_key, raw_key)
-
-        g = grouped.setdefault(canonical, {
-            "key": canonical,
+        g = grouped.setdefault(ident["key"], {
+            "key": ident["key"],
             "name": ident.get("name") or "",
             "address": ident.get("address") or "",
             "supplierNumber": ident.get("supplierNumber") or "",
             "count": 0,
             "years": set(),
-            "aliases": set(groups.get(canonical, [canonical])),
-            "variants": {},
         })
-        g["aliases"].add(raw_key)
         g["count"] += 1
         if item.get("year"):
             g["years"].add(int(item["year"]))
 
-        variant = g["variants"].setdefault(raw_key, {
-            "key": raw_key,
-            "name": ident.get("name") or "",
-            "address": ident.get("address") or "",
-            "supplierNumber": ident.get("supplierNumber") or "",
-            "count": 0,
-        })
-        variant["count"] += 1
-
-        # Bessere sichtbare Stammdaten nachziehen.
+        # Wenn spätere Rechnung eine bessere Adresse/Nummer liefert, nachziehen.
         if not g["address"] and ident.get("address"):
             g["address"] = ident["address"]
         if not g["supplierNumber"] and ident.get("supplierNumber"):
@@ -1366,16 +1533,11 @@ def incoming_supplier_candidates(query, limit=20):
     rows = []
     for g in grouped.values():
         g["years"] = sorted(g["years"], reverse=True)
-        g["aliases"] = sorted(g["aliases"])
-        g["variants"] = sorted(
-            g["variants"].values(),
-            key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower())
-        )
-        g["linkedCount"] = len(g["aliases"])
         rows.append(g)
 
     rows.sort(key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower()))
     return rows[:max(1, min(int(limit or 20), 50))]
+
 
 def incoming_supplier_invoices(supplier_key, text_query=""):
     """
@@ -1391,11 +1553,9 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
     query_tokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
-    linked_keys = _supplier_group_keys(supplier_key) or {supplier_key}
-
     for item in _incoming_catalog():
         ident = item.get("_supplier")
-        if not ident or ident.get("key") not in linked_keys:
+        if not ident or ident.get("key") != supplier_key:
             continue
 
         raw = str(item.get("_raw_text") or "")
@@ -1580,10 +1740,16 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .supplier-choice{cursor:pointer}
 .supplier-choice:hover{border-color:#788292}
 .supplier-choice .project-title{font-size:17px}
-.supplier-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-.supplier-actions button{min-height:40px}
-.supplier-link-note{margin-top:8px;color:var(--blue);font-size:12px}
-.supplier-connect-mode{border-color:#7bb7ff!important;box-shadow:0 0 0 2px rgba(123,183,255,.12)}
+.ww-address-card{cursor:pointer}
+.ww-address-card:hover{border-color:#8994a5}
+.ww-address-card.selected{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.10)}
+.review-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.review-card{background:#17191d;border:1px solid var(--line);border-radius:18px;padding:12px}
+.review-thumb{width:100%;aspect-ratio:210/297;object-fit:contain;background:#fff;border-radius:11px}
+.review-title{font-weight:850;margin-top:9px}
+.review-match{color:var(--good);font-size:12px;margin-top:5px}
+.review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+@media(max-width:700px){.review-grid{grid-template-columns:1fr}}
 .supplier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .invoice-text-search{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
 .year-block{margin-top:20px}
@@ -1659,14 +1825,14 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     <div id="docs"></div>
   </div>
   <div class="section" id="incomingSupplierSection" hidden>
-    <div class="section-head"><h2>Lieferant auswählen</h2></div>
+    <div class="section-head"><h2>Adresse auswählen</h2></div>
     <div id="incomingSuppliers"></div>
   </div>
 
   <div class="section" id="incomingSection" hidden>
     <div class="section-head">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button id="backToSuppliers" class="dark" type="button">← Lieferant wechseln</button>
+        <button id="backToSuppliers" class="dark" type="button">← Adresse wechseln</button>
         <h2>Eingangsrechnungen</h2>
       </div>
     </div>
@@ -1689,6 +1855,12 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     </div>
 
     <div id="incomingGrouped"></div>
+
+    <div class="section" id="incomingReviewSection" hidden>
+      <div class="section-head"><h2>Noch nicht zugeordnet · einmal prüfen</h2></div>
+      <div class="meta">Unsichere Rechnung einmal anklicken → danach dauerhaft mit dieser WW-Adresse verheiratet.</div>
+      <div id="incomingReview"></div>
+    </div>
   </div>
 
   <div class="footer">Privater Zugriff über Tailscale</div>
@@ -1751,11 +1923,12 @@ const incomingTitle=document.getElementById('incomingTitle'),incomingSub=documen
 const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
 const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextMeta=document.getElementById('incomingTextMeta');
 const backToSuppliers=document.getElementById('backToSuppliers');
+const incomingReviewSection=document.getElementById('incomingReviewSection'),incomingReview=document.getElementById('incomingReview');
 const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null,supplierLinkSource=null;
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null;
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -1936,7 +2109,6 @@ function renderDocumentTypes(sourceFilter=''){
 
 function setSearchMode(mode){
   searchMode=mode;
-  supplierLinkSource=null;
   modeProjects.classList.toggle('active',mode==='projects');
   modeIncoming.classList.toggle('active',mode==='incoming');
 
@@ -1947,8 +2119,8 @@ function setSearchMode(mode){
   incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
 
   if(mode==='incoming'){
-    q.placeholder='Lieferant oder Adresse suchen, z. B. Sto …';
-    meta.textContent='Schritt 1: Lieferant/Adresse auswählen · noch keine Rechnungstextsuche';
+    q.placeholder='Lieferant oder Adresse in WinWorker suchen, z. B. Morscher …';
+    meta.textContent='Schritt 1: echte WinWorker-Adresse auswählen';
   }else{
     q.placeholder='Baustelle, Kunde, Nummer, Adresse …';
     meta.textContent='WinWorker + PDF-Archiv';
@@ -1968,127 +2140,179 @@ function invoiceMoney(v){
 function renderSupplierCandidates(){
   incomingSupplierSection.hidden=false;
   incomingSuppliers.innerHTML=incomingCandidates.length
-    ? incomingCandidates.map((s,i)=>{
-      const isSource=supplierLinkSource&&supplierLinkSource.key===s.key;
-      const linked=Number(s.linkedCount||0)>1
-        ? `<div class="supplier-link-note">🔗 ${Number(s.linkedCount)} Adress-/Namensvarianten bereits verbunden</div>`:'';
-      const variantInfo=(s.variants||[]).length>1
-        ? `<div class="sub">${(s.variants||[]).slice(0,3).map(v=>esc([v.name,v.address].filter(Boolean).join(' · '))).join('<br>')}</div>`:'';
-      return `<div class="card supplier-choice ${isSource?'supplier-connect-mode':''}" data-supplier="${i}">
-        <div class="project-title">${esc(s.name||'Lieferant')}</div>
+    ? incomingCandidates.map((s,i)=>`
+      <div class="card ww-address-card" data-supplier="${i}">
+        <div class="project-title">${esc(s.name||'Adresse')}</div>
+        ${s.person&&s.person!==s.name?`<div class="sub">${esc(s.person)}</div>`:''}
         ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
-        ${s.supplierNumber?`<div class="sub">Nr. ${esc(s.supplierNumber)}</div>`:''}
-        ${variantInfo}
-        <div class="supplier-meta">
-          <span class="pill">${Number(s.count||0)} Rechnungen</span>
-          ${(s.years||[]).slice(0,5).map(y=>`<span class="pill">${esc(y)}</span>`).join('')}
-        </div>
-        ${linked}
+        ${s.customerNumber?`<div class="sub">WW-Nr. ${esc(s.customerNumber)}</div>`:''}
         <div class="supplier-actions">
-          <button class="dark open-supplier" type="button" data-supplier="${i}">Rechnungen</button>
-          ${supplierLinkSource&&!isSource
-            ? `<button class="connect-target" type="button" data-supplier="${i}">Mit „${esc(supplierLinkSource.name||'Auswahl')}“ verbinden</button>`
-            : `<button class="dark connect-source" type="button" data-supplier="${i}">${isSource?'Verbinden abbrechen':'Verbinden'}</button>`}
+          <button type="button" data-supplier="${i}" class="choose-address">Diese Adresse auswählen</button>
         </div>
-      </div>`;
-    }).join('')
-    : '<div class="empty">Kein passender Lieferant gefunden.</div>';
+      </div>`).join('')
+    : '<div class="empty">Keine passende WinWorker-Adresse gefunden.</div>';
 
-  incomingSuppliers.querySelectorAll('.open-supplier').forEach(btn=>{
-    btn.onclick=e=>{e.stopPropagation();selectIncomingSupplier(incomingCandidates[Number(btn.dataset.supplier)])};
-  });
-  incomingSuppliers.querySelectorAll('.connect-source').forEach(btn=>{
+  incomingSuppliers.querySelectorAll('.choose-address').forEach(btn=>{
     btn.onclick=e=>{
       e.stopPropagation();
-      const row=incomingCandidates[Number(btn.dataset.supplier)];
-      supplierLinkSource=(supplierLinkSource&&supplierLinkSource.key===row?.key)?null:row;
-      renderSupplierCandidates();
-      meta.textContent=supplierLinkSource
-        ? 'Verbindungsmodus: jetzt die zweite Lieferanten-/Adresskarte auswählen'
-        : incomingCandidates.length+' passende Lieferanten/Adressen · bitte aktiv auswählen';
+      selectIncomingSupplier(incomingCandidates[Number(btn.dataset.supplier)]);
     };
   });
-  incomingSuppliers.querySelectorAll('.connect-target').forEach(btn=>{
-    btn.onclick=async e=>{
-      e.stopPropagation();
-      const target=incomingCandidates[Number(btn.dataset.supplier)];
-      if(!supplierLinkSource||!target)return;
-      await connectSupplierCards(supplierLinkSource,target);
-    };
+  incomingSuppliers.querySelectorAll('.ww-address-card').forEach(card=>{
+    card.onclick=()=>selectIncomingSupplier(incomingCandidates[Number(card.dataset.supplier)]);
   });
-}
-
-async function connectSupplierCards(a,b){
-  if(!a||!b||a.key===b.key)return;
-  const labelA=[a.name,a.address].filter(Boolean).join(' · ');
-  const labelB=[b.name,b.address].filter(Boolean).join(' · ');
-  if(!confirm(`Diese Lieferanten/Adressen dauerhaft im Brain verbinden?\n\n${labelA}\n↔\n${labelB}\n\nOriginaldaten werden NICHT verändert.`))return;
-
-  meta.textContent='Lieferanten werden verbunden …';
-  try{
-    const r=await fetch('/incoming/supplier-links/connect',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({keys:[a.key,b.key]})
-    });
-    const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||'Verbinden fehlgeschlagen');
-    supplierLinkSource=null;
-    await runIncomingSupplierSearch(q.value);
-    meta.textContent='✓ Verbunden · beide Adressen gehören jetzt zu einer Brain-Lieferantenakte';
-  }catch(e){
-    meta.innerHTML='<span class="error">Verbinden fehlgeschlagen: '+esc(e.message)+'</span>';
-  }
 }
 
 async function runIncomingSupplierSearch(term){
   term=String(term||'').trim();
   if(term.length<2){
-    meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen vom Lieferanten oder der Adresse eingeben.</span>';
+    meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen eingeben.</span>';
     q.focus();return;
   }
 
   loader.style.display='block';
   ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
   incomingSection.hidden=true;incomingSupplierSection.hidden=true;
-  meta.textContent='Suche passende Lieferanten / Adressen …';
+  meta.textContent='Suche echte WinWorker-Adressen …';
 
   try{
-    const r=await fetch('/incoming/suppliers?q='+encodeURIComponent(term),{cache:'no-store'});
+    const r=await fetch('/incoming/address-search?q='+encodeURIComponent(term),{cache:'no-store'});
     const data=await r.json();
     if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
 
-    incomingCandidates=data.suppliers||[];
+    incomingCandidates=data.addresses||[];
     renderSupplierCandidates();
     meta.textContent=incomingCandidates.length+
-      ' passende Lieferanten/Adressen · bitte aktiv auswählen';
+      ' WinWorker-Adresse(n) gefunden · bitte einmal die richtige auswählen';
   }catch(e){
-    meta.innerHTML='<span class="error">Lieferantensuche fehlgeschlagen: '+esc(e.message)+'</span>';
+    meta.innerHTML='<span class="error">Adresssuche fehlgeschlagen: '+esc(e.message)+'</span>';
   }finally{
     loader.style.display='none';
   }
 }
 
-async function selectIncomingSupplier(supplier){
-  if(!supplier)return;
-  selectedSupplier=supplier;
+async function selectIncomingSupplier(address){
+  if(!address)return;
+  selectedSupplier=address;
+  selectedWwAddress=address;
 
   incomingSupplierSection.hidden=true;
   incomingSection.hidden=false;
-
-  incomingTitle.textContent=supplier.name||'Lieferant';
-  incomingSupplierAddress.textContent=supplier.address||'';
-  incomingSupplierNumber.textContent=supplier.supplierNumber
-    ? 'Lieferant/Kundennr. '+supplier.supplierNumber
-    : '';
-  incomingSub.textContent='Rechnungen werden geladen …';
-  incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
+  incomingTitle.textContent=address.name||'Lieferant';
+  incomingSupplierAddress.textContent=address.address||'';
+  incomingSupplierNumber.textContent=address.customerNumber
+    ? 'WinWorker-Nr. '+address.customerNumber : '';
+  incomingSub.textContent='Verknüpfte Rechnungen werden geladen …';
   incomingTextQ.value='';
   incomingTextMeta.textContent='';
-  incomingGrouped.innerHTML='';
+  incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
 
   await loadSupplierInvoices('');
+  await loadUnassignedCandidates();
   incomingSection.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function loadUnassignedCandidates(){
+  if(!selectedWwAddress)return;
+  incomingReviewSection.hidden=false;
+  incomingReview.innerHTML='<div class="empty">Suche noch nicht zugeordnete Rechnungen …</div>';
+  try{
+    const params=new URLSearchParams({
+      addressId:selectedWwAddress.addressId||'',
+      name:selectedWwAddress.name||'',
+      person:selectedWwAddress.person||'',
+      street:selectedWwAddress.street||'',
+      postalCode:selectedWwAddress.postalCode||'',
+      city:selectedWwAddress.city||'',
+      customerNumber:selectedWwAddress.customerNumber||''
+    });
+    const r=await fetch('/incoming/unassigned?'+params.toString(),{cache:'no-store'});
+    const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Fehler');
+    renderUnassignedCandidates(d.documents||[]);
+  }catch(e){
+    incomingReview.innerHTML='<div class="empty error">'+esc(e.message)+'</div>';
+  }
+}
+
+function renderUnassignedCandidates(rows){
+  if(!rows.length){
+    incomingReview.innerHTML='<div class="empty">Keine offenen Kandidaten.</div>';
+    return;
+  }
+  incomingReview.innerHTML=`<div class="review-grid">`+rows.map((d,i)=>`
+    <div class="review-card">
+      <img class="review-thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
+      <div class="review-title">${esc(d.filename||'Eingangsrechnung')}</div>
+      ${d.invoiceDate?`<div class="sub">${esc(d.invoiceDate.split('-').reverse().join('.'))}</div>`:''}
+      ${d.amount!==null&&d.amount!==undefined?`<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
+      ${d.detectedSupplierName?`<div class="sub">erkannt: ${esc(d.detectedSupplierName)}</div>`:''}
+      ${Number(d.matchScore||0)>0?`<div class="review-match">möglicher Treffer · ${Number(d.matchScore)} Punkte</div>`:''}
+      <div class="review-actions">
+        <a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF prüfen</a>
+        <button type="button" data-link="${i}">✓ gehört zu ${esc(selectedWwAddress?.name||'dieser Adresse')}</button>
+      </div>
+    </div>`).join('')+`</div>`;
+
+  incomingReview.querySelectorAll('[data-link]').forEach(btn=>{
+    btn.onclick=()=>marryInvoice(rows[Number(btn.dataset.link)]);
+  });
+}
+
+async function marryInvoice(doc){
+  if(!doc||!selectedWwAddress)return;
+  const ok=confirm(`Diese Rechnung dauerhaft mit\n\n${selectedWwAddress.name}\n${selectedWwAddress.address||''}\n\nverbinden?\n\nDie Originaldatei bleibt unverändert.`);
+  if(!ok)return;
+  try{
+    const r=await fetch('/incoming/address-link',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        addressId:selectedWwAddress.addressId,
+        invoiceId:doc.invoiceId||'',
+        supplierKey:doc.detectedSupplierKey||''
+      })
+    });
+    const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
+    await loadSupplierInvoices('');
+    await loadUnassignedCandidates();
+    incomingTextMeta.textContent='✓ dauerhaft zugeordnet';
+  }catch(e){
+    incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
+  }
+}
+
+async function loadSupplierInvoices(textQuery=''){
+  if(!selectedWwAddress)return;
+
+  loader.style.display='block';
+  incomingTextMeta.textContent=textQuery
+    ? 'Suche innerhalb der zugeordneten Rechnungen …'
+    : 'Lade Lieferantenakte …';
+
+  try{
+    const params=new URLSearchParams({
+      addressId:selectedWwAddress.addressId||'',
+      q:textQuery||''
+    });
+    const r=await fetch('/incoming/address-invoices?'+params.toString(),{cache:'no-store'});
+    const data=await r.json();
+    if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+
+    incomingAll=data.documents||[];
+    incomingSub.textContent=incomingAll.length+' dauerhaft zugeordnete Eingangsrechnungen'+
+      (textQuery?' · Textfilter: "'+textQuery+'"':'');
+    incomingTextMeta.textContent=textQuery
+      ? incomingAll.length+' Treffer innerhalb dieses Lieferanten'
+      : 'Diese Akte wächst mit jeder bestätigten Zuordnung';
+
+    renderIncomingGrouped(incomingAll,data.years||{});
+  }catch(e){
+    incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
+  }finally{
+    loader.style.display='none';
+  }
 }
 
 function monthLabel(month, fallback){
@@ -2205,11 +2429,10 @@ incomingTextQ.addEventListener('keydown',e=>{
 });
 
 backToSuppliers.onclick=()=>{
-  selectedSupplier=null;
-  incomingSection.hidden=true;
+  selectedSupplier=null;selectedWwAddress=null;
+  incomingSection.hidden=true;incomingReviewSection.hidden=true;
   incomingSupplierSection.hidden=false;
-  meta.textContent=incomingCandidates.length+
-    ' passende Lieferanten/Adressen · bitte aktiv auswählen';
+  meta.textContent=incomingCandidates.length+' WinWorker-Adresse(n) · bitte auswählen';
   incomingSupplierSection.scrollIntoView({behavior:'smooth',block:'start'});
 };
 
@@ -2309,7 +2532,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.3",
+        "version": "0.11.4",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -2620,6 +2843,77 @@ def kristine_job_create():
 
 
 
+@app.get("/incoming/address-search")
+def incoming_address_search():
+    q = str(request.args.get("q", "")).strip()
+    if len(q) < 2:
+        return jsonify({"ok": False, "error": "Bitte mindestens 2 Zeichen eingeben."}), 400
+    try:
+        rows = ww_address_search(q)
+        return jsonify({"ok": True, "query": q, "addresses": rows, "count": len(rows)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/incoming/address-invoices")
+def incoming_address_invoices():
+    address_id = str(request.args.get("addressId", "")).strip()
+    text_query = str(request.args.get("q", "")).strip()
+    if not address_id:
+        return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
+    try:
+        docs = incoming_for_address(address_id, text_query)
+        return jsonify({
+            "ok": True,
+            "addressId": address_id,
+            "documents": docs,
+            "count": len(docs),
+            "years": incoming_year_summary(docs),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/incoming/unassigned")
+def incoming_unassigned():
+    try:
+        address = {
+            "addressId": str(request.args.get("addressId", "")).strip(),
+            "name": str(request.args.get("name", "")).strip(),
+            "person": str(request.args.get("person", "")).strip(),
+            "street": str(request.args.get("street", "")).strip(),
+            "postalCode": str(request.args.get("postalCode", "")).strip(),
+            "city": str(request.args.get("city", "")).strip(),
+            "customerNumber": str(request.args.get("customerNumber", "")).strip(),
+        }
+        if not address["addressId"]:
+            return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
+        docs = unassigned_invoice_candidates(address)
+        return jsonify({"ok": True, "documents": docs, "count": len(docs)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/incoming/address-link")
+def incoming_address_link():
+    try:
+        body = request.get_json(silent=True) or {}
+        address_id = str(body.get("addressId") or "").strip()
+        invoice_id = str(body.get("invoiceId") or "").strip()
+        supplier_key = str(body.get("supplierKey") or "").strip()
+        link_invoice_or_supplier_to_address(address_id, invoice_id, supplier_key)
+        return jsonify({
+            "ok": True,
+            "addressId": address_id,
+            "invoiceId": invoice_id,
+            "supplierKey": supplier_key,
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/incoming/suppliers")
 def incoming_suppliers():
     q = str(request.args.get("q", "")).strip()
@@ -2636,38 +2930,6 @@ def incoming_suppliers():
             "suppliers": suppliers,
             "count": len(suppliers),
         })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.get("/incoming/supplier-links")
-def incoming_supplier_links():
-    try:
-        data = _load_supplier_links()
-        return jsonify({
-            "ok": True,
-            "file": str(SUPPLIER_LINKS_FILE),
-            "groups": data.get("groups", {}),
-            "groupCount": len(data.get("groups", {})),
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.post("/incoming/supplier-links/connect")
-def incoming_supplier_links_connect():
-    try:
-        body = request.get_json(silent=True) or {}
-        keys = body.get("keys") or []
-        canonical, merged = _connect_supplier_keys(keys)
-        return jsonify({
-            "ok": True,
-            "canonicalKey": canonical,
-            "keys": merged,
-            "count": len(merged),
-        })
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -2758,7 +3020,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.3 - Lieferantenadressen finden + dauerhaft verbinden")
+    print("Version: 0.11.4 - WW-Adresse zuerst + Rechnung einmal dauerhaft verheiraten")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
