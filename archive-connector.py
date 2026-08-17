@@ -367,7 +367,12 @@ def _payment_state(status_text):
     if any(t in s for t in paid_terms):
         return "paid"
 
-    if "offen" in s:
+    open_terms = (
+        "offen",
+        "noch zu begleichen",
+        "zu begleichen",
+    )
+    if any(t in s for t in open_terms):
         return "open"
 
     return "unknown"
@@ -2587,6 +2592,7 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .payment-paid{color:var(--good);font-weight:850}
 .payment-unknown{color:var(--warn);font-weight:850}
 .open-total{color:#ff7777;font-weight:850}
+.open-total-zero{color:var(--good);font-weight:850}
 
 </style>
 </head>
@@ -3214,7 +3220,7 @@ async function loadSupplierInvoices(textQuery=''){
     incomingSub.innerHTML=
       `<strong>${count} Rechnungen</strong> · `+
       `<strong>${esc(invoiceMoney(totalSum))}</strong> Gesamtsumme · `+
-      `<span class="open-total">${openCount} offen · ${esc(invoiceMoney(openSum))}</span> · `+
+      `<span class="${openCount>0||openSum>0?'open-total':'open-total-zero'}">${openCount} offen · ${esc(invoiceMoney(openSum))}</span> · `+
       `<span class="ww-truth">WW-Eingangsbelege</span>`+
       (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
 
@@ -3223,7 +3229,8 @@ async function loadSupplierInvoices(textQuery=''){
       ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
       : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
           const s=yearly[y]||{};
-          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="open-total">${Number(s.openCount||0)} offen · ${esc(invoiceMoney(Number(s.openSum||0)))}</span></span>`;
+          const oc=Number(s.openCount||0), os=Number(s.openSum||0);
+          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="${oc>0||os>0?'open-total':'open-total-zero'}">${oc} offen · ${esc(invoiceMoney(os))}</span></span>`;
         }).join('');
 
     renderIncomingGrouped(incomingAll,data.years||{});
@@ -3307,7 +3314,7 @@ function renderIncomingGrouped(rows, yearSummary){
         <div class="year-total">
           <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
           <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
-          <small class="open-total">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
+          <small class="${Number(ys.openCount||0)>0||Number(ys.openSum||0)>0?'open-total':'open-total-zero'}">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
         </div>
       </div>
       ${monthHtml}
@@ -3425,7 +3432,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.9",
+        "version": "0.12.10",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -4004,7 +4011,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.9 - OP Summen und Zahlungsstatus Farben")
+    print("Version: 0.12.10 - OP Statuslogik Noch zu begleichen rot")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
