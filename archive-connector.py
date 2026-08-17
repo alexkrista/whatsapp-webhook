@@ -2649,7 +2649,7 @@ backToProjects.onclick=restorePreviousView;
 function renderDoc(d){
   const pd=d.printDate?d.printDate.split('-').reverse().join('.'):'';
   return `<div class="card doc">
-    <img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
+    ${d.path?`<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`:'<div class="thumb empty">WW</div>'}
     <div>
       <div class="docname">${esc(d.filename||'Dokument')}</div>
       <div class="doctype">${esc(docType(d))}</div>
@@ -3064,38 +3064,6 @@ function renderIncomingGrouped(rows, yearSummary){
   }).join('');
 }
 
-async function loadSupplierInvoices(textQuery=''){
-  if(!selectedSupplier)return;
-
-  loader.style.display='block';
-  incomingTextMeta.textContent=textQuery
-    ? 'Suche innerhalb der Rechnungen …'
-    : 'Lade Lieferantenakte …';
-
-  try{
-    const params=new URLSearchParams({
-      key:selectedSupplier.key||'',
-      q:textQuery||''
-    });
-
-    const r=await fetch('/incoming/invoices?'+params.toString(),{cache:'no-store'});
-    const data=await r.json();
-    if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
-
-    incomingAll=data.documents||[];
-    incomingSub.textContent=incomingAll.length+' Eingangsrechnungen'+
-      (textQuery?' · Textfilter: "'+textQuery+'"':'');
-    incomingTextMeta.textContent=textQuery
-      ? incomingAll.length+' Treffer innerhalb dieses Lieferanten'
-      : 'Eigene Textsuche nur innerhalb der Rechnungen dieses Lieferanten';
-
-    renderIncomingGrouped(incomingAll,data.years||{});
-  }catch(e){
-    incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
-  }finally{
-    loader.style.display='none';
-  }
-}
 
 incomingTextGo.onclick=()=>loadSupplierInvoices(incomingTextQ.value.trim());
 incomingTextQ.addEventListener('keydown',e=>{
@@ -3206,7 +3174,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.1",
+        "version": "0.12.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3764,7 +3732,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.1 - WW Lieferantenadressen nach echten Eingangsbelegen sortiert")
+    print("Version: 0.12.2 - doppelte Legacy-Ladefunktion entfernt")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
