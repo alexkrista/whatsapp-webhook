@@ -323,29 +323,32 @@ def ww_incoming_for_address(address_id):
     cur = con.cursor()
     rows = cur.execute("""
         SELECT
-            cID,
-            sBelegnummer,
-            dzBelegdatum,
-            dblBruttoBetrag,
-            dblNettoBetrag,
-            dblUStBetrag,
-            dblFreigegebenerBetrag,
-            dblSkontobetrag,
-            lVonAdrIndex,
-            nFibuStatus,
-            nZahlungsStatus,
-            sZahlungsStatus,
-            nZahlungsart,
-            sIban,
-            sSwift,
-            sBankkontoInhaber,
-            sBemerkung,
-            gDMID,
-            dzAufgenommen,
-            dzGeaendert
-        FROM dbo.Eingangsbelege
-        WHERE lVonAdrIndex = ?
-        ORDER BY dzBelegdatum DESC, cID DESC
+            e.cID,
+            e.sBelegnummer,
+            e.dzBelegdatum,
+            e.dblBruttoBetrag,
+            e.dblNettoBetrag,
+            e.dblUStBetrag,
+            e.dblFreigegebenerBetrag,
+            e.dblSkontobetrag,
+            e.lVonAdrIndex,
+            e.nFibuStatus,
+            e.nZahlungsStatus,
+            e.sZahlungsStatus,
+            e.nZahlungsart,
+            e.sIban,
+            e.sSwift,
+            e.sBankkontoInhaber,
+            e.sBemerkung,
+            e.gDMID,
+            e.dzAufgenommen,
+            e.dzGeaendert,
+            dm.sDocID
+        FROM dbo.Eingangsbelege AS e
+        LEFT JOIN dbo.DokumentenManagement AS dm
+            ON dm.gID = e.gDMID
+        WHERE e.lVonAdrIndex = ?
+        ORDER BY e.dzBelegdatum DESC, e.cID DESC
     """, address_int).fetchall()
     con.close()
 
@@ -379,6 +382,7 @@ def ww_incoming_for_address(address_id):
             "accountHolder": str(r.sBankkontoInhaber or "").strip(),
             "remark": str(r.sBemerkung or "").strip(),
             "gDMID": str(r.gDMID or "").strip(),
+            "docId": str(r.sDocID or "").strip(),
             "recordedAt": str(r.dzAufgenommen or ""),
             "changedAt": str(r.dzGeaendert or ""),
             "sourceOfTruth": "WinWorker Eingangsbelege",
@@ -589,33 +593,88 @@ def acknowledge_watch_alert(address_id, alert_key, decision="known"):
     return bucket[alert_key]
 
 
+
+def _pdf_paths_by_docids(doc_ids):
+    """
+    Exakte WW-Verknüpfung:
+    DokumentenManagement.sDocID == PDF-Dateiname ohne .pdf/_Original.pdf.
+    Kein OCR, kein Volltext-Matching.
+    """
+    wanted = {str(x or "").strip() for x in doc_ids if str(x or "").strip()}
+    if not wanted:
+        return {}
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        has_source = "source" in cols
+        result = {}
+
+        # Chunking keeps SQLite variable count safe.
+        ids = sorted(wanted)
+        for pos in range(0, len(ids), 400):
+            chunk = ids[pos:pos+400]
+            placeholders = ",".join("?" for _ in chunk)
+            # filename exact-ish: 11502600347.pdf or 11502600347_Original.pdf
+            conditions = []
+            params = []
+            for doc_id in chunk:
+                conditions.append("(filename = ? OR filename = ?)")
+                params.extend([f"{doc_id}.pdf", f"{doc_id}_Original.pdf"])
+
+            sql = "SELECT filename,path FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
+            if has_source:
+                sql += " AND source='EINGANG'"
+
+            for row in con.execute(sql, params).fetchall():
+                fn = str(row["filename"] or "")
+                path = str(row["path"] or "")
+                m = re.match(r"^(\d+)(?:_Original)?\.pdf$", fn, re.I)
+                if not m:
+                    continue
+                doc_id = m.group(1)
+                bucket = result.setdefault(doc_id, {"pdfPath": "", "originalPath": ""})
+                if re.search(r"_Original\.pdf$", fn, re.I):
+                    bucket["originalPath"] = path
+                else:
+                    bucket["pdfPath"] = path
+        return result
+    finally:
+        con.close()
+
+
 def incoming_for_address(address_id, text_query=""):
     """
-    SOFORT-ANSICHT:
-    WinWorker dbo.Eingangsbelege wird direkt angezeigt.
-    KEIN PDF-Katalog wird beim Öffnen der Lieferantenakte geladen.
-    Dadurch erscheinen auch 425+ Rechnungen sofort.
-
-    PDF/Volltext wird bewusst entkoppelt und kann später separat nachgeladen werden.
+    WW sofort + exakte PDF-Verknüpfung über:
+    Eingangsbelege.gDMID -> DokumentenManagement.gID -> sDocID -> PDF-Dateiname.
     """
     address_id = str(address_id or "").strip()
     if not address_id:
         return []
 
+    ww_rows = ww_incoming_for_address(address_id)
+    paths = _pdf_paths_by_docids([x.get("docId") for x in ww_rows])
     qtokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
-    for ww in ww_incoming_for_address(address_id):
+    for ww in ww_rows:
+        doc_id = str(ww.get("docId") or "").strip()
+        found = paths.get(doc_id, {})
+        pdf_path = found.get("pdfPath") or ""
+        original_path = found.get("originalPath") or ""
+
         item = dict(ww)
         item.update({
-            "filename": "",
-            "path": "",
-            "logical_id": "",
+            "filename": Path(pdf_path).name if pdf_path else (f"{doc_id}.pdf" if doc_id else ""),
+            "path": pdf_path,
+            "originalPath": original_path,
+            "logical_id": doc_id,
             "invoiceId": f"ww:{ww.get('wwIncomingId')}",
             "dokumenttyp": "Eingangsrechnung",
             "snippet": "",
             "fingerprint": {},
-            "pdfDeferred": True,
+            "pdfLinked": bool(pdf_path or original_path),
         })
 
         if qtokens:
@@ -626,6 +685,7 @@ def incoming_for_address(address_id, text_query=""):
                 str(item.get("iban") or ""),
                 str(item.get("swift") or ""),
                 str(item.get("accountHolder") or ""),
+                str(item.get("docId") or ""),
             ]))
             if not all(t in hay for t in qtokens):
                 continue
@@ -3064,7 +3124,8 @@ function renderIncomingDoc(d){
       <div class="ww-truth">Quelle: WinWorker Eingangsbelege</div>
       ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
-        ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF wird separat geladen</span>'}
+        ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF nicht gefunden</span>'}
+        ${d.originalPath?`<a class="action" href="${urlFor('/pdf',d.originalPath)}" target="_blank" rel="noopener">Original</a>`:''}
       </div>
     </div>
   </div>`;
@@ -3231,7 +3292,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.4",
+        "version": "0.12.5",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3789,7 +3850,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.4 - WW Rechnungen sofort, PDF komplett entkoppelt")
+    print("Version: 0.12.5 - PDF exakt via gDMID und sDocID")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
