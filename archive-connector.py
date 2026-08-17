@@ -144,7 +144,7 @@ def _load_brain_supplier_map():
     Originaldaten werden nie verändert.
     """
     if not BRAIN_SUPPLIER_MAP_FILE.exists():
-        return {"addressLinks": {}, "invoiceLinks": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}}
     try:
         data = json.loads(BRAIN_SUPPLIER_MAP_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -152,9 +152,10 @@ def _load_brain_supplier_map():
         return {
             "addressLinks": dict(data.get("addressLinks") or {}),
             "invoiceLinks": dict(data.get("invoiceLinks") or {}),
+            "fingerprints": dict(data.get("fingerprints") or {}),
         }
     except Exception:
-        return {"addressLinks": {}, "invoiceLinks": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}}
 
 
 def _save_brain_supplier_map(data):
@@ -295,10 +296,137 @@ def incoming_for_address(address_id, text_query=""):
     return result
 
 
+
+MONEY_RE = re.compile(r'(?<!\d)(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+,\d{2})(?!\d)')
+TOTAL_LABELS_HIGH = (
+    "endbetrag", "rechnungsbetrag", "gesamtbetrag", "zahlbetrag",
+    "zu zahlen", "zahlbarer betrag", "bruttobetrag", "gesamt eur",
+)
+TOTAL_LABELS_NET = ("nettobetrag", "netto", "ust-basis", "mwst-basis", "ust basis")
+TOTAL_LABELS_TAX = ("mwst", "ust", "mehrwertsteuer")
+
+
+def _parse_euro_number(value):
+    s = str(value or "").replace("EUR","").replace("€","").strip().replace(" ","")
+    if not s:
+        return None
+    if "," in s:
+        s = s.replace(".","").replace(",",".")
+    try:
+        return round(float(s), 2)
+    except Exception:
+        return None
+
+
+def _line_money_values(line):
+    out=[]
+    for m in MONEY_RE.finditer(str(line or "")):
+        v=_parse_euro_number(m.group(1))
+        if v is not None:
+            out.append(v)
+    return out
+
+
+def _extract_invoice_amount_smart(raw_text):
+    lines=[re.sub(r"\s+"," ",x).strip() for x in str(raw_text or "").splitlines()]
+    lines=[x for x in lines if x]
+    best=None
+    net=None
+    tax=None
+
+    for i,line in enumerate(lines):
+        low=line.lower()
+        vals=_line_money_values(line)
+        if not vals:
+            continue
+
+        # Prozent-/Rabattzeilen niemals als Gesamtsumme verwenden
+        if "%" in line and not any(lbl in low for lbl in TOTAL_LABELS_HIGH):
+            continue
+
+        if any(lbl in low for lbl in TOTAL_LABELS_HIGH):
+            cand=vals[-1]
+            row={"amount":cand,"confidence":100,"reason":"total_label","line":line}
+            if best is None or row["confidence"]>best["confidence"]:
+                best=row
+
+        if any(lbl in low for lbl in TOTAL_LABELS_NET):
+            net=vals[-1]
+        if any(lbl in low for lbl in TOTAL_LABELS_TAX) and "%" not in line:
+            tax=vals[-1]
+
+    if best is None:
+        for i,line in enumerate(lines[:-1]):
+            low=line.lower()
+            if any(lbl in low for lbl in TOTAL_LABELS_HIGH):
+                vals=_line_money_values(lines[i+1])
+                if vals and "%" not in lines[i+1]:
+                    best={"amount":vals[-1],"confidence":95,"reason":"next_line_total","line":line+" / "+lines[i+1]}
+                    break
+
+    if net is not None and tax is not None:
+        expected=round(net+tax,2)
+        if best is not None and abs(best["amount"]-expected)<=0.02:
+            best["confidence"]=100
+            best["reason"]="total_label+net_tax_check"
+        elif best is None:
+            best={"amount":expected,"confidence":80,"reason":"net_plus_tax","line":""}
+
+    return best or {"amount":None,"confidence":0,"reason":"not_found","line":""}
+
+
+def _extract_supplier_fingerprint(raw_text):
+    flat=re.sub(r"\s+"," ",str(raw_text or ""))
+
+    def first(patterns):
+        for p in patterns:
+            m=re.search(p,flat,re.I)
+            if m:
+                return (m.group(1) or "").strip()
+        return ""
+
+    customer_no=first([
+        r'Kunden[-\s]?Nr\.?\s*[:\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})',
+        r'Kundennummer\s*[:\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})',
+    ])
+    uid=first([
+        r'\bUID(?:-Nr\.?)?\s*[:\-]?\s*(ATU\d{8})\b',
+        r'\bUSt[-\s]?Id(?:Nr\.?)?\s*[:\-]?\s*(ATU\d{8})\b',
+    ])
+    iban=first([
+        r'\bIBAN\s*[:\-]?\s*((?:AT|DE|CH|LI)\s*\d(?:[\sA-Z0-9]){12,32})',
+    ])
+    if iban:
+        iban=re.sub(r'\s+','',iban).upper()
+
+    invoice_no=first([
+        r'\bRechnung(?:s)?(?:nummer|nr\.?|Nr\.?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})',
+        r'\bNummer\s*[:\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})',
+    ])
+    amount=_extract_invoice_amount_smart(flat)
+
+    return {
+        "customerNumberExternal":customer_no,
+        "uid":uid,
+        "iban":iban,
+        "invoiceNumber":invoice_no,
+        "amountSmart":amount.get("amount"),
+        "amountConfidence":amount.get("confidence",0),
+        "amountReason":amount.get("reason",""),
+    }
+
+
 def _incoming_public_item(item):
     raw = str(item.get("_raw_text") or "")
     compact = " ".join(raw.split())
     ident = item.get("_supplier") or {}
+    fp = _extract_supplier_fingerprint(raw)
+
+    old_amount = item.get("amount")
+    smart_amount = fp.get("amountSmart")
+    smart_conf = int(fp.get("amountConfidence") or 0)
+    final_amount = smart_amount if smart_amount is not None and smart_conf >= 80 else old_amount
+
     return {
         "filename": item.get("filename"),
         "path": item.get("path"),
@@ -311,12 +439,22 @@ def _incoming_public_item(item):
         "month": item.get("month"),
         "monthName": item.get("monthName"),
         "day": item.get("day"),
-        "amount": item.get("amount"),
+        "amount": final_amount,
+        "amountOriginal": old_amount,
+        "amountSmart": smart_amount,
+        "amountConfidence": smart_conf,
+        "amountReason": fp.get("amountReason") or "",
         "snippet": compact[:420],
         "detectedSupplierKey": ident.get("key") or "",
         "detectedSupplierName": ident.get("name") or "",
         "detectedSupplierAddress": ident.get("address") or "",
         "detectedSupplierNumber": ident.get("supplierNumber") or "",
+        "fingerprint": {
+            "customerNumberExternal": fp.get("customerNumberExternal") or "",
+            "uid": fp.get("uid") or "",
+            "iban": fp.get("iban") or "",
+            "invoiceNumber": fp.get("invoiceNumber") or "",
+        },
     }
 
 
@@ -348,6 +486,20 @@ def unassigned_invoice_candidates(address, limit=80):
 
         score = 0
         matched = []
+
+        fp_bucket = supplier_map.get("fingerprints", {}).get(str(address.get("addressId") or ""), {})
+        for known in fp_bucket.get("customerNumbers", []):
+            if known and _norm_supplier(known) in hay:
+                score += 50
+                matched.append("KundenNr "+known)
+        for known in fp_bucket.get("uids", []):
+            if known and _norm_supplier(known) in hay:
+                score += 45
+                matched.append("UID "+known)
+        for known in fp_bucket.get("ibans", []):
+            if known and _norm_supplier(known) in hay:
+                score += 40
+                matched.append("IBAN "+known)
         for t in tokens:
             if t and t in hay:
                 score += 3 if len(t) >= 6 else 1
@@ -367,18 +519,7 @@ def unassigned_invoice_candidates(address, limit=80):
         str(row[1].get("filename") or "")
     ))
 
-    positives = [x for x in scored if x[0] > 0][:max(1, min(int(limit or 80), 120))]
-    # Always append a small "unassigned latest" tail for image-header PDFs.
-    if len(positives) < 20:
-        seen = {_invoice_identity(x[1]) for x in positives}
-        for row in scored:
-            iid = _invoice_identity(row[1])
-            if iid in seen:
-                continue
-            positives.append(row)
-            seen.add(iid)
-            if len(positives) >= 20:
-                break
+    positives = [x for x in scored if x[0] >= 8][:max(1, min(int(limit or 80), 120))]
 
     out = []
     for score, item, matched in positives:
@@ -387,6 +528,26 @@ def unassigned_invoice_candidates(address, limit=80):
         pub["matchTerms"] = matched[:8]
         out.append(pub)
     return out
+
+
+def _learn_address_fingerprint(address_id, item):
+    data = _load_brain_supplier_map()
+    fp = _extract_supplier_fingerprint(str(item.get("_raw_text") or ""))
+    bucket = data.setdefault("fingerprints", {}).setdefault(str(address_id), {
+        "customerNumbers": [], "uids": [], "ibans": []
+    })
+
+    for key, field in (
+        ("customerNumberExternal", "customerNumbers"),
+        ("uid", "uids"),
+        ("iban", "ibans"),
+    ):
+        value = str(fp.get(key) or "").strip()
+        if value and value not in bucket[field]:
+            bucket[field].append(value)
+
+    _save_brain_supplier_map(data)
+    return fp
 
 
 def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=""):
@@ -404,7 +565,14 @@ def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=
     if invoice_id:
         data.setdefault("invoiceLinks", {})[invoice_id] = address_id
     _save_brain_supplier_map(data)
-    return data
+
+    learned={}
+    if invoice_id:
+        for item in _incoming_catalog():
+            if _invoice_identity(item) == invoice_id:
+                learned=_learn_address_fingerprint(address_id,item)
+                break
+    return data, learned
 
 
 def get_sql_driver():
@@ -2245,8 +2413,10 @@ function renderUnassignedCandidates(rows){
       <img class="review-thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
       <div class="review-title">${esc(d.filename||'Eingangsrechnung')}</div>
       ${d.invoiceDate?`<div class="sub">${esc(d.invoiceDate.split('-').reverse().join('.'))}</div>`:''}
-      ${d.amount!==null&&d.amount!==undefined?`<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
+      ${d.amount!==null&&d.amount!==undefined?`<div class="invoice-amount">${esc(invoiceMoney(d.amount))}${Number(d.amountConfidence||0)>=80?' <span class="pill">Summe geprüft</span>':''}</div>`:''}
       ${d.detectedSupplierName?`<div class="sub">erkannt: ${esc(d.detectedSupplierName)}</div>`:''}
+      ${d.fingerprint?.customerNumberExternal?`<div class="sub">KundenNr. ${esc(d.fingerprint.customerNumberExternal)}</div>`:''}
+      ${d.fingerprint?.uid?`<div class="sub">UID ${esc(d.fingerprint.uid)}</div>`:''}
       ${Number(d.matchScore||0)>0?`<div class="review-match">möglicher Treffer · ${Number(d.matchScore)} Punkte</div>`:''}
       <div class="review-actions">
         <a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF prüfen</a>
@@ -2532,7 +2702,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.4",
+        "version": "0.11.5",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -2901,12 +3071,21 @@ def incoming_address_link():
         address_id = str(body.get("addressId") or "").strip()
         invoice_id = str(body.get("invoiceId") or "").strip()
         supplier_key = str(body.get("supplierKey") or "").strip()
-        link_invoice_or_supplier_to_address(address_id, invoice_id, supplier_key)
+        _, learned = link_invoice_or_supplier_to_address(address_id, invoice_id, supplier_key)
         return jsonify({
             "ok": True,
             "addressId": address_id,
             "invoiceId": invoice_id,
             "supplierKey": supplier_key,
+            "learned": {
+                "customerNumberExternal": learned.get("customerNumberExternal") or "",
+                "uid": learned.get("uid") or "",
+                "iban": learned.get("iban") or "",
+                "invoiceNumber": learned.get("invoiceNumber") or "",
+                "amount": learned.get("amountSmart"),
+                "amountConfidence": learned.get("amountConfidence", 0),
+                "amountReason": learned.get("amountReason") or "",
+            },
         })
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -3020,7 +3199,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.4 - WW-Adresse zuerst + Rechnung einmal dauerhaft verheiraten")
+    print("Version: 0.11.5 - KundenNr/UID/IBAN lernen + Summenparser kontextgenau")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
