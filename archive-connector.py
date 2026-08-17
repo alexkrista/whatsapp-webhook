@@ -35,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -144,7 +144,7 @@ def _load_brain_supplier_map():
     Originaldaten werden nie verändert.
     """
     if not BRAIN_SUPPLIER_MAP_FILE.exists():
-        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}, "negativeFingerprints": {}, "watchAcks": {}}
     try:
         data = json.loads(BRAIN_SUPPLIER_MAP_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -154,9 +154,11 @@ def _load_brain_supplier_map():
             "invoiceLinks": dict(data.get("invoiceLinks") or {}),
             "fingerprints": dict(data.get("fingerprints") or {}),
             "rejections": dict(data.get("rejections") or {}),
+            "negativeFingerprints": dict(data.get("negativeFingerprints") or {}),
+            "watchAcks": dict(data.get("watchAcks") or {}),
         }
     except Exception:
-        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}, "negativeFingerprints": {}, "watchAcks": {}}
 
 
 def _save_brain_supplier_map(data):
@@ -210,7 +212,10 @@ def ww_address_search(query, limit=25):
             k.sVorname,
             k.sStrasse,
             k.sPLZ,
-            k.sOrt
+            k.sOrt,
+            k.lLieferantenNr,
+            k.sUStIDNr,
+            k.sL_KdnNr
         FROM dbo.Kunden AS k
         WHERE {" AND ".join(conditions)}
         ORDER BY
@@ -239,6 +244,9 @@ def ww_address_search(query, limit=25):
             "street": r.sStrasse or "",
             "postalCode": r.sPLZ or "",
             "city": r.sOrt or "",
+            "supplierNumber": str(r.lLieferantenNr or ""),
+            "vatId": str(r.sUStIDNr or "").strip(),
+            "ourCustomerNumber": str(r.sL_KdnNr or "").strip(),
             "address": ", ".join(
                 x for x in [
                     (r.sStrasse or "").strip(),
@@ -274,28 +282,294 @@ def _invoice_linked_address_id(item, supplier_map):
     return ""
 
 
+
+def _iso_date(value):
+    if value is None:
+        return None
+    try:
+        return value.date().isoformat()
+    except Exception:
+        s = str(value)
+        return s[:10] if len(s) >= 10 else s
+
+
+def _norm_iban(value):
+    return re.sub(r"\s+", "", str(value or "")).upper().strip()
+
+
+def ww_incoming_for_address(address_id):
+    """
+    Fachliche Wahrheit für Eingangsrechnungen direkt aus WinWorker.
+    Kein OCR-Raten für Lieferant, Datum oder Betrag.
+    """
+    try:
+        address_int = int(str(address_id).strip())
+    except Exception:
+        return []
+
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute("""
+        SELECT
+            cID,
+            sBelegnummer,
+            dzBelegdatum,
+            dblBruttoBetrag,
+            dblNettoBetrag,
+            dblUStBetrag,
+            dblFreigegebenerBetrag,
+            dblSkontobetrag,
+            lVonAdrIndex,
+            nFibuStatus,
+            nZahlungsStatus,
+            sZahlungsStatus,
+            nZahlungsart,
+            sIban,
+            sSwift,
+            sBankkontoInhaber,
+            sBemerkung,
+            gDMID,
+            dzAufgenommen,
+            dzGeaendert
+        FROM dbo.Eingangsbelege
+        WHERE lVonAdrIndex = ?
+        ORDER BY dzBelegdatum DESC, cID DESC
+    """, address_int).fetchall()
+    con.close()
+
+    out = []
+    for r in rows:
+        gross = float(r.dblBruttoBetrag) if r.dblBruttoBetrag is not None else None
+        net = float(r.dblNettoBetrag) if r.dblNettoBetrag is not None else None
+        vat = float(r.dblUStBetrag) if r.dblUStBetrag is not None else None
+        date_iso = _iso_date(r.dzBelegdatum)
+        out.append({
+            "wwIncomingId": int(r.cID),
+            "invoiceNumber": str(r.sBelegnummer or "").strip(),
+            "invoiceDate": date_iso,
+            "invoiceDateTime": (date_iso + "T00:00:00") if date_iso else None,
+            "year": int(date_iso[:4]) if date_iso and len(date_iso) >= 4 else None,
+            "month": int(date_iso[5:7]) if date_iso and len(date_iso) >= 7 else None,
+            "monthName": MONTH_NAMES_DE.get(int(date_iso[5:7]), "") if date_iso and len(date_iso) >= 7 else "",
+            "day": int(date_iso[8:10]) if date_iso and len(date_iso) >= 10 else None,
+            "amount": gross,
+            "netAmount": net,
+            "vatAmount": vat,
+            "releasedAmount": float(r.dblFreigegebenerBetrag) if r.dblFreigegebenerBetrag is not None else None,
+            "discountAmount": float(r.dblSkontobetrag) if r.dblSkontobetrag is not None else None,
+            "addressId": str(r.lVonAdrIndex or ""),
+            "fibuStatus": r.nFibuStatus,
+            "paymentStatusCode": r.nZahlungsStatus,
+            "paymentStatus": str(r.sZahlungsStatus or "").strip(),
+            "paymentTypeCode": r.nZahlungsart,
+            "iban": _norm_iban(r.sIban),
+            "swift": str(r.sSwift or "").strip(),
+            "accountHolder": str(r.sBankkontoInhaber or "").strip(),
+            "remark": str(r.sBemerkung or "").strip(),
+            "gDMID": str(r.gDMID or "").strip(),
+            "recordedAt": str(r.dzAufgenommen or ""),
+            "changedAt": str(r.dzGeaendert or ""),
+            "sourceOfTruth": "WinWorker Eingangsbelege",
+        })
+    return out
+
+
+def _pdf_match_score_for_ww(item, ww):
+    """
+    Verknüpft den WW-Eingangsbeleg mit dem bereits indexierten PDF.
+    Die WW-Daten bleiben trotzdem fachliche Wahrheit.
+    """
+    filename = str(item.get("filename") or "")
+    if filename.lower().endswith("_original.pdf"):
+        return -1000
+
+    raw = str(item.get("_raw_text") or "")
+    raw_norm = _norm_supplier(raw)
+    score = 0
+
+    nr = str(ww.get("invoiceNumber") or "").strip()
+    if nr:
+        # Exact token-ish occurrence
+        if re.search(rf"(?<![A-Z0-9]){re.escape(nr)}(?![A-Z0-9])", raw, re.I):
+            score += 100
+        elif _norm_supplier(nr) in raw_norm:
+            score += 70
+
+    date_iso = str(ww.get("invoiceDate") or "")
+    if date_iso:
+        try:
+            y, m, d = date_iso.split("-")
+            variants = {
+                f"{d}.{m}.{y}",
+                f"{int(d)}.{int(m)}.{y}",
+                date_iso,
+            }
+            if any(v in raw for v in variants):
+                score += 15
+        except Exception:
+            pass
+
+    ww_amount = ww.get("amount")
+    if ww_amount is not None:
+        try:
+            smart = _extract_invoice_amount_smart(raw)
+            pdf_amount = smart.get("amount")
+            if pdf_amount is not None and abs(float(pdf_amount) - float(ww_amount)) <= 0.02:
+                score += 20
+        except Exception:
+            pass
+
+    return score
+
+
+def _attach_pdf_to_ww_invoice(ww, catalog):
+    best = None
+    best_score = 0
+    for item in catalog:
+        score = _pdf_match_score_for_ww(item, ww)
+        if score > best_score:
+            best_score = score
+            best = item
+
+    result = dict(ww)
+    if best is not None and best_score >= 70:
+        pub = _incoming_public_item(best)
+        # WW wins for structured invoice values.
+        pub.update({
+            "wwIncomingId": ww.get("wwIncomingId"),
+            "invoiceNumber": ww.get("invoiceNumber"),
+            "invoiceDate": ww.get("invoiceDate"),
+            "invoiceDateTime": ww.get("invoiceDateTime"),
+            "year": ww.get("year"),
+            "month": ww.get("month"),
+            "monthName": ww.get("monthName"),
+            "day": ww.get("day"),
+            "amount": ww.get("amount"),
+            "netAmount": ww.get("netAmount"),
+            "vatAmount": ww.get("vatAmount"),
+            "paymentStatus": ww.get("paymentStatus"),
+            "paymentStatusCode": ww.get("paymentStatusCode"),
+            "iban": ww.get("iban"),
+            "swift": ww.get("swift"),
+            "accountHolder": ww.get("accountHolder"),
+            "gDMID": ww.get("gDMID"),
+            "sourceOfTruth": "WinWorker Eingangsbelege",
+            "pdfMatchScore": best_score,
+        })
+        return pub
+
+    # WW entry without matched PDF remains visible.
+    result.update({
+        "filename": "",
+        "path": "",
+        "logical_id": "",
+        "invoiceId": f"ww:{ww.get('wwIncomingId')}",
+        "dokumenttyp": "Eingangsrechnung",
+        "snippet": "",
+        "fingerprint": {},
+        "pdfMatchScore": best_score,
+    })
+    return result
+
+
+def incoming_watch_alerts(address_id, ww_rows=None):
+    """
+    Stammdatenwächter:
+    Erkennt einen Wechsel der Bankverbindung beim selben WW-Lieferanten.
+    Zeigt nur den jüngsten echten Wechsel und lässt ihn in Brain quittieren.
+    """
+    rows = list(ww_rows if ww_rows is not None else ww_incoming_for_address(address_id))
+    rows.sort(key=lambda x: (x.get("invoiceDate") or "", x.get("wwIncomingId") or 0))
+
+    bank_rows = [r for r in rows if _norm_iban(r.get("iban"))]
+    if len(bank_rows) < 2:
+        return []
+
+    latest = bank_rows[-1]
+    latest_iban = _norm_iban(latest.get("iban"))
+    previous = None
+    for r in reversed(bank_rows[:-1]):
+        if _norm_iban(r.get("iban")) != latest_iban:
+            previous = r
+            break
+    if previous is None:
+        return []
+
+    prev_iban = _norm_iban(previous.get("iban"))
+    alert_key = f"bank:{latest_iban}"
+    acks = _load_brain_supplier_map().get("watchAcks", {}).get(str(address_id), {})
+    if acks.get(alert_key):
+        return []
+
+    return [{
+        "key": alert_key,
+        "type": "bank_change",
+        "severity": "warning",
+        "title": "Neue Bankverbindung erkannt",
+        "message": "WinWorker zeigt bei neueren Eingangsbelegen eine andere IBAN als zuvor.",
+        "previousIban": prev_iban,
+        "currentIban": latest_iban,
+        "previousInvoice": previous.get("invoiceNumber") or "",
+        "currentInvoice": latest.get("invoiceNumber") or "",
+        "previousDate": previous.get("invoiceDate") or "",
+        "currentDate": latest.get("invoiceDate") or "",
+        "previousHolder": previous.get("accountHolder") or "",
+        "currentHolder": latest.get("accountHolder") or "",
+    }]
+
+
+def acknowledge_watch_alert(address_id, alert_key, decision="known"):
+    address_id = str(address_id or "").strip()
+    alert_key = str(alert_key or "").strip()
+    if not address_id or not alert_key:
+        raise ValueError("Adresse oder Hinweis fehlt.")
+    data = _load_brain_supplier_map()
+    bucket = data.setdefault("watchAcks", {}).setdefault(address_id, {})
+    bucket[alert_key] = {
+        "decision": str(decision or "known"),
+        "at": datetime.now().isoformat(timespec="seconds"),
+    }
+    _save_brain_supplier_map(data)
+    return bucket[alert_key]
+
+
 def incoming_for_address(address_id, text_query=""):
+    """
+    Primärquelle: WinWorker dbo.Eingangsbelege.
+    PDF-Index dient nur noch zum Anreichern mit Vorschau/Volltext.
+    """
     address_id = str(address_id or "").strip()
     if not address_id:
         return []
 
-    supplier_map = _load_brain_supplier_map()
+    ww_rows = ww_incoming_for_address(address_id)
+    catalog = _incoming_catalog()
     qtokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
-    for item in _incoming_catalog():
-        if _invoice_linked_address_id(item, supplier_map) != address_id:
-            continue
-        raw = str(item.get("_raw_text") or "")
+    for ww in ww_rows:
+        item = _attach_pdf_to_ww_invoice(ww, catalog)
+
         if qtokens:
-            nr = _norm_supplier(raw)
-            if not all(t in nr for t in qtokens):
+            hay = " ".join([
+                str(item.get("invoiceNumber") or ""),
+                str(item.get("paymentStatus") or ""),
+                str(item.get("remark") or ""),
+                str(item.get("snippet") or ""),
+            ])
+            if item.get("path"):
+                for cat in catalog:
+                    if str(cat.get("path") or "") == str(item.get("path") or ""):
+                        hay += " " + str(cat.get("_raw_text") or "")
+                        break
+            nh = _norm_supplier(hay)
+            if not all(t in nh for t in qtokens):
                 continue
-        result.append(_incoming_public_item(item))
 
-    result.sort(key=lambda x: (x.get("invoiceDateTime") or "", x.get("filename") or ""), reverse=True)
+        result.append(item)
+
+    result.sort(key=lambda x: (x.get("invoiceDateTime") or "", x.get("wwIncomingId") or 0), reverse=True)
     return result
-
 
 
 MONEY_RE = re.compile(r'(?<!\d)(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+,\d{2})(?!\d)')
@@ -477,6 +751,8 @@ def unassigned_invoice_candidates(address, limit=80):
         iid = _invoice_identity(item)
         if not iid or iid in rejected:
             continue
+        if _negative_match(item, address_id, supplier_map):
+            continue
         if _invoice_linked_address_id(item, supplier_map):
             continue
 
@@ -577,17 +853,54 @@ def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=
     return _load_brain_supplier_map(), learned, auto_linked
 
 
+def _fingerprint_signature(fp):
+    """Stable supplier identity hints. Never use invoice number/date/amount."""
+    out=[]
+    customer=str(fp.get("customerNumberExternal") or "").strip()
+    uid=str(fp.get("uid") or "").strip().upper()
+    iban=str(fp.get("iban") or "").strip().upper()
+    if customer:
+        out.append("customer:"+_norm_supplier(customer))
+    if uid:
+        out.append("uid:"+_norm_supplier(uid))
+    if iban:
+        out.append("iban:"+_norm_supplier(iban))
+    return [x for x in out if x.split(":",1)[-1]]
+
+
+def _negative_match(item, address_id, supplier_map):
+    bucket=set(supplier_map.get("negativeFingerprints", {}).get(str(address_id), []))
+    if not bucket:
+        return False
+    fp=_extract_supplier_fingerprint(str(item.get("_raw_text") or ""))
+    return bool(bucket.intersection(_fingerprint_signature(fp)))
+
+
 def reject_invoice_for_address(address_id, invoice_id):
     address_id = str(address_id or "").strip()
     invoice_id = str(invoice_id or "").strip()
     if not address_id or not invoice_id:
         raise ValueError("Adresse oder Rechnung fehlt.")
+
     data = _load_brain_supplier_map()
     bucket = data.setdefault("rejections", {}).setdefault(address_id, [])
     if invoice_id not in bucket:
         bucket.append(invoice_id)
+
+    learned_negative=[]
+    for item in _incoming_catalog():
+        if _invoice_identity(item) != invoice_id:
+            continue
+        fp=_extract_supplier_fingerprint(str(item.get("_raw_text") or ""))
+        learned_negative=_fingerprint_signature(fp)
+        neg=data.setdefault("negativeFingerprints", {}).setdefault(address_id, [])
+        for sig in learned_negative:
+            if sig not in neg:
+                neg.append(sig)
+        break
+
     _save_brain_supplier_map(data)
-    return data
+    return data, learned_negative
 
 
 def _stable_fingerprint_matches(item, address_id, supplier_map=None):
@@ -1983,6 +2296,14 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .review-title{font-weight:850;margin-top:9px}
 .review-match{color:var(--good);font-size:12px;margin-top:5px}
 .review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.brain-watch{margin:12px 0;padding:14px 16px;border:1px solid #7c652a;border-radius:16px;background:#241f13}
+.brain-watch-title{font-weight:900;font-size:16px;margin-bottom:6px}
+.brain-watch-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.brain-watch-value{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#17191d}
+.brain-watch-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.ww-truth{font-size:12px;color:var(--good);font-weight:750}
+.payment-ok{color:var(--good);font-weight:750}
+@media(max-width:700px){.brain-watch-grid{grid-template-columns:1fr}}
 @media(max-width:700px){.review-grid{grid-template-columns:1fr}}
 .supplier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .invoice-text-search{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
@@ -2088,6 +2409,7 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
       </div>
     </div>
 
+    <div id="incomingWatch"></div>
     <div id="incomingGrouped"></div>
 
     <div class="section" id="incomingReviewSection" hidden>
@@ -2157,6 +2479,7 @@ const incomingTitle=document.getElementById('incomingTitle'),incomingSub=documen
 const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
 const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextMeta=document.getElementById('incomingTextMeta');
 const backToSuppliers=document.getElementById('backToSuppliers');
+const incomingWatch=document.getElementById('incomingWatch');
 const incomingReviewSection=document.getElementById('incomingReviewSection'),incomingReview=document.getElementById('incomingReview');
 const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
@@ -2379,7 +2702,10 @@ function renderSupplierCandidates(){
         <div class="project-title">${esc(s.name||'Adresse')}</div>
         ${s.person&&s.person!==s.name?`<div class="sub">${esc(s.person)}</div>`:''}
         ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
-        ${s.customerNumber?`<div class="sub">WW-Nr. ${esc(s.customerNumber)}</div>`:''}
+        ${s.supplierNumber?`<div class="sub">Lieferantennr. ${esc(s.supplierNumber)}</div>`:''}
+        ${s.ourCustomerNumber?`<div class="sub">Unsere KundenNr. dort: ${esc(s.ourCustomerNumber)}</div>`:''}
+        ${s.vatId?`<div class="sub">UID ${esc(s.vatId)}</div>`:''}
+        ${s.customerNumber?`<div class="sub">WW-Adressnr. ${esc(s.customerNumber)}</div>`:''}
         <div class="supplier-actions">
           <button type="button" data-supplier="${i}" class="choose-address">Diese Adresse auswählen</button>
         </div>
@@ -2442,7 +2768,8 @@ async function selectIncomingSupplier(address){
   incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
 
   await loadSupplierInvoices('');
-  await loadUnassignedCandidates();
+  incomingReviewSection.hidden=true;
+  incomingReview.innerHTML='';
   incomingSection.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -2539,12 +2866,64 @@ async function rejectInvoice(doc,button){
     });
     const d=await r.json();
     if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
-    incomingTextMeta.textContent='✕ dauerhaft für diese Adresse ausgeschlossen';
+    incomingTextMeta.textContent=Number(d.negativeFingerprintsLearned||0)>0?'✕ ausgeschlossen · gleiche Fremd-Fingerprints werden ebenfalls ausgeblendet':'✕ dauerhaft für diese Adresse ausgeschlossen';
     await loadUnassignedCandidates();
   }catch(e){
     if(button){button.disabled=false;button.textContent='✕ Gehört nicht dazu';}
     incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
   }
+}
+
+function renderIncomingWatch(alerts){
+  const rows=Array.isArray(alerts)?alerts:[];
+  if(!incomingWatch)return;
+  if(!rows.length){
+    incomingWatch.innerHTML='';
+    return;
+  }
+  incomingWatch.innerHTML=rows.map(a=>`
+    <div class="brain-watch">
+      <div class="brain-watch-title">⚠ ${esc(a.title||'Stammdaten prüfen')}</div>
+      <div class="sub">${esc(a.message||'')}</div>
+      <div class="brain-watch-grid">
+        <div class="brain-watch-value">
+          <div class="sub">Bisher</div>
+          <strong>${esc(a.previousIban||'—')}</strong>
+          ${a.previousDate?`<div class="sub">${esc(a.previousDate.split('-').reverse().join('.'))} · ${esc(a.previousInvoice||'')}</div>`:''}
+        </div>
+        <div class="brain-watch-value">
+          <div class="sub">Neu erkannt</div>
+          <strong>${esc(a.currentIban||'—')}</strong>
+          ${a.currentDate?`<div class="sub">${esc(a.currentDate.split('-').reverse().join('.'))} · ${esc(a.currentInvoice||'')}</div>`:''}
+        </div>
+      </div>
+      <div class="brain-watch-actions">
+        <button type="button" data-watch-key="${esc(a.key||'')}">✓ Geprüft · neue Bankverbindung ist bekannt</button>
+      </div>
+    </div>`).join('');
+
+  incomingWatch.querySelectorAll('[data-watch-key]').forEach(btn=>{
+    btn.onclick=async()=>{
+      btn.disabled=true;btn.textContent='gespeichert ✓';
+      try{
+        const r=await fetch('/incoming/watch-ack',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            addressId:selectedWwAddress?.addressId||'',
+            key:btn.dataset.watchKey||'',
+            decision:'known'
+          })
+        });
+        const d=await r.json();
+        if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
+        await loadSupplierInvoices('');
+      }catch(e){
+        btn.disabled=false;btn.textContent='✓ Geprüft · neue Bankverbindung ist bekannt';
+        incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
+      }
+    };
+  });
 }
 
 async function loadSupplierInvoices(textQuery=''){
@@ -2565,11 +2944,25 @@ async function loadSupplierInvoices(textQuery=''){
     if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
 
     incomingAll=data.documents||[];
-    incomingSub.textContent=incomingAll.length+' dauerhaft zugeordnete Eingangsrechnungen'+
-      (textQuery?' · Textfilter: "'+textQuery+'"':'');
-    incomingTextMeta.textContent=textQuery
-      ? incomingAll.length+' Treffer innerhalb dieses Lieferanten'
-      : 'Diese Akte wächst mit jeder bestätigten Zuordnung';
+    renderIncomingWatch(data.watchAlerts||[]);
+    const stats=data.stats||{};
+    const totalSum=Number(stats.sum||0);
+    const amountCount=Number(stats.amountCount||0);
+    const count=Number(stats.count||incomingAll.length||0);
+    const yearly=stats.yearly||{};
+
+    incomingSub.innerHTML=
+      `<strong>${count} Rechnungen</strong> · `+
+      `<strong>${esc(invoiceMoney(totalSum))}</strong> Gesamtsumme · `+
+      `<span class="ww-truth">WW-Eingangsbelege</span>`+
+      (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
+
+    incomingTextMeta.innerHTML=textQuery
+      ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
+      : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
+          const s=yearly[y]||{};
+          return `<span class="pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))}</span>`;
+        }).join(' ');
 
     renderIncomingGrouped(incomingAll,data.years||{});
   }catch(e){
@@ -2592,12 +2985,14 @@ function renderIncomingDoc(d){
     <img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
     <div>
       ${date?`<div class="day-date">${esc(date)}</div>`:''}
-      <div class="docname">${esc(d.filename||'Eingangsrechnung')}</div>
+      <div class="docname">${esc(d.invoiceNumber?('Rechnung '+d.invoiceNumber):(d.filename||'Eingangsrechnung'))}</div>
       ${d.amount!==null&&d.amount!==undefined
         ? `<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
+      ${d.paymentStatus?`<div class="payment-ok">${esc(d.paymentStatus)}</div>`:''}
+      <div class="ww-truth">Quelle: WinWorker Eingangsbelege</div>
       ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
-        <a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>
+        ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF noch nicht verknüpft</span>'}
       </div>
     </div>
   </div>`;
@@ -2796,7 +3191,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.6",
+        "version": "0.12.0",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3126,13 +3521,39 @@ def incoming_address_invoices():
     if not address_id:
         return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
     try:
+        ww_rows = ww_incoming_for_address(address_id)
         docs = incoming_for_address(address_id, text_query)
+        years = incoming_year_summary(docs)
+
+        total_sum = round(sum(float(x.get("amount") or 0) for x in docs if x.get("amount") is not None), 2)
+        amount_count = sum(1 for x in docs if x.get("amount") is not None)
+        yearly_stats = {}
+        for x in docs:
+            year = str(x.get("year") or "")
+            if not year:
+                continue
+            row = yearly_stats.setdefault(year, {"count": 0, "amountCount": 0, "sum": 0.0})
+            row["count"] += 1
+            if x.get("amount") is not None:
+                row["amountCount"] += 1
+                row["sum"] += float(x.get("amount") or 0)
+        for row in yearly_stats.values():
+            row["sum"] = round(row["sum"], 2)
+
         return jsonify({
             "ok": True,
             "addressId": address_id,
             "documents": docs,
             "count": len(docs),
-            "years": incoming_year_summary(docs),
+            "years": years,
+            "stats": {
+                "count": len(docs),
+                "amountCount": amount_count,
+                "sum": total_sum,
+                "yearly": yearly_stats,
+            },
+            "watchAlerts": incoming_watch_alerts(address_id, ww_rows),
+            "sourceOfTruth": "WinWorker Eingangsbelege",
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -3194,8 +3615,28 @@ def incoming_address_reject():
         body = request.get_json(silent=True) or {}
         address_id = str(body.get("addressId") or "").strip()
         invoice_id = str(body.get("invoiceId") or "").strip()
-        reject_invoice_for_address(address_id, invoice_id)
-        return jsonify({"ok": True, "addressId": address_id, "invoiceId": invoice_id})
+        _, learned_negative = reject_invoice_for_address(address_id, invoice_id)
+        return jsonify({
+            "ok": True,
+            "addressId": address_id,
+            "invoiceId": invoice_id,
+            "negativeFingerprintsLearned": len(learned_negative),
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/incoming/watch-ack")
+def incoming_watch_ack():
+    try:
+        body = request.get_json(silent=True) or {}
+        address_id = str(body.get("addressId") or "").strip()
+        key = str(body.get("key") or "").strip()
+        decision = str(body.get("decision") or "known").strip()
+        saved = acknowledge_watch_alert(address_id, key, decision)
+        return jsonify({"ok": True, "saved": saved})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
@@ -3308,7 +3749,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.6 - Ja/Nein Lernmaschine + Vollscan nach Fingerprint")
+    print("Version: 0.12.0 - WW Eingangsbelege als Wahrheit + Stammdatenwaechter")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
