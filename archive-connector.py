@@ -35,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/unassigned"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned"}
 
 
 def _request_is_local():
@@ -144,7 +144,7 @@ def _load_brain_supplier_map():
     Originaldaten werden nie verändert.
     """
     if not BRAIN_SUPPLIER_MAP_FILE.exists():
-        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}}
     try:
         data = json.loads(BRAIN_SUPPLIER_MAP_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -153,9 +153,10 @@ def _load_brain_supplier_map():
             "addressLinks": dict(data.get("addressLinks") or {}),
             "invoiceLinks": dict(data.get("invoiceLinks") or {}),
             "fingerprints": dict(data.get("fingerprints") or {}),
+            "rejections": dict(data.get("rejections") or {}),
         }
     except Exception:
-        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}}
+        return {"addressLinks": {}, "invoiceLinks": {}, "fingerprints": {}, "rejections": {}}
 
 
 def _save_brain_supplier_map(data):
@@ -460,18 +461,22 @@ def _incoming_public_item(item):
 
 def unassigned_invoice_candidates(address, limit=80):
     """
-    Kandidaten nach Auswahl einer echten WW-Adresse.
-    Wichtig: Nur Vorschläge. Verheiratet wird erst durch Klick.
-    Enthält:
-      - nicht zugeordnete Rechnungen mit brauchbaren Namens/Adresssignalen
-      - zusätzlich jüngste unzugeordnete Rechnungen, damit Fälle wie Morscher
-        (Briefkopf nur als Bild) manuell sichtbar und zuordenbar bleiben.
+    Unknown-only review queue.
+    Explicit YES -> linked.
+    Explicit NO -> permanently hidden for this address.
+    Strong learned fingerprints are auto-linked before this list is returned.
     """
+    address_id = str(address.get("addressId") or "")
+    auto_link_by_fingerprint(address_id)
     supplier_map = _load_brain_supplier_map()
+    rejected = set(supplier_map.get("rejections", {}).get(address_id, []))
     tokens = _address_tokens(address)
     scored = []
 
     for item in _incoming_catalog():
+        iid = _invoice_identity(item)
+        if not iid or iid in rejected:
+            continue
         if _invoice_linked_address_id(item, supplier_map):
             continue
 
@@ -480,38 +485,31 @@ def unassigned_invoice_candidates(address, limit=80):
             ident.get("name") or "",
             ident.get("address") or "",
             ident.get("supplierNumber") or "",
-            str(item.get("_raw_text") or "")[:2500],
+            str(item.get("_raw_text") or "")[:3500],
             item.get("filename") or "",
         ]))
 
         score = 0
         matched = []
 
-        fp_bucket = supplier_map.get("fingerprints", {}).get(str(address.get("addressId") or ""), {})
-        for known in fp_bucket.get("customerNumbers", []):
-            if known and _norm_supplier(known) in hay:
-                score += 50
-                matched.append("KundenNr "+known)
-        for known in fp_bucket.get("uids", []):
-            if known and _norm_supplier(known) in hay:
-                score += 45
-                matched.append("UID "+known)
-        for known in fp_bucket.get("ibans", []):
-            if known and _norm_supplier(known) in hay:
-                score += 40
-                matched.append("IBAN "+known)
+        # Stable learned fingerprints: these would normally already be auto-linked.
+        for kind, value, pts in _stable_fingerprint_matches(item, address_id, supplier_map):
+            score += pts
+            matched.append(f"{kind}: {value}")
+
+        # Fuzzy address/name evidence is only for the manual review queue.
         for t in tokens:
             if t and t in hay:
                 score += 3 if len(t) >= 6 else 1
                 matched.append(t)
-
-        # PLZ/Ort are particularly useful.
         for field in ("postalCode", "city"):
             t = _norm_supplier(address.get(field))
             if t and t in hay:
                 score += 4
 
-        scored.append((score, item, matched))
+        # Only genuinely plausible candidates enter manual review.
+        if score >= 8:
+            scored.append((score, item, matched))
 
     scored.sort(key=lambda row: (
         -row[0],
@@ -519,13 +517,12 @@ def unassigned_invoice_candidates(address, limit=80):
         str(row[1].get("filename") or "")
     ))
 
-    positives = [x for x in scored if x[0] >= 8][:max(1, min(int(limit or 80), 120))]
-
-    out = []
-    for score, item, matched in positives:
-        pub = _incoming_public_item(item)
-        pub["matchScore"] = score
-        pub["matchTerms"] = matched[:8]
+    out=[]
+    for score,item,matched in scored[:max(1,min(int(limit or 80),120))]:
+        pub=_incoming_public_item(item)
+        pub["matchScore"]=score
+        pub["matchTerms"]=matched[:8]
+        pub["decision"]="unknown"
         out.append(pub)
     return out
 
@@ -557,13 +554,16 @@ def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=
     if not address_id:
         raise ValueError("WW-Adresse fehlt.")
     if not invoice_id and not supplier_key:
-        raise ValueError("Rechnung oder erkannte Lieferantenvariante fehlt.")
+        raise ValueError("Rechnung fehlt.")
 
     data = _load_brain_supplier_map()
     if supplier_key:
         data.setdefault("addressLinks", {})[supplier_key] = address_id
     if invoice_id:
         data.setdefault("invoiceLinks", {})[invoice_id] = address_id
+        rejected = data.setdefault("rejections", {}).setdefault(address_id, [])
+        if invoice_id in rejected:
+            rejected.remove(invoice_id)
     _save_brain_supplier_map(data)
 
     learned={}
@@ -572,7 +572,73 @@ def link_invoice_or_supplier_to_address(address_id, invoice_id="", supplier_key=
             if _invoice_identity(item) == invoice_id:
                 learned=_learn_address_fingerprint(address_id,item)
                 break
-    return data, learned
+
+    auto_linked = auto_link_by_fingerprint(address_id)
+    return _load_brain_supplier_map(), learned, auto_linked
+
+
+def reject_invoice_for_address(address_id, invoice_id):
+    address_id = str(address_id or "").strip()
+    invoice_id = str(invoice_id or "").strip()
+    if not address_id or not invoice_id:
+        raise ValueError("Adresse oder Rechnung fehlt.")
+    data = _load_brain_supplier_map()
+    bucket = data.setdefault("rejections", {}).setdefault(address_id, [])
+    if invoice_id not in bucket:
+        bucket.append(invoice_id)
+    _save_brain_supplier_map(data)
+    return data
+
+
+def _stable_fingerprint_matches(item, address_id, supplier_map=None):
+    supplier_map = supplier_map or _load_brain_supplier_map()
+    bucket = supplier_map.get("fingerprints", {}).get(str(address_id), {})
+    raw_norm = _norm_supplier(str(item.get("_raw_text") or ""))
+    matches = []
+
+    for value in bucket.get("customerNumbers", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("customerNumber", value, 100))
+    for value in bucket.get("uids", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("uid", value, 95))
+    for value in bucket.get("ibans", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("iban", value, 90))
+    return matches
+
+
+def auto_link_by_fingerprint(address_id):
+    """
+    Re-scan the COMPLETE invoice catalogue after every positive learning click.
+    Strong stable fingerprints are auto-married. Explicit rejections always win.
+    """
+    address_id = str(address_id or "").strip()
+    data = _load_brain_supplier_map()
+    rejected = set(data.get("rejections", {}).get(address_id, []))
+    linked = 0
+
+    for item in _incoming_catalog():
+        iid = _invoice_identity(item)
+        if not iid or iid in rejected:
+            continue
+        current = _invoice_linked_address_id(item, data)
+        if current and current != address_id:
+            continue
+        if current == address_id:
+            continue
+
+        matches = _stable_fingerprint_matches(item, address_id, data)
+        if matches:
+            data.setdefault("invoiceLinks", {})[iid] = address_id
+            linked += 1
+
+    if linked:
+        _save_brain_supplier_map(data)
+    return linked
 
 
 def get_sql_driver():
@@ -2420,19 +2486,22 @@ function renderUnassignedCandidates(rows){
       ${Number(d.matchScore||0)>0?`<div class="review-match">möglicher Treffer · ${Number(d.matchScore)} Punkte</div>`:''}
       <div class="review-actions">
         <a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF prüfen</a>
-        <button type="button" data-link="${i}">✓ gehört zu ${esc(selectedWwAddress?.name||'dieser Adresse')}</button>
+        <button type="button" data-link="${i}">✓ Gehört dazu</button>
+        <button type="button" class="dark" data-reject="${i}">✕ Gehört nicht dazu</button>
       </div>
     </div>`).join('')+`</div>`;
 
   incomingReview.querySelectorAll('[data-link]').forEach(btn=>{
-    btn.onclick=()=>marryInvoice(rows[Number(btn.dataset.link)]);
+    btn.onclick=()=>marryInvoice(rows[Number(btn.dataset.link)],btn);
+  });
+  incomingReview.querySelectorAll('[data-reject]').forEach(btn=>{
+    btn.onclick=()=>rejectInvoice(rows[Number(btn.dataset.reject)],btn);
   });
 }
 
-async function marryInvoice(doc){
+async function marryInvoice(doc,button){
   if(!doc||!selectedWwAddress)return;
-  const ok=confirm(`Diese Rechnung dauerhaft mit\n\n${selectedWwAddress.name}\n${selectedWwAddress.address||''}\n\nverbinden?\n\nDie Originaldatei bleibt unverändert.`);
-  if(!ok)return;
+  if(button){button.disabled=true;button.textContent='✓ gespeichert';}
   try{
     const r=await fetch('/incoming/address-link',{
       method:'POST',
@@ -2445,10 +2514,35 @@ async function marryInvoice(doc){
     });
     const d=await r.json();
     if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
+    incomingTextMeta.textContent=d.autoLinked
+      ? `✓ gelernt · ${Number(d.autoLinked)} weitere eindeutige Rechnung(en) automatisch zugeordnet`
+      : '✓ dauerhaft zugeordnet und gelernt';
     await loadSupplierInvoices('');
     await loadUnassignedCandidates();
-    incomingTextMeta.textContent='✓ dauerhaft zugeordnet';
   }catch(e){
+    if(button){button.disabled=false;button.textContent='✓ Gehört dazu';}
+    incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
+  }
+}
+
+async function rejectInvoice(doc,button){
+  if(!doc||!selectedWwAddress)return;
+  if(button){button.disabled=true;button.textContent='✕ ausgeschlossen';}
+  try{
+    const r=await fetch('/incoming/address-reject',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        addressId:selectedWwAddress.addressId,
+        invoiceId:doc.invoiceId||''
+      })
+    });
+    const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
+    incomingTextMeta.textContent='✕ dauerhaft für diese Adresse ausgeschlossen';
+    await loadUnassignedCandidates();
+  }catch(e){
+    if(button){button.disabled=false;button.textContent='✕ Gehört nicht dazu';}
     incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
   }
 }
@@ -2702,7 +2796,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.5",
+        "version": "0.11.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3071,7 +3165,7 @@ def incoming_address_link():
         address_id = str(body.get("addressId") or "").strip()
         invoice_id = str(body.get("invoiceId") or "").strip()
         supplier_key = str(body.get("supplierKey") or "").strip()
-        _, learned = link_invoice_or_supplier_to_address(address_id, invoice_id, supplier_key)
+        _, learned, auto_linked = link_invoice_or_supplier_to_address(address_id, invoice_id, supplier_key)
         return jsonify({
             "ok": True,
             "addressId": address_id,
@@ -3086,7 +3180,22 @@ def incoming_address_link():
                 "amountConfidence": learned.get("amountConfidence", 0),
                 "amountReason": learned.get("amountReason") or "",
             },
+            "autoLinked": auto_linked,
         })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/incoming/address-reject")
+def incoming_address_reject():
+    try:
+        body = request.get_json(silent=True) or {}
+        address_id = str(body.get("addressId") or "").strip()
+        invoice_id = str(body.get("invoiceId") or "").strip()
+        reject_invoice_for_address(address_id, invoice_id)
+        return jsonify({"ok": True, "addressId": address_id, "invoiceId": invoice_id})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
@@ -3119,7 +3228,7 @@ def incoming_invoices():
     text_query = str(request.args.get("q", "")).strip()
 
     if not supplier_key:
-        return jsonify({"ok": False, "error": "Lieferantenschlüssel fehlt."}), 400
+        return jsonify({"ok": False, "error": "WW-Adresse ist ausgewählt."}), 400
 
     try:
         documents = incoming_supplier_invoices(supplier_key, text_query)
@@ -3199,7 +3308,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.5 - KundenNr/UID/IBAN lernen + Summenparser kontextgenau")
+    print("Version: 0.11.6 - Ja/Nein Lernmaschine + Vollscan nach Fingerprint")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
