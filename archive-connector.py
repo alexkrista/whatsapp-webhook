@@ -591,41 +591,51 @@ def acknowledge_watch_alert(address_id, alert_key, decision="known"):
 
 def incoming_for_address(address_id, text_query=""):
     """
-    Primärquelle: WinWorker dbo.Eingangsbelege.
-    PDF-Index dient nur noch zum Anreichern mit Vorschau/Volltext.
+    SOFORT-ANSICHT:
+    WinWorker dbo.Eingangsbelege wird direkt angezeigt.
+    KEIN PDF-Katalog wird beim Öffnen der Lieferantenakte geladen.
+    Dadurch erscheinen auch 425+ Rechnungen sofort.
+
+    PDF/Volltext wird bewusst entkoppelt und kann später separat nachgeladen werden.
     """
     address_id = str(address_id or "").strip()
     if not address_id:
         return []
 
-    ww_rows = ww_incoming_for_address(address_id)
-    catalog = _incoming_catalog()
-    lookup = _build_pdf_invoice_lookup(catalog)
     qtokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
-    for ww in ww_rows:
-        item = _attach_pdf_to_ww_invoice(ww, catalog, lookup)
+    for ww in ww_incoming_for_address(address_id):
+        item = dict(ww)
+        item.update({
+            "filename": "",
+            "path": "",
+            "logical_id": "",
+            "invoiceId": f"ww:{ww.get('wwIncomingId')}",
+            "dokumenttyp": "Eingangsrechnung",
+            "snippet": "",
+            "fingerprint": {},
+            "pdfDeferred": True,
+        })
 
         if qtokens:
-            hay = " ".join([
+            hay = _norm_supplier(" ".join([
                 str(item.get("invoiceNumber") or ""),
                 str(item.get("paymentStatus") or ""),
                 str(item.get("remark") or ""),
-                str(item.get("snippet") or ""),
-            ])
-            if item.get("path"):
-                for cat in catalog:
-                    if str(cat.get("path") or "") == str(item.get("path") or ""):
-                        hay += " " + str(cat.get("_raw_text") or "")
-                        break
-            nh = _norm_supplier(hay)
-            if not all(t in nh for t in qtokens):
+                str(item.get("iban") or ""),
+                str(item.get("swift") or ""),
+                str(item.get("accountHolder") or ""),
+            ]))
+            if not all(t in hay for t in qtokens):
                 continue
 
         result.append(item)
 
-    result.sort(key=lambda x: (x.get("invoiceDateTime") or "", x.get("wwIncomingId") or 0), reverse=True)
+    result.sort(
+        key=lambda x: (x.get("invoiceDateTime") or "", x.get("wwIncomingId") or 0),
+        reverse=True
+    )
     return result
 
 
@@ -2991,7 +3001,7 @@ async function loadSupplierInvoices(textQuery=''){
 
   loader.style.display='block';
   incomingTextMeta.textContent=textQuery
-    ? 'Suche innerhalb der zugeordneten Rechnungen …'
+    ? 'Suche in den WinWorker-Rechnungsdaten …'
     : 'Lade Lieferantenakte …';
 
   try{
@@ -3042,7 +3052,9 @@ function renderIncomingDoc(d){
     ? d.invoiceDate.split('-').reverse().join('.')
     : '';
   return `<div class="card doc">
-    <img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">
+    ${d.path
+      ? `<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`
+      : `<div class="thumb empty" style="display:flex;align-items:center;justify-content:center;color:#666;font-weight:900">WW</div>`}
     <div>
       ${date?`<div class="day-date">${esc(date)}</div>`:''}
       <div class="docname">${esc(d.invoiceNumber?('Rechnung '+d.invoiceNumber):(d.filename||'Eingangsrechnung'))}</div>
@@ -3052,7 +3064,7 @@ function renderIncomingDoc(d){
       <div class="ww-truth">Quelle: WinWorker Eingangsbelege</div>
       ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
-        ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF noch nicht verknüpft</span>'}
+        ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF wird separat geladen</span>'}
       </div>
     </div>
   </div>`;
@@ -3219,7 +3231,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.3",
+        "version": "0.12.4",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3777,7 +3789,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.3 - Eingangsbelege PDF-Matching massiv beschleunigt")
+    print("Version: 0.12.4 - WW Rechnungen sofort, PDF komplett entkoppelt")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
