@@ -35,7 +35,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/supplier-links", "/incoming/supplier-links/connect"}
 
 
 def _request_is_local():
@@ -132,6 +132,96 @@ SQL_DATABASE = "WinWorker_Projekte_Standard"
 SQL_USER = "kristine_reader"
 
 SCHEMA_INDEX_FILE = DB.parent / "winworker_sql_structure_index.json"
+
+SUPPLIER_LINKS_FILE = DB.parent / "brain_supplier_links.json"
+
+
+def _load_supplier_links():
+    """
+    Persistente, rein additive Brain-Zuordnung:
+    Original-Supplier-Keys bleiben unverändert; wir speichern nur Verbindungen darüber.
+    Format:
+      {"groups": {"canonicalKey": ["keyA","keyB", ...]}}
+    """
+    if not SUPPLIER_LINKS_FILE.exists():
+        return {"groups": {}}
+    try:
+        data = json.loads(SUPPLIER_LINKS_FILE.read_text(encoding="utf-8"))
+        groups = data.get("groups") if isinstance(data, dict) else {}
+        if not isinstance(groups, dict):
+            groups = {}
+        clean = {}
+        for canonical, keys in groups.items():
+            vals = sorted({str(x).strip() for x in (keys or []) if str(x).strip()})
+            if vals:
+                canonical = str(canonical or vals[0]).strip() or vals[0]
+                clean[canonical] = vals
+        return {"groups": clean}
+    except Exception:
+        return {"groups": {}}
+
+
+def _save_supplier_links(data):
+    SUPPLIER_LINKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SUPPLIER_LINKS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(SUPPLIER_LINKS_FILE)
+
+
+def _supplier_link_index():
+    data = _load_supplier_links()
+    key_to_canonical = {}
+    groups = {}
+    for canonical, keys in data.get("groups", {}).items():
+        all_keys = sorted(set([canonical, *keys]))
+        groups[canonical] = all_keys
+        for key in all_keys:
+            key_to_canonical[key] = canonical
+    return data, key_to_canonical, groups
+
+
+def _canonical_supplier_key(raw_key):
+    key = str(raw_key or "").strip()
+    if not key:
+        return ""
+    _, key_to_canonical, _ = _supplier_link_index()
+    return key_to_canonical.get(key, key)
+
+
+def _supplier_group_keys(raw_key):
+    key = str(raw_key or "").strip()
+    if not key:
+        return set()
+    _, key_to_canonical, groups = _supplier_link_index()
+    canonical = key_to_canonical.get(key, key)
+    return set(groups.get(canonical, [key]))
+
+
+def _connect_supplier_keys(keys):
+    wanted = [str(x or "").strip() for x in keys if str(x or "").strip()]
+    wanted = list(dict.fromkeys(wanted))
+    if len(wanted) < 2:
+        raise ValueError("Mindestens zwei Lieferanten/Adressen auswählen.")
+
+    data, key_to_canonical, groups = _supplier_link_index()
+
+    merged = set(wanted)
+    touched_canonicals = set()
+    for key in wanted:
+        canonical = key_to_canonical.get(key)
+        if canonical:
+            touched_canonicals.add(canonical)
+            merged.update(groups.get(canonical, []))
+
+    # Stabiler Canonical-Key: bestehende Gruppe bevorzugen, sonst erster gewählter Key.
+    canonical = next(iter(sorted(touched_canonicals)), wanted[0])
+
+    for old in touched_canonicals:
+        data["groups"].pop(old, None)
+
+    data.setdefault("groups", {})[canonical] = sorted(merged)
+    _save_supplier_links(data)
+    return canonical, sorted(merged)
 
 
 def get_sql_driver():
@@ -1215,7 +1305,8 @@ def _incoming_catalog():
 def incoming_supplier_candidates(query, limit=20):
     """
     Schritt 1: nur Lieferant/Adresse.
-    Kein Treffer mehr, nur weil 'Sto' irgendwo im Artikeltext einer Hilti-Rechnung steht.
+    Bereits manuell verbundene Varianten werden zu EINER Brain-Identität zusammengeführt.
+    Die Original-Keys bleiben als aliases erhalten.
     """
     q = str(query or "").strip()
     nq = _norm_supplier(q)
@@ -1224,6 +1315,7 @@ def incoming_supplier_candidates(query, limit=20):
 
     tokens = [x for x in nq.split() if len(x) >= 2]
     grouped = {}
+    _, key_to_canonical, groups = _supplier_link_index()
 
     for item in _incoming_catalog():
         ident = item.get("_supplier")
@@ -1235,23 +1327,37 @@ def incoming_supplier_candidates(query, limit=20):
             ident.get("addressNorm") or "",
             _norm_supplier(ident.get("supplierNumber") or ""),
         ])
-
         if not all(t in searchable for t in tokens):
             continue
 
-        g = grouped.setdefault(ident["key"], {
-            "key": ident["key"],
+        raw_key = ident["key"]
+        canonical = key_to_canonical.get(raw_key, raw_key)
+
+        g = grouped.setdefault(canonical, {
+            "key": canonical,
             "name": ident.get("name") or "",
             "address": ident.get("address") or "",
             "supplierNumber": ident.get("supplierNumber") or "",
             "count": 0,
             "years": set(),
+            "aliases": set(groups.get(canonical, [canonical])),
+            "variants": {},
         })
+        g["aliases"].add(raw_key)
         g["count"] += 1
         if item.get("year"):
             g["years"].add(int(item["year"]))
 
-        # Wenn spätere Rechnung eine bessere Adresse/Nummer liefert, nachziehen.
+        variant = g["variants"].setdefault(raw_key, {
+            "key": raw_key,
+            "name": ident.get("name") or "",
+            "address": ident.get("address") or "",
+            "supplierNumber": ident.get("supplierNumber") or "",
+            "count": 0,
+        })
+        variant["count"] += 1
+
+        # Bessere sichtbare Stammdaten nachziehen.
         if not g["address"] and ident.get("address"):
             g["address"] = ident["address"]
         if not g["supplierNumber"] and ident.get("supplierNumber"):
@@ -1260,11 +1366,16 @@ def incoming_supplier_candidates(query, limit=20):
     rows = []
     for g in grouped.values():
         g["years"] = sorted(g["years"], reverse=True)
+        g["aliases"] = sorted(g["aliases"])
+        g["variants"] = sorted(
+            g["variants"].values(),
+            key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower())
+        )
+        g["linkedCount"] = len(g["aliases"])
         rows.append(g)
 
     rows.sort(key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower()))
     return rows[:max(1, min(int(limit or 20), 50))]
-
 
 def incoming_supplier_invoices(supplier_key, text_query=""):
     """
@@ -1280,9 +1391,11 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
     query_tokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
+    linked_keys = _supplier_group_keys(supplier_key) or {supplier_key}
+
     for item in _incoming_catalog():
         ident = item.get("_supplier")
-        if not ident or ident.get("key") != supplier_key:
+        if not ident or ident.get("key") not in linked_keys:
             continue
 
         raw = str(item.get("_raw_text") or "")
@@ -1467,6 +1580,10 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .supplier-choice{cursor:pointer}
 .supplier-choice:hover{border-color:#788292}
 .supplier-choice .project-title{font-size:17px}
+.supplier-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.supplier-actions button{min-height:40px}
+.supplier-link-note{margin-top:8px;color:var(--blue);font-size:12px}
+.supplier-connect-mode{border-color:#7bb7ff!important;box-shadow:0 0 0 2px rgba(123,183,255,.12)}
 .supplier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .invoice-text-search{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
 .year-block{margin-top:20px}
@@ -1638,7 +1755,7 @@ const backToProjects=document.getElementById('backToProjects'),projectsTitle=doc
 const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null;
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null,supplierLinkSource=null;
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -1819,6 +1936,7 @@ function renderDocumentTypes(sourceFilter=''){
 
 function setSearchMode(mode){
   searchMode=mode;
+  supplierLinkSource=null;
   modeProjects.classList.toggle('active',mode==='projects');
   modeIncoming.classList.toggle('active',mode==='incoming');
 
@@ -1850,21 +1968,77 @@ function invoiceMoney(v){
 function renderSupplierCandidates(){
   incomingSupplierSection.hidden=false;
   incomingSuppliers.innerHTML=incomingCandidates.length
-    ? incomingCandidates.map((s,i)=>`
-      <div class="card supplier-choice" data-supplier="${i}">
+    ? incomingCandidates.map((s,i)=>{
+      const isSource=supplierLinkSource&&supplierLinkSource.key===s.key;
+      const linked=Number(s.linkedCount||0)>1
+        ? `<div class="supplier-link-note">🔗 ${Number(s.linkedCount)} Adress-/Namensvarianten bereits verbunden</div>`:'';
+      const variantInfo=(s.variants||[]).length>1
+        ? `<div class="sub">${(s.variants||[]).slice(0,3).map(v=>esc([v.name,v.address].filter(Boolean).join(' · '))).join('<br>')}</div>`:'';
+      return `<div class="card supplier-choice ${isSource?'supplier-connect-mode':''}" data-supplier="${i}">
         <div class="project-title">${esc(s.name||'Lieferant')}</div>
         ${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
         ${s.supplierNumber?`<div class="sub">Nr. ${esc(s.supplierNumber)}</div>`:''}
+        ${variantInfo}
         <div class="supplier-meta">
           <span class="pill">${Number(s.count||0)} Rechnungen</span>
           ${(s.years||[]).slice(0,5).map(y=>`<span class="pill">${esc(y)}</span>`).join('')}
         </div>
-      </div>`).join('')
+        ${linked}
+        <div class="supplier-actions">
+          <button class="dark open-supplier" type="button" data-supplier="${i}">Rechnungen</button>
+          ${supplierLinkSource&&!isSource
+            ? `<button class="connect-target" type="button" data-supplier="${i}">Mit „${esc(supplierLinkSource.name||'Auswahl')}“ verbinden</button>`
+            : `<button class="dark connect-source" type="button" data-supplier="${i}">${isSource?'Verbinden abbrechen':'Verbinden'}</button>`}
+        </div>
+      </div>`;
+    }).join('')
     : '<div class="empty">Kein passender Lieferant gefunden.</div>';
 
-  incomingSuppliers.querySelectorAll('[data-supplier]').forEach(card=>{
-    card.onclick=()=>selectIncomingSupplier(incomingCandidates[Number(card.dataset.supplier)]);
+  incomingSuppliers.querySelectorAll('.open-supplier').forEach(btn=>{
+    btn.onclick=e=>{e.stopPropagation();selectIncomingSupplier(incomingCandidates[Number(btn.dataset.supplier)])};
   });
+  incomingSuppliers.querySelectorAll('.connect-source').forEach(btn=>{
+    btn.onclick=e=>{
+      e.stopPropagation();
+      const row=incomingCandidates[Number(btn.dataset.supplier)];
+      supplierLinkSource=(supplierLinkSource&&supplierLinkSource.key===row?.key)?null:row;
+      renderSupplierCandidates();
+      meta.textContent=supplierLinkSource
+        ? 'Verbindungsmodus: jetzt die zweite Lieferanten-/Adresskarte auswählen'
+        : incomingCandidates.length+' passende Lieferanten/Adressen · bitte aktiv auswählen';
+    };
+  });
+  incomingSuppliers.querySelectorAll('.connect-target').forEach(btn=>{
+    btn.onclick=async e=>{
+      e.stopPropagation();
+      const target=incomingCandidates[Number(btn.dataset.supplier)];
+      if(!supplierLinkSource||!target)return;
+      await connectSupplierCards(supplierLinkSource,target);
+    };
+  });
+}
+
+async function connectSupplierCards(a,b){
+  if(!a||!b||a.key===b.key)return;
+  const labelA=[a.name,a.address].filter(Boolean).join(' · ');
+  const labelB=[b.name,b.address].filter(Boolean).join(' · ');
+  if(!confirm(`Diese Lieferanten/Adressen dauerhaft im Brain verbinden?\n\n${labelA}\n↔\n${labelB}\n\nOriginaldaten werden NICHT verändert.`))return;
+
+  meta.textContent='Lieferanten werden verbunden …';
+  try{
+    const r=await fetch('/incoming/supplier-links/connect',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({keys:[a.key,b.key]})
+    });
+    const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Verbinden fehlgeschlagen');
+    supplierLinkSource=null;
+    await runIncomingSupplierSearch(q.value);
+    meta.textContent='✓ Verbunden · beide Adressen gehören jetzt zu einer Brain-Lieferantenakte';
+  }catch(e){
+    meta.innerHTML='<span class="error">Verbinden fehlgeschlagen: '+esc(e.message)+'</span>';
+  }
 }
 
 async function runIncomingSupplierSearch(term){
@@ -2135,7 +2309,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.11.2",
+        "version": "0.11.3",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -2466,6 +2640,38 @@ def incoming_suppliers():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.get("/incoming/supplier-links")
+def incoming_supplier_links():
+    try:
+        data = _load_supplier_links()
+        return jsonify({
+            "ok": True,
+            "file": str(SUPPLIER_LINKS_FILE),
+            "groups": data.get("groups", {}),
+            "groupCount": len(data.get("groups", {})),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/incoming/supplier-links/connect")
+def incoming_supplier_links_connect():
+    try:
+        body = request.get_json(silent=True) or {}
+        keys = body.get("keys") or []
+        canonical, merged = _connect_supplier_keys(keys)
+        return jsonify({
+            "ok": True,
+            "canonicalKey": canonical,
+            "keys": merged,
+            "count": len(merged),
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/incoming/invoices")
 def incoming_invoices():
     supplier_key = str(request.args.get("key", "")).strip()
@@ -2552,7 +2758,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.11.2 - Lieferantenfilter präzise + Auswahl schnell + Dubletten reduziert")
+    print("Version: 0.11.3 - Lieferantenadressen finden + dauerhaft verbinden")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
