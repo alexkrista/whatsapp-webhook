@@ -196,7 +196,9 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .task-create-card.task-create-collapsed{padding:12px 14px}.task-reminder-levels label:has(input[value="2"]:checked){background:#fff5dc;border-color:#e0bc5a}.task-reminder-levels label:has(input[value="3"]:checked){background:#fde9e5;border-color:#d27b68}
 .task-card-compact{display:grid;grid-template-columns:38px minmax(0,1.5fr) minmax(120px,.8fr) 110px auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid #e4e8e4;cursor:pointer}
 .task-card-compact:hover{background:#f8faf8}.task-reminder-badge{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:900;background:#e8f3ea;color:#2d6a3e}
-.task-reminder-badge.level-2{background:#fff0c8;color:#7a5b11}.task-reminder-badge.level-3{background:#f9ddd7;color:#9a3729}.task-reminder-badge.level-4{background:#9f1f1f;color:#fff;box-shadow:0 0 0 3px #f1c6c6}.task-card-compact.task-escalated{background:#fff1ef;border-left:5px solid #9f1f1f}.task-card-title{font-weight:850}.task-card-sub{font-size:11px;color:#69736c}
+.task-reminder-badge.level-2{background:#fff0c8;color:#7a5b11}.task-reminder-badge.level-3{background:#f9ddd7;color:#9a3729}.task-card-title{font-weight:850}.task-card-sub{font-size:11px;color:#69736c}
+.daybar-segment.seg-empty.control-gap-bookable{cursor:pointer;position:relative;transition:filter .12s,box-shadow .12s}
+.daybar-segment.seg-empty.control-gap-bookable:hover{filter:brightness(.92);box-shadow:inset 0 0 0 2px rgba(37,112,58,.42)}
 @media(max-width:820px){
  .site-toolbar{grid-template-columns:1fr}.site-toolbar-actions{grid-column:1/-1}.site-toolbar-actions input{min-width:0;width:100%}
  .site-list-head{display:none}.site-row{grid-template-columns:74px 1fr auto;padding:12px}.site-row .site-address{grid-column:2/-1}.site-row .site-plan{display:none}
@@ -207,15 +209,13 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.7"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.9"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
-  <button onclick="showTab('planning')">📅 Planung</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
-  <button onclick="showTab('sites')">🏗️ Baustellen</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
-  <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
+  <button onclick="window.open('/gehirn'+(token?'?token='+encodeURIComponent(token):''),'_blank','noopener')">🧠 The Brain</button>
   <button class="secondary krista-refresh" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
@@ -405,7 +405,6 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
           <label><input type="radio" name="taskReminderLevel" value="1" checked>① normal</label>
           <label><input type="radio" name="taskReminderLevel" value="2">② nachfassen</label>
           <label><input type="radio" name="taskReminderLevel" value="3">③ dringend</label>
-          <label><input type="radio" name="taskReminderLevel" value="4">④ Eskalation</label>
         </div></div>
         <div class="full task-contact-box">
           <strong>Kontakt und Ort</strong><div class="small" style="margin:3px 0 10px">Bei Baustellenbezug werden vorhandene Daten automatisch übernommen. Ohne Baustelle bitte hier eintragen.</div>
@@ -614,7 +613,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.8"});
+createKristaTopbar({active:"kristine",build:"0031.9"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],employeeWorkRules={},companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -1141,20 +1140,7 @@ function dragAssignmentStart(event,assignmentId){draggedAssignmentId=assignmentI
 function dragAssignmentEnd(event){event.currentTarget.classList.remove('dragging');document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));draggedAssignmentId=null}
 function planningDragOver(event){event.preventDefault();event.currentTarget.classList.add('dragover');event.dataTransfer.dropEffect='copy'}
 function planningDragLeave(event){if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.classList.remove('dragover')}
-async function planningDrop(event,date){
-  event.preventDefault();event.currentTarget.classList.remove('dragover');
-  const source=droppedAssignment(event);if(!source||source.date===date)return;
-  const employee=employeeById(source.employeeId);if(!employee)return;
-  const copy=Boolean(event.ctrlKey||event.altKey);
-  if(cardTypeOf(source)==='site'){
-    const placed=copy
-      ?await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0})
-      :await placeSiteAssignment(source,employee,date,{forceDialog:siteSegments(employee.id,date,source.id).length>0,excludeId:source.id});
-    if(placed)await saveAssignments(true);else renderPlanning();return;
-  }
-  const created=await createSpecialAssignment(cardTypeOf(source),employee,date,source);
-  if(created){if(!copy)data.assignments=data.assignments.filter(a=>String(a.id)!==String(source.id));await saveAssignments(true)}else renderPlanning();
-}
+async function planningDrop(event,date){event.preventDefault();event.currentTarget.classList.remove('dragover');const source=droppedAssignment(event);if(!source||source.date===date)return;if(cardTypeOf(source)==='site'){const employee=employeeById(source.employeeId);if(!employee)return;const placed=await placeSiteAssignment({...source,id:id()},employee,date,{forceDialog:siteSegments(employee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}const employee=employeeById(source.employeeId);if(!employee)return;const created=await createSpecialAssignment(cardTypeOf(source),employee,date,source);if(created)await saveAssignments(true);else renderPlanning()}
 function droppedPayload(event){return event.dataTransfer.getData('text/plain')||draggedAssignmentId||''}
 function droppedAssignment(event){const payload=droppedPayload(event);return data.assignments.find(a=>a.id===payload)||null}
 function movedOrCopiedAssignment(event,source){const clone={...source,id:id()};data.assignments.push(clone);return clone}
@@ -1176,17 +1162,8 @@ async function planningEmployeeDrop(event,date,employeeId){
   if(payload.startsWith('pooljob:')){const jobId=payload.slice(8),job=masterJobs.find(j=>String(j.jobId)===String(jobId));if(!job)return;const template={id:id(),cardType:'site',jobId:String(job.jobId),jobName:job.name||('#'+job.jobId),city:job.city||'',address:jobAddress(job),vehicle:'',note:''};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
   if(payload.startsWith('pooltype:')){const type=payload.slice(9);const created=await createSpecialAssignment(type,targetEmployee,date);if(created)await saveAssignments(true);else renderPlanning();return}
   const source=droppedAssignment(event);if(!source)return;
-  const sameTarget=String(source.employeeId)===String(targetEmployee.id)&&String(source.date)===String(date);
-  if(sameTarget)return;
-  const copy=Boolean(event.ctrlKey||event.altKey);
-  if(cardTypeOf(source)==='site'){
-    const placed=copy
-      ?await placeSiteAssignment({...source,id:id()},targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0})
-      :await placeSiteAssignment(source,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date,source.id).length>0,excludeId:source.id});
-    if(placed)await saveAssignments(true);else renderPlanning();return;
-  }
-  const created=await createSpecialAssignment(cardTypeOf(source),targetEmployee,date,source);
-  if(created){if(!copy)data.assignments=data.assignments.filter(a=>String(a.id)!==String(source.id));await saveAssignments(true)}else renderPlanning()
+  if(cardTypeOf(source)==='site'){const template={...source,id:id()};const placed=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:siteSegments(targetEmployee.id,date).length>0});if(placed)await saveAssignments(true);else renderPlanning();return}
+  const created=await createSpecialAssignment(cardTypeOf(source),targetEmployee,date,source);if(created)await saveAssignments(true);else renderPlanning()
 }
 function setSiteSort(value){siteSort=value||'assigned';localStorage.setItem('kristaSiteSort',siteSort);renderPlanning()}
 function siteStatusRank(status){const order={'Angebot':1,'Auftrag':2,'Laufend':3,'Fertig nicht abgerechnet':4,'Geschlossen':5};return order[String(status||'')]||99}
@@ -1506,7 +1483,7 @@ function renderAxisLabels(dayStart,dayEnd){
   }
   return `<div class="daybar-labels" style="grid-template-columns:repeat(${count},1fr)">${labels.join('')}</div>`;
 }
-function renderDayBar(segments,dayStart,dayEnd){
+function renderDayBar(segments,dayStart,dayEnd,employeeId=""){
   const total=Math.max(60,dayEnd-dayStart);
   const ordered=[...segments]
     .filter(seg=>Number.isFinite(seg.from)&&Number.isFinite(seg.to))
@@ -1524,7 +1501,9 @@ function renderDayBar(segments,dayStart,dayEnd){
     if(to<=from)continue;
 
     if(from>cursor){
-      html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
+      const gapFrom=cursor,gapTo=from;
+      const gapTitle=`Offene Zeit ${minutesToHm(gapFrom)}–${minutesToHm(gapTo)} · anklicken zum Buchen`;
+      html+=`<span class="daybar-segment seg-empty control-gap-bookable" style="width:${((gapTo-gapFrom)/total)*100}%" title="${esc(gapTitle)}" onclick="event.stopPropagation();openControlGap('${esc(employeeId)}',${gapFrom},${gapTo})"></span>`;
     }
 
     const cls=
@@ -1607,11 +1586,14 @@ function renderDayBar(segments,dayStart,dayEnd){
   }
 
   if(cursor<dayEnd){
-    html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
+    const gapFrom=cursor,gapTo=dayEnd;
+    const gapTitle=`Offene Zeit ${minutesToHm(gapFrom)}–${minutesToHm(gapTo)} · anklicken zum Buchen`;
+    html+=`<span class="daybar-segment seg-empty control-gap-bookable" style="width:${((gapTo-gapFrom)/total)*100}%" title="${esc(gapTitle)}" onclick="event.stopPropagation();openControlGap('${esc(employeeId)}',${gapFrom},${gapTo})"></span>`;
   }
 
   if(!html){
-    html='<span class="daybar-segment seg-empty" style="width:100%"></span>';
+    const gapTitle=`Offene Zeit ${minutesToHm(dayStart)}–${minutesToHm(dayEnd)} · anklicken zum Buchen`;
+    html=`<span class="daybar-segment seg-empty control-gap-bookable" style="width:100%" title="${esc(gapTitle)}" onclick="event.stopPropagation();openControlGap('${esc(employeeId)}',${dayStart},${dayEnd})"></span>`;
   }
 
   return html+markers;
@@ -1736,6 +1718,37 @@ async function copyTimeEditorFromEmployee(){
     const hint=document.getElementById('timeCopyHint');if(hint)hint.innerHTML=`<span class="time-copy-source">Von ${esc(source?.name||sourceId)} übernommen.</span> Bitte kontrollieren und anschließend speichern.`;
     employeeActionNote.textContent=`✓ Korrektur von ${source?.name||sourceId} übernommen – noch nicht gespeichert.`;
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
+}
+async function openControlGap(employeeId,fromMinutes,toMinutes){
+  if(!employeeId||!Number.isFinite(Number(fromMinutes))||!Number.isFinite(Number(toMinutes))||Number(toMinutes)<=Number(fromMinutes))return;
+  await openEmployeeActionModal(employeeId);
+  if(String(selectedControlEmployeeId)!==String(employeeId))return;
+
+  const from=minutesToHm(Number(fromMinutes));
+  const to=minutesToHm(Number(toMinutes));
+  const plans=(data.assignments||[]).filter(a=>
+    String(a.employeeId)===String(employeeId) &&
+    String(a.date)===String(selectedWorkDate()) &&
+    !['urlaub','krank','za','feiertag','betriebsurlaub'].includes(cardTypeOf(a))
+  );
+  const uniqueJobs=[...new Map(plans.filter(a=>a.jobId).map(a=>[String(a.jobId),a])).values()];
+  const plannedJob=uniqueJobs.length===1?uniqueJobs[0]:null;
+
+  timeEditorSegments.push({
+    id:id(),
+    type:'work',
+    from,
+    to,
+    jobId:plannedJob?String(plannedJob.jobId||''):'',
+    jobName:plannedJob?String(plannedJob.jobName||plannedJob.name||''):'',
+    reason:''
+  });
+  timeEditorSegments.sort((a,b)=>(hmToMinutes(a.from)??9999)-(hmToMinutes(b.from)??9999));
+  renderTimeEditor();
+  populateTimeCopyEmployees();
+  employeeActionNote.textContent=plannedJob
+    ? `Offene Zeit ${from}–${to} übernommen · geplante Baustelle vorausgewählt. Bitte kontrollieren und speichern.`
+    : `Offene Zeit ${from}–${to} übernommen · bitte Baustelle wählen und speichern.`;
 }
 async function openEmployeeActionModal(employeeId){
   const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));selectedControlEmployeeId=String(employeeId);
@@ -2110,23 +2123,36 @@ function renderControl(){
       workMinutes,
       upMinutes,
       breakMinutes,
-      hasProductiveBooking:workMinutes>0,
-      isOffice:/büro|buero|office/i.test(String(masterEmployees.find(e=>aliasIds.includes(String(e.id)))?.role||'')),
-      hasClockedActivity:workMinutes>0||upMinutes>0||['working','pause','lunch'].includes(String(s?.mode||''))
+      hasProductiveBooking:workMinutes>0
     };
   }).sort((a,b)=>{
-    // Leitstand-Reihenfolge:
-    // 1 produktiv auf Baustelle · 2 produktive MA auf UP · 3 Büro eingestempelt · 4 leer
-    const group=x=>{
-      if(!x.isOffice&&x.workMinutes>0)return 1;
-      if(!x.isOffice&&x.upMinutes>0)return 2;
-      if(x.isOffice&&x.hasClockedActivity)return 3;
+    function controlSortGroup(row){
+      const aliasIds=(row.aliasIds||[row.employeeId]).map(String);
+      const master=masterEmployees.find(e=>aliasIds.includes(String(e.id)))||{};
+      const roleText=[master.role,master.team,master.department].filter(Boolean).join(' ').toLowerCase();
+      const isOffice=/\\bbüro\\b|\\boffice\\b/.test(roleText);
+      const mode=String(row.state?.mode||'idle');
+      const hasStamp=(row.segments||[]).length>0 || !['idle',''].includes(mode);
+
+      // 1: arbeitende produktive Mitarbeiter auf Baustelle
+      if(!isOffice && Number(row.workMinutes||0)>0)return 1;
+      // 2: produktive Mitarbeiter mit UP-Buchung
+      if(!isOffice && Number(row.upMinutes||0)>0)return 2;
+      // 3: Büro, sobald für den Tag eine echte Buchung / ein Status vorhanden ist
+      if(isOffice && hasStamp)return 3;
+      // 4: leer / ohne Buchung
       return 4;
-    };
-    const ga=group(a),gb=group(b);if(ga!==gb)return ga-gb;
-    const modeA=a.state?.mode||'idle',modeB=b.state?.mode||'idle';
-    return (rank[modeA]||99)-(rank[modeB]||99)
-      ||String(a.employeeName||'').localeCompare(String(b.employeeName||''),'de');
+    }
+    const ga=controlSortGroup(a),gb=controlSortGroup(b);
+    if(ga!==gb)return ga-gb;
+
+    const aliasA=(a.aliasIds||[a.employeeId]).map(String);
+    const aliasB=(b.aliasIds||[b.employeeId]).map(String);
+    const ma=masterEmployees.find(e=>aliasA.includes(String(e.id)))||{};
+    const mb=masterEmployees.find(e=>aliasB.includes(String(e.id)))||{};
+    const nameA=String(ma.nickname||a.employeeName||ma.name||'');
+    const nameB=String(mb.nickname||b.employeeName||mb.name||'');
+    return nameA.localeCompare(nameB,'de');
   });
 
   const unknownCount=Object.values(data.states||{}).reduce(
@@ -2326,7 +2352,7 @@ function renderControl(){
             <div class="daybar-wrap">
               ${renderAxisLabels(dayStart,dayEnd)}
               <div class="daybar" style="position:relative;overflow:visible">
-                ${renderDayBar(segments,dayStart,dayEnd)}
+                ${renderDayBar(segments,dayStart,dayEnd,activeEmployeeId)}
               </div>
             </div>
 
@@ -2370,7 +2396,7 @@ async function addTask(){
   const button=document.querySelector('button[onclick="addTask()"]');
   const oldLabel=button?.textContent;
   const newTask={
-    id:id(),title:tTitle.value.trim(),taskType:selectedTaskType(),priority:selectedTaskPriority(),reminderLevel:selectedTaskReminderLevel(),repeatCount:1,
+    id:id(),title:tTitle.value.trim(),taskType:selectedTaskType(),priority:selectedTaskPriority(),reminderLevel:selectedTaskReminderLevel(),
     assigneeId:tAssigneeId.value.trim(),assigneeName:tAssigneeName.value.trim(),
     jobId:tJobId.value.trim(),jobName:tJobName.value.trim(),
     dueDate:tDueDate.value,reminder:tReminder.value.trim(),
@@ -2379,21 +2405,8 @@ async function addTask(){
     contactPhone:tContactPhone.value.trim(),contactEmail:tContactEmail.value.trim(),
     status:'open',createdAt:new Date().toISOString(),completedAt:null
   };
-  const showNotice=(text,type='ok')=>{taskSaveNotice.textContent=text;taskSaveNotice.className='task-save-notice '+type};
-  const norm=v=>String(v||'').trim().toLowerCase().replace(/\s+/g,' ');
-  const existing=(data.tasks||[]).find(t=>t.status!=='done'&&norm(t.title)===norm(newTask.title)&&String(t.assigneeId||'')===String(newTask.assigneeId||'')&&String(t.jobId||'')===String(newTask.jobId||''));
-  if(existing){
-    existing.repeatCount=Math.max(1,Number(existing.repeatCount||existing.reminderLevel||1))+1;
-    existing.reminderLevel=Math.min(4,existing.repeatCount);
-    existing.updatedAt=new Date().toISOString();
-    if(existing.repeatCount>=4&&!existing.escalatedAt)existing.escalatedAt=existing.updatedAt;
-    if(newTask.dueDate)existing.dueDate=newTask.dueDate;
-    if(newTask.reminder)existing.reminder=newTask.reminder;
-    renderTasks();renderControl();
-    try{await persistTasks();showNotice(`Aufgabe als ${existing.repeatCount}. Wiederholung gespeichert${existing.repeatCount>=4?' · ESKALATION':''}.`,'ok')}catch(e){showNotice('Wiederholung konnte nicht gespeichert werden: '+e.message,'warn')}
-    return;
-  }
   data.tasks.push(newTask);renderTasks();renderControl();
+  const showNotice=(text,type='ok')=>{taskSaveNotice.textContent=text;taskSaveNotice.className='task-save-notice '+type};
   try{
     if(button){button.disabled=true;button.textContent='Speichert …'}
     const r=await persistTasks();
@@ -2425,10 +2438,9 @@ function renderTasks(){
   if(taskFilter==='done')tasks=tasks.filter(t=>t.status==='done');
   tasks.sort((a,b)=>taskFilter==='newest'?String(b.createdAt||b.id||'').localeCompare(String(a.createdAt||a.id||'')):(a.status==='done')-(b.status==='done')||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   taskList.innerHTML=tasks.length?tasks.map(t=>{
-    const repeats=Math.max(1,Number(t.repeatCount||t.reminderLevel||1));
-    const level=Math.max(1,Math.min(4,repeats));
-    return `<div class="task-card-compact ${level>=4?'task-escalated':''}" onclick="openTaskListModal('${esc(t.id)}')">
-      <span class="task-reminder-badge level-${level}">${repeats}×</span>
+    const level=Math.max(1,Math.min(3,Number(t.reminderLevel||1)));
+    return `<div class="task-card-compact" onclick="openTaskListModal('${esc(t.id)}')">
+      <span class="task-reminder-badge level-${level}">${level}</span>
       <div><div class="task-card-title">${esc(t.title)}</div><div class="task-card-sub">${esc(t.jobName||'ohne Baustelle')} · ${esc(t.taskType||'Aufgabe')}</div></div>
       <div class="task-assignee">${esc(t.assigneeName||t.assigneeId||'–')}</div>
       <div class="task-due">${esc(taskDueLabel(t.dueDate))}</div>
@@ -2447,7 +2459,7 @@ async function saveTasks(){
 }
 function taskDetailHtml(t){
   const address=t.address||(masterJobs.find(x=>String(x.jobId)===String(t.jobId))&&jobAddress(masterJobs.find(x=>String(x.jobId)===String(t.jobId))))||'';
-  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Art</span><strong>${esc(t.taskType||'Aufgabe')}</strong><span>Priorität</span><strong>${esc(t.priority||'normal')}</strong><span>Wiederholung</span><strong>${esc(String(t.repeatCount||t.reminderLevel||1))}×${Number(t.repeatCount||t.reminderLevel||1)>=4?' · ESKALATION':''}</strong><span>Für</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Von</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong>${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:''}<span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Hinweise</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactEmail?`<span>E-Mail</span><strong>${esc(t.contactEmail)}</strong>`:''}${t.contactPhone?`<span>Rückruf</span><strong>${esc(t.contactName||'')} ${esc(t.contactPhone)}</strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}</div></div>`
+  return `<div class="task-modal-item ${taskIsOverdue(t)?'overdue':''}"><h4>${esc(t.title)}</h4><div class="task-detail-grid"><span>Art</span><strong>${esc(t.taskType||'Aufgabe')}</strong><span>Priorität</span><strong>${esc(t.priority||'normal')}</strong><span>Erinnerung</span><strong>${esc(String(t.reminderLevel||1))}</strong><span>Für</span><strong>${esc(t.assigneeName||t.assigneeId||'–')}</strong><span>Von</span><strong>${esc(t.creatorName||'Chef / Büro')}</strong><span>Baustelle</span><strong>${esc(t.jobName||'keine Baustelle')}</strong>${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:''}<span>Fällig</span><strong>${esc(taskDueLabel(t.dueDate))}${taskIsOverdue(t)?' · überfällig':''}</strong><span>Status</span><strong>${esc(taskStatusLabel(t))}</strong>${t.reminder?`<span>Hinweise</span><strong>${esc(t.reminder)}</strong>`:''}${t.contactEmail?`<span>E-Mail</span><strong>${esc(t.contactEmail)}</strong>`:''}${t.contactPhone?`<span>Rückruf</span><strong>${esc(t.contactName||'')} ${esc(t.contactPhone)}</strong>`:''}</div><div class="actions">${t.contactPhone?`<a class="navbtn" href="tel:${esc(t.contactPhone)}">📞 Anrufen</a>`:''}${t.status!=='done'?`<button class="green" onclick="markTaskDone('${t.id}')">✓ Erledigt</button>`:''}</div></div>`
 }
 function openTaskListModal(focusId=''){
   const tasks=(data.tasks||[]).filter(t=>t.status!=='done').sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
