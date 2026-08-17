@@ -434,10 +434,56 @@ def _pdf_match_score_for_ww(item, ww):
     return score
 
 
-def _attach_pdf_to_ww_invoice(ww, catalog):
+
+def _build_pdf_invoice_lookup(catalog):
+    """
+    Einmaliger Lookup pro Request statt für JEDE WW-Rechnung den kompletten
+    PDF-Katalog neu zu durchsuchen.
+    """
+    by_number = {}
+    fallback = []
+
+    for item in catalog:
+        filename = str(item.get("filename") or "")
+        if filename.lower().endswith("_original.pdf"):
+            continue
+
+        raw = str(item.get("_raw_text") or "")
+        fp = _extract_supplier_fingerprint(raw)
+        nr = str(fp.get("invoiceNumber") or "").strip()
+
+        if nr:
+            key = _norm_supplier(nr)
+            if key:
+                by_number.setdefault(key, []).append(item)
+        else:
+            fallback.append(item)
+
+    return {"byNumber": by_number, "fallback": fallback}
+
+
+def _attach_pdf_to_ww_invoice(ww, catalog, lookup=None):
+    """
+    Schnelle PDF-Verknüpfung:
+    1. Rechnungsnummer-Index
+    2. nur bei Bedarf kleiner Fallback
+    WW bleibt fachliche Wahrheit.
+    """
+    lookup = lookup or _build_pdf_invoice_lookup(catalog)
+
+    nr = str(ww.get("invoiceNumber") or "").strip()
+    candidates = []
+    if nr:
+        candidates = list(lookup.get("byNumber", {}).get(_norm_supplier(nr), []))
+
+    # Falls Parser die Rechnungsnummer im PDF nicht sauber erkannt hat:
+    # nur Fallback-Dokumente + maximal einige Kandidaten prüfen, nicht den ganzen Katalog.
+    if not candidates:
+        candidates = list(lookup.get("fallback", []))[:250]
+
     best = None
     best_score = 0
-    for item in catalog:
+    for item in candidates:
         score = _pdf_match_score_for_ww(item, ww)
         if score > best_score:
             best_score = score
@@ -446,7 +492,6 @@ def _attach_pdf_to_ww_invoice(ww, catalog):
     result = dict(ww)
     if best is not None and best_score >= 70:
         pub = _incoming_public_item(best)
-        # WW wins for structured invoice values.
         pub.update({
             "wwIncomingId": ww.get("wwIncomingId"),
             "invoiceNumber": ww.get("invoiceNumber"),
@@ -470,7 +515,6 @@ def _attach_pdf_to_ww_invoice(ww, catalog):
         })
         return pub
 
-    # WW entry without matched PDF remains visible.
     result.update({
         "filename": "",
         "path": "",
@@ -556,11 +600,12 @@ def incoming_for_address(address_id, text_query=""):
 
     ww_rows = ww_incoming_for_address(address_id)
     catalog = _incoming_catalog()
+    lookup = _build_pdf_invoice_lookup(catalog)
     qtokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
 
     for ww in ww_rows:
-        item = _attach_pdf_to_ww_invoice(ww, catalog)
+        item = _attach_pdf_to_ww_invoice(ww, catalog, lookup)
 
         if qtokens:
             hay = " ".join([
@@ -3174,7 +3219,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.2",
+        "version": "0.12.3",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3732,7 +3777,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.2 - doppelte Legacy-Ladefunktion entfernt")
+    print("Version: 0.12.3 - Eingangsbelege PDF-Matching massiv beschleunigt")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
