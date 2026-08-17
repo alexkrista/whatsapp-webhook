@@ -175,22 +175,50 @@ def _invoice_identity(item):
 def ww_address_search(query, limit=25):
     """
     Echte WinWorker-Adressen als Master.
-    Dieselbe Adresswelt wie bei Projekten; unabhängig davon, ob bereits
-    eine Rechnung richtig erkannt wurde.
+
+    Suche ist bewusst tolerant:
+    LED findet auch L.E.D., L-E-D, L E D usw.
+    Punkte, Bindestriche, Leerzeichen, / und & werden für eine zweite
+    Vergleichsspur ignoriert.
     """
     q = str(query or "").strip()
     if len(q) < 2:
         return []
 
     terms = [x for x in re.split(r"\s+", q) if x]
+
+    def compact(v):
+        return re.sub(r"[\s\.\-_/&]+", "", str(v or "")).lower()
+
+    q_compact = compact(q)
+
     con = sql_connection("WinWorker_Adressen_Standard")
     cur = con.cursor()
 
+    # SQL expression equivalent to compact(), for the WW address fields.
+    def sql_compact(expr):
+        return (
+            "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE("
+            f"ISNULL({expr},''),'.',''),'-',''),' ',''),'/',''),'&',''),'_',''))"
+        )
+
+    compact_fields = [
+        sql_compact("k.sFirma"),
+        sql_compact("k.sName"),
+        sql_compact("k.sVorname"),
+        sql_compact("k.sStrasse"),
+        sql_compact("k.sOrt"),
+    ]
+
     conditions = []
     params = []
+
     for term in terms:
         like = f"%{term}%"
-        conditions.append("""
+        term_compact = compact(term)
+        compact_like = f"%{term_compact}%"
+
+        normal_clause = """
             (
                 ISNULL(k.sFirma,'') LIKE ?
                 OR ISNULL(k.sName,'') LIKE ?
@@ -200,8 +228,14 @@ def ww_address_search(query, limit=25):
                 OR ISNULL(k.sOrt,'') LIKE ?
                 OR CAST(ISNULL(k.lKundenNr,0) AS varchar(40)) LIKE ?
             )
-        """)
+        """
+        compact_clause = "(" + " OR ".join(f"{f} LIKE ?" for f in compact_fields) + ")"
+
+        conditions.append(f"({normal_clause} OR {compact_clause})")
         params.extend([like] * 7)
+        params.extend([compact_like] * len(compact_fields))
+
+    compact_firma = sql_compact("k.sFirma")
 
     sql = f"""
         SELECT TOP {max(1, min(int(limit or 25), 100))}
@@ -229,6 +263,7 @@ def ww_address_search(query, limit=25):
         WHERE {" AND ".join(conditions)}
         ORDER BY
             CASE WHEN ISNULL(eb.cnt,0) > 0 THEN 0 ELSE 1 END,
+            CASE WHEN {compact_firma} LIKE ? THEN 0 ELSE 1 END,
             ISNULL(eb.cnt,0) DESC,
             CASE WHEN ISNULL(k.sFirma,'') LIKE ? THEN 0 ELSE 1 END,
             CASE WHEN k.lLieferantenNr IS NULL THEN 1 ELSE 0 END,
@@ -237,7 +272,8 @@ def ww_address_search(query, limit=25):
             k.sOrt
     """
     exact_like = f"%{q}%"
-    rows = cur.execute(sql, *(params + [exact_like])).fetchall()
+    compact_exact_like = f"%{q_compact}%"
+    rows = cur.execute(sql, *(params + [compact_exact_like, exact_like])).fetchall()
     con.close()
 
     out = []
@@ -309,6 +345,34 @@ def _norm_iban(value):
     return re.sub(r"\s+", "", str(value or "")).upper().strip()
 
 
+def _payment_state(status_text):
+    """
+    Erste feste OP-Regeln:
+    - Beglichen/bezahlt = bezahlt
+    - SEPA übergeben = bezahlt (User-Regel)
+    - Offen = offen
+    - Rest = unbekannt
+    """
+    s = _norm_supplier(status_text)
+    if not s:
+        return "unknown"
+
+    paid_terms = (
+        "beglichen",
+        "bezahlt",
+        "sepa ubergeben",
+        "sepa übergeben",
+        "lastschrift beglichen",
+    )
+    if any(t in s for t in paid_terms):
+        return "paid"
+
+    if "offen" in s:
+        return "open"
+
+    return "unknown"
+
+
 def ww_incoming_for_address(address_id):
     """
     Fachliche Wahrheit für Eingangsrechnungen direkt aus WinWorker.
@@ -376,6 +440,7 @@ def ww_incoming_for_address(address_id):
             "fibuStatus": r.nFibuStatus,
             "paymentStatusCode": r.nZahlungsStatus,
             "paymentStatus": str(r.sZahlungsStatus or "").strip(),
+            "paymentState": _payment_state(r.sZahlungsStatus),
             "paymentTypeCode": r.nZahlungsart,
             "iban": _norm_iban(r.sIban),
             "swift": str(r.sSwift or "").strip(),
@@ -2517,6 +2582,12 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
   }
 }
 
+
+.payment-open{color:#ff7777;font-weight:850}
+.payment-paid{color:var(--good);font-weight:850}
+.payment-unknown{color:var(--warn);font-weight:850}
+.open-total{color:#ff7777;font-weight:850}
+
 </style>
 </head>
 <body>
@@ -3134,6 +3205,8 @@ async function loadSupplierInvoices(textQuery=''){
     renderIncomingWatch(data.watchAlerts||[]);
     const stats=data.stats||{};
     const totalSum=Number(stats.sum||0);
+    const openSum=Number(stats.openSum||0);
+    const openCount=Number(stats.openCount||0);
     const amountCount=Number(stats.amountCount||0);
     const count=Number(stats.count||incomingAll.length||0);
     const yearly=stats.yearly||{};
@@ -3141,6 +3214,7 @@ async function loadSupplierInvoices(textQuery=''){
     incomingSub.innerHTML=
       `<strong>${count} Rechnungen</strong> · `+
       `<strong>${esc(invoiceMoney(totalSum))}</strong> Gesamtsumme · `+
+      `<span class="open-total">${openCount} offen · ${esc(invoiceMoney(openSum))}</span> · `+
       `<span class="ww-truth">WW-Eingangsbelege</span>`+
       (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
 
@@ -3149,7 +3223,7 @@ async function loadSupplierInvoices(textQuery=''){
       ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
       : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
           const s=yearly[y]||{};
-          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))}</span>`;
+          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="open-total">${Number(s.openCount||0)} offen · ${esc(invoiceMoney(Number(s.openSum||0)))}</span></span>`;
         }).join('');
 
     renderIncomingGrouped(incomingAll,data.years||{});
@@ -3178,7 +3252,7 @@ function renderIncomingDoc(d){
       <div class="docname">${esc(d.invoiceNumber?('Rechnung '+d.invoiceNumber):(d.filename||'Eingangsrechnung'))}</div>
       ${d.amount!==null&&d.amount!==undefined
         ? `<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
-      ${d.paymentStatus?`<div class="payment-ok">${esc(d.paymentStatus)}</div>`:''}
+      ${d.paymentStatus?`<div class="${d.paymentState==='open'?'payment-open':d.paymentState==='paid'?'payment-paid':'payment-unknown'}">${esc(d.paymentStatus)}</div>`:''}
       <div class="ww-truth">Quelle: WinWorker Eingangsbelege</div>
       ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
@@ -3233,6 +3307,7 @@ function renderIncomingGrouped(rows, yearSummary){
         <div class="year-total">
           <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
           <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
+          <small class="open-total">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
         </div>
       </div>
       ${monthHtml}
@@ -3350,7 +3425,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.12.7",
+        "version": "0.12.9",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -3686,18 +3761,37 @@ def incoming_address_invoices():
 
         total_sum = round(sum(float(x.get("amount") or 0) for x in docs if x.get("amount") is not None), 2)
         amount_count = sum(1 for x in docs if x.get("amount") is not None)
+        open_sum = round(sum(
+            float(x.get("amount") or 0)
+            for x in docs
+            if x.get("paymentState") == "open" and x.get("amount") is not None
+        ), 2)
+        open_count = sum(1 for x in docs if x.get("paymentState") == "open")
+
         yearly_stats = {}
         for x in docs:
             year = str(x.get("year") or "")
             if not year:
                 continue
-            row = yearly_stats.setdefault(year, {"count": 0, "amountCount": 0, "sum": 0.0})
+            row = yearly_stats.setdefault(year, {
+                "count": 0,
+                "amountCount": 0,
+                "sum": 0.0,
+                "openCount": 0,
+                "openSum": 0.0,
+            })
             row["count"] += 1
             if x.get("amount") is not None:
                 row["amountCount"] += 1
                 row["sum"] += float(x.get("amount") or 0)
+            if x.get("paymentState") == "open":
+                row["openCount"] += 1
+                if x.get("amount") is not None:
+                    row["openSum"] += float(x.get("amount") or 0)
+
         for row in yearly_stats.values():
             row["sum"] = round(row["sum"], 2)
+            row["openSum"] = round(row["openSum"], 2)
 
         return jsonify({
             "ok": True,
@@ -3709,6 +3803,8 @@ def incoming_address_invoices():
                 "count": len(docs),
                 "amountCount": amount_count,
                 "sum": total_sum,
+                "openCount": open_count,
+                "openSum": open_sum,
                 "yearly": yearly_stats,
             },
             "watchAlerts": incoming_watch_alerts(address_id, ww_rows),
@@ -3908,7 +4004,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.12.7 - Jahresuebersicht echter DOM-Fix")
+    print("Version: 0.12.9 - OP Summen und Zahlungsstatus Farben")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
