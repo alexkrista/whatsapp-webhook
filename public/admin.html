@@ -827,5 +827,125 @@ loadWorktimeModels().then(()=>loadEmployeeMasters()).catch(()=>{});
 loadJobs();
 </script>
   <script src="/public/ui/topbar.js"></script>
+
+<!-- KRISTA BEULEN-FIX 2026-08-17 · Mitarbeiter: Kacheln + Editor-Popup -->
+<style id="employeeBeulenFixStyle">
+  .employee-list-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 14px}
+  .employee-new-button{background:#24733b!important;border-color:#24733b!important;font-weight:800}
+  .employee-editor-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;z-index:90}
+  .employee-editor{position:fixed;inset:4vh 8vw;background:#fff;border-radius:18px;box-shadow:0 18px 70px rgba(0,0,0,.35);z-index:91;display:none;overflow:auto}
+  .employee-editor .employee-modal-head{position:sticky;top:0;z-index:4}
+  .employee-editor-body{padding:20px}
+  .employee-editor-titleline{display:flex;flex-direction:column;gap:2px}
+  .employee-identity-note{font-size:12px;color:#ddd}
+  .employee-rule-readonly{background:#f3f5f3!important;color:#49524b!important;font-weight:750;pointer-events:none}
+  .employee-editor-actions{display:flex!important;justify-content:flex-end!important;gap:10px!important}
+  @media(max-width:760px){.employee-editor{inset:2vh 2vw}}
+</style>
+<script id="employeeBeulenFixScript">
+(function(){
+  function ensureEmployeePopup(){
+    const modal=document.getElementById('employeeModal');
+    const body=modal?.querySelector('.employee-modal-body');
+    const form=body?.querySelector('.employee-form');
+    const list=document.getElementById('employeeList');
+    if(!modal||!body||!form||!list||document.getElementById('employeeEditor'))return;
+
+    const subtitle=modal.querySelector('.employee-modal-head .small');
+    if(subtitle)subtitle.textContent='Mitarbeiter auswählen oder neu anlegen';
+
+    // Liste oben: nur + Neuer Mitarbeiter und bestehende Mitarbeiter-Kacheln/Tabelle.
+    const toolbar=document.createElement('div');
+    toolbar.className='employee-list-toolbar';
+    toolbar.innerHTML='<button class="employee-new-button" type="button" onclick="openNewEmployee()">+ Neuer Mitarbeiter</button>';
+    body.insertBefore(toolbar,list);
+
+    // Editor als eigenes Popup. Die bestehende, aktuelle Formularlogik wird nur verschoben,
+    // nicht dupliziert – Dokumente (PDF/Word/Bild) bleiben dadurch unverändert erhalten.
+    const backdrop=document.createElement('div');
+    backdrop.id='employeeEditorBackdrop';backdrop.className='employee-editor-backdrop';
+    backdrop.addEventListener('click',closeEmployeeEditor);
+    const editor=document.createElement('section');
+    editor.id='employeeEditor';editor.className='employee-editor';editor.setAttribute('aria-hidden','true');
+    editor.innerHTML='<div class="employee-modal-head"><div class="employee-editor-titleline"><strong id="employeeEditorTitle">👷 Mitarbeiter bearbeiten</strong><div id="employeeEditorIdentity" class="employee-identity-note"></div></div><button class="closebtn" type="button" onclick="closeEmployeeEditor()">×</button></div><div class="employee-editor-body"></div>';
+    document.body.append(backdrop,editor);
+    editor.querySelector('.employee-editor-body').appendChild(form);
+
+    // Kürzel vollständig aus der Bearbeitungsmaske entfernen.
+    const shortInput=document.getElementById('empShort');
+    const shortRow=shortInput?.closest('div');
+    if(shortRow)shortRow.style.display='none';
+
+    // Regeln nur anzeigen. Werte bleiben aus der bestehenden Logik befüllt,
+    // sind in den Stammdaten aber nicht mehr veränderbar.
+    const allowance=document.getElementById('empDailyAllowanceModel');
+    if(allowance){
+      allowance.disabled=true;allowance.classList.add('employee-rule-readonly');
+      const opt=allowance.querySelector('option[value="site6"]');
+      if(opt)opt.textContent='Baustelle < 120 km · ab 6 Std.';
+      const label=allowance.closest('div')?.querySelector('label');
+      if(label)label.textContent='Taggeldregel (automatisch)';
+    }
+    const worktime=document.getElementById('empWorktimeModel');
+    if(worktime){
+      worktime.disabled=true;worktime.classList.add('employee-rule-readonly');
+      const label=worktime.closest('div')?.querySelector('label');
+      if(label)label.textContent='Arbeitszeitmodell (automatisch)';
+    }
+
+    const actions=form.querySelector('.full.actions');
+    if(actions){
+      actions.className='full employee-editor-actions';
+      actions.innerHTML='<button class="secondary" type="button" onclick="closeEmployeeEditor()">Abbrechen</button><button type="button" onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button>';
+    }
+  }
+
+  window.openEmployeeEditor=function(){
+    const b=document.getElementById('employeeEditorBackdrop'),e=document.getElementById('employeeEditor');
+    if(b)b.style.display='block';if(e){e.style.display='block';e.setAttribute('aria-hidden','false');e.scrollTo({top:0});}
+  };
+  window.closeEmployeeEditor=function(){
+    const b=document.getElementById('employeeEditorBackdrop'),e=document.getElementById('employeeEditor');
+    if(b)b.style.display='none';if(e){e.style.display='none';e.setAttribute('aria-hidden','true');}
+    if(typeof resetEmployeeForm==='function')resetEmployeeForm();
+  };
+  window.openNewEmployee=function(){
+    if(typeof resetEmployeeForm==='function')resetEmployeeForm();
+    const title=document.getElementById('employeeEditorTitle');if(title)title.textContent='👷 Neuer Mitarbeiter';
+    const note=document.getElementById('employeeEditorIdentity');if(note)note.textContent='Neue Mitarbeiter-Stammdaten';
+    openEmployeeEditor();
+  };
+
+  document.addEventListener('DOMContentLoaded',()=>{
+    ensureEmployeePopup();
+
+    const originalEdit=window.editEmployeeMaster;
+    if(typeof originalEdit==='function'){
+      window.editEmployeeMaster=function(id){
+        originalEdit(id);
+        const e=(window.employeeMasters||[]).find(x=>String(x.id)===String(id));
+        const title=document.getElementById('employeeEditorTitle');if(title)title.textContent='👷 '+(e?.nickname||e?.name||'Mitarbeiter')+' bearbeiten';
+        const note=document.getElementById('employeeEditorIdentity');if(note)note.textContent='Arbeitszeit- und Taggeldregel werden automatisch geführt';
+        openEmployeeEditor();
+      };
+    }
+
+    const originalSave=window.saveEmployeeMaster;
+    if(typeof originalSave==='function'){
+      window.saveEmployeeMaster=async function(){
+        await originalSave();
+        // Originalfunktion leert empEditId nur bei erfolgreichem Speichern.
+        if(!document.getElementById('empEditId')?.value)closeEmployeeEditor();
+      };
+    }
+
+    const originalClose=window.closeEmployees;
+    if(typeof originalClose==='function'){
+      window.closeEmployees=function(){closeEmployeeEditor();return originalClose();};
+    }
+  });
+})();
+</script>
+
 </body>
 </html>

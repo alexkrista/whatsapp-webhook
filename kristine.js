@@ -2541,11 +2541,61 @@ const open = taskId
     }
   });
 
+
+  async function sendEscalatedTaskReminders() {
+    if (typeof sendWhatsApp !== "function" || typeof readEmployees !== "function") return;
+    const p = viennaParts(new Date());
+    const hour = Number(p.hour || 0);
+    if (hour < 7) return; // keine Eskalationsmeldung in der Nacht
+    const today = `${p.year}-${p.month}-${p.day}`;
+    const tasks = await readJson(TASKS, []);
+    const employees = await readEmployees().catch(() => []);
+    const employeeById = new Map((employees || []).map(e => [String(e.id || e.employeeId || ""), e]));
+    let changed = false;
+
+    for (const task of Array.isArray(tasks) ? tasks : []) {
+      const repeats = Math.max(1, Number(task.repeatCount || task.reminderLevel || 1) || 1);
+      if (task.status === "done" || repeats < 4 || String(task.lastReminderDate || "") === today) continue;
+      const employee = employeeById.get(String(task.assigneeId || ""));
+      const phone = String(employee?.phone || employee?.whatsapp || employee?.mobile || "").replace(/\D/g, "");
+      if (!phone) continue;
+      const lines = [
+        `🚨 Aufgabe eskaliert · ${repeats}. Wiederholung`,
+        `*${task.title || "Aufgabe"}*`,
+        task.jobName ? `🏗️ ${task.jobName}${task.jobId ? ` (#${task.jobId})` : ""}` : "",
+        task.dueDate ? `📅 Fällig: ${String(task.dueDate).split("-").reverse().join(".")}` : "",
+        "Diese Aufgabe bleibt bis zur Erledigung täglich in Erinnerung."
+      ].filter(Boolean);
+      try {
+        await sendWhatsApp({
+          to: phone,
+          reply: lines.join("\n"),
+          buttons: [
+            ...(task.contactPhone ? [{ id: `task_call:${task.id}`, title: "Anrufen" }] : []),
+            { id: `task_done:${task.id}`, title: "Erledigt" }
+          ]
+        });
+        task.lastReminderDate = today;
+        task.escalatedAt = task.escalatedAt || new Date().toISOString();
+        changed = true;
+        console.log("🚨 Aufgaben-Eskalation versendet", { taskId: task.id, repeats, assigneeId: task.assigneeId });
+      } catch (error) {
+        console.error("❌ Aufgaben-Eskalation fehlgeschlagen", { taskId: task.id, error: String(error?.message || error) });
+      }
+    }
+    if (changed) await writeJson(TASKS, tasks);
+  }
+
+  // Einmal kurz nach Start und danach stündlich prüfen. lastReminderDate verhindert Doppelversand.
+  setTimeout(() => sendEscalatedTaskReminders().catch(error => console.error("Aufgaben-Eskalationsprüfung:", error)), 20000);
+  setInterval(() => sendEscalatedTaskReminders().catch(error => console.error("Aufgaben-Eskalationsprüfung:", error)), 60 * 60 * 1000);
+
   app.put("/kristine/api/tasks", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const previousTasks = await readJson(TASKS, []);
       const previousIds = new Set(previousTasks.map(t => String(t.id || "")));
+      const previousById = new Map(previousTasks.map(t => [String(t.id || ""), t]));
       const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
       const employees = typeof readEmployees === "function" ? await readEmployees() : [];
       const employeeById = new Map(employees.map(e => [String(e.id || ""), e]));
@@ -2574,9 +2624,14 @@ const open = taskId
           contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
           dueDate: String(t.dueDate || "").slice(0, 10),
           reminder: String(t.reminder || "").trim().slice(0, 500),
+          reminderLevel: Math.max(1, Math.min(4, Number(t.reminderLevel || t.repeatCount || 1) || 1)),
+          repeatCount: Math.max(1, Number(t.repeatCount || t.reminderLevel || 1) || 1),
           status: t.status === "done" ? "done" : "open",
-          createdAt: t.createdAt || new Date().toISOString(),
+          createdAt: t.createdAt || previousById.get(String(t.id || ""))?.createdAt || new Date().toISOString(),
+          updatedAt: t.updatedAt || new Date().toISOString(),
           completedAt: t.completedAt || null,
+          escalatedAt: t.escalatedAt || previousById.get(String(t.id || ""))?.escalatedAt || ((Number(t.repeatCount || t.reminderLevel || 1) >= 4) ? new Date().toISOString() : null),
+          lastReminderDate: t.lastReminderDate || previousById.get(String(t.id || ""))?.lastReminderDate || null,
         };
         if (row.title) clean.push(row);
       }
