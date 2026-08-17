@@ -209,13 +209,14 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.9"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0031.10"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
   <button onclick="window.open('/gehirn'+(token?'?token='+encodeURIComponent(token):''),'_blank','noopener')">🧠 The Brain</button>
+  <button onclick="openDunjaIncoming()">📥 Eingangsrechnungen</button>
   <button class="secondary krista-refresh" onclick="loadAll()">↻ Aktualisieren</button>
 </nav>
 
@@ -613,7 +614,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 
 <script src="/public/ui/topbar.js"></script>
 <script>
-createKristaTopbar({active:"kristine",build:"0031.9"});
+createKristaTopbar({active:"kristine",build:"0031.10"});
 const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
 let data={assignments:[],states:{},tasks:[],timeEvents:[],today:''};let masterJobs=[],masterEmployees=[],masterVehicles=[],worktimeModels=[],employeeWorkRules={},companySettings={productiveHoursPerFullTimeYear:1650};let planningView='week',planningPerspective='employee';let siteSort=localStorage.getItem('kristaSiteSort')||'assigned';
 window.addEventListener('resize',()=>requestAnimationFrame(updatePlanningStickyOffsets));
@@ -637,6 +638,10 @@ function updatePlanningStickyOffsets(){
   const active=document.getElementById('planning')?.classList.contains('active');
   if(!active)return;
   document.documentElement.style.setProperty('--planning-sticky-top',`${Math.ceil(top.getBoundingClientRect().height)}px`);
+}
+function openDunjaIncoming(){
+  const base=String(localStorage.getItem('kristineIncomingUrl')||'http://100.98.155.39:5051').replace(/\/$/,'');
+  window.open(base+'/incoming-capture','_blank','noopener');
 }
 function showTab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.krista-module-nav button').forEach(btn=>btn.classList.toggle('active',String(btn.getAttribute('onclick')||'').includes("'"+id+"'")));if(id==='kristool')renderKristool();if(id==='sites')renderSites();if(id==='planning')requestAnimationFrame(updatePlanningStickyOffsets)}
 async function loadAll(){
