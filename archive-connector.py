@@ -147,15 +147,24 @@ CAPTURE_DB = Path(os.environ.get(
     "KRISTINE_INCOMING_DB",
     str(DB.parent / "kristine_incoming_capture.db")
 ))
+CAPTURE_TEST_DB = Path(os.environ.get(
+    "KRISTINE_INCOMING_TEST_DB",
+    str(DB.parent / "kristine_incoming_training.db")
+))
 CAPTURE_ROOT = Path(os.environ.get(
     "KRISTINE_INCOMING_DIR",
     r"N:\OneDrive\Dokumente\Kristine\Eingangsrechnungen"
+))
+CAPTURE_TEST_ROOT = Path(os.environ.get(
+    "KRISTINE_INCOMING_TEST_DIR",
+    r"N:\OneDrive\Dokumente\Kristine\Testgelaende\Eingangsrechnungen"
 ))
 CAPTURE_PREFIX = str(os.environ.get("KRISTINE_INCOMING_PREFIX", "1150")).strip() or "1150"
 CAPTURE_ALLOW_OFFLINE_SEQUENCE = str(
     os.environ.get("KRISTINE_INCOMING_ALLOW_OFFLINE_SEQUENCE", "0")
 ).strip() == "1"
 CAPTURE_NUMBER_LOCK = threading.Lock()
+CAPTURE_TEST_LOCK = threading.Lock()
 
 CAPTURE_COST_TYPES = [
     "Material",
@@ -175,9 +184,10 @@ CAPTURE_COST_TYPES = [
 ]
 
 
-def _capture_connection():
-    CAPTURE_DB.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(CAPTURE_DB, timeout=30)
+def _capture_connection(db_path=None):
+    target = Path(db_path or CAPTURE_DB)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(target, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA journal_mode=DELETE")
@@ -250,6 +260,25 @@ def _ensure_capture_schema(con):
             ON incoming_allocations(invoice_id, line_no);
     """)
     con.commit()
+
+
+def _capture_area(value="live"):
+    raw = str(value or "live").strip().lower()
+    return "test" if raw in {"test", "training", "sandbox", "testgelaende", "testgelände"} else "live"
+
+
+def _capture_truthy(value):
+    if value is True:
+        return True
+    return str(value or "").strip().lower() in {"1", "true", "yes", "ja", "on", "test", "training"}
+
+
+def _capture_area_connection(area="live"):
+    return _capture_connection(CAPTURE_TEST_DB if _capture_area(area) == "test" else CAPTURE_DB)
+
+
+def _capture_area_root(area="live"):
+    return CAPTURE_TEST_ROOT if _capture_area(area) == "test" else CAPTURE_ROOT
 
 
 def _capture_invoice_number_norm(value):
@@ -342,6 +371,58 @@ def _capture_number_status(year=None, con=None):
     finally:
         if owns:
             con.close()
+
+
+
+def _capture_test_doc_prefix(year):
+    return f"TEST-{int(year) % 100:02d}-"
+
+
+def _local_max_test_counter(con, year):
+    prefix = _capture_test_doc_prefix(year)
+    rows = con.execute(
+        "SELECT doc_id FROM incoming_invoices WHERE doc_id LIKE ?",
+        (prefix + "%",),
+    ).fetchall()
+    maximum = 0
+    for row in rows:
+        match = re.fullmatch(re.escape(prefix) + r"(\d{5})", str(row["doc_id"] or ""))
+        if match:
+            maximum = max(maximum, int(match.group(1)))
+    return maximum
+
+
+def _capture_test_number_status(year=None, con=None):
+    year = int(year or datetime.now().year)
+    owns = con is None
+    if owns:
+        con = _capture_area_connection("test")
+    try:
+        local_max = _local_max_test_counter(con, year)
+        next_counter = local_max + 1
+        if next_counter > 99999:
+            raise RuntimeError(f"Test-Nummernkreis {year} ist ausgeschöpft.")
+        prefix = _capture_test_doc_prefix(year)
+        return {
+            "year": year,
+            "prefix": prefix,
+            "wwMax": 0,
+            "localMax": local_max,
+            "nextCounter": next_counter,
+            "nextDocId": f"{prefix}{next_counter:05d}",
+            "wwError": "",
+            "area": "test",
+            "trainingMode": True,
+        }
+    finally:
+        if owns:
+            con.close()
+
+
+def _capture_number_status_for_area(year=None, area="live", con=None):
+    if _capture_area(area) == "test":
+        return _capture_test_number_status(year, con)
+    return _capture_number_status(year, con)
 
 
 def _capture_pdf_text(pdf_bytes, max_pages=12):
@@ -470,7 +551,7 @@ def _capture_allocations(con, invoice_id):
     """, (invoice_id,)).fetchall()]
 
 
-def _capture_row_public(row, allocations=None, include_text=False):
+def _capture_row_public(row, allocations=None, include_text=False, area="live"):
     data = dict(row)
     public = {
         "id": int(data["id"]),
@@ -505,7 +586,9 @@ def _capture_row_public(row, allocations=None, include_text=False):
         "createdBy": data.get("created_by") or "Dunja",
         "createdAt": data.get("created_at") or "",
         "updatedAt": data.get("updated_at") or "",
-        "sourceOfTruth": "KRISTINE Eingangsrechnungen",
+        "area": _capture_area(area),
+        "trainingMode": _capture_area(area) == "test",
+        "sourceOfTruth": "KRISTINE Testgelände" if _capture_area(area) == "test" else "KRISTINE Eingangsrechnungen",
         "allocations": allocations or [],
         "snippet": " ".join(str(data.get("pdf_text") or "").split())[:420],
     }
@@ -515,7 +598,7 @@ def _capture_row_public(row, allocations=None, include_text=False):
     public["month"] = int(date_iso[5:7]) if len(date_iso) >= 7 else None
     public["monthName"] = MONTH_NAMES_DE.get(public["month"], "") if public["month"] else ""
     public["day"] = int(date_iso[8:10]) if len(date_iso) >= 10 else None
-    public["invoiceId"] = f"kristine:{public['id']}"
+    public["invoiceId"] = f"kristine-test:{public['id']}" if public["trainingMode"] else f"kristine:{public['id']}"
     public["logical_id"] = public["docId"]
     public["dokumenttyp"] = "Eingangsrechnung"
     public["pdfLinked"] = bool(public["path"])
@@ -576,8 +659,9 @@ def _capture_supplier_context(address_id):
         con.close()
 
 
-def _capture_recent(limit=50, workflow_status=""):
-    con = _capture_connection()
+def _capture_recent(limit=50, workflow_status="", area="live"):
+    area = _capture_area(area)
+    con = _capture_area_connection(area)
     try:
         params = []
         where = ""
@@ -592,15 +676,16 @@ def _capture_recent(limit=50, workflow_status=""):
             LIMIT ?
         """, params).fetchall()
         return [
-            _capture_row_public(row, _capture_allocations(con, row["id"]))
+            _capture_row_public(row, _capture_allocations(con, row["id"]), area=area)
             for row in rows
         ]
     finally:
         con.close()
 
 
-def _capture_cost_summary(year):
-    con = _capture_connection()
+def _capture_cost_summary(year, area="live"):
+    area = _capture_area(area)
+    con = _capture_area_connection(area)
     try:
         rows = con.execute("""
             SELECT a.cost_type,
@@ -635,9 +720,10 @@ def _capture_cost_summary(year):
         con.close()
 
 
-def _capture_dashboard(year=None):
+def _capture_dashboard(year=None, area="live"):
     year = int(year or datetime.now().year)
-    con = _capture_connection()
+    area = _capture_area(area)
+    con = _capture_area_connection(area)
     try:
         row = con.execute("""
             SELECT
@@ -648,16 +734,18 @@ def _capture_dashboard(year=None):
                 SUM(CASE WHEN SUBSTR(invoice_date,1,4) = ? THEN gross_amount ELSE 0 END) AS year_sum
             FROM incoming_invoices
         """, (str(year), str(year))).fetchone()
-        number = _capture_number_status(year, con)
+        number = _capture_number_status_for_area(year, area, con)
         return {
             "year": year,
+            "area": area,
+            "trainingMode": area == "test",
             "totalCount": int(row["total_count"] or 0),
             "reviewCount": int(row["review_count"] or 0),
             "openSum": round(float(row["open_sum"] or 0), 2),
             "yearCount": int(row["year_count"] or 0),
             "yearSum": round(float(row["year_sum"] or 0), 2),
             "numbering": number,
-            "costSummary": _capture_cost_summary(year),
+            "costSummary": _capture_cost_summary(year, area),
         }
     finally:
         con.close()
@@ -665,16 +753,55 @@ def _capture_dashboard(year=None):
 
 def _capture_path_is_allowed(path):
     wanted = str(Path(path))
-    con = _capture_connection()
+    for area in ("live", "test"):
+        con = _capture_area_connection(area)
+        try:
+            row = con.execute("""
+                SELECT 1 FROM incoming_invoices
+                WHERE pdf_path = ? OR original_path = ?
+                LIMIT 1
+            """, (wanted, wanted)).fetchone()
+            if row:
+                return True
+        finally:
+            con.close()
+    return False
+
+
+def _capture_path_within(path_value, root):
     try:
-        row = con.execute("""
-            SELECT 1 FROM incoming_invoices
-            WHERE pdf_path = ? OR original_path = ?
-            LIMIT 1
-        """, (wanted, wanted)).fetchone()
-        return bool(row)
-    finally:
-        con.close()
+        path_obj = Path(str(path_value or "")).resolve(strict=False)
+        root_obj = Path(root).resolve(strict=False)
+        return path_obj == root_obj or root_obj in path_obj.parents
+    except Exception:
+        return False
+
+
+def _capture_delete_test_files(row):
+    deleted = []
+    warnings = []
+    for key in ("pdf_path", "original_path"):
+        raw = str(row.get(key) or "")
+        if not raw:
+            continue
+        if not _capture_path_within(raw, CAPTURE_TEST_ROOT):
+            warnings.append(f"Datei außerhalb des Testgeländes nicht gelöscht: {raw}")
+            continue
+        try:
+            path_obj = Path(raw)
+            path_obj.unlink(missing_ok=True)
+            deleted.append(raw)
+            parent = path_obj.parent
+            root_resolved = Path(CAPTURE_TEST_ROOT).resolve(strict=False)
+            while parent.exists() and parent.resolve(strict=False) != root_resolved:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
+        except Exception as exc:
+            warnings.append(f"{raw}: {exc}")
+    return deleted, warnings
 
 
 def _load_brain_supplier_map():
@@ -3198,6 +3325,103 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 @media(max-width:900px){.capture-dashboard{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-grid .span-4{grid-column:1/-1}.capture-allocation{grid-template-columns:1fr 1fr}.capture-allocation .remove{grid-column:2}.capture-recent,.capture-costs{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.capture-dashboard,.capture-grid,.capture-supplier-results,.capture-recent,.capture-costs{grid-template-columns:1fr}.capture-grid .span-2,.capture-grid .span-4{grid-column:auto}.capture-allocation{grid-template-columns:1fr}.capture-allocation .remove{grid-column:auto}}
 
+
+/* 0.13.1 · Dunja-Kontierung: breiter Arbeitsbereich und saubere Spalten */
+body.capture-wide .wrap{
+  max-width:1480px;
+}
+
+.capture-allocation{
+  width:100%;
+  max-width:100%;
+  grid-template-columns:
+    minmax(100px,.75fr)
+    minmax(155px,1.15fr)
+    minmax(145px,1fr)
+    minmax(115px,.8fr)
+    minmax(170px,1.25fr)
+    minmax(110px,.75fr)
+    minmax(82px,.55fr)
+    44px;
+}
+
+.capture-allocation > *{
+  min-width:0;
+}
+
+.capture-allocation input,
+.capture-allocation select{
+  display:block;
+  width:100%;
+  min-width:0;
+}
+
+@media(max-width:1250px){
+  body.capture-wide .wrap{
+    max-width:1040px;
+  }
+
+  .capture-allocation{
+    grid-template-columns:repeat(12,minmax(0,1fr));
+  }
+
+  .capture-allocation > div:nth-child(1){grid-column:span 2}
+  .capture-allocation > div:nth-child(2){grid-column:span 3}
+  .capture-allocation > div:nth-child(3){grid-column:span 3}
+  .capture-allocation > div:nth-child(4){grid-column:span 3}
+  .capture-allocation > div:nth-child(5){grid-column:span 6}
+  .capture-allocation > div:nth-child(6){grid-column:span 3}
+  .capture-allocation > div:nth-child(7){grid-column:span 3}
+  .capture-allocation .remove{
+    grid-column:12;
+    grid-row:1;
+  }
+}
+
+@media(max-width:800px){
+  body.capture-wide .wrap{
+    max-width:820px;
+  }
+
+  .capture-allocation{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .capture-allocation > div{
+    grid-column:auto!important;
+  }
+
+  .capture-allocation .remove{
+    grid-column:2;
+    grid-row:auto;
+  }
+}
+
+@media(max-width:560px){
+  .capture-allocation{
+    grid-template-columns:1fr;
+  }
+
+  .capture-allocation .remove{
+    grid-column:1;
+  }
+}
+
+
+/* 0.13.2 · Eingangsrechnungen: getrenntes Testgelände */
+.capture-area-switch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}
+.capture-area-switch button{min-height:52px;font-weight:900;border:1px solid var(--line);background:#20242c;color:#eef1f5}
+.capture-area-switch button.active.test{background:#392b10;border-color:#9a7426;color:#ffe29a;box-shadow:0 0 0 2px rgba(213,166,64,.12)}
+.capture-area-switch button.active.live{background:#173421;border-color:#4d9464;color:#b9f3ca;box-shadow:0 0 0 2px rgba(100,194,127,.12)}
+.capture-area-banner{border-radius:14px;padding:12px 14px;margin-bottom:14px;line-height:1.45;border:1px solid var(--line)}
+.capture-area-banner.test{background:#2b210f;border-color:#7d6124;color:#ffe19a}
+.capture-area-banner.live{background:#13281a;border-color:#3e7650;color:#b9efc8}
+.capture-area-banner strong{display:block;font-size:16px;margin-bottom:2px}
+body.capture-training #captureSection>.card{border-color:#5f4a1d}
+.capture-badge.training{color:#ffe19a;background:#382b12;border-color:#7d6124}
+.capture-delete,.capture-clear-test{background:#401d1d!important;border-color:#713333!important;color:#ffc0c0!important}
+@media(max-width:620px){.capture-area-switch{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -3290,10 +3514,16 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     <div class="section-head">
       <div>
         <h2>📥 Eingangsrechnung erfassen · Dunja</h2>
-        <div class="sub">KRISTINE führt den Nummernkreis 1150 · Jahr · laufende Nummer weiter.</div>
+        <div class="sub">Training bleibt vollständig getrennt. Nur der Echtbetrieb führt den Nummernkreis 1150 · Jahr · laufende Nummer weiter.</div>
       </div>
       <span class="pill" id="captureNextNumber">Nächste Nummer wird geladen …</span>
     </div>
+
+    <div class="capture-area-switch" aria-label="Arbeitsbereich auswählen">
+      <button id="captureAreaTest" class="test" type="button">🧪 Testgelände / Training</button>
+      <button id="captureAreaLive" class="live" type="button">🔒 Echtbetrieb</button>
+    </div>
+    <div id="captureAreaBanner" class="capture-area-banner test"></div>
 
     <div class="capture-dashboard" id="captureDashboard"></div>
 
@@ -3353,12 +3583,12 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
     </div>
 
     <div class="section">
-      <div class="section-head"><h2>Kostenentwicklung <span id="captureCostYear"></span></h2></div>
+      <div class="section-head"><h2><span id="captureCostTitle">Kostenentwicklung</span> <span id="captureCostYear"></span></h2></div>
       <div id="captureCostSummary" class="capture-costs"></div>
     </div>
 
     <div class="section">
-      <div class="section-head"><h2>Zuletzt erfasst</h2><button id="captureReload" class="dark" type="button">↻ Aktualisieren</button></div>
+      <div class="section-head"><h2 id="captureRecentTitle">Zuletzt erfasst</h2><div class="actions"><button id="captureClearTest" class="capture-clear-test" type="button" hidden>Testgelände leeren</button><button id="captureReload" class="dark" type="button">↻ Aktualisieren</button></div></div>
       <div id="captureRecent" class="capture-recent"></div>
     </div>
   </div>
@@ -3431,16 +3661,19 @@ const modal=document.getElementById('newJobModal'),closeModal=document.getElemen
 const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
 
 const captureSection=document.getElementById('captureSection'),captureDashboard=document.getElementById('captureDashboard');
+const captureAreaTest=document.getElementById('captureAreaTest'),captureAreaLive=document.getElementById('captureAreaLive'),captureAreaBanner=document.getElementById('captureAreaBanner');
 const captureNextNumber=document.getElementById('captureNextNumber'),captureFile=document.getElementById('captureFile'),captureDrop=document.getElementById('captureDrop'),captureAnalyzeMeta=document.getElementById('captureAnalyzeMeta');
 const captureSupplierQ=document.getElementById('captureSupplierQ'),captureSupplierGo=document.getElementById('captureSupplierGo'),captureSupplierResults=document.getElementById('captureSupplierResults'),captureSelectedSupplierBox=document.getElementById('captureSelectedSupplier'),captureBankWarning=document.getElementById('captureBankWarning');
 const captureDocumentType=document.getElementById('captureDocumentType'),captureInvoiceNumber=document.getElementById('captureInvoiceNumber'),captureInvoiceDate=document.getElementById('captureInvoiceDate'),captureDueDate=document.getElementById('captureDueDate');
 const captureNet=document.getElementById('captureNet'),captureVat=document.getElementById('captureVat'),captureGross=document.getElementById('captureGross'),captureCurrency=document.getElementById('captureCurrency');
 const captureIban=document.getElementById('captureIban'),captureSwift=document.getElementById('captureSwift'),captureExternalCustomerNo=document.getElementById('captureExternalCustomerNo'),captureBookingText=document.getElementById('captureBookingText'),captureNote=document.getElementById('captureNote'),captureCreatedBy=document.getElementById('captureCreatedBy'),captureWorkflow=document.getElementById('captureWorkflow');
 const captureAllocations=document.getElementById('captureAllocations'),captureAllocationTotal=document.getElementById('captureAllocationTotal'),captureAddAllocation=document.getElementById('captureAddAllocation'),captureSave=document.getElementById('captureSave'),captureSaveMessage=document.getElementById('captureSaveMessage');
-const captureCostSummary=document.getElementById('captureCostSummary'),captureCostYear=document.getElementById('captureCostYear'),captureRecent=document.getElementById('captureRecent'),captureReload=document.getElementById('captureReload');
+const captureCostSummary=document.getElementById('captureCostSummary'),captureCostYear=document.getElementById('captureCostYear'),captureCostTitle=document.getElementById('captureCostTitle');
+const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
 
 
 let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
+let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
@@ -3624,6 +3857,7 @@ function setSearchMode(mode){
   modeProjects.classList.toggle('active',mode==='projects');
   modeIncoming.classList.toggle('active',mode==='incoming');
   modeCapture.classList.toggle('active',mode==='capture');
+  document.body.classList.toggle('capture-wide',mode==='capture');
 
   ps.hidden=true;ds.hidden=true;
   incomingSupplierSection.hidden=true;incomingSection.hidden=true;captureSection.hidden=true;
@@ -4041,6 +4275,34 @@ backToSuppliers.onclick=()=>{
 
 
 
+
+function captureAreaIsTest(){return captureArea==='test'}
+function updateCaptureAreaUi(){
+  const isTest=captureAreaIsTest();
+  captureAreaTest.classList.toggle('active',isTest);
+  captureAreaLive.classList.toggle('active',!isTest);
+  captureAreaBanner.className='capture-area-banner '+(isTest?'test':'live');
+  captureAreaBanner.innerHTML=isTest
+    ? '<strong>🧪 TESTGELÄNDE AKTIV</strong>Keine echte 1150-Nummer · kein Brain/OP · keine echte Kostenentwicklung · Testrechnungen können vollständig gelöscht werden.'
+    : '<strong>🔒 ECHTBETRIEB AKTIV</strong>Die nächste echte 1150-Nummer wird verbindlich vergeben. Echtbelege sind danach nicht löschbar.';
+  captureSave.textContent=isTest?'Testrechnung speichern':'Rechnung verbindlich erfassen';
+  captureCostTitle.textContent=isTest?'Test-Kostenentwicklung':'Kostenentwicklung';
+  captureRecentTitle.textContent=isTest?'Trainingsbelege':'Zuletzt erfasst';
+  captureClearTest.hidden=!isTest;
+  document.body.classList.toggle('capture-training',isTest);
+}
+async function setCaptureArea(next,{confirmLive=true}={}){
+  const area=next==='live'?'live':'test';
+  if(area==='live'&&captureArea!=='live'&&confirmLive){
+    const ok=confirm('ECHTBETRIEB aktivieren?\n\nDie nächste Rechnung erhält eine echte 1150-Nummer und kann nicht gelöscht werden.');
+    if(!ok)return;
+  }
+  captureArea=area;
+  localStorage.setItem('kristineCaptureArea',captureArea);
+  resetCaptureForm();setCaptureMessage('');updateCaptureAreaUi();
+  await Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
+}
+
 const CAPTURE_COST_TYPES=['Material','Fremdleistung','Miete','Strom','Gas / Heizung','Versicherung','Fahrzeug','IT / Telefon','Werkstatt','Büro','Werbung','Steuerberater','Maschinen','Sonstiges'];
 function captureNumber(v){const n=Number(v);return Number.isFinite(n)?n:0}
 function setCaptureMessage(text,type=''){captureSaveMessage.textContent=text||'';captureSaveMessage.className='capture-message '+type}
@@ -4090,7 +4352,7 @@ async function analyzeCaptureFile(){
   const file=captureFile.files?.[0];captureAnalysis=null;
   if(!file){captureDrop.classList.remove('has-file');captureAnalyzeMeta.textContent='';return}
   captureDrop.classList.add('has-file');captureAnalyzeMeta.textContent='PDF wird gelesen …';
-  const fd=new FormData();fd.append('file',file);
+  const fd=new FormData();fd.append('file',file);fd.append('area',captureArea);
   try{
     const r=await fetch('/incoming/capture/analyze',{method:'POST',body:fd});const d=await r.json();
     if(!r.ok||!d.ok)throw new Error(d.error||'PDF konnte nicht gelesen werden');
@@ -4147,6 +4409,8 @@ function checkCaptureBankWarning(){
 
 function capturePayload(){
   return {
+    area:captureArea,
+    trainingMode:captureAreaIsTest(),
     documentType:captureDocumentType.value,
     supplier:captureSelectedSupplier,
     supplierInvoiceNumber:captureInvoiceNumber.value.trim(),
@@ -4171,31 +4435,48 @@ async function saveCaptureInvoice(){
   if(!captureInvoiceNumber.value.trim())return setCaptureMessage('Lieferanten-Rechnungsnummer fehlt.','error');
   if(!captureInvoiceDate.value)return setCaptureMessage('Rechnungsdatum fehlt.','error');
   if(!updateCaptureAllocationTotal())return setCaptureMessage('Kontierung stimmt noch nicht mit dem Netto überein.','error');
-  captureSave.disabled=true;setCaptureMessage('KRISTINE vergibt die Nummer und speichert …');
+  captureSave.disabled=true;setCaptureMessage(captureAreaIsTest()?'KRISTINE speichert ins Testgelände …':'KRISTINE vergibt die echte Nummer und speichert …');
   const fd=new FormData();fd.append('file',file);fd.append('payload',JSON.stringify(capturePayload()));
   try{
     const r=await fetch('/incoming/capture/save',{method:'POST',body:fd});const d=await r.json();
     if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
     const warning=d.warnings?.length?' · '+d.warnings.join(' · '):'';
-    setCaptureMessage(`✓ ${d.invoice.docId} gespeichert${warning}`,'success');
+    setCaptureMessage(`✓ ${d.invoice.docId} ${d.trainingMode?'im Testgelände':'verbindlich'} gespeichert${warning}`,'success');
     resetCaptureForm();await loadCaptureDashboard();await loadCaptureRecent();
   }catch(e){setCaptureMessage(e.message,'error')}finally{captureSave.disabled=false}
 }
 
 function renderCaptureDashboard(d){
-  const n=d.numbering||{};captureNextNumber.textContent='Nächste Nummer '+(n.nextDocId||'–');captureCostYear.textContent=d.year||'';
-  captureDashboard.innerHTML=`<div class="capture-kpi"><small>Zu prüfen</small><strong>${Number(d.reviewCount||0)}</strong></div><div class="capture-kpi"><small>Offen</small><strong>${esc(invoiceMoney(Number(d.openSum||0)))}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} erfasst</small><strong>${Number(d.yearCount||0)}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} Summe</small><strong>${esc(invoiceMoney(Number(d.yearSum||0)))}</strong></div>`;
-  const costs=d.costSummary||[];captureCostSummary.innerHTML=costs.length?costs.map(x=>`<div class="capture-cost-card"><span>${esc(x.costType)}</span><strong>${esc(invoiceMoney(Number(x.netSum||0)))}</strong><small>${Number(x.invoiceCount||0)} Rechnung(en)</small></div>`).join(''):'<div class="empty">Noch keine KRISTINE-Kontierungen in diesem Jahr.</div>';
+  const n=d.numbering||{};const isTest=Boolean(d.trainingMode);
+  captureNextNumber.textContent=(isTest?'Nächste Testnummer ':'Nächste Nummer ')+(n.nextDocId||'–');captureCostYear.textContent=d.year||'';
+  captureDashboard.innerHTML=`<div class="capture-kpi"><small>${isTest?'Test · zu prüfen':'Zu prüfen'}</small><strong>${Number(d.reviewCount||0)}</strong></div><div class="capture-kpi"><small>${isTest?'Test-Summe offen':'Offen'}</small><strong>${esc(invoiceMoney(Number(d.openSum||0)))}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} ${isTest?'Testbelege':'erfasst'}</small><strong>${Number(d.yearCount||0)}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} ${isTest?'Testsumme':'Summe'}</small><strong>${esc(invoiceMoney(Number(d.yearSum||0)))}</strong></div>`;
+  const costs=d.costSummary||[];captureCostSummary.innerHTML=costs.length?costs.map(x=>`<div class="capture-cost-card"><span>${esc(x.costType)}</span><strong>${esc(invoiceMoney(Number(x.netSum||0)))}</strong><small>${Number(x.invoiceCount||0)} Rechnung(en)</small></div>`).join(''):`<div class="empty">${isTest?'Noch keine Trainings-Kontierungen.':'Noch keine KRISTINE-Kontierungen in diesem Jahr.'}</div>`;
 }
-
-async function loadCaptureDashboard(){const r=await fetch('/incoming/capture/dashboard',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Dashboard konnte nicht geladen werden');renderCaptureDashboard(d.dashboard||{})}
-function renderCaptureRecent(rows){captureRecent.innerHTML=rows.length?rows.map(x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><strong>${esc(x.docId)}</strong><span class="capture-badge ${x.workflowStatus==='geprueft'?'done':'review'}">${x.workflowStatus==='geprueft'?'Geprüft':'Zu prüfen'}</span></div><div class="sub">${esc(x.supplierName)} · Rechnung ${esc(x.invoiceNumber)}</div><div class="invoice-amount">${esc(invoiceMoney(x.grossAmount))}</div><div class="sub">${esc((x.allocations||[]).map(a=>a.costType).filter(Boolean).join(' · '))}</div><div class="actions"><a class="action" href="${urlFor('/pdf',x.path)}" target="_blank" rel="noopener">PDF öffnen</a></div></div>`).join(''):'<div class="empty">Noch keine Rechnungen in KRISTINE erfasst.</div>'}
-async function loadCaptureRecent(){const r=await fetch('/incoming/capture/list?limit=30',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Liste konnte nicht geladen werden');renderCaptureRecent(d.invoices||[])}
-async function initCapture(){if(!captureAllocationRows.length){captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations()}await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}
-
+async function loadCaptureDashboard(){const r=await fetch('/incoming/capture/dashboard?area='+encodeURIComponent(captureArea),{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Dashboard konnte nicht geladen werden');renderCaptureDashboard(d.dashboard||{})}
+function renderCaptureRecent(rows){
+  const isTest=captureAreaIsTest();
+  captureRecent.innerHTML=rows.length?rows.map(x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><strong>${esc(x.docId)}</strong><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${x.trainingMode?'<span class="capture-badge training">TEST</span>':''}<span class="capture-badge ${x.workflowStatus==='geprueft'?'done':'review'}">${x.workflowStatus==='geprueft'?'Geprüft':'Zu prüfen'}</span></div></div><div class="sub">${esc(x.supplierName)} · Rechnung ${esc(x.invoiceNumber)}</div><div class="invoice-amount">${esc(invoiceMoney(x.grossAmount))}</div><div class="sub">${esc((x.allocations||[]).map(a=>a.costType).filter(Boolean).join(' · '))}</div><div class="actions"><a class="action" href="${urlFor('/pdf',x.path)}" target="_blank" rel="noopener">PDF öffnen</a>${x.trainingMode?`<button class="capture-delete" type="button" data-delete-test="${Number(x.id)}" data-doc-id="${esc(x.docId)}">Testrechnung löschen</button>`:''}</div></div>`).join(''):`<div class="empty">${isTest?'Noch keine Trainingsbelege im Testgelände.':'Noch keine Rechnungen in KRISTINE erfasst.'}</div>`;
+  captureRecent.querySelectorAll('[data-delete-test]').forEach(btn=>btn.onclick=()=>deleteCaptureTestInvoice(Number(btn.dataset.deleteTest),btn.dataset.docId||''));
+}
+async function loadCaptureRecent(){const r=await fetch('/incoming/capture/list?limit=30&area='+encodeURIComponent(captureArea),{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Liste konnte nicht geladen werden');renderCaptureRecent(d.invoices||[])}
+async function deleteCaptureTestInvoice(invoiceId,docId){
+  if(!captureAreaIsTest())return;
+  if(!confirm(`Testrechnung ${docId||invoiceId} wirklich vollständig löschen?\n\nDatensatz, Arbeits-PDF und Original-PDF werden entfernt.`))return;
+  setCaptureMessage(`Lösche ${docId||invoiceId} aus dem Testgelände …`);
+  try{const r=await fetch('/incoming/capture/'+encodeURIComponent(invoiceId)+'?area=test',{method:'DELETE'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Löschen fehlgeschlagen');setCaptureMessage(`✓ ${d.docId||docId} aus dem Testgelände gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}
+}
+async function clearCaptureTestArea(){
+  if(!captureAreaIsTest())return;
+  const typed=prompt('Gesamtes Testgelände leeren?\n\nAlle Trainingsrechnungen und Test-PDFs werden endgültig gelöscht.\n\nZur Sicherheit TEST LEEREN eingeben:');
+  if(typed!=='TEST LEEREN')return;
+  setCaptureMessage('Leere das Testgelände …');
+  try{const r=await fetch('/incoming/capture/test-area',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'TESTGELAENDE LEEREN'})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Testgelände konnte nicht geleert werden');setCaptureMessage(`✓ ${Number(d.deletedCount||0)} Trainingsbeleg(e) gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}
+}
+async function initCapture(){updateCaptureAreaUi();if(!captureAllocationRows.length){captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations()}await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}
 captureFile.onchange=analyzeCaptureFile;captureSupplierGo.onclick=searchCaptureSuppliers;captureSupplierQ.addEventListener('keydown',e=>{if(e.key==='Enter')searchCaptureSuppliers()});captureIban.oninput=checkCaptureBankWarning;
 captureNet.oninput=()=>captureAutoAmounts('net');captureVat.oninput=()=>captureAutoAmounts('vat');captureGross.oninput=()=>captureAutoAmounts('gross');
 captureAddAllocation.onclick=()=>{captureAllocationRows.push(captureAllocationSeed());renderCaptureAllocations()};captureSave.onclick=saveCaptureInvoice;captureReload.onclick=()=>Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
+captureAreaTest.onclick=()=>setCaptureArea('test');captureAreaLive.onclick=()=>setCaptureArea('live');captureClearTest.onclick=clearCaptureTestArea;
 
 async function runSearch(term,isRefined=false){
   term=String(term||'').trim();if(!term){q.focus();return}
@@ -4293,7 +4574,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.13.0",
+        "version": "0.13.2",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -4614,7 +4895,8 @@ def incoming_capture_home():
 def incoming_capture_next_number():
     try:
         year = int(request.args.get("year") or datetime.now().year)
-        return jsonify({"ok": True, "numbering": _capture_number_status(year)})
+        area = _capture_area(request.args.get("area"))
+        return jsonify({"ok": True, "area": area, "numbering": _capture_number_status_for_area(year, area)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -4623,7 +4905,8 @@ def incoming_capture_next_number():
 def incoming_capture_dashboard():
     try:
         year = int(request.args.get("year") or datetime.now().year)
-        return jsonify({"ok": True, "dashboard": _capture_dashboard(year)})
+        area = _capture_area(request.args.get("area"))
+        return jsonify({"ok": True, "area": area, "dashboard": _capture_dashboard(year, area)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -4661,16 +4944,21 @@ def incoming_capture_analyze():
         if not pdf_bytes:
             raise ValueError("PDF ist leer.")
         analysis = _capture_analyze_pdf(pdf_bytes, upload.filename)
-        con = _capture_connection()
-        try:
-            duplicate = con.execute(
-                "SELECT id, doc_id, supplier_name, supplier_invoice_number FROM incoming_invoices WHERE file_sha256 = ? LIMIT 1",
-                (analysis["sha256"],)
-            ).fetchone()
-        finally:
-            con.close()
+        area = _capture_area(request.form.get("area") or request.args.get("area"))
+        duplicate = None
+        if area == "live":
+            con = _capture_area_connection(area)
+            try:
+                duplicate = con.execute(
+                    "SELECT id, doc_id, supplier_name, supplier_invoice_number FROM incoming_invoices WHERE file_sha256 = ? LIMIT 1",
+                    (analysis["sha256"],)
+                ).fetchone()
+            finally:
+                con.close()
         return jsonify({
             "ok": True,
+            "area": area,
+            "trainingMode": area == "test",
             "analysis": {k: v for k, v in analysis.items() if k != "text"},
             "duplicate": dict(duplicate) if duplicate else None,
         })
@@ -4688,6 +4976,8 @@ def incoming_capture_save():
     except Exception:
         return jsonify({"ok": False, "error": "Formulardaten sind ungültig."}), 400
 
+    area_hint = payload.get("area") or ("test" if _capture_truthy(payload.get("trainingMode")) else "live")
+    area = _capture_area(area_hint)
     created_paths = []
     try:
         supplier = payload.get("supplier") or {}
@@ -4749,25 +5039,27 @@ def incoming_capture_save():
         if iban and context.get("knownIbans") and iban not in context["knownIbans"]:
             warnings.append("Neue Bankverbindung – bitte prüfen")
 
-        with CAPTURE_NUMBER_LOCK:
-            con = _capture_connection()
+        lock = CAPTURE_TEST_LOCK if area == "test" else CAPTURE_NUMBER_LOCK
+        with lock:
+            con = _capture_area_connection(area)
             try:
                 con.execute("BEGIN IMMEDIATE")
-                duplicate = con.execute("""
-                    SELECT id, doc_id, supplier_name, supplier_invoice_number
-                    FROM incoming_invoices
-                    WHERE file_sha256 = ?
-                       OR (supplier_address_id = ? AND supplier_invoice_number_norm = ?)
-                    LIMIT 1
-                """, (sha256, address_id, invoice_number_norm)).fetchone()
-                if duplicate:
-                    raise ValueError(
-                        f"Doppelte Rechnung: bereits als {duplicate['doc_id']} gespeichert ({duplicate['supplier_name']} · {duplicate['supplier_invoice_number']})."
-                    )
+                if area == "live":
+                    duplicate = con.execute("""
+                        SELECT id, doc_id, supplier_name, supplier_invoice_number
+                        FROM incoming_invoices
+                        WHERE file_sha256 = ?
+                           OR (supplier_address_id = ? AND supplier_invoice_number_norm = ?)
+                        LIMIT 1
+                    """, (sha256, address_id, invoice_number_norm)).fetchone()
+                    if duplicate:
+                        raise ValueError(
+                            f"Doppelte Rechnung: bereits als {duplicate['doc_id']} gespeichert ({duplicate['supplier_name']} · {duplicate['supplier_invoice_number']})."
+                        )
 
-                number = _capture_number_status(year, con)
+                number = _capture_number_status_for_area(year, area, con)
                 doc_id = number["nextDocId"]
-                folder = CAPTURE_ROOT / str(year)
+                folder = _capture_area_root(area) / str(year)
                 folder.mkdir(parents=True, exist_ok=True)
                 pdf_path = folder / f"{doc_id}.pdf"
                 original_path = folder / f"{doc_id}_Original.pdf"
@@ -4781,6 +5073,10 @@ def incoming_capture_save():
                 temp_original.replace(original_path)
                 temp_pdf.replace(pdf_path)
                 created_paths.extend([pdf_path, original_path])
+
+                # Im Testgelände darf dieselbe Übungsrechnung mehrfach gespeichert werden.
+                stored_invoice_norm = invoice_number_norm if area == "live" else f"{invoice_number_norm}__{doc_id}"
+                stored_sha256 = sha256 if area == "live" else f"{sha256}:{doc_id}"
 
                 cur = con.execute("""
                     INSERT INTO incoming_invoices (
@@ -4802,7 +5098,7 @@ def incoming_capture_save():
                     str(supplier.get("supplierNumber") or ""),
                     str(supplier.get("ourCustomerNumber") or ""),
                     invoice_number,
-                    invoice_number_norm,
+                    stored_invoice_norm,
                     invoice_date,
                     due_date,
                     net,
@@ -4821,7 +5117,7 @@ def incoming_capture_save():
                     str(upload.filename or ""),
                     str(pdf_path),
                     str(original_path),
-                    sha256,
+                    stored_sha256,
                     analysis.get("text") or "",
                     int(analysis.get("pageCount") or 0),
                     str(payload.get("createdBy") or "Dunja").strip() or "Dunja",
@@ -4842,14 +5138,14 @@ def incoming_capture_save():
                     ))
                 con.commit()
                 saved = con.execute("SELECT * FROM incoming_invoices WHERE id = ?", (invoice_id,)).fetchone()
-                public = _capture_row_public(saved, _capture_allocations(con, invoice_id))
+                public = _capture_row_public(saved, _capture_allocations(con, invoice_id), area=area)
             except Exception:
                 con.rollback()
                 raise
             finally:
                 con.close()
 
-        return jsonify({"ok": True, "invoice": public, "warnings": warnings})
+        return jsonify({"ok": True, "area": area, "trainingMode": area == "test", "invoice": public, "warnings": warnings})
     except ValueError as e:
         for path in created_paths:
             try:
@@ -4869,11 +5165,13 @@ def incoming_capture_save():
 @app.get("/incoming/capture/list")
 def incoming_capture_list():
     try:
+        area = _capture_area(request.args.get("area"))
         rows = _capture_recent(
             limit=request.args.get("limit", 50),
             workflow_status=str(request.args.get("workflowStatus") or "").strip(),
+            area=area,
         )
-        return jsonify({"ok": True, "invoices": rows, "count": len(rows)})
+        return jsonify({"ok": True, "area": area, "trainingMode": area == "test", "invoices": rows, "count": len(rows)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -4881,12 +5179,13 @@ def incoming_capture_list():
 @app.put("/incoming/capture/<int:invoice_id>/status")
 def incoming_capture_status(invoice_id):
     body = request.get_json(silent=True) or {}
+    area = _capture_area(body.get("area") or request.args.get("area"))
     workflow = str(body.get("workflowStatus") or "").strip()
     payment = str(body.get("paymentStatus") or "").strip()
     if workflow and workflow not in {"zu_pruefen", "geprueft", "storniert"}:
         return jsonify({"ok": False, "error": "Ungültiger Arbeitsstatus."}), 400
     try:
-        con = _capture_connection()
+        con = _capture_area_connection(area)
         try:
             row = con.execute("SELECT * FROM incoming_invoices WHERE id = ?", (invoice_id,)).fetchone()
             if not row:
@@ -4900,9 +5199,71 @@ def incoming_capture_status(invoice_id):
             """, (new_workflow, new_payment, _payment_state(new_payment), datetime.now().isoformat(timespec="seconds"), invoice_id))
             con.commit()
             updated = con.execute("SELECT * FROM incoming_invoices WHERE id = ?", (invoice_id,)).fetchone()
-            return jsonify({"ok": True, "invoice": _capture_row_public(updated, _capture_allocations(con, invoice_id))})
+            return jsonify({"ok": True, "area": area, "invoice": _capture_row_public(updated, _capture_allocations(con, invoice_id), area=area)})
         finally:
             con.close()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.delete("/incoming/capture/<int:invoice_id>")
+def incoming_capture_delete(invoice_id):
+    area = _capture_area(request.args.get("area"))
+    if area != "test":
+        return jsonify({
+            "ok": False,
+            "error": "Echtbelege werden nicht gelöscht. Dafür bitte später den Status 'storniert' verwenden."
+        }), 403
+    try:
+        con = _capture_area_connection("test")
+        try:
+            row = con.execute("SELECT * FROM incoming_invoices WHERE id = ?", (invoice_id,)).fetchone()
+            if not row:
+                return jsonify({"ok": False, "error": "Testrechnung nicht gefunden."}), 404
+            row_data = dict(row)
+            con.execute("DELETE FROM incoming_invoices WHERE id = ?", (invoice_id,))
+            con.commit()
+        finally:
+            con.close()
+        deleted, warnings = _capture_delete_test_files(row_data)
+        return jsonify({
+            "ok": True,
+            "area": "test",
+            "deletedInvoiceId": invoice_id,
+            "docId": row_data.get("doc_id") or "",
+            "deletedFiles": deleted,
+            "warnings": warnings,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.delete("/incoming/capture/test-area")
+def incoming_capture_clear_test_area():
+    body = request.get_json(silent=True) or {}
+    if str(body.get("confirm") or "").strip().upper() != "TESTGELAENDE LEEREN":
+        return jsonify({"ok": False, "error": "Bestätigung fehlt."}), 400
+    try:
+        con = _capture_area_connection("test")
+        try:
+            rows = [dict(row) for row in con.execute("SELECT * FROM incoming_invoices ORDER BY id").fetchall()]
+            con.execute("DELETE FROM incoming_invoices")
+            con.commit()
+        finally:
+            con.close()
+        deleted_files = []
+        warnings = []
+        for row in rows:
+            deleted, row_warnings = _capture_delete_test_files(row)
+            deleted_files.extend(deleted)
+            warnings.extend(row_warnings)
+        return jsonify({
+            "ok": True,
+            "area": "test",
+            "deletedCount": len(rows),
+            "deletedFiles": len(deleted_files),
+            "warnings": warnings,
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -5176,7 +5537,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.13.0 - Dunja Eingangsrechnungserfassung und Kontierung")
+    print("Version: 0.13.2 - Dunja Testgelaende getrennt und loeschbar")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
