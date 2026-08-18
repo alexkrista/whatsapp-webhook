@@ -1,4 +1,4 @@
-// Datei: daily-report.js · Build 0030.3 · Tagesabschluss inkl. Abwesenheitsstunden
+// Datei: daily-report.js · Build 0030.4 · Automatische Tageszusammenfassung
 "use strict";
 
 const fs = require("fs");
@@ -8,7 +8,18 @@ const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { migrateLegacyMediaForDate } = require("./media-migration");
 
-function registerDailyReport(app, { dataDir, requireAdmin }) {
+function registerDailyReport(app, {
+  dataDir,
+  requireAdmin,
+  sendWhatsApp = null,
+  chefPhone = "",
+  phoneNumberId = "",
+  publicBaseUrl = "",
+  adminToken = "",
+  sendMail = null,
+  mailTo = "",
+  logger = console,
+}) {
   const ROOT = path.join(dataDir, "_kristine");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
   const REVIEW_ENTRIES = path.join(ROOT, "day-review-entries.json");
@@ -18,6 +29,7 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
   const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
   const REPORTS_DIR = path.join(ROOT, "reports");
+  const SCHEDULER_FILE = path.join(ROOT, "daily-report-scheduler.json");
 
   async function readJson(file, fallback) {
     try {
@@ -27,12 +39,30 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     }
   }
 
+  async function writeJson(file, value) {
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const temp = `${file}.tmp`;
+    await fsp.writeFile(temp, JSON.stringify(value, null, 2), "utf8");
+    await fsp.rename(temp, file);
+  }
+
+  function normalizePhone(value) {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    if (digits.startsWith("0")) digits = `43${digits.slice(1)}`;
+    return digits;
+  }
+
   function viennaParts(d = new Date()) {
     const parts = new Intl.DateTimeFormat("de-AT", {
       timeZone: "Europe/Vienna",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+      hourCycle: "h23",
     }).formatToParts(d);
     return Object.fromEntries(parts.map((part) => [part.type, part.value]));
   }
@@ -42,8 +72,37 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     return `${p.year}-${p.month}-${p.day}`;
   }
 
+  function localHm(d = new Date()) {
+    const p = viennaParts(d);
+    return `${p.hour}:${p.minute}`;
+  }
+
+  function minutesFromClock(value) {
+    const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+  }
+
+  function inWindow(value, from, to) {
+    const minute = minutesFromClock(value);
+    return minute >= minutesFromClock(from) && minute <= minutesFromClock(to);
+  }
+
   function yesterdayISO() {
     return localDateISO(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  }
+
+  function previousWorkdayISO(reference = localDateISO()) {
+    const [year, month, day] = String(reference).split("-").map(Number);
+    const value = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    do {
+      value.setUTCDate(value.getUTCDate() - 1);
+    } while ([0, 6].includes(value.getUTCDay()));
+    return value.toISOString().slice(0, 10);
+  }
+
+  function weekdayNumber(date) {
+    const [year, month, day] = String(date).split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
   }
 
   function minutesFromHM(value) {
@@ -1591,8 +1650,234 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
       siteReports.push({ jobId, jobName, filePath });
     }
 
-    return { date, overallPath, siteReports };
+    const day = summarizeDay(employees);
+    const absenceMinutes = Object.values(day.absences)
+      .flat()
+      .reduce((sum, row) => sum + Number(row.minutes || 0), 0);
+    const unproductiveMinutes = day.unproductive + absenceMinutes;
+    const totalMinutes = day.productive + unproductiveMinutes;
+
+    return {
+      date,
+      overallPath,
+      siteReports,
+      summary: {
+        employees: day.headcount,
+        activeEmployees: day.activeCount,
+        jobs: day.jobs.size,
+        productiveMinutes: day.productive,
+        unproductiveMinutes,
+        totalMinutes,
+        vacation: day.absences.vacation.length,
+        sick: day.absences.sick.length,
+        holiday: day.absences.holiday.length,
+        otherAbsence: day.absences.other.length,
+      },
+    };
   }
+
+  function reportUrl(date) {
+    const base = String(publicBaseUrl || "").replace(/\/$/, "");
+    if (!base) return "";
+    const url = new URL(`${base}/admin/daily-report/${date}`);
+    if (adminToken) url.searchParams.set("token", String(adminToken));
+    return url.toString();
+  }
+
+  function buildDailySummaryMessage(result) {
+    const summary = result.summary || {};
+    const lines = [
+      `📊 Tageszusammenfassung KRISTA – ${formatDateDE(result.date)}`,
+      "",
+      `🟢 Produktiv: ${formatDuration(summary.productiveMinutes)}`,
+      `⚪ Unproduktiv: ${formatDuration(summary.unproductiveMinutes)}`,
+      `⏱ Gesamt: ${formatDuration(summary.totalMinutes)}`,
+      `👷 Im Einsatz: ${Number(summary.activeEmployees || 0)} / ${Number(summary.employees || 0)}`,
+      `🏗 Baustellen: ${Number(summary.jobs || 0)}`,
+    ];
+
+    const url = reportUrl(result.date);
+    if (url) lines.push("", "Tagesreport öffnen:", url);
+    return lines.join("\n");
+  }
+
+  async function deliverDailySummary(result) {
+    const message = buildDailySummaryMessage(result);
+    const delivery = {
+      delivered: false,
+      whatsapp: { sent: false, reason: "not_configured" },
+      email: { sent: false, reason: "not_configured" },
+    };
+
+    const recipient = normalizePhone(chefPhone);
+    if (typeof sendWhatsApp === "function" && recipient) {
+      try {
+        const response = await sendWhatsApp({
+          phoneNumberId,
+          to: recipient,
+          reply: message,
+        });
+        delivery.whatsapp = {
+          sent: true,
+          messageId: response?.messages?.[0]?.id || null,
+        };
+      } catch (error) {
+        delivery.whatsapp = {
+          sent: false,
+          reason: "send_failed",
+          error: String(error?.message || error),
+        };
+        logger.error("❌ Tageszusammenfassung WhatsApp fehlgeschlagen", delivery.whatsapp);
+      }
+    } else if (!recipient) {
+      delivery.whatsapp = { sent: false, reason: "chef_phone_missing" };
+    }
+
+    // Fallback: Wenn WhatsApp nicht zugestellt werden konnte, kommt der Link per Mail.
+    if (!delivery.whatsapp.sent && typeof sendMail === "function" && String(mailTo || "").trim()) {
+      try {
+        const url = reportUrl(result.date);
+        const info = await sendMail({
+          to: String(mailTo).trim(),
+          subject: `KRISTA Tageszusammenfassung ${formatDateDE(result.date)}`,
+          text: message,
+          html: `<p>${message.replace(/\n/g, "<br>")}</p>${url ? `<p><a href="${url}">Tagesreport öffnen</a></p>` : ""}`,
+        });
+        delivery.email = info
+          ? { sent: true, messageId: info.messageId || null }
+          : { sent: false, reason: "send_failed" };
+      } catch (error) {
+        delivery.email = {
+          sent: false,
+          reason: "send_failed",
+          error: String(error?.message || error),
+        };
+        logger.error("❌ Tageszusammenfassung Mail fehlgeschlagen", delivery.email);
+      }
+    }
+
+    delivery.delivered = delivery.whatsapp.sent || delivery.email.sent;
+    return { message, delivery };
+  }
+
+  async function runScheduledReport({
+    reportDate = previousWorkdayISO(),
+    force = false,
+  } = {}) {
+    const state = await readJson(SCHEDULER_FILE, {});
+
+    if (!force && state.sentReportDate === reportDate) {
+      return { skipped: true, reason: "already_sent", state };
+    }
+
+    if (!force && state.lastAttemptAt) {
+      const age = Date.now() - Date.parse(state.lastAttemptAt);
+      if (Number.isFinite(age) && age >= 0 && age < 10 * 60_000) {
+        return { skipped: true, reason: "retry_wait", state };
+      }
+    }
+
+    state.lastAttemptAt = new Date().toISOString();
+    state.lastReportDate = reportDate;
+    await writeJson(SCHEDULER_FILE, state);
+
+    const result = await generate(reportDate);
+    const sent = await deliverDailySummary(result);
+
+    const nextState = {
+      ...state,
+      lastAttemptAt: new Date().toISOString(),
+      lastReportDate: reportDate,
+      lastDelivery: sent.delivery,
+      lastError: sent.delivery.delivered
+        ? null
+        : sent.delivery.whatsapp.error ||
+          sent.delivery.email.error ||
+          sent.delivery.whatsapp.reason ||
+          sent.delivery.email.reason ||
+          "nicht zugestellt",
+    };
+
+    if (sent.delivery.delivered) {
+      nextState.sentReportDate = reportDate;
+      nextState.sentAt = new Date().toISOString();
+    }
+
+    await writeJson(SCHEDULER_FILE, nextState);
+
+    logger.log("KRISTA Tageszusammenfassung", {
+      reportDate,
+      delivered: sent.delivery.delivered,
+      whatsapp: sent.delivery.whatsapp,
+      email: sent.delivery.email,
+    });
+
+    return {
+      ok: true,
+      report: result,
+      message: sent.message,
+      delivery: sent.delivery,
+      state: nextState,
+    };
+  }
+
+  async function schedulerTick() {
+    try {
+      const today = localDateISO();
+      const weekday = weekdayNumber(today);
+      const hm = localHm();
+
+      // Montag bis Freitag, 07:00 Uhr; bis 18:00 wird nach einem Neustart nachgeholt.
+      if (weekday >= 1 && weekday <= 5 && inWindow(hm, "07:00", "18:00")) {
+        await runScheduledReport({
+          reportDate: previousWorkdayISO(today),
+          force: false,
+        });
+      }
+    } catch (error) {
+      logger.error("❌ Tagesreport-Scheduler", error);
+    }
+  }
+
+  const schedulerTimer = setInterval(schedulerTick, 60_000);
+  schedulerTimer.unref?.();
+  setTimeout(schedulerTick, 5_000).unref?.();
+
+  logger.log("✅ Tagesreport-Scheduler registriert", {
+    timezone: "Europe/Vienna",
+    time: "07:00",
+    catchUpUntil: "18:00",
+  });
+
+  app.get("/admin/api/daily-report-scheduler/status", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const state = await readJson(SCHEDULER_FILE, {});
+    res.json({
+      ok: true,
+      now: { date: localDateISO(), time: localHm() },
+      previousWorkday: previousWorkdayISO(),
+      chefPhoneConfigured: Boolean(normalizePhone(chefPhone)),
+      phoneNumberIdConfigured: Boolean(String(phoneNumberId || "").trim()),
+      mailFallbackConfigured: Boolean(typeof sendMail === "function" && String(mailTo || "").trim()),
+      state,
+    });
+  });
+
+  app.post("/admin/api/daily-report-scheduler/test", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reportDate = String(
+        req.body?.date || req.query.date || previousWorkdayISO()
+      ).slice(0, 10);
+      const result = await runScheduledReport({ reportDate, force: true });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: String(error?.message || error),
+      });
+    }
+  });
 
   app.post("/admin/api/daily-report/:date?", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -1650,7 +1935,17 @@ function registerDailyReport(app, { dataDir, requireAdmin }) {
     }
   });
 
-  return { generate, yesterdayISO };
+  return {
+    generate,
+    yesterdayISO,
+    previousWorkdayISO,
+    runScheduledReport,
+    getStatus: async () => ({
+      state: await readJson(SCHEDULER_FILE, {}),
+      now: { date: localDateISO(), time: localHm() },
+      previousWorkday: previousWorkdayISO(),
+    }),
+  };
 }
 
 module.exports = { registerDailyReport };

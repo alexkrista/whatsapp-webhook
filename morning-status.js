@@ -1,9 +1,9 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0024.1
-// KRISTA: 07:00 Startprüfung, 08:00 Chefstatus,
-// 15:00 Planung morgen, 15:30 Nachfassung.
+// Build 0025.1 · Teleport / Erinnerungen wieder zuverlässig
+// KRISTA: 06:45 Morgenbegrüßung, 07:00 Startprüfung,
+// 08:00 Chefstatus, 15:00 Planung morgen, 15:30 Nachfassung.
 //
 // Bestehende Datenstruktur und Exports bleiben erhalten.
 // Überarbeitet wurden vor allem:
@@ -619,7 +619,7 @@ function buildChefReport(statuses, date) {
   return lines.join("\n");
 }
 
-function reminderText(employee, assignment, kristineUrl) {
+function morningGreetingText(employee, assignment, kristineUrl) {
   const name = displayName(employee);
   const start = String(assignment?.from || OFFICIAL_START).trim();
   const place = [assignment?.city, assignment?.address]
@@ -641,19 +641,17 @@ function reminderText(employee, assignment, kristineUrl) {
   lines.push("");
   lines.push("Los geht’s mit KRISTINE →");
   lines.push(kristineUrl);
-  lines.push("");
-  lines.push("Falls du später kommst oder heute nicht arbeitest, gib bitte kurz Bescheid.");
-
   return lines.join("\n");
 }
 
-function nextPlanningWorkday(date) {
-  let target = addDaysIso(date, 1);
-  // Freitag -> Montag; Samstag/Sonntag werden ebenfalls übersprungen.
-  while ([0, 6].includes(weekdayNumber(target))) {
-    target = addDaysIso(target, 1);
-  }
-  return target;
+function startReminderText(employee, assignment) {
+  const name = displayName(employee);
+  return [
+    `Guten Morgen ${name}.`,
+    `Ich habe noch keinen Arbeitsbeginn bei ${jobLabel(assignment)} erhalten.`,
+    "",
+    "Kommst du heute später oder arbeitest du heute nicht?",
+  ].join("\n");
 }
 
 function tomorrowPlanningStatus({
@@ -716,57 +714,44 @@ function tomorrowPlanningStatus({
 
 function buildPlanningReminder(status, followUp = false) {
   const missingCount = status.missing.length;
-  const grouped = new Map();
+  const complete = missingCount === 0;
 
-  for (const item of status.planned) {
-    for (const assignment of item.assignments || []) {
-      const label = jobLabel(assignment);
-      if (!grouped.has(label)) grouped.set(label, []);
-      grouped.get(label).push(displayName(item.employee));
-    }
-  }
-
-  const title = followUp
-    ? "⚠️ Einteilung noch nicht bestätigt"
-    : "📅 Einteilung prüfen";
+  const title = complete
+    ? followUp
+      ? "✅ Einteilung jetzt vollständig"
+      : "✅ Einteilung vollständig"
+    : followUp
+      ? "⚠️ Einteilung weiterhin offen"
+      : "📅 Einteilung prüfen";
 
   const lines = [
     title,
     "",
     `Für: ${status.date}`,
     "",
+    `🟢 Eingeteilt: ${status.planned.length}`,
+    `🔵 Frei / abwesend: ${status.free.length}`,
+    `🔴 Noch ohne Einteilung: ${missingCount}`,
   ];
 
-  for (const [job, names] of grouped) {
-    lines.push(`🟢 ${job}`);
-    lines.push(`   ${[...new Set(names)].join(" · ")}`);
-    lines.push("");
+  if (complete) {
+    lines.push("", "✅ Keine offenen Einteilungen.");
+    return lines.join("\n");
   }
 
-  if (missingCount) {
-    lines.push("🔴 Ohne Einteilung");
-    for (const employee of status.missing) {
-      lines.push(`   • ${displayName(employee)}`);
-    }
-    lines.push("");
+  lines.push("", "Noch offen:");
+
+  for (const employee of status.missing) {
+    lines.push(`• ${displayName(employee)}`);
   }
 
-  if (status.free.length) {
-    lines.push("🔵 Frei / abwesend");
-    for (const item of status.free) {
-      lines.push(`   • ${displayName(item.employee)}${item.reason ? ` – ${item.reason}` : ""}`);
-    }
-    lines.push("");
-  }
+  lines.push("");
 
-  if (!missingCount) {
-    lines.push("🟢 Alle verfügbaren Mitarbeiter sind eingeteilt.");
-    lines.push("");
+  if (missingCount === 1) {
+    lines.push(`👉 Bitte ${displayName(status.missing[0])} noch einteilen.`);
+  } else {
+    lines.push("👉 Bitte die Einteilung fertigstellen.");
   }
-
-  lines.push("👉 Bitte kurz kontrollieren.");
-  lines.push("Antwort: PASST");
-  lines.push("Oder Planung in KRISTINE öffnen und ändern.");
 
   return lines.join("\n");
 }
@@ -860,24 +845,29 @@ async function registerMorningStatus({
     };
   }
 
-  async function saveRun(key, date, scheduler) {
+  async function saveRun(key, date, scheduler, meta = {}) {
     scheduler[key] = date;
+    scheduler[`${key}At`] = new Date().toISOString();
+    if (meta.targetDate) scheduler[`${key}TargetDate`] = meta.targetDate;
+    if (scheduler.lastFailure?.key === key) delete scheduler.lastFailure;
     await writeJson(files.scheduler, scheduler);
   }
 
-  async function saveAttempt(key, scheduler, patch = {}) {
-    scheduler._delivery = scheduler._delivery && typeof scheduler._delivery === "object"
-      ? scheduler._delivery
-      : {};
-    const current = scheduler._delivery[key] && typeof scheduler._delivery[key] === "object"
-      ? scheduler._delivery[key]
-      : {};
-    scheduler._delivery[key] = {
-      ...current,
-      ...patch,
-      updatedAt: new Date().toISOString(),
+  async function saveFailure(key, date, scheduler, error) {
+    scheduler.lastFailure = {
+      key,
+      date,
+      at: new Date().toISOString(),
+      error: String(error?.message || error || "Versand fehlgeschlagen"),
     };
     await writeJson(files.scheduler, scheduler);
+  }
+
+  function retryBlocked(scheduler, key, minutes = 10) {
+    const row = scheduler?.lastFailure;
+    if (!row || row.key !== key || !row.at) return false;
+    const age = Date.now() - Date.parse(row.at);
+    return Number.isFinite(age) && age >= 0 && age < minutes * 60_000;
   }
 
   async function sendToChef(reply) {
@@ -906,10 +896,73 @@ async function registerMorningStatus({
     };
   }
 
-  async function runSevenOClock(
-    date = localIsoDate(),
-    force = false
-  ) {
+async function runSixFortyFive(
+  date = localIsoDate(),
+  force = false,
+  onlyEmployeeId = ""
+) {
+    const state = await loadState();
+
+    if (!force && state.scheduler.morningGreeting === date) {
+      return { skipped: true };
+    }
+
+    const employeesToCheck = onlyEmployeeId
+      ? activeEmployees(state.employees).filter(
+          (employee) => String(employee.id) === String(onlyEmployeeId)
+        )
+      : activeEmployees(state.employees);
+
+    const statuses = employeesToCheck.map(
+      (employee) => statusForEmployee({ employee, ...state, date })
+    );
+
+    const recipients = statuses.filter(
+      (status) => status.category !== "non_work" && Boolean(status.assignment)
+    );
+
+    let sent = 0;
+    for (const status of recipients) {
+      try {
+        await sendWhatsApp({
+          phoneNumberId,
+          to: normalizePhone(status.employee.phone),
+          reply: morningGreetingText(
+            status.employee,
+            status.assignment,
+            kristineGoUrl(status.employee)
+          ),
+        });
+        sent += 1;
+      } catch (error) {
+        logger.error(
+          "06:45 Morgenbegrüßung fehlgeschlagen",
+          displayName(status.employee),
+          error
+        );
+      }
+    }
+
+    await saveRun("morningGreeting", date, state.scheduler);
+
+    logger.log("KRISTA 06:45 Morgenbegrüßung", {
+      date,
+      sent,
+      suppressed: statuses.length - recipients.length,
+    });
+
+    return {
+      sent,
+      suppressed: statuses.length - recipients.length,
+      statuses,
+    };
+  }
+
+async function runSevenOClock(
+  date = localIsoDate(),
+  force = false,
+  onlyEmployeeId = ""
+) {
     const state = await loadState();
 
     if (
@@ -921,49 +974,40 @@ async function registerMorningStatus({
       };
     }
 
-    const statuses = activeEmployees(state.employees).map(
-      (employee) =>
-        statusForEmployee({
-          employee,
-          ...state,
-          date,
-        })
-    );
+    const employeesToCheck = onlyEmployeeId
+  ? activeEmployees(state.employees).filter(
+      (employee) => String(employee.id) === String(onlyEmployeeId)
+    )
+  : activeEmployees(state.employees);
 
-    const missing = statuses.filter(
-      (status) => status.category === "missing"
-    );
-
-    let sentCount = 0;
-    const failedEmployees = [];
-
-    await saveAttempt("startReminder", state.scheduler, {
+const statuses = employeesToCheck.map(
+  (employee) =>
+    statusForEmployee({
+      employee,
+      ...state,
       date,
-      lastAttempt: new Date().toISOString(),
-      requested: missing.length,
-      sent: 0,
-      failed: 0,
-      lastError: "",
-    });
+    })
+);
+
+const missing = statuses.filter(
+  (status) => status.category === "missing"
+);
 
     for (const status of missing) {
       try {
         await sendWhatsApp({
           phoneNumberId,
           to: normalizePhone(status.employee.phone),
-          reply: reminderText(
+          reply: startReminderText(
             status.employee,
-            status.assignment,
-            kristineGoUrl(status.employee)
+            status.assignment
           ),
           buttons: [
             "Komme später",
             "Heute nicht",
           ],
         });
-        sentCount += 1;
       } catch (error) {
-        failedEmployees.push(displayName(status.employee));
         logger.error(
           "07:00 Erinnerung fehlgeschlagen",
           displayName(status.employee),
@@ -972,26 +1016,11 @@ async function registerMorningStatus({
       }
     }
 
-    if (failedEmployees.length === 0) {
-      await saveRun("startReminder", date, state.scheduler);
-      await saveAttempt("startReminder", state.scheduler, {
-        date,
-        lastSuccess: new Date().toISOString(),
-        requested: missing.length,
-        sent: sentCount,
-        failed: 0,
-        lastError: "",
-      });
-    } else {
-      await saveAttempt("startReminder", state.scheduler, {
-        date,
-        requested: missing.length,
-        sent: sentCount,
-        failed: failedEmployees.length,
-        failedEmployees,
-        lastError: `WhatsApp-Versand fehlgeschlagen für: ${failedEmployees.join(", ")}`,
-      });
-    }
+    await saveRun(
+      "startReminder",
+      date,
+      state.scheduler
+    );
 
     const suppressed = statuses.filter(
       (status) => status.category === "non_work"
@@ -999,14 +1028,12 @@ async function registerMorningStatus({
 
     logger.log("KRISTA 07:00 Prüfung", {
       date,
-      reminded: sentCount,
-      failed: failedEmployees.length,
+      reminded: missing.length,
       suppressed,
     });
 
     return {
-      sent: sentCount,
-      failed: failedEmployees,
+      sent: missing.length,
       suppressed,
       statuses,
     };
@@ -1017,22 +1044,18 @@ async function registerMorningStatus({
     force = false
   ) {
     const state = await loadState();
+    const schedulerKey = "chefReport";
 
-    if (
-      !force &&
-      state.scheduler.chefReport === date
-    ) {
-      logger.log(
-        "KRISTA 08:00 Chefstatus übersprungen",
-        {
-          date,
-          reason: "bereits gesendet",
-        }
-      );
+    if (!force && state.scheduler[schedulerKey] === date) {
+      logger.log("KRISTA 08:00 Chefstatus übersprungen", {
+        date,
+        reason: "bereits gesendet",
+      });
+      return { skipped: true };
+    }
 
-      return {
-        skipped: true,
-      };
+    if (!force && retryBlocked(state.scheduler, schedulerKey)) {
+      return { skipped: true, reason: "retry_wait" };
     }
 
     const statuses = activeEmployees(state.employees).map(
@@ -1046,46 +1069,41 @@ async function registerMorningStatus({
 
     const report = buildChefReport(statuses, date);
 
-    await saveAttempt("chefReport", state.scheduler, {
-      date,
-      lastAttempt: new Date().toISOString(),
-      lastError: "",
-    });
+    try {
+      const result = await sendToChef(report);
 
-    const result = await sendToChef(report);
-
-    if (result.sent) {
-      logger.log(
-        "KRISTA 08:00 Chefstatus gesendet",
-        {
+      if (!result.sent) {
+        await saveFailure(
+          schedulerKey,
           date,
-          recipients: 1,
-        }
-      );
-      await saveRun("chefReport", date, state.scheduler);
-      await saveAttempt("chefReport", state.scheduler, {
-        date,
-        lastSuccess: new Date().toISOString(),
-        sent: true,
-        lastError: "",
-      });
-    } else {
-      await saveAttempt("chefReport", state.scheduler, {
-        date,
-        sent: false,
-        lastError: result.reason || "Versand nicht bestätigt",
-      });
-      logger.warn("KRISTA 08:00 Chefstatus NICHT als gesendet markiert", {
-        date,
-        reason: result.reason || "Versand nicht bestätigt",
-      });
-    }
+          state.scheduler,
+          result.reason || "Chefstatus nicht versendet"
+        );
+        return {
+          sent: false,
+          retry: true,
+          reason: result.reason,
+          statuses,
+          report,
+        };
+      }
 
-    return {
-      sent: result.sent,
-      statuses,
-      report,
-    };
+      await saveRun(schedulerKey, date, state.scheduler);
+
+      logger.log("KRISTA 08:00 Chefstatus gesendet", {
+        date,
+        recipients: 1,
+      });
+
+      return {
+        sent: true,
+        statuses,
+        report,
+      };
+    } catch (error) {
+      await saveFailure(schedulerKey, date, state.scheduler, error);
+      throw error;
+    }
   }
 
   async function runPlanningReminder({
@@ -1094,93 +1112,99 @@ async function registerMorningStatus({
     followUp,
   }) {
     const state = await loadState();
+    const weekday = weekdayNumber(date);
+    const isFriday = weekday === 5;
 
     const schedulerKey = followUp
       ? "tomorrowPlanningFollowUp"
       : "tomorrowPlanningReminder";
 
-    const label = followUp
-      ? "15:30 Planung-Nachfassung"
-      : "15:00 Planung";
+    const label = isFriday && !followUp
+      ? "11:00 Montagseinteilung"
+      : followUp
+        ? "15:30 Planung-Nachfassung"
+        : "15:00 Planung";
 
-    if (
-      !force &&
-      state.scheduler[schedulerKey] === date
-    ) {
+    if (!force && state.scheduler[schedulerKey] === date) {
       logger.log(`${label} übersprungen`, {
         date,
         reason: "bereits geprüft",
       });
-
-      return {
-        skipped: true,
-      };
+      return { skipped: true };
     }
 
-    const tomorrow = nextPlanningWorkday(date);
+    if (!force && retryBlocked(state.scheduler, schedulerKey)) {
+      return { skipped: true, reason: "retry_wait" };
+    }
+
+    // Freitag wird nicht der Samstag, sondern der Montag kontrolliert.
+    const targetDate = addDaysIso(date, isFriday ? 3 : 1);
 
     const status = tomorrowPlanningStatus({
       ...state,
-      date: tomorrow,
+      date: targetDate,
     });
 
-    let sent = false;
+    // Erste Kontrolle IMMER melden – auch wenn schon alles eingeteilt ist.
+    // Die Nachfassung meldet nur noch tatsächlich offene Einteilungen.
+    const shouldSend = !followUp || status.missing.length > 0;
 
-    const message = buildPlanningReminder(
-      status,
-      followUp
-    );
-
-    await saveAttempt(schedulerKey, state.scheduler, {
-      date,
-      tomorrow,
-      lastAttempt: new Date().toISOString(),
-      lastError: "",
-    });
-
-    const result = await sendToChef(message);
-    sent = result.sent;
-
-    logger.log(
-      sent
-        ? `${label} gesendet`
-        : `${label} NICHT gesendet`,
-      {
+    if (!shouldSend) {
+      await saveRun(schedulerKey, date, state.scheduler, { targetDate });
+      logger.log(`${label} geprüft`, {
         date,
-        tomorrow,
-        reminderNeeded: status.missing.length > 0,
+        targetDate,
+        reminderNeeded: false,
+        missing: 0,
+        planned: status.planned.length,
+        free: status.free.length,
+      });
+      return {
+        sent: false,
+        status,
+        completed: true,
+      };
+    }
+
+    const message = buildPlanningReminder(status, followUp);
+
+    try {
+      const result = await sendToChef(message);
+
+      if (!result.sent) {
+        await saveFailure(
+          schedulerKey,
+          date,
+          state.scheduler,
+          result.reason || `${label} nicht versendet`
+        );
+        return {
+          sent: false,
+          retry: true,
+          reason: result.reason,
+          status,
+        };
+      }
+
+      await saveRun(schedulerKey, date, state.scheduler, { targetDate });
+
+      logger.log(`${label} gesendet`, {
+        date,
+        targetDate,
         missing: status.missing.length,
         planned: status.planned.length,
         free: status.free.length,
-        chefPhoneConfigured: Boolean(
-          normalizePhone(chefPhone)
-        ),
-        reason: result.reason || "",
-      }
-    );
+      });
 
-    if (sent) {
-      await saveRun(schedulerKey, date, state.scheduler);
-      await saveAttempt(schedulerKey, state.scheduler, {
-        date,
-        tomorrow,
-        lastSuccess: new Date().toISOString(),
+      return {
         sent: true,
-        lastError: "",
-      });
-    } else {
-      await saveAttempt(schedulerKey, state.scheduler, {
-        date,
-        tomorrow,
-        sent: false,
-        lastError: result.reason || "Versand nicht bestätigt",
-      });
+        status,
+        message,
+      };
+    } catch (error) {
+      await saveFailure(schedulerKey, date, state.scheduler, error);
+      throw error;
     }
-
-    return {
-      sent,
-      status,
-    };
   }
 
   async function runFifteenOClock(
@@ -1209,10 +1233,13 @@ async function registerMorningStatus({
     try {
       const hm = localHm();
       const date = localIsoDate();
+      const weekday = weekdayNumber(date);
 
-      // Nachholfenster:
-      // Render-Neustarts oder kurze Schlafphasen verlieren
-      // die Ausführung nicht.
+      // Breite Nachholfenster: Ein Render-Neustart darf keinen Lauf verschlucken.
+      if (inWindow(hm, "06:45", "06:59")) {
+        await runSixFortyFive(date);
+      }
+
       if (inWindow(hm, "07:00", "07:59")) {
         await runSevenOClock(date);
       }
@@ -1221,28 +1248,21 @@ async function registerMorningStatus({
         await runEightOClock(date);
       }
 
-      const weekday = weekdayNumber(date);
-
-      // Freitag endet der Arbeitstag früher:
-      // Montagseinteilung deshalb bereits um 11:00 Uhr kontrollieren.
-      if (weekday === 5 && inWindow(hm, "11:00", "11:29")) {
-        await runFifteenOClock(date);
-      }
-
-      // Montag–Donnerstag: Chef-Kontrolle um 15:00 Uhr.
+      // Montag–Donnerstag: Planung für den nächsten Tag.
       if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:00", "15:29")) {
         await runFifteenOClock(date);
       }
 
-      // Bestehende Nachfassung nur Montag–Donnerstag.
       if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:30", "18:00")) {
         await runFifteenThirty(date);
       }
+
+      // Freitag: Montag bereits am verkürzten Arbeitstag um 11 Uhr prüfen.
+      if (weekday === 5 && inWindow(hm, "11:00", "14:00")) {
+        await runFifteenOClock(date);
+      }
     } catch (error) {
-      logger.error(
-        "KRISTA Status-Scheduler:",
-        error
-      );
+      logger.error("KRISTA Status-Scheduler:", error);
     }
   }
 
@@ -1265,19 +1285,39 @@ async function registerMorningStatus({
     {
       timezone: TZ,
       jobs: [
+        "06:45 Morgenbegrüßung",
         "07:00 Startprüfung",
         "08:00 Chefstatus",
-        "15:00 Planung morgen",
-        "15:30 Nachfassung",
+        "Mo–Do 15:00 Planung morgen",
+        "Mo–Do 15:30 Nachfassung",
+        "Fr 11:00 Montagseinteilung",
       ],
     }
   );
 
+  async function getStatus() {
+    const state = await loadState();
+    return {
+      ok: true,
+      timezone: TZ,
+      now: {
+        date: localIsoDate(),
+        time: localHm(),
+      },
+      chefPhoneConfigured: Boolean(normalizePhone(chefPhone)),
+      phoneNumberIdConfigured: Boolean(String(phoneNumberId || "").trim()),
+      scheduler: state.scheduler,
+      files,
+    };
+  }
+
   return {
+    runSixFortyFive,
     runSevenOClock,
     runEightOClock,
     runFifteenOClock,
     runFifteenThirty,
+    getStatus,
     clampStartTime,
     dailyTargetHours: DAILY_TARGET_HOURS,
     files,
