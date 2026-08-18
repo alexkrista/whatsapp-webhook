@@ -39,7 +39,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/documents", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -2268,65 +2268,97 @@ def ww_hours_fusion_source(project_indices):
 
 def project_metrics(project_indices):
     """
-    Projektkennzahlen V0.9.
+    Projektkennzahlen für The Brain.
 
-    IST-STUNDEN
-    -----------
-    Direkte Verbindung zur Datenbank WinWorker_Mitschreibung_Standard.
-    Das vermeidet Cross-DB-Probleme des Reader-Users.
-    SUM(dStundenErfasst), bNichtAuswerten = 0.
+    STUNDEN
+    -------
+    Produktive WinWorker-Stunden. Pro Mitarbeiter und Arbeitstag wird die
+    unbezahlte 15-Minuten-Pause einmal proportional auf alle produktiven
+    Projekte dieses Tages verteilt. Damit entspricht die Kennzahl der
+    Nachkalkulationslogik von KRISTINE.
 
-    NETTO
-    -----
-    1) Pro Projekt + sBuchNummer nur die neueste Buch-Version.
-       Reihenfolge: Geändert / dzInhaltGeaendert / dzDocDatum / Aufgenommen.
-    2) dbo.Rechnung zusätzlich je gBuchID deduplizieren.
-    3) Erst danach cUmsatzNetto summieren.
+    UMSATZ
+    ------
+    Pro Projekt + Rechnungsnummer zählt nur die jüngste, nicht stornierte
+    WinWorker-Version. Erst danach wird cUmsatzNetto summiert.
     """
     ids = sorted({int(x) for x in project_indices if x is not None})
     if not ids:
         return {}
 
     placeholders = ",".join("?" for _ in ids)
-    result = {pid: {"hoursTotal": None, "netInvoiced": None} for pid in ids}
+    result = {
+        pid: {
+            "hoursTotal": None,
+            "hoursProductive": None,
+            "hoursRecorded": None,
+            "breakHours": None,
+            "netInvoiced": None,
+            "revenuePerHour": None,
+            "hoursSource": None,
+        }
+        for pid in ids
+    }
 
-    # 1) Echte IST-Stunden
-    # Wichtig: gleiche Verbindung wie die funktionierende Projektsuche verwenden,
-    # aber die Mitschreibungs-Tabelle vollständig qualifizieren.
+    # 1) Produktive Stunden inkl. proportionalem 15-Minuten-Abzug.
     try:
-        con = sql_connection("WinWorker_Projekte_Standard")
-        cur = con.cursor()
-        sql = f"""
-            SELECT
-                sm.ProjektIndex,
-                SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
-            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
-            WHERE sm.ProjektIndex IN ({placeholders})
-              AND ISNULL(sm.bNichtAuswerten, 0) = 0
-            GROUP BY sm.ProjektIndex
-        """
-        rows = cur.execute(sql, *ids).fetchall()
-        con.close()
-
+        rows = ww_hours_fusion_source(ids)
+        sums = {
+            pid: {"net": 0.0, "raw": 0.0, "break": 0.0, "seen": False}
+            for pid in ids
+        }
         for row in rows:
-            pid = int(row.ProjektIndex)
-            if pid in result:
-                result[pid]["hoursTotal"] = (
-                    float(row.IstStunden) if row.IstStunden is not None else None
-                )
-    except Exception as e:
-        print("SQL Stunden-Metrik FEHLER:", repr(e))
+            pid = row.get("projectIndex")
+            if pid not in sums:
+                continue
+            sums[pid]["net"] += float(row.get("netHours") or 0)
+            sums[pid]["raw"] += float(row.get("rawHours") or 0)
+            sums[pid]["break"] += float(row.get("breakHours") or 0)
+            sums[pid]["seen"] = True
 
-    # 2) Aktueller Netto-Abrechnungsstand
-    #
-    # WinWorker liefert dieselbe Rechnungsnummer mehrfach (z. B. Buchart 6/7
-    # oder neu gedruckte/geänderte Versionen). Für die Archivkarte zählt
-    # JEDE RECHNUNGSNUMMER NUR EINMAL.
-    #
-    # Vorgehen:
-    # - alle Buch-/Rechnungszeilen des Projekts holen
-    # - pro sBuchNummer nur eine aktuelle/eindeutige Netto-Zeile bestimmen
-    # - erst danach summieren
+        for pid, values in sums.items():
+            if not values["seen"]:
+                continue
+            productive = round(values["net"], 4)
+            result[pid]["hoursTotal"] = productive
+            result[pid]["hoursProductive"] = productive
+            result[pid]["hoursRecorded"] = round(values["raw"], 4)
+            result[pid]["breakHours"] = round(values["break"], 4)
+            result[pid]["hoursSource"] = "WinWorker produktiv · 15 Min anteilig abgezogen"
+    except Exception as e:
+        print("SQL produktive Stunden-Metrik FEHLER:", repr(e))
+
+        # Rückfall: wenigstens produktive Rohstunden liefern, falls die
+        # tageweise Fusion auf einer älteren WW-Struktur nicht möglich ist.
+        try:
+            con = sql_connection("WinWorker_Projekte_Standard")
+            cur = con.cursor()
+            sql = f"""
+                SELECT
+                    sm.ProjektIndex,
+                    SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
+                FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+                WHERE sm.ProjektIndex IN ({placeholders})
+                  AND ISNULL(sm.bNichtAuswerten, 0) = 0
+                  AND ISNULL(sm.bUnproduktiv, 0) = 0
+                GROUP BY sm.ProjektIndex
+            """
+            rows = cur.execute(sql, *ids).fetchall()
+            con.close()
+            for row in rows:
+                pid = int(row.ProjektIndex)
+                if pid not in result:
+                    continue
+                hours = float(row.IstStunden) if row.IstStunden is not None else None
+                result[pid]["hoursTotal"] = hours
+                result[pid]["hoursProductive"] = hours
+                result[pid]["hoursRecorded"] = hours
+                result[pid]["breakHours"] = None
+                result[pid]["hoursSource"] = "WinWorker produktive Rohstunden · Pause nicht abziehbar"
+        except Exception as fallback_error:
+            print("SQL Stunden-Fallback FEHLER:", repr(fallback_error))
+
+    # 2) Aktueller Netto-Abrechnungsstand.
     try:
         con = sql_connection("WinWorker_Projekte_Standard")
         cur = con.cursor()
@@ -2358,9 +2390,7 @@ def project_metrics(project_indices):
                     cUmsatzNetto,
                     ROW_NUMBER() OVER (
                         PARTITION BY ProjektIndex, sBuchNummer
-                        ORDER BY
-                            VersionZeit DESC,
-                            gID DESC
+                        ORDER BY VersionZeit DESC, gID DESC
                     ) AS rn
                 FROM InvoiceRows
             )
@@ -2385,19 +2415,75 @@ def project_metrics(project_indices):
     except Exception as e:
         print("SQL Rechnungs-Metrik FEHLER:", repr(e))
 
+    for metric in result.values():
+        hours = metric.get("hoursProductive")
+        revenue = metric.get("netInvoiced")
+        if hours is not None and hours > 0 and revenue is not None:
+            metric["revenuePerHour"] = round(float(revenue) / float(hours), 2)
+
     return result
 
-def search_projects(terms):
+
+def _project_row_to_dict(row):
+    street = row.sStrasse or ""
+    postal = row.sPLZ or ""
+    city = row.sOrt or ""
+    address = " ".join(x for x in [street, postal, city] if x).strip()
+    customer = " ".join(
+        x for x in [row.sVorname or "", row.sName or ""] if x
+    ).strip()
+
+    return {
+        "projectIndex": int(row.ProjektIndex) if row.ProjektIndex is not None else None,
+        "projectNumber": row.sProjektNummer or "",
+        "title": row.sProjekt or row.sBaustelle or row.sBauvorhaben or "",
+        "site": row.sBaustelle or "",
+        "projectDescription": row.sBauvorhaben or "",
+        "customerIndex": int(row.KundenIndex) if row.KundenIndex is not None else None,
+        "customerNumber": row.lKundenNr,
+        "company": row.sFirma or "",
+        "firstName": row.sVorname or "",
+        "lastName": row.sName or "",
+        "customer": customer,
+        "street": street,
+        "postalCode": postal,
+        "city": city,
+        "address": address,
+        "firstDate": clean_date(row.ErstesDatum),
+        "lastDate": clean_date(row.LetztesDatum),
+    }
+
+
+def _attach_project_metrics(projects):
+    metrics = project_metrics([item.get("projectIndex") for item in projects])
+    for item in projects:
+        project_index = item.get("projectIndex")
+        metric = metrics.get(int(project_index)) if project_index is not None else None
+        metric = metric or {}
+        item["hoursTotal"] = metric.get("hoursTotal")
+        item["hoursProductive"] = metric.get("hoursProductive")
+        item["hoursRecorded"] = metric.get("hoursRecorded")
+        item["breakHours"] = metric.get("breakHours")
+        item["hoursSource"] = metric.get("hoursSource")
+        item["netInvoiced"] = metric.get("netInvoiced")
+        item["revenuePerHour"] = metric.get("revenuePerHour")
+    return projects
+
+
+def search_projects(terms, include_metrics=True, limit=100):
     if not terms:
         return []
 
+    limit = max(1, min(int(limit or 100), 500))
     con = sql_connection()
     cur = con.cursor()
 
     conditions = []
     params = []
 
-    # Alle Suchbegriffe müssen irgendwo im Projekt/Kunden-Datensatz vorkommen.
+    # Alle Suchbegriffe müssen irgendwo im Projekt, Kundenstamm oder in einer
+    # WW-Belegnummer vorkommen. Dadurch funktioniert auch die Eingabe einer
+    # Angebots-, Auftrags- oder Rechnungsnummer.
     for term in terms:
         like = f"%{term}%"
         conditions.append(
@@ -2413,13 +2499,17 @@ def search_projects(terms):
                 OR ISNULL(k.sStrasse, '') LIKE ?
                 OR ISNULL(k.sPLZ, '') LIKE ?
                 OR ISNULL(k.sOrt, '') LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM dbo.[Bücher] AS sb
+                    WHERE sb.ProjektIndex = p.ProjektIndex
+                      AND ISNULL(sb.sBuchNummer, '') LIKE ?
+                )
             )
             """
         )
-        params.extend([like] * 10)
+        params.extend([like] * 11)
 
-    # Numerische Suchbegriffe werden nur zur Sortierung genutzt:
-    # exakte Projektnummer zuerst, flexible Suche bleibt vollständig erhalten.
     numeric_terms = [t for t in terms if re.fullmatch(r"\d+", t)]
     order_params = []
     order_parts = []
@@ -2439,7 +2529,7 @@ def search_projects(terms):
     order_by = ",\n            ".join(order_parts)
 
     sql = f"""
-        SELECT TOP 100
+        SELECT TOP {limit}
             p.ProjektIndex,
             p.sProjektNummer,
             p.sProjekt,
@@ -2458,7 +2548,7 @@ def search_projects(terms):
         FROM dbo.Projekte AS p
         LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
             ON p.KundenIndex = k.StammIndex
-        LEFT JOIN dbo.Bücher AS b
+        LEFT JOIN dbo.[Bücher] AS b
             ON b.ProjektIndex = p.ProjektIndex
         WHERE {" AND ".join(conditions)}
         GROUP BY
@@ -2475,57 +2565,1061 @@ def search_projects(terms):
             k.sStrasse,
             k.sPLZ,
             k.sOrt
-        ORDER BY
-            {order_by}
+        ORDER BY {order_by}
     """
 
     cur.execute(sql, params + order_params)
     rows = cur.fetchall()
     con.close()
 
+    result = [_project_row_to_dict(row) for row in rows]
+    if include_metrics:
+        _attach_project_metrics(result)
+    return result
+
+
+def projects_for_customer(customer_index):
+    customer_index = int(customer_index)
+    con = sql_connection()
+    cur = con.cursor()
+    rows = cur.execute("""
+        SELECT TOP 500
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE p.KundenIndex = ?
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+        ORDER BY
+            MAX(b.dzDocDatum) DESC,
+            p.ProjektIndex DESC
+    """, customer_index).fetchall()
+    con.close()
+
+    result = [_project_row_to_dict(row) for row in rows]
+    return _attach_project_metrics(result)
+
+
+def _customer_revenue_by_year(project_indices):
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return []
+
+    placeholders = ",".join("?" for _ in ids)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute(f"""
+        WITH InvoiceRows AS (
+            SELECT
+                b.ProjektIndex,
+                LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
+                r.cUmsatzNetto,
+                COALESCE(
+                    r.dzRechnungsdatum,
+                    b.dzDocDatum,
+                    b.Geändert,
+                    b.dzInhaltGeaendert,
+                    b.Aufgenommen
+                ) AS Rechnungsdatum,
+                COALESCE(
+                    b.Geändert,
+                    b.dzInhaltGeaendert,
+                    b.dzDocDatum,
+                    b.Aufgenommen
+                ) AS VersionZeit,
+                b.gID
+            FROM dbo.[Bücher] AS b
+            INNER JOIN dbo.Rechnung AS r
+                ON r.gBuchID = b.gID
+            WHERE b.ProjektIndex IN ({placeholders})
+              AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+              AND ISNULL(b.Storno, 0) = 0
+              AND r.cUmsatzNetto IS NOT NULL
+        ),
+        LatestPerInvoiceNumber AS (
+            SELECT
+                ProjektIndex,
+                sBuchNummer,
+                cUmsatzNetto,
+                Rechnungsdatum,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ProjektIndex, sBuchNummer
+                    ORDER BY VersionZeit DESC, gID DESC
+                ) AS rn
+            FROM InvoiceRows
+        )
+        SELECT
+            YEAR(Rechnungsdatum) AS UmsatzJahr,
+            SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoUmsatz,
+            COUNT(*) AS BelegAnzahl
+        FROM LatestPerInvoiceNumber
+        WHERE rn = 1
+        GROUP BY YEAR(Rechnungsdatum)
+        ORDER BY UmsatzJahr DESC
+    """, *ids).fetchall()
+    con.close()
+
     result = []
     for row in rows:
-        street = row.sStrasse or ""
-        postal = row.sPLZ or ""
-        city = row.sOrt or ""
-        address = " ".join(x for x in [street, postal, city] if x).strip()
-
-        customer = " ".join(
-            x for x in [row.sVorname or "", row.sName or ""] if x
-        ).strip()
-
         result.append({
-            "projectIndex": row.ProjektIndex,
-            "projectNumber": row.sProjektNummer or "",
-            "title": row.sProjekt or row.sBaustelle or row.sBauvorhaben or "",
-            "site": row.sBaustelle or "",
-            "projectDescription": row.sBauvorhaben or "",
-            "customerIndex": row.KundenIndex,
-            "customerNumber": row.lKundenNr,
-            "company": row.sFirma or "",
-            "firstName": row.sVorname or "",
-            "lastName": row.sName or "",
-            "customer": customer,
-            "street": street,
-            "postalCode": postal,
-            "city": city,
-            "address": address,
-            "firstDate": clean_date(row.ErstesDatum),
-            "lastDate": clean_date(row.LetztesDatum),
+            "year": int(row.UmsatzJahr) if row.UmsatzJahr is not None else None,
+            "netRevenue": float(row.NettoUmsatz or 0),
+            "invoiceCount": int(row.BelegAnzahl or 0),
         })
+    return result
 
 
-    metrics = project_metrics([item.get("projectIndex") for item in result])
-    for item in result:
-        project_index = item.get("projectIndex")
-        metric = metrics.get(int(project_index)) if project_index is not None else None
-        item["hoursTotal"] = metric.get("hoursTotal") if metric else None
-        item["netInvoiced"] = metric.get("netInvoiced") if metric else None
+def project_address_candidates(query, limit=30):
+    terms = [x.strip() for x in str(query or "").split() if x.strip()]
+    if not terms:
+        return []
 
+    projects = search_projects(
+        terms,
+        include_metrics=False,
+        limit=max(100, min(int(limit or 30) * 8, 400)),
+    )
+    grouped = {}
+    for project in projects:
+        customer_index = project.get("customerIndex")
+        if customer_index is not None:
+            key = f"customer:{customer_index}"
+        else:
+            key = "address:" + hashlib.sha1(
+                "|".join([
+                    str(project.get("company") or ""),
+                    str(project.get("customer") or ""),
+                    str(project.get("address") or ""),
+                ]).encode("utf-8", errors="ignore")
+            ).hexdigest()[:16]
+
+        if key not in grouped:
+            display_name = project.get("company") or project.get("customer") or "Adresse"
+            grouped[key] = {
+                "key": key,
+                "customerIndex": customer_index,
+                "customerNumber": project.get("customerNumber"),
+                "name": display_name,
+                "company": project.get("company") or "",
+                "person": project.get("customer") or "",
+                "street": project.get("street") or "",
+                "postalCode": project.get("postalCode") or "",
+                "city": project.get("city") or "",
+                "address": project.get("address") or "",
+                "matchingProjectCount": 0,
+                "sampleProjects": [],
+                "lastDate": project.get("lastDate"),
+            }
+
+        candidate = grouped[key]
+        candidate["matchingProjectCount"] += 1
+        number = str(project.get("projectNumber") or "").strip()
+        title = str(project.get("title") or "").strip()
+        label = " · ".join(x for x in [number, title] if x)
+        if label and label not in candidate["sampleProjects"] and len(candidate["sampleProjects"]) < 4:
+            candidate["sampleProjects"].append(label)
+        if str(project.get("lastDate") or "") > str(candidate.get("lastDate") or ""):
+            candidate["lastDate"] = project.get("lastDate")
+
+    qnorm = _norm_supplier(query)
+    qcompact = re.sub(r"\s+", "", qnorm)
+
+    def score(candidate):
+        name = _norm_supplier(candidate.get("name"))
+        address = _norm_supplier(candidate.get("address"))
+        customer_no = _norm_supplier(candidate.get("customerNumber"))
+        hay = " ".join([name, address, customer_no])
+        value = 0
+        if qnorm and name == qnorm:
+            value += 1000
+        elif qnorm and name.startswith(qnorm):
+            value += 700
+        if qnorm and qnorm in address:
+            value += 350
+        if qcompact and qcompact == re.sub(r"\s+", "", customer_no):
+            value += 900
+        value += min(int(candidate.get("matchingProjectCount") or 0), 50)
+        return (-value, -int(candidate.get("matchingProjectCount") or 0), hay)
+
+    rows = sorted(grouped.values(), key=score)
+    return rows[:max(1, min(int(limit or 30), 100))]
+
+
+def customer_project_overview(customer_index):
+    projects = projects_for_customer(customer_index)
+    ids = [p.get("projectIndex") for p in projects]
+    try:
+        yearly = _customer_revenue_by_year(ids)
+    except Exception as e:
+        print("SQL Jahresumsatz FEHLER:", repr(e))
+        yearly = []
+
+    revenue_values = [
+        float(p["netInvoiced"])
+        for p in projects
+        if p.get("netInvoiced") is not None
+    ]
+    hour_values = [
+        float(p["hoursProductive"])
+        for p in projects
+        if p.get("hoursProductive") is not None
+    ]
+    total_revenue = round(sum(revenue_values), 2) if revenue_values else None
+    total_hours = round(sum(hour_values), 2) if hour_values else None
+
+    comparable_projects = [
+        project for project in projects
+        if project.get("netInvoiced") is not None
+        and project.get("hoursProductive") is not None
+        and float(project.get("hoursProductive") or 0) > 0
+    ]
+    comparable_revenue = sum(float(project["netInvoiced"]) for project in comparable_projects)
+    comparable_hours = sum(float(project["hoursProductive"]) for project in comparable_projects)
+    revenue_per_hour = (
+        round(comparable_revenue / comparable_hours, 2)
+        if comparable_hours > 0
+        else None
+    )
+
+    first = projects[0] if projects else {}
+    overview = {
+        "customerIndex": int(customer_index),
+        "customerNumber": first.get("customerNumber"),
+        "name": first.get("company") or first.get("customer") or "Adresse",
+        "company": first.get("company") or "",
+        "person": first.get("customer") or "",
+        "address": first.get("address") or "",
+        "projectCount": len(projects),
+        "projectsWithRevenue": len(revenue_values),
+        "projectsWithHours": len(hour_values),
+        "projectsComparable": len(comparable_projects),
+        "totalRevenue": total_revenue,
+        "totalProductiveHours": total_hours,
+        "revenuePerHour": revenue_per_hour,
+        "revenueByYear": yearly,
+        "revenueSource": "WinWorker Rechnungen netto · je Rechnungsnummer nur jüngste Version",
+        "hoursSource": "WinWorker produktive Stunden · 15 Minuten pro MA/Tag anteilig abgezogen",
+        "ratioSource": "Umsatz/Std. nur aus Projekten mit vollständig vorhandenem Umsatz und Stunden",
+    }
+    return overview, projects
+
+
+def _normalize_project_identifier(value):
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def canonical_project_document_type(*values, is_invoice=False, ww_book_art=None):
+    text = _norm_supplier(" ".join(str(v or "") for v in values))
+
+    if re.search(r"\b(auftragssteuerung|auftrag steuerung|projektsteuerung)\b", text):
+        return "Auftragssteuerung"
+    if re.search(r"\b(nachkalkulation|vorkalkulation|kalkulation|kalkulationsblatt)\b", text):
+        return "Kalkulation"
+    if re.search(r"\b(schlussrechnung|schluss rechnung|endabrechnung|end abrechnung)\b", text):
+        return "Schlussrechnung"
+    if re.search(r"\b(teilrechnung|teil rechnung|abschlagsrechnung|akontorechnung|acontorechnung)\b", text):
+        return "Teilrechnung"
+    if re.search(r"\b(gutschrift|storno|stornorechnung)\b", text):
+        return "Gutschrift / Storno"
+    if re.search(r"\b(auftragsbestätigung|auftragsbestatigung|auftragsbestaetigung|auftrag bestätigung|auftrag bestatigung|auftrag bestaetigung)\b", text):
+        return "Auftrag / Auftragsbestätigung"
+    if re.search(r"\b(angebot|offerte|kostenvoranschlag)\b", text):
+        return "Angebot"
+    if re.search(r"\b(auftrag|bestellung)\b", text):
+        return "Auftrag / Auftragsbestätigung"
+    if re.search(r"\b(aufmass|aufmaß|massenermittlung)\b", text):
+        return "Aufmaß"
+    if re.search(r"\b(regiebericht|regie bericht|regiezettel)\b", text):
+        return "Regiebericht"
+    if re.search(r"\b(lieferschein)\b", text):
+        return "Lieferschein"
+    if re.search(r"\b(rechnung|faktura|invoice)\b", text) or is_invoice:
+        return "Rechnung"
+    if ww_book_art not in (None, ""):
+        return "Weitere WW-Belege"
+    return "Sonstige Dokumente"
+
+
+def _project_pdf_rows(project_number, book_numbers=None, limit=600):
+    project_number = str(project_number or "").strip()
+    needles = []
+    for value in [project_number] + list(book_numbers or []):
+        value = str(value or "").strip()
+        if len(value) >= 3 and value not in needles:
+            needles.append(value)
+    if not needles or not DB.exists():
+        return []
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        select = ["filename", "path", "dokumenttyp", "modified", "text"]
+        for optional in ("source", "doc_year", "logical_id"):
+            if optional in cols:
+                select.append(optional)
+
+        or_parts = []
+        params = []
+        for needle in needles[:80]:
+            like = f"%{needle}%"
+            or_parts.append("(text LIKE ? OR filename LIKE ? OR path LIKE ?)")
+            params.extend([like, like, like])
+
+        sql = "SELECT " + ",".join(select) + " FROM pdf_index WHERE (" + " OR ".join(or_parts) + ")"
+        if "source" in cols:
+            sql += " AND (source IS NULL OR source <> 'EINGANG')"
+        else:
+            sql += r" AND path NOT LIKE '%\Dokman\%'"
+        sql += " ORDER BY modified DESC LIMIT ?"
+        params.append(max(1, min(int(limit or 600), 1000)))
+        rows = con.execute(sql, params).fetchall()
+    finally:
+        con.close()
+
+    result = []
+    seen = set()
+    for row in rows:
+        item = dict(row)
+        path = str(item.get("path") or "")
+        key = path.lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        dt = parse_print_time(item.get("filename"), item.get("modified"))
+        item["printDate"] = dt.date().isoformat() if dt else None
+        item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+        item["year"] = dt.year if dt else item.get("doc_year")
+        item["_raw_text"] = item.pop("text", "") or ""
+        item["pdfFound"] = True
+        item["sourceOfTruth"] = "PDF-Archiv"
+        result.append(item)
     return result
 
 
 
+def _project_sql_ident(value):
+    """SQL-Identifier ausschließlich aus gelesenen SQL-Metadaten quoten."""
+    return "[" + str(value or "").replace("]", "]]" ) + "]"
+
+
+def _project_type_priority(label):
+    order = {
+        "Angebot": 10,
+        "Kalkulation": 20,
+        "Auftrag / Auftragsbestätigung": 30,
+        "Auftragssteuerung": 40,
+        "Aufmaß": 50,
+        "Teilrechnung": 60,
+        "Schlussrechnung": 70,
+        "Rechnung": 80,
+        "Gutschrift / Storno": 90,
+        "Regiebericht": 100,
+        "Lieferschein": 110,
+        "Weitere WW-Belege": 900,
+        "Sonstige Dokumente": 999,
+    }
+    return order.get(label, 950)
+
+
+def _ww_project_book_types(con, book_ids):
+    """
+    Erkennt Belegarten anhand der in dieser WW-Installation tatsächlich
+    vorhandenen Tabellen mit gBuchID. Dadurch bleiben wir unabhängig von einer
+    geratenen numerischen Buchart-Zuordnung.
+    """
+    original = [value for value in book_ids if value is not None]
+    result = {str(value).lower(): set() for value in original}
+    if not original:
+        return result
+
+    cur = con.cursor()
+    try:
+        candidates = cur.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE LOWER(COLUMN_NAME) = 'gbuchid'
+              AND (
+                    LOWER(TABLE_NAME) LIKE '%angebot%'
+                 OR LOWER(TABLE_NAME) LIKE '%auftrag%'
+                 OR LOWER(TABLE_NAME) LIKE '%steuerung%'
+                 OR LOWER(TABLE_NAME) LIKE '%kalk%'
+                 OR LOWER(TABLE_NAME) LIKE '%rechnung%'
+                 OR LOWER(TABLE_NAME) LIKE '%gutschrift%'
+                 OR LOWER(TABLE_NAME) LIKE '%lieferschein%'
+                 OR LOWER(TABLE_NAME) LIKE '%aufmass%'
+                 OR LOWER(TABLE_NAME) LIKE '%aufmaß%'
+                 OR LOWER(TABLE_NAME) LIKE '%regie%'
+              )
+            GROUP BY TABLE_SCHEMA, TABLE_NAME
+        """).fetchall()
+    except Exception as e:
+        print("WW Belegart-Metadaten FEHLER:", repr(e))
+        return result
+
+    for table in candidates:
+        label = canonical_project_document_type(table.TABLE_NAME)
+        if label in {"Sonstige Dokumente", "Weitere WW-Belege"}:
+            continue
+        for pos in range(0, len(original), 350):
+            chunk = original[pos:pos + 350]
+            placeholders = ",".join("?" for _ in chunk)
+            try:
+                rows = cur.execute(
+                    f"SELECT DISTINCT gBuchID FROM "
+                    f"{_project_sql_ident(table.TABLE_SCHEMA)}.{_project_sql_ident(table.TABLE_NAME)} "
+                    f"WHERE gBuchID IN ({placeholders})",
+                    *chunk,
+                ).fetchall()
+            except Exception:
+                continue
+            for row in rows:
+                result.setdefault(str(row.gBuchID).lower(), set()).add(label)
+    return result
+
+
+def _ww_project_document_links(con, project_index):
+    """
+    Liefert je Bücher.gID die exakten DokumentenManagement.sDocID-Werte.
+
+    Reihenfolge:
+    1. direkte deklarierte Fremdschlüssel,
+    2. eindeutig benannte ID-Spalten direkt in Bücher/DokumentenManagement,
+    3. WW-Zwischentabellen mit Buch- und Dokument-ID.
+
+    Es werden ausschließlich gelesene SQL-Metadaten verwendet. Ist in einer
+    älteren WW-Struktur keine eindeutige Beziehung auffindbar, bleibt die
+    Belegnummern-/Archivsuche als sicherer Rückfall aktiv.
+    """
+    cur = con.cursor()
+    direct_relations = []
+
+    try:
+        rows = cur.execute("""
+            SELECT
+                ps.name AS parent_schema,
+                pt.name AS parent_table,
+                pc.name AS parent_column,
+                rs.name AS ref_schema,
+                rt.name AS ref_table,
+                rc.name AS ref_column
+            FROM sys.foreign_key_columns AS fkc
+            JOIN sys.tables AS pt ON pt.object_id = fkc.parent_object_id
+            JOIN sys.schemas AS ps ON ps.schema_id = pt.schema_id
+            JOIN sys.columns AS pc
+              ON pc.object_id = fkc.parent_object_id
+             AND pc.column_id = fkc.parent_column_id
+            JOIN sys.tables AS rt ON rt.object_id = fkc.referenced_object_id
+            JOIN sys.schemas AS rs ON rs.schema_id = rt.schema_id
+            JOIN sys.columns AS rc
+              ON rc.object_id = fkc.referenced_object_id
+             AND rc.column_id = fkc.referenced_column_id
+            WHERE (pt.name = N'Bücher' AND rt.name = N'DokumentenManagement')
+               OR (pt.name = N'DokumentenManagement' AND rt.name = N'Bücher')
+        """).fetchall()
+        for row in rows:
+            if row.parent_table == "Bücher":
+                direct_relations.append(
+                    (row.parent_schema, row.parent_column, row.ref_schema, row.ref_column)
+                )
+            else:
+                direct_relations.append(
+                    (row.ref_schema, row.ref_column, row.parent_schema, row.parent_column)
+                )
+    except Exception as exc:
+        print("WW Dokument-FK Diagnose FEHLER:", repr(exc))
+
+    try:
+        book_columns = {
+            str(row.COLUMN_NAME).lower(): str(row.COLUMN_NAME)
+            for row in cur.execute("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=N'Bücher'
+            """).fetchall()
+        }
+        dm_columns = {
+            str(row.COLUMN_NAME).lower(): str(row.COLUMN_NAME)
+            for row in cur.execute("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=N'DokumentenManagement'
+            """).fetchall()
+        }
+        for candidate in ("gdmid", "gdokumentid", "dokumentid", "dmid"):
+            if candidate in book_columns and "gid" in dm_columns:
+                direct_relations.append(
+                    ("dbo", book_columns[candidate], "dbo", dm_columns["gid"])
+                )
+        for candidate in ("gbuchid", "buchid", "gbelegid", "belegid"):
+            if candidate in dm_columns and "gid" in book_columns:
+                direct_relations.append(
+                    ("dbo", book_columns["gid"], "dbo", dm_columns[candidate])
+                )
+    except Exception as exc:
+        print("WW Dokument-ID Diagnose FEHLER:", repr(exc))
+
+    unique_relations = []
+    seen_relations = set()
+    for relation in direct_relations:
+        key = tuple(str(value).lower() for value in relation)
+        if key in seen_relations:
+            continue
+        seen_relations.add(key)
+        unique_relations.append(relation)
+
+    links = {}
+
+    def add_link(book_id, doc_id):
+        book_key = str(book_id or "").strip().lower()
+        doc_value = str(doc_id or "").strip()
+        if not book_key or not doc_value:
+            return
+        bucket = links.setdefault(book_key, [])
+        if doc_value not in bucket:
+            bucket.append(doc_value)
+
+    for book_schema, book_column, dm_schema, dm_column in unique_relations:
+        try:
+            rows = cur.execute(f"""
+                SELECT
+                    CONVERT(varchar(80), b.gID) AS BookGID,
+                    LTRIM(RTRIM(dm.sDocID)) AS DocID
+                FROM {_project_sql_ident(book_schema)}.[Bücher] AS b
+                INNER JOIN {_project_sql_ident(dm_schema)}.[DokumentenManagement] AS dm
+                    ON b.{_project_sql_ident(book_column)} = dm.{_project_sql_ident(dm_column)}
+                WHERE b.ProjektIndex = ?
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(dm.sDocID,''))), '') IS NOT NULL
+            """, int(project_index)).fetchall()
+        except Exception:
+            continue
+        for row in rows:
+            add_link(row.BookGID, row.DocID)
+
+    # Manche WW-Versionen verwenden eine Zwischentabelle statt einer direkten
+    # Beziehung. Nur Tabellen mit klar benannter Buch- UND Dokument-ID werden
+    # berücksichtigt, damit keine zufälligen GUID-Gleichheiten entstehen.
+    book_id_names = {"gbuchid", "buchid", "gbelegid", "belegid"}
+    document_id_names = {"gdmid", "gdokumentid", "dokumentid", "dmid"}
+    try:
+        metadata_rows = cur.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE LOWER(COLUMN_NAME) IN (
+                'gbuchid','buchid','gbelegid','belegid',
+                'gdmid','gdokumentid','dokumentid','dmid'
+            )
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        """).fetchall()
+        tables = {}
+        for row in metadata_rows:
+            table_key = (str(row.TABLE_SCHEMA), str(row.TABLE_NAME))
+            tables.setdefault(table_key, {})[str(row.COLUMN_NAME).lower()] = str(row.COLUMN_NAME)
+
+        for (schema, table_name), columns in tables.items():
+            if table_name in {"Bücher", "DokumentenManagement"}:
+                continue
+            book_column = next((columns[name] for name in book_id_names if name in columns), None)
+            dm_column = next((columns[name] for name in document_id_names if name in columns), None)
+            if not book_column or not dm_column:
+                continue
+            try:
+                rows = cur.execute(f"""
+                    SELECT DISTINCT
+                        CONVERT(varchar(80), b.gID) AS BookGID,
+                        LTRIM(RTRIM(dm.sDocID)) AS DocID
+                    FROM dbo.[Bücher] AS b
+                    INNER JOIN {_project_sql_ident(schema)}.{_project_sql_ident(table_name)} AS bridge
+                        ON bridge.{_project_sql_ident(book_column)} = b.gID
+                    INNER JOIN dbo.[DokumentenManagement] AS dm
+                        ON dm.gID = bridge.{_project_sql_ident(dm_column)}
+                    WHERE b.ProjektIndex = ?
+                      AND NULLIF(LTRIM(RTRIM(ISNULL(dm.sDocID,''))), '') IS NOT NULL
+                """, int(project_index)).fetchall()
+            except Exception:
+                continue
+            for row in rows:
+                add_link(row.BookGID, row.DocID)
+    except Exception as exc:
+        print("WW Dokument-Zwischentabellen Diagnose FEHLER:", repr(exc))
+
+    return links
+
+
+def _project_pdf_rows_by_docids(doc_ids):
+    """
+    Exakte PDF-Treffer:
+    DokumentenManagement.sDocID == Dateiname ohne .pdf/_Original.pdf.
+
+    Pro Dokument-ID wird die normale Arbeits-PDF bevorzugt. Ist nur das
+    unveränderte Original indexiert, wird dieses angezeigt. Doppelte
+    Indexpfade werden nicht mehrfach ausgegeben.
+    """
+    def normalize_doc_id(value):
+        raw = Path(str(value or "").strip()).name
+        raw = re.sub(r"_Original\.pdf$", "", raw, flags=re.I)
+        raw = re.sub(r"\.pdf$", "", raw, flags=re.I)
+        return raw.strip()
+
+    normalized = {}
+    for value in doc_ids:
+        doc_id = normalize_doc_id(value)
+        if doc_id:
+            normalized.setdefault(doc_id.lower(), doc_id)
+    if not normalized or not DB.exists():
+        return {}
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    buckets = {}
+    try:
+        cols = {row[1] for row in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        select = ["filename", "path", "dokumenttyp", "modified"]
+        for optional in ("source", "doc_year", "logical_id"):
+            if optional in cols:
+                select.append(optional)
+
+        ids = sorted(normalized.values(), key=str.lower)
+        for pos in range(0, len(ids), 300):
+            chunk = ids[pos:pos + 300]
+            conditions = []
+            params = []
+            filename_map = {}
+            for doc_id in chunk:
+                work = f"{doc_id}.pdf"
+                original = f"{doc_id}_Original.pdf"
+                conditions.append("(LOWER(filename)=LOWER(?) OR LOWER(filename)=LOWER(?))")
+                params.extend([work, original])
+                filename_map[work.lower()] = doc_id.lower()
+                filename_map[original.lower()] = doc_id.lower()
+
+            sql = (
+                "SELECT " + ",".join(select) +
+                " FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
+            )
+            if "source" in cols:
+                sql += " AND (source IS NULL OR source <> 'EINGANG')"
+            else:
+                sql += r" AND path NOT LIKE '%\Dokman\%'"
+            sql += " ORDER BY modified DESC"
+
+            rows = con.execute(sql, params).fetchall()
+            for row in rows:
+                item = dict(row)
+                filename = str(item.get("filename") or "")
+                doc_key = filename_map.get(filename.lower())
+                if not doc_key:
+                    continue
+                path_value = str(item.get("path") or "")
+                if not path_value:
+                    continue
+                dt = parse_print_time(filename, item.get("modified"))
+                item["printDate"] = dt.date().isoformat() if dt else None
+                item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+                item["year"] = dt.year if dt else item.get("doc_year")
+                item["pdfFound"] = True
+                item["sourceOfTruth"] = "WinWorker-Dokument-ID + PDF-Archiv"
+                bucket = buckets.setdefault(doc_key, {"work": [], "original": []})
+                target = "original" if re.search(r"_Original\.pdf$", filename, re.I) else "work"
+                if not any(str(x.get("path") or "").lower() == path_value.lower() for x in bucket[target]):
+                    bucket[target].append(item)
+    finally:
+        con.close()
+
+    result = {}
+    for doc_key, bucket in buckets.items():
+        work_rows = bucket["work"]
+        original_rows = bucket["original"]
+        chosen = dict(work_rows[0] if work_rows else original_rows[0])
+        if original_rows:
+            chosen["originalPath"] = original_rows[0].get("path") or ""
+        else:
+            chosen["originalPath"] = ""
+        chosen["wwDocId"] = normalized.get(doc_key, doc_key)
+        result[doc_key] = [chosen]
+    return result
+
+
+def _merged_project_document_type(book, pdf=None):
+    pdf = pdf or {}
+    book_type = str(book.get("documentType") or "Weitere WW-Belege")
+    pdf_type = canonical_project_document_type(
+        pdf.get("dokumenttyp"),
+        pdf.get("filename"),
+        pdf.get("path"),
+        book.get("bookNumber"),
+        is_invoice=book.get("isInvoice", False),
+        ww_book_art=book.get("wwBookArt"),
+    )
+    generic = {"Sonstige Dokumente", "Weitere WW-Belege"}
+    if pdf_type in generic:
+        return book_type
+    if book_type in {"Teilrechnung", "Schlussrechnung", "Gutschrift / Storno"} and pdf_type == "Rechnung":
+        return book_type
+    return pdf_type
+
+
+def _ww_project_books(project_index):
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute("""
+        SELECT
+            b.gID,
+            b.sBuchNummer,
+            b.Buchart,
+            b.dzDocDatum,
+            b.Geändert,
+            b.dzInhaltGeaendert,
+            b.Aufgenommen,
+            b.Storno,
+            r.cUmsatzNetto,
+            r.dzRechnungsdatum
+        FROM dbo.[Bücher] AS b
+        LEFT JOIN dbo.Rechnung AS r
+            ON r.gBuchID = b.gID
+        WHERE b.ProjektIndex = ?
+          AND ISNULL(b.Storno, 0) = 0
+        ORDER BY
+            COALESCE(b.Geändert, b.dzInhaltGeaendert, b.dzDocDatum, b.Aufgenommen) DESC,
+            b.gID DESC
+    """, int(project_index)).fetchall()
+
+    book_ids = [row.gID for row in rows if row.gID is not None]
+    try:
+        type_map = _ww_project_book_types(con, book_ids)
+    except Exception as exc:
+        print("WW Projekt-Belegarten FEHLER:", repr(exc))
+        type_map = {}
+    try:
+        document_links = _ww_project_document_links(con, project_index)
+    except Exception as exc:
+        print("WW Projekt-Dokumentlinks FEHLER:", repr(exc))
+        document_links = {}
+    con.close()
+
+    def select_type(labels, fallback):
+        labels = {str(label) for label in labels if str(label)}
+        # Spezifische Typen schlagen allgemeine Oberbegriffe.
+        specificity = {
+            "Schlussrechnung": 10,
+            "Teilrechnung": 20,
+            "Gutschrift / Storno": 30,
+            "Auftragssteuerung": 40,
+            "Kalkulation": 50,
+            "Aufmaß": 60,
+            "Regiebericht": 70,
+            "Lieferschein": 80,
+            "Angebot": 90,
+            "Auftrag / Auftragsbestätigung": 100,
+            "Rechnung": 110,
+            "Weitere WW-Belege": 900,
+            "Sonstige Dokumente": 999,
+        }
+        if labels:
+            return min(labels, key=lambda label: specificity.get(label, 950))
+        return fallback
+
+    # Dieselbe WW-Belegnummer kann als Druck-/Buchversion mehrfach vorkommen.
+    # Die jüngste Version liefert Datum/Betrag; exakte Dokument-IDs älterer
+    # Versionen bleiben dennoch erhalten, damit kein auffindbares PDF verloren
+    # geht. Buchart ist Teil des Schlüssels, weil unterschiedliche Belegarten
+    # in WW dieselbe sichtbare Nummer tragen können.
+    latest = {}
+    for row in rows:
+        number = str(row.sBuchNummer or "").strip()
+        gid = str(row.gID or "").strip()
+        gid_key = gid.lower()
+        art_key = _normalize_project_identifier(row.Buchart)
+        number_key = _normalize_project_identifier(number)
+        key = f"{art_key}|{number_key}" if number_key else f"GID:{gid_key}"
+
+        amount = float(row.cUmsatzNetto) if row.cUmsatzNetto is not None else None
+        doc_date = clean_date(
+            row.dzRechnungsdatum or row.dzDocDatum or row.Geändert or row.Aufgenommen
+        )
+        labels = set(type_map.get(gid_key, set()))
+        fallback_type = canonical_project_document_type(
+            number,
+            is_invoice=amount is not None,
+            ww_book_art=row.Buchart,
+        )
+
+        if key not in latest:
+            latest[key] = {
+                "wwBookId": gid,
+                "wwBookIds": [gid] if gid else [],
+                "bookNumber": number,
+                "wwBookArt": row.Buchart,
+                "documentDate": doc_date,
+                "netAmount": amount,
+                "isInvoice": amount is not None,
+                "documentType": select_type(labels, fallback_type),
+                "docIds": [],
+                "_typeCandidates": set(labels),
+            }
+        else:
+            item = latest[key]
+            if gid and gid not in item["wwBookIds"]:
+                item["wwBookIds"].append(gid)
+            item["_typeCandidates"].update(labels)
+            if amount is not None:
+                item["isInvoice"] = True
+                if item.get("netAmount") is None:
+                    item["netAmount"] = amount
+            if not item.get("documentDate") and doc_date:
+                item["documentDate"] = doc_date
+
+        item = latest[key]
+        for doc_id in document_links.get(gid_key, []):
+            if doc_id not in item["docIds"]:
+                item["docIds"].append(doc_id)
+
+    for item in latest.values():
+        fallback_type = canonical_project_document_type(
+            item.get("bookNumber"),
+            is_invoice=item.get("isInvoice", False),
+            ww_book_art=item.get("wwBookArt"),
+        )
+        item["documentType"] = select_type(item.pop("_typeCandidates", set()), fallback_type)
+
+    return list(latest.values())
+
+
+def _project_by_index(project_index):
+    con = sql_connection()
+    cur = con.cursor()
+    row = cur.execute("""
+        SELECT
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE p.ProjektIndex = ?
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+    """, int(project_index)).fetchone()
+    con.close()
+    if not row:
+        return None
+    project = _project_row_to_dict(row)
+    _attach_project_metrics([project])
+    return project
+
+
+def project_document_catalog(project_index):
+    project = _project_by_index(project_index)
+    if not project:
+        raise ValueError("Projekt wurde in WinWorker nicht gefunden.")
+
+    books = _ww_project_books(project_index)
+    all_doc_ids = [doc_id for book in books for doc_id in book.get("docIds", [])]
+    exact_by_doc_id = _project_pdf_rows_by_docids(all_doc_ids)
+
+    book_numbers = [book.get("bookNumber") for book in books if book.get("bookNumber")]
+    fallback_pdfs = _project_pdf_rows(project.get("projectNumber"), book_numbers)
+
+    # Rückfall-Zuordnung über sichtbare Belegnummer. Eine PDF wird dabei
+    # höchstens einem WW-Beleg zugeordnet; Dateiname ist stärker als Pfad,
+    # OCR-Text ist nur die letzte Stufe.
+    fallback_assignments = {}
+    for pdf_index, pdf in enumerate(fallback_pdfs):
+        filename_norm = _normalize_project_identifier(pdf.get("filename"))
+        path_norm = _normalize_project_identifier(pdf.get("path"))
+        text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
+        best = None
+        for book_index, book in enumerate(books):
+            number_norm = _normalize_project_identifier(book.get("bookNumber"))
+            if len(number_norm) < 3:
+                continue
+            score = 0
+            if number_norm in filename_norm:
+                score += 100
+            if number_norm in path_norm:
+                score += 60
+            if number_norm in text_norm:
+                score += 15
+            rank = (score, len(number_norm))
+            if score and (best is None or rank > best[:2]):
+                best = (score, len(number_norm), book_index)
+        if best is not None:
+            fallback_assignments.setdefault(best[2], []).append(pdf_index)
+
+    documents = []
+    used_paths = set()
+    used_fallback_indices = set()
+
+    def append_book_pdf(book, pdf, exact=False):
+        item = dict(pdf)
+        path_key = str(item.get("path") or "").strip().lower()
+        if not path_key or path_key in used_paths:
+            return False
+        used_paths.add(path_key)
+        doc_type = _merged_project_document_type(book, item)
+        item.update({
+            "documentType": doc_type,
+            "dokumenttyp": doc_type,
+            "bookNumber": book.get("bookNumber") or "",
+            "documentDate": book.get("documentDate") or item.get("printDate"),
+            "netAmount": book.get("netAmount"),
+            "wwBookArt": book.get("wwBookArt"),
+            "wwBookId": book.get("wwBookId"),
+            "wwBookIds": book.get("wwBookIds") or [],
+            "wwDocIds": book.get("docIds") or [],
+            "sourceOfTruth": (
+                "WinWorker-Dokument-ID + PDF-Archiv"
+                if exact
+                else "WinWorker-Belegnummer + PDF-Archiv"
+            ),
+            "pdfFound": True,
+        })
+        item.pop("_raw_text", None)
+        documents.append(item)
+        return True
+
+    for book_index, book in enumerate(books):
+        found_for_book = False
+
+        # 1. exakte WW-Dokument-ID
+        for doc_id in book.get("docIds", []):
+            for pdf in exact_by_doc_id.get(str(doc_id).strip().lower(), []):
+                found_for_book = append_book_pdf(book, pdf, exact=True) or found_for_book
+
+        # 2. Rückfall über Belegnummer/Projektindex
+        for pdf_index in fallback_assignments.get(book_index, []):
+            if pdf_index in used_fallback_indices:
+                continue
+            pdf = fallback_pdfs[pdf_index]
+            if append_book_pdf(book, pdf, exact=False):
+                used_fallback_indices.add(pdf_index)
+                found_for_book = True
+
+        # WW-Beleg bleibt sichtbar, auch wenn kein PDF im Index auffindbar ist.
+        if not found_for_book:
+            doc_type = book.get("documentType") or canonical_project_document_type(
+                book.get("bookNumber"),
+                is_invoice=book.get("isInvoice", False),
+                ww_book_art=book.get("wwBookArt"),
+            )
+            documents.append({
+                "filename": book.get("bookNumber") or f"WinWorker-Beleg {book.get('wwBookArt') or ''}".strip(),
+                "path": "",
+                "documentType": doc_type,
+                "dokumenttyp": doc_type,
+                "bookNumber": book.get("bookNumber") or "",
+                "documentDate": book.get("documentDate"),
+                "printDate": book.get("documentDate"),
+                "netAmount": book.get("netAmount"),
+                "wwBookArt": book.get("wwBookArt"),
+                "wwBookId": book.get("wwBookId"),
+                "wwBookIds": book.get("wwBookIds") or [],
+                "wwDocIds": book.get("docIds") or [],
+                "sourceOfTruth": "WinWorker · PDF nicht gefunden",
+                "pdfFound": False,
+            })
+
+    # Projekt-PDFs, die nicht eindeutig an einen WW-Beleg gekoppelt werden
+    # konnten, bleiben unter ihrem erkannten Dokumenttyp auffindbar.
+    for pdf_index, pdf in enumerate(fallback_pdfs):
+        path_key = str(pdf.get("path") or "").strip().lower()
+        if pdf_index in used_fallback_indices or not path_key or path_key in used_paths:
+            continue
+        used_paths.add(path_key)
+        item = dict(pdf)
+        doc_type = canonical_project_document_type(
+            item.get("dokumenttyp"), item.get("filename"), item.get("path")
+        )
+        item.update({
+            "documentType": doc_type,
+            "dokumenttyp": doc_type,
+            "documentDate": item.get("printDate"),
+            "sourceOfTruth": "PDF-Archiv · kein eindeutiger WW-Beleg",
+            "pdfFound": True,
+        })
+        item.pop("_raw_text", None)
+        documents.append(item)
+
+    # Erst fachliche Reihenfolge, innerhalb einer Gruppe neueste Dokumente oben.
+    documents.sort(key=lambda d: str(d.get("filename") or "").lower())
+    documents.sort(key=lambda d: 0 if d.get("pdfFound") else 1)
+    documents.sort(
+        key=lambda d: str(d.get("documentDate") or d.get("printDate") or ""),
+        reverse=True,
+    )
+    documents.sort(key=lambda d: _project_type_priority(d.get("documentType")))
+
+    counts = {}
+    for document in documents:
+        kind = document.get("documentType") or "Sonstige Dokumente"
+        counts[kind] = counts.get(kind, 0) + 1
+
+    return {
+        "project": project,
+        "documents": documents,
+        "documentTypeCounts": counts,
+        "wwBookCount": len(books),
+        "pdfCount": sum(1 for document in documents if document.get("pdfFound")),
+        "missingPdfCount": sum(1 for document in documents if not document.get("pdfFound")),
+    }
+
+
+# ---------------------------------------------------------------------------
 def discover_metric_columns():
     """
     Findet nur Kandidaten für Stunden-/Rechnungsfelder.
@@ -3148,6 +4242,7 @@ button.plus{background:#fff;color:#111}
 .sub{color:var(--muted);margin-top:8px;font-size:14px;line-height:1.45}
 .metrics,.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .pill,.chip{background:#111318;border:1px solid var(--line);border-radius:999px;padding:7px 10px;font-size:12px;color:#dfe3e8;text-decoration:none}
+.pill.metric-missing{color:var(--warn);border-color:#69562c}
 .chip{cursor:pointer}
 .chip.active,.chip:hover{background:#f5f5f5;color:#111}
 .addressbar{margin-top:14px}
@@ -3294,6 +4389,37 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .open-total{color:#ff7777;font-weight:850}
 .open-total-zero{color:var(--good);font-weight:850}
 
+
+/* 0.13.3 · Projektsuche wie Eingangsrechnungen */
+.project-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.project-address-card{cursor:pointer;margin:0}
+.project-address-card:hover{border-color:#8994a5}
+.project-address-card .project-title{font-size:17px}
+.project-address-samples{margin-top:9px;color:var(--muted);font-size:12px;line-height:1.45}
+.customer-overview{margin-bottom:14px}
+.customer-overview-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+.customer-overview-name{font-size:21px;font-weight:900}
+.overview-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.overview-kpi{background:#111318;border:1px solid var(--line);border-radius:14px;padding:11px;min-width:0}
+.overview-kpi small{display:block;color:var(--muted);margin-bottom:5px;line-height:1.3}
+.overview-kpi strong{display:block;font-size:17px;overflow-wrap:anywhere}
+.year-revenue-title{font-size:12px;color:var(--muted);font-weight:800;margin:14px 0 7px}
+.year-revenue-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.year-revenue{background:#111318;border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+.year-revenue strong{display:block;margin-top:3px}
+.overview-note{color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+.project-open-hint{font-size:12px;color:var(--blue);font-weight:750;margin-top:10px}
+.ww-placeholder{display:flex;align-items:center;justify-content:center;text-align:center;color:#20242a;font-weight:900;line-height:1.35}
+.doc-source{margin-top:6px;color:var(--good);font-size:11px;font-weight:750;line-height:1.35}
+.doc-missing{margin-top:9px;color:var(--warn);font-size:12px;font-weight:800}
+@media(max-width:700px){
+  .project-address-grid{grid-template-columns:1fr}
+  .overview-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .year-revenue-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:440px){
+  .overview-kpis,.year-revenue-grid{grid-template-columns:1fr}
+}
 
 /* KRISTINE Eingangsrechnungen · Dunja */
 .capture-dashboard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
@@ -3452,14 +4578,22 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
     <div class="summary" id="summary" hidden></div>
   </div>
 
+  <div class="section" id="projectAddressSection" hidden>
+    <div class="section-head"><h2>Kunde / Adresse auswählen</h2></div>
+    <div class="meta">Die erste Eingabe grenzt nur den richtigen WinWorker-Kunden über seine Adresse ein.</div>
+    <div id="projectAddresses" class="project-address-grid" style="margin-top:10px"></div>
+  </div>
+
   <div class="section" id="projectsSection" hidden>
     <div class="section-head">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button id="backToProjects" class="dark" type="button" hidden>← Zurück</button>
-        <h2 id="projectsTitle">Projekte / Aufträge</h2>
+        <button id="backToProjectAddresses" class="dark" type="button" hidden>← Adresse wechseln</button>
+        <button id="backToProjects" class="dark" type="button" hidden>← Projekte</button>
+        <h2 id="projectsTitle">Projekte auswählen</h2>
       </div>
       <button id="newFromSelection" class="plus" type="button">＋ Neue Baustelle</button>
     </div>
+    <div id="projectCustomerOverview" class="card customer-overview" hidden></div>
     <div id="projects"></div>
   </div>
 
@@ -3643,6 +4777,8 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
 const q=document.getElementById('q'),go=document.getElementById('go'),meta=document.getElementById('meta');
 const loader=document.getElementById('loader'),projects=document.getElementById('projects'),docs=document.getElementById('docs');
 const ps=document.getElementById('projectsSection'),ds=document.getElementById('docsSection');
+const projectAddressSection=document.getElementById('projectAddressSection'),projectAddresses=document.getElementById('projectAddresses');
+const projectCustomerOverview=document.getElementById('projectCustomerOverview'),backToProjectAddresses=document.getElementById('backToProjectAddresses');
 const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
 const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
 const newFromSelection=document.getElementById('newFromSelection');
@@ -3672,7 +4808,7 @@ const captureCostSummary=document.getElementById('captureCostSummary'),captureCo
 const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
 
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
 let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -3690,38 +4826,107 @@ function docSource(d){
   if(/archiv|altarchiv|scanarchiv/.test(s))return 'Archiv';
   return 'Dokumente';
 }
-function docType(d){return String(d.dokumenttyp||'Sonstige / nicht erkannt').trim()||'Sonstige / nicht erkannt'}
+function docType(d){return String(d.documentType||d.dokumenttyp||'Sonstige Dokumente').trim()||'Sonstige Dokumente'}
 
 function groupCounts(list,fn){
   const m=new Map(); list.forEach(x=>{const k=fn(x);m.set(k,(m.get(k)||0)+1)}); return [...m.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'de'));
 }
 
-function renderAddressChoices(pp){
-  const map=new Map();
-  pp.forEach(p=>{
-    const key=addressKey(p),label=addressLabel(p);
-    if(!key||!label)return;
-    if(!map.has(key))map.set(key,{key,label,p,count:0});
-    map.get(key).count++;
+function renderProjectAddressCandidates(){
+  projectAddressSection.hidden=false;
+  projectAddresses.innerHTML=projectAddressCandidates.length
+    ? projectAddressCandidates.map((a,i)=>`<div class="card project-address-card" data-project-address="${i}">
+        <div class="project-title">${esc(a.name||a.person||'Adresse')}</div>
+        ${a.person&&a.person!==a.name?`<div class="sub">${esc(a.person)}</div>`:''}
+        ${a.address?`<div class="sub">${esc(a.address)}</div>`:''}
+        <div class="metrics">
+          <span class="pill">${Number(a.matchingProjectCount||0)} passende Projekt${Number(a.matchingProjectCount||0)===1?'':'e'}</span>
+          ${a.customerNumber!==null&&a.customerNumber!==undefined&&a.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(a.customerNumber)}</span>`:''}
+        </div>
+        ${Array.isArray(a.sampleProjects)&&a.sampleProjects.length?`<div class="project-address-samples">${a.sampleProjects.map(esc).join('<br>')}</div>`:''}
+        <div class="actions"><button type="button" data-choose-project-address="${i}">Diese Adresse auswählen</button></div>
+      </div>`).join('')
+    : '<div class="empty">Keine passende WinWorker-Adresse gefunden.</div>';
+
+  projectAddresses.querySelectorAll('[data-choose-project-address]').forEach(btn=>{
+    btn.onclick=e=>{e.stopPropagation();selectProjectAddress(projectAddressCandidates[Number(btn.dataset.chooseProjectAddress)]||null)};
   });
-  const rows=[...map.values()].sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'de'));
-  addressBar.hidden=rows.length<2;
-  addresses.innerHTML=rows.map(a=>`<button class="chip ${selectedAddress?.key===a.key?'active':''}" type="button" data-address="${esc(a.key)}">${esc(a.label)} <strong>${a.count}</strong></button>`).join('');
-  addresses.querySelectorAll('[data-address]').forEach(btn=>btn.onclick=()=>{
-    const row=rows.find(x=>x.key===btn.dataset.address);if(!row)return;
-    selectedAddress=row;
-    const p=row.p;
-    const refined=[baseQuery,p.street,p.postalCode,p.city].filter(Boolean).join(' ');
-    runSearch(refined,true);
+  projectAddresses.querySelectorAll('[data-project-address]').forEach(card=>{
+    card.onclick=()=>selectProjectAddress(projectAddressCandidates[Number(card.dataset.projectAddress)]||null);
   });
 }
 
+function renderProjectCustomerOverview(o){
+  projectCustomerOverview.hidden=false;
+  const years=Array.isArray(o?.revenueByYear)?o.revenueByYear.filter(x=>x.year):[];
+  projectCustomerOverview.innerHTML=`
+    <div class="customer-overview-head">
+      <div>
+        <div class="customer-overview-name">${esc(o?.name||selectedProjectAddress?.name||'Kunde')}</div>
+        ${o?.person&&o.person!==o.name?`<div class="sub">${esc(o.person)}</div>`:''}
+        ${o?.address?`<div class="sub">${esc(o.address)}</div>`:''}
+      </div>
+      ${o?.customerNumber!==null&&o?.customerNumber!==undefined&&o?.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(o.customerNumber)}</span>`:''}
+    </div>
+    <div class="overview-kpis">
+      <div class="overview-kpi"><small>Umsatz gesamt · netto</small><strong>${esc(money(o?.totalRevenue)||'–')}</strong></div>
+      <div class="overview-kpi"><small>Produktive Stunden gesamt</small><strong>${o?.totalProductiveHours!==null&&o?.totalProductiveHours!==undefined?esc(num(o.totalProductiveHours))+' h':'–'}</strong></div>
+      <div class="overview-kpi"><small>Umsatz je produktiver Stunde</small><strong>${esc(money(o?.revenuePerHour)||'–')}</strong></div>
+      <div class="overview-kpi"><small>Projekte</small><strong>${Number(o?.projectCount||0)}</strong></div>
+    </div>
+    <div class="year-revenue-title">Umsatz netto pro Jahr</div>
+    <div class="year-revenue-grid">${years.length?years.map(y=>`<div class="year-revenue"><span>${esc(y.year)}</span><strong>${esc(money(y.netRevenue)||'–')}</strong><small>${Number(y.invoiceCount||0)} Rechnung${Number(y.invoiceCount||0)===1?'':'en'}</small></div>`).join(''):'<div class="empty">Noch kein Jahresumsatz gefunden.</div>'}</div>
+    <div class="overview-note">Datenabdeckung: ${Number(o?.projectsWithRevenue||0)}/${Number(o?.projectCount||0)} Projekte mit Umsatz · ${Number(o?.projectsWithHours||0)}/${Number(o?.projectCount||0)} mit Stunden · ${Number(o?.projectsComparable||0)}/${Number(o?.projectCount||0)} für Umsatz/Std.<br>${esc(o?.revenueSource||'')}<br>${esc(o?.hoursSource||'')}<br>${esc(o?.ratioSource||'')}</div>`;
+}
+
+async function selectProjectAddress(address){
+  if(!address)return;
+  if(address.customerIndex===null||address.customerIndex===undefined||address.customerIndex===''){
+    meta.innerHTML='<span class="error">Diese Adresse hat keinen eindeutigen WinWorker-Kundenindex.</span>';
+    return;
+  }
+  selectedProjectAddress=address;
+  selectedProject=null;projectOverview=null;projectDetailMode=false;previousView=null;
+  loader.style.display='block';meta.textContent='Lade Projekte, Umsatz und Stunden aus WinWorker …';
+  projectAddressSection.hidden=true;ps.hidden=true;ds.hidden=true;summary.hidden=true;addressBar.hidden=true;
+  try{
+    const r=await fetch('/project/address-projects?customerIndex='+encodeURIComponent(address.customerIndex),{cache:'no-store'});
+    const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+    currentProjects=data.projects||[];currentDocs=[];projectOverview=data.overview||{};currentDocType='';
+    projectsTitle.textContent='Projekte auswählen';
+    backToProjectAddresses.hidden=false;backToProjects.hidden=true;
+    ps.hidden=false;ds.hidden=true;summary.hidden=true;
+    renderProjectCustomerOverview(projectOverview);renderProjects();
+    meta.textContent=`${address.name||'Adresse'} · ${currentProjects.length} Projekte · bitte Projekt auswählen`;
+    ps.scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){
+    projectAddressSection.hidden=false;
+    meta.innerHTML='<span class="error">Projekte konnten nicht geladen werden: '+esc(e.message)+'</span>';
+  }finally{loader.style.display='none'}
+}
+
+function showProjectAddressSelection(){
+  selectedProjectAddress=null;selectedProject=null;projectOverview=null;projectDetailMode=false;previousView=null;
+  currentProjects=[];currentDocs=[];currentDocType='';
+  ps.hidden=true;ds.hidden=true;summary.hidden=true;projectCustomerOverview.hidden=true;
+  backToProjectAddresses.hidden=true;backToProjects.hidden=true;
+  projectsTitle.textContent='Projekte auswählen';
+  renderProjectAddressCandidates();
+  meta.textContent=`${projectAddressCandidates.length} WinWorker-Adresse(n) · bitte die richtige Adresse auswählen`;
+  projectAddressSection.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+backToProjectAddresses.onclick=showProjectAddressSelection;
+
 function renderSummary(pp,dd){
   const sourceCounts=groupCounts(dd,docSource);
+  const pdfCount=dd.filter(d=>Boolean(d.path)).length;
+  const missingCount=dd.length-pdfCount;
   summary.hidden=false;
   summary.innerHTML=
-    `<a class="chip" href="#projectsSection">Projekte <strong>${pp.length}</strong></a>`+
     `<a class="chip" href="#docsSection">Dokumente <strong>${dd.length}</strong></a>`+
+    `<a class="chip" href="#docsSection">PDF <strong>${pdfCount}</strong></a>`+
+    (missingCount?`<a class="chip" href="#docsSection">ohne PDF <strong>${missingCount}</strong></a>`:'')+
     sourceCounts.filter(([s])=>s!=='Dokumente').map(([s,c])=>`<a class="chip" href="#docsSection" data-source="${esc(s)}">${esc(s)} <strong>${c}</strong></a>`).join('');
   summary.querySelectorAll('[data-source]').forEach(a=>a.onclick=e=>{e.preventDefault();renderDocumentTypes(a.dataset.source);ds.scrollIntoView({behavior:'smooth'})});
 }
@@ -3730,119 +4935,110 @@ function renderProject(p,index){
   const title=p.title||p.site||p.projectDescription||p.customer||'Projekt';
   const customer=[p.company,p.customer].filter(Boolean).join(' · ');
   const addr=p.address||addressLabel(p);
-  const h=num(p.hoursTotal),n=money(p.netInvoiced);
-  let metrics='';if(h)metrics+=`<span class="pill">${esc(h)} h IST</span>`;if(n)metrics+=`<span class="pill">${esc(n)} netto</span>`;
+  const hours=p.hoursProductive??p.hoursTotal;
+  const hoursText=num(hours),netText=money(p.netInvoiced),perHourText=money(p.revenuePerHour);
+  let metrics='';
+  if(hours!==null&&hours!==undefined)metrics+=`<span class="pill">${esc(hoursText)} h produktiv</span>`;
+  else metrics+='<span class="pill metric-missing">Stunden nicht gefunden</span>';
+  if(p.netInvoiced!==null&&p.netInvoiced!==undefined)metrics+=`<span class="pill">${esc(netText)} Umsatz netto</span>`;
+  else metrics+='<span class="pill metric-missing">Umsatz nicht gefunden</span>';
+  if(p.revenuePerHour!==null&&p.revenuePerHour!==undefined)metrics+=`<span class="pill">${esc(perHourText)} / Std.</span>`;
+  else metrics+='<span class="pill metric-missing">Umsatz/Std. nicht berechenbar</span>';
   return `<div class="card project-card ${selectedProject===p?'selected':''}" data-project="${index}">
     <div class="project-title">${esc(title)}</div>
     ${p.projectNumber?`<span class="project-no">${esc(p.projectNumber)}</span>`:''}
     ${customer?`<div class="sub">${esc(customer)}</div>`:''}
     ${addr?`<div class="sub">${esc(addr)}</div>`:''}
     ${metrics?`<div class="metrics">${metrics}</div>`:''}
+    ${!projectDetailMode?'<div class="project-open-hint">Projekt anklicken → WW-Dokumente und PDFs</div>':''}
     <div class="actions"><button class="dark create-from-project" type="button" data-project="${index}">＋ Neue Baustelle daraus</button></div>
   </div>`;
 }
+
 function renderProjects(){
   projects.innerHTML=currentProjects.length?currentProjects.map(renderProject).join(''):'<div class="empty">Keine Projekte gefunden.</div>';
   projects.querySelectorAll('.project-card').forEach(card=>card.onclick=e=>{
-    if(e.target.closest('.create-from-project'))return;
+    if(e.target.closest('.create-from-project')||projectDetailMode)return;
     const p=currentProjects[Number(card.dataset.project)]||null;
-    if(p) openProjectDetail(p);
+    if(p)openProjectDetail(p);
   });
-  projects.querySelectorAll('.create-from-project').forEach(btn=>btn.onclick=()=>openNewJob(currentProjects[Number(btn.dataset.project)]||null));
+  projects.querySelectorAll('.create-from-project').forEach(btn=>btn.onclick=e=>{e.stopPropagation();openNewJob(currentProjects[Number(btn.dataset.project)]||null)});
 }
-
 
 async function openProjectDetail(p){
   if(!p)return;
   previousView={
     projects:[...currentProjects],
-    docs:[...currentDocs],
-    selectedAddress:selectedAddress,
+    overview:projectOverview,
+    selectedProjectAddress:selectedProjectAddress,
     meta:meta.textContent,
     baseQuery:baseQuery
   };
-  projectDetailMode=true;
-  selectedProject=p;
+  projectDetailMode=true;selectedProject=p;currentDocs=[];currentDocType='';
   const no=String(p.projectNumber||'').trim();
-  const term=no||[p.title,p.company,p.customer].filter(Boolean).join(' ');
-  loader.style.display='block';
-  addressBar.hidden=true;
-  summary.hidden=true;
-  projectsTitle.textContent=no?`Projekt ${no}`:'Projekt';
-  backToProjects.hidden=false;
+  loader.style.display='block';addressBar.hidden=true;summary.hidden=true;ds.hidden=true;
+  projectsTitle.textContent=no?`Projekt ${no} · Dokumente`:'Projekt · Dokumente';
+  backToProjectAddresses.hidden=true;backToProjects.hidden=false;projectCustomerOverview.hidden=true;
+  currentProjects=[p];renderProjects();
+  meta.textContent='Lade WW-Belege und suche die zugehörigen PDFs …';
   try{
-    const r=await fetch('/search?q='+encodeURIComponent(term),{cache:'no-store'});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();if(!data.ok)throw new Error(data.error||'Fehler');
-
-    // Genau den gewählten Auftrag anzeigen.
-    const exact=(data.projects||[]).filter(x=>
-      no && String(x.projectNumber||'').trim()===no
-    );
-    currentProjects=exact.length?exact:[p];
-
-    // Dokumente aus der Projektnummer-Suche gehören zum gewählten Auftrag.
-    currentDocs=data.documents||[];
-    selectedProject=currentProjects[0]||p;
-    currentDocType='';
-
-    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente`;
-    ps.hidden=false;ds.hidden=false;
+    const r=await fetch('/project/documents?projectIndex='+encodeURIComponent(p.projectIndex),{cache:'no-store'});
+    const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+    selectedProject=data.project||p;currentProjects=[selectedProject];currentDocs=data.documents||[];currentDocType='';
     renderProjects();
-    renderSummary(currentProjects,currentDocs);
-    renderDocumentTypes();
-    ps.scrollIntoView({behavior:'smooth',block:'start'});
+    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}`;
+    ds.hidden=false;renderSummary(currentProjects,currentDocs);renderDocumentTypes();
+    ds.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
     meta.innerHTML='<span class="error">Projekt konnte nicht geöffnet werden: '+esc(e.message)+'</span>';
-  }finally{
-    loader.style.display='none';
-  }
+  }finally{loader.style.display='none'}
 }
 
 function restorePreviousView(){
   if(!previousView)return;
-  currentProjects=previousView.projects||[];
-  currentDocs=previousView.docs||[];
-  selectedAddress=previousView.selectedAddress||null;
-  baseQuery=previousView.baseQuery||baseQuery;
-  selectedProject=currentProjects[0]||null;
-  currentDocType='';
-  projectDetailMode=false;
-  meta.textContent=previousView.meta||`${currentProjects.length} Projekte · ${currentDocs.length} Dokumente`;
-  previousView=null;
-  backToProjects.hidden=true;
-  projectsTitle.textContent='Projekte / Aufträge';
-  renderAddressChoices(currentProjects);
-  renderSummary(currentProjects,currentDocs);
-  ps.hidden=false;ds.hidden=false;
-  renderProjects();
-  renderDocumentTypes();
-  ps.scrollIntoView({behavior:'smooth',block:'start'});
+  currentProjects=previousView.projects||[];projectOverview=previousView.overview||{};
+  selectedProjectAddress=previousView.selectedProjectAddress||null;baseQuery=previousView.baseQuery||baseQuery;
+  selectedProject=null;currentDocs=[];currentDocType='';projectDetailMode=false;
+  meta.textContent=previousView.meta||`${currentProjects.length} Projekte · bitte auswählen`;
+  previousView=null;backToProjects.hidden=true;backToProjectAddresses.hidden=false;
+  projectsTitle.textContent='Projekte auswählen';summary.hidden=true;ds.hidden=true;
+  projectCustomerOverview.hidden=false;renderProjectCustomerOverview(projectOverview);
+  ps.hidden=false;renderProjects();ps.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 backToProjects.onclick=restorePreviousView;
 
 function renderDoc(d){
-  const pd=d.printDate?d.printDate.split('-').reverse().join('.'):'';
+  const rawDate=d.documentDate||d.printDate||'';
+  const pd=/^\d{4}-\d{2}-\d{2}$/.test(rawDate)?rawDate.split('-').reverse().join('.'):rawDate;
+  const amount=money(d.netAmount),source=d.sourceOfTruth||'';
+  const title=d.filename||d.bookNumber||docType(d)||'Dokument';
   return `<div class="card doc">
-    ${d.path?`<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`:'<div class="thumb empty">WW</div>'}
+    ${d.path?`<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`:'<div class="thumb ww-placeholder">WINWORKER<br>PDF nicht gefunden</div>'}
     <div>
-      <div class="docname">${esc(d.filename||'Dokument')}</div>
+      <div class="docname">${esc(title)}</div>
       <div class="doctype">${esc(docType(d))}</div>
+      ${d.bookNumber&&d.bookNumber!==title?`<div class="docmeta">Beleg ${esc(d.bookNumber)}</div>`:''}
       ${pd?`<div class="docmeta">${esc(pd)}</div>`:''}
-      <div class="actions"><a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a></div>
+      ${amount?`<div class="invoice-amount">${esc(amount)} netto</div>`:''}
+      ${source?`<div class="doc-source">${esc(source)}</div>`:''}
+      ${d.path?`<div class="actions"><a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a></div>`:'<div class="doc-missing">WW-Datensatz vorhanden · kein PDF gefunden</div>'}
     </div>
   </div>`;
 }
 
+const PROJECT_DOC_ORDER=['Angebot','Kalkulation','Auftrag / Auftragsbestätigung','Auftragssteuerung','Aufmaß','Teilrechnung','Schlussrechnung','Rechnung','Gutschrift / Storno','Regiebericht','Lieferschein','Weitere WW-Belege','Sonstige Dokumente'];
 function renderDocumentTypes(sourceFilter=''){
   const sourceDocs=sourceFilter?currentDocs.filter(d=>docSource(d)===sourceFilter):currentDocs;
   const sourceTitle=sourceFilter?`<div class="sub" style="margin-bottom:8px">${esc(sourceFilter)} · ${sourceDocs.length} Treffer</div>`:'';
-  const types=groupCounts(sourceDocs,docType);
+  const types=groupCounts(sourceDocs,docType).sort((a,b)=>{
+    const ai=PROJECT_DOC_ORDER.indexOf(a[0]),bi=PROJECT_DOC_ORDER.indexOf(b[0]);
+    return (ai<0?999:ai)-(bi<0?999:bi)||a[0].localeCompare(b[0],'de');
+  });
   sourceTypes.innerHTML=sourceTitle+`<div class="type-list">`+
     types.map(([t,c])=>`<button class="chip ${currentDocType===t?'active':''}" type="button" data-type="${esc(t)}">${esc(t)} <strong>${c}</strong></button>`).join('')+
     `</div>`;
-  docs.innerHTML='<div class="empty">Dokumenttyp anklicken.</div>';
+  docs.innerHTML=types.length?'<div class="empty">Dokumentart auswählen.</div>':'<div class="empty">Zu diesem Projekt wurden weder WW-Belege noch PDFs gefunden.</div>';
   sourceTypes.querySelectorAll('[data-type]').forEach(btn=>btn.onclick=()=>{
     currentDocType=btn.dataset.type;
     const filtered=sourceDocs.filter(d=>docType(d)===currentDocType);
@@ -3851,7 +5047,6 @@ function renderDocumentTypes(sourceFilter=''){
   });
 }
 
-
 function setSearchMode(mode){
   searchMode=mode;
   modeProjects.classList.toggle('active',mode==='projects');
@@ -3859,9 +5054,9 @@ function setSearchMode(mode){
   modeCapture.classList.toggle('active',mode==='capture');
   document.body.classList.toggle('capture-wide',mode==='capture');
 
-  ps.hidden=true;ds.hidden=true;
+  ps.hidden=true;ds.hidden=true;projectAddressSection.hidden=true;projectCustomerOverview.hidden=true;
   incomingSupplierSection.hidden=true;incomingSection.hidden=true;captureSection.hidden=true;
-  addressBar.hidden=true;summary.hidden=true;
+  addressBar.hidden=true;summary.hidden=true;backToProjectAddresses.hidden=true;backToProjects.hidden=true;
   projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
   incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
   incomingTextMeta.classList.remove('year-summary-grid');
@@ -3876,8 +5071,8 @@ function setSearchMode(mode){
     captureSection.hidden=false;
     initCapture().catch(e=>setCaptureMessage(e.message,'error'));
   }else{
-    q.placeholder='Baustelle, Kunde, Nummer, Adresse …';
-    meta.textContent='WinWorker + PDF-Archiv';
+    q.placeholder='Name, Adresse, Projekt- oder Belegnummer …';
+    meta.textContent='Schritt 1: WinWorker-Kunde über die Adresse auswählen';
     q.focus();
   }
 }
@@ -3932,7 +5127,7 @@ async function runIncomingSupplierSearch(term){
   }
 
   loader.style.display='block';
-  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
+  ps.hidden=true;ds.hidden=true;projectAddressSection.hidden=true;projectCustomerOverview.hidden=true;addressBar.hidden=true;summary.hidden=true;
   incomingSection.hidden=true;incomingSupplierSection.hidden=true;
   meta.textContent='Suche echte WinWorker-Adressen …';
 
@@ -4479,26 +5674,26 @@ captureAddAllocation.onclick=()=>{captureAllocationRows.push(captureAllocationSe
 captureAreaTest.onclick=()=>setCaptureArea('test');captureAreaLive.onclick=()=>setCaptureArea('live');captureClearTest.onclick=clearCaptureTestArea;
 
 async function runSearch(term,isRefined=false){
-  term=String(term||'').trim();if(!term){q.focus();return}
-  if(!isRefined){
-    baseQuery=term;selectedAddress=null;
-    projectDetailMode=false;previousView=null;
-    backToProjects.hidden=true;
-    projectsTitle.textContent='Projekte / Aufträge';
-  }
-  loader.style.display='block';meta.textContent='Suche läuft …';
-  ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;
-  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
+  term=String(term||'').trim();
+  if(term.length<2){meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen eingeben.</span>';q.focus();return}
+
+  baseQuery=term;selectedAddress=null;selectedProjectAddress=null;selectedProject=null;projectOverview=null;
+  projectDetailMode=false;previousView=null;projectAddressCandidates=[];currentProjects=[];currentDocs=[];currentDocType='';
+  loader.style.display='block';meta.textContent='Suche passende WinWorker-Kunden und Adressen …';
+  projectAddressSection.hidden=true;ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;projectCustomerOverview.hidden=true;
+  backToProjectAddresses.hidden=true;backToProjects.hidden=true;projectsTitle.textContent='Projekte auswählen';
+  projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';projectAddresses.innerHTML='';
   try{
-    const r=await fetch('/search?q='+encodeURIComponent(term),{cache:'no-store'});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();if(!data.ok)throw new Error(data.error||'Fehler');
-    currentProjects=data.projects||[];currentDocs=data.documents||[];selectedProject=currentProjects[0]||null;currentDocType='';
-    meta.textContent=`${currentProjects.length} Projekte · ${currentDocs.length} Dokumente${selectedAddress?' · '+selectedAddress.label:''}`;
-    renderAddressChoices(currentProjects);renderSummary(currentProjects,currentDocs);
-    ps.hidden=false;ds.hidden=false;renderProjects();renderDocumentTypes();
-  }catch(e){meta.innerHTML='<span class="error">Suche fehlgeschlagen: '+esc(e.message)+'</span>'}
-  finally{loader.style.display='none'}
+    const r=await fetch('/project/address-search?q='+encodeURIComponent(term),{cache:'no-store'});
+    const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+    projectAddressCandidates=data.addresses||[];
+    renderProjectAddressCandidates();
+    meta.textContent=projectAddressCandidates.length
+      ? `${projectAddressCandidates.length} WinWorker-Adresse(n) gefunden · bitte die richtige Adresse auswählen`
+      : 'Keine passende WinWorker-Adresse gefunden.';
+  }catch(e){
+    meta.innerHTML='<span class="error">Projektsuche fehlgeschlagen: '+esc(e.message)+'</span>';
+  }finally{loader.style.display='none'}
 }
 
 function splitStreet(raw){
@@ -4506,7 +5701,7 @@ function splitStreet(raw){
   return m?{street:m[1],house:m[2]}:{street:s,house:''};
 }
 async function openNewJob(project){
-  const p=project||selectedProject||(selectedAddress&&selectedAddress.p)||currentProjects[0]||{};
+  const p=project||selectedProject||selectedProjectAddress||currentProjects[0]||{};
   const sh=splitStreet(p.street||'');
   document.getElementById('newJobName').value=p.title||p.site||p.projectDescription||p.company||p.customer||'';
   document.getElementById('newJobStreet').value=sh.street;
@@ -4552,7 +5747,7 @@ saveNewJob.onclick=async()=>{
 go.onclick=()=>searchMode==='incoming'?runIncomingSupplierSearch(q.value):runSearch(q.value,false);
 q.addEventListener('keydown',e=>{if(e.key==='Enter'){searchMode==='incoming'?runIncomingSupplierSearch(q.value):runSearch(q.value,false)}});
 const initialMode=new URLSearchParams(location.search).get('mode');
-if(initialMode==='capture'||location.pathname.includes('incoming-capture'))setSearchMode('capture');else q.focus();
+if(initialMode==='capture'||location.pathname.includes('incoming-capture'))setSearchMode('capture');else if(initialMode==='incoming')setSearchMode('incoming');else setSearchMode('projects');
 </script>
 </body>
 </html>
@@ -4574,7 +5769,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.13.2",
+        "version": "0.13.3",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -4806,6 +6001,59 @@ def ww_hours_sample(project_index):
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.get("/project/address-search")
+def project_address_search_api():
+    q = str(request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"ok": True, "query": q, "addresses": []})
+    try:
+        rows = project_address_candidates(q, request.args.get("limit", 30))
+        return jsonify({
+            "ok": True,
+            "query": q,
+            "addresses": rows,
+            "count": len(rows),
+            "sourceOfTruth": "WinWorker Projekte + Kunden + Belegnummern",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/project/address-projects")
+def project_address_projects_api():
+    customer_index = request.args.get("customerIndex")
+    try:
+        if customer_index in (None, ""):
+            raise ValueError("WinWorker-Kundenadresse fehlt.")
+        overview, projects = customer_project_overview(int(customer_index))
+        return jsonify({
+            "ok": True,
+            "overview": overview,
+            "projects": projects,
+            "count": len(projects),
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/project/documents")
+def project_documents_api():
+    project_index = request.args.get("projectIndex")
+    try:
+        if project_index in (None, ""):
+            raise ValueError("WinWorker-Projekt fehlt.")
+        data = project_document_catalog(int(project_index))
+        return jsonify({"ok": True, **data})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 @app.get("/search")
@@ -5537,7 +6785,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.13.2 - Dunja Testgelaende getrennt und loeschbar")
+    print("Version: 0.13.3 - Projektsuche Adresse, Kennzahlen und WW-Dokumente")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
