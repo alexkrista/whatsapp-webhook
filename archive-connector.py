@@ -607,7 +607,7 @@ def _capture_row_public(row, allocations=None, include_text=False, area="live"):
     return public
 
 
-def kristine_incoming_for_address(address_id, include_text=False):
+def kristine_incoming_for_address(address_id):
     con = _capture_connection()
     try:
         rows = con.execute("""
@@ -617,11 +617,7 @@ def kristine_incoming_for_address(address_id, include_text=False):
         """, (str(address_id),)).fetchall()
         result = []
         for row in rows:
-            result.append(_capture_row_public(
-                row,
-                _capture_allocations(con, row["id"]),
-                include_text=bool(include_text),
-            ))
+            result.append(_capture_row_public(row, _capture_allocations(con, row["id"])))
         return result
     finally:
         con.close()
@@ -1352,14 +1348,11 @@ def acknowledge_watch_alert(address_id, alert_key, decision="known"):
 
 
 
-def _pdf_paths_by_docids(doc_ids, include_text=False):
+def _pdf_paths_by_docids(doc_ids):
     """
     Exakte WW-Verknüpfung:
     DokumentenManagement.sDocID == PDF-Dateiname ohne .pdf/_Original.pdf.
-
-    Für die normale Lieferantenakte werden nur Pfade gelesen. Erst bei einer
-    gezielten Materialsuche wird zusätzlich der bereits indexierte OCR-/PDF-Text
-    geladen. Dadurch bleibt die normale Ansicht schnell.
+    Kein OCR, kein Volltext-Matching.
     """
     wanted = {str(x or "").strip() for x in doc_ids if str(x or "").strip()}
     if not wanted:
@@ -1370,506 +1363,67 @@ def _pdf_paths_by_docids(doc_ids, include_text=False):
     try:
         cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
         has_source = "source" in cols
-        has_text = bool(include_text and "text" in cols)
         result = {}
 
+        # Chunking keeps SQLite variable count safe.
         ids = sorted(wanted)
         for pos in range(0, len(ids), 400):
             chunk = ids[pos:pos+400]
+            placeholders = ",".join("?" for _ in chunk)
+            # filename exact-ish: 11502600347.pdf or 11502600347_Original.pdf
             conditions = []
             params = []
             for doc_id in chunk:
                 conditions.append("(filename = ? OR filename = ?)")
                 params.extend([f"{doc_id}.pdf", f"{doc_id}_Original.pdf"])
 
-            select = "filename,path" + (",text" if has_text else "")
-            sql = f"SELECT {select} FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
+            sql = "SELECT filename,path FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
             if has_source:
                 sql += " AND source='EINGANG'"
 
             for row in con.execute(sql, params).fetchall():
                 fn = str(row["filename"] or "")
-                pdf_path = str(row["path"] or "")
+                path = str(row["path"] or "")
                 m = re.match(r"^(\d+)(?:_Original)?\.pdf$", fn, re.I)
                 if not m:
                     continue
                 doc_id = m.group(1)
-                bucket = result.setdefault(doc_id, {
-                    "pdfPath": "",
-                    "originalPath": "",
-                    "pdfText": "",
-                    "originalText": "",
-                    "ocrTexts": [],
-                })
-                raw_text = str(row["text"] or "") if has_text else ""
-                is_original = bool(re.search(r"_Original\.pdf$", fn, re.I))
-                if is_original:
-                    bucket["originalPath"] = pdf_path or bucket["originalPath"]
-                    if len(raw_text) > len(bucket["originalText"]):
-                        bucket["originalText"] = raw_text
+                bucket = result.setdefault(doc_id, {"pdfPath": "", "originalPath": ""})
+                if re.search(r"_Original\.pdf$", fn, re.I):
+                    bucket["originalPath"] = path
                 else:
-                    bucket["pdfPath"] = pdf_path or bucket["pdfPath"]
-                    if len(raw_text) > len(bucket["pdfText"]):
-                        bucket["pdfText"] = raw_text
-
-        for bucket in result.values():
-            seen_texts = set()
-            texts = []
-            for raw_text in (bucket.get("pdfText"), bucket.get("originalText")):
-                value = str(raw_text or "").strip()
-                if not value:
-                    continue
-                fingerprint = hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()
-                if fingerprint in seen_texts:
-                    continue
-                seen_texts.add(fingerprint)
-                texts.append(value)
-            bucket["ocrTexts"] = texts
+                    bucket["pdfPath"] = path
         return result
     finally:
         con.close()
 
 
-_MATERIAL_END_MARKERS = (
-    "rechnungsbetrag", "endbetrag", "zahlbetrag", "zu zahlen",
-    "nettobetrag", "nettowarenwert", "warenwert netto", "summe netto",
-    "gesamt netto", "umsatzsteuer", "mehrwertsteuer", "mwst",
-    "ust basis", "ust betrag", "zahlungsbedingungen", "zahlungsziel",
-    "bankverbindung", "iban", "bic", "swift", "skonto",
-)
-
-_MATERIAL_NOISE_MARKERS = (
-    "rechnungsnummer", "rechnung nr", "rechnungs nr", "belegnummer",
-    "kundennummer", "kunden nr", "lieferantennummer", "lieferanten nr",
-    "rechnungsdatum", "lieferdatum", "leistungsdatum", "bestelldatum",
-    "lieferschein nr", "lieferscheinnummer", "ihre bestellung",
-    "bestellung vom", "bestellnummer", "bestell nr", "auftragsnummer",
-    "auftrag nr", "lieferadresse", "rechnungsadresse", "bearbeiter",
-    "ansprechpartner", "telefon", "fax", "email", "e mail", "www",
-    "uid", "ust id", "bankverbindung", "iban", "bic", "swift",
-    "zahlungsbedingungen", "zahlungsziel", "seite", "blatt",
-)
-
-_MATERIAL_SEARCH_CACHE = {}
-_MATERIAL_SEARCH_CACHE_LIMIT = 1200
-
-
-def _material_header_score(line):
-    n = _norm_supplier(line)
-    if not n:
-        return 0
-    score = 0
-    if "bezeichnung" in n or "beschreibung" in n:
-        score += 3
-    if re.search(r"\b(artikel|artikelnummer|artnr|art nr|produkt)\b", n):
-        score += 2
-    if re.search(r"\b(pos|position)\b", n):
-        score += 1
-    if "menge" in n:
-        score += 2
-    if re.search(r"\b(einheit|eh|me)\b", n):
-        score += 1
-    if "preis" in n or "einzelpreis" in n:
-        score += 2
-    if "betrag" in n or "gesamtpreis" in n:
-        score += 2
-    return score
-
-
-def _is_material_header(line):
-    n = _norm_supplier(line)
-    score = _material_header_score(line)
-    if not n:
-        return False
-    if ("bezeichnung" in n or "beschreibung" in n) and score >= 5:
-        return True
-    if re.search(r"\b(artikel|artikelnummer|artnr|art nr)\b", n) and "menge" in n and score >= 5:
-        return True
-    return score >= 7
-
-
-def _is_material_end_line(line):
-    n = _norm_supplier(line)
-    if not n:
-        return False
-    if any(marker in n for marker in _MATERIAL_END_MARKERS):
-        return True
-    return bool(re.search(r"\b(zwischensumme|gesamtsumme|bruttosumme)\b", n))
-
-
-def _is_material_noise_line(line):
-    clean = re.sub(r"\s+", " ", str(line or "")).strip()
-    n = _norm_supplier(clean)
-    if not n:
-        return True
-    if _is_material_header(clean) or _is_material_end_line(clean):
-        return True
-    for marker in _MATERIAL_NOISE_MARKERS:
-        if marker in {"seite", "blatt"}:
-            if re.match(rf"^{marker}\b", n):
-                return True
-        elif marker in {"uid", "iban", "bic", "swift", "telefon", "fax", "email", "www", "bearbeiter", "ansprechpartner"}:
-            if re.search(rf"\b{re.escape(marker)}\b", n):
-                return True
-        elif marker in n:
-            return True
-    if n in {"rechnung", "gutschrift", "lieferschein", "angebot", "ubertrag", "übertrag"}:
-        return True
-    if re.fullmatch(r"(?:seite|blatt)?\s*\d+\s*(?:von|\/)?\s*\d*", n):
-        return True
-    return False
-
-
-def _looks_like_material_line(line):
-    clean = re.sub(r"\s+", " ", str(line or "")).strip()
-    if _is_material_noise_line(clean):
-        return False
-    has_word = bool(re.search(r"[A-Za-zÄÖÜäöüß]{3,}", clean))
-    has_number = bool(re.search(r"\d", clean))
-    has_unit = bool(re.search(
-        r"(?i)\b(?:stk|stck|stück|kg|g|to|t|l|lt|liter|ml|m|m2|m²|m3|m³|lfm|sack|skt|pkg|pack|dose|eimer|kanister|rolle|paar|set)\b",
-        clean,
-    ))
-    has_article_code = bool(re.search(
-        r"\b(?=[A-Z0-9._/-]{4,}\b)(?=[A-Z0-9._/-]*\d)[A-Z0-9][A-Z0-9._/-]{3,}\b",
-        clean,
-        re.I,
-    ))
-    return bool((has_word and has_number) or has_unit or (has_word and has_article_code))
-
-
-def _material_flat_segment(raw_text):
-    flat = re.sub(r"\s+", " ", str(raw_text or "")).strip()
-    if not flat:
-        return ""
-
-    start_patterns = (
-        r"(?i)\b(?:pos(?:ition)?|artikel(?:nummer)?|art\.?\s*nr\.?)\b.{0,100}\b(?:bezeichnung|beschreibung)\b.{0,100}\b(?:menge|preis|betrag|gesamtpreis)\b",
-        r"(?i)\b(?:bezeichnung|beschreibung)\b.{0,80}\bmenge\b.{0,80}\b(?:preis|betrag|gesamtpreis)\b",
-    )
-    starts = []
-    for pattern in start_patterns:
-        m = re.search(pattern, flat)
-        if m:
-            starts.append(m.end())
-    if not starts:
-        return ""
-    start = min(starts)
-
-    tail = flat[start:]
-    stop_positions = []
-    for marker in _MATERIAL_END_MARKERS + ("zwischensumme", "gesamtsumme", "bruttosumme"):
-        m = re.search(rf"(?i)\b{re.escape(marker)}\b", tail)
-        if m:
-            stop_positions.append(m.start())
-    end = start + (min(stop_positions) if stop_positions else len(tail))
-    segment = flat[start:end].strip(" ·|-")
-    return segment if len(segment) >= 12 else ""
-
-
-def _material_search_lines(raw_text):
-    raw = str(raw_text or "").replace("\x00", " ")
-    lines = [re.sub(r"\s+", " ", row).strip() for row in raw.splitlines()]
-    lines = [row for row in lines if row]
-    if not lines:
-        return [], "none"
-
-    header_indices = set()
-    for index, line in enumerate(lines):
-        if _is_material_header(line):
-            header_indices.add(index)
-            # Eine bereits erkennbare Kopfzeile kann noch eine kurze Fortsetzung
-            # wie „Einzelpreis · Betrag“ direkt darunter haben.
-            for offset in (1, 2):
-                next_index = index + offset
-                if next_index >= len(lines):
-                    break
-                next_line = lines[next_index]
-                if _material_header_score(next_line) <= 0 or _looks_like_material_line(next_line):
-                    break
-                if _is_material_header(" ".join(lines[index:next_index+1])):
-                    header_indices.add(next_index)
-            continue
-
-        # Manche PDFs teilen die Tabellenüberschrift auf zwei oder drei Zeilen.
-        # Nur Zeilen mit echten Überschriftswörtern markieren – niemals bereits
-        # die erste Materialposition hinter der Überschrift mit verschlucken.
-        for span in (2, 3):
-            parts = lines[index:index+span]
-            if len(parts) != span or not _is_material_header(" ".join(parts)):
-                continue
-            marked = [index + offset for offset, part in enumerate(parts) if _material_header_score(part) > 0]
-            if len(marked) >= 2:
-                header_indices.update(marked)
-                break
-
-    regions = []
-    current = []
-    in_table = False
-    for index, line in enumerate(lines):
-        if index in header_indices:
-            if current:
-                regions.append(current)
-                current = []
-            in_table = True
-            continue
-        if in_table and _is_material_end_line(line):
-            if current:
-                regions.append(current)
-                current = []
-            in_table = False
-            continue
-        if in_table and not _is_material_noise_line(line):
-            current.append(line)
-    if current:
-        regions.append(current)
-
-    table_lines = [line for region in regions for line in region]
-    if table_lines:
-        return table_lines, "table"
-
-    flat_segment = _material_flat_segment(raw)
-    if flat_segment:
-        return [flat_segment], "flat-table"
-
-    # Konservativer Rückfall für schlecht strukturierte Scans: nur der mittlere
-    # Dokumentbereich und nur zeilenartige Materialkandidaten samt Nachbarzeilen.
-    start = max(3, int(len(lines) * 0.08))
-    end = max(start + 1, int(len(lines) * 0.90))
-    eligible = set()
-    for index in range(start, min(end, len(lines))):
-        if _looks_like_material_line(lines[index]):
-            eligible.update({index - 1, index, index + 1})
-
-    fallback = []
-    for index in sorted(i for i in eligible if start <= i < end and 0 <= i < len(lines)):
-        line = lines[index]
-        if not _is_material_noise_line(line):
-            fallback.append(line)
-    return fallback, "fallback" if fallback else "none"
-
-
-def _material_search_index(raw_text):
-    raw = str(raw_text or "")
-    if not raw.strip():
-        return {"lines": [], "mode": "none", "joinedNorm": "", "joinedCompact": ""}
-    key = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()
-    cached = _MATERIAL_SEARCH_CACHE.get(key)
-    if cached is not None:
-        return cached
-
-    lines, mode = _material_search_lines(raw)
-    joined = " ".join(lines)
-    data = {
-        "lines": lines,
-        "mode": mode,
-        "joinedNorm": _norm_supplier(joined),
-        "joinedCompact": _compact_search_value(joined),
-    }
-    if len(_MATERIAL_SEARCH_CACHE) >= _MATERIAL_SEARCH_CACHE_LIMIT:
-        _MATERIAL_SEARCH_CACHE.clear()
-    _MATERIAL_SEARCH_CACHE[key] = data
-    return data
-
-
-def _compact_search_value(value):
-    return re.sub(r"[^a-z0-9äöü]+", "", str(value or "").lower().replace("ß", "ss"))
-
-
-def _focus_material_snippet(value, query, limit=560):
-    compact = re.sub(r"\s+", " ", str(value or "")).strip()
-    if len(compact) <= limit:
-        return compact
-    low = compact.lower()
-    raw_terms = [part for part in re.split(r"\s+", str(query or "").strip()) if part]
-    positions = [low.find(term.lower()) for term in raw_terms if low.find(term.lower()) >= 0]
-    pos = min(positions) if positions else max(0, len(compact) // 2)
-    start = max(0, pos - 170)
-    end = min(len(compact), start + limit)
-    start = max(0, end - limit)
-    return ("… " if start else "") + compact[start:end].strip() + (" …" if end < len(compact) else "")
-
-
-def _material_search_result(raw_text, text_query):
-    query = str(text_query or "").strip()
-    qnorm = _norm_supplier(query)
-    qcompact = _compact_search_value(query)
-    tokens = [token for token in qnorm.split() if token]
-    if not query or (not tokens and not qcompact):
-        return {
-            "matched": False, "searchable": False, "matchCount": 0,
-            "ideal": False, "score": 0, "matches": [], "mode": "none",
-        }
-
-    search_index = _material_search_index(raw_text)
-    lines = search_index["lines"]
-    mode = search_index["mode"]
-    if not lines:
-        return {
-            "matched": False, "searchable": False, "matchCount": 0,
-            "ideal": False, "score": 0, "matches": [], "mode": mode,
-        }
-
-    joined = " ".join(lines)
-    joined_norm = search_index["joinedNorm"]
-    joined_compact = search_index["joinedCompact"]
-
-    phrase_count = joined_norm.count(qnorm) if qnorm else 0
-    compact_count = joined_compact.count(qcompact) if len(qcompact) >= 3 else 0
-    token_counts = [joined_norm.count(token) for token in tokens]
-    body_match = bool(
-        phrase_count > 0 or
-        compact_count > 0 or
-        (tokens and all(count > 0 for count in token_counts))
-    )
-    if not body_match:
-        return {
-            "matched": False, "searchable": True, "matchCount": 0,
-            "ideal": False, "score": 0, "matches": [], "mode": mode,
-        }
-
-    matches = []
-    seen = set()
-    ideal = False
-    best_window_score = 0
-    for index in range(len(lines)):
-        start = max(0, index - 1)
-        end = min(len(lines), index + 3)
-        window = " · ".join(lines[start:end])
-        wnorm = _norm_supplier(window)
-        wcompact = _compact_search_value(window)
-        token_window = bool(tokens and all(token in wnorm for token in tokens))
-        compact_window = bool(len(qcompact) >= 3 and qcompact in wcompact)
-        phrase_window = bool(qnorm and qnorm in wnorm)
-        if not (phrase_window or compact_window or token_window):
-            continue
-        exact = phrase_window or compact_window
-        ideal = ideal or exact
-        window_score = 100 if exact else 70
-        best_window_score = max(best_window_score, window_score)
-        snippet = _focus_material_snippet(window, query)
-        key = _norm_supplier(snippet)
-        if key and key not in seen:
-            seen.add(key)
-            matches.append(snippet)
-        if len(matches) >= 5:
-            break
-
-    if not matches:
-        matches = [_focus_material_snippet(joined, query)]
-
-    if phrase_count > 0:
-        match_count = phrase_count
-    elif compact_count > 0:
-        match_count = compact_count
-    elif token_counts:
-        match_count = min(token_counts)
-    else:
-        match_count = 1
-    match_count = max(1, int(match_count or 1))
-    score = (1000 if ideal else 0) + best_window_score + min(match_count, 99) * 10
-
-    return {
-        "matched": True,
-        "searchable": True,
-        "matchCount": match_count,
-        "ideal": bool(ideal),
-        "score": score,
-        "matches": matches,
-        "mode": mode,
-    }
-
-
-def _best_material_search(texts, text_query):
-    best = None
-    searchable = False
-    for raw_text in texts or []:
-        result = _material_search_result(raw_text, text_query)
-        searchable = searchable or bool(result.get("searchable"))
-        if not result.get("matched"):
-            continue
-        if best is None or (
-            int(result.get("score") or 0),
-            int(result.get("matchCount") or 0),
-        ) > (
-            int(best.get("score") or 0),
-            int(best.get("matchCount") or 0),
-        ):
-            best = result
-    if best is not None:
-        return best
-    return {
-        "matched": False, "searchable": searchable, "matchCount": 0,
-        "ideal": False, "score": 0, "matches": [], "mode": "none",
-    }
-
-
-def incoming_for_address(address_id, text_query="", return_context=False):
+def incoming_for_address(address_id, text_query=""):
     """
     WW sofort + exakte PDF-Verknüpfung über:
     Eingangsbelege.gDMID -> DokumentenManagement.gID -> sDocID -> PDF-Dateiname.
-
-    Eine Textsuche arbeitet ausschließlich im OCR-Materialbereich der PDFs.
-    Kopfzeilen wie Datum, Rechnungsnummer, Kundennummer oder Zahlungsdaten sind
-    bewusst kein Suchraum.
     """
     address_id = str(address_id or "").strip()
     if not address_id:
-        empty = {
-            "documents": [], "allDocuments": [], "search": {"active": False},
-            "wwRows": [], "localRows": [],
-        }
-        return empty if return_context else []
+        return []
 
-    query = str(text_query or "").strip()
-    search_active = bool(query)
     ww_rows = ww_incoming_for_address(address_id)
-    local_rows = kristine_incoming_for_address(address_id, include_text=search_active)
-    paths = _pdf_paths_by_docids(
-        [x.get("docId") for x in ww_rows],
-        include_text=search_active,
-    )
-
-    all_result = []
-    ocr_invoices = 0
-    material_searchable = 0
-    pdf_linked = 0
-    total_matches = 0
-    ideal_hits = 0
-
-    def apply_material_search(item, texts):
-        nonlocal ocr_invoices, material_searchable, total_matches, ideal_hits
-        clean_texts = [str(value or "") for value in (texts or []) if str(value or "").strip()]
-        if clean_texts:
-            ocr_invoices += 1
-        result = _best_material_search(clean_texts, query) if search_active else None
-        if not search_active:
-            return
-        if result.get("searchable"):
-            material_searchable += 1
-        item["materialMatched"] = bool(result.get("matched"))
-        item["materialMatchCount"] = int(result.get("matchCount") or 0)
-        item["materialMatchIdeal"] = bool(result.get("ideal"))
-        item["materialMatchScore"] = int(result.get("score") or 0)
-        item["materialMatches"] = list(result.get("matches") or [])
-        item["materialSearchMode"] = str(result.get("mode") or "none")
-        if item["materialMatched"]:
-            total_matches += item["materialMatchCount"]
-            ideal_hits += 1 if item["materialMatchIdeal"] else 0
+    local_rows = kristine_incoming_for_address(address_id)
+    paths = _pdf_paths_by_docids([x.get("docId") for x in ww_rows])
+    qtokens = [x for x in _norm_supplier(text_query).split() if x]
+    result = []
 
     for ww in ww_rows:
         doc_id = str(ww.get("docId") or "").strip()
         found = paths.get(doc_id, {})
         pdf_path = found.get("pdfPath") or ""
         original_path = found.get("originalPath") or ""
-        if pdf_path or original_path:
-            pdf_linked += 1
 
         item = dict(ww)
         item.update({
-            "filename": Path(pdf_path).name if pdf_path else (Path(original_path).name if original_path else (f"{doc_id}.pdf" if doc_id else "")),
-            "path": pdf_path or original_path,
-            "originalPath": original_path if original_path and original_path != (pdf_path or original_path) else "",
+            "filename": Path(pdf_path).name if pdf_path else (f"{doc_id}.pdf" if doc_id else ""),
+            "path": pdf_path,
+            "originalPath": original_path,
             "logical_id": doc_id,
             "invoiceId": f"ww:{ww.get('wwIncomingId')}",
             "dokumenttyp": "Eingangsrechnung",
@@ -1877,68 +1431,42 @@ def incoming_for_address(address_id, text_query="", return_context=False):
             "fingerprint": {},
             "pdfLinked": bool(pdf_path or original_path),
         })
-        apply_material_search(item, found.get("ocrTexts") or [])
-        all_result.append(item)
+        result.append(item)
 
-    for local in local_rows:
-        item = dict(local)
-        pdf_text = str(item.pop("pdfText", "") or "")
-        if item.get("path"):
-            pdf_linked += 1
-        apply_material_search(item, [pdf_text] if pdf_text else [])
-        if search_active:
-            # In der Trefferansicht niemals wieder den kompletten Rechnungskopf
-            # als Snippet zeigen – nur die erkannten Materialzeilen.
-            item["snippet"] = ""
-        all_result.append(item)
+    result.extend(local_rows)
 
-    if search_active:
-        documents = [item for item in all_result if item.get("materialMatched")]
-        documents.sort(
-            key=lambda x: (
-                1 if x.get("materialMatchIdeal") else 0,
-                int(x.get("materialMatchScore") or 0),
-                int(x.get("materialMatchCount") or 0),
-                x.get("invoiceDateTime") or "",
-                str(x.get("docId") or ""),
-            ),
-            reverse=True,
-        )
-    else:
-        documents = list(all_result)
-        documents.sort(
-            key=lambda x: (
-                x.get("invoiceDateTime") or "",
-                str(x.get("docId") or ""),
-                int(x.get("id") or 0),
-            ),
-            reverse=True,
-        )
+    if qtokens:
+        filtered = []
+        for item in result:
+            hay = _norm_supplier(" ".join([
+                str(item.get("invoiceNumber") or ""),
+                str(item.get("paymentStatus") or ""),
+                str(item.get("remark") or ""),
+                str(item.get("bookingText") or ""),
+                str(item.get("note") or ""),
+                str(item.get("snippet") or ""),
+                str(item.get("iban") or ""),
+                str(item.get("swift") or ""),
+                str(item.get("accountHolder") or ""),
+                str(item.get("docId") or ""),
+                " ".join(
+                    " ".join(str(v or "") for v in allocation.values())
+                    for allocation in (item.get("allocations") or [])
+                ),
+            ]))
+            if all(t in hay for t in qtokens):
+                filtered.append(item)
+        result = filtered
 
-    search_meta = {
-        "active": search_active,
-        "query": query,
-        "scope": "selected_supplier",
-        "addressId": address_id,
-        "scannedInvoices": len(all_result),
-        "pdfLinkedInvoices": pdf_linked,
-        "ocrInvoices": ocr_invoices if search_active else 0,
-        "materialSearchableInvoices": material_searchable if search_active else 0,
-        "withoutOcr": max(0, len(all_result) - ocr_invoices) if search_active else 0,
-        "hitInvoices": len(documents) if search_active else 0,
-        "matchCount": total_matches if search_active else 0,
-        "idealHitInvoices": ideal_hits if search_active else 0,
-    }
-
-    if return_context:
-        return {
-            "documents": documents,
-            "allDocuments": all_result,
-            "search": search_meta,
-            "wwRows": ww_rows,
-            "localRows": local_rows,
-        }
-    return documents
+    result.sort(
+        key=lambda x: (
+            x.get("invoiceDateTime") or "",
+            str(x.get("docId") or ""),
+            int(x.get("id") or 0),
+        ),
+        reverse=True
+    )
+    return result
 
 
 MONEY_RE = re.compile(r'(?<!\d)(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+,\d{2})(?!\d)')
@@ -3309,6 +2837,107 @@ def _normalize_project_identifier(value):
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
+def _identifier_token_regex(value):
+    """
+    Erkennt Projekt-/Belegnummern nur als vollständigen Bezeichner.
+
+    Wichtig: Ein Projekt 26023 darf NICHT in einer langen WW-Dokument-ID wie
+    11502602345 als Treffer gelten. Trennzeichen innerhalb einer Nummer werden
+    toleriert (z. B. 2026-07001 statt 202607001).
+    """
+    compact = _normalize_project_identifier(value)
+    if len(compact) < 3:
+        return None
+    body = r"[\s./_\\-]*".join(re.escape(char) for char in compact)
+    return re.compile(rf"(?<![A-Z0-9]){body}(?![A-Z0-9])", re.I)
+
+
+def _identifier_occurs_as_token(value, *haystacks):
+    pattern = _identifier_token_regex(value)
+    if pattern is None:
+        return False
+    return any(pattern.search(str(haystack or "")) for haystack in haystacks)
+
+
+def _explicit_project_numbers(*values):
+    """Liest ausdrücklich als 'Projekt: ...' bezeichnete Nummern aus OCR-Text."""
+    pattern = re.compile(
+        r"\b(?:projekt(?:nummer|[\s-]?nr\.?)?|proj(?:ekt)?[\s-]?nr\.?|"
+        r"baustelle(?:nnummer|[\s-]?nr\.?)?)\s*[:#-]?\s*"
+        r"([0-9][0-9./_-]{3,18})\b",
+        re.I,
+    )
+    found = set()
+    for value in values:
+        for match in pattern.finditer(str(value or "")):
+            normalized = _normalize_project_identifier(match.group(1))
+            if len(normalized) >= 4:
+                found.add(normalized)
+    return found
+
+
+def _project_pdf_evidence(pdf, project):
+    project_number = str(project.get("projectNumber") or "").strip()
+    selected = _normalize_project_identifier(project_number)
+    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
+    filename = str(pdf.get("filename") or "")
+    path_value = str(pdf.get("path") or "")
+    explicit = _explicit_project_numbers(raw_text)
+    explicit_match = bool(selected and selected in explicit)
+    explicit_conflict = bool(selected and explicit and not explicit_match)
+    return {
+        "explicitNumbers": explicit,
+        "explicitMatch": explicit_match,
+        "explicitConflict": explicit_conflict,
+        "filenameMatch": _identifier_occurs_as_token(project_number, filename),
+        "pathMatch": _identifier_occurs_as_token(project_number, path_value),
+        "textMatch": _identifier_occurs_as_token(project_number, raw_text),
+    }
+
+
+def _project_customer_address_match(pdf, project):
+    """
+    Zusätzliche Absicherung für den Belegnummern-Rückfall.
+    Eine gleiche Belegnummer allein reicht nicht; wenigstens Kunde/Adresse oder
+    die echte Projektnummer muss ebenfalls zum ausgewählten Projekt passen.
+    """
+    hay = _norm_supplier(" ".join([
+        str(pdf.get("_raw_text") or pdf.get("text") or ""),
+        str(pdf.get("filename") or ""),
+        str(pdf.get("path") or ""),
+    ]))
+    if not hay:
+        return False
+
+    company = _norm_supplier(project.get("company"))
+    first = _norm_supplier(project.get("firstName"))
+    last = _norm_supplier(project.get("lastName"))
+    street = _norm_supplier(project.get("street"))
+    postal = _norm_supplier(project.get("postalCode"))
+    city = _norm_supplier(project.get("city"))
+
+    company_match = len(company) >= 4 and company in hay
+    person_tokens = [token for token in (first, last) if len(token) >= 3]
+    person_match = len(person_tokens) >= 2 and all(token in hay for token in person_tokens)
+    street_match = len(street) >= 5 and street in hay
+    postal_city_match = bool(postal and city and postal in hay and city in hay)
+
+    return bool(street_match or postal_city_match or company_match or person_match)
+
+
+def _project_book_match_score(pdf, book_number):
+    """Exakte, begrenzte Belegnummern-Treffer; keine bloßen Teilstrings."""
+    if len(_normalize_project_identifier(book_number)) < 4:
+        return 0
+    score = 0
+    if _identifier_occurs_as_token(book_number, pdf.get("filename")):
+        score += 100
+    if _identifier_occurs_as_token(book_number, pdf.get("path")):
+        score += 60
+    if _identifier_occurs_as_token(book_number, pdf.get("_raw_text")):
+        score += 30
+    return score
+
 def canonical_project_document_type(*values, is_invoice=False, ww_book_art=None):
     text = _norm_supplier(" ".join(str(v or "") for v in values))
 
@@ -3346,7 +2975,8 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
     needles = []
     for value in [project_number] + list(book_numbers or []):
         value = str(value or "").strip()
-        if len(value) >= 3 and value not in needles:
+        # 3-stellige Belegnummern sind als globale Archivsuche zu unsicher.
+        if len(_normalize_project_identifier(value)) >= 4 and value not in needles:
             needles.append(value)
     if not needles or not DB.exists():
         return []
@@ -3360,6 +2990,8 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
             if optional in cols:
                 select.append(optional)
 
+        # SQLite-LIKE dient nur als schneller Kandidatenfilter. Danach wird jede
+        # Nummer zwingend als vollständiger Token geprüft.
         or_parts = []
         params = []
         for needle in needles[:80]:
@@ -3382,10 +3014,25 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
     seen = set()
     for row in rows:
         item = dict(row)
-        path = str(item.get("path") or "")
-        key = path.lower()
+        path_value = str(item.get("path") or "")
+        key = path_value.lower()
         if not key or key in seen:
             continue
+
+        raw_text = str(item.get("text") or "")
+        # Schutz gegen die Hauptursache der falschen Treffer:
+        # 26023 in 11502602345.pdf ist KEIN Projekt-26023-Treffer.
+        if not any(
+            _identifier_occurs_as_token(
+                needle,
+                item.get("filename"),
+                path_value,
+                raw_text,
+            )
+            for needle in needles
+        ):
+            continue
+
         seen.add(key)
         dt = parse_print_time(item.get("filename"), item.get("modified"))
         item["printDate"] = dt.date().isoformat() if dt else None
@@ -3675,7 +3322,7 @@ def _project_pdf_rows_by_docids(doc_ids):
     buckets = {}
     try:
         cols = {row[1] for row in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
-        select = ["filename", "path", "dokumenttyp", "modified"]
+        select = ["filename", "path", "dokumenttyp", "modified", "text"]
         for optional in ("source", "doc_year", "logical_id"):
             if optional in cols:
                 select.append(optional)
@@ -3718,6 +3365,7 @@ def _project_pdf_rows_by_docids(doc_ids):
                 item["printDate"] = dt.date().isoformat() if dt else None
                 item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
                 item["year"] = dt.year if dt else item.get("doc_year")
+                item["_raw_text"] = item.pop("text", "") or ""
                 item["pdfFound"] = True
                 item["sourceOfTruth"] = "WinWorker-Dokument-ID + PDF-Archiv"
                 bucket = buckets.setdefault(doc_key, {"work": [], "original": []})
@@ -3947,29 +3595,41 @@ def project_document_catalog(project_index):
     book_numbers = [book.get("bookNumber") for book in books if book.get("bookNumber")]
     fallback_pdfs = _project_pdf_rows(project.get("projectNumber"), book_numbers)
 
-    # Rückfall-Zuordnung über sichtbare Belegnummer. Eine PDF wird dabei
-    # höchstens einem WW-Beleg zugeordnet; Dateiname ist stärker als Pfad,
-    # OCR-Text ist nur die letzte Stufe.
+    # Rückfall nur bei ZWEI passenden Signalen:
+    # vollständige Belegnummer + Projektnummer/Kunde/Adresse.
+    # So kann ein zufälliger Teilstring in einer WW-Dokument-ID kein fremdes
+    # Projekt mehr in die Liste ziehen.
     fallback_assignments = {}
+    rejected_paths = set()
     for pdf_index, pdf in enumerate(fallback_pdfs):
-        filename_norm = _normalize_project_identifier(pdf.get("filename"))
-        path_norm = _normalize_project_identifier(pdf.get("path"))
-        text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
+        evidence = _project_pdf_evidence(pdf, project)
+        path_key = str(pdf.get("path") or "").strip().lower()
+        if evidence["explicitConflict"]:
+            if path_key:
+                rejected_paths.add(path_key)
+            continue
+
+        customer_match = _project_customer_address_match(pdf, project)
+        project_support = bool(
+            evidence["explicitMatch"]
+            or evidence["filenameMatch"]
+            or evidence["pathMatch"]
+            or customer_match
+            or (evidence["textMatch"] and customer_match)
+        )
+        if not project_support:
+            continue
+
         best = None
         for book_index, book in enumerate(books):
-            number_norm = _normalize_project_identifier(book.get("bookNumber"))
-            if len(number_norm) < 3:
+            number = book.get("bookNumber")
+            score = _project_book_match_score(pdf, number)
+            if not score:
                 continue
-            score = 0
-            if number_norm in filename_norm:
-                score += 100
-            if number_norm in path_norm:
-                score += 60
-            if number_norm in text_norm:
-                score += 15
-            rank = (score, len(number_norm))
-            if score and (best is None or rank > best[:2]):
-                best = (score, len(number_norm), book_index)
+            number_len = len(_normalize_project_identifier(number))
+            rank = (score, number_len)
+            if best is None or rank > best[:2]:
+                best = (score, number_len, book_index)
         if best is not None:
             fallback_assignments.setdefault(best[2], []).append(pdf_index)
 
@@ -3982,6 +3642,14 @@ def project_document_catalog(project_index):
         path_key = str(item.get("path") or "").strip().lower()
         if not path_key or path_key in used_paths:
             return False
+
+        evidence = _project_pdf_evidence(item, project)
+        # Selbst eine automatisch entdeckte WW-Dokumentbeziehung wird verworfen,
+        # wenn im PDF ausdrücklich ein anderes Projekt steht.
+        if evidence["explicitConflict"]:
+            rejected_paths.add(path_key)
+            return False
+
         used_paths.add(path_key)
         doc_type = _merged_project_document_type(book, item)
         item.update({
@@ -3997,7 +3665,7 @@ def project_document_catalog(project_index):
             "sourceOfTruth": (
                 "WinWorker-Dokument-ID + PDF-Archiv"
                 if exact
-                else "WinWorker-Belegnummer + PDF-Archiv"
+                else "WinWorker-Belegnummer + Projektabgleich + PDF-Archiv"
             ),
             "pdfFound": True,
         })
@@ -4008,12 +3676,13 @@ def project_document_catalog(project_index):
     for book_index, book in enumerate(books):
         found_for_book = False
 
-        # 1. exakte WW-Dokument-ID
+        # 1. exakte WW-Dokument-ID; ein ausdrücklich fremdes Projekt wird dennoch
+        #    als fehlerhafte Verknüpfung abgefangen.
         for doc_id in book.get("docIds", []):
             for pdf in exact_by_doc_id.get(str(doc_id).strip().lower(), []):
                 found_for_book = append_book_pdf(book, pdf, exact=True) or found_for_book
 
-        # 2. Rückfall über Belegnummer/Projektindex
+        # 2. strenger Rückfall über Belegnummer PLUS Projekt/Kunde/Adresse.
         for pdf_index in fallback_assignments.get(book_index, []):
             if pdf_index in used_fallback_indices:
                 continue
@@ -4022,7 +3691,7 @@ def project_document_catalog(project_index):
                 used_fallback_indices.add(pdf_index)
                 found_for_book = True
 
-        # WW-Beleg bleibt sichtbar, auch wenn kein PDF im Index auffindbar ist.
+        # WW-Beleg bleibt sichtbar, auch wenn dazu kein sicheres PDF auffindbar ist.
         if not found_for_book:
             doc_type = book.get("documentType") or canonical_project_document_type(
                 book.get("bookNumber"),
@@ -4042,16 +3711,33 @@ def project_document_catalog(project_index):
                 "wwBookId": book.get("wwBookId"),
                 "wwBookIds": book.get("wwBookIds") or [],
                 "wwDocIds": book.get("docIds") or [],
-                "sourceOfTruth": "WinWorker · PDF nicht gefunden",
+                "sourceOfTruth": "WinWorker · PDF nicht sicher gefunden",
                 "pdfFound": False,
             })
 
-    # Projekt-PDFs, die nicht eindeutig an einen WW-Beleg gekoppelt werden
-    # konnten, bleiben unter ihrem erkannten Dokumenttyp auffindbar.
+    # Ungekoppelte Archiv-PDFs werden nur noch gezeigt, wenn die ausgewählte
+    # Projektnummer als echtes, begrenztes Merkmal vorkommt. Ein bloßer Treffer
+    # auf irgendeine Belegnummer reicht ausdrücklich nicht mehr.
     for pdf_index, pdf in enumerate(fallback_pdfs):
         path_key = str(pdf.get("path") or "").strip().lower()
         if pdf_index in used_fallback_indices or not path_key or path_key in used_paths:
             continue
+
+        evidence = _project_pdf_evidence(pdf, project)
+        customer_match = _project_customer_address_match(pdf, project)
+        strong_project_match = bool(
+            not evidence["explicitConflict"]
+            and (
+                evidence["explicitMatch"]
+                or evidence["filenameMatch"]
+                or evidence["pathMatch"]
+                or (evidence["textMatch"] and customer_match)
+            )
+        )
+        if not strong_project_match:
+            rejected_paths.add(path_key)
+            continue
+
         used_paths.add(path_key)
         item = dict(pdf)
         doc_type = canonical_project_document_type(
@@ -4061,7 +3747,7 @@ def project_document_catalog(project_index):
             "documentType": doc_type,
             "dokumenttyp": doc_type,
             "documentDate": item.get("printDate"),
-            "sourceOfTruth": "PDF-Archiv · kein eindeutiger WW-Beleg",
+            "sourceOfTruth": "PDF-Archiv · Projektnummer eindeutig",
             "pdfFound": True,
         })
         item.pop("_raw_text", None)
@@ -4088,6 +3774,7 @@ def project_document_catalog(project_index):
         "wwBookCount": len(books),
         "pdfCount": sum(1 for document in documents if document.get("pdfFound")),
         "missingPdfCount": sum(1 for document in documents if not document.get("pdfFound")),
+        "filteredPdfCount": len(rejected_paths),
     }
 
 
@@ -4551,8 +4238,8 @@ def incoming_supplier_candidates(query, limit=20):
 
 def incoming_supplier_invoices(supplier_key, text_query=""):
     """
-    Direkte Auswahl über den erkannten Supplier-Key.
-    Bei Suchbegriff werden ausschließlich OCR-Materialzeilen durchsucht.
+    Schritt 2: direkte Auswahl über den bereits erkannten Supplier-Key.
+    Dadurch kein erneutes Parsen aller 6.475 PDFs beim Klick -> deutlich schneller.
     """
     supplier_key = str(supplier_key or "").strip()
     text_query = str(text_query or "").strip()
@@ -4560,16 +4247,34 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
     if not supplier_key:
         return []
 
+    query_tokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
+
     for item in _incoming_catalog():
         ident = item.get("_supplier")
         if not ident or ident.get("key") != supplier_key:
             continue
 
         raw = str(item.get("_raw_text") or "")
-        material = _material_search_result(raw, text_query) if text_query else None
-        if text_query and not material.get("matched"):
+        raw_norm = _norm_supplier(raw)
+
+        if query_tokens and not all(t in raw_norm for t in query_tokens):
             continue
+
+        snippet = " ".join(raw.split())[:420]
+        if query_tokens:
+            low = raw.lower()
+            positions = [low.find(t.lower()) for t in query_tokens if low.find(t.lower()) >= 0]
+            if positions:
+                pos = min(positions)
+                compact = " ".join(raw.split())
+                # Für Snippet robust nochmal im kompakten Text suchen.
+                low_compact = compact.lower()
+                pos2 = min(
+                    [low_compact.find(t.lower()) for t in query_tokens if low_compact.find(t.lower()) >= 0]
+                    or [0]
+                )
+                snippet = compact[max(0, pos2-140):min(len(compact), pos2+500)]
 
         result.append({
             "filename": item.get("filename"),
@@ -4585,26 +4290,16 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
             "monthName": item.get("monthName"),
             "day": item.get("day"),
             "amount": item.get("amount"),
-            "snippet": "" if text_query else " ".join(raw.split())[:420],
-            "materialMatched": bool(material and material.get("matched")),
-            "materialMatchCount": int((material or {}).get("matchCount") or 0),
-            "materialMatchIdeal": bool((material or {}).get("ideal")),
-            "materialMatchScore": int((material or {}).get("score") or 0),
-            "materialMatches": list((material or {}).get("matches") or []),
+            "snippet": snippet,
         })
 
-    if text_query:
-        result.sort(key=lambda x: (
-            1 if x.get("materialMatchIdeal") else 0,
-            int(x.get("materialMatchScore") or 0),
-            int(x.get("materialMatchCount") or 0),
+    result.sort(
+        key=lambda x: (
             x.get("invoiceDateTime") or "",
-        ), reverse=True)
-    else:
-        result.sort(
-            key=lambda x: (x.get("invoiceDateTime") or "", x.get("filename") or ""),
-            reverse=True,
-        )
+            x.get("filename") or ""
+        ),
+        reverse=True
+    )
     return result
 
 
@@ -4616,21 +4311,14 @@ def incoming_year_summary(documents):
             "count": 0,
             "amount": 0.0,
             "amountCount": 0,
-            "openCount": 0,
-            "openSum": 0.0,
         })
         row["count"] += 1
         if d.get("amount") is not None:
             row["amount"] += float(d["amount"])
             row["amountCount"] += 1
-        if d.get("paymentState") == "open":
-            row["openCount"] += 1
-            if d.get("amount") is not None:
-                row["openSum"] += float(d["amount"])
 
     for row in summary.values():
         row["amount"] = round(row["amount"], 2)
-        row["openSum"] = round(row["openSum"], 2)
     return summary
 
 
@@ -4782,23 +4470,6 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .invoice-amount{font-size:15px;font-weight:850;margin-top:7px}
 .invoice-snippet{font-size:12px;color:var(--muted);line-height:1.35;margin-top:7px;max-height:4.1em;overflow:hidden}
 
-.material-search-note{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.4}
-.material-search-status{margin-top:10px;padding:11px 12px;border:1px solid #48556a;border-radius:13px;background:#121820;color:#dfe7f2;line-height:1.45}
-.material-search-status strong{color:#fff}
-.material-search-status .subline{display:block;color:var(--muted);font-size:11px;margin-top:4px}
-.material-search-clear{margin-top:9px;background:#252a32;color:#fff;border:1px solid #444c58;padding:7px 10px;height:auto}
-.doc.material-search-hit{border-color:#617b9d;box-shadow:0 0 0 1px rgba(129,166,214,.13)}
-.material-hit-head{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 7px}
-.material-hit-badge{display:inline-flex;align-items:center;border:1px solid #526986;border-radius:999px;padding:5px 8px;background:#172131;color:#d9e9ff;font-size:11px;font-weight:900}
-.material-hit-badge.ideal{border-color:#9b7d27;background:#2a2412;color:#ffe393}
-.material-hit-box{margin-top:10px;padding:10px;border-radius:12px;background:#10151d;border:1px solid #354359}
-.material-hit-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#9fb5d3;font-weight:900;margin-bottom:6px}
-.material-hit-line{font-size:12px;line-height:1.45;color:#dfe6ef;padding:5px 0;border-top:1px solid rgba(255,255,255,.06)}
-.material-hit-line:first-of-type{border-top:0}
-mark.material-hit-mark{background:#ffe86b;color:#111;border-radius:3px;padding:0 2px;font-weight:900}
-.material-no-hit{padding:18px;border:1px dashed #4d5663;border-radius:16px;background:#15181d;color:#c8ced8}
-.material-no-hit strong{display:block;color:#fff;font-size:17px;margin-bottom:6px}
-
 @media (max-width:900px){
   .doc-list{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
@@ -4878,7 +4549,7 @@ mark.material-hit-mark{background:#ffe86b;color:#111;border-radius:3px;padding:0
 .open-total-zero{color:var(--good);font-weight:850}
 
 
-/* 0.13.3 · Projektsuche wie Eingangsrechnungen */
+/* 0.13.4 · Strenge Projekt-PDF-Zuordnung */
 .project-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .project-address-card{cursor:pointer;margin:0}
 .project-address-card:hover{border-color:#8994a5}
@@ -5110,13 +4781,12 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
       <div class="sub" id="incomingSub"></div>
 
       <div class="invoice-text-search">
-        <div class="formlabel">Welches Material suche ich?</div>
+        <div class="formlabel">Was suche ich in den Rechnungen?</div>
         <div class="searchrow">
           <input id="incomingTextQ" type="search"
-                 placeholder="Material, Artikelname oder Artikelnummer …" autocomplete="off">
-          <button id="incomingTextGo" type="button">Alle Rechnungen durchsuchen</button>
+                 placeholder="Artikel, Artikelnummer, Text …" autocomplete="off">
+          <button id="incomingTextGo" type="button">In Rechnungen suchen</button>
         </div>
-        <div class="material-search-note" id="incomingTextHint">Durchsucht alle Rechnungen des ausgewählten Lieferanten – ausschließlich die OCR-Materialzeilen.</div>
         <div class="meta" id="incomingTextMeta"></div>
       </div>
     </div>
@@ -5277,7 +4947,7 @@ const incomingSupplierSection=document.getElementById('incomingSupplierSection')
 const incomingSection=document.getElementById('incomingSection'),incomingGrouped=document.getElementById('incomingGrouped');
 const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub');
 const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
-const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextHint=document.getElementById('incomingTextHint'),incomingTextMeta=document.getElementById('incomingTextMeta');
+const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextMeta=document.getElementById('incomingTextMeta');
 const backToSuppliers=document.getElementById('backToSuppliers');
 const incomingWatch=document.getElementById('incomingWatch');
 const incomingReviewSection=document.getElementById('incomingReviewSection'),incomingReview=document.getElementById('incomingReview');
@@ -5297,7 +4967,7 @@ const captureCostSummary=document.getElementById('captureCostSummary'),captureCo
 const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
 
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,incomingMaterialQuery='',captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
 let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -5307,29 +4977,6 @@ function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
 function norm(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ')}
 function addressLabel(p){return [p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function addressKey(p){return norm([p.street,p.postalCode,p.city].filter(Boolean).join('|'))}
-
-function regexEscape(v){return String(v||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
-function highlightMaterialText(value,query){
-  const terms=String(query||'').trim().split(/[^0-9A-Za-zÄÖÜäöüß]+/).filter(Boolean).sort((a,b)=>b.length-a.length);
-  if(!terms.length)return esc(value);
-  const pattern=new RegExp('('+terms.map(regexEscape).join('|')+')','gi');
-  return String(value??'').split(pattern).map((part,index)=>index%2
-    ?`<mark class="material-hit-mark">${esc(part)}</mark>`
-    :esc(part)).join('');
-}
-function supplierSearchLabel(){
-  const name=String(selectedWwAddress?.name||'').trim();
-  return name||'diesem Lieferanten';
-}
-function updateIncomingMaterialScope(){
-  const name=supplierSearchLabel();
-  incomingTextGo.textContent='Alle Rechnungen durchsuchen';
-  incomingTextHint.textContent=`Durchsucht alle Rechnungen von ${name} – ausschließlich die OCR-Materialzeilen, nicht Datum, Rechnungsnummer oder Rechnungskopf.`;
-}
-function clearIncomingMaterialSearch(){
-  incomingTextQ.value='';
-  loadSupplierInvoices('');
-}
 
 function docSource(d){
   const s=norm([d.path,d.filename,d.dokumenttyp].filter(Boolean).join(' '));
@@ -5498,7 +5145,7 @@ async function openProjectDetail(p){
     const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
     selectedProject=data.project||p;currentProjects=[selectedProject];currentDocs=data.documents||[];currentDocType='';
     renderProjects();
-    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}`;
+    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}${Number(data.filteredPdfCount||0)?' · '+Number(data.filteredPdfCount)+' unsichere ausgeblendet':''}`;
     ds.hidden=false;renderSummary(currentProjects,currentDocs);renderDocumentTypes();
     ds.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
@@ -5672,9 +5319,7 @@ async function selectIncomingSupplier(address){
     ? 'WinWorker-Nr. '+address.customerNumber : '';
   incomingSub.textContent='Verknüpfte Rechnungen werden geladen …';
   incomingTextQ.value='';
-  incomingMaterialQuery='';
   incomingTextMeta.textContent='';
-  updateIncomingMaterialScope();
   incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
 
   await loadSupplierInvoices('');
@@ -5839,18 +5484,15 @@ function renderIncomingWatch(alerts){
 async function loadSupplierInvoices(textQuery=''){
   if(!selectedWwAddress)return;
 
-  const query=String(textQuery||'').trim();
-  incomingMaterialQuery=query;
   loader.style.display='block';
-  incomingTextGo.disabled=true;
-  incomingTextMeta.textContent=query
-    ? `Durchsuche alle OCR-Materialzeilen von ${supplierSearchLabel()} …`
+  incomingTextMeta.textContent=textQuery
+    ? 'Suche in den WinWorker-Rechnungsdaten …'
     : 'Lade Lieferantenakte …';
 
   try{
     const params=new URLSearchParams({
       addressId:selectedWwAddress.addressId||'',
-      q:query
+      q:textQuery||''
     });
     const r=await fetch('/incoming/address-invoices?'+params.toString(),{cache:'no-store'});
     const data=await r.json();
@@ -5859,11 +5501,11 @@ async function loadSupplierInvoices(textQuery=''){
     incomingAll=data.documents||[];
     renderIncomingWatch(data.watchAlerts||[]);
     const stats=data.stats||{};
-    const search=data.search||{};
     const totalSum=Number(stats.sum||0);
     const openSum=Number(stats.openSum||0);
     const openCount=Number(stats.openCount||0);
-    const count=Number(stats.count||data.allCount||0);
+    const amountCount=Number(stats.amountCount||0);
+    const count=Number(stats.count||incomingAll.length||0);
     const yearly=stats.yearly||{};
 
     incomingSub.innerHTML=
@@ -5871,37 +5513,22 @@ async function loadSupplierInvoices(textQuery=''){
       `<strong>${esc(invoiceMoney(totalSum))}</strong> Gesamtsumme · `+
       `<span class="${openCount>0||openSum>0?'open-total':'open-total-zero'}">${openCount} offen · ${esc(invoiceMoney(openSum))}</span> · `+
       `<span class="ww-truth">WW + KRISTINE</span>`+
-      (query?` · <span class="material-hit-badge">${Number(search.hitInvoices||0)} Rechnungen mit Materialtreffer</span>`:'');
+      (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
 
-    incomingTextMeta.classList.toggle('year-summary-grid',!query);
-    if(query){
-      const scanned=Number(search.scannedInvoices||count||0);
-      const ocr=Number(search.ocrInvoices||0);
-      const without=Number(search.withoutOcr||0);
-      const hits=Number(search.hitInvoices||incomingAll.length||0);
-      const matches=Number(search.matchCount||0);
-      const ideal=Number(search.idealHitInvoices||0);
-      const matchText=matches===1?'1 markiertem Materialtreffer':`${matches} markierten Materialtreffern`;
-      incomingTextMeta.innerHTML=`<div class="material-search-status">
-        <strong>${hits} Rechnung${hits===1?'':'en'} mit ${matchText}</strong>
-        <span class="subline">${scanned} Rechnungen von ${esc(supplierSearchLabel())} geprüft · ${ocr} OCR-Texte gelesen${without?` · ${without} ohne lesbaren OCR-Text`:''}${ideal?` · ${ideal} ideal gereiht`:''}</span>
-        <button id="incomingMaterialClear" class="material-search-clear" type="button">× Materialsuche löschen · alle Rechnungen anzeigen</button>
-      </div>`;
-      document.getElementById('incomingMaterialClear')?.addEventListener('click',clearIncomingMaterialSearch);
-    }else{
-      incomingTextMeta.innerHTML=Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
-        const s=yearly[y]||{};
-        const oc=Number(s.openCount||0), os=Number(s.openSum||0);
-        return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="${oc>0||os>0?'open-total':'open-total-zero'}">${oc} offen · ${esc(invoiceMoney(os))}</span></span>`;
-      }).join('');
-    }
+    incomingTextMeta.classList.toggle('year-summary-grid',!textQuery);
+    incomingTextMeta.innerHTML=textQuery
+      ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
+      : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
+          const s=yearly[y]||{};
+          const oc=Number(s.openCount||0), os=Number(s.openSum||0);
+          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="${oc>0||os>0?'open-total':'open-total-zero'}">${oc} offen · ${esc(invoiceMoney(os))}</span></span>`;
+        }).join('');
 
-    renderIncomingGrouped(incomingAll,data.years||{},query,search);
+    renderIncomingGrouped(incomingAll,data.years||{});
   }catch(e){
     incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
   }finally{
     loader.style.display='none';
-    incomingTextGo.disabled=false;
   }
 }
 
@@ -5914,31 +5541,18 @@ function renderIncomingDoc(d){
   const date=d.invoiceDate
     ? d.invoiceDate.split('-').reverse().join('.')
     : '';
-  const searching=Boolean(incomingMaterialQuery);
-  const materialMatches=Array.isArray(d.materialMatches)?d.materialMatches:[];
-  const materialBox=searching&&materialMatches.length
-    ? `<div class="material-hit-box">
-        <div class="material-hit-label">Nur Materialzeilen · ${Number(d.materialMatchCount||materialMatches.length)} Treffer</div>
-        ${materialMatches.map(line=>`<div class="material-hit-line">${highlightMaterialText(line,incomingMaterialQuery)}</div>`).join('')}
-      </div>`
-    : '';
-  const hitBadge=searching
-    ? `<div class="material-hit-head"><span class="material-hit-badge ${d.materialMatchIdeal?'ideal':''}">${d.materialMatchIdeal?'★ Idealer Treffer':'Materialtreffer'} · ${Number(d.materialMatchCount||1)}</span></div>`
-    : '';
-  return `<div class="card doc ${searching?'material-search-hit':''}">
+  return `<div class="card doc">
     ${d.path
       ? `<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`
       : `<div class="thumb empty" style="display:flex;align-items:center;justify-content:center;color:#666;font-weight:900">WW</div>`}
     <div>
-      ${hitBadge}
       ${date?`<div class="day-date">${esc(date)}</div>`:''}
       <div class="docname">${esc(d.invoiceNumber?('Rechnung '+d.invoiceNumber):(d.filename||'Eingangsrechnung'))}</div>
       ${d.amount!==null&&d.amount!==undefined
         ? `<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
       ${d.paymentStatus?`<div class="${d.paymentState==='open'?'payment-open':d.paymentState==='paid'?'payment-paid':'payment-unknown'}">${esc(d.paymentStatus)}</div>`:''}
       <div class="ww-truth">Quelle: ${esc(d.sourceOfTruth||'WinWorker Eingangsbelege')}</div>
-      ${materialBox}
-      ${!searching&&d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
+      ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
         ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF nicht gefunden</span>'}
         ${d.originalPath?`<a class="action" href="${urlFor('/pdf',d.originalPath)}" target="_blank" rel="noopener">Original</a>`:''}
@@ -5947,19 +5561,9 @@ function renderIncomingDoc(d){
   </div>`;
 }
 
-function renderIncomingGrouped(rows, yearSummary, textQuery='', searchMeta={}){
-  const searching=Boolean(String(textQuery||'').trim());
+function renderIncomingGrouped(rows, yearSummary){
   if(!rows.length){
-    if(searching){
-      incomingGrouped.innerHTML=`<div class="material-no-hit">
-        <strong>Kein Materialtreffer für „${esc(textQuery)}“</strong>
-        Durchsucht wurden ${Number(searchMeta.scannedInvoices||0)} Rechnungen von ${esc(supplierSearchLabel())}. Rechnungskopf, Datum und Rechnungsnummer zählen bewusst nicht als Treffer.
-        <div><button class="material-search-clear" type="button" id="incomingMaterialClearEmpty">Alle Rechnungen wieder anzeigen</button></div>
-      </div>`;
-      document.getElementById('incomingMaterialClearEmpty')?.addEventListener('click',clearIncomingMaterialSearch);
-    }else{
-      incomingGrouped.innerHTML='<div class="empty">Keine Rechnungen für diese Auswahl gefunden.</div>';
-    }
+    incomingGrouped.innerHTML='<div class="empty">Keine Rechnungen für diese Auswahl gefunden.</div>';
     return;
   }
 
@@ -5985,46 +5589,38 @@ function renderIncomingGrouped(rows, yearSummary, textQuery='', searchMeta={}){
 
     const months=years.get(y);
     const monthKeys=[...months.keys()].sort((a,b)=>Number(b)-Number(a));
-    const yearDocs=[...months.values()].flat();
-    const yearMatches=yearDocs.reduce((sum,d)=>sum+Number(d.materialMatchCount||0),0);
 
     const monthHtml=monthKeys.map(m=>{
       const docsForMonth=months.get(m);
       const title=monthLabel(m,docsForMonth[0]?.monthName);
-      const monthMatches=docsForMonth.reduce((sum,d)=>sum+Number(d.materialMatchCount||0),0);
       return `<div class="month-block">
-        <div class="month-title">${esc(title)} · ${docsForMonth.length}${searching?` Rechnung${docsForMonth.length===1?'':'en'} · ${monthMatches} Materialtreffer`:''}</div>
+        <div class="month-title">${esc(title)} · ${docsForMonth.length}</div>
         <div class="doc-list">${docsForMonth.map(renderIncomingDoc).join('')}</div>
       </div>`;
     }).join('');
 
-    const yearTotal=searching
-      ? `<div class="year-total"><strong>${yearDocs.length} Rechnung${yearDocs.length===1?'':'en'}</strong><small>${yearMatches} markierte Materialtreffer</small></div>`
-      : `<div class="year-total">
-          <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
-          <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
-          <small class="${Number(ys.openCount||0)>0||Number(ys.openSum||0)>0?'open-total':'open-total-zero'}">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
-        </div>`;
-
     return `<div class="year-block">
       <div class="year-header">
         <div class="year-name">${esc(y)}</div>
-        ${yearTotal}
+        <div class="year-total">
+          <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
+          <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
+          <small class="${Number(ys.openCount||0)>0||Number(ys.openSum||0)>0?'open-total':'open-total-zero'}">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
+        </div>
       </div>
       ${monthHtml}
     </div>`;
   }).join('');
 }
 
+
 incomingTextGo.onclick=()=>loadSupplierInvoices(incomingTextQ.value.trim());
 incomingTextQ.addEventListener('keydown',e=>{
   if(e.key==='Enter')loadSupplierInvoices(incomingTextQ.value.trim());
-  if(e.key==='Escape'&&incomingMaterialQuery)clearIncomingMaterialSearch();
 });
 
-
 backToSuppliers.onclick=()=>{
-  selectedSupplier=null;selectedWwAddress=null;incomingMaterialQuery='';
+  selectedSupplier=null;selectedWwAddress=null;
   incomingSection.hidden=true;incomingReviewSection.hidden=true;
   incomingSupplierSection.hidden=false;
   meta.textContent=incomingCandidates.length+' WinWorker-Adresse(n) · bitte auswählen';
@@ -7098,26 +6694,22 @@ def incoming_address_invoices():
     if not address_id:
         return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
     try:
-        context = incoming_for_address(address_id, text_query, return_context=True)
-        docs = context["documents"]
-        all_docs = context["allDocuments"]
-        ww_rows = context["wwRows"]
-        local_rows = context["localRows"]
+        ww_rows = ww_incoming_for_address(address_id)
+        local_rows = kristine_incoming_for_address(address_id)
+        docs = incoming_for_address(address_id, text_query)
         years = incoming_year_summary(docs)
 
-        # Lieferantenkopf und OP bleiben auch während einer Materialsuche auf
-        # der vollständigen Lieferantenakte – nicht nur auf den Treffern.
-        total_sum = round(sum(float(x.get("amount") or 0) for x in all_docs if x.get("amount") is not None), 2)
-        amount_count = sum(1 for x in all_docs if x.get("amount") is not None)
+        total_sum = round(sum(float(x.get("amount") or 0) for x in docs if x.get("amount") is not None), 2)
+        amount_count = sum(1 for x in docs if x.get("amount") is not None)
         open_sum = round(sum(
             float(x.get("amount") or 0)
-            for x in all_docs
+            for x in docs
             if x.get("paymentState") == "open" and x.get("amount") is not None
         ), 2)
-        open_count = sum(1 for x in all_docs if x.get("paymentState") == "open")
+        open_count = sum(1 for x in docs if x.get("paymentState") == "open")
 
         yearly_stats = {}
-        for x in all_docs:
+        for x in docs:
             year = str(x.get("year") or "")
             if not year:
                 continue
@@ -7146,17 +6738,15 @@ def incoming_address_invoices():
             "addressId": address_id,
             "documents": docs,
             "count": len(docs),
-            "allCount": len(all_docs),
             "years": years,
             "stats": {
-                "count": len(all_docs),
+                "count": len(docs),
                 "amountCount": amount_count,
                 "sum": total_sum,
                 "openCount": open_count,
                 "openSum": open_sum,
                 "yearly": yearly_stats,
             },
-            "search": context["search"],
             "watchAlerts": incoming_watch_alerts(address_id, ww_rows + local_rows),
             "sourceOfTruth": "WinWorker + KRISTINE",
         })
@@ -7354,7 +6944,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.13.4 - OCR-Materialsuche je Lieferant mit Treffer-Markierung")
+    print("Version: 0.13.4 - Projekt-PDFs ohne Teilstring-Falschtreffer")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
