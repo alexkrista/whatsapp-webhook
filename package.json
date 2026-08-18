@@ -1,19 +1,14 @@
 {
-  "name": "krista-baustellenprotokoll",
-  "version": "2.0.0",
-  "main": "server.js",
+  "name": "kristine-hotfix-2026-08-18",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hotfix for immediate WhatsApp fertig stop and KRISPLAN absence reconciliation",
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "nodemailer": "^6.9.14",
-    "pdf-lib": "^1.17.1",
-    "sharp": "^0.33.4",
-    "node-cron": "^3.0.2",
-    "xlsx": "^0.18.5"
+    "test": "node --test test/*.test.js",
+    "check": "node --check lib/finish-now.js && node --check lib/krisplan-absence-reconcile.js && node --check integration/server-wiring.example.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   }
 }
