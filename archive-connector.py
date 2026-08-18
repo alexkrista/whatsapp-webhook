@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, send_file, render_template_string
 import sqlite3
 from pathlib import Path
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import re
 import json
@@ -14,6 +14,7 @@ import urllib.parse
 import shutil
 import threading
 import math
+import difflib
 
 import pymupdf
 import pyodbc
@@ -90,7 +91,7 @@ def archive_security_headers(response):
         "style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
-        "object-src 'none'; "
+        "object-src 'self' blob:; frame-src 'self' blob:; "
         "base-uri 'none'; "
         "form-action 'self'; "
         "frame-ancestors 'none'"
@@ -165,6 +166,8 @@ CAPTURE_ALLOW_OFFLINE_SEQUENCE = str(
 ).strip() == "1"
 CAPTURE_NUMBER_LOCK = threading.Lock()
 CAPTURE_TEST_LOCK = threading.Lock()
+CAPTURE_OCR_LANG = str(os.environ.get("KRISTINE_INCOMING_OCR_LANG", "deu+eng")).strip() or "deu+eng"
+CAPTURE_OCR_DPI = max(120, min(300, int(os.environ.get("KRISTINE_INCOMING_OCR_DPI", "190"))))
 
 CAPTURE_COST_TYPES = [
     "Material",
@@ -252,13 +255,50 @@ def _ensure_capture_schema(con):
             FOREIGN KEY(invoice_id) REFERENCES incoming_invoices(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS supplier_bank_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_address_id TEXT NOT NULL,
+            iban TEXT NOT NULL,
+            source_invoice_id INTEGER,
+            source_doc_id TEXT,
+            confirmed_by TEXT,
+            confirmed_at TEXT NOT NULL,
+            note TEXT,
+            FOREIGN KEY(source_invoice_id) REFERENCES incoming_invoices(id) ON DELETE SET NULL,
+            UNIQUE(supplier_address_id, iban)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_incoming_supplier
             ON incoming_invoices(supplier_address_id, invoice_date DESC);
         CREATE INDEX IF NOT EXISTS idx_incoming_status
             ON incoming_invoices(workflow_status, payment_state);
         CREATE INDEX IF NOT EXISTS idx_incoming_alloc_invoice
             ON incoming_allocations(invoice_id, line_no);
+        CREATE INDEX IF NOT EXISTS idx_supplier_bank_address
+            ON supplier_bank_accounts(supplier_address_id, confirmed_at DESC);
     """)
+
+    # Bestehende 0.13.x-Datenbanken werden ohne Datenverlust erweitert.
+    existing = {
+        str(row[1])
+        for row in con.execute("PRAGMA table_info(incoming_invoices)").fetchall()
+    }
+    migrations = {
+        "skonto_enabled": "INTEGER NOT NULL DEFAULT 0",
+        "skonto_percent": "REAL",
+        "skonto_due_date": "TEXT",
+        "net_due_date": "TEXT",
+        "payment_terms": "TEXT",
+        "invoice_iban": "TEXT",
+        "master_iban": "TEXT",
+        "bank_change_accepted": "INTEGER NOT NULL DEFAULT 0",
+        "ocr_used": "INTEGER NOT NULL DEFAULT 0",
+        "ocr_pages": "INTEGER NOT NULL DEFAULT 0",
+        "ocr_warning": "TEXT",
+    }
+    for name, sql_type in migrations.items():
+        if name not in existing:
+            con.execute(f"ALTER TABLE incoming_invoices ADD COLUMN {name} {sql_type}")
     con.commit()
 
 
@@ -426,70 +466,411 @@ def _capture_number_status_for_area(year=None, area="live", con=None):
 
 
 def _capture_pdf_text(pdf_bytes, max_pages=12):
+    """Text zuerst direkt lesen; bei echten Scan-Seiten OCR als Fallback."""
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
         if len(doc) < 1:
             raise ValueError("PDF hat keine Seiten.")
         chunks = []
-        for page in list(doc)[:max_pages]:
+        ocr_pages = 0
+        ocr_errors = []
+        for page_no, page in enumerate(list(doc)[:max_pages], start=1):
             try:
-                chunks.append(page.get_text("text") or "")
+                direct = page.get_text("text") or ""
             except Exception:
-                chunks.append("")
-        return "\n".join(chunks), len(doc)
+                direct = ""
+            meaningful = re.sub(r"\s+", "", direct)
+            if len(meaningful) >= 40:
+                chunks.append(direct)
+                continue
+            try:
+                textpage = page.get_textpage_ocr(
+                    language=CAPTURE_OCR_LANG,
+                    dpi=CAPTURE_OCR_DPI,
+                    full=True,
+                )
+                ocr_text = page.get_text("text", textpage=textpage) or ""
+                if len(re.sub(r"\s+", "", ocr_text)) > len(meaningful):
+                    direct = ocr_text
+                    ocr_pages += 1
+            except Exception as exc:
+                ocr_errors.append(f"Seite {page_no}: {exc}")
+            chunks.append(direct)
+        warning = ""
+        if ocr_errors and not any(re.sub(r"\s+", "", chunk) for chunk in chunks):
+            warning = "OCR nicht verfügbar: " + " | ".join(ocr_errors[:2])
+        elif ocr_errors:
+            warning = "Einzelne Scan-Seiten konnten nicht per OCR gelesen werden."
+        return "\n".join(chunks), len(doc), ocr_pages, warning
 
 
-def _capture_labeled_money(text, labels):
-    lines = [re.sub(r"\s+", " ", line).strip() for line in str(text or "").splitlines()]
-    for line in lines:
+def _capture_clean_text(text):
+    return (
+        str(text or "")
+        .replace("\u00ad", "")
+        .replace("\xa0", " ")
+        .replace("\u2011", "-")
+        .replace("\u2013", "-")
+    )
+
+
+def _capture_lines(text):
+    return [
+        re.sub(r"\s+", " ", line).strip()
+        for line in _capture_clean_text(text).splitlines()
+        if re.sub(r"\s+", " ", line).strip()
+    ]
+
+
+def _capture_parse_date_token(value):
+    match = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b", str(value or ""))
+    if not match:
+        return ""
+    try:
+        day, month, year = map(int, match.groups())
+        return datetime(year, month, day).date().isoformat()
+    except Exception:
+        return ""
+
+
+def _capture_date_plus_days(date_iso, days):
+    try:
+        return (datetime.strptime(date_iso, "%Y-%m-%d").date() + timedelta(days=int(days))).isoformat()
+    except Exception:
+        return ""
+
+
+def _capture_invoice_number(text, filename=""):
+    cleaned = _capture_clean_text(text)
+    flat = re.sub(r"\s+", " ", cleaned)
+    patterns = [
+        r"(?i)\bRechnung\s*(?:Nr\.?|Nummer)?\s*[:#-]\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+        r"(?i)\bRechnungs(?:nummer|nr\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+        r"(?i)\bBeleg(?:nummer|nr\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+        r"(?i)\bInvoice\s*(?:No\.?|Number)?\s*[:#-]\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, flat)
+        if match:
+            value = match.group(1).strip(" .,:;-")
+            if value and not re.fullmatch(r"\d{1,2}[.-]\d{1,2}[.-]20\d{2}", value):
+                return value
+
+    # Viele Rechnungen drucken die Nummer allein ganz oben und später nochmals.
+    lines = _capture_lines(cleaned)
+    for line in lines[:5]:
+        candidate = line.strip()
+        if re.fullmatch(r"[A-Z0-9][A-Z0-9./_-]{2,24}", candidate) and not re.fullmatch(r"\d{1,2}[.-]\d{1,2}[.-]20\d{2}", candidate):
+            if re.search(rf"(?i)\bRechnung\b[^\n]{{0,30}}\b{re.escape(candidate)}\b", flat):
+                return candidate
+
+    # Dateiname nur als letzte Notlösung; Wörter wie Kopie/Vorg/Rech werden ignoriert.
+    stem = Path(str(filename or "")).stem
+    for match in re.finditer(r"(?<!\d)(\d{3,12})(?!\d)", stem):
+        value = match.group(1)
+        if not value.startswith("20") or len(value) > 8:
+            return value
+    return ""
+
+
+def _capture_invoice_date(text):
+    lines = _capture_lines(text)
+    label = re.compile(r"(?i)\b(rechnungsdatum|belegdatum|invoice date)\b")
+    for index, line in enumerate(lines):
+        if not label.search(line):
+            continue
+        same = _capture_parse_date_token(line)
+        if same:
+            return same
+        # PDF-Text wird oft spaltenweise ausgegeben: Wert steht vor dem Label.
+        for offset in (1, 2, 3, -1, -2, -3):
+            pos = index - offset if offset > 0 else index - offset
+            if 0 <= pos < len(lines):
+                found = _capture_parse_date_token(lines[pos])
+                if found:
+                    return found
+    for line in lines[:15]:
+        found = _capture_parse_date_token(line)
+        if found:
+            return found
+    fallback = _extract_invoice_date(text)
+    return fallback.date().isoformat() if fallback else ""
+
+
+def _capture_money_near_labels(text, labels, max_follow=4):
+    lines = _capture_lines(text)
+    for index, line in enumerate(lines):
         low = line.lower()
         if not any(label in low for label in labels):
             continue
-        values = _line_money_values(line)
+        values = []
+        for offset in range(0, max_follow + 1):
+            if index + offset >= len(lines):
+                break
+            candidate = lines[index + offset]
+            if "%" in candidate:
+                continue
+            values.extend(_line_money_values(candidate))
         if values:
             return values[-1]
     return None
 
 
-def _capture_due_date(text):
-    flat = re.sub(r"\s+", " ", str(text or ""))
+def _capture_vat_rate(text):
+    cleaned = _capture_clean_text(text)
     patterns = [
-        r"(?i)(?:fälligkeitsdatum|fälligkeit|zahlbar bis)\s*[:\-]?\s*(\d{1,2})[./-](\d{1,2})[./-](20\d{2})",
-        r"(?i)(?:due date)\s*[:\-]?\s*(\d{1,2})[./-](\d{1,2})[./-](20\d{2})",
+        r"(?i)(?:MwSt|USt|VAT)\s*(?:\(\d+\))?\s*[:\-]?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%",
+        r"(?i)\b(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*(?:MwSt|USt|VAT)\b",
     ]
     for pattern in patterns:
-        match = re.search(pattern, flat)
-        if not match:
-            continue
-        try:
-            day, month, year = map(int, match.groups())
-            return datetime(year, month, day).date().isoformat()
-        except Exception:
-            pass
+        match = re.search(pattern, cleaned)
+        if match:
+            try:
+                value = float(match.group(1).replace(",", "."))
+                if 0 <= value <= 30:
+                    return round(value, 2)
+            except Exception:
+                pass
+    return None
+
+
+def _capture_payment_terms(text, invoice_date):
+    lines = _capture_lines(text)
+    selected = []
+    for index, line in enumerate(lines):
+        if re.search(r"(?i)\b(zahlung|zahlungsbeding|fällig|faellig|skonto|zahlbar|payment terms|due date)\b", line):
+            selected.extend(lines[index:index + 4])
+    phrase = " ".join(dict.fromkeys(selected))
+    if not phrase:
+        phrase = re.sub(r"\s+", " ", _capture_clean_text(text))[:3500]
+    compact = re.sub(r"\s+", " ", phrase).strip()
+
+    skonto_match = re.search(r"(?i)(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*Skonto", compact)
+    if not skonto_match:
+        skonto_match = re.search(r"(?i)Skonto[^\d]{0,20}(\d{1,2}(?:[.,]\d{1,2})?)\s*%", compact)
+    skonto_percent = round(float(skonto_match.group(1).replace(",", ".")), 2) if skonto_match else None
+    skonto_enabled = bool(skonto_match or re.search(r"(?i)\bSkonto\b", compact))
+
+    skonto_due = ""
+    skonto_date_match = re.search(
+        r"(?i)Skonto.{0,80}?(\d{1,2}[./-]\d{1,2}[./-]20\d{2})",
+        compact,
+    )
+    if skonto_date_match:
+        skonto_due = _capture_parse_date_token(skonto_date_match.group(1))
+    if not skonto_due and invoice_date:
+        days_match = re.search(r"(?i)(\d{1,3})\s*Tage?[^.]{0,40}Skonto|Skonto[^.]{0,40}?(\d{1,3})\s*Tage?", compact)
+        if days_match:
+            skonto_due = _capture_date_plus_days(invoice_date, next(x for x in days_match.groups() if x))
+
+    net_due = ""
+    explicit_net = re.search(
+        r"(?i)(?:fällig(?:keitsdatum)?|faellig|zahlbar bis|netto(?:fällig)?|ohne Abzug|Zahlung)"
+        r".{0,60}?(\d{1,2}[./-]\d{1,2}[./-]20\d{2})",
+        compact,
+    )
+    if explicit_net:
+        net_due = _capture_parse_date_token(explicit_net.group(1))
+    if not net_due and invoice_date:
+        net_days = re.search(r"(?i)(\d{1,3})\s*Tage?\s*(?:netto|ohne Abzug)", compact)
+        if net_days:
+            net_due = _capture_date_plus_days(invoice_date, net_days.group(1))
+        elif re.search(r"(?i)\bsofort\b", compact):
+            net_due = invoice_date
+
+    # Eine nackte Zahlungsdatumszeile direkt nach "Zahlung" gilt ebenfalls als Nettofälligkeit.
+    if not net_due:
+        for index, line in enumerate(lines):
+            if re.search(r"(?i)\bZahlung\b", line):
+                for candidate in lines[index:index + 4]:
+                    found = _capture_parse_date_token(candidate)
+                    if found:
+                        net_due = found
+                        break
+            if net_due:
+                break
+
+    payment_line = ""
+    for index, line in enumerate(lines):
+        if re.search(r"(?i)\b(Zahlung|Zahlungsbeding|Skonto|zahlbar)\b", line):
+            parts = []
+            for candidate in lines[index:index + 5]:
+                if parts and re.search(r"(?i)\b(USt|UID|Kasse|Kreditkarte|Rechnung|IBAN|BIC)\b", candidate):
+                    break
+                parts.append(candidate)
+            payment_line = " ".join(parts)[:260]
+            break
+    return {
+        "skontoEnabled": skonto_enabled,
+        "skontoPercent": skonto_percent,
+        "skontoDueDate": skonto_due,
+        "netDueDate": net_due,
+        "paymentTerms": payment_line or compact[:260],
+    }
+
+
+def _capture_booking_text(text):
+    lines = _capture_lines(text)
+    for index, line in enumerate(lines):
+        match = re.search(r"(?i)\b(?:Betreff|Betrifft|Buchungstext|Verwendungszweck)\s*[:\-]\s*(.+)$", line)
+        if match and match.group(1).strip():
+            return match.group(1).strip()[:220]
+        if re.fullmatch(r"(?i)(?:Betreff|Betrifft|Buchungstext|Verwendungszweck)\s*[:\-]?", line) and index + 1 < len(lines):
+            candidate = lines[index + 1].strip()
+            if candidate:
+                return candidate[:220]
     return ""
 
 
+def _capture_supplier_identity(text):
+    lines = _capture_lines(text)
+    own = re.compile(r"(?i)\b(farben\s*[- ]?krista|malerische\s+wohnideen|studio\s+raum\s*&\s*bad)\b")
+    legal = re.compile(r"(?i)\b(gmbh|ges\.?\s*m\.?\s*b\.?\s*h\.?|ag|kg|ohg|gmbh\s*&\s*co|sarl|sa|ltd|limited)\b")
+    generic = re.compile(r"(?i)^(kopie|original|rechnung|gutschrift|seite\s*\d+|firma|bezeichnung)$")
+    candidates = []
+
+    def add_candidate(name, index, bonus=0, source="line"):
+        clean = re.sub(r"\s+", " ", str(name or "")).strip(" ,;:-")
+        clean = re.sub(r"\s*[-–]\s*", "-", clean)
+        clean = re.sub(r"\s*&\s*", " & ", clean)
+        if len(clean) < 3 or len(clean) > 150 or own.search(clean) or generic.fullmatch(clean):
+            return
+        score = bonus
+        if legal.search(clean):
+            score += 55
+        if re.search(r"[A-Za-zÄÖÜäöü]{3}", clean):
+            score += 8
+        if index >= max(0, len(lines) - 20):
+            score += 8
+        nearby = " ".join(lines[index + 1:index + 6]) if 0 <= index < len(lines) else ""
+        if re.search(r"\b\d{4}\s+[A-Za-zÄÖÜäöü]", nearby):
+            score += 15
+        if re.search(r"(?i)(?:straße|strasse|str\.?|weg|gasse|platz)", nearby):
+            score += 8
+        if "@" in nearby or re.search(r"\+\d", nearby):
+            score += 5
+        normalized = _norm_supplier(clean)
+        repeats = sum(1 for line in lines if _norm_supplier(line) == normalized)
+        score += min(20, repeats * 8)
+        candidates.append({"name": clean, "index": index, "score": score, "source": source, "norm": normalized})
+
+    for index, line in enumerate(lines):
+        explicit = re.search(r"(?i)\bBezeichnung\s*:\s*(.+)$", line)
+        if explicit:
+            add_candidate(explicit.group(1), index, 80, "bezeichnung")
+        if legal.search(line):
+            add_candidate(line, index, 20, "legal")
+
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda row: (-row["score"], len(row["name"]), row["index"]))
+    best = candidates[0]
+    # Bei gleicher Identität die sauberste alleinstehende Firmenzeile bevorzugen.
+    same = [row for row in candidates if row["norm"] == best["norm"] and row["score"] >= best["score"] - 20]
+    if same:
+        best = min(same, key=lambda row: (0 if row["source"] == "legal" else 1, len(row["name"])))
+
+    index = best["index"]
+    street = ""
+    postal = ""
+    for line in lines[index + 1:index + 10]:
+        if own.search(line):
+            continue
+        if not street and re.search(r"(?i)(?:straße|strasse|str\.?|weg|gasse|platz|allee)", line) and re.search(r"\d", line):
+            street = line
+        if not postal and re.search(r"\b(?:A-|AT-|CH-|LI-)?\d{4}\s+[A-Za-zÄÖÜäöü]", line):
+            postal = line
+        if street and postal:
+            break
+    address = ", ".join(part for part in (street, postal) if part)
+    email = next((line for line in lines[index:index + 12] if "@" in line), "")
+    phone = next((line for line in lines[index:index + 12] if re.search(r"\+\d{2}", line)), "")
+    return {
+        "name": best["name"],
+        "address": address,
+        "email": email,
+        "phone": phone,
+        "confidence": min(100, max(0, int(best["score"]))),
+    }
+
+
+def _capture_customer_number(text):
+    lines = _capture_lines(text)
+    generic = {"firma", "rechnung", "kunde", "kundennr", "kundennummer"}
+    for index, line in enumerate(lines):
+        if not re.search(r"(?i)Kunden[-\s]?Nr|Kundennummer", line):
+            continue
+        same = re.search(r"(?i)(?:Kunden[-\s]?Nr\.?|Kundennummer)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{1,30})", line)
+        if same:
+            value = same.group(1).strip()
+            if re.search(r"\d", value) and value.lower() not in generic:
+                return value
+        # Spaltenweise PDF-Ausgabe: Wert steht häufig unmittelbar VOR dem Label.
+        for pos in range(index - 1, max(-1, index - 5), -1):
+            if pos < 0:
+                break
+            value = lines[pos].strip()
+            if re.fullmatch(r"[A-Z0-9./_-]{2,30}", value) and re.search(r"\d", value):
+                if not _capture_parse_date_token(value):
+                    return value
+
+    flat = re.sub(r"\s+", " ", _capture_clean_text(text))
+    for pattern in (
+        r"(?i)Kunden[-\s]?Nr\.?\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+        r"(?i)Kundennummer\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{1,30})",
+    ):
+        match = re.search(pattern, flat)
+        if match:
+            value = match.group(1).strip()
+            if re.search(r"\d", value) and value.lower() not in generic:
+                return value
+    return ""
+
+
+def _capture_uid(text):
+    flat = re.sub(r"\s+", " ", _capture_clean_text(text))
+    match = re.search(r"(?i)\b(?:UID|USt[-\s]?ID(?:Nr\.?)?)\s*[:#-]?\s*(ATU\d{8})\b", flat)
+    if match:
+        return match.group(1).upper()
+    match = re.search(r"\bATU\d{8}\b", flat, re.I)
+    return match.group(0).upper() if match else ""
+
+
 def _capture_analyze_pdf(pdf_bytes, filename=""):
-    text, page_count = _capture_pdf_text(pdf_bytes)
-    fingerprint = _extract_supplier_fingerprint(text)
-    supplier = _extract_supplier_identity(text) or {}
-    invoice_dt = _extract_invoice_date(text)
+    text, page_count, ocr_pages, ocr_warning = _capture_pdf_text(pdf_bytes)
+    supplier = _capture_supplier_identity(text)
+    invoice_date = _capture_invoice_date(text)
+    invoice_number = _capture_invoice_number(text, filename)
     amount_info = _extract_invoice_amount_smart(text)
     gross = amount_info.get("amount")
-    net = _capture_labeled_money(text, (
+    net = _capture_money_near_labels(text, (
         "nettobetrag", "netto gesamt", "waren- und dienstleistungswert",
-        "total eur ohne mwst", "ust-basis", "net amount"
+        "total eur ohne mwst", "ust-basis", "ust basis", "steuerbasis",
+        "grundlagen", "zw. summe", "zw summe", "net amount",
     ))
-    vat = _capture_labeled_money(text, (
+    vat = _capture_money_near_labels(text, (
         "mwst-betrag", "ust-betrag", "umsatzsteuer", "mwst gesamt",
-        "ust gesamtbetrag", "zzgl. gesetzl. mwst", "vat amount"
+        "ust gesamtbetrag", "steuerwerte", "vat amount",
     ))
+    vat_rate = _capture_vat_rate(text)
+
     if gross is not None and net is not None and vat is None:
         vat = round(float(gross) - float(net), 2)
     elif gross is not None and vat is not None and net is None:
         net = round(float(gross) - float(vat), 2)
     elif gross is None and net is not None and vat is not None:
         gross = round(float(net) + float(vat), 2)
+    elif gross is not None and net is None and vat is None and vat_rate not in (None, 0):
+        net = round(float(gross) / (1 + float(vat_rate) / 100), 2)
+        vat = round(float(gross) - float(net), 2)
 
+    # Plausibilisierung: Grundbetrag + Steuer muss die Endsumme ergeben.
+    if gross is not None and net is not None and vat is not None and abs((float(net) + float(vat)) - float(gross)) > 0.08:
+        derived_vat = round(float(gross) - float(net), 2)
+        if derived_vat >= 0:
+            vat = derived_vat
+
+    terms = _capture_payment_terms(text, invoice_date)
+    iban = _extract_iban_from_text(text)
     return {
         "filename": str(filename or ""),
         "pageCount": page_count,
@@ -498,19 +879,117 @@ def _capture_analyze_pdf(pdf_bytes, filename=""):
         "textPreview": " ".join(text.split())[:900],
         "supplierName": supplier.get("name") or "",
         "supplierAddress": supplier.get("address") or "",
-        "supplierInvoiceNumber": fingerprint.get("invoiceNumber") or "",
-        "invoiceDate": invoice_dt.date().isoformat() if invoice_dt else "",
-        "dueDate": _capture_due_date(text),
+        "supplierEmail": supplier.get("email") or "",
+        "supplierPhone": supplier.get("phone") or "",
+        "supplierConfidence": int(supplier.get("confidence") or 0),
+        "supplierInvoiceNumber": invoice_number,
+        "invoiceDate": invoice_date,
+        "dueDate": terms.get("netDueDate") or "",
+        "netDueDate": terms.get("netDueDate") or "",
+        "skontoEnabled": bool(terms.get("skontoEnabled")),
+        "skontoPercent": terms.get("skontoPercent"),
+        "skontoDueDate": terms.get("skontoDueDate") or "",
+        "paymentTerms": terms.get("paymentTerms") or "",
         "grossAmount": gross,
         "netAmount": net,
         "vatAmount": vat,
-        "iban": _norm_iban(fingerprint.get("iban")),
-        "uid": fingerprint.get("uid") or "",
-        "customerNumberExternal": fingerprint.get("customerNumberExternal") or "",
-        "amountConfidence": int(fingerprint.get("amountConfidence") or 0),
-        "amountReason": fingerprint.get("amountReason") or "",
+        "vatRate": vat_rate,
+        "iban": iban,
+        "ibanValid": _iban_valid(iban) if iban else False,
+        "uid": _capture_uid(text),
+        "customerNumberExternal": _capture_customer_number(text),
+        "bookingText": _capture_booking_text(text),
+        "amountConfidence": int(amount_info.get("confidence") or 0),
+        "amountReason": amount_info.get("reason") or "",
+        "ocrUsed": ocr_pages > 0,
+        "ocrPages": ocr_pages,
+        "ocrWarning": ocr_warning,
     }
 
+
+
+def _capture_supplier_match_score(address, analysis):
+    score = 0
+    reasons = []
+    wanted_name = _norm_supplier(analysis.get("supplierName"))
+    actual_name = _norm_supplier(address.get("name"))
+    if wanted_name and actual_name:
+        ratio = difflib.SequenceMatcher(None, wanted_name, actual_name).ratio()
+        if ratio >= 0.92:
+            score += 80
+            reasons.append("Firmenname sehr sicher")
+        elif ratio >= 0.72:
+            score += 50
+            reasons.append("Firmenname ähnlich")
+        else:
+            wanted_tokens = {x for x in wanted_name.split() if len(x) >= 3}
+            actual_tokens = {x for x in actual_name.split() if len(x) >= 3}
+            overlap = len(wanted_tokens & actual_tokens)
+            if overlap:
+                score += min(35, overlap * 12)
+                reasons.append("Namensbestandteile stimmen")
+
+    wanted_uid = re.sub(r"\s+", "", str(analysis.get("uid") or "")).upper()
+    actual_uid = re.sub(r"\s+", "", str(address.get("vatId") or "")).upper()
+    if wanted_uid and actual_uid and wanted_uid == actual_uid:
+        score += 100
+        reasons.append("UID stimmt")
+
+    wanted_customer = _capture_invoice_number_norm(analysis.get("customerNumberExternal"))
+    actual_customer = _capture_invoice_number_norm(address.get("ourCustomerNumber"))
+    if wanted_customer and actual_customer and wanted_customer == actual_customer:
+        score += 110
+        reasons.append("Unsere Kundennummer stimmt")
+
+    wanted_address = _norm_supplier(analysis.get("supplierAddress"))
+    actual_address = _norm_supplier(address.get("address"))
+    if wanted_address and actual_address:
+        wanted_postal = re.search(r"\b\d{4}\b", wanted_address)
+        actual_postal = re.search(r"\b\d{4}\b", actual_address)
+        if wanted_postal and actual_postal and wanted_postal.group(0) == actual_postal.group(0):
+            score += 25
+            reasons.append("PLZ stimmt")
+        ratio = difflib.SequenceMatcher(None, wanted_address, actual_address).ratio()
+        if ratio >= 0.7:
+            score += 20
+            reasons.append("Adresse ähnlich")
+
+    if int(address.get("incomingCount") or 0) > 0:
+        score += 5
+    return score, reasons
+
+
+def _capture_supplier_suggestions(analysis, limit=8):
+    queries = []
+    for value in (
+        analysis.get("customerNumberExternal"),
+        analysis.get("uid"),
+        analysis.get("supplierName"),
+        analysis.get("supplierAddress"),
+    ):
+        clean = str(value or "").strip()
+        if len(clean) >= 2 and clean.lower() not in {"kopie", "rechnung", "original"}:
+            queries.append(clean)
+
+    rows_by_id = {}
+    errors = []
+    for query in queries[:4]:
+        try:
+            for row in ww_address_search(query, 20):
+                rows_by_id[str(row.get("addressId"))] = row
+        except Exception as exc:
+            errors.append(str(exc))
+
+    ranked = []
+    for row in rows_by_id.values():
+        score, reasons = _capture_supplier_match_score(row, analysis)
+        decorated = dict(row)
+        decorated["matchScore"] = int(score)
+        decorated["matchReasons"] = reasons
+        decorated["idealMatch"] = score >= 100
+        ranked.append(decorated)
+    ranked.sort(key=lambda row: (-int(row.get("matchScore") or 0), -int(row.get("incomingCount") or 0), str(row.get("name") or "")))
+    return ranked[:max(1, min(int(limit or 8), 20))], (errors[0] if errors and not ranked else "")
 
 def _capture_address_summary(address_ids=None):
     con = _capture_connection()
@@ -564,13 +1043,21 @@ def _capture_row_public(row, allocations=None, include_text=False, area="live"):
         "ourCustomerNumber": data.get("our_customer_number") or "",
         "invoiceNumber": data["supplier_invoice_number"],
         "invoiceDate": data["invoice_date"],
-        "dueDate": data.get("due_date") or "",
+        "dueDate": data.get("net_due_date") or data.get("due_date") or "",
+        "netDueDate": data.get("net_due_date") or data.get("due_date") or "",
+        "skontoEnabled": bool(data.get("skonto_enabled") or 0),
+        "skontoPercent": float(data.get("skonto_percent") or 0),
+        "skontoDueDate": data.get("skonto_due_date") or "",
+        "paymentTerms": data.get("payment_terms") or "",
         "netAmount": float(data["net_amount"] or 0),
         "vatAmount": float(data["vat_amount"] or 0),
         "amount": float(data["gross_amount"] or 0),
         "grossAmount": float(data["gross_amount"] or 0),
         "currency": data.get("currency") or "EUR",
         "iban": data.get("iban") or "",
+        "invoiceIban": data.get("invoice_iban") or data.get("iban") or "",
+        "masterIban": data.get("master_iban") or "",
+        "bankChangeAccepted": bool(data.get("bank_change_accepted") or 0),
         "swift": data.get("swift") or "",
         "accountHolder": data.get("account_holder") or "",
         "customerNumberExternal": data.get("customer_number_external") or "",
@@ -583,6 +1070,9 @@ def _capture_row_public(row, allocations=None, include_text=False, area="live"):
         "path": data.get("pdf_path") or "",
         "originalPath": data.get("original_path") or "",
         "pageCount": int(data.get("page_count") or 0),
+        "ocrUsed": bool(data.get("ocr_used") or 0),
+        "ocrPages": int(data.get("ocr_pages") or 0),
+        "ocrWarning": data.get("ocr_warning") or "",
         "createdBy": data.get("created_by") or "Dunja",
         "createdAt": data.get("created_at") or "",
         "updatedAt": data.get("updated_at") or "",
@@ -607,7 +1097,7 @@ def _capture_row_public(row, allocations=None, include_text=False, area="live"):
     return public
 
 
-def kristine_incoming_for_address(address_id):
+def kristine_incoming_for_address(address_id, include_text=False):
     con = _capture_connection()
     try:
         rows = con.execute("""
@@ -617,42 +1107,81 @@ def kristine_incoming_for_address(address_id):
         """, (str(address_id),)).fetchall()
         result = []
         for row in rows:
-            result.append(_capture_row_public(row, _capture_allocations(con, row["id"])))
+            result.append(_capture_row_public(
+                row,
+                _capture_allocations(con, row["id"]),
+                include_text=bool(include_text),
+            ))
         return result
     finally:
         con.close()
 
 
-def _capture_supplier_context(address_id):
+def _capture_supplier_context(address_id, area="live"):
     address_id = str(address_id or "").strip()
+    area = _capture_area(area)
     ww_rows = ww_incoming_for_address(address_id) if address_id else []
-    local_rows = kristine_incoming_for_address(address_id) if address_id else []
-    ibans = []
-    for row in sorted(ww_rows + local_rows, key=lambda x: (x.get("invoiceDate") or "", str(x.get("docId") or ""))):
+    historical_ibans = []
+    for row in sorted(ww_rows, key=lambda x: (x.get("invoiceDate") or "", str(x.get("docId") or ""))):
         iban = _norm_iban(row.get("iban"))
-        if iban and iban not in ibans:
-            ibans.append(iban)
+        if iban and iban not in historical_ibans:
+            historical_ibans.append(iban)
 
-    con = _capture_connection()
+    con = _capture_area_connection(area)
     try:
-        latest = con.execute("""
+        accepted_rows = con.execute("""
+            SELECT iban, confirmed_at, source_doc_id
+            FROM supplier_bank_accounts
+            WHERE supplier_address_id = ?
+            ORDER BY confirmed_at, id
+        """, (address_id,)).fetchall()
+        accepted_ibans = []
+        for row in accepted_rows:
+            iban = _norm_iban(row["iban"])
+            if iban and iban not in accepted_ibans:
+                accepted_ibans.append(iban)
+
+        observed_rows = con.execute("""
+            SELECT invoice_iban, iban
+            FROM incoming_invoices
+            WHERE supplier_address_id = ?
+            ORDER BY invoice_date, id
+        """, (address_id,)).fetchall()
+        observed_ibans = []
+        for row in observed_rows:
+            iban = _norm_iban(row["invoice_iban"] or row["iban"])
+            if iban and iban not in observed_ibans:
+                observed_ibans.append(iban)
+
+        known = []
+        for iban in historical_ibans + accepted_ibans:
+            if iban not in known:
+                known.append(iban)
+        latest = accepted_ibans[-1] if accepted_ibans else (historical_ibans[-1] if historical_ibans else "")
+
+        latest_invoice = con.execute("""
             SELECT id FROM incoming_invoices
             WHERE supplier_address_id = ?
             ORDER BY invoice_date DESC, id DESC LIMIT 1
         """, (address_id,)).fetchone()
         defaults = {}
-        if latest:
+        if latest_invoice:
             allocation = con.execute("""
                 SELECT account, cost_type, cost_center, project_id, description, vat_rate
                 FROM incoming_allocations
                 WHERE invoice_id = ?
                 ORDER BY line_no LIMIT 1
-            """, (latest["id"],)).fetchone()
+            """, (latest_invoice["id"],)).fetchone()
             if allocation:
                 defaults = dict(allocation)
         return {
-            "knownIbans": ibans,
-            "latestIban": ibans[-1] if ibans else "",
+            "area": area,
+            "knownIbans": known,
+            "historicalIbans": historical_ibans,
+            "acceptedIbans": accepted_ibans,
+            "observedIbans": observed_ibans,
+            "latestIban": latest,
+            "latestIbanSource": "KRISTINE bestätigt" if accepted_ibans else ("WinWorker" if historical_ibans else ""),
             "defaults": defaults,
         }
     finally:
@@ -895,12 +1424,15 @@ def ww_address_search(query, limit=25):
                 OR ISNULL(k.sPLZ,'') LIKE ?
                 OR ISNULL(k.sOrt,'') LIKE ?
                 OR CAST(ISNULL(k.lKundenNr,0) AS varchar(40)) LIKE ?
+                OR CAST(ISNULL(k.lLieferantenNr,0) AS varchar(40)) LIKE ?
+                OR ISNULL(k.sUStIDNr,'') LIKE ?
+                OR ISNULL(k.sL_KdnNr,'') LIKE ?
             )
         """
         compact_clause = "(" + " OR ".join(f"{f} LIKE ?" for f in compact_fields) + ")"
 
         conditions.append(f"({normal_clause} OR {compact_clause})")
-        params.extend([like] * 7)
+        params.extend([like] * 10)
         params.extend([compact_like] * len(compact_fields))
 
     compact_firma = sql_compact("k.sFirma")
@@ -1025,8 +1557,69 @@ def _iso_date(value):
         return s[:10] if len(s) >= 10 else s
 
 
+IBAN_LENGTHS = {
+    "AT": 20,
+    "DE": 22,
+    "CH": 21,
+    "LI": 21,
+    "IT": 27,
+    "FR": 27,
+    "NL": 18,
+    "BE": 16,
+    "LU": 20,
+}
+
+
 def _norm_iban(value):
-    return re.sub(r"\s+", "", str(value or "")).upper().strip()
+    """IBAN säubern und exakt an der länderspezifischen Länge abschneiden.
+
+    Damit wird z. B. ``AT68...3295BIC`` zuverlässig zu der 20-stelligen
+    österreichischen IBAN und BIC/SWIFT kann nie mehr hinten ankleben.
+    """
+    raw = re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+    raw = re.sub(r"^IBAN", "", raw)
+    match = re.search(r"([A-Z]{2}\d{2}[A-Z0-9]{10,32})", raw)
+    if not match:
+        return ""
+    candidate = match.group(1)
+    expected = IBAN_LENGTHS.get(candidate[:2])
+    if expected:
+        return candidate[:expected] if len(candidate) >= expected else candidate
+    return candidate[:34]
+
+
+def _iban_valid(value):
+    iban = _norm_iban(value)
+    expected = IBAN_LENGTHS.get(iban[:2])
+    if not iban or (expected and len(iban) != expected):
+        return False
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]+", iban):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    digits = "".join(str(int(ch, 36)) if ch.isalpha() else ch for ch in rearranged)
+    try:
+        remainder = 0
+        for ch in digits:
+            remainder = (remainder * 10 + int(ch)) % 97
+        return remainder == 1
+    except Exception:
+        return False
+
+
+def _extract_iban_from_text(text):
+    normalized = str(text or "").replace("\u00ad", "").replace("\xa0", " ")
+    flat = re.sub(r"\s+", " ", normalized)
+    patterns = [
+        r"(?i)\bIBAN\s*[:\-]?\s*([A-Z]{2}\s*\d{2}(?:[\s-]*[A-Z0-9]){10,34}?)(?=\s+(?:BIC|SWIFT|Bank|Bezeichnung|Konto)\b|$)",
+        r"(?i)\b([A-Z]{2}\s*\d{2}(?:[\s-]*[A-Z0-9]){12,30})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, flat)
+        if match:
+            value = _norm_iban(match.group(1))
+            if value:
+                return value
+    return ""
 
 
 def _payment_state(status_text):
@@ -1348,11 +1941,14 @@ def acknowledge_watch_alert(address_id, alert_key, decision="known"):
 
 
 
-def _pdf_paths_by_docids(doc_ids):
+def _pdf_paths_by_docids(doc_ids, include_text=False):
     """
     Exakte WW-Verknüpfung:
     DokumentenManagement.sDocID == PDF-Dateiname ohne .pdf/_Original.pdf.
-    Kein OCR, kein Volltext-Matching.
+
+    Für die normale Lieferantenakte werden nur Pfade gelesen. Erst bei einer
+    gezielten Materialsuche wird zusätzlich der bereits indexierte OCR-/PDF-Text
+    geladen. Dadurch bleibt die normale Ansicht schnell.
     """
     wanted = {str(x or "").strip() for x in doc_ids if str(x or "").strip()}
     if not wanted:
@@ -1363,67 +1959,506 @@ def _pdf_paths_by_docids(doc_ids):
     try:
         cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
         has_source = "source" in cols
+        has_text = bool(include_text and "text" in cols)
         result = {}
 
-        # Chunking keeps SQLite variable count safe.
         ids = sorted(wanted)
         for pos in range(0, len(ids), 400):
             chunk = ids[pos:pos+400]
-            placeholders = ",".join("?" for _ in chunk)
-            # filename exact-ish: 11502600347.pdf or 11502600347_Original.pdf
             conditions = []
             params = []
             for doc_id in chunk:
                 conditions.append("(filename = ? OR filename = ?)")
                 params.extend([f"{doc_id}.pdf", f"{doc_id}_Original.pdf"])
 
-            sql = "SELECT filename,path FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
+            select = "filename,path" + (",text" if has_text else "")
+            sql = f"SELECT {select} FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
             if has_source:
                 sql += " AND source='EINGANG'"
 
             for row in con.execute(sql, params).fetchall():
                 fn = str(row["filename"] or "")
-                path = str(row["path"] or "")
+                pdf_path = str(row["path"] or "")
                 m = re.match(r"^(\d+)(?:_Original)?\.pdf$", fn, re.I)
                 if not m:
                     continue
                 doc_id = m.group(1)
-                bucket = result.setdefault(doc_id, {"pdfPath": "", "originalPath": ""})
-                if re.search(r"_Original\.pdf$", fn, re.I):
-                    bucket["originalPath"] = path
+                bucket = result.setdefault(doc_id, {
+                    "pdfPath": "",
+                    "originalPath": "",
+                    "pdfText": "",
+                    "originalText": "",
+                    "ocrTexts": [],
+                })
+                raw_text = str(row["text"] or "") if has_text else ""
+                is_original = bool(re.search(r"_Original\.pdf$", fn, re.I))
+                if is_original:
+                    bucket["originalPath"] = pdf_path or bucket["originalPath"]
+                    if len(raw_text) > len(bucket["originalText"]):
+                        bucket["originalText"] = raw_text
                 else:
-                    bucket["pdfPath"] = path
+                    bucket["pdfPath"] = pdf_path or bucket["pdfPath"]
+                    if len(raw_text) > len(bucket["pdfText"]):
+                        bucket["pdfText"] = raw_text
+
+        for bucket in result.values():
+            seen_texts = set()
+            texts = []
+            for raw_text in (bucket.get("pdfText"), bucket.get("originalText")):
+                value = str(raw_text or "").strip()
+                if not value:
+                    continue
+                fingerprint = hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()
+                if fingerprint in seen_texts:
+                    continue
+                seen_texts.add(fingerprint)
+                texts.append(value)
+            bucket["ocrTexts"] = texts
         return result
     finally:
         con.close()
 
 
-def incoming_for_address(address_id, text_query=""):
+_MATERIAL_END_MARKERS = (
+    "rechnungsbetrag", "endbetrag", "zahlbetrag", "zu zahlen",
+    "nettobetrag", "nettowarenwert", "warenwert netto", "summe netto",
+    "gesamt netto", "umsatzsteuer", "mehrwertsteuer", "mwst",
+    "ust basis", "ust betrag", "zahlungsbedingungen", "zahlungsziel",
+    "bankverbindung", "iban", "bic", "swift", "skonto",
+)
+
+_MATERIAL_NOISE_MARKERS = (
+    "rechnungsnummer", "rechnung nr", "rechnungs nr", "belegnummer",
+    "kundennummer", "kunden nr", "lieferantennummer", "lieferanten nr",
+    "rechnungsdatum", "lieferdatum", "leistungsdatum", "bestelldatum",
+    "lieferschein nr", "lieferscheinnummer", "ihre bestellung",
+    "bestellung vom", "bestellnummer", "bestell nr", "auftragsnummer",
+    "auftrag nr", "lieferadresse", "rechnungsadresse", "bearbeiter",
+    "ansprechpartner", "telefon", "fax", "email", "e mail", "www",
+    "uid", "ust id", "bankverbindung", "iban", "bic", "swift",
+    "zahlungsbedingungen", "zahlungsziel", "seite", "blatt",
+)
+
+_MATERIAL_SEARCH_CACHE = {}
+_MATERIAL_SEARCH_CACHE_LIMIT = 1200
+
+
+def _material_header_score(line):
+    n = _norm_supplier(line)
+    if not n:
+        return 0
+    score = 0
+    if "bezeichnung" in n or "beschreibung" in n:
+        score += 3
+    if re.search(r"\b(artikel|artikelnummer|artnr|art nr|produkt)\b", n):
+        score += 2
+    if re.search(r"\b(pos|position)\b", n):
+        score += 1
+    if "menge" in n:
+        score += 2
+    if re.search(r"\b(einheit|eh|me)\b", n):
+        score += 1
+    if "preis" in n or "einzelpreis" in n:
+        score += 2
+    if "betrag" in n or "gesamtpreis" in n:
+        score += 2
+    return score
+
+
+def _is_material_header(line):
+    n = _norm_supplier(line)
+    score = _material_header_score(line)
+    if not n:
+        return False
+    if ("bezeichnung" in n or "beschreibung" in n) and score >= 5:
+        return True
+    if re.search(r"\b(artikel|artikelnummer|artnr|art nr)\b", n) and "menge" in n and score >= 5:
+        return True
+    return score >= 7
+
+
+def _is_material_end_line(line):
+    n = _norm_supplier(line)
+    if not n:
+        return False
+    if any(marker in n for marker in _MATERIAL_END_MARKERS):
+        return True
+    return bool(re.search(r"\b(zwischensumme|gesamtsumme|bruttosumme)\b", n))
+
+
+def _is_material_noise_line(line):
+    clean = re.sub(r"\s+", " ", str(line or "")).strip()
+    n = _norm_supplier(clean)
+    if not n:
+        return True
+    if _is_material_header(clean) or _is_material_end_line(clean):
+        return True
+    for marker in _MATERIAL_NOISE_MARKERS:
+        if marker in {"seite", "blatt"}:
+            if re.match(rf"^{marker}\b", n):
+                return True
+        elif marker in {"uid", "iban", "bic", "swift", "telefon", "fax", "email", "www", "bearbeiter", "ansprechpartner"}:
+            if re.search(rf"\b{re.escape(marker)}\b", n):
+                return True
+        elif marker in n:
+            return True
+    if n in {"rechnung", "gutschrift", "lieferschein", "angebot", "ubertrag", "übertrag"}:
+        return True
+    if re.fullmatch(r"(?:seite|blatt)?\s*\d+\s*(?:von|\/)?\s*\d*", n):
+        return True
+    return False
+
+
+def _looks_like_material_line(line):
+    clean = re.sub(r"\s+", " ", str(line or "")).strip()
+    if _is_material_noise_line(clean):
+        return False
+    has_word = bool(re.search(r"[A-Za-zÄÖÜäöüß]{3,}", clean))
+    has_number = bool(re.search(r"\d", clean))
+    has_unit = bool(re.search(
+        r"(?i)\b(?:stk|stck|stück|kg|g|to|t|l|lt|liter|ml|m|m2|m²|m3|m³|lfm|sack|skt|pkg|pack|dose|eimer|kanister|rolle|paar|set)\b",
+        clean,
+    ))
+    has_article_code = bool(re.search(
+        r"\b(?=[A-Z0-9._/-]{4,}\b)(?=[A-Z0-9._/-]*\d)[A-Z0-9][A-Z0-9._/-]{3,}\b",
+        clean,
+        re.I,
+    ))
+    return bool((has_word and has_number) or has_unit or (has_word and has_article_code))
+
+
+def _material_flat_segment(raw_text):
+    flat = re.sub(r"\s+", " ", str(raw_text or "")).strip()
+    if not flat:
+        return ""
+
+    start_patterns = (
+        r"(?i)\b(?:pos(?:ition)?|artikel(?:nummer)?|art\.?\s*nr\.?)\b.{0,100}\b(?:bezeichnung|beschreibung)\b.{0,100}\b(?:menge|preis|betrag|gesamtpreis)\b",
+        r"(?i)\b(?:bezeichnung|beschreibung)\b.{0,80}\bmenge\b.{0,80}\b(?:preis|betrag|gesamtpreis)\b",
+    )
+    starts = []
+    for pattern in start_patterns:
+        m = re.search(pattern, flat)
+        if m:
+            starts.append(m.end())
+    if not starts:
+        return ""
+    start = min(starts)
+
+    tail = flat[start:]
+    stop_positions = []
+    for marker in _MATERIAL_END_MARKERS + ("zwischensumme", "gesamtsumme", "bruttosumme"):
+        m = re.search(rf"(?i)\b{re.escape(marker)}\b", tail)
+        if m:
+            stop_positions.append(m.start())
+    end = start + (min(stop_positions) if stop_positions else len(tail))
+    segment = flat[start:end].strip(" ·|-")
+    return segment if len(segment) >= 12 else ""
+
+
+def _material_search_lines(raw_text):
+    raw = str(raw_text or "").replace("\x00", " ")
+    lines = [re.sub(r"\s+", " ", row).strip() for row in raw.splitlines()]
+    lines = [row for row in lines if row]
+    if not lines:
+        return [], "none"
+
+    header_indices = set()
+    for index, line in enumerate(lines):
+        if _is_material_header(line):
+            header_indices.add(index)
+            # Eine bereits erkennbare Kopfzeile kann noch eine kurze Fortsetzung
+            # wie „Einzelpreis · Betrag“ direkt darunter haben.
+            for offset in (1, 2):
+                next_index = index + offset
+                if next_index >= len(lines):
+                    break
+                next_line = lines[next_index]
+                if _material_header_score(next_line) <= 0 or _looks_like_material_line(next_line):
+                    break
+                if _is_material_header(" ".join(lines[index:next_index+1])):
+                    header_indices.add(next_index)
+            continue
+
+        # Manche PDFs teilen die Tabellenüberschrift auf zwei oder drei Zeilen.
+        # Nur Zeilen mit echten Überschriftswörtern markieren – niemals bereits
+        # die erste Materialposition hinter der Überschrift mit verschlucken.
+        for span in (2, 3):
+            parts = lines[index:index+span]
+            if len(parts) != span or not _is_material_header(" ".join(parts)):
+                continue
+            marked = [index + offset for offset, part in enumerate(parts) if _material_header_score(part) > 0]
+            if len(marked) >= 2:
+                header_indices.update(marked)
+                break
+
+    regions = []
+    current = []
+    in_table = False
+    for index, line in enumerate(lines):
+        if index in header_indices:
+            if current:
+                regions.append(current)
+                current = []
+            in_table = True
+            continue
+        if in_table and _is_material_end_line(line):
+            if current:
+                regions.append(current)
+                current = []
+            in_table = False
+            continue
+        if in_table and not _is_material_noise_line(line):
+            current.append(line)
+    if current:
+        regions.append(current)
+
+    table_lines = [line for region in regions for line in region]
+    if table_lines:
+        return table_lines, "table"
+
+    flat_segment = _material_flat_segment(raw)
+    if flat_segment:
+        return [flat_segment], "flat-table"
+
+    # Konservativer Rückfall für schlecht strukturierte Scans: nur der mittlere
+    # Dokumentbereich und nur zeilenartige Materialkandidaten samt Nachbarzeilen.
+    start = max(3, int(len(lines) * 0.08))
+    end = max(start + 1, int(len(lines) * 0.90))
+    eligible = set()
+    for index in range(start, min(end, len(lines))):
+        if _looks_like_material_line(lines[index]):
+            eligible.update({index - 1, index, index + 1})
+
+    fallback = []
+    for index in sorted(i for i in eligible if start <= i < end and 0 <= i < len(lines)):
+        line = lines[index]
+        if not _is_material_noise_line(line):
+            fallback.append(line)
+    return fallback, "fallback" if fallback else "none"
+
+
+def _material_search_index(raw_text):
+    raw = str(raw_text or "")
+    if not raw.strip():
+        return {"lines": [], "mode": "none", "joinedNorm": "", "joinedCompact": ""}
+    key = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()
+    cached = _MATERIAL_SEARCH_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    lines, mode = _material_search_lines(raw)
+    joined = " ".join(lines)
+    data = {
+        "lines": lines,
+        "mode": mode,
+        "joinedNorm": _norm_supplier(joined),
+        "joinedCompact": _compact_search_value(joined),
+    }
+    if len(_MATERIAL_SEARCH_CACHE) >= _MATERIAL_SEARCH_CACHE_LIMIT:
+        _MATERIAL_SEARCH_CACHE.clear()
+    _MATERIAL_SEARCH_CACHE[key] = data
+    return data
+
+
+def _compact_search_value(value):
+    return re.sub(r"[^a-z0-9äöü]+", "", str(value or "").lower().replace("ß", "ss"))
+
+
+def _focus_material_snippet(value, query, limit=560):
+    compact = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(compact) <= limit:
+        return compact
+    low = compact.lower()
+    raw_terms = [part for part in re.split(r"\s+", str(query or "").strip()) if part]
+    positions = [low.find(term.lower()) for term in raw_terms if low.find(term.lower()) >= 0]
+    pos = min(positions) if positions else max(0, len(compact) // 2)
+    start = max(0, pos - 170)
+    end = min(len(compact), start + limit)
+    start = max(0, end - limit)
+    return ("… " if start else "") + compact[start:end].strip() + (" …" if end < len(compact) else "")
+
+
+def _material_search_result(raw_text, text_query):
+    query = str(text_query or "").strip()
+    qnorm = _norm_supplier(query)
+    qcompact = _compact_search_value(query)
+    tokens = [token for token in qnorm.split() if token]
+    if not query or (not tokens and not qcompact):
+        return {
+            "matched": False, "searchable": False, "matchCount": 0,
+            "ideal": False, "score": 0, "matches": [], "mode": "none",
+        }
+
+    search_index = _material_search_index(raw_text)
+    lines = search_index["lines"]
+    mode = search_index["mode"]
+    if not lines:
+        return {
+            "matched": False, "searchable": False, "matchCount": 0,
+            "ideal": False, "score": 0, "matches": [], "mode": mode,
+        }
+
+    joined = " ".join(lines)
+    joined_norm = search_index["joinedNorm"]
+    joined_compact = search_index["joinedCompact"]
+
+    phrase_count = joined_norm.count(qnorm) if qnorm else 0
+    compact_count = joined_compact.count(qcompact) if len(qcompact) >= 3 else 0
+    token_counts = [joined_norm.count(token) for token in tokens]
+    body_match = bool(
+        phrase_count > 0 or
+        compact_count > 0 or
+        (tokens and all(count > 0 for count in token_counts))
+    )
+    if not body_match:
+        return {
+            "matched": False, "searchable": True, "matchCount": 0,
+            "ideal": False, "score": 0, "matches": [], "mode": mode,
+        }
+
+    matches = []
+    seen = set()
+    ideal = False
+    best_window_score = 0
+    for index in range(len(lines)):
+        start = max(0, index - 1)
+        end = min(len(lines), index + 3)
+        window = " · ".join(lines[start:end])
+        wnorm = _norm_supplier(window)
+        wcompact = _compact_search_value(window)
+        token_window = bool(tokens and all(token in wnorm for token in tokens))
+        compact_window = bool(len(qcompact) >= 3 and qcompact in wcompact)
+        phrase_window = bool(qnorm and qnorm in wnorm)
+        if not (phrase_window or compact_window or token_window):
+            continue
+        exact = phrase_window or compact_window
+        ideal = ideal or exact
+        window_score = 100 if exact else 70
+        best_window_score = max(best_window_score, window_score)
+        snippet = _focus_material_snippet(window, query)
+        key = _norm_supplier(snippet)
+        if key and key not in seen:
+            seen.add(key)
+            matches.append(snippet)
+        if len(matches) >= 5:
+            break
+
+    if not matches:
+        matches = [_focus_material_snippet(joined, query)]
+
+    if phrase_count > 0:
+        match_count = phrase_count
+    elif compact_count > 0:
+        match_count = compact_count
+    elif token_counts:
+        match_count = min(token_counts)
+    else:
+        match_count = 1
+    match_count = max(1, int(match_count or 1))
+    score = (1000 if ideal else 0) + best_window_score + min(match_count, 99) * 10
+
+    return {
+        "matched": True,
+        "searchable": True,
+        "matchCount": match_count,
+        "ideal": bool(ideal),
+        "score": score,
+        "matches": matches,
+        "mode": mode,
+    }
+
+
+def _best_material_search(texts, text_query):
+    best = None
+    searchable = False
+    for raw_text in texts or []:
+        result = _material_search_result(raw_text, text_query)
+        searchable = searchable or bool(result.get("searchable"))
+        if not result.get("matched"):
+            continue
+        if best is None or (
+            int(result.get("score") or 0),
+            int(result.get("matchCount") or 0),
+        ) > (
+            int(best.get("score") or 0),
+            int(best.get("matchCount") or 0),
+        ):
+            best = result
+    if best is not None:
+        return best
+    return {
+        "matched": False, "searchable": searchable, "matchCount": 0,
+        "ideal": False, "score": 0, "matches": [], "mode": "none",
+    }
+
+
+def incoming_for_address(address_id, text_query="", return_context=False):
     """
     WW sofort + exakte PDF-Verknüpfung über:
     Eingangsbelege.gDMID -> DokumentenManagement.gID -> sDocID -> PDF-Dateiname.
+
+    Eine Textsuche arbeitet ausschließlich im OCR-Materialbereich der PDFs.
+    Kopfzeilen wie Datum, Rechnungsnummer, Kundennummer oder Zahlungsdaten sind
+    bewusst kein Suchraum.
     """
     address_id = str(address_id or "").strip()
     if not address_id:
-        return []
+        empty = {
+            "documents": [], "allDocuments": [], "search": {"active": False},
+            "wwRows": [], "localRows": [],
+        }
+        return empty if return_context else []
 
+    query = str(text_query or "").strip()
+    search_active = bool(query)
     ww_rows = ww_incoming_for_address(address_id)
-    local_rows = kristine_incoming_for_address(address_id)
-    paths = _pdf_paths_by_docids([x.get("docId") for x in ww_rows])
-    qtokens = [x for x in _norm_supplier(text_query).split() if x]
-    result = []
+    local_rows = kristine_incoming_for_address(address_id, include_text=search_active)
+    paths = _pdf_paths_by_docids(
+        [x.get("docId") for x in ww_rows],
+        include_text=search_active,
+    )
+
+    all_result = []
+    ocr_invoices = 0
+    material_searchable = 0
+    pdf_linked = 0
+    total_matches = 0
+    ideal_hits = 0
+
+    def apply_material_search(item, texts):
+        nonlocal ocr_invoices, material_searchable, total_matches, ideal_hits
+        clean_texts = [str(value or "") for value in (texts or []) if str(value or "").strip()]
+        if clean_texts:
+            ocr_invoices += 1
+        result = _best_material_search(clean_texts, query) if search_active else None
+        if not search_active:
+            return
+        if result.get("searchable"):
+            material_searchable += 1
+        item["materialMatched"] = bool(result.get("matched"))
+        item["materialMatchCount"] = int(result.get("matchCount") or 0)
+        item["materialMatchIdeal"] = bool(result.get("ideal"))
+        item["materialMatchScore"] = int(result.get("score") or 0)
+        item["materialMatches"] = list(result.get("matches") or [])
+        item["materialSearchMode"] = str(result.get("mode") or "none")
+        if item["materialMatched"]:
+            total_matches += item["materialMatchCount"]
+            ideal_hits += 1 if item["materialMatchIdeal"] else 0
 
     for ww in ww_rows:
         doc_id = str(ww.get("docId") or "").strip()
         found = paths.get(doc_id, {})
         pdf_path = found.get("pdfPath") or ""
         original_path = found.get("originalPath") or ""
+        if pdf_path or original_path:
+            pdf_linked += 1
 
         item = dict(ww)
         item.update({
-            "filename": Path(pdf_path).name if pdf_path else (f"{doc_id}.pdf" if doc_id else ""),
-            "path": pdf_path,
-            "originalPath": original_path,
+            "filename": Path(pdf_path).name if pdf_path else (Path(original_path).name if original_path else (f"{doc_id}.pdf" if doc_id else "")),
+            "path": pdf_path or original_path,
+            "originalPath": original_path if original_path and original_path != (pdf_path or original_path) else "",
             "logical_id": doc_id,
             "invoiceId": f"ww:{ww.get('wwIncomingId')}",
             "dokumenttyp": "Eingangsrechnung",
@@ -1431,42 +2466,68 @@ def incoming_for_address(address_id, text_query=""):
             "fingerprint": {},
             "pdfLinked": bool(pdf_path or original_path),
         })
-        result.append(item)
+        apply_material_search(item, found.get("ocrTexts") or [])
+        all_result.append(item)
 
-    result.extend(local_rows)
+    for local in local_rows:
+        item = dict(local)
+        pdf_text = str(item.pop("pdfText", "") or "")
+        if item.get("path"):
+            pdf_linked += 1
+        apply_material_search(item, [pdf_text] if pdf_text else [])
+        if search_active:
+            # In der Trefferansicht niemals wieder den kompletten Rechnungskopf
+            # als Snippet zeigen – nur die erkannten Materialzeilen.
+            item["snippet"] = ""
+        all_result.append(item)
 
-    if qtokens:
-        filtered = []
-        for item in result:
-            hay = _norm_supplier(" ".join([
-                str(item.get("invoiceNumber") or ""),
-                str(item.get("paymentStatus") or ""),
-                str(item.get("remark") or ""),
-                str(item.get("bookingText") or ""),
-                str(item.get("note") or ""),
-                str(item.get("snippet") or ""),
-                str(item.get("iban") or ""),
-                str(item.get("swift") or ""),
-                str(item.get("accountHolder") or ""),
-                str(item.get("docId") or ""),
-                " ".join(
-                    " ".join(str(v or "") for v in allocation.values())
-                    for allocation in (item.get("allocations") or [])
-                ),
-            ]))
-            if all(t in hay for t in qtokens):
-                filtered.append(item)
-        result = filtered
+    if search_active:
+        documents = [item for item in all_result if item.get("materialMatched")]
+        documents.sort(
+            key=lambda x: (
+                1 if x.get("materialMatchIdeal") else 0,
+                int(x.get("materialMatchScore") or 0),
+                int(x.get("materialMatchCount") or 0),
+                x.get("invoiceDateTime") or "",
+                str(x.get("docId") or ""),
+            ),
+            reverse=True,
+        )
+    else:
+        documents = list(all_result)
+        documents.sort(
+            key=lambda x: (
+                x.get("invoiceDateTime") or "",
+                str(x.get("docId") or ""),
+                int(x.get("id") or 0),
+            ),
+            reverse=True,
+        )
 
-    result.sort(
-        key=lambda x: (
-            x.get("invoiceDateTime") or "",
-            str(x.get("docId") or ""),
-            int(x.get("id") or 0),
-        ),
-        reverse=True
-    )
-    return result
+    search_meta = {
+        "active": search_active,
+        "query": query,
+        "scope": "selected_supplier",
+        "addressId": address_id,
+        "scannedInvoices": len(all_result),
+        "pdfLinkedInvoices": pdf_linked,
+        "ocrInvoices": ocr_invoices if search_active else 0,
+        "materialSearchableInvoices": material_searchable if search_active else 0,
+        "withoutOcr": max(0, len(all_result) - ocr_invoices) if search_active else 0,
+        "hitInvoices": len(documents) if search_active else 0,
+        "matchCount": total_matches if search_active else 0,
+        "idealHitInvoices": ideal_hits if search_active else 0,
+    }
+
+    if return_context:
+        return {
+            "documents": documents,
+            "allDocuments": all_result,
+            "search": search_meta,
+            "wwRows": ww_rows,
+            "localRows": local_rows,
+        }
+    return documents
 
 
 MONEY_RE = re.compile(r'(?<!\d)(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+,\d{2})(?!\d)')
@@ -2837,107 +3898,6 @@ def _normalize_project_identifier(value):
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
-def _identifier_token_regex(value):
-    """
-    Erkennt Projekt-/Belegnummern nur als vollständigen Bezeichner.
-
-    Wichtig: Ein Projekt 26023 darf NICHT in einer langen WW-Dokument-ID wie
-    11502602345 als Treffer gelten. Trennzeichen innerhalb einer Nummer werden
-    toleriert (z. B. 2026-07001 statt 202607001).
-    """
-    compact = _normalize_project_identifier(value)
-    if len(compact) < 3:
-        return None
-    body = r"[\s./_\\-]*".join(re.escape(char) for char in compact)
-    return re.compile(rf"(?<![A-Z0-9]){body}(?![A-Z0-9])", re.I)
-
-
-def _identifier_occurs_as_token(value, *haystacks):
-    pattern = _identifier_token_regex(value)
-    if pattern is None:
-        return False
-    return any(pattern.search(str(haystack or "")) for haystack in haystacks)
-
-
-def _explicit_project_numbers(*values):
-    """Liest ausdrücklich als 'Projekt: ...' bezeichnete Nummern aus OCR-Text."""
-    pattern = re.compile(
-        r"\b(?:projekt(?:nummer|[\s-]?nr\.?)?|proj(?:ekt)?[\s-]?nr\.?|"
-        r"baustelle(?:nnummer|[\s-]?nr\.?)?)\s*[:#-]?\s*"
-        r"([0-9][0-9./_-]{3,18})\b",
-        re.I,
-    )
-    found = set()
-    for value in values:
-        for match in pattern.finditer(str(value or "")):
-            normalized = _normalize_project_identifier(match.group(1))
-            if len(normalized) >= 4:
-                found.add(normalized)
-    return found
-
-
-def _project_pdf_evidence(pdf, project):
-    project_number = str(project.get("projectNumber") or "").strip()
-    selected = _normalize_project_identifier(project_number)
-    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
-    filename = str(pdf.get("filename") or "")
-    path_value = str(pdf.get("path") or "")
-    explicit = _explicit_project_numbers(raw_text)
-    explicit_match = bool(selected and selected in explicit)
-    explicit_conflict = bool(selected and explicit and not explicit_match)
-    return {
-        "explicitNumbers": explicit,
-        "explicitMatch": explicit_match,
-        "explicitConflict": explicit_conflict,
-        "filenameMatch": _identifier_occurs_as_token(project_number, filename),
-        "pathMatch": _identifier_occurs_as_token(project_number, path_value),
-        "textMatch": _identifier_occurs_as_token(project_number, raw_text),
-    }
-
-
-def _project_customer_address_match(pdf, project):
-    """
-    Zusätzliche Absicherung für den Belegnummern-Rückfall.
-    Eine gleiche Belegnummer allein reicht nicht; wenigstens Kunde/Adresse oder
-    die echte Projektnummer muss ebenfalls zum ausgewählten Projekt passen.
-    """
-    hay = _norm_supplier(" ".join([
-        str(pdf.get("_raw_text") or pdf.get("text") or ""),
-        str(pdf.get("filename") or ""),
-        str(pdf.get("path") or ""),
-    ]))
-    if not hay:
-        return False
-
-    company = _norm_supplier(project.get("company"))
-    first = _norm_supplier(project.get("firstName"))
-    last = _norm_supplier(project.get("lastName"))
-    street = _norm_supplier(project.get("street"))
-    postal = _norm_supplier(project.get("postalCode"))
-    city = _norm_supplier(project.get("city"))
-
-    company_match = len(company) >= 4 and company in hay
-    person_tokens = [token for token in (first, last) if len(token) >= 3]
-    person_match = len(person_tokens) >= 2 and all(token in hay for token in person_tokens)
-    street_match = len(street) >= 5 and street in hay
-    postal_city_match = bool(postal and city and postal in hay and city in hay)
-
-    return bool(street_match or postal_city_match or company_match or person_match)
-
-
-def _project_book_match_score(pdf, book_number):
-    """Exakte, begrenzte Belegnummern-Treffer; keine bloßen Teilstrings."""
-    if len(_normalize_project_identifier(book_number)) < 4:
-        return 0
-    score = 0
-    if _identifier_occurs_as_token(book_number, pdf.get("filename")):
-        score += 100
-    if _identifier_occurs_as_token(book_number, pdf.get("path")):
-        score += 60
-    if _identifier_occurs_as_token(book_number, pdf.get("_raw_text")):
-        score += 30
-    return score
-
 def canonical_project_document_type(*values, is_invoice=False, ww_book_art=None):
     text = _norm_supplier(" ".join(str(v or "") for v in values))
 
@@ -2975,8 +3935,7 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
     needles = []
     for value in [project_number] + list(book_numbers or []):
         value = str(value or "").strip()
-        # 3-stellige Belegnummern sind als globale Archivsuche zu unsicher.
-        if len(_normalize_project_identifier(value)) >= 4 and value not in needles:
+        if len(value) >= 3 and value not in needles:
             needles.append(value)
     if not needles or not DB.exists():
         return []
@@ -2990,8 +3949,6 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
             if optional in cols:
                 select.append(optional)
 
-        # SQLite-LIKE dient nur als schneller Kandidatenfilter. Danach wird jede
-        # Nummer zwingend als vollständiger Token geprüft.
         or_parts = []
         params = []
         for needle in needles[:80]:
@@ -3014,25 +3971,10 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
     seen = set()
     for row in rows:
         item = dict(row)
-        path_value = str(item.get("path") or "")
-        key = path_value.lower()
+        path = str(item.get("path") or "")
+        key = path.lower()
         if not key or key in seen:
             continue
-
-        raw_text = str(item.get("text") or "")
-        # Schutz gegen die Hauptursache der falschen Treffer:
-        # 26023 in 11502602345.pdf ist KEIN Projekt-26023-Treffer.
-        if not any(
-            _identifier_occurs_as_token(
-                needle,
-                item.get("filename"),
-                path_value,
-                raw_text,
-            )
-            for needle in needles
-        ):
-            continue
-
         seen.add(key)
         dt = parse_print_time(item.get("filename"), item.get("modified"))
         item["printDate"] = dt.date().isoformat() if dt else None
@@ -3322,7 +4264,7 @@ def _project_pdf_rows_by_docids(doc_ids):
     buckets = {}
     try:
         cols = {row[1] for row in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
-        select = ["filename", "path", "dokumenttyp", "modified", "text"]
+        select = ["filename", "path", "dokumenttyp", "modified"]
         for optional in ("source", "doc_year", "logical_id"):
             if optional in cols:
                 select.append(optional)
@@ -3365,7 +4307,6 @@ def _project_pdf_rows_by_docids(doc_ids):
                 item["printDate"] = dt.date().isoformat() if dt else None
                 item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
                 item["year"] = dt.year if dt else item.get("doc_year")
-                item["_raw_text"] = item.pop("text", "") or ""
                 item["pdfFound"] = True
                 item["sourceOfTruth"] = "WinWorker-Dokument-ID + PDF-Archiv"
                 bucket = buckets.setdefault(doc_key, {"work": [], "original": []})
@@ -3595,41 +4536,29 @@ def project_document_catalog(project_index):
     book_numbers = [book.get("bookNumber") for book in books if book.get("bookNumber")]
     fallback_pdfs = _project_pdf_rows(project.get("projectNumber"), book_numbers)
 
-    # Rückfall nur bei ZWEI passenden Signalen:
-    # vollständige Belegnummer + Projektnummer/Kunde/Adresse.
-    # So kann ein zufälliger Teilstring in einer WW-Dokument-ID kein fremdes
-    # Projekt mehr in die Liste ziehen.
+    # Rückfall-Zuordnung über sichtbare Belegnummer. Eine PDF wird dabei
+    # höchstens einem WW-Beleg zugeordnet; Dateiname ist stärker als Pfad,
+    # OCR-Text ist nur die letzte Stufe.
     fallback_assignments = {}
-    rejected_paths = set()
     for pdf_index, pdf in enumerate(fallback_pdfs):
-        evidence = _project_pdf_evidence(pdf, project)
-        path_key = str(pdf.get("path") or "").strip().lower()
-        if evidence["explicitConflict"]:
-            if path_key:
-                rejected_paths.add(path_key)
-            continue
-
-        customer_match = _project_customer_address_match(pdf, project)
-        project_support = bool(
-            evidence["explicitMatch"]
-            or evidence["filenameMatch"]
-            or evidence["pathMatch"]
-            or customer_match
-            or (evidence["textMatch"] and customer_match)
-        )
-        if not project_support:
-            continue
-
+        filename_norm = _normalize_project_identifier(pdf.get("filename"))
+        path_norm = _normalize_project_identifier(pdf.get("path"))
+        text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
         best = None
         for book_index, book in enumerate(books):
-            number = book.get("bookNumber")
-            score = _project_book_match_score(pdf, number)
-            if not score:
+            number_norm = _normalize_project_identifier(book.get("bookNumber"))
+            if len(number_norm) < 3:
                 continue
-            number_len = len(_normalize_project_identifier(number))
-            rank = (score, number_len)
-            if best is None or rank > best[:2]:
-                best = (score, number_len, book_index)
+            score = 0
+            if number_norm in filename_norm:
+                score += 100
+            if number_norm in path_norm:
+                score += 60
+            if number_norm in text_norm:
+                score += 15
+            rank = (score, len(number_norm))
+            if score and (best is None or rank > best[:2]):
+                best = (score, len(number_norm), book_index)
         if best is not None:
             fallback_assignments.setdefault(best[2], []).append(pdf_index)
 
@@ -3642,14 +4571,6 @@ def project_document_catalog(project_index):
         path_key = str(item.get("path") or "").strip().lower()
         if not path_key or path_key in used_paths:
             return False
-
-        evidence = _project_pdf_evidence(item, project)
-        # Selbst eine automatisch entdeckte WW-Dokumentbeziehung wird verworfen,
-        # wenn im PDF ausdrücklich ein anderes Projekt steht.
-        if evidence["explicitConflict"]:
-            rejected_paths.add(path_key)
-            return False
-
         used_paths.add(path_key)
         doc_type = _merged_project_document_type(book, item)
         item.update({
@@ -3665,7 +4586,7 @@ def project_document_catalog(project_index):
             "sourceOfTruth": (
                 "WinWorker-Dokument-ID + PDF-Archiv"
                 if exact
-                else "WinWorker-Belegnummer + Projektabgleich + PDF-Archiv"
+                else "WinWorker-Belegnummer + PDF-Archiv"
             ),
             "pdfFound": True,
         })
@@ -3676,13 +4597,12 @@ def project_document_catalog(project_index):
     for book_index, book in enumerate(books):
         found_for_book = False
 
-        # 1. exakte WW-Dokument-ID; ein ausdrücklich fremdes Projekt wird dennoch
-        #    als fehlerhafte Verknüpfung abgefangen.
+        # 1. exakte WW-Dokument-ID
         for doc_id in book.get("docIds", []):
             for pdf in exact_by_doc_id.get(str(doc_id).strip().lower(), []):
                 found_for_book = append_book_pdf(book, pdf, exact=True) or found_for_book
 
-        # 2. strenger Rückfall über Belegnummer PLUS Projekt/Kunde/Adresse.
+        # 2. Rückfall über Belegnummer/Projektindex
         for pdf_index in fallback_assignments.get(book_index, []):
             if pdf_index in used_fallback_indices:
                 continue
@@ -3691,7 +4611,7 @@ def project_document_catalog(project_index):
                 used_fallback_indices.add(pdf_index)
                 found_for_book = True
 
-        # WW-Beleg bleibt sichtbar, auch wenn dazu kein sicheres PDF auffindbar ist.
+        # WW-Beleg bleibt sichtbar, auch wenn kein PDF im Index auffindbar ist.
         if not found_for_book:
             doc_type = book.get("documentType") or canonical_project_document_type(
                 book.get("bookNumber"),
@@ -3711,33 +4631,16 @@ def project_document_catalog(project_index):
                 "wwBookId": book.get("wwBookId"),
                 "wwBookIds": book.get("wwBookIds") or [],
                 "wwDocIds": book.get("docIds") or [],
-                "sourceOfTruth": "WinWorker · PDF nicht sicher gefunden",
+                "sourceOfTruth": "WinWorker · PDF nicht gefunden",
                 "pdfFound": False,
             })
 
-    # Ungekoppelte Archiv-PDFs werden nur noch gezeigt, wenn die ausgewählte
-    # Projektnummer als echtes, begrenztes Merkmal vorkommt. Ein bloßer Treffer
-    # auf irgendeine Belegnummer reicht ausdrücklich nicht mehr.
+    # Projekt-PDFs, die nicht eindeutig an einen WW-Beleg gekoppelt werden
+    # konnten, bleiben unter ihrem erkannten Dokumenttyp auffindbar.
     for pdf_index, pdf in enumerate(fallback_pdfs):
         path_key = str(pdf.get("path") or "").strip().lower()
         if pdf_index in used_fallback_indices or not path_key or path_key in used_paths:
             continue
-
-        evidence = _project_pdf_evidence(pdf, project)
-        customer_match = _project_customer_address_match(pdf, project)
-        strong_project_match = bool(
-            not evidence["explicitConflict"]
-            and (
-                evidence["explicitMatch"]
-                or evidence["filenameMatch"]
-                or evidence["pathMatch"]
-                or (evidence["textMatch"] and customer_match)
-            )
-        )
-        if not strong_project_match:
-            rejected_paths.add(path_key)
-            continue
-
         used_paths.add(path_key)
         item = dict(pdf)
         doc_type = canonical_project_document_type(
@@ -3747,7 +4650,7 @@ def project_document_catalog(project_index):
             "documentType": doc_type,
             "dokumenttyp": doc_type,
             "documentDate": item.get("printDate"),
-            "sourceOfTruth": "PDF-Archiv · Projektnummer eindeutig",
+            "sourceOfTruth": "PDF-Archiv · kein eindeutiger WW-Beleg",
             "pdfFound": True,
         })
         item.pop("_raw_text", None)
@@ -3774,7 +4677,6 @@ def project_document_catalog(project_index):
         "wwBookCount": len(books),
         "pdfCount": sum(1 for document in documents if document.get("pdfFound")),
         "missingPdfCount": sum(1 for document in documents if not document.get("pdfFound")),
-        "filteredPdfCount": len(rejected_paths),
     }
 
 
@@ -4238,8 +5140,8 @@ def incoming_supplier_candidates(query, limit=20):
 
 def incoming_supplier_invoices(supplier_key, text_query=""):
     """
-    Schritt 2: direkte Auswahl über den bereits erkannten Supplier-Key.
-    Dadurch kein erneutes Parsen aller 6.475 PDFs beim Klick -> deutlich schneller.
+    Direkte Auswahl über den erkannten Supplier-Key.
+    Bei Suchbegriff werden ausschließlich OCR-Materialzeilen durchsucht.
     """
     supplier_key = str(supplier_key or "").strip()
     text_query = str(text_query or "").strip()
@@ -4247,34 +5149,16 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
     if not supplier_key:
         return []
 
-    query_tokens = [x for x in _norm_supplier(text_query).split() if x]
     result = []
-
     for item in _incoming_catalog():
         ident = item.get("_supplier")
         if not ident or ident.get("key") != supplier_key:
             continue
 
         raw = str(item.get("_raw_text") or "")
-        raw_norm = _norm_supplier(raw)
-
-        if query_tokens and not all(t in raw_norm for t in query_tokens):
+        material = _material_search_result(raw, text_query) if text_query else None
+        if text_query and not material.get("matched"):
             continue
-
-        snippet = " ".join(raw.split())[:420]
-        if query_tokens:
-            low = raw.lower()
-            positions = [low.find(t.lower()) for t in query_tokens if low.find(t.lower()) >= 0]
-            if positions:
-                pos = min(positions)
-                compact = " ".join(raw.split())
-                # Für Snippet robust nochmal im kompakten Text suchen.
-                low_compact = compact.lower()
-                pos2 = min(
-                    [low_compact.find(t.lower()) for t in query_tokens if low_compact.find(t.lower()) >= 0]
-                    or [0]
-                )
-                snippet = compact[max(0, pos2-140):min(len(compact), pos2+500)]
 
         result.append({
             "filename": item.get("filename"),
@@ -4290,16 +5174,26 @@ def incoming_supplier_invoices(supplier_key, text_query=""):
             "monthName": item.get("monthName"),
             "day": item.get("day"),
             "amount": item.get("amount"),
-            "snippet": snippet,
+            "snippet": "" if text_query else " ".join(raw.split())[:420],
+            "materialMatched": bool(material and material.get("matched")),
+            "materialMatchCount": int((material or {}).get("matchCount") or 0),
+            "materialMatchIdeal": bool((material or {}).get("ideal")),
+            "materialMatchScore": int((material or {}).get("score") or 0),
+            "materialMatches": list((material or {}).get("matches") or []),
         })
 
-    result.sort(
-        key=lambda x: (
+    if text_query:
+        result.sort(key=lambda x: (
+            1 if x.get("materialMatchIdeal") else 0,
+            int(x.get("materialMatchScore") or 0),
+            int(x.get("materialMatchCount") or 0),
             x.get("invoiceDateTime") or "",
-            x.get("filename") or ""
-        ),
-        reverse=True
-    )
+        ), reverse=True)
+    else:
+        result.sort(
+            key=lambda x: (x.get("invoiceDateTime") or "", x.get("filename") or ""),
+            reverse=True,
+        )
     return result
 
 
@@ -4311,14 +5205,21 @@ def incoming_year_summary(documents):
             "count": 0,
             "amount": 0.0,
             "amountCount": 0,
+            "openCount": 0,
+            "openSum": 0.0,
         })
         row["count"] += 1
         if d.get("amount") is not None:
             row["amount"] += float(d["amount"])
             row["amountCount"] += 1
+        if d.get("paymentState") == "open":
+            row["openCount"] += 1
+            if d.get("amount") is not None:
+                row["openSum"] += float(d["amount"])
 
     for row in summary.values():
         row["amount"] = round(row["amount"], 2)
+        row["openSum"] = round(row["openSum"], 2)
     return summary
 
 
@@ -4470,6 +5371,23 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .invoice-amount{font-size:15px;font-weight:850;margin-top:7px}
 .invoice-snippet{font-size:12px;color:var(--muted);line-height:1.35;margin-top:7px;max-height:4.1em;overflow:hidden}
 
+.material-search-note{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.4}
+.material-search-status{margin-top:10px;padding:11px 12px;border:1px solid #48556a;border-radius:13px;background:#121820;color:#dfe7f2;line-height:1.45}
+.material-search-status strong{color:#fff}
+.material-search-status .subline{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.material-search-clear{margin-top:9px;background:#252a32;color:#fff;border:1px solid #444c58;padding:7px 10px;height:auto}
+.doc.material-search-hit{border-color:#617b9d;box-shadow:0 0 0 1px rgba(129,166,214,.13)}
+.material-hit-head{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 7px}
+.material-hit-badge{display:inline-flex;align-items:center;border:1px solid #526986;border-radius:999px;padding:5px 8px;background:#172131;color:#d9e9ff;font-size:11px;font-weight:900}
+.material-hit-badge.ideal{border-color:#9b7d27;background:#2a2412;color:#ffe393}
+.material-hit-box{margin-top:10px;padding:10px;border-radius:12px;background:#10151d;border:1px solid #354359}
+.material-hit-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#9fb5d3;font-weight:900;margin-bottom:6px}
+.material-hit-line{font-size:12px;line-height:1.45;color:#dfe6ef;padding:5px 0;border-top:1px solid rgba(255,255,255,.06)}
+.material-hit-line:first-of-type{border-top:0}
+mark.material-hit-mark{background:#ffe86b;color:#111;border-radius:3px;padding:0 2px;font-weight:900}
+.material-no-hit{padding:18px;border:1px dashed #4d5663;border-radius:16px;background:#15181d;color:#c8ced8}
+.material-no-hit strong{display:block;color:#fff;font-size:17px;margin-bottom:6px}
+
 @media (max-width:900px){
   .doc-list{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
@@ -4549,7 +5467,7 @@ a.action{display:inline-flex;align-items:center;justify-content:center;text-deco
 .open-total-zero{color:var(--good);font-weight:850}
 
 
-/* 0.13.4 · Strenge Projekt-PDF-Zuordnung */
+/* 0.13.3 · Projektsuche wie Eingangsrechnungen */
 .project-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .project-address-card{cursor:pointer;margin:0}
 .project-address-card:hover{border-color:#8994a5}
@@ -4707,6 +5625,66 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
 .capture-delete,.capture-clear-test{background:#401d1d!important;border-color:#713333!important;color:#ffc0c0!important}
 @media(max-width:620px){.capture-area-switch{grid-template-columns:1fr}}
 
+
+
+/* 0.13.5 · Rechnungsprüfplatz: PDF links, Kontrolle rechts */
+.capture-workbench{display:grid;grid-template-columns:minmax(520px,1.28fr) minmax(500px,.95fr);gap:16px;align-items:start;margin-top:14px}
+.capture-preview-column{min-width:0;position:sticky;top:12px;align-self:start}
+.capture-editor-column{min-width:0;display:grid;gap:14px}
+.capture-preview-card{margin:0;padding:14px;min-height:720px}
+.capture-preview-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.capture-drop{padding:12px;transition:.18s ease}
+.capture-drop.dragover{border-color:#9fe0b4;background:#13261a;box-shadow:0 0 0 3px rgba(159,224,180,.12)}
+.capture-file-tools{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:8px}
+.capture-file-label{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 15px;border-radius:12px;background:#fff;color:#090a0c;font-weight:900;cursor:pointer}
+.capture-file-label input{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.capture-pdf-shell{margin-top:12px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0b0d10;min-height:610px;display:flex;align-items:stretch;justify-content:stretch}
+.capture-pdf-shell iframe{display:block;width:100%;height:calc(100vh - 185px);min-height:610px;border:0;background:#fff}
+.capture-pdf-empty{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;min-height:610px;padding:30px;color:var(--muted);line-height:1.55}
+.capture-form-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 12px;margin-top:12px}
+.capture-form-two .full{grid-column:1/-1}
+.capture-form-two input,.capture-form-two select,.capture-form-two textarea{width:100%;min-width:0;box-sizing:border-box}
+.capture-form-two textarea{min-height:72px;resize:vertical}
+.capture-readonly{background:#111318!important;color:#cbd1d9!important;border-color:#303640!important}
+.capture-field-note{font-size:11px;color:var(--muted);line-height:1.35;margin-top:4px}
+.capture-supplier-results{grid-template-columns:1fr}
+.capture-supplier-choice{position:relative}
+.capture-supplier-choice.best{border-color:#9fe0b4;box-shadow:0 0 0 2px rgba(159,224,180,.1)}
+.capture-match-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:#173421;border:1px solid #4d9464;color:#b9f3ca;font-size:11px;font-weight:900;margin-bottom:6px}
+.capture-match-reasons{font-size:11px;color:var(--good);margin-top:5px;line-height:1.4}
+.capture-bank-warning{padding:13px 14px}
+.capture-bank-warning.ok{background:#13281a;border-color:#3e7650;color:#b9efc8}
+.capture-bank-warning.bad{background:#321717;border-color:#753333;color:#ffb3b3}
+.capture-bank-comparison{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.capture-bank-value{background:#111318;border:1px solid var(--line);border-radius:11px;padding:9px;overflow-wrap:anywhere}
+.capture-bank-value small{display:block;color:var(--muted);margin-bottom:3px}
+.capture-accept-bank{display:flex;align-items:flex-start;gap:9px;background:#fff;color:#111;border-radius:12px;padding:11px 13px;font-weight:900;cursor:pointer}
+.capture-accept-bank input{width:auto;min-width:auto;margin-top:3px;transform:scale(1.15)}
+.capture-payment-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.capture-skonto-off{opacity:.48}
+.capture-analyze-steps{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+.capture-analyze-step{font-size:11px;padding:4px 7px;border-radius:999px;background:#242831;border:1px solid var(--line);color:var(--muted)}
+.capture-analyze-step.ok{color:var(--good);border-color:#3e7650}
+.capture-analyze-step.warn{color:var(--warn);border-color:#765d24}
+@media(max-width:1180px){
+  .capture-workbench{grid-template-columns:minmax(420px,1fr) minmax(430px,1fr)}
+  .capture-preview-column{position:static}
+  .capture-pdf-shell iframe{height:720px}
+}
+@media(max-width:920px){
+  .capture-workbench{grid-template-columns:1fr}
+  .capture-preview-column{order:0}
+  .capture-editor-column{order:1}
+  .capture-preview-card{min-height:auto}
+  .capture-pdf-shell,.capture-pdf-empty{min-height:520px}
+  .capture-pdf-shell iframe{height:620px;min-height:520px}
+}
+@media(max-width:590px){
+  .capture-form-two,.capture-payment-grid,.capture-bank-comparison{grid-template-columns:1fr}
+  .capture-form-two .full{grid-column:auto}
+  .capture-pdf-shell,.capture-pdf-empty{min-height:430px}
+  .capture-pdf-shell iframe{height:520px;min-height:430px}
+}
 </style>
 </head>
 <body>
@@ -4781,12 +5759,13 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
       <div class="sub" id="incomingSub"></div>
 
       <div class="invoice-text-search">
-        <div class="formlabel">Was suche ich in den Rechnungen?</div>
+        <div class="formlabel">Welches Material suche ich?</div>
         <div class="searchrow">
           <input id="incomingTextQ" type="search"
-                 placeholder="Artikel, Artikelnummer, Text …" autocomplete="off">
-          <button id="incomingTextGo" type="button">In Rechnungen suchen</button>
+                 placeholder="Material, Artikelname oder Artikelnummer …" autocomplete="off">
+          <button id="incomingTextGo" type="button">Alle Rechnungen durchsuchen</button>
         </div>
+        <div class="material-search-note" id="incomingTextHint">Durchsucht alle Rechnungen des ausgewählten Lieferanten – ausschließlich die OCR-Materialzeilen.</div>
         <div class="meta" id="incomingTextMeta"></div>
       </div>
     </div>
@@ -4807,7 +5786,7 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
     <div class="section-head">
       <div>
         <h2>📥 Eingangsrechnung erfassen · Dunja</h2>
-        <div class="sub">Training bleibt vollständig getrennt. Nur der Echtbetrieb führt den Nummernkreis 1150 · Jahr · laufende Nummer weiter.</div>
+        <div class="sub">Rechnung links ablesen · rechts Lieferant, Zahlungsbedingungen, Beträge und Kontierung kontrollieren.</div>
       </div>
       <span class="pill" id="captureNextNumber">Nächste Nummer wird geladen …</span>
     </div>
@@ -4817,61 +5796,86 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
       <button id="captureAreaLive" class="live" type="button">🔒 Echtbetrieb</button>
     </div>
     <div id="captureAreaBanner" class="capture-area-banner test"></div>
-
     <div class="capture-dashboard" id="captureDashboard"></div>
 
-    <div class="card">
-      <div class="project-title">1 · PDF</div>
-      <div class="capture-drop" id="captureDrop">
-        <strong>Rechnung hier auswählen</strong>
-        <div class="sub">Das Original bleibt unverändert; KRISTINE legt Arbeits-PDF und _Original.pdf an.</div>
-        <input id="captureFile" type="file" accept="application/pdf,.pdf">
-        <div class="meta" id="captureAnalyzeMeta"></div>
-      </div>
-    </div>
+    <div class="capture-workbench">
+      <aside class="capture-preview-column">
+        <div class="card capture-preview-card">
+          <div class="capture-preview-head">
+            <div><div class="project-title">1 · Rechnung</div><div class="sub">PDF bleibt beim Prüfen immer sichtbar.</div></div>
+            <a id="captureOpenPdf" class="action secondary" href="#" target="_blank" rel="noopener" hidden>PDF groß öffnen</a>
+          </div>
+          <div class="capture-drop" id="captureDrop">
+            <strong>PDF hier hineinziehen</strong>
+            <div class="sub">oder Datei auswählen · Text wird gelesen, Scan-Seiten erhalten automatisch OCR.</div>
+            <div class="capture-file-tools">
+              <label class="capture-file-label">PDF auswählen<input id="captureFile" type="file" accept="application/pdf,.pdf"></label>
+            </div>
+            <div class="capture-analyze-steps" id="captureAnalyzeSteps"></div>
+            <div class="meta" id="captureAnalyzeMeta"></div>
+          </div>
+          <div class="capture-pdf-shell">
+            <div id="capturePdfEmpty" class="capture-pdf-empty">Noch keine Rechnung ausgewählt.<br>Nach dem Reinziehen erscheint sie hier direkt neben der Kontrolle.</div>
+            <iframe id="capturePdfPreview" title="Vorschau der Eingangsrechnung" hidden></iframe>
+          </div>
+        </div>
+      </aside>
 
-    <div class="card">
-      <div class="project-title">2 · Lieferant aus WinWorker</div>
-      <div class="searchrow" style="margin-top:10px">
-        <input id="captureSupplierQ" type="search" placeholder="Lieferant suchen, z. B. Morscher, LED …" autocomplete="off">
-        <button id="captureSupplierGo" type="button">Suchen</button>
-      </div>
-      <div id="captureSelectedSupplier" class="meta">Noch kein Lieferant ausgewählt.</div>
-      <div id="captureSupplierResults" class="capture-supplier-results"></div>
-      <div id="captureBankWarning"></div>
-    </div>
+      <div class="capture-editor-column">
+        <div class="card">
+          <div class="project-title">2 · Lieferant aus WinWorker</div>
+          <div class="sub">KRISTINE schlägt nach PDF-Text, UID, Kundennummer und Adresse vor. Dunja wählt bewusst aus.</div>
+          <div class="searchrow" style="margin-top:10px">
+            <input id="captureSupplierQ" type="search" placeholder="Lieferant händisch suchen …" autocomplete="off">
+            <button id="captureSupplierGo" type="button">Suchen</button>
+          </div>
+          <div id="captureSelectedSupplier" class="meta">Noch kein Lieferant ausgewählt.</div>
+          <div id="captureSupplierResults" class="capture-supplier-results"></div>
+        </div>
 
-    <div class="card">
-      <div class="project-title">3 · Rechnungsdaten</div>
-      <div class="capture-grid" style="margin-top:12px">
-        <div><div class="formlabel">Belegart</div><select id="captureDocumentType"><option>Rechnung</option><option>Gutschrift</option></select></div>
-        <div><div class="formlabel">Lieferanten-Rechnungsnummer</div><input id="captureInvoiceNumber" type="text"></div>
-        <div><div class="formlabel">Rechnungsdatum</div><input id="captureInvoiceDate" type="date"></div>
-        <div><div class="formlabel">Fällig am</div><input id="captureDueDate" type="date"></div>
-        <div><div class="formlabel">Netto</div><input id="captureNet" type="number" step="0.01"></div>
-        <div><div class="formlabel">USt</div><input id="captureVat" type="number" step="0.01"></div>
-        <div><div class="formlabel">Brutto</div><input id="captureGross" type="number" step="0.01"></div>
-        <div><div class="formlabel">Währung</div><select id="captureCurrency"><option>EUR</option><option>CHF</option></select></div>
-        <div class="span-2"><div class="formlabel">IBAN auf Rechnung</div><input id="captureIban" type="text"></div>
-        <div><div class="formlabel">SWIFT / BIC</div><input id="captureSwift" type="text"></div>
-        <div><div class="formlabel">Unsere KundenNr. dort</div><input id="captureExternalCustomerNo" type="text"></div>
-        <div class="span-2"><div class="formlabel">Buchungstext</div><input id="captureBookingText" type="text"></div>
-        <div class="span-2"><div class="formlabel">Interne Notiz</div><input id="captureNote" type="text"></div>
-        <div><div class="formlabel">Bearbeiter</div><input id="captureCreatedBy" type="text" value="Dunja"></div>
-        <div><div class="formlabel">Arbeitsstatus</div><select id="captureWorkflow"><option value="zu_pruefen">Zu prüfen</option><option value="geprueft">Geprüft</option></select></div>
-      </div>
-    </div>
+        <div class="card">
+          <div class="project-title">3 · Rechnungsdaten</div>
+          <div class="capture-form-two">
+            <div><div class="formlabel">Belegart</div><select id="captureDocumentType"><option>Rechnung</option><option>Gutschrift</option></select></div>
+            <div><div class="formlabel">Lieferanten-Rechnungsnummer</div><input id="captureInvoiceNumber" type="text"></div>
 
-    <div class="card">
-      <div class="section-head">
-        <div><div class="project-title">4 · Kontierung</div><div class="sub">Summe der Kontierungszeilen muss dem Rechnungs-Netto entsprechen.</div></div>
-        <button id="captureAddAllocation" type="button" class="dark">＋ Kontierungszeile</button>
-      </div>
-      <div id="captureAllocations"></div>
-      <div id="captureAllocationTotal" class="capture-total"></div>
-      <div class="capture-actions">
-        <button id="captureSave" type="button">Rechnung verbindlich erfassen</button>
-        <span id="captureSaveMessage" class="capture-message"></span>
+            <div><div class="formlabel">Rechnungsdatum</div><input id="captureInvoiceDate" type="date"></div>
+            <div><div class="formlabel">Nettofällig am</div><input id="captureNetDueDate" type="date"></div>
+
+            <div><div class="formlabel">Skonto</div><select id="captureSkontoEnabled"><option value="0">Nein</option><option value="1">Ja</option></select></div>
+            <div id="captureSkontoPercentWrap"><div class="formlabel">Skonto %</div><input id="captureSkontoPercent" type="number" min="0" max="100" step="0.01"></div>
+            <div id="captureSkontoDueWrap"><div class="formlabel">Skonto fällig am</div><input id="captureSkontoDueDate" type="date"></div>
+            <div><div class="formlabel">Währung</div><select id="captureCurrency"><option>EUR</option><option>CHF</option></select></div>
+
+            <div><div class="formlabel">Netto</div><input id="captureNet" type="number" step="0.01"></div>
+            <div><div class="formlabel">USt</div><input id="captureVat" type="number" step="0.01"></div>
+            <div><div class="formlabel">Brutto</div><input id="captureGross" type="number" step="0.01"></div>
+            <div><div class="formlabel">Unsere KundenNr. dort</div><input id="captureExternalCustomerNo" type="text"><div class="capture-field-note">Nach Lieferantenauswahl aus WinWorker; falls dort leer, händisch ergänzbar.</div></div>
+
+            <div class="full"><div class="formlabel">Zahlungsbedingungen laut Rechnung</div><input id="capturePaymentTerms" type="text" placeholder="z. B. sofort ohne Abzug"></div>
+            <div class="full"><div class="formlabel">IBAN laut Stammdaten</div><input id="captureMasterIban" class="capture-readonly" type="text" readonly placeholder="wird nach Lieferantenauswahl geladen"></div>
+            <div class="full"><div class="formlabel">IBAN auf dieser Rechnung</div><input id="captureInvoiceIban" type="text" placeholder="nur zur Gegenprüfung"></div>
+            <div id="captureBankWarning" class="full"></div>
+
+            <div class="full"><div class="formlabel">Buchungstext / Betreff</div><input id="captureBookingText" type="text" placeholder="wird nur bei eindeutigem Betreff vorgeschlagen"></div>
+            <div class="full"><div class="formlabel">Interne Notiz</div><textarea id="captureNote"></textarea></div>
+            <div><div class="formlabel">Bearbeiter</div><input id="captureCreatedBy" type="text" value="Dunja"></div>
+            <div><div class="formlabel">Arbeitsstatus</div><select id="captureWorkflow"><option value="zu_pruefen">Zu prüfen</option><option value="geprueft">Geprüft</option></select></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <div><div class="project-title">4 · Kontierung</div><div class="sub">Summe der Kontierungszeilen muss dem Rechnungs-Netto entsprechen.</div></div>
+            <button id="captureAddAllocation" type="button" class="dark">＋ Kontierungszeile</button>
+          </div>
+          <div id="captureAllocations"></div>
+          <div id="captureAllocationTotal" class="capture-total"></div>
+          <div class="capture-actions">
+            <button id="captureSave" type="button">Rechnung verbindlich erfassen</button>
+            <span id="captureSaveMessage" class="capture-message"></span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -4947,7 +5951,7 @@ const incomingSupplierSection=document.getElementById('incomingSupplierSection')
 const incomingSection=document.getElementById('incomingSection'),incomingGrouped=document.getElementById('incomingGrouped');
 const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub');
 const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
-const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextMeta=document.getElementById('incomingTextMeta');
+const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextHint=document.getElementById('incomingTextHint'),incomingTextMeta=document.getElementById('incomingTextMeta');
 const backToSuppliers=document.getElementById('backToSuppliers');
 const incomingWatch=document.getElementById('incomingWatch');
 const incomingReviewSection=document.getElementById('incomingReviewSection'),incomingReview=document.getElementById('incomingReview');
@@ -4957,17 +5961,19 @@ const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getEle
 
 const captureSection=document.getElementById('captureSection'),captureDashboard=document.getElementById('captureDashboard');
 const captureAreaTest=document.getElementById('captureAreaTest'),captureAreaLive=document.getElementById('captureAreaLive'),captureAreaBanner=document.getElementById('captureAreaBanner');
-const captureNextNumber=document.getElementById('captureNextNumber'),captureFile=document.getElementById('captureFile'),captureDrop=document.getElementById('captureDrop'),captureAnalyzeMeta=document.getElementById('captureAnalyzeMeta');
+const captureNextNumber=document.getElementById('captureNextNumber'),captureFile=document.getElementById('captureFile'),captureDrop=document.getElementById('captureDrop'),captureAnalyzeMeta=document.getElementById('captureAnalyzeMeta'),captureAnalyzeSteps=document.getElementById('captureAnalyzeSteps');
+const capturePdfPreview=document.getElementById('capturePdfPreview'),capturePdfEmpty=document.getElementById('capturePdfEmpty'),captureOpenPdf=document.getElementById('captureOpenPdf');
 const captureSupplierQ=document.getElementById('captureSupplierQ'),captureSupplierGo=document.getElementById('captureSupplierGo'),captureSupplierResults=document.getElementById('captureSupplierResults'),captureSelectedSupplierBox=document.getElementById('captureSelectedSupplier'),captureBankWarning=document.getElementById('captureBankWarning');
-const captureDocumentType=document.getElementById('captureDocumentType'),captureInvoiceNumber=document.getElementById('captureInvoiceNumber'),captureInvoiceDate=document.getElementById('captureInvoiceDate'),captureDueDate=document.getElementById('captureDueDate');
+const captureDocumentType=document.getElementById('captureDocumentType'),captureInvoiceNumber=document.getElementById('captureInvoiceNumber'),captureInvoiceDate=document.getElementById('captureInvoiceDate'),captureNetDueDate=document.getElementById('captureNetDueDate');
+const captureSkontoEnabled=document.getElementById('captureSkontoEnabled'),captureSkontoPercent=document.getElementById('captureSkontoPercent'),captureSkontoDueDate=document.getElementById('captureSkontoDueDate'),captureSkontoPercentWrap=document.getElementById('captureSkontoPercentWrap'),captureSkontoDueWrap=document.getElementById('captureSkontoDueWrap'),capturePaymentTerms=document.getElementById('capturePaymentTerms');
 const captureNet=document.getElementById('captureNet'),captureVat=document.getElementById('captureVat'),captureGross=document.getElementById('captureGross'),captureCurrency=document.getElementById('captureCurrency');
-const captureIban=document.getElementById('captureIban'),captureSwift=document.getElementById('captureSwift'),captureExternalCustomerNo=document.getElementById('captureExternalCustomerNo'),captureBookingText=document.getElementById('captureBookingText'),captureNote=document.getElementById('captureNote'),captureCreatedBy=document.getElementById('captureCreatedBy'),captureWorkflow=document.getElementById('captureWorkflow');
+const captureMasterIban=document.getElementById('captureMasterIban'),captureInvoiceIban=document.getElementById('captureInvoiceIban'),captureExternalCustomerNo=document.getElementById('captureExternalCustomerNo'),captureBookingText=document.getElementById('captureBookingText'),captureNote=document.getElementById('captureNote'),captureCreatedBy=document.getElementById('captureCreatedBy'),captureWorkflow=document.getElementById('captureWorkflow');
 const captureAllocations=document.getElementById('captureAllocations'),captureAllocationTotal=document.getElementById('captureAllocationTotal'),captureAddAllocation=document.getElementById('captureAddAllocation'),captureSave=document.getElementById('captureSave'),captureSaveMessage=document.getElementById('captureSaveMessage');
 const captureCostSummary=document.getElementById('captureCostSummary'),captureCostYear=document.getElementById('captureCostYear'),captureCostTitle=document.getElementById('captureCostTitle');
 const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
 
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[];
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,incomingMaterialQuery='',captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[],capturePdfObjectUrl='',captureAcceptNewIban=false;
 let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -4977,6 +5983,29 @@ function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
 function norm(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ')}
 function addressLabel(p){return [p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function addressKey(p){return norm([p.street,p.postalCode,p.city].filter(Boolean).join('|'))}
+
+function regexEscape(v){return String(v||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+function highlightMaterialText(value,query){
+  const terms=String(query||'').trim().split(/[^0-9A-Za-zÄÖÜäöüß]+/).filter(Boolean).sort((a,b)=>b.length-a.length);
+  if(!terms.length)return esc(value);
+  const pattern=new RegExp('('+terms.map(regexEscape).join('|')+')','gi');
+  return String(value??'').split(pattern).map((part,index)=>index%2
+    ?`<mark class="material-hit-mark">${esc(part)}</mark>`
+    :esc(part)).join('');
+}
+function supplierSearchLabel(){
+  const name=String(selectedWwAddress?.name||'').trim();
+  return name||'diesem Lieferanten';
+}
+function updateIncomingMaterialScope(){
+  const name=supplierSearchLabel();
+  incomingTextGo.textContent='Alle Rechnungen durchsuchen';
+  incomingTextHint.textContent=`Durchsucht alle Rechnungen von ${name} – ausschließlich die OCR-Materialzeilen, nicht Datum, Rechnungsnummer oder Rechnungskopf.`;
+}
+function clearIncomingMaterialSearch(){
+  incomingTextQ.value='';
+  loadSupplierInvoices('');
+}
 
 function docSource(d){
   const s=norm([d.path,d.filename,d.dokumenttyp].filter(Boolean).join(' '));
@@ -5145,7 +6174,7 @@ async function openProjectDetail(p){
     const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
     selectedProject=data.project||p;currentProjects=[selectedProject];currentDocs=data.documents||[];currentDocType='';
     renderProjects();
-    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}${Number(data.filteredPdfCount||0)?' · '+Number(data.filteredPdfCount)+' unsichere ausgeblendet':''}`;
+    meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}`;
     ds.hidden=false;renderSummary(currentProjects,currentDocs);renderDocumentTypes();
     ds.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
@@ -5319,7 +6348,9 @@ async function selectIncomingSupplier(address){
     ? 'WinWorker-Nr. '+address.customerNumber : '';
   incomingSub.textContent='Verknüpfte Rechnungen werden geladen …';
   incomingTextQ.value='';
+  incomingMaterialQuery='';
   incomingTextMeta.textContent='';
+  updateIncomingMaterialScope();
   incomingGrouped.innerHTML='<div class="empty">Lieferantenakte wird geladen …</div>';
 
   await loadSupplierInvoices('');
@@ -5484,15 +6515,18 @@ function renderIncomingWatch(alerts){
 async function loadSupplierInvoices(textQuery=''){
   if(!selectedWwAddress)return;
 
+  const query=String(textQuery||'').trim();
+  incomingMaterialQuery=query;
   loader.style.display='block';
-  incomingTextMeta.textContent=textQuery
-    ? 'Suche in den WinWorker-Rechnungsdaten …'
+  incomingTextGo.disabled=true;
+  incomingTextMeta.textContent=query
+    ? `Durchsuche alle OCR-Materialzeilen von ${supplierSearchLabel()} …`
     : 'Lade Lieferantenakte …';
 
   try{
     const params=new URLSearchParams({
       addressId:selectedWwAddress.addressId||'',
-      q:textQuery||''
+      q:query
     });
     const r=await fetch('/incoming/address-invoices?'+params.toString(),{cache:'no-store'});
     const data=await r.json();
@@ -5501,11 +6535,11 @@ async function loadSupplierInvoices(textQuery=''){
     incomingAll=data.documents||[];
     renderIncomingWatch(data.watchAlerts||[]);
     const stats=data.stats||{};
+    const search=data.search||{};
     const totalSum=Number(stats.sum||0);
     const openSum=Number(stats.openSum||0);
     const openCount=Number(stats.openCount||0);
-    const amountCount=Number(stats.amountCount||0);
-    const count=Number(stats.count||incomingAll.length||0);
+    const count=Number(stats.count||data.allCount||0);
     const yearly=stats.yearly||{};
 
     incomingSub.innerHTML=
@@ -5513,22 +6547,37 @@ async function loadSupplierInvoices(textQuery=''){
       `<strong>${esc(invoiceMoney(totalSum))}</strong> Gesamtsumme · `+
       `<span class="${openCount>0||openSum>0?'open-total':'open-total-zero'}">${openCount} offen · ${esc(invoiceMoney(openSum))}</span> · `+
       `<span class="ww-truth">WW + KRISTINE</span>`+
-      (textQuery?' · Textfilter: "'+esc(textQuery)+'"':'');
+      (query?` · <span class="material-hit-badge">${Number(search.hitInvoices||0)} Rechnungen mit Materialtreffer</span>`:'');
 
-    incomingTextMeta.classList.toggle('year-summary-grid',!textQuery);
-    incomingTextMeta.innerHTML=textQuery
-      ? `${incomingAll.length} Treffer innerhalb dieses Lieferanten`
-      : Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
-          const s=yearly[y]||{};
-          const oc=Number(s.openCount||0), os=Number(s.openSum||0);
-          return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="${oc>0||os>0?'open-total':'open-total-zero'}">${oc} offen · ${esc(invoiceMoney(os))}</span></span>`;
-        }).join('');
+    incomingTextMeta.classList.toggle('year-summary-grid',!query);
+    if(query){
+      const scanned=Number(search.scannedInvoices||count||0);
+      const ocr=Number(search.ocrInvoices||0);
+      const without=Number(search.withoutOcr||0);
+      const hits=Number(search.hitInvoices||incomingAll.length||0);
+      const matches=Number(search.matchCount||0);
+      const ideal=Number(search.idealHitInvoices||0);
+      const matchText=matches===1?'1 markiertem Materialtreffer':`${matches} markierten Materialtreffern`;
+      incomingTextMeta.innerHTML=`<div class="material-search-status">
+        <strong>${hits} Rechnung${hits===1?'':'en'} mit ${matchText}</strong>
+        <span class="subline">${scanned} Rechnungen von ${esc(supplierSearchLabel())} geprüft · ${ocr} OCR-Texte gelesen${without?` · ${without} ohne lesbaren OCR-Text`:''}${ideal?` · ${ideal} ideal gereiht`:''}</span>
+        <button id="incomingMaterialClear" class="material-search-clear" type="button">× Materialsuche löschen · alle Rechnungen anzeigen</button>
+      </div>`;
+      document.getElementById('incomingMaterialClear')?.addEventListener('click',clearIncomingMaterialSearch);
+    }else{
+      incomingTextMeta.innerHTML=Object.keys(yearly).sort((a,b)=>Number(b)-Number(a)).map(y=>{
+        const s=yearly[y]||{};
+        const oc=Number(s.openCount||0), os=Number(s.openSum||0);
+        return `<span class="pill year-summary-pill"><strong>${esc(y)}</strong> · ${Number(s.count||0)} Rechnungen · ${esc(invoiceMoney(Number(s.sum||0)))} · <span class="${oc>0||os>0?'open-total':'open-total-zero'}">${oc} offen · ${esc(invoiceMoney(os))}</span></span>`;
+      }).join('');
+    }
 
-    renderIncomingGrouped(incomingAll,data.years||{});
+    renderIncomingGrouped(incomingAll,data.years||{},query,search);
   }catch(e){
     incomingTextMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';
   }finally{
     loader.style.display='none';
+    incomingTextGo.disabled=false;
   }
 }
 
@@ -5541,18 +6590,31 @@ function renderIncomingDoc(d){
   const date=d.invoiceDate
     ? d.invoiceDate.split('-').reverse().join('.')
     : '';
-  return `<div class="card doc">
+  const searching=Boolean(incomingMaterialQuery);
+  const materialMatches=Array.isArray(d.materialMatches)?d.materialMatches:[];
+  const materialBox=searching&&materialMatches.length
+    ? `<div class="material-hit-box">
+        <div class="material-hit-label">Nur Materialzeilen · ${Number(d.materialMatchCount||materialMatches.length)} Treffer</div>
+        ${materialMatches.map(line=>`<div class="material-hit-line">${highlightMaterialText(line,incomingMaterialQuery)}</div>`).join('')}
+      </div>`
+    : '';
+  const hitBadge=searching
+    ? `<div class="material-hit-head"><span class="material-hit-badge ${d.materialMatchIdeal?'ideal':''}">${d.materialMatchIdeal?'★ Idealer Treffer':'Materialtreffer'} · ${Number(d.materialMatchCount||1)}</span></div>`
+    : '';
+  return `<div class="card doc ${searching?'material-search-hit':''}">
     ${d.path
       ? `<img class="thumb" loading="lazy" src="${urlFor('/thumb',d.path)}" alt="">`
       : `<div class="thumb empty" style="display:flex;align-items:center;justify-content:center;color:#666;font-weight:900">WW</div>`}
     <div>
+      ${hitBadge}
       ${date?`<div class="day-date">${esc(date)}</div>`:''}
       <div class="docname">${esc(d.invoiceNumber?('Rechnung '+d.invoiceNumber):(d.filename||'Eingangsrechnung'))}</div>
       ${d.amount!==null&&d.amount!==undefined
         ? `<div class="invoice-amount">${esc(invoiceMoney(d.amount))}</div>`:''}
       ${d.paymentStatus?`<div class="${d.paymentState==='open'?'payment-open':d.paymentState==='paid'?'payment-paid':'payment-unknown'}">${esc(d.paymentStatus)}</div>`:''}
       <div class="ww-truth">Quelle: ${esc(d.sourceOfTruth||'WinWorker Eingangsbelege')}</div>
-      ${d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
+      ${materialBox}
+      ${!searching&&d.snippet?`<div class="invoice-snippet">${esc(d.snippet)}</div>`:''}
       <div class="actions">
         ${d.path?`<a class="action" href="${urlFor('/pdf',d.path)}" target="_blank" rel="noopener">PDF öffnen</a>`:'<span class="sub">PDF nicht gefunden</span>'}
         ${d.originalPath?`<a class="action" href="${urlFor('/pdf',d.originalPath)}" target="_blank" rel="noopener">Original</a>`:''}
@@ -5561,9 +6623,19 @@ function renderIncomingDoc(d){
   </div>`;
 }
 
-function renderIncomingGrouped(rows, yearSummary){
+function renderIncomingGrouped(rows, yearSummary, textQuery='', searchMeta={}){
+  const searching=Boolean(String(textQuery||'').trim());
   if(!rows.length){
-    incomingGrouped.innerHTML='<div class="empty">Keine Rechnungen für diese Auswahl gefunden.</div>';
+    if(searching){
+      incomingGrouped.innerHTML=`<div class="material-no-hit">
+        <strong>Kein Materialtreffer für „${esc(textQuery)}“</strong>
+        Durchsucht wurden ${Number(searchMeta.scannedInvoices||0)} Rechnungen von ${esc(supplierSearchLabel())}. Rechnungskopf, Datum und Rechnungsnummer zählen bewusst nicht als Treffer.
+        <div><button class="material-search-clear" type="button" id="incomingMaterialClearEmpty">Alle Rechnungen wieder anzeigen</button></div>
+      </div>`;
+      document.getElementById('incomingMaterialClearEmpty')?.addEventListener('click',clearIncomingMaterialSearch);
+    }else{
+      incomingGrouped.innerHTML='<div class="empty">Keine Rechnungen für diese Auswahl gefunden.</div>';
+    }
     return;
   }
 
@@ -5589,38 +6661,46 @@ function renderIncomingGrouped(rows, yearSummary){
 
     const months=years.get(y);
     const monthKeys=[...months.keys()].sort((a,b)=>Number(b)-Number(a));
+    const yearDocs=[...months.values()].flat();
+    const yearMatches=yearDocs.reduce((sum,d)=>sum+Number(d.materialMatchCount||0),0);
 
     const monthHtml=monthKeys.map(m=>{
       const docsForMonth=months.get(m);
       const title=monthLabel(m,docsForMonth[0]?.monthName);
+      const monthMatches=docsForMonth.reduce((sum,d)=>sum+Number(d.materialMatchCount||0),0);
       return `<div class="month-block">
-        <div class="month-title">${esc(title)} · ${docsForMonth.length}</div>
+        <div class="month-title">${esc(title)} · ${docsForMonth.length}${searching?` Rechnung${docsForMonth.length===1?'':'en'} · ${monthMatches} Materialtreffer`:''}</div>
         <div class="doc-list">${docsForMonth.map(renderIncomingDoc).join('')}</div>
       </div>`;
     }).join('');
 
-    return `<div class="year-block">
-      <div class="year-header">
-        <div class="year-name">${esc(y)}</div>
-        <div class="year-total">
+    const yearTotal=searching
+      ? `<div class="year-total"><strong>${yearDocs.length} Rechnung${yearDocs.length===1?'':'en'}</strong><small>${yearMatches} markierte Materialtreffer</small></div>`
+      : `<div class="year-total">
           <strong>${totalKnown?esc(invoiceMoney(yearAmount)):'–'}</strong>
           <small>Jahressumme${totalKnown<totalCount?' · '+totalKnown+'/'+totalCount+' Beträge erkannt':''}</small>
           <small class="${Number(ys.openCount||0)>0||Number(ys.openSum||0)>0?'open-total':'open-total-zero'}">${Number(ys.openCount||0)} offen · ${esc(invoiceMoney(Number(ys.openSum||0)))}</small>
-        </div>
+        </div>`;
+
+    return `<div class="year-block">
+      <div class="year-header">
+        <div class="year-name">${esc(y)}</div>
+        ${yearTotal}
       </div>
       ${monthHtml}
     </div>`;
   }).join('');
 }
 
-
 incomingTextGo.onclick=()=>loadSupplierInvoices(incomingTextQ.value.trim());
 incomingTextQ.addEventListener('keydown',e=>{
   if(e.key==='Enter')loadSupplierInvoices(incomingTextQ.value.trim());
+  if(e.key==='Escape'&&incomingMaterialQuery)clearIncomingMaterialSearch();
 });
 
+
 backToSuppliers.onclick=()=>{
-  selectedSupplier=null;selectedWwAddress=null;
+  selectedSupplier=null;selectedWwAddress=null;incomingMaterialQuery='';
   incomingSection.hidden=true;incomingReviewSection.hidden=true;
   incomingSupplierSection.hidden=false;
   meta.textContent=incomingCandidates.length+' WinWorker-Adresse(n) · bitte auswählen';
@@ -5633,41 +6713,45 @@ backToSuppliers.onclick=()=>{
 function captureAreaIsTest(){return captureArea==='test'}
 function updateCaptureAreaUi(){
   const isTest=captureAreaIsTest();
-  captureAreaTest.classList.toggle('active',isTest);
-  captureAreaLive.classList.toggle('active',!isTest);
+  captureAreaTest.classList.toggle('active',isTest);captureAreaLive.classList.toggle('active',!isTest);
   captureAreaBanner.className='capture-area-banner '+(isTest?'test':'live');
   captureAreaBanner.innerHTML=isTest
-    ? '<strong>🧪 TESTGELÄNDE AKTIV</strong>Keine echte 1150-Nummer · kein Brain/OP · keine echte Kostenentwicklung · Testrechnungen können vollständig gelöscht werden.'
-    : '<strong>🔒 ECHTBETRIEB AKTIV</strong>Die nächste echte 1150-Nummer wird verbindlich vergeben. Echtbelege sind danach nicht löschbar.';
+    ?'<strong>🧪 Testgelände aktiv</strong>Testnummern, Testdatenbank und Test-PDFs sind vollständig vom Echtbetrieb getrennt. Trainingsbelege dürfen gelöscht werden.'
+    :'<strong>🔒 Echtbetrieb aktiv</strong>Die nächste Rechnung erhält eine echte 1150-Nummer. Echtbelege werden nicht gelöscht.';
   captureSave.textContent=isTest?'Testrechnung speichern':'Rechnung verbindlich erfassen';
-  captureCostTitle.textContent=isTest?'Test-Kostenentwicklung':'Kostenentwicklung';
-  captureRecentTitle.textContent=isTest?'Trainingsbelege':'Zuletzt erfasst';
-  captureClearTest.hidden=!isTest;
+  captureCostTitle.textContent=isTest?'Test-Kostenentwicklung':'Kostenentwicklung';captureRecentTitle.textContent=isTest?'Trainingsbelege':'Zuletzt erfasst';captureClearTest.hidden=!isTest;
   document.body.classList.toggle('capture-training',isTest);
 }
-async function setCaptureArea(next,{confirmLive=true}={}){
-  const area=next==='live'?'live':'test';
-  if(area==='live'&&captureArea!=='live'&&confirmLive){
-    const ok=confirm('ECHTBETRIEB aktivieren?\n\nDie nächste Rechnung erhält eine echte 1150-Nummer und kann nicht gelöscht werden.');
-    if(!ok)return;
-  }
-  captureArea=area;
-  localStorage.setItem('kristineCaptureArea',captureArea);
-  resetCaptureForm();setCaptureMessage('');updateCaptureAreaUi();
-  await Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
+async function setCaptureArea(area,confirmLive=true){
+  area=area==='live'?'live':'test';
+  if(area==='live'&&captureArea!=='live'&&confirmLive){if(!confirm('In den Echtbetrieb wechseln?\n\nDie nächste gespeicherte Rechnung erhält eine echte 1150-Nummer und kann nicht gelöscht werden.'))return}
+  captureArea=area;localStorage.setItem('kristineCaptureArea',captureArea);captureAcceptNewIban=false;updateCaptureAreaUi();resetCaptureForm();await Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
 }
-
-const CAPTURE_COST_TYPES=['Material','Fremdleistung','Miete','Strom','Gas / Heizung','Versicherung','Fahrzeug','IT / Telefon','Werkstatt','Büro','Werbung','Steuerberater','Maschinen','Sonstiges'];
-function captureNumber(v){const n=Number(v);return Number.isFinite(n)?n:0}
+function captureNumber(v){const n=Number(String(v??'').replace(',','.'));return Number.isFinite(n)?n:0}
 function setCaptureMessage(text,type=''){captureSaveMessage.textContent=text||'';captureSaveMessage.className='capture-message '+type}
-function captureToday(){return new Date().toISOString().slice(0,10)}
 function captureAllocationSeed(seed={}){return {account:seed.account||'',costType:seed.cost_type||seed.costType||'Material',costCenter:seed.cost_center||seed.costCenter||'',projectId:seed.project_id||seed.projectId||'',description:seed.description||'',netAmount:seed.net_amount??seed.netAmount??'',vatRate:seed.vat_rate??seed.vatRate??20}}
+function captureNormalizeIban(value){
+  let raw=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^IBAN/,'');
+  const lengths={AT:20,DE:22,CH:21,LI:21,IT:27,FR:27,NL:18,BE:16,LU:20};
+  const m=raw.match(/([A-Z]{2}\d{2}[A-Z0-9]{10,32})/);if(!m)return '';
+  raw=m[1];const len=lengths[raw.slice(0,2)];return len&&raw.length>=len?raw.slice(0,len):raw.slice(0,34);
+}
+function captureIbanValid(value){
+  const iban=captureNormalizeIban(value),lengths={AT:20,DE:22,CH:21,LI:21,IT:27,FR:27,NL:18,BE:16,LU:20};
+  if(!iban||lengths[iban.slice(0,2)]&&iban.length!==lengths[iban.slice(0,2)])return false;
+  const rearranged=iban.slice(4)+iban.slice(0,4);let remainder=0;
+  for(const ch of rearranged){const part=/[A-Z]/.test(ch)?String(ch.charCodeAt(0)-55):ch;for(const digit of part)remainder=(remainder*10+Number(digit))%97}
+  return remainder===1;
+}
+function captureFormatIban(value){return captureNormalizeIban(value).replace(/(.{4})/g,'$1 ').trim()}
+function captureDateDE(value){if(!value)return '–';const p=String(value).split('-');return p.length===3?`${p[2]}.${p[1]}.${p[0]}`:value}
 
 function renderCaptureAllocations(){
   if(!captureAllocationRows.length)captureAllocationRows=[captureAllocationSeed()];
+  const costOptions=['Material','Fremdleistung','Miete','Strom','Gas / Heizung','Versicherung','Fahrzeug','IT / Telefon','Werkstatt','Büro','Werbung','Steuerberater','Maschinen','Sonstiges'];
   captureAllocations.innerHTML=captureAllocationRows.map((row,i)=>`<div class="capture-allocation" data-allocation="${i}">
     <div><div class="formlabel">Sachkonto</div><input data-field="account" value="${esc(row.account)}" placeholder="z. B. 5100"></div>
-    <div><div class="formlabel">Kostenart</div><select data-field="costType">${CAPTURE_COST_TYPES.map(x=>`<option ${x===row.costType?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+    <div><div class="formlabel">Kostenart</div><select data-field="costType">${costOptions.map(x=>`<option ${x===row.costType?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
     <div><div class="formlabel">Kostenstelle</div><input data-field="costCenter" value="${esc(row.costCenter)}" placeholder="Firma / Büro"></div>
     <div><div class="formlabel">Baustelle</div><input data-field="projectId" value="${esc(row.projectId)}" placeholder="26083"></div>
     <div><div class="formlabel">Beschreibung</div><input data-field="description" value="${esc(row.description)}"></div>
@@ -5675,162 +6759,152 @@ function renderCaptureAllocations(){
     <div><div class="formlabel">USt %</div><input data-field="vatRate" type="number" step="0.01" value="${esc(row.vatRate)}"></div>
     <button class="remove" type="button" data-remove="${i}">×</button>
   </div>`).join('');
-  captureAllocations.querySelectorAll('[data-allocation]').forEach(node=>{
-    const i=Number(node.dataset.allocation);
-    node.querySelectorAll('[data-field]').forEach(input=>input.oninput=()=>{captureAllocationRows[i][input.dataset.field]=input.value;updateCaptureAllocationTotal()});
-  });
+  captureAllocations.querySelectorAll('[data-allocation]').forEach(node=>{const i=Number(node.dataset.allocation);node.querySelectorAll('[data-field]').forEach(input=>input.oninput=()=>{captureAllocationRows[i][input.dataset.field]=input.value;updateCaptureAllocationTotal()})});
   captureAllocations.querySelectorAll('[data-remove]').forEach(btn=>btn.onclick=()=>{captureAllocationRows.splice(Number(btn.dataset.remove),1);renderCaptureAllocations()});
   updateCaptureAllocationTotal();
 }
-
 function updateCaptureAllocationTotal(){
-  const net=captureNumber(captureNet.value);
-  const allocated=captureAllocationRows.reduce((sum,row)=>sum+captureNumber(row.netAmount),0);
-  const diff=Math.round((net-allocated)*100)/100;
-  const ok=Math.abs(diff)<=0.02;
+  const net=captureNumber(captureNet.value),allocated=captureAllocationRows.reduce((sum,row)=>sum+captureNumber(row.netAmount),0),diff=Math.round((net-allocated)*100)/100,ok=Math.abs(diff)<=0.02;
   captureAllocationTotal.className='capture-total '+(ok?'good':'bad');
-  captureAllocationTotal.innerHTML=`<span>Rechnungs-Netto <strong>${esc(invoiceMoney(net))}</strong></span><span>Kontiert <strong>${esc(invoiceMoney(allocated))}</strong></span><span>Differenz <strong>${esc(invoiceMoney(diff))}</strong></span>`;
-  return ok;
+  captureAllocationTotal.innerHTML=`<span>Rechnungs-Netto <strong>${esc(invoiceMoney(net))}</strong></span><span>Kontiert <strong>${esc(invoiceMoney(allocated))}</strong></span><span>Differenz <strong>${esc(invoiceMoney(diff))}</strong></span>`;return ok;
 }
-
 function captureAutoAmounts(source){
-  const net=captureNumber(captureNet.value),vat=captureNumber(captureVat.value),gross=captureNumber(captureGross.value);
-  if(source==='net'&&gross&& !captureVat.value)captureVat.value=(gross-net).toFixed(2);
-  if(source==='gross'&&net)captureVat.value=(gross-net).toFixed(2);
-  if(source==='vat'&&net)captureGross.value=(net+vat).toFixed(2);
-  if(captureAllocationRows.length===1&&!captureAllocationRows[0].netAmount&&net)captureAllocationRows[0].netAmount=net.toFixed(2);
+  let net=captureNumber(captureNet.value),vat=captureNumber(captureVat.value),gross=captureNumber(captureGross.value);
+  const rate=captureNumber(captureAllocationRows[0]?.vatRate??20);
+  if(source==='gross'&&gross&&!net&&!vat&&rate>=0){net=rate?gross/(1+rate/100):gross;vat=gross-net;captureNet.value=net.toFixed(2);captureVat.value=vat.toFixed(2)}
+  else if(gross&&net){captureVat.value=(gross-net).toFixed(2)}
+  else if(net&&vat){captureGross.value=(net+vat).toFixed(2)}
+  if(captureAllocationRows.length===1&&!captureAllocationRows[0].netAmount&&captureNumber(captureNet.value))captureAllocationRows[0].netAmount=captureNumber(captureNet.value).toFixed(2);
   renderCaptureAllocations();
 }
-
+function updateCaptureSkontoUi(){
+  const on=captureSkontoEnabled.value==='1';captureSkontoPercent.disabled=!on;captureSkontoDueDate.disabled=!on;
+  captureSkontoPercentWrap.classList.toggle('capture-skonto-off',!on);captureSkontoDueWrap.classList.toggle('capture-skonto-off',!on);
+  if(!on){captureSkontoPercent.value='';captureSkontoDueDate.value=''}
+}
+function captureSetAnalyzeSteps(analysis={},stage='done'){
+  if(stage==='loading'){captureAnalyzeSteps.innerHTML='<span class="capture-analyze-step">PDF lesen</span><span class="capture-analyze-step">OCR prüfen</span><span class="capture-analyze-step">Lieferant suchen</span>';return}
+  const steps=[`<span class="capture-analyze-step ok">✓ ${Number(analysis.pageCount||0)} Seite(n)</span>`];
+  steps.push(`<span class="capture-analyze-step ${analysis.ocrWarning?'warn':'ok'}">${analysis.ocrUsed?'✓ OCR '+Number(analysis.ocrPages||0)+' Seite(n)':'✓ PDF-Text'}</span>`);
+  if(analysis.supplierName)steps.push('<span class="capture-analyze-step ok">✓ Lieferant erkannt</span>');
+  if(analysis.supplierInvoiceNumber)steps.push('<span class="capture-analyze-step ok">✓ Rechnungsnummer</span>');
+  if(analysis.grossAmount!==null&&analysis.grossAmount!==undefined)steps.push('<span class="capture-analyze-step ok">✓ Betrag</span>');
+  captureAnalyzeSteps.innerHTML=steps.join('');
+}
+function showCapturePdf(file){
+  if(capturePdfObjectUrl)URL.revokeObjectURL(capturePdfObjectUrl);capturePdfObjectUrl='';
+  if(!file){capturePdfPreview.hidden=true;capturePdfPreview.removeAttribute('src');capturePdfEmpty.hidden=false;captureOpenPdf.hidden=true;return}
+  capturePdfObjectUrl=URL.createObjectURL(file);capturePdfPreview.src=capturePdfObjectUrl;capturePdfPreview.hidden=false;capturePdfEmpty.hidden=true;captureOpenPdf.href=capturePdfObjectUrl;captureOpenPdf.hidden=false;
+}
+function setCaptureFile(file){
+  if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf')){setCaptureMessage('Bitte eine PDF-Datei verwenden.','error');return}
+  const dt=new DataTransfer();dt.items.add(file);captureFile.files=dt.files;analyzeCaptureFile();
+}
+function renderCaptureSupplierResults(rows=[],suggested=false){
+  captureSupplierResults.innerHTML=rows.length?rows.map((s,i)=>`<div class="card capture-supplier-choice ${i===0&&suggested?'best':''}" data-capture-supplier="${i}">
+    ${i===0&&suggested?'<span class="capture-match-badge">★ Bester Vorschlag</span>':''}
+    <strong>${esc(s.name||'Adresse')}</strong>${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
+    <div class="sub">Lieferant ${esc(s.supplierNumber||'–')} · WW-Adresse ${esc(s.customerNumber||s.addressId||'–')}</div>
+    ${s.ourCustomerNumber?`<div class="sub">Unsere KundenNr. dort: ${esc(s.ourCustomerNumber)}</div>`:''}
+    ${s.vatId?`<div class="sub">UID ${esc(s.vatId)}</div>`:''}
+    ${(s.matchReasons||[]).length?`<div class="capture-match-reasons">${esc(s.matchReasons.join(' · '))}</div>`:''}
+  </div>`).join(''):'<div class="empty">Keine passende WinWorker-Adresse gefunden. Lieferant kann händisch gesucht werden.</div>';
+  captureSupplierResults.querySelectorAll('[data-capture-supplier]').forEach(card=>card.onclick=()=>selectCaptureSupplier(rows[Number(card.dataset.captureSupplier)]));
+}
 async function analyzeCaptureFile(){
-  const file=captureFile.files?.[0];captureAnalysis=null;
-  if(!file){captureDrop.classList.remove('has-file');captureAnalyzeMeta.textContent='';return}
-  captureDrop.classList.add('has-file');captureAnalyzeMeta.textContent='PDF wird gelesen …';
+  const file=captureFile.files?.[0];captureAnalysis=null;captureSelectedSupplier=null;captureAcceptNewIban=false;
+  captureSelectedSupplierBox.innerHTML='Noch kein Lieferant ausgewählt.';captureSupplierResults.innerHTML='';captureBankWarning.innerHTML='';
+  if(!file){captureDrop.classList.remove('has-file');captureAnalyzeMeta.textContent='';captureSetAnalyzeSteps({},'');showCapturePdf(null);return}
+  showCapturePdf(file);captureDrop.classList.add('has-file');captureAnalyzeMeta.textContent='PDF wird gelesen …';captureSetAnalyzeSteps({},'loading');
   const fd=new FormData();fd.append('file',file);fd.append('area',captureArea);
   try{
-    const r=await fetch('/incoming/capture/analyze',{method:'POST',body:fd});const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||'PDF konnte nicht gelesen werden');
-    captureAnalysis=d.analysis||{};
-    if(d.duplicate){captureAnalyzeMeta.innerHTML=`<span class="error">⚠ Dieses PDF ist bereits als ${esc(d.duplicate.doc_id||'Rechnung')} gespeichert.</span>`;}
-    if(captureAnalysis.supplierName&&!captureSupplierQ.value)captureSupplierQ.value=captureAnalysis.supplierName;
-    if(captureAnalysis.supplierInvoiceNumber)captureInvoiceNumber.value=captureAnalysis.supplierInvoiceNumber;
-    if(captureAnalysis.invoiceDate)captureInvoiceDate.value=captureAnalysis.invoiceDate;
-    if(captureAnalysis.dueDate)captureDueDate.value=captureAnalysis.dueDate;
-    if(captureAnalysis.netAmount!==null&&captureAnalysis.netAmount!==undefined)captureNet.value=Number(captureAnalysis.netAmount).toFixed(2);
-    if(captureAnalysis.vatAmount!==null&&captureAnalysis.vatAmount!==undefined)captureVat.value=Number(captureAnalysis.vatAmount).toFixed(2);
-    if(captureAnalysis.grossAmount!==null&&captureAnalysis.grossAmount!==undefined)captureGross.value=Number(captureAnalysis.grossAmount).toFixed(2);
-    if(captureAnalysis.iban)captureIban.value=captureAnalysis.iban;
-    if(captureAnalysis.customerNumberExternal)captureExternalCustomerNo.value=captureAnalysis.customerNumberExternal;
-    if(captureAllocationRows.length===1&&!captureAllocationRows[0].netAmount&&captureNet.value)captureAllocationRows[0].netAmount=Number(captureNet.value).toFixed(2);
-    renderCaptureAllocations();checkCaptureBankWarning();
-    if(!d.duplicate)captureAnalyzeMeta.innerHTML=`✓ ${Number(captureAnalysis.pageCount||0)} Seite(n) gelesen${captureAnalysis.supplierName?' · Vorschlag '+esc(captureAnalysis.supplierName):''}`;
-  }catch(e){captureAnalyzeMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+    const r=await fetch('/incoming/capture/analyze',{method:'POST',body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'PDF konnte nicht gelesen werden');
+    captureAnalysis=d.analysis||{};captureSetAnalyzeSteps(captureAnalysis,'done');
+    if(captureAnalysis.supplierName)captureSupplierQ.value=captureAnalysis.supplierName;else captureSupplierQ.value='';
+    captureInvoiceNumber.value=captureAnalysis.supplierInvoiceNumber||'';captureInvoiceDate.value=captureAnalysis.invoiceDate||'';captureNetDueDate.value=captureAnalysis.netDueDate||captureAnalysis.dueDate||'';
+    captureSkontoEnabled.value=captureAnalysis.skontoEnabled?'1':'0';captureSkontoPercent.value=captureAnalysis.skontoPercent??'';captureSkontoDueDate.value=captureAnalysis.skontoDueDate||'';capturePaymentTerms.value=captureAnalysis.paymentTerms||'';updateCaptureSkontoUi();
+    if(captureAnalysis.netAmount!==null&&captureAnalysis.netAmount!==undefined)captureNet.value=Number(captureAnalysis.netAmount).toFixed(2);else captureNet.value='';
+    if(captureAnalysis.vatAmount!==null&&captureAnalysis.vatAmount!==undefined)captureVat.value=Number(captureAnalysis.vatAmount).toFixed(2);else captureVat.value='';
+    if(captureAnalysis.grossAmount!==null&&captureAnalysis.grossAmount!==undefined)captureGross.value=Number(captureAnalysis.grossAmount).toFixed(2);else captureGross.value='';
+    captureInvoiceIban.value=captureFormatIban(captureAnalysis.iban||'');captureMasterIban.value='';captureExternalCustomerNo.value='';captureBookingText.value=captureAnalysis.bookingText||'';
+    if(captureAnalysis.vatRate!==null&&captureAnalysis.vatRate!==undefined&&captureAllocationRows.length===1)captureAllocationRows[0].vatRate=Number(captureAnalysis.vatRate);
+    if(captureAllocationRows.length===1&&captureNet.value)captureAllocationRows[0].netAmount=Number(captureNet.value).toFixed(2);renderCaptureAllocations();
+    const suggestions=d.supplierSuggestions||[];renderCaptureSupplierResults(suggestions,true);
+    const parts=[];if(d.duplicate)parts.push(`⚠ Bereits als ${d.duplicate.doc_id||'Rechnung'} gespeichert`);else parts.push('✓ Rechnung gelesen');
+    if(captureAnalysis.supplierName)parts.push(`Vorschlag: ${captureAnalysis.supplierName}`);if(d.suggestionError)parts.push('WW-Vorschläge konnten nicht vollständig geladen werden');if(captureAnalysis.ocrWarning)parts.push(captureAnalysis.ocrWarning);
+    captureAnalyzeMeta.innerHTML=parts.map(esc).join(' · ');
+  }catch(e){captureAnalyzeMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>';captureSetAnalyzeSteps({},'')}
 }
-
 async function searchCaptureSuppliers(){
-  const term=captureSupplierQ.value.trim();if(term.length<2){captureSupplierQ.focus();return}
-  captureSupplierResults.innerHTML='<div class="empty">Suche …</div>';
-  try{
-    const r=await fetch('/incoming/capture/suppliers?q='+encodeURIComponent(term),{cache:'no-store'});const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||'Adresssuche fehlgeschlagen');
-    const rows=d.addresses||[];
-    captureSupplierResults.innerHTML=rows.length?rows.map((s,i)=>`<div class="card capture-supplier-choice" data-capture-supplier="${i}">
-      <strong>${esc(s.name||'Adresse')}</strong>${s.address?`<div class="sub">${esc(s.address)}</div>`:''}
-      <div class="sub">Lieferant ${esc(s.supplierNumber||'–')} · WW-Adresse ${esc(s.customerNumber||s.addressId||'–')}</div>
-      ${s.ourCustomerNumber?`<div class="sub">Unsere KundenNr. dort: ${esc(s.ourCustomerNumber)}</div>`:''}
-    </div>`).join(''):'<div class="empty">Keine Adresse gefunden.</div>';
-    captureSupplierResults.querySelectorAll('[data-capture-supplier]').forEach(card=>card.onclick=()=>selectCaptureSupplier(rows[Number(card.dataset.captureSupplier)]));
-  }catch(e){captureSupplierResults.innerHTML='<div class="empty error">'+esc(e.message)+'</div>'}
+  const term=captureSupplierQ.value.trim();if(term.length<2){captureSupplierQ.focus();return}captureSupplierResults.innerHTML='<div class="empty">Suche …</div>';
+  try{const r=await fetch('/incoming/capture/suppliers?q='+encodeURIComponent(term),{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Adresssuche fehlgeschlagen');renderCaptureSupplierResults(d.addresses||[],false)}catch(e){captureSupplierResults.innerHTML='<div class="empty error">'+esc(e.message)+'</div>'}
 }
-
 async function selectCaptureSupplier(supplier){
-  captureSelectedSupplier=supplier;captureSupplierResults.innerHTML='';
-  captureSelectedSupplierBox.innerHTML=`<div class="card capture-selected"><strong>${esc(supplier.name||'Lieferant')}</strong>${supplier.address?`<div class="sub">${esc(supplier.address)}</div>`:''}<div class="sub">StammIndex ${esc(supplier.addressId||'')} · Lieferantennr. ${esc(supplier.supplierNumber||'–')}</div></div>`;
+  captureSelectedSupplier=supplier;captureSupplierResults.innerHTML='';captureAcceptNewIban=false;
+  captureSelectedSupplierBox.innerHTML=`<div class="card capture-selected"><strong>${esc(supplier.name||'Lieferant')}</strong>${supplier.address?`<div class="sub">${esc(supplier.address)}</div>`:''}<div class="sub">StammIndex ${esc(supplier.addressId||'')} · Lieferantennr. ${esc(supplier.supplierNumber||'–')}</div>${supplier.ourCustomerNumber?`<div class="payment-ok">Unsere KundenNr. dort: ${esc(supplier.ourCustomerNumber)}</div>`:''}</div>`;
+  captureExternalCustomerNo.value=supplier.ourCustomerNumber||captureAnalysis?.customerNumberExternal||'';
   try{
-    const r=await fetch('/incoming/capture/supplier-context?addressId='+encodeURIComponent(supplier.addressId||''),{cache:'no-store'});const d=await r.json();
-    if(r.ok&&d.ok){supplier._context=d.context||{};const defaults=supplier._context.defaults||{};
-      if(captureAllocationRows.length===1){const row=captureAllocationRows[0];if(!row.account&&!row.costCenter&&!row.projectId){captureAllocationRows[0]={...row,...captureAllocationSeed(defaults)};renderCaptureAllocations()}}
-      checkCaptureBankWarning();
-    }
-  }catch{}
+    const r=await fetch('/incoming/capture/supplier-context?addressId='+encodeURIComponent(supplier.addressId||'')+'&area='+encodeURIComponent(captureArea),{cache:'no-store'});const d=await r.json();
+    if(r.ok&&d.ok){supplier._context=d.context||{};captureMasterIban.value=captureFormatIban(supplier._context.latestIban||'');const defaults=supplier._context.defaults||{};if(captureAllocationRows.length===1){const row=captureAllocationRows[0];if(!row.account&&!row.costCenter&&!row.projectId){captureAllocationRows[0]={...row,...captureAllocationSeed(defaults)};if(captureNet.value&&!captureAllocationRows[0].netAmount)captureAllocationRows[0].netAmount=Number(captureNet.value).toFixed(2);renderCaptureAllocations()}}}
+  }catch(e){captureMasterIban.value=''}
+  checkCaptureBankWarning();
 }
-
 function checkCaptureBankWarning(){
-  const iban=String(captureIban.value||'').replace(/\s/g,'').toUpperCase();const known=captureSelectedSupplier?._context?.knownIbans||[];
-  if(iban&&known.length&&!known.includes(iban))captureBankWarning.innerHTML=`<div class="capture-bank-warning">⚠ Neue Bankverbindung erkannt · bisher ${esc(known.at(-1))} · neu ${esc(iban)}. Bitte besonders prüfen.</div>`;
-  else captureBankWarning.innerHTML='';
+  const invoice=captureNormalizeIban(captureInvoiceIban.value),master=captureNormalizeIban(captureMasterIban.value),valid=!invoice||captureIbanValid(invoice);
+  captureInvoiceIban.value=captureFormatIban(invoice);captureAcceptNewIban=false;
+  if(!invoice){captureBankWarning.innerHTML='<div class="capture-bank-warning bad">⚠ Auf der Rechnung wurde keine IBAN sicher erkannt. Stamm-IBAN bleibt unverändert.</div>';return}
+  if(!valid){captureBankWarning.innerHTML=`<div class="capture-bank-warning bad">⚠ Die erkannte IBAN ist formal nicht gültig: <strong>${esc(captureFormatIban(invoice))}</strong><br>Bitte anhand der Rechnung korrigieren.</div>`;return}
+  if(master&&invoice===master){captureBankWarning.innerHTML=`<div class="capture-bank-warning ok">✓ IBAN auf der Rechnung stimmt mit den Stammdaten überein: <strong>${esc(captureFormatIban(master))}</strong></div>`;return}
+  const title=master?'⚠ Neue Bankverbindung auf der Rechnung erkannt':'⚠ Noch keine bestätigte Stamm-IBAN vorhanden';
+  captureBankWarning.innerHTML=`<div class="capture-bank-warning"><strong>${title}</strong><div class="capture-bank-comparison"><div class="capture-bank-value"><small>Bisher / Stammdaten</small><strong>${esc(captureFormatIban(master)||'keine')}</strong></div><div class="capture-bank-value"><small>Auf dieser Rechnung</small><strong>${esc(captureFormatIban(invoice))}</strong></div></div><label class="capture-accept-bank"><input id="captureAcceptNewIban" type="checkbox"> <span>Neue IBAN aus dieser Rechnung übernehmen</span></label></div>`;
+  const check=document.getElementById('captureAcceptNewIban');if(check)check.onchange=()=>{captureAcceptNewIban=check.checked};
 }
-
-function capturePayload(){
-  return {
-    area:captureArea,
-    trainingMode:captureAreaIsTest(),
-    documentType:captureDocumentType.value,
-    supplier:captureSelectedSupplier,
-    supplierInvoiceNumber:captureInvoiceNumber.value.trim(),
-    invoiceDate:captureInvoiceDate.value,
-    dueDate:captureDueDate.value,
-    netAmount:captureNumber(captureNet.value),vatAmount:captureNumber(captureVat.value),grossAmount:captureNumber(captureGross.value),currency:captureCurrency.value,
-    iban:captureIban.value.trim(),swift:captureSwift.value.trim(),customerNumberExternal:captureExternalCustomerNo.value.trim(),
-    bookingText:captureBookingText.value.trim(),note:captureNote.value.trim(),createdBy:captureCreatedBy.value.trim()||'Dunja',workflowStatus:captureWorkflow.value,
-    allocations:captureAllocationRows.map((row,i)=>({lineNo:i+1,account:String(row.account||'').trim(),costType:String(row.costType||'Sonstiges'),costCenter:String(row.costCenter||'').trim(),projectId:String(row.projectId||'').trim(),description:String(row.description||'').trim(),netAmount:captureNumber(row.netAmount),vatRate:captureNumber(row.vatRate)}))
-  };
-}
-
+function capturePayload(){return {
+  area:captureArea,trainingMode:captureAreaIsTest(),documentType:captureDocumentType.value,supplier:captureSelectedSupplier,supplierInvoiceNumber:captureInvoiceNumber.value.trim(),invoiceDate:captureInvoiceDate.value,
+  dueDate:captureNetDueDate.value,netDueDate:captureNetDueDate.value,skontoEnabled:captureSkontoEnabled.value==='1',skontoPercent:captureNumber(captureSkontoPercent.value),skontoDueDate:captureSkontoDueDate.value,paymentTerms:capturePaymentTerms.value.trim(),
+  netAmount:captureNumber(captureNet.value),vatAmount:captureNumber(captureVat.value),grossAmount:captureNumber(captureGross.value),currency:captureCurrency.value,
+  masterIban:captureNormalizeIban(captureMasterIban.value),invoiceIban:captureNormalizeIban(captureInvoiceIban.value),acceptNewIban:captureAcceptNewIban,customerNumberExternal:captureExternalCustomerNo.value.trim(),
+  bookingText:captureBookingText.value.trim(),note:captureNote.value.trim(),createdBy:captureCreatedBy.value.trim()||'Dunja',workflowStatus:captureWorkflow.value,
+  allocations:captureAllocationRows.map((row,i)=>({lineNo:i+1,account:String(row.account||'').trim(),costType:String(row.costType||'Sonstiges'),costCenter:String(row.costCenter||'').trim(),projectId:String(row.projectId||'').trim(),description:String(row.description||'').trim(),netAmount:captureNumber(row.netAmount),vatRate:captureNumber(row.vatRate)}))
+}}
 function resetCaptureForm(){
-  captureFile.value='';captureDrop.classList.remove('has-file');captureAnalyzeMeta.textContent='';captureAnalysis=null;captureSelectedSupplier=null;captureSelectedSupplierBox.innerHTML='Noch kein Lieferant ausgewählt.';captureSupplierResults.innerHTML='';captureBankWarning.innerHTML='';
-  [captureInvoiceNumber,captureInvoiceDate,captureDueDate,captureNet,captureVat,captureGross,captureIban,captureSwift,captureExternalCustomerNo,captureBookingText,captureNote].forEach(x=>x.value='');
-  captureDocumentType.value='Rechnung';captureCurrency.value='EUR';captureWorkflow.value='zu_pruefen';captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations();
+  captureFile.value='';captureDrop.classList.remove('has-file','dragover');captureAnalyzeMeta.textContent='';captureAnalyzeSteps.innerHTML='';captureAnalysis=null;captureSelectedSupplier=null;captureAcceptNewIban=false;showCapturePdf(null);
+  captureSelectedSupplierBox.innerHTML='Noch kein Lieferant ausgewählt.';captureSupplierResults.innerHTML='';captureBankWarning.innerHTML='';captureSupplierQ.value='';
+  [captureInvoiceNumber,captureInvoiceDate,captureNetDueDate,captureSkontoPercent,captureSkontoDueDate,capturePaymentTerms,captureNet,captureVat,captureGross,captureMasterIban,captureInvoiceIban,captureExternalCustomerNo,captureBookingText,captureNote].forEach(x=>x.value='');
+  captureDocumentType.value='Rechnung';captureCurrency.value='EUR';captureWorkflow.value='zu_pruefen';captureSkontoEnabled.value='0';updateCaptureSkontoUi();captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations();
 }
-
 async function saveCaptureInvoice(){
-  const file=captureFile.files?.[0];if(!file)return setCaptureMessage('Bitte zuerst ein PDF auswählen.','error');
-  if(!captureSelectedSupplier?.addressId)return setCaptureMessage('Bitte den Lieferanten aus WinWorker auswählen.','error');
-  if(!captureInvoiceNumber.value.trim())return setCaptureMessage('Lieferanten-Rechnungsnummer fehlt.','error');
-  if(!captureInvoiceDate.value)return setCaptureMessage('Rechnungsdatum fehlt.','error');
+  const file=captureFile.files?.[0];if(!file)return setCaptureMessage('Bitte zuerst ein PDF auswählen.','error');if(!captureSelectedSupplier?.addressId)return setCaptureMessage('Bitte den Lieferanten aus WinWorker auswählen.','error');
+  if(!captureInvoiceNumber.value.trim())return setCaptureMessage('Lieferanten-Rechnungsnummer fehlt.','error');if(!captureInvoiceDate.value)return setCaptureMessage('Rechnungsdatum fehlt.','error');
+  if(captureSkontoEnabled.value==='1'&&captureNumber(captureSkontoPercent.value)<=0)return setCaptureMessage('Bei Skonto bitte den Prozentsatz eintragen.','error');
   if(!updateCaptureAllocationTotal())return setCaptureMessage('Kontierung stimmt noch nicht mit dem Netto überein.','error');
   captureSave.disabled=true;setCaptureMessage(captureAreaIsTest()?'KRISTINE speichert ins Testgelände …':'KRISTINE vergibt die echte Nummer und speichert …');
   const fd=new FormData();fd.append('file',file);fd.append('payload',JSON.stringify(capturePayload()));
-  try{
-    const r=await fetch('/incoming/capture/save',{method:'POST',body:fd});const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
-    const warning=d.warnings?.length?' · '+d.warnings.join(' · '):'';
-    setCaptureMessage(`✓ ${d.invoice.docId} ${d.trainingMode?'im Testgelände':'verbindlich'} gespeichert${warning}`,'success');
-    resetCaptureForm();await loadCaptureDashboard();await loadCaptureRecent();
-  }catch(e){setCaptureMessage(e.message,'error')}finally{captureSave.disabled=false}
+  try{const r=await fetch('/incoming/capture/save',{method:'POST',body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');const warning=d.warnings?.length?' · '+d.warnings.join(' · '):'';setCaptureMessage(`✓ ${d.invoice.docId} ${d.trainingMode?'im Testgelände':'verbindlich'} gespeichert${warning}`,'success');resetCaptureForm();await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}finally{captureSave.disabled=false}
 }
-
 function renderCaptureDashboard(d){
-  const n=d.numbering||{};const isTest=Boolean(d.trainingMode);
-  captureNextNumber.textContent=(isTest?'Nächste Testnummer ':'Nächste Nummer ')+(n.nextDocId||'–');captureCostYear.textContent=d.year||'';
+  const n=d.numbering||{},isTest=Boolean(d.trainingMode);captureNextNumber.textContent=(isTest?'Nächste Testnummer ':'Nächste Nummer ')+(n.nextDocId||'–');captureCostYear.textContent=d.year||'';
   captureDashboard.innerHTML=`<div class="capture-kpi"><small>${isTest?'Test · zu prüfen':'Zu prüfen'}</small><strong>${Number(d.reviewCount||0)}</strong></div><div class="capture-kpi"><small>${isTest?'Test-Summe offen':'Offen'}</small><strong>${esc(invoiceMoney(Number(d.openSum||0)))}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} ${isTest?'Testbelege':'erfasst'}</small><strong>${Number(d.yearCount||0)}</strong></div><div class="capture-kpi"><small>${esc(d.year||'')} ${isTest?'Testsumme':'Summe'}</small><strong>${esc(invoiceMoney(Number(d.yearSum||0)))}</strong></div>`;
   const costs=d.costSummary||[];captureCostSummary.innerHTML=costs.length?costs.map(x=>`<div class="capture-cost-card"><span>${esc(x.costType)}</span><strong>${esc(invoiceMoney(Number(x.netSum||0)))}</strong><small>${Number(x.invoiceCount||0)} Rechnung(en)</small></div>`).join(''):`<div class="empty">${isTest?'Noch keine Trainings-Kontierungen.':'Noch keine KRISTINE-Kontierungen in diesem Jahr.'}</div>`;
 }
 async function loadCaptureDashboard(){const r=await fetch('/incoming/capture/dashboard?area='+encodeURIComponent(captureArea),{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Dashboard konnte nicht geladen werden');renderCaptureDashboard(d.dashboard||{})}
 function renderCaptureRecent(rows){
-  const isTest=captureAreaIsTest();
-  captureRecent.innerHTML=rows.length?rows.map(x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><strong>${esc(x.docId)}</strong><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${x.trainingMode?'<span class="capture-badge training">TEST</span>':''}<span class="capture-badge ${x.workflowStatus==='geprueft'?'done':'review'}">${x.workflowStatus==='geprueft'?'Geprüft':'Zu prüfen'}</span></div></div><div class="sub">${esc(x.supplierName)} · Rechnung ${esc(x.invoiceNumber)}</div><div class="invoice-amount">${esc(invoiceMoney(x.grossAmount))}</div><div class="sub">${esc((x.allocations||[]).map(a=>a.costType).filter(Boolean).join(' · '))}</div><div class="actions"><a class="action" href="${urlFor('/pdf',x.path)}" target="_blank" rel="noopener">PDF öffnen</a>${x.trainingMode?`<button class="capture-delete" type="button" data-delete-test="${Number(x.id)}" data-doc-id="${esc(x.docId)}">Testrechnung löschen</button>`:''}</div></div>`).join(''):`<div class="empty">${isTest?'Noch keine Trainingsbelege im Testgelände.':'Noch keine Rechnungen in KRISTINE erfasst.'}</div>`;
+  const isTest=captureAreaIsTest();captureRecent.innerHTML=rows.length?rows.map(x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><strong>${esc(x.docId)}</strong><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${x.trainingMode?'<span class="capture-badge training">TEST</span>':''}<span class="capture-badge ${x.workflowStatus==='geprueft'?'done':'review'}">${x.workflowStatus==='geprueft'?'Geprüft':'Zu prüfen'}</span></div></div><div class="sub">${esc(x.supplierName)} · Rechnung ${esc(x.invoiceNumber)}</div><div class="invoice-amount">${esc(invoiceMoney(x.grossAmount))}</div><div class="sub">${esc((x.allocations||[]).map(a=>a.costType).filter(Boolean).join(' · '))}</div><div class="actions"><a class="action" href="${urlFor('/pdf',x.path)}" target="_blank" rel="noopener">PDF öffnen</a>${x.trainingMode?`<button class="capture-delete" type="button" data-delete-test="${Number(x.id)}" data-doc-id="${esc(x.docId)}">Testrechnung löschen</button>`:''}</div></div>`).join(''):`<div class="empty">${isTest?'Noch keine Trainingsbelege im Testgelände.':'Noch keine Rechnungen in KRISTINE erfasst.'}</div>`;
   captureRecent.querySelectorAll('[data-delete-test]').forEach(btn=>btn.onclick=()=>deleteCaptureTestInvoice(Number(btn.dataset.deleteTest),btn.dataset.docId||''));
 }
 async function loadCaptureRecent(){const r=await fetch('/incoming/capture/list?limit=30&area='+encodeURIComponent(captureArea),{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Liste konnte nicht geladen werden');renderCaptureRecent(d.invoices||[])}
-async function deleteCaptureTestInvoice(invoiceId,docId){
-  if(!captureAreaIsTest())return;
-  if(!confirm(`Testrechnung ${docId||invoiceId} wirklich vollständig löschen?\n\nDatensatz, Arbeits-PDF und Original-PDF werden entfernt.`))return;
-  setCaptureMessage(`Lösche ${docId||invoiceId} aus dem Testgelände …`);
-  try{const r=await fetch('/incoming/capture/'+encodeURIComponent(invoiceId)+'?area=test',{method:'DELETE'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Löschen fehlgeschlagen');setCaptureMessage(`✓ ${d.docId||docId} aus dem Testgelände gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}
-}
-async function clearCaptureTestArea(){
-  if(!captureAreaIsTest())return;
-  const typed=prompt('Gesamtes Testgelände leeren?\n\nAlle Trainingsrechnungen und Test-PDFs werden endgültig gelöscht.\n\nZur Sicherheit TEST LEEREN eingeben:');
-  if(typed!=='TEST LEEREN')return;
-  setCaptureMessage('Leere das Testgelände …');
-  try{const r=await fetch('/incoming/capture/test-area',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'TESTGELAENDE LEEREN'})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Testgelände konnte nicht geleert werden');setCaptureMessage(`✓ ${Number(d.deletedCount||0)} Trainingsbeleg(e) gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}
-}
-async function initCapture(){updateCaptureAreaUi();if(!captureAllocationRows.length){captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations()}await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}
-captureFile.onchange=analyzeCaptureFile;captureSupplierGo.onclick=searchCaptureSuppliers;captureSupplierQ.addEventListener('keydown',e=>{if(e.key==='Enter')searchCaptureSuppliers()});captureIban.oninput=checkCaptureBankWarning;
+async function deleteCaptureTestInvoice(invoiceId,docId){if(!captureAreaIsTest())return;if(!confirm(`Testrechnung ${docId||invoiceId} wirklich vollständig löschen?\n\nDatensatz, Arbeits-PDF und Original-PDF werden entfernt.`))return;setCaptureMessage(`Lösche ${docId||invoiceId} aus dem Testgelände …`);try{const r=await fetch('/incoming/capture/'+encodeURIComponent(invoiceId)+'?area=test',{method:'DELETE'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Löschen fehlgeschlagen');setCaptureMessage(`✓ ${d.docId||docId} aus dem Testgelände gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}}
+async function clearCaptureTestArea(){if(!captureAreaIsTest())return;const typed=prompt('Gesamtes Testgelände leeren?\n\nAlle Trainingsrechnungen und Test-PDFs werden endgültig gelöscht.\n\nZur Sicherheit TEST LEEREN eingeben:');if(typed!=='TEST LEEREN')return;setCaptureMessage('Leere das Testgelände …');try{const r=await fetch('/incoming/capture/test-area',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'TESTGELAENDE LEEREN'})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Testgelände konnte nicht geleert werden');setCaptureMessage(`✓ ${Number(d.deletedCount||0)} Trainingsbeleg(e) gelöscht`,'success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}catch(e){setCaptureMessage(e.message,'error')}}
+async function initCapture(){updateCaptureAreaUi();if(!captureAllocationRows.length){captureAllocationRows=[captureAllocationSeed()];renderCaptureAllocations()}updateCaptureSkontoUi();await Promise.all([loadCaptureDashboard(),loadCaptureRecent()])}
+
+captureFile.onchange=analyzeCaptureFile;captureSupplierGo.onclick=searchCaptureSuppliers;captureSupplierQ.addEventListener('keydown',e=>{if(e.key==='Enter')searchCaptureSuppliers()});
+captureInvoiceIban.addEventListener('change',checkCaptureBankWarning);captureInvoiceIban.addEventListener('blur',checkCaptureBankWarning);captureSkontoEnabled.onchange=updateCaptureSkontoUi;
 captureNet.oninput=()=>captureAutoAmounts('net');captureVat.oninput=()=>captureAutoAmounts('vat');captureGross.oninput=()=>captureAutoAmounts('gross');
 captureAddAllocation.onclick=()=>{captureAllocationRows.push(captureAllocationSeed());renderCaptureAllocations()};captureSave.onclick=saveCaptureInvoice;captureReload.onclick=()=>Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
 captureAreaTest.onclick=()=>setCaptureArea('test');captureAreaLive.onclick=()=>setCaptureArea('live');captureClearTest.onclick=clearCaptureTestArea;
+['dragenter','dragover'].forEach(type=>captureDrop.addEventListener(type,e=>{e.preventDefault();e.stopPropagation();captureDrop.classList.add('dragover')}));
+['dragleave','drop'].forEach(type=>captureDrop.addEventListener(type,e=>{e.preventDefault();e.stopPropagation();captureDrop.classList.remove('dragover')}));
+captureDrop.addEventListener('drop',e=>{const file=[...(e.dataTransfer?.files||[])].find(f=>String(f.name||'').toLowerCase().endsWith('.pdf'));if(file)setCaptureFile(file);else setCaptureMessage('Bitte eine PDF-Datei hineinziehen.','error')});
 
 async function runSearch(term,isRefined=false){
   term=String(term||'').trim();
@@ -5928,7 +7002,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.13.4",
+        "version": "0.13.5",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -6336,7 +7410,8 @@ def incoming_capture_supplier_context():
     if not address_id:
         return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
     try:
-        return jsonify({"ok": True, "context": _capture_supplier_context(address_id)})
+        area = _capture_area(request.args.get("area"))
+        return jsonify({"ok": True, "area": area, "context": _capture_supplier_context(address_id, area)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -6362,11 +7437,14 @@ def incoming_capture_analyze():
                 ).fetchone()
             finally:
                 con.close()
+        suggestions, suggestion_error = _capture_supplier_suggestions(analysis, 8)
         return jsonify({
             "ok": True,
             "area": area,
             "trainingMode": area == "test",
             "analysis": {k: v for k, v in analysis.items() if k != "text"},
+            "supplierSuggestions": suggestions,
+            "suggestionError": suggestion_error,
             "duplicate": dict(duplicate) if duplicate else None,
         })
     except Exception as e:
@@ -6398,7 +7476,14 @@ def incoming_capture_save():
         if not invoice_number_norm:
             raise ValueError("Lieferanten-Rechnungsnummer fehlt.")
         invoice_date = _capture_date(payload.get("invoiceDate"), "Rechnungsdatum")
-        due_date = _capture_date(payload.get("dueDate"), "Fälligkeit", allow_empty=True)
+        net_due_date = _capture_date(payload.get("netDueDate") or payload.get("dueDate"), "Nettofälligkeit", allow_empty=True)
+        due_date = net_due_date
+        skonto_enabled = _capture_truthy(payload.get("skontoEnabled"))
+        skonto_percent = _capture_float(payload.get("skontoPercent"), "Skonto-Prozent", allow_none=True)
+        if skonto_enabled and (skonto_percent is None or skonto_percent <= 0):
+            raise ValueError("Bei Skonto bitte einen Prozentsatz größer 0 eintragen.")
+        skonto_due_date = _capture_date(payload.get("skontoDueDate"), "Skontofälligkeit", allow_empty=True)
+        payment_terms = str(payload.get("paymentTerms") or "").strip()[:500]
         net = _capture_float(payload.get("netAmount"), "Netto")
         vat = _capture_float(payload.get("vatAmount"), "USt")
         gross = _capture_float(payload.get("grossAmount"), "Brutto")
@@ -6436,15 +7521,24 @@ def incoming_capture_save():
         sha256 = analysis["sha256"]
         year = int(invoice_date[:4])
         now = datetime.now().isoformat(timespec="seconds")
-        iban = _norm_iban(payload.get("iban") or analysis.get("iban"))
+        context = _capture_supplier_context(address_id, area)
+        invoice_iban = _norm_iban(payload.get("invoiceIban") or analysis.get("iban"))
+        master_iban = _norm_iban(payload.get("masterIban") or context.get("latestIban"))
+        accept_new_iban = _capture_truthy(payload.get("acceptNewIban"))
+        if accept_new_iban and not invoice_iban:
+            raise ValueError("Zum Übernehmen wurde keine IBAN auf der Rechnung erkannt.")
+        if accept_new_iban and not _iban_valid(invoice_iban):
+            raise ValueError("Die neue IBAN ist formal nicht gültig. Bitte zuerst korrigieren.")
+        iban = invoice_iban if accept_new_iban else master_iban
         workflow = str(payload.get("workflowStatus") or "zu_pruefen")
         if workflow not in {"zu_pruefen", "geprueft"}:
             workflow = "zu_pruefen"
 
         warnings = []
-        context = _capture_supplier_context(address_id)
-        if iban and context.get("knownIbans") and iban not in context["knownIbans"]:
-            warnings.append("Neue Bankverbindung – bitte prüfen")
+        if invoice_iban and master_iban and invoice_iban != master_iban and not accept_new_iban:
+            warnings.append("Abweichende IBAN wurde nicht in die Stammdaten übernommen")
+        elif invoice_iban and not master_iban and not accept_new_iban:
+            warnings.append("Noch keine bestätigte Stamm-IBAN vorhanden")
 
         lock = CAPTURE_TEST_LOCK if area == "test" else CAPTURE_NUMBER_LOCK
         with lock:
@@ -6490,12 +7584,16 @@ def incoming_capture_save():
                         doc_id, document_type, supplier_address_id, supplier_name,
                         supplier_address, supplier_number, our_customer_number,
                         supplier_invoice_number, supplier_invoice_number_norm,
-                        invoice_date, due_date, net_amount, vat_amount, gross_amount,
-                        currency, iban, swift, account_holder, customer_number_external,
+                        invoice_date, due_date, net_due_date,
+                        skonto_enabled, skonto_percent, skonto_due_date, payment_terms,
+                        net_amount, vat_amount, gross_amount,
+                        currency, iban, invoice_iban, master_iban, bank_change_accepted,
+                        swift, account_holder, customer_number_external,
                         workflow_status, payment_status, payment_state,
                         booking_text, note, original_filename, pdf_path, original_path,
-                        file_sha256, pdf_text, page_count, created_by, created_at, updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        file_sha256, pdf_text, page_count, ocr_used, ocr_pages, ocr_warning,
+                        created_by, created_at, updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     doc_id,
                     str(payload.get("documentType") or "Rechnung"),
@@ -6508,18 +7606,26 @@ def incoming_capture_save():
                     stored_invoice_norm,
                     invoice_date,
                     due_date,
+                    net_due_date,
+                    1 if skonto_enabled else 0,
+                    skonto_percent,
+                    skonto_due_date,
+                    payment_terms,
                     net,
                     vat,
                     gross,
                     str(payload.get("currency") or "EUR"),
                     iban,
-                    str(payload.get("swift") or "").strip(),
+                    invoice_iban,
+                    master_iban,
+                    1 if accept_new_iban else 0,
+                    "",
                     str(payload.get("accountHolder") or "").strip(),
-                    str(payload.get("customerNumberExternal") or analysis.get("customerNumberExternal") or "").strip(),
+                    str(supplier.get("ourCustomerNumber") or payload.get("customerNumberExternal") or analysis.get("customerNumberExternal") or "").strip(),
                     workflow,
                     "Offen",
                     "open",
-                    str(payload.get("bookingText") or "").strip(),
+                    str(payload.get("bookingText") or analysis.get("bookingText") or "").strip(),
                     str(payload.get("note") or "").strip(),
                     str(upload.filename or ""),
                     str(pdf_path),
@@ -6527,11 +7633,35 @@ def incoming_capture_save():
                     stored_sha256,
                     analysis.get("text") or "",
                     int(analysis.get("pageCount") or 0),
+                    1 if analysis.get("ocrUsed") else 0,
+                    int(analysis.get("ocrPages") or 0),
+                    str(analysis.get("ocrWarning") or ""),
                     str(payload.get("createdBy") or "Dunja").strip() or "Dunja",
                     now,
                     now,
                 ))
                 invoice_id = int(cur.lastrowid)
+                if accept_new_iban and invoice_iban:
+                    con.execute("""
+                        INSERT INTO supplier_bank_accounts (
+                            supplier_address_id, iban, source_invoice_id, source_doc_id,
+                            confirmed_by, confirmed_at, note
+                        ) VALUES (?,?,?,?,?,?,?)
+                        ON CONFLICT(supplier_address_id, iban) DO UPDATE SET
+                            source_invoice_id = excluded.source_invoice_id,
+                            source_doc_id = excluded.source_doc_id,
+                            confirmed_by = excluded.confirmed_by,
+                            confirmed_at = excluded.confirmed_at,
+                            note = excluded.note
+                    """, (
+                        address_id,
+                        invoice_iban,
+                        invoice_id,
+                        doc_id,
+                        str(payload.get("createdBy") or "Dunja").strip() or "Dunja",
+                        now,
+                        "Neue IBAN aus Rechnung übernommen",
+                    ))
                 for row in clean_allocations:
                     con.execute("""
                         INSERT INTO incoming_allocations (
@@ -6628,6 +7758,7 @@ def incoming_capture_delete(invoice_id):
             if not row:
                 return jsonify({"ok": False, "error": "Testrechnung nicht gefunden."}), 404
             row_data = dict(row)
+            con.execute("DELETE FROM supplier_bank_accounts WHERE source_invoice_id = ?", (invoice_id,))
             con.execute("DELETE FROM incoming_invoices WHERE id = ?", (invoice_id,))
             con.commit()
         finally:
@@ -6654,6 +7785,7 @@ def incoming_capture_clear_test_area():
         con = _capture_area_connection("test")
         try:
             rows = [dict(row) for row in con.execute("SELECT * FROM incoming_invoices ORDER BY id").fetchall()]
+            con.execute("DELETE FROM supplier_bank_accounts")
             con.execute("DELETE FROM incoming_invoices")
             con.commit()
         finally:
@@ -6694,22 +7826,26 @@ def incoming_address_invoices():
     if not address_id:
         return jsonify({"ok": False, "error": "WW-Adresse fehlt."}), 400
     try:
-        ww_rows = ww_incoming_for_address(address_id)
-        local_rows = kristine_incoming_for_address(address_id)
-        docs = incoming_for_address(address_id, text_query)
+        context = incoming_for_address(address_id, text_query, return_context=True)
+        docs = context["documents"]
+        all_docs = context["allDocuments"]
+        ww_rows = context["wwRows"]
+        local_rows = context["localRows"]
         years = incoming_year_summary(docs)
 
-        total_sum = round(sum(float(x.get("amount") or 0) for x in docs if x.get("amount") is not None), 2)
-        amount_count = sum(1 for x in docs if x.get("amount") is not None)
+        # Lieferantenkopf und OP bleiben auch während einer Materialsuche auf
+        # der vollständigen Lieferantenakte – nicht nur auf den Treffern.
+        total_sum = round(sum(float(x.get("amount") or 0) for x in all_docs if x.get("amount") is not None), 2)
+        amount_count = sum(1 for x in all_docs if x.get("amount") is not None)
         open_sum = round(sum(
             float(x.get("amount") or 0)
-            for x in docs
+            for x in all_docs
             if x.get("paymentState") == "open" and x.get("amount") is not None
         ), 2)
-        open_count = sum(1 for x in docs if x.get("paymentState") == "open")
+        open_count = sum(1 for x in all_docs if x.get("paymentState") == "open")
 
         yearly_stats = {}
-        for x in docs:
+        for x in all_docs:
             year = str(x.get("year") or "")
             if not year:
                 continue
@@ -6738,15 +7874,17 @@ def incoming_address_invoices():
             "addressId": address_id,
             "documents": docs,
             "count": len(docs),
+            "allCount": len(all_docs),
             "years": years,
             "stats": {
-                "count": len(docs),
+                "count": len(all_docs),
                 "amountCount": amount_count,
                 "sum": total_sum,
                 "openCount": open_count,
                 "openSum": open_sum,
                 "yearly": yearly_stats,
             },
+            "search": context["search"],
             "watchAlerts": incoming_watch_alerts(address_id, ww_rows + local_rows),
             "sourceOfTruth": "WinWorker + KRISTINE",
         })
@@ -6944,7 +8082,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.13.4 - Projekt-PDFs ohne Teilstring-Falschtreffer")
+    print("Version: 0.13.5 - Rechnungsprüfplatz PDF links, Daten rechts, Skonto und IBAN-Prüfung")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
