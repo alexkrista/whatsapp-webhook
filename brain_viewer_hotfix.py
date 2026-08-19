@@ -19,6 +19,18 @@ def install(ns):
     if not page or app is None:
         return
 
+    # brain_line2 liefert weiterhin Toolbar + Preview-Endpunkte, aber sein alter
+    # Viewer-V2 darf nicht parallel mit unserem aktuellen Viewer laufen.
+    # Zwei Controller auf denselben DOM-Elementen waren die Ursache für den
+    # zweiten Browser-Viewer und den großen Leerraum oberhalb der Rechnung.
+    import re
+    page = re.sub(
+        r'<script\s+id="kristaBrainCaptureViewerV2">.*?</script>',
+        '',
+        page,
+        flags=re.I | re.S,
+    )
+
     if "brain_capture_preview_upload" not in app.view_functions:
         from flask import request, jsonify
         import brain_line2
@@ -43,7 +55,7 @@ def install(ns):
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
 
-    if "kristaBrainViewerReliableV6" in page:
+    if "kristaBrainViewerReliableV7" in page:
         ns["MOBILE_PAGE"] = page
         return
 
@@ -56,7 +68,7 @@ def install(ns):
 '''
 
     script = r'''
-<script id="kristaBrainViewerReliableV6">
+<script id="kristaBrainViewerReliableV7">
 (function(){
   function installPrintButton(){
     const original=document.getElementById('pdfOriginal');
@@ -73,25 +85,29 @@ def install(ns):
   let tools=document.getElementById('captureSuperTools');
   if(!tools){
     tools=document.createElement('div');tools.id='captureSuperTools';tools.className='capture-super-tools';tools.hidden=true;
-    tools.innerHTML='<button id="capturePreviewPrev" type="button">←</button><span id="capturePreviewStatus" class="capture-super-status">1 / 1</span><button id="capturePreviewNext" type="button">→</button><button id="capturePreviewMinus" type="button">−</button><button id="capturePreview100" type="button">100 %</button><button id="capturePreviewWidth" type="button">Breite</button><button id="capturePreviewPlus" type="button">＋</button>';
+    tools.innerHTML='<button id="capturePreviewPrev" type="button">←</button><span id="capturePreviewStatus" class="capture-super-status">1 / 1</span><button id="capturePreviewNext" type="button">→</button><button id="capturePreviewMinus" type="button">−</button><button id="capturePreview100" type="button">100 %</button><button id="capturePreviewWidth" type="button">Breite</button><button id="capturePreviewPlus" type="button">＋</button><button type="button" data-capture-loupe="2">🔎 2×</button><button type="button" data-capture-loupe="3">🔎 3×</button><button type="button" data-capture-loupe="4">🔎 4×</button>';
     shell.parentNode.insertBefore(tools,shell);
   }
   let image=document.getElementById('capturePdfPageImage');
   if(!image){image=document.createElement('img');image.id='capturePdfPageImage';image.alt='PDF Vorschau';image.hidden=true;shell.appendChild(image)}
+  let loupe=document.getElementById('capturePreviewLoupe');
+  if(!loupe){loupe=document.createElement('div');loupe.id='capturePreviewLoupe';loupe.className='capture-preview-loupe';document.body.appendChild(loupe)}
 
   const status=document.getElementById('capturePreviewStatus'),prev=document.getElementById('capturePreviewPrev'),next=document.getElementById('capturePreviewNext');
-  const state={token:'',page:1,pages:1,scale:1.45,width:0};
+  const state={token:'',page:1,pages:1,scale:1.45,width:0,loupe:0,pending:false};
   function pageUrl(){return '/incoming/capture/preview-page?token='+encodeURIComponent(state.token)+'&page='+state.page+'&scale='+Number(state.scale).toFixed(2)}
+  function stopLoupe(){state.loupe=0;loupe.style.display='none';tools.querySelectorAll('[data-capture-loupe]').forEach(b=>b.classList.remove('active'))}
   function hideLegacyViewer(){
-    if(!state.token)return;
+    if(!state.token&&!state.pending)return;
     frame.hidden=true;frame.classList.add('brain-super-hidden','brain-single-viewer-off');frame.setAttribute('aria-hidden','true');
     if(frame.style.getPropertyValue('display')!=='none'||frame.style.getPropertyPriority('display')!=='important')frame.style.setProperty('display','none','important');
     empty.hidden=true;empty.classList.add('brain-super-hidden');
   }
   function releaseLegacyViewer(){
-    frame.classList.remove('brain-single-viewer-off');frame.style.removeProperty('display');frame.removeAttribute('aria-hidden');
+    frame.classList.remove('brain-single-viewer-off','brain-super-hidden');frame.style.removeProperty('display');frame.removeAttribute('aria-hidden');
+    empty.classList.remove('brain-super-hidden');
   }
-  function render(){if(!state.token)return;status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;hideLegacyViewer();image.hidden=false;image.src=pageUrl()}
+  function render(){if(!state.token)return;stopLoupe();status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;hideLegacyViewer();image.hidden=false;image.src=pageUrl()}
   function fitWidth(){if(!state.width||!shell.clientWidth){render();return}state.scale=Math.max(.55,Math.min(5,Math.max(300,shell.clientWidth-22)/state.width));render()}
   async function activate(token){
     if(!token)return;state.token=token;state.page=1;state.pages=1;state.scale=1.45;state.width=0;
@@ -99,10 +115,11 @@ def install(ns):
     if(!r.ok||!d.ok)throw new Error(d.error||'PDF-Vorschau fehlgeschlagen');state.pages=Number(d.pages||1);state.width=Number(d.width||0);fitWidth();
   }
   async function primePreview(file){
-    if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf'))return;shell.classList.add('brain-preview-loading');
+    if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf'))return;
+    state.pending=true;state.token='';tools.hidden=true;image.hidden=true;stopLoupe();hideLegacyViewer();shell.classList.add('brain-preview-loading');
     try{const fd=new FormData();fd.append('file',file);const r=await fetch('/incoming/capture/analyze-preview',{method:'POST',body:fd,cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok||!d.previewToken)throw new Error(d.error||'PDF-Vorschau fehlgeschlagen');await activate(d.previewToken)}
-    catch(error){console.error('Dunja PDF-Viewer:',error);state.token='';tools.hidden=true;image.hidden=true;releaseLegacyViewer();frame.classList.remove('brain-super-hidden');empty.classList.remove('brain-super-hidden');frame.hidden=false}
-    finally{shell.classList.remove('brain-preview-loading')}
+    catch(error){console.error('Dunja PDF-Viewer:',error);state.token='';tools.hidden=true;image.hidden=true;releaseLegacyViewer();frame.hidden=false;empty.hidden=true}
+    finally{state.pending=false;shell.classList.remove('brain-preview-loading');if(state.token)hideLegacyViewer()}
   }
 
   prev?.addEventListener('click',()=>{if(state.page>1){state.page--;render()}});next?.addEventListener('click',()=>{if(state.page<state.pages){state.page++;render()}});
@@ -110,10 +127,14 @@ def install(ns):
   document.getElementById('capturePreviewPlus')?.addEventListener('click',()=>{state.scale=Math.min(5,state.scale+.2);render()});
   document.getElementById('capturePreview100')?.addEventListener('click',()=>{state.scale=1;render()});
   document.getElementById('capturePreviewWidth')?.addEventListener('click',fitWidth);
+  tools.querySelectorAll('[data-capture-loupe]').forEach(button=>button.addEventListener('click',()=>{const value=Number(button.dataset.captureLoupe||0),same=state.loupe===value;stopLoupe();if(!same){state.loupe=value;button.classList.add('active')}}));
   shell.addEventListener('wheel',e=>{if(!e.ctrlKey||!state.token)return;e.preventDefault();state.scale=Math.max(.45,Math.min(5,state.scale+(e.deltaY<0?.18:-.18)));render()},{passive:false});
+  image.addEventListener('mousemove',e=>{if(!state.loupe)return;const r=image.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const z=state.loupe,lw=loupe.offsetWidth||340,lh=loupe.offsetHeight||235;loupe.style.display='block';loupe.style.left=Math.min(window.innerWidth-lw-8,e.clientX+24)+'px';loupe.style.top=Math.max(8,Math.min(window.innerHeight-lh-8,e.clientY-lh/2))+'px';loupe.style.backgroundImage='url("'+image.src+'")';loupe.style.backgroundSize=(r.width*z)+'px '+(r.height*z)+'px';loupe.style.backgroundPosition=(-x*z+lw/2)+'px '+(-y*z+lh/2)+'px'});
+  image.addEventListener('mouseleave',()=>loupe.style.display='none');
   fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0];if(file)primePreview(file)},true);
   const pageObserver=new MutationObserver(installPrintButton);pageObserver.observe(document.documentElement,{childList:true,subtree:true});installPrintButton();
-  const legacyObserver=new MutationObserver(()=>{if(state.token)hideLegacyViewer()});legacyObserver.observe(frame,{attributes:true,attributeFilter:['hidden','src','class','style']});
+  const legacyObserver=new MutationObserver(()=>{if(state.token||state.pending)hideLegacyViewer()});legacyObserver.observe(frame,{attributes:true,attributeFilter:['hidden','src','class','style']});
+  const emptyObserver=new MutationObserver(()=>{if(state.token||state.pending){empty.hidden=true;empty.classList.add('brain-super-hidden')}});emptyObserver.observe(empty,{attributes:true,attributeFilter:['hidden','class','style']});
   if(fileInput.files?.[0])setTimeout(()=>primePreview(fileInput.files[0]),0);
 })();
 </script>
@@ -122,4 +143,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V6 aktiv: genau ein Dunja-Viewer + Drucken + OP-Liste + Materialhistorie + WW-Lieferantenmap")
+    print("✅ Brain Viewer V7 aktiv: nur ein Dunja-Viewer + Lupe + Fallback")
