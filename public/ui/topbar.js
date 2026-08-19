@@ -103,6 +103,10 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-employee-sort.js", "data-krista-employee-sort");
   }
 
+  function loadKristineTaskList() {
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js", "data-krista-task-list");
+  }
+
   function loadAdminEmployeeDocumentCompleteness() {
     if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
   }
@@ -153,6 +157,7 @@
     });
     cleanModuleNavigation();
     loadKristineEmployeeSort();
+    loadKristineTaskList();
     loadAdminEmployeeDocumentCompleteness();
     loadKriszeitToolbar();
     activateKristineHash();
