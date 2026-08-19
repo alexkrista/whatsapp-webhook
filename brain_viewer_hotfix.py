@@ -55,7 +55,7 @@ def install(ns):
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
 
-    if "kristaBrainViewerReliableV7" in page:
+    if "kristaBrainViewerReliableV8" in page:
         ns["MOBILE_PAGE"] = page
         return
 
@@ -68,7 +68,7 @@ def install(ns):
 '''
 
     script = r'''
-<script id="kristaBrainViewerReliableV7">
+<script id="kristaBrainViewerReliableV8">
 (function(){
   function installPrintButton(){
     const original=document.getElementById('pdfOriginal');
@@ -97,15 +97,20 @@ def install(ns):
   const state={token:'',page:1,pages:1,scale:1.45,width:0,loupe:0,pending:false};
   function pageUrl(){return '/incoming/capture/preview-page?token='+encodeURIComponent(state.token)+'&page='+state.page+'&scale='+Number(state.scale).toFixed(2)}
   function stopLoupe(){state.loupe=0;loupe.style.display='none';tools.querySelectorAll('[data-capture-loupe]').forEach(b=>b.classList.remove('active'))}
+  function hideEmptyAfterSelection(){
+    if(!fileInput.files?.length)return;
+    empty.hidden=true;empty.classList.add('brain-super-hidden');empty.setAttribute('aria-hidden','true');
+    if(empty.style.getPropertyValue('display')!=='none'||empty.style.getPropertyPriority('display')!=='important')empty.style.setProperty('display','none','important');
+  }
   function hideLegacyViewer(){
     if(!state.token&&!state.pending)return;
     frame.hidden=true;frame.classList.add('brain-super-hidden','brain-single-viewer-off');frame.setAttribute('aria-hidden','true');
     if(frame.style.getPropertyValue('display')!=='none'||frame.style.getPropertyPriority('display')!=='important')frame.style.setProperty('display','none','important');
-    empty.hidden=true;empty.classList.add('brain-super-hidden');
+    hideEmptyAfterSelection();
   }
   function releaseLegacyViewer(){
     frame.classList.remove('brain-single-viewer-off','brain-super-hidden');frame.style.removeProperty('display');frame.removeAttribute('aria-hidden');
-    empty.classList.remove('brain-super-hidden');
+    if(!fileInput.files?.length){empty.classList.remove('brain-super-hidden');empty.style.removeProperty('display');empty.removeAttribute('aria-hidden')}
   }
   function render(){if(!state.token)return;stopLoupe();status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;hideLegacyViewer();image.hidden=false;image.src=pageUrl()}
   function fitWidth(){if(!state.width||!shell.clientWidth){render();return}state.scale=Math.max(.55,Math.min(5,Math.max(300,shell.clientWidth-22)/state.width));render()}
@@ -116,10 +121,10 @@ def install(ns):
   }
   async function primePreview(file){
     if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf'))return;
-    state.pending=true;state.token='';tools.hidden=true;image.hidden=true;stopLoupe();hideLegacyViewer();shell.classList.add('brain-preview-loading');
+    state.pending=true;state.token='';tools.hidden=true;image.hidden=true;stopLoupe();hideEmptyAfterSelection();hideLegacyViewer();shell.classList.add('brain-preview-loading');
     try{const fd=new FormData();fd.append('file',file);const r=await fetch('/incoming/capture/analyze-preview',{method:'POST',body:fd,cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok||!d.previewToken)throw new Error(d.error||'PDF-Vorschau fehlgeschlagen');await activate(d.previewToken)}
-    catch(error){console.error('Dunja PDF-Viewer:',error);state.token='';tools.hidden=true;image.hidden=true;releaseLegacyViewer();frame.hidden=false;empty.hidden=true}
-    finally{state.pending=false;shell.classList.remove('brain-preview-loading');if(state.token)hideLegacyViewer()}
+    catch(error){console.error('Dunja PDF-Viewer:',error);state.token='';tools.hidden=true;image.hidden=true;releaseLegacyViewer();frame.hidden=false;hideEmptyAfterSelection()}
+    finally{state.pending=false;shell.classList.remove('brain-preview-loading');if(state.token)hideLegacyViewer();hideEmptyAfterSelection()}
   }
 
   prev?.addEventListener('click',()=>{if(state.page>1){state.page--;render()}});next?.addEventListener('click',()=>{if(state.page<state.pages){state.page++;render()}});
@@ -131,11 +136,11 @@ def install(ns):
   shell.addEventListener('wheel',e=>{if(!e.ctrlKey||!state.token)return;e.preventDefault();state.scale=Math.max(.45,Math.min(5,state.scale+(e.deltaY<0?.18:-.18)));render()},{passive:false});
   image.addEventListener('mousemove',e=>{if(!state.loupe)return;const r=image.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const z=state.loupe,lw=loupe.offsetWidth||340,lh=loupe.offsetHeight||235;loupe.style.display='block';loupe.style.left=Math.min(window.innerWidth-lw-8,e.clientX+24)+'px';loupe.style.top=Math.max(8,Math.min(window.innerHeight-lh-8,e.clientY-lh/2))+'px';loupe.style.backgroundImage='url("'+image.src+'")';loupe.style.backgroundSize=(r.width*z)+'px '+(r.height*z)+'px';loupe.style.backgroundPosition=(-x*z+lw/2)+'px '+(-y*z+lh/2)+'px'});
   image.addEventListener('mouseleave',()=>loupe.style.display='none');
-  fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0];if(file)primePreview(file)},true);
+  fileInput.addEventListener('change',()=>{hideEmptyAfterSelection();const file=fileInput.files?.[0];if(file)primePreview(file)},true);
   const pageObserver=new MutationObserver(installPrintButton);pageObserver.observe(document.documentElement,{childList:true,subtree:true});installPrintButton();
-  const legacyObserver=new MutationObserver(()=>{if(state.token||state.pending)hideLegacyViewer()});legacyObserver.observe(frame,{attributes:true,attributeFilter:['hidden','src','class','style']});
-  const emptyObserver=new MutationObserver(()=>{if(state.token||state.pending){empty.hidden=true;empty.classList.add('brain-super-hidden')}});emptyObserver.observe(empty,{attributes:true,attributeFilter:['hidden','class','style']});
-  if(fileInput.files?.[0])setTimeout(()=>primePreview(fileInput.files[0]),0);
+  const legacyObserver=new MutationObserver(()=>{if(state.token||state.pending)hideLegacyViewer();hideEmptyAfterSelection()});legacyObserver.observe(frame,{attributes:true,attributeFilter:['hidden','src','class','style']});
+  const emptyObserver=new MutationObserver(()=>{hideEmptyAfterSelection()});emptyObserver.observe(empty,{attributes:true,attributeFilter:['hidden','class','style']});
+  if(fileInput.files?.[0]){hideEmptyAfterSelection();setTimeout(()=>primePreview(fileInput.files[0]),0)}
 })();
 </script>
 '''
@@ -143,4 +148,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V7 aktiv: nur ein Dunja-Viewer + Lupe + Fallback")
+    print("✅ Brain Viewer V8 aktiv: Platzhalter nach PDF-Auswahl immer eingeklappt")
