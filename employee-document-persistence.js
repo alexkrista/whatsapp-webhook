@@ -1,16 +1,11 @@
 "use strict";
 
 /**
- * Linie 2 · Mitarbeiter-Dokumente dauerhaft speichern.
+ * Linie 2 · Mitarbeiter-Dokumente + Personalstammdaten dauerhaft speichern.
  *
- * Hintergrund:
- * public/admin.html sendet Führerschein-/Pass-Dateien als ...Document-Objekte.
- * server.js cleanEmployeeMaster() kennt aktuell nur die alten ...Image-Felder und
- * verwirft PDF/DOC/DOCX beim Speichern. Diese kleine Vorlade-Erweiterung hält die
- * vier Dokumentobjekte deshalb in einer separaten persistenten Sidecar-Datei und
- * mischt sie beim GET /admin/api/employees wieder in die Mitarbeiter ein.
- *
- * server.js bleibt damit unangetastet; alte Bildfelder funktionieren weiter.
+ * server.js cleanEmployeeMaster() kennt nicht alle neueren Mitarbeiterfelder.
+ * Diese Vorlade-Erweiterung hält deshalb Dokumente und zusätzliche Personalakte-
+ * Felder in einer persistenten Sidecar-Datei und mischt sie beim GET wieder ein.
  */
 
 const fs = require("fs");
@@ -27,6 +22,13 @@ const DOCUMENT_FIELDS = [
   "passportPage2Document",
 ];
 
+const PROFILE_FIELDS = [
+  "socialSecurityNumber",
+  "collectiveAgreementClassification",
+  "employmentHistory",
+  "personnelDocuments",
+];
+
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "application/msword",
@@ -37,6 +39,8 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const MAX_DATA_CHARS = 8_000_000;
+const MAX_PERSONNEL_DOCS = 60;
+const MAX_HISTORY_ROWS = 80;
 
 function ensureStoreDir() {
   fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
@@ -81,7 +85,37 @@ function sanitizeDocument(value) {
   };
 }
 
-function docsFromBody(body) {
+function sanitizeHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_HISTORY_ROWS).map((row) => {
+    const source = row && typeof row === "object" ? row : {};
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(source.from || "")) ? String(source.from) : "";
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(source.to || "")) ? String(source.to) : "";
+    const kind = String(source.kind || source.type || "Beschäftigung").trim().slice(0, 120) || "Beschäftigung";
+    const note = String(source.note || "").trim().slice(0, 300);
+    const id = String(source.id || `${from}-${to}-${kind}`).trim().slice(0, 120);
+    return { id, from, to, kind, note };
+  }).filter((row) => row.from || row.to || row.kind || row.note);
+}
+
+function sanitizePersonnelDocuments(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_PERSONNEL_DOCS).map((row, index) => {
+    const source = row && typeof row === "object" ? row : {};
+    const document = sanitizeDocument(source.document || source.file || source);
+    if (!document) return null;
+    return {
+      id: String(source.id || `doc-${Date.now()}-${index}`).trim().slice(0, 120),
+      title: String(source.title || source.label || document.name || "Dokument").trim().slice(0, 180) || "Dokument",
+      category: String(source.category || "Sonstiges").trim().slice(0, 120) || "Sonstiges",
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(source.date || "")) ? String(source.date) : "",
+      note: String(source.note || "").trim().slice(0, 300),
+      document,
+    };
+  }).filter(Boolean);
+}
+
+function profileFromBody(body) {
   const result = {};
   let touched = false;
   const source = body && typeof body === "object" ? body : {};
@@ -92,28 +126,48 @@ function docsFromBody(body) {
     result[field] = sanitizeDocument(source[field]);
   }
 
+  if (Object.prototype.hasOwnProperty.call(source, "socialSecurityNumber")) {
+    touched = true;
+    result.socialSecurityNumber = String(source.socialSecurityNumber || "").trim().slice(0, 64);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "collectiveAgreementClassification")) {
+    touched = true;
+    result.collectiveAgreementClassification = String(source.collectiveAgreementClassification || "").trim().slice(0, 180);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "employmentHistory")) {
+    touched = true;
+    result.employmentHistory = sanitizeHistory(source.employmentHistory);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "personnelDocuments")) {
+    touched = true;
+    result.personnelDocuments = sanitizePersonnelDocuments(source.personnelDocuments);
+  }
+
   return touched ? result : null;
 }
 
-function mergeEmployeeDocs(employee, store) {
+function mergeEmployeeProfile(employee, store) {
   if (!employee || typeof employee !== "object") return employee;
   const id = String(employee.id || "").trim();
   if (!id || !store[id]) return employee;
   return { ...employee, ...store[id] };
 }
 
-function saveDocs(employeeId, docs) {
+function saveProfile(employeeId, profile) {
   const id = String(employeeId || "").trim();
-  if (!id || !docs) return;
+  if (!id || !profile) return;
 
   const store = readStore();
   const current = store[id] && typeof store[id] === "object" ? store[id] : {};
   const next = { ...current };
 
-  for (const field of DOCUMENT_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(docs, field)) continue;
-    if (docs[field]) next[field] = docs[field];
-    else delete next[field];
+  for (const field of [...DOCUMENT_FIELDS, ...PROFILE_FIELDS]) {
+    if (!Object.prototype.hasOwnProperty.call(profile, field)) continue;
+    const value = profile[field];
+    const emptyArray = Array.isArray(value) && value.length === 0;
+    const emptyString = typeof value === "string" && !value;
+    if (value == null || emptyArray || emptyString) delete next[field];
+    else next[field] = value;
   }
 
   if (Object.keys(next).length) store[id] = next;
@@ -136,11 +190,11 @@ function installEmployeeGetInterceptor() {
             const store = readStore();
             payload = {
               ...payload,
-              employees: payload.employees.map((employee) => mergeEmployeeDocs(employee, store)),
+              employees: payload.employees.map((employee) => mergeEmployeeProfile(employee, store)),
             };
           }
         } catch (error) {
-          console.error("Mitarbeiter-Dokumente konnten nicht geladen werden:", error?.message || error);
+          console.error("Mitarbeiter-Personalakte konnte nicht geladen werden:", error?.message || error);
         }
         return originalJson(payload);
       };
@@ -159,25 +213,25 @@ function installEmployeeWriteInterceptor(methodName, route) {
     }
 
     const persistenceMiddleware = (req, res, next) => {
-      const docs = docsFromBody(req.body);
+      const profile = profileFromBody(req.body);
       const originalJson = res.json.bind(res);
 
       res.json = (payload) => {
         try {
-          if (payload?.ok && payload.employee?.id && docs) {
+          if (payload?.ok && payload.employee?.id && profile) {
             const employeeId = String(payload.employee.id);
-            saveDocs(employeeId, docs);
+            saveProfile(employeeId, profile);
             const store = readStore();
             payload = {
               ...payload,
-              employee: mergeEmployeeDocs(payload.employee, store),
+              employee: mergeEmployeeProfile(payload.employee, store),
             };
           }
         } catch (error) {
-          console.error("Mitarbeiter-Dokumente konnten nicht gespeichert werden:", error?.message || error);
+          console.error("Mitarbeiter-Personalakte konnte nicht gespeichert werden:", error?.message || error);
           return originalJson({
             ok: false,
-            error: "Mitarbeiterdaten wurden gespeichert, aber das Dokument konnte nicht dauerhaft gesichert werden.",
+            error: "Mitarbeiterdaten wurden gespeichert, aber die Personalakte konnte nicht dauerhaft gesichert werden.",
           });
         }
         return originalJson(payload);
@@ -194,4 +248,4 @@ installEmployeeGetInterceptor();
 installEmployeeWriteInterceptor("post", "/admin/api/employees");
 installEmployeeWriteInterceptor("put", "/admin/api/employees/:employeeId");
 
-console.log("✅ Mitarbeiter-Dokumentpersistenz aktiv");
+console.log("✅ Mitarbeiter-Dokument- und Personalaktenpersistenz aktiv");
