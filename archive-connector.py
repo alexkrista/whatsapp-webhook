@@ -40,7 +40,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/documents", "/thumb", "/pdf", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -276,6 +276,23 @@ def _ensure_capture_schema(con):
             ON incoming_allocations(invoice_id, line_no);
         CREATE INDEX IF NOT EXISTS idx_supplier_bank_address
             ON supplier_bank_accounts(supplier_address_id, confirmed_at DESC);
+
+        CREATE TABLE IF NOT EXISTS brain_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            location TEXT,
+            name TEXT,
+            role TEXT,
+            phone TEXT NOT NULL,
+            email TEXT,
+            note TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_brain_contacts_entity
+            ON brain_contacts(entity_type, entity_id, sort_order, id);
     """)
 
     # Bestehende 0.13.x-Datenbanken werden ohne Datenverlust erweitert.
@@ -300,6 +317,100 @@ def _ensure_capture_schema(con):
         if name not in existing:
             con.execute(f"ALTER TABLE incoming_invoices ADD COLUMN {name} {sql_type}")
     con.commit()
+
+
+def _contact_entity_type(value):
+    raw = str(value or "").strip().lower()
+    aliases = {
+        "supplier": "supplier", "lieferant": "supplier",
+        "customer": "customer", "kunde": "customer",
+        "project": "project", "projekt": "project",
+    }
+    return aliases.get(raw, "")
+
+
+def brain_contacts(entity_type, entity_id):
+    entity_type = _contact_entity_type(entity_type)
+    entity_id = str(entity_id or "").strip()
+    if not entity_type or not entity_id:
+        return []
+    con = _capture_connection()
+    try:
+        rows = con.execute(
+            """SELECT id, entity_type, entity_id, location, name, role, phone, email, note, sort_order
+               FROM brain_contacts
+               WHERE entity_type=? AND entity_id=?
+               ORDER BY sort_order ASC, location COLLATE NOCASE, name COLLATE NOCASE, id ASC""",
+            (entity_type, entity_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        con.close()
+
+
+def _save_brain_contact(payload):
+    payload = payload or {}
+    entity_type = _contact_entity_type(payload.get("entityType"))
+    entity_id = str(payload.get("entityId") or "").strip()
+    phone = re.sub(r"\s+", " ", str(payload.get("phone") or "").strip())
+    if not entity_type or not entity_id:
+        raise ValueError("Kontakt-Zuordnung fehlt.")
+    if not phone:
+        raise ValueError("Telefonnummer fehlt.")
+    now = datetime.now().isoformat(timespec="seconds")
+    contact_id = int(payload.get("id") or 0)
+    values = (
+        str(payload.get("location") or "").strip(),
+        str(payload.get("name") or "").strip(),
+        str(payload.get("role") or "").strip(),
+        phone,
+        str(payload.get("email") or "").strip(),
+        str(payload.get("note") or "").strip(),
+        int(payload.get("sortOrder") or 0),
+        now,
+    )
+    con = _capture_connection()
+    try:
+        if contact_id:
+            found = con.execute(
+                "SELECT id FROM brain_contacts WHERE id=? AND entity_type=? AND entity_id=?",
+                (contact_id, entity_type, entity_id),
+            ).fetchone()
+            if not found:
+                raise ValueError("Kontakt nicht gefunden.")
+            con.execute(
+                """UPDATE brain_contacts
+                   SET location=?, name=?, role=?, phone=?, email=?, note=?, sort_order=?, updated_at=?
+                   WHERE id=?""",
+                values + (contact_id,),
+            )
+        else:
+            cur = con.execute(
+                """INSERT INTO brain_contacts
+                   (entity_type, entity_id, location, name, role, phone, email, note, sort_order, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (entity_type, entity_id) + values[:-1] + (now, now),
+            )
+            contact_id = int(cur.lastrowid)
+        con.commit()
+        return contact_id
+    finally:
+        con.close()
+
+
+def _delete_brain_contact(contact_id, entity_type, entity_id):
+    entity_type = _contact_entity_type(entity_type)
+    entity_id = str(entity_id or "").strip()
+    con = _capture_connection()
+    try:
+        cur = con.execute(
+            "DELETE FROM brain_contacts WHERE id=? AND entity_type=? AND entity_id=?",
+            (int(contact_id), entity_type, entity_id),
+        )
+        con.commit()
+        return bool(cur.rowcount)
+    finally:
+        con.close()
 
 
 def _capture_area(value="live"):
@@ -5084,6 +5195,87 @@ def _incoming_catalog():
     return result
 
 
+def global_material_search(query, limit=80):
+    """Lieferantenübergreifende Materialsuche für The Brain.
+
+    Exakte Material-/Artikel-Treffer kommen vor ähnlichen Vorschlägen. Innerhalb
+    derselben Qualität steht die neueste Rechnung zuerst.
+    """
+    query = str(query or "").strip()
+    if len(query) < 2:
+        return {"query": query, "results": [], "exactCount": 0, "similarCount": 0, "scanned": 0}
+    try:
+        limit = max(10, min(200, int(limit)))
+    except Exception:
+        limit = 80
+
+    qnorm = _norm_supplier(query)
+    qtokens = [x for x in qnorm.split() if len(x) >= 2]
+    exact, similar = [], []
+    scanned = 0
+    for row in _incoming_catalog():
+        raw = str(row.get("_raw_text") or "")
+        if not raw.strip():
+            continue
+        scanned += 1
+        hit = _material_search_result(raw, query)
+        supplier = dict(row.get("_supplier") or {})
+        base = {
+            "filename": row.get("filename") or "",
+            "path": row.get("path") or "",
+            "invoiceDate": row.get("invoiceDate"),
+            "invoiceDateTime": row.get("invoiceDateTime"),
+            "amount": row.get("amount"),
+            "supplierName": supplier.get("name") or "Lieferant nicht sicher erkannt",
+            "supplierAddress": supplier.get("address") or "",
+            "supplierNumber": supplier.get("supplierNumber") or "",
+            "materialMatches": [],
+            "matchScore": 0,
+            "matchType": "",
+        }
+        if hit.get("matched"):
+            base.update({
+                "materialMatches": list(hit.get("matches") or []),
+                "matchScore": int(hit.get("score") or 0),
+                "matchType": "exact" if hit.get("ideal") else "good",
+                "matchCount": int(hit.get("matchCount") or 1),
+            })
+            exact.append(base)
+            continue
+
+        # Ähnliche Vorschläge nur aus erkannten Materialzeilen, niemals aus dem
+        # Rechnungskopf. Dadurch bleibt "ähnlich" nützlich statt beliebig.
+        idx = _material_search_index(raw)
+        best_ratio, best_line = 0.0, ""
+        for line in idx.get("lines") or []:
+            lnorm = _norm_supplier(line)
+            if not lnorm:
+                continue
+            ratio = difflib.SequenceMatcher(None, qnorm, lnorm[:max(len(qnorm)*3, 40)]).ratio()
+            if qtokens:
+                token_ratio = max((difflib.SequenceMatcher(None, token, word).ratio() for token in qtokens for word in lnorm.split()), default=0.0)
+                ratio = max(ratio, token_ratio * 0.88)
+            if ratio > best_ratio:
+                best_ratio, best_line = ratio, line
+        if best_ratio >= 0.62 and best_line:
+            base.update({
+                "materialMatches": [_focus_material_snippet(best_line, query)],
+                "matchScore": int(best_ratio * 1000),
+                "matchType": "similar",
+                "matchCount": 1,
+            })
+            similar.append(base)
+
+    date_key = lambda x: str(x.get("invoiceDateTime") or "")
+    exact.sort(key=lambda x: (2 if x.get("matchType") == "exact" else 1, int(x.get("matchScore") or 0), date_key(x)), reverse=True)
+    similar.sort(key=lambda x: (int(x.get("matchScore") or 0), date_key(x)), reverse=True)
+    results = (exact + similar)[:limit]
+    return {
+        "query": query, "results": results, "exactCount": len(exact),
+        "similarCount": len(similar), "scanned": scanned,
+    }
+
+
 def incoming_supplier_candidates(query, limit=20):
     """
     Schritt 1: nur Lieferant/Adresse.
@@ -5685,6 +5877,41 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
   .capture-pdf-shell,.capture-pdf-empty{min-height:430px}
   .capture-pdf-shell iframe{height:520px;min-height:430px}
 }
+
+/* Linie 2 · Kontakte + Materialsuche + PDF-Superviewer */
+.contact-button{background:#1f6f50;border:1px solid #2f8d68;color:#fff;font-weight:900;padding:9px 12px;border-radius:11px;height:auto}
+.contact-button:hover{filter:brightness(1.08)}
+.contact-summary{margin-top:10px;display:flex;gap:7px;flex-wrap:wrap}
+.contact-chip{display:inline-flex;gap:6px;align-items:center;padding:6px 9px;border:1px solid #3c4958;border-radius:999px;background:#151b22;color:#e9eef5;font-size:12px}
+.contact-modal,.pdf-super-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:18px}
+.contact-modal[hidden],.pdf-super-modal[hidden]{display:none!important}
+.contact-panel{width:min(820px,100%);max-height:92vh;overflow:auto;background:#10141a;border:1px solid #3a4552;border-radius:18px;box-shadow:0 22px 80px rgba(0,0,0,.55)}
+.contact-panel-head,.pdf-super-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:10px;align-items:center;padding:14px 16px;background:#141a22;border-bottom:1px solid #303946}
+.contact-panel-body{padding:14px 16px}
+.contact-list{display:grid;gap:9px;margin:10px 0 16px}
+.contact-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) minmax(140px,1.2fr) auto;gap:8px;align-items:center;padding:11px;border:1px solid #303946;border-radius:13px;background:#0d1117}
+.contact-row .who{font-weight:900}.contact-row .role,.contact-row .where{color:var(--muted);font-size:12px}
+.contact-call{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#1f6f50;color:#fff;border-radius:10px;padding:9px 11px;font-weight:900;white-space:nowrap}
+.contact-edit{background:#252d38;color:#fff;border:1px solid #424d5d;padding:7px 9px;height:auto}
+.contact-form{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding-top:12px;border-top:1px solid #303946}
+.contact-form .full{grid-column:1/-1}.contact-form input{width:100%}
+.material-global-results{display:grid;gap:10px}
+.material-global-card{display:grid;grid-template-columns:95px 1fr;gap:12px;border:1px solid #394655;background:#10151c;border-radius:14px;padding:11px}
+.material-global-card.exact{border-color:#5d836f}.material-global-card.similar{border-color:#665d3f}
+.material-global-card .thumb{width:95px;height:132px;object-fit:cover;border-radius:8px;background:#fff}
+.material-global-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.material-global-supplier{font-size:17px;font-weight:950}
+.pdf-super-panel{width:min(1500px,98vw);height:96vh;background:#0b0e12;border:1px solid #35404d;border-radius:18px;display:flex;flex-direction:column;overflow:hidden}
+.pdf-super-head{position:relative;flex:0 0 auto}.pdf-super-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pdf-super-tools button{height:auto;padding:7px 10px;background:#242c36;color:#fff;border:1px solid #455160}
+.pdf-super-stage{position:relative;flex:1;overflow:auto;background:#262a2f;text-align:center;padding:14px}
+.pdf-super-stage img{display:inline-block;max-width:none;box-shadow:0 4px 24px rgba(0,0,0,.42);background:#fff}
+.pdf-loupe{position:fixed;z-index:10020;width:320px;height:220px;border:3px solid #fff;border-radius:14px;box-shadow:0 10px 45px rgba(0,0,0,.65);background:#111 no-repeat;pointer-events:none;display:none;overflow:hidden}
+.pdf-super-status{font-size:12px;color:#c8d1dc;min-width:90px;text-align:center}
+@media(max-width:720px){
+  .contact-modal,.pdf-super-modal{padding:0}.contact-panel,.pdf-super-panel{width:100%;height:100%;max-height:none;border-radius:0}
+  .contact-row{grid-template-columns:1fr auto}.contact-row .where,.contact-row .role{grid-column:1/-1}.contact-form{grid-template-columns:1fr}
+  .material-global-card{grid-template-columns:72px 1fr}.material-global-card .thumb{width:72px;height:100px}
+  .pdf-loupe{width:260px;height:180px}.pdf-super-stage{padding:6px}
+}
 </style>
 </head>
 <body>
@@ -5698,6 +5925,7 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
     <div class="mode-switch">
       <button id="modeProjects" class="mode active" type="button">🧠 Projekte / Firmenwissen</button>
       <button id="modeIncoming" class="mode" type="button">🧾 Eingangsrechnungen</button>
+      <button id="modeMaterial" class="mode" type="button">🔎 Material</button>
       <button id="modeCapture" class="mode" type="button">📥 Erfassen · Dunja</button>
     </div>
     <div class="searchrow" id="mainSearchRow">
@@ -5739,6 +5967,20 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
     <div id="sourceTypes"></div>
     <div id="docs"></div>
   </div>
+  <div class="section" id="materialSection" hidden>
+    <div class="section-head"><h2>Material finden · lieferantenübergreifend</h2></div>
+    <div class="card">
+      <div class="project-title">Materialname, Artikel oder Artikelnummer</div>
+      <div class="sub">The Brain durchsucht die Materialblöcke aller Eingangsrechnungen. Beste Treffer zuerst, bei gleicher Qualität die neuesten.</div>
+      <div class="searchrow" style="margin-top:10px">
+        <input id="materialQ" type="search" placeholder="z. B. StoPrim Plex, Unistar, 180 g Vlies …" autocomplete="off">
+        <button id="materialGo" type="button">Material suchen</button>
+      </div>
+      <div id="materialMeta" class="meta"></div>
+    </div>
+    <div id="materialResults" class="material-global-results"></div>
+  </div>
+
   <div class="section" id="incomingSupplierSection" hidden>
     <div class="section-head"><h2>Adresse auswählen</h2></div>
     <div id="incomingSuppliers"></div>
@@ -5757,6 +5999,7 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
       <div class="sub" id="incomingSupplierAddress"></div>
       <div class="sub" id="incomingSupplierNumber"></div>
       <div class="sub" id="incomingSub"></div>
+      <div style="margin-top:10px"><button id="incomingCall" class="contact-button" type="button">📞 Anrufen / Kontakte</button></div>
 
       <div class="invoice-text-search">
         <div class="formlabel">Welches Material suche ich?</div>
@@ -5781,6 +6024,40 @@ body.capture-training #captureSection>.card{border-color:#5f4a1d}
   </div>
 
 
+
+  <div id="contactModal" class="contact-modal" hidden>
+    <div class="contact-panel">
+      <div class="contact-panel-head"><div><strong id="contactTitle">Kontakte</strong><div class="sub" id="contactSub"></div></div><button id="contactClose" class="dark" type="button">✕</button></div>
+      <div class="contact-panel-body">
+        <div id="contactList" class="contact-list"></div>
+        <form id="contactForm" class="contact-form">
+          <input id="contactId" type="hidden">
+          <div><div class="formlabel">Standort</div><input id="contactLocation" placeholder="z. B. Rankweil"></div>
+          <div><div class="formlabel">Name</div><input id="contactName" placeholder="z. B. Stefan Walser"></div>
+          <div><div class="formlabel">Funktion</div><input id="contactRole" placeholder="Außendienst, Bauleiter, Zentrale …"></div>
+          <div><div class="formlabel">Telefonnummer *</div><input id="contactPhone" type="tel" required placeholder="+43 …"></div>
+          <div><div class="formlabel">E-Mail</div><input id="contactEmail" type="email"></div>
+          <div><div class="formlabel">Notiz</div><input id="contactNote" placeholder="z. B. Schlüssel, nur vormittags …"></div>
+          <div class="full" style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Kontakt speichern</button><button id="contactReset" class="dark" type="button">Neu / leeren</button><button id="contactDelete" class="danger" type="button" hidden>Kontakt löschen</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="pdfSuperModal" class="pdf-super-modal" hidden>
+    <div class="pdf-super-panel">
+      <div class="pdf-super-head">
+        <div><strong id="pdfSuperTitle">PDF</strong><div class="sub">Breite · Zoom · Superlupe</div></div>
+        <div class="pdf-super-tools">
+          <button id="pdfPrev" type="button">←</button><span id="pdfStatus" class="pdf-super-status">1 / 1</span><button id="pdfNext" type="button">→</button>
+          <button id="pdfMinus" type="button">−</button><button id="pdf100" type="button">100 %</button><button id="pdfWidth" type="button">Breite</button><button id="pdfPlus" type="button">＋</button>
+          <button id="pdfLoupeToggle" type="button">🔎 Lupe</button><a id="pdfOriginal" class="action" href="#" target="_blank" rel="noopener">Original</a><button id="pdfClose" class="dark" type="button">✕</button>
+        </div>
+      </div>
+      <div id="pdfStage" class="pdf-super-stage"><img id="pdfImage" alt="PDF Seite"></div>
+    </div>
+  </div>
+  <div id="pdfLoupe" class="pdf-loupe"></div>
 
   <div class="section" id="captureSection" hidden>
     <div class="section-head">
@@ -5945,7 +6222,8 @@ const projectCustomerOverview=document.getElementById('projectCustomerOverview')
 const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
 const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
 const newFromSelection=document.getElementById('newFromSelection');
-const modeProjects=document.getElementById('modeProjects'),modeIncoming=document.getElementById('modeIncoming'),modeCapture=document.getElementById('modeCapture');
+const modeProjects=document.getElementById('modeProjects'),modeIncoming=document.getElementById('modeIncoming'),modeMaterial=document.getElementById('modeMaterial'),modeCapture=document.getElementById('modeCapture');
+const materialSection=document.getElementById('materialSection'),materialQ=document.getElementById('materialQ'),materialGo=document.getElementById('materialGo'),materialMeta=document.getElementById('materialMeta'),materialResults=document.getElementById('materialResults');
 const mainSearchRow=document.getElementById('mainSearchRow');
 const incomingSupplierSection=document.getElementById('incomingSupplierSection'),incomingSuppliers=document.getElementById('incomingSuppliers');
 const incomingSection=document.getElementById('incomingSection'),incomingGrouped=document.getElementById('incomingGrouped');
@@ -5980,6 +6258,41 @@ function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
 function num(v){if(v===null||v===undefined||v==='')return null;return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v))}
 function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
+
+let activeContactContext=null;
+const contactModal=document.getElementById('contactModal'),contactTitle=document.getElementById('contactTitle'),contactSub=document.getElementById('contactSub'),contactList=document.getElementById('contactList'),contactForm=document.getElementById('contactForm');
+const contactId=document.getElementById('contactId'),contactLocation=document.getElementById('contactLocation'),contactName=document.getElementById('contactName'),contactRole=document.getElementById('contactRole'),contactPhone=document.getElementById('contactPhone'),contactEmail=document.getElementById('contactEmail'),contactNote=document.getElementById('contactNote'),contactDelete=document.getElementById('contactDelete');
+function phoneHref(value){const raw=String(value||'').trim();return 'tel:'+raw.replace(/[^+\d]/g,'')}
+function resetContactForm(){contactForm?.reset();if(contactId)contactId.value='';if(contactDelete)contactDelete.hidden=true}
+async function loadContacts(){
+  if(!activeContactContext)return;
+  const p=new URLSearchParams({entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});
+  const r=await fetch('/contacts?'+p.toString(),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Kontakte konnten nicht geladen werden');
+  const rows=d.contacts||[];
+  contactList.innerHTML=rows.length?rows.map(c=>`<div class="contact-row">
+    <div><div class="who">${esc(c.name||c.role||'Kontakt')}</div><div class="where">${esc(c.location||'')}</div></div>
+    <div class="role">${esc(c.role||'')}</div>
+    <a class="contact-call" href="${phoneHref(c.phone)}">📞 ${esc(c.phone)}</a>
+    <button class="contact-edit" type="button" data-contact='${esc(JSON.stringify(c))}'>Bearbeiten</button>
+  </div>`).join(''):'<div class="empty">Noch keine Telefonnummer gespeichert.</div>';
+  contactList.querySelectorAll('[data-contact]').forEach(btn=>btn.onclick=()=>{const c=JSON.parse(btn.dataset.contact);contactId.value=c.id||'';contactLocation.value=c.location||'';contactName.value=c.name||'';contactRole.value=c.role||'';contactPhone.value=c.phone||'';contactEmail.value=c.email||'';contactNote.value=c.note||'';contactDelete.hidden=false;});
+}
+async function openContacts(ctx){activeContactContext=ctx;contactTitle.textContent='📞 '+(ctx.title||'Kontakte');contactSub.textContent=ctx.subtitle||'';resetContactForm();contactModal.hidden=false;await loadContacts();}
+document.getElementById('contactClose')?.addEventListener('click',()=>contactModal.hidden=true);document.getElementById('contactReset')?.addEventListener('click',resetContactForm);
+contactForm?.addEventListener('submit',async e=>{e.preventDefault();if(!activeContactContext)return;const payload={id:Number(contactId.value||0)||undefined,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId,location:contactLocation.value,name:contactName.value,role:contactRole.value,phone:contactPhone.value,email:contactEmail.value,note:contactNote.value};const r=await fetch('/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Speichern fehlgeschlagen');resetContactForm();await loadContacts();});
+contactDelete?.addEventListener('click',async()=>{if(!activeContactContext||!contactId.value||!confirm('Kontakt wirklich löschen?'))return;const p=new URLSearchParams({id:contactId.value,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});const r=await fetch('/contacts?'+p.toString(),{method:'DELETE'}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Löschen fehlgeschlagen');resetContactForm();await loadContacts();});
+
+let pdfState={path:'',page:1,pages:1,scale:1.45,loupe:false,baseWidth:0};
+const pdfModal=document.getElementById('pdfSuperModal'),pdfImage=document.getElementById('pdfImage'),pdfStage=document.getElementById('pdfStage'),pdfStatus=document.getElementById('pdfStatus'),pdfLoupe=document.getElementById('pdfLoupe');
+function pdfPageUrl(){return '/pdf-page?path='+encodeURIComponent(pdfState.path)+'&page='+pdfState.page+'&scale='+pdfState.scale.toFixed(2)}
+function renderPdfPage(){pdfStatus.textContent=pdfState.page+' / '+pdfState.pages;pdfImage.src=pdfPageUrl();document.getElementById('pdfPrev').disabled=pdfState.page<=1;document.getElementById('pdfNext').disabled=pdfState.page>=pdfState.pages;}
+async function openBrainPdf(path,title='PDF'){if(!path)return;pdfState={path,page:1,pages:1,scale:1.45,loupe:false,baseWidth:0};document.getElementById('pdfSuperTitle').textContent=title||'PDF';document.getElementById('pdfOriginal').href=urlFor('/pdf',path);pdfModal.hidden=false;const r=await fetch('/pdf-info?path='+encodeURIComponent(path),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok){pdfModal.hidden=true;return window.open(urlFor('/pdf',path),'_blank')}pdfState.pages=Number(d.pages||1);pdfState.baseWidth=Number(d.width||0);fitPdfWidth();}
+function fitPdfWidth(){if(!pdfState.baseWidth)return renderPdfPage();const usable=Math.max(320,pdfStage.clientWidth-34);pdfState.scale=Math.max(.55,Math.min(4.5,usable/pdfState.baseWidth));renderPdfPage();}
+document.getElementById('pdfClose')?.addEventListener('click',()=>{pdfModal.hidden=true;pdfLoupe.style.display='none'});document.getElementById('pdfPrev')?.addEventListener('click',()=>{if(pdfState.page>1){pdfState.page--;renderPdfPage()}});document.getElementById('pdfNext')?.addEventListener('click',()=>{if(pdfState.page<pdfState.pages){pdfState.page++;renderPdfPage()}});document.getElementById('pdfMinus')?.addEventListener('click',()=>{pdfState.scale=Math.max(.45,pdfState.scale-.2);renderPdfPage()});document.getElementById('pdfPlus')?.addEventListener('click',()=>{pdfState.scale=Math.min(5,pdfState.scale+.2);renderPdfPage()});document.getElementById('pdf100')?.addEventListener('click',()=>{pdfState.scale=1;renderPdfPage()});document.getElementById('pdfWidth')?.addEventListener('click',fitPdfWidth);document.getElementById('pdfLoupeToggle')?.addEventListener('click',()=>{pdfState.loupe=!pdfState.loupe;if(!pdfState.loupe)pdfLoupe.style.display='none'});
+pdfStage?.addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();pdfState.scale=Math.max(.45,Math.min(5,pdfState.scale+(e.deltaY<0?.18:-.18)));renderPdfPage()},{passive:false});
+pdfImage?.addEventListener('mousemove',e=>{if(!pdfState.loupe)return;const r=pdfImage.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const zoom=2.6;pdfLoupe.style.display='block';pdfLoupe.style.left=Math.min(window.innerWidth-335,e.clientX+24)+'px';pdfLoupe.style.top=Math.max(8,Math.min(window.innerHeight-235,e.clientY-110))+'px';pdfLoupe.style.backgroundImage=`url("${pdfImage.src}")`;pdfLoupe.style.backgroundSize=(r.width*zoom)+'px '+(r.height*zoom)+'px';pdfLoupe.style.backgroundPosition=(-x*zoom+160)+'px '+(-y*zoom+110)+'px';});pdfImage?.addEventListener('mouseleave',()=>pdfLoupe.style.display='none');
+document.addEventListener('click',e=>{const a=e.target.closest('a.action[href*="/pdf?path="]');if(!a)return;try{const u=new URL(a.href,location.href),path=u.searchParams.get('path');if(path){e.preventDefault();openBrainPdf(path,a.closest('.doc')?.querySelector('.docname')?.textContent||a.textContent||'PDF')}}catch(_){}});
+
 function norm(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ')}
 function addressLabel(p){return [p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function addressKey(p){return norm([p.street,p.postalCode,p.city].filter(Boolean).join('|'))}
@@ -6054,7 +6367,10 @@ function renderProjectCustomerOverview(o){
         ${o?.person&&o.person!==o.name?`<div class="sub">${esc(o.person)}</div>`:''}
         ${o?.address?`<div class="sub">${esc(o.address)}</div>`:''}
       </div>
-      ${o?.customerNumber!==null&&o?.customerNumber!==undefined&&o?.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(o.customerNumber)}</span>`:''}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${o?.customerNumber!==null&&o?.customerNumber!==undefined&&o?.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(o.customerNumber)}</span>`:''}
+        <button id="customerContactBtn" class="contact-button" type="button">📞 Kunde / Kontakte</button>
+      </div>
     </div>
     <div class="overview-kpis">
       <div class="overview-kpi"><small>Umsatz gesamt · netto</small><strong>${esc(money(o?.totalRevenue)||'–')}</strong></div>
@@ -6065,6 +6381,7 @@ function renderProjectCustomerOverview(o){
     <div class="year-revenue-title">Umsatz netto pro Jahr</div>
     <div class="year-revenue-grid">${years.length?years.map(y=>`<div class="year-revenue"><span>${esc(y.year)}</span><strong>${esc(money(y.netRevenue)||'–')}</strong><small>${Number(y.invoiceCount||0)} Rechnung${Number(y.invoiceCount||0)===1?'':'en'}</small></div>`).join(''):'<div class="empty">Noch kein Jahresumsatz gefunden.</div>'}</div>
     <div class="overview-note">Datenabdeckung: ${Number(o?.projectsWithRevenue||0)}/${Number(o?.projectCount||0)} Projekte mit Umsatz · ${Number(o?.projectsWithHours||0)}/${Number(o?.projectCount||0)} mit Stunden · ${Number(o?.projectsComparable||0)}/${Number(o?.projectCount||0)} für Umsatz/Std.<br>${esc(o?.revenueSource||'')}<br>${esc(o?.hoursSource||'')}<br>${esc(o?.ratioSource||'')}</div>`;
+  document.getElementById('customerContactBtn')?.addEventListener('click',()=>openContacts({entityType:'customer',entityId:String(o?.customerIndex??selectedProjectAddress?.customerIndex??''),title:o?.name||selectedProjectAddress?.name||'Kunde',subtitle:o?.address||selectedProjectAddress?.address||''}));
 }
 
 async function selectProjectAddress(address){
@@ -6175,6 +6492,8 @@ async function openProjectDetail(p){
     selectedProject=data.project||p;currentProjects=[selectedProject];currentDocs=data.documents||[];currentDocType='';
     renderProjects();
     meta.textContent=`${no?'Projekt '+no+' · ':''}${currentDocs.length} Dokumente · ${Number(data.pdfCount||0)} PDF${Number(data.missingPdfCount||0)?' · '+Number(data.missingPdfCount)+' ohne PDF':''}`;
+    meta.innerHTML += ` · <button class="contact-button" id="projectContactBtn" type="button">📞 Projektkontakte</button>`;
+    document.getElementById('projectContactBtn')?.addEventListener('click',()=>openContacts({entityType:'project',entityId:String(p.projectIndex||''),title:'Projekt '+(p.projectNumber||p.projectIndex||''),subtitle:p.address||p.name||''}));
     ds.hidden=false;renderSummary(currentProjects,currentDocs);renderDocumentTypes();
     ds.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
@@ -6239,21 +6558,26 @@ function setSearchMode(mode){
   searchMode=mode;
   modeProjects.classList.toggle('active',mode==='projects');
   modeIncoming.classList.toggle('active',mode==='incoming');
+  modeMaterial?.classList.toggle('active',mode==='material');
   modeCapture.classList.toggle('active',mode==='capture');
   document.body.classList.toggle('capture-wide',mode==='capture');
 
   ps.hidden=true;ds.hidden=true;projectAddressSection.hidden=true;projectCustomerOverview.hidden=true;
-  incomingSupplierSection.hidden=true;incomingSection.hidden=true;captureSection.hidden=true;
+  incomingSupplierSection.hidden=true;incomingSection.hidden=true;captureSection.hidden=true;materialSection.hidden=true;
   addressBar.hidden=true;summary.hidden=true;backToProjectAddresses.hidden=true;backToProjects.hidden=true;
   projects.innerHTML='';docs.innerHTML='';sourceTypes.innerHTML='';
   incomingSuppliers.innerHTML='';incomingGrouped.innerHTML='';
   incomingTextMeta.classList.remove('year-summary-grid');
-  mainSearchRow.hidden=mode==='capture';
+  mainSearchRow.hidden=mode==='capture'||mode==='material';
 
   if(mode==='incoming'){
     q.placeholder='Lieferant oder Adresse in WinWorker suchen, z. B. Morscher …';
     meta.textContent='Schritt 1: echte WinWorker-Adresse auswählen';
     q.focus();
+  }else if(mode==='material'){
+    meta.textContent='Materialsuche über alle Eingangsrechnungen';
+    materialSection.hidden=false;
+    materialQ?.focus();
   }else if(mode==='capture'){
     meta.textContent='Dunja · Erfassen · Kontieren · Prüfen';
     captureSection.hidden=false;
@@ -6267,6 +6591,7 @@ function setSearchMode(mode){
 
 modeProjects.onclick=()=>setSearchMode('projects');
 modeIncoming.onclick=()=>setSearchMode('incoming');
+modeMaterial.onclick=()=>setSearchMode('material');
 modeCapture.onclick=()=>setSearchMode('capture');
 
 function invoiceMoney(v){
@@ -6512,6 +6837,8 @@ function renderIncomingWatch(alerts){
   });
 }
 
+document.getElementById('incomingCall')?.addEventListener('click',()=>{if(!selectedWwAddress)return;openContacts({entityType:'supplier',entityId:selectedWwAddress.addressId,title:selectedWwAddress.name||'Lieferant',subtitle:selectedWwAddress.address||''})});
+
 async function loadSupplierInvoices(textQuery=''){
   if(!selectedWwAddress)return;
 
@@ -6580,6 +6907,23 @@ async function loadSupplierInvoices(textQuery=''){
     incomingTextGo.disabled=false;
   }
 }
+
+
+async function runGlobalMaterialSearch(){
+  const query=String(materialQ?.value||'').trim();if(query.length<2){materialMeta.textContent='Bitte mindestens 2 Zeichen eingeben.';return}
+  materialGo.disabled=true;materialMeta.textContent='The Brain durchsucht alle Materialblöcke …';materialResults.innerHTML='';
+  try{const r=await fetch('/material-search?q='+encodeURIComponent(query),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Materialsuche fehlgeschlagen');
+    materialMeta.innerHTML=`<strong>${Number(d.exactCount||0)} passende</strong> · ${Number(d.similarCount||0)} ähnliche Treffer · ${Number(d.scanned||0)} Rechnungen geprüft`;
+    const rows=d.results||[];materialResults.innerHTML=rows.length?rows.map(x=>`<div class="material-global-card ${x.matchType==='similar'?'similar':'exact'}">
+      ${x.path?`<img class="thumb" loading="lazy" src="${urlFor('/thumb',x.path)}" alt="">`:'<div class="thumb"></div>'}
+      <div><div class="material-global-top"><div><div class="material-global-supplier">${esc(x.supplierName||'Lieferant')}</div><div class="sub">${esc(x.supplierAddress||'')}</div></div><span class="material-hit-badge ${x.matchType==='exact'?'ideal':''}">${x.matchType==='similar'?'Ähnlicher Treffer':x.matchType==='exact'?'★ Bester Treffer':'Guter Treffer'}</span></div>
+      ${(x.materialMatches||[]).map(m=>`<div class="material-hit-line">${highlightMaterialText(m,query)}</div>`).join('')}
+      <div class="sub" style="margin-top:7px">${x.invoiceDate?esc(x.invoiceDate.split('-').reverse().join('.')):''}${x.amount!==null&&x.amount!==undefined?' · '+esc(invoiceMoney(x.amount)):''}</div>
+      <div class="actions">${x.path?`<a class="action" href="${urlFor('/pdf',x.path)}">Rechnung öffnen</a>`:''}</div></div>
+    </div>`).join(''):'<div class="empty">Kein passendes Material gefunden.</div>';
+  }catch(e){materialMeta.innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{materialGo.disabled=false}
+}
+materialGo?.addEventListener('click',runGlobalMaterialSearch);materialQ?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();runGlobalMaterialSearch()}});
 
 function monthLabel(month, fallback){
   const names=['','Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
@@ -7235,6 +7579,34 @@ def ww_hours_sample(project_index):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+
+@app.route("/contacts", methods=["GET", "POST", "DELETE"])
+def contacts_api():
+    try:
+        if request.method == "GET":
+            entity_type = request.args.get("entityType")
+            entity_id = request.args.get("entityId")
+            return jsonify({"ok": True, "contacts": brain_contacts(entity_type, entity_id)})
+        if request.method == "POST":
+            payload = request.get_json(silent=True) or {}
+            contact_id = _save_brain_contact(payload)
+            return jsonify({"ok": True, "id": contact_id, "contacts": brain_contacts(payload.get("entityType"), payload.get("entityId"))})
+        deleted = _delete_brain_contact(request.args.get("id"), request.args.get("entityType"), request.args.get("entityId"))
+        return jsonify({"ok": True, "deleted": deleted})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/material-search")
+def material_search_api():
+    try:
+        data = global_material_search(request.args.get("q"), request.args.get("limit", 80))
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.get("/project/address-search")
@@ -8050,6 +8422,36 @@ def thumbnail():
     except Exception as e:
         print("Thumbnail-Fehler:", e)
         return ("", 500)
+
+
+@app.get("/pdf-info")
+def pdf_info():
+    try:
+        path = validate_indexed_pdf_path(request.args.get("path"))
+        with pymupdf.open(path) as doc:
+            if doc.page_count < 1:
+                raise ValueError("PDF hat keine Seiten.")
+            rect = doc[0].rect
+            return jsonify({"ok": True, "pages": doc.page_count, "width": float(rect.width), "height": float(rect.height)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/pdf-page")
+def pdf_page_image():
+    try:
+        path = validate_indexed_pdf_path(request.args.get("path"))
+        page_no = max(1, int(request.args.get("page", 1)))
+        scale = max(0.45, min(5.0, float(request.args.get("scale", 1.45))))
+        with pymupdf.open(path) as doc:
+            if page_no > doc.page_count:
+                raise ValueError("PDF-Seite existiert nicht.")
+            page = doc[page_no - 1]
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+            data = pix.tobytes("png")
+        return send_file(BytesIO(data), mimetype="image/png", max_age=0)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.get("/pdf")
