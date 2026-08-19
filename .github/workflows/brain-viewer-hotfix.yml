@@ -1,0 +1,40 @@
+name: Brain viewer hotfix patch
+on:
+  push:
+    branches:
+      - line2/brain-viewer-hotfix-2026-08-19
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[viewer-hotfix-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: line2/brain-viewer-hotfix-2026-08-19
+          fetch-depth: 0
+      - name: Patch connector and verify
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('archive-connector.py')
+          s = p.read_text(encoding='utf-8')
+          needle = "import brain_line2 as _brain_line2\n_brain_line2.install(globals())\n"
+          replacement = needle + "import brain_viewer_hotfix as _brain_viewer_hotfix\n_brain_viewer_hotfix.install(globals())\n"
+          if "brain_viewer_hotfix.install(globals())" not in s:
+              if needle not in s:
+                  raise SystemExit('Brain Line2 hook not found')
+              s = s.replace(needle, replacement, 1)
+              p.write_text(s, encoding='utf-8')
+      - name: Python syntax check
+        run: python -m py_compile archive-connector.py brain_line2.py brain_viewer_hotfix.py
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/brain-viewer-hotfix.yml
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add archive-connector.py brain_viewer_hotfix.py .github/workflows/brain-viewer-hotfix.yml
+          git commit -m "Brain: Viewer-Hotfix direkt aktivieren [viewer-hotfix-done]"
+          git push origin HEAD:line2/brain-viewer-hotfix-2026-08-19
