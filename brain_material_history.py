@@ -157,7 +157,7 @@ def install(ns):
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 500
 
-    if "kristaMaterialHistoryV1" in page:
+    if "kristaMaterialHistoryV2" in page:
         ns["MOBILE_PAGE"] = page
         return
 
@@ -166,6 +166,15 @@ def install(ns):
       <div class="material-history-head">
         <div><strong>Materialhistorie</strong><div id="materialHistoryMeta" class="sub">Preisverlauf aus sicheren Rechnungszeilen</div></div>
         <button id="materialHistoryCsv" type="button">CSV / Excel</button>
+      </div>
+      <div class="material-history-filterbar">
+        <div id="materialHistorySuppliers" class="material-history-suppliers" aria-label="Lieferant filtern"></div>
+        <div id="materialHistorySort" class="material-history-sort" aria-label="Materialhistorie sortieren">
+          <button type="button" class="active" data-history-sort="date-desc">Datum ↓</button>
+          <button type="button" data-history-sort="price-asc">Preis ↑</button>
+          <button type="button" data-history-sort="price-desc">Preis ↓</button>
+          <button type="button" data-history-sort="supplier">Lieferant</button>
+        </div>
       </div>
       <div id="materialHistoryKpis" class="material-history-kpis"></div>
       <div id="materialHistoryChart" class="material-history-chart"></div>
@@ -176,45 +185,80 @@ def install(ns):
     css = r'''
 .material-history-panel{margin:12px 0 18px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
 .material-history-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.material-history-head strong{font-size:17px}
+.material-history-filterbar{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin:11px 0 2px;flex-wrap:wrap}
+.material-history-suppliers{display:flex;gap:6px;align-items:center;overflow-x:auto;max-width:100%;padding:1px 1px 5px;scrollbar-width:thin}
+.material-history-chip,.material-history-sort button{border:1px solid var(--line);background:rgba(127,127,127,.06);color:inherit;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:800;white-space:nowrap;cursor:pointer;height:auto;min-height:30px}
+.material-history-chip.active,.material-history-sort button.active{background:#fff;color:#111;border-color:#fff}
+.material-history-chip small{font-size:10px;font-weight:650;opacity:.72;margin-left:4px}.material-history-chip .chip-price{font-weight:900;opacity:1}
+.material-history-sort{display:flex;gap:5px;flex-wrap:wrap}.material-history-sort button{border-radius:9px}
 .material-history-kpis{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:8px;margin:12px 0}.material-history-kpi{padding:10px;border:1px solid var(--line);border-radius:11px;background:rgba(127,127,127,.07)}
 .material-history-kpi small{display:block;color:var(--muted);margin-bottom:3px}.material-history-kpi strong{font-size:16px}.material-history-chart{height:76px;margin:8px 0 12px;border-radius:10px;background:rgba(127,127,127,.06);overflow:hidden}
 .material-history-chart svg{width:100%;height:100%;display:block}.material-history-table-wrap{overflow:auto}.material-history-table{width:100%;border-collapse:collapse;font-size:12px}.material-history-table th,.material-history-table td{padding:8px 9px;border-top:1px solid var(--line);text-align:left;vertical-align:top}.material-history-table th{white-space:nowrap;color:var(--muted)}
 .material-history-price{font-weight:900;white-space:nowrap}.material-history-confidence{display:inline-flex;padding:3px 7px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}.material-history-confidence.high{font-weight:850}.material-history-confidence.none{opacity:.55}.material-history-material{min-width:260px;max-width:620px}.material-history-note{font-size:11px;color:var(--muted)}
-@media(max-width:900px){.material-history-kpis{grid-template-columns:1fr 1fr}.material-history-table{min-width:850px}}
+@media(max-width:900px){.material-history-filterbar{display:block}.material-history-suppliers{width:100%;flex-wrap:nowrap}.material-history-sort{margin-top:6px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.material-history-kpis{grid-template-columns:1fr 1fr}.material-history-table{min-width:850px}}
 '''
 
     script = r'''
-<script id="kristaMaterialHistoryV1">
+<script id="kristaMaterialHistoryV2">
 (function(){
   const q=document.getElementById('materialQ'),go=document.getElementById('materialGo');
-  const panel=document.getElementById('materialHistoryPanel'),meta=document.getElementById('materialHistoryMeta'),kpis=document.getElementById('materialHistoryKpis'),body=document.getElementById('materialHistoryBody'),chart=document.getElementById('materialHistoryChart'),csv=document.getElementById('materialHistoryCsv');
+  const panel=document.getElementById('materialHistoryPanel'),meta=document.getElementById('materialHistoryMeta'),kpis=document.getElementById('materialHistoryKpis'),body=document.getElementById('materialHistoryBody'),chart=document.getElementById('materialHistoryChart'),csv=document.getElementById('materialHistoryCsv'),suppliers=document.getElementById('materialHistorySuppliers'),sortBar=document.getElementById('materialHistorySort');
   if(!q||!go||!panel||!body)return;
-  let current=[];
+  let allRows=[],current=[],supplierFilter='__all__',sortMode='date-desc';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=n=>n===null||n===undefined?'–':new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n));
   const date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+'.'+m[2]+'.'+m[1]:'–'};
   const unit=u=>String(u||'').replace(/^st\.?$/i,'Stk');
+  const reliable=r=>r&&r.confidence==='high'&&r.price!==null&&r.price!==undefined&&Number.isFinite(Number(r.price));
   function spark(series){
     if(!Array.isArray(series)||series.length<2)return '<div class="material-history-note" style="padding:22px 10px">Für einen Preisverlauf brauchen wir mindestens zwei sichere Einzelpreise.</div>';
     const vals=series.map(x=>Number(x.price)).filter(Number.isFinite),min=Math.min(...vals),max=Math.max(...vals),span=Math.max(.01,max-min),w=900,h=70,p=8;
     const pts=series.map((x,i)=>{const xx=p+(w-2*p)*(i/Math.max(1,series.length-1)),yy=h-p-(h-2*p)*((Number(x.price)-min)/span);return xx.toFixed(1)+','+yy.toFixed(1)}).join(' ');
     return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Preisverlauf"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>`;
   }
-  function render(d){
-    current=Array.isArray(d.rows)?d.rows:[];panel.hidden=false;
-    meta.textContent=`${d.rowCount||0} Materialzeilen gefunden · ${d.reliableCount||0} sichere Einzelpreise · nur sichere Werte fließen in den Verlauf ein`;
-    const change=d.changePercent===null||d.changePercent===undefined?'–':(Number(d.changePercent)>0?'+':'')+Number(d.changePercent).toFixed(1)+' %';
-    kpis.innerHTML=`<div class="material-history-kpi"><small>Letzter sicherer Preis</small><strong>${esc(money(d.lastPrice))}${d.lastUnit?' / '+esc(unit(d.lastUnit)):''}</strong></div><div class="material-history-kpi"><small>Davor</small><strong>${esc(money(d.previousPrice))}</strong></div><div class="material-history-kpi"><small>Veränderung</small><strong>${esc(change)}</strong></div><div class="material-history-kpi"><small>Günstigster</small><strong>${esc(money(d.minPrice))}</strong></div><div class="material-history-kpi"><small>Teuerster</small><strong>${esc(money(d.maxPrice))}</strong></div>`;
-    chart.innerHTML=spark(d.series||[]);
-    body.innerHTML=current.length?current.map(r=>{const conf=r.confidence==='high'?'✓ sicher':r.confidence==='medium'?'~ prüfen':'? kein Preis';const qty=r.quantity!==null&&r.quantity!==undefined?String(r.quantity).replace('.',',')+(r.unit?' '+unit(r.unit):''):'–';const price=r.price!==null&&r.price!==undefined?money(r.price)+(r.confidence==='high'&&r.unit?' / '+unit(r.unit):''): '–';return `<tr><td>${esc(date(r.date))}</td><td>${esc(r.supplier)}</td><td class="material-history-material">${esc(r.material)}${r.priceKind?`<div class="material-history-note">${esc(r.priceKind)}</div>`:''}</td><td>${esc(qty)}</td><td class="material-history-price">${esc(price)}</td><td><span class="material-history-confidence ${esc(r.confidence)}">${esc(conf)}</span></td><td>${r.path?`<a class="action" href="/pdf?path=${encodeURIComponent(r.path)}">Rechnung</a>`:''}</td></tr>`}).join(''):'<tr><td colspan="7">Noch keine belastbare Materialhistorie gefunden.</td></tr>';
+  function supplierStats(){
+    const map=new Map();
+    allRows.forEach(r=>{const name=String(r.supplier||'Lieferant nicht sicher erkannt');let x=map.get(name);if(!x){x={name,count:0,last:null};map.set(name,x)}x.count++;if(reliable(r)&&(!x.last||String(r.date||'')>String(x.last.date||'')))x.last=r});
+    return [...map.values()].sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name,'de',{sensitivity:'base'}));
+  }
+  function renderSupplierChips(){
+    const stats=supplierStats();
+    suppliers.innerHTML=`<button type="button" class="material-history-chip ${supplierFilter==='__all__'?'active':''}" data-history-supplier="__all__">Alle <small>${allRows.length}</small></button>`+stats.map(s=>`<button type="button" class="material-history-chip ${supplierFilter===s.name?'active':''}" data-history-supplier="${esc(s.name)}" title="${esc(s.name)}">${esc(s.name)} <small>${s.count}</small>${s.last?` <small class="chip-price">· ${esc(money(s.last.price))}${s.last.unit?' / '+esc(unit(s.last.unit)):''}</small>`:''}</button>`).join('');
+    suppliers.querySelectorAll('[data-history-supplier]').forEach(b=>b.addEventListener('click',()=>{supplierFilter=b.dataset.historySupplier||'__all__';renderView()}));
+  }
+  function visibleRows(){
+    let rows=supplierFilter==='__all__'?[...allRows]:allRows.filter(r=>String(r.supplier||'Lieferant nicht sicher erkannt')===supplierFilter);
+    if(sortMode==='price-asc')rows.sort((a,b)=>{const ap=reliable(a)?Number(a.price):Number.POSITIVE_INFINITY,bp=reliable(b)?Number(b.price):Number.POSITIVE_INFINITY;return ap-bp||String(b.date||'').localeCompare(String(a.date||''))});
+    else if(sortMode==='price-desc')rows.sort((a,b)=>{const ap=reliable(a)?Number(a.price):Number.NEGATIVE_INFINITY,bp=reliable(b)?Number(b.price):Number.NEGATIVE_INFINITY;return bp-ap||String(b.date||'').localeCompare(String(a.date||''))});
+    else if(sortMode==='supplier')rows.sort((a,b)=>String(a.supplier||'').localeCompare(String(b.supplier||''),'de',{sensitivity:'base'})||String(b.date||'').localeCompare(String(a.date||'')));
+    else rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(a.supplier||'').localeCompare(String(b.supplier||''),'de',{sensitivity:'base'}));
+    return rows;
+  }
+  function summary(rows){
+    const rel=rows.filter(reliable).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+    const oldest=[...rel].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+    const prices=oldest.map(r=>Number(r.price));const last=rel[0]||null,previous=rel[1]||null;
+    let change=null;if(last&&previous&&Number(previous.price)>0)change=(Number(last.price)/Number(previous.price)-1)*100;
+    return {reliable:rel,last,previous,change,min:prices.length?Math.min(...prices):null,max:prices.length?Math.max(...prices):null,series:oldest.slice(-24).map(r=>({date:r.date,price:r.price}))};
+  }
+  function renderView(){
+    current=visibleRows();const s=summary(current);panel.hidden=false;renderSupplierChips();
+    sortBar.querySelectorAll('[data-history-sort]').forEach(b=>b.classList.toggle('active',b.dataset.historySort===sortMode));
+    const scope=supplierFilter==='__all__'?'alle Lieferanten':supplierFilter;
+    meta.textContent=`${current.length} von ${allRows.length} Materialzeilen · ${s.reliable.length} sichere Einzelpreise · ${scope}`;
+    const change=s.change===null?'–':(Number(s.change)>0?'+':'')+Number(s.change).toFixed(1)+' %';
+    kpis.innerHTML=`<div class="material-history-kpi"><small>Letzter sicherer Preis</small><strong>${esc(money(s.last?.price))}${s.last?.unit?' / '+esc(unit(s.last.unit)):''}</strong></div><div class="material-history-kpi"><small>Davor</small><strong>${esc(money(s.previous?.price))}</strong></div><div class="material-history-kpi"><small>Veränderung</small><strong>${esc(change)}</strong></div><div class="material-history-kpi"><small>Günstigster</small><strong>${esc(money(s.min))}</strong></div><div class="material-history-kpi"><small>Teuerster</small><strong>${esc(money(s.max))}</strong></div>`;
+    chart.innerHTML=spark(s.series);
+    body.innerHTML=current.length?current.map(r=>{const conf=r.confidence==='high'?'✓ sicher':r.confidence==='medium'?'~ prüfen':'? kein Preis';const qty=r.quantity!==null&&r.quantity!==undefined?String(r.quantity).replace('.',',')+(r.unit?' '+unit(r.unit):''):'–';const price=r.price!==null&&r.price!==undefined?money(r.price)+(r.confidence==='high'&&r.unit?' / '+unit(r.unit):''): '–';return `<tr><td>${esc(date(r.date))}</td><td>${esc(r.supplier)}</td><td class="material-history-material">${esc(r.material)}${r.priceKind?`<div class="material-history-note">${esc(r.priceKind)}</div>`:''}</td><td>${esc(qty)}</td><td class="material-history-price">${esc(price)}</td><td><span class="material-history-confidence ${esc(r.confidence)}">${esc(conf)}</span></td><td>${r.path?`<a class="action" href="/pdf?path=${encodeURIComponent(r.path)}">Rechnung</a>`:''}</td></tr>`}).join(''):'<tr><td colspan="7">Für diesen Lieferanten keine Materialzeilen gefunden.</td></tr>';
   }
   async function load(){
     const query=String(q.value||'').trim();if(query.length<2){panel.hidden=true;return}
-    panel.hidden=false;meta.textContent='Materialhistorie wird aufgebaut …';kpis.innerHTML='';chart.innerHTML='';body.innerHTML='<tr><td colspan="7">Rechnungszeilen werden geprüft …</td></tr>';
-    try{const r=await fetch('/material-history?q='+encodeURIComponent(query),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Materialhistorie fehlgeschlagen');render(d)}catch(e){meta.textContent=e.message;body.innerHTML='<tr><td colspan="7">Materialhistorie konnte nicht geladen werden.</td></tr>'}
+    panel.hidden=false;meta.textContent='Materialhistorie wird aufgebaut …';kpis.innerHTML='';chart.innerHTML='';suppliers.innerHTML='';body.innerHTML='<tr><td colspan="7">Rechnungszeilen werden geprüft …</td></tr>';
+    try{const r=await fetch('/material-history?q='+encodeURIComponent(query),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Materialhistorie fehlgeschlagen');allRows=Array.isArray(d.rows)?d.rows:[];supplierFilter='__all__';sortMode='date-desc';renderView()}catch(e){meta.textContent=e.message;body.innerHTML='<tr><td colspan="7">Materialhistorie konnte nicht geladen werden.</td></tr>'}
   }
   go.addEventListener('click',()=>setTimeout(load,20));q.addEventListener('keydown',e=>{if(e.key==='Enter')setTimeout(load,20)});
-  csv?.addEventListener('click',()=>{if(!current.length)return;const sep=';';const lines=[['Datum','Lieferant','Material','Menge','Einheit','Preis','Sicherheit','Rechnung'].join(sep),...current.map(r=>[r.date||'',r.supplier||'',r.material||'',r.quantity??'',r.unit||'',r.price??'',r.confidence||'',r.path||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(sep))];const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Materialhistorie_'+String(q.value||'Material').replace(/[^a-z0-9äöüß_-]+/gi,'_')+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+  sortBar.querySelectorAll('[data-history-sort]').forEach(b=>b.addEventListener('click',()=>{sortMode=b.dataset.historySort||'date-desc';renderView()}));
+  csv?.addEventListener('click',()=>{if(!current.length)return;const sep=';';const lines=[['Datum','Lieferant','Material','Menge','Einheit','Preis','Sicherheit','Rechnung'].join(sep),...current.map(r=>[r.date||'',r.supplier||'',r.material||'',r.quantity??'',r.unit||'',r.price??'',r.confidence||'',r.path||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(sep))];const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Materialhistorie_'+String(q.value||'Material').replace(/[^a-z0-9äöüß_-]+/gi,'_')+(supplierFilter==='__all__'?'':'_'+supplierFilter.replace(/[^a-z0-9äöüß_-]+/gi,'_'))+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
 })();
 </script>
 '''
@@ -225,4 +269,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Materialhistorie aktiv: Preisentwicklung + Rechnungsklick + CSV")
+    print("✅ Brain Materialhistorie V2 aktiv: Lieferantenfilter + Sortierung + Preisentwicklung + CSV")
