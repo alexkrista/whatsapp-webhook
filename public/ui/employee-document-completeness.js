@@ -69,6 +69,23 @@
     });
   }
 
+  function loadEmployeePolishAssets() {
+    if (!document.querySelector('link[data-krista-personnel-layout]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "/public/ui/admin-employee-personnel-layout.css";
+      link.dataset.kristaPersonnelLayout = "1";
+      document.head.appendChild(link);
+    }
+    if (!document.querySelector('script[data-krista-admin-employee-polish]')) {
+      const script = document.createElement("script");
+      script.src = "/public/ui/admin-employee-ui-polish.js";
+      script.dataset.kristaAdminEmployeePolish = "1";
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+  }
+
   let timer = null;
   function scheduleUpdate() {
     clearTimeout(timer);
@@ -76,6 +93,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    loadEmployeePolishAssets();
     const list = document.getElementById("employeeList");
     if (!list) return;
 
