@@ -166,6 +166,18 @@
     });
   }
 
+  function loadKristineEmployeeSort() {
+    const pathname = window.location.pathname.toLowerCase();
+    if (!pathname.includes("/kristine")) return;
+    if (document.querySelector('script[data-krista-employee-sort]')) return;
+
+    const script = document.createElement("script");
+    script.src = "/public/ui/kristine-employee-sort.js";
+    script.dataset.kristaEmployeeSort = "1";
+    script.defer = true;
+    document.head.appendChild(script);
+  }
+
   function cleanModuleNavigation() {
     cleanKristineModuleNav();
     cleanAdminModuleNav();
@@ -236,6 +248,7 @@
     });
 
     cleanModuleNavigation();
+    loadKristineEmployeeSort();
     activateKristineHash();
   });
 
