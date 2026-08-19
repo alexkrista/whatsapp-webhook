@@ -1,16 +1,13 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0025.1 · Teleport / Erinnerungen wieder zuverlässig
+// Build 0025.2 · Produktion/Büro klar getrennt
 // KRISTA: 06:45 Morgenbegrüßung, 07:00 Startprüfung,
-// 08:00 Chefstatus, 15:00 Planung morgen, 15:30 Nachfassung.
+// 08:00 Chefstatus nur Produktion, 15:00 Planung morgen nur Produktion,
+// 15:30 Nachfassung nur Produktion.
 //
-// Bestehende Datenstruktur und Exports bleiben erhalten.
-// Überarbeitet wurden vor allem:
-// - klarere Struktur
-// - einheitliche WhatsApp-Texte
-// - situationsabhängige Planungserinnerung
-// - robustere Scheduler- und Versandprotokolle
+// Büro bleibt vollständig in Planung, Urlaub/Krank/ZA/Feiertagen und
+// Arbeitszeitmodellen enthalten, wird aber nicht als fehlende Produktion gemeldet.
 
 const fsp = require("fs/promises");
 const path = require("path");
@@ -107,6 +104,15 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function normalizeEmployeeField(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function displayName(employee) {
   return String(
     employee?.nickname ||
@@ -148,6 +154,60 @@ function activeEmployees(employees) {
       employee.active !== false &&
       normalizePhone(employee.phone)
   );
+}
+
+function isOfficeEmployee(employee) {
+  if (!employee) return false;
+
+  if (
+    employee.office === true ||
+    employee.isOffice === true ||
+    employee.officeEmployee === true ||
+    employee.isOfficeEmployee === true
+  ) {
+    return true;
+  }
+
+  const fields = [
+    employee.department,
+    employee.area,
+    employee.group,
+    employee.employeeGroup,
+    employee.role,
+    employee.employeeType,
+    employee.category,
+    employee.team,
+    employee.workArea,
+    employee.employmentType,
+  ]
+    .map(normalizeEmployeeField)
+    .filter(Boolean)
+    .join(" ");
+
+  if (/\b(buro|office|verwaltung|administration|backoffice)\b/.test(fields)) {
+    return true;
+  }
+
+  // Bestehender KRISTA-Stamm: Übergangs-Fallback bis alle Mitarbeiter sauber
+  // mit Büro/Produktion gekennzeichnet sind. Entspricht der aktuellen UI-Sortierung.
+  const name = normalizeEmployeeField(
+    employee.name ||
+    employee.employeeName ||
+    employee.nickname ||
+    employee.rufname
+  );
+
+  return [
+    "alexander krista",
+    "alex krista",
+    "bettina eberle nigsch",
+    "dunja turtscher",
+    "judith krista",
+  ].includes(name);
+}
+
+function productionEmployees(employees) {
+  return activeEmployees(employees).filter((employee) => !isOfficeEmployee(employee));
 }
 
 function rowsForDate(rows, date) {
@@ -663,7 +723,9 @@ function tomorrowPlanningStatus({
   worktimeModels,
   date,
 }) {
-  const active = activeEmployees(employees);
+  // Operative Einteilungsprüfung = ausschließlich Produktion.
+  // Büro bleibt in assignments/absences und allen Planungsdaten vollständig erhalten.
+  const active = productionEmployees(employees);
   const planned = [];
   const missing = [];
   const free = [];
@@ -1058,7 +1120,8 @@ const missing = statuses.filter(
       return { skipped: true, reason: "retry_wait" };
     }
 
-    const statuses = activeEmployees(state.employees).map(
+    // Chef-Morgenstatus = ausschließlich Produktion.
+    const statuses = productionEmployees(state.employees).map(
       (employee) =>
         statusForEmployee({
           employee,
@@ -1093,6 +1156,7 @@ const missing = statuses.filter(
       logger.log("KRISTA 08:00 Chefstatus gesendet", {
         date,
         recipients: 1,
+        productionEmployees: statuses.length,
       });
 
       return {
@@ -1194,6 +1258,7 @@ const missing = statuses.filter(
         missing: status.missing.length,
         planned: status.planned.length,
         free: status.free.length,
+        productionEmployees: status.activeCount,
       });
 
       return {
@@ -1287,10 +1352,10 @@ const missing = statuses.filter(
       jobs: [
         "06:45 Morgenbegrüßung",
         "07:00 Startprüfung",
-        "08:00 Chefstatus",
-        "Mo–Do 15:00 Planung morgen",
-        "Mo–Do 15:30 Nachfassung",
-        "Fr 11:00 Montagseinteilung",
+        "08:00 Chefstatus · nur Produktion",
+        "Mo–Do 15:00 Planung morgen · nur Produktion",
+        "Mo–Do 15:30 Nachfassung · nur Produktion",
+        "Fr 11:00 Montagseinteilung · nur Produktion",
       ],
     }
   );
