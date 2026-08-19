@@ -1,0 +1,43 @@
+name: Brain Linie 2 einmalig patchen
+
+on:
+  push:
+    branches:
+      - line2/brain-direct-2026-08-19
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'Brain Connector direkt aktivieren') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Connector direkt aktivieren
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('archive-connector.py')
+          text = path.read_text(encoding='utf-8')
+          marker = 'if __name__ == "__main__":'
+          hook = '''# Linie 2 · The Brain direkte Erweiterung\nimport brain_line2 as _brain_line2\n_brain_line2.install(globals())\n\n'''
+          if '_brain_line2.install(globals())' not in text:
+              if marker not in text:
+                  raise SystemExit('Startmarker in archive-connector.py nicht gefunden')
+              text = text.replace(marker, hook + marker, 1)
+              path.write_text(text, encoding='utf-8')
+          Path('difflib.py').unlink(missing_ok=True)
+          Path('.github/workflows/brain-line2-once.yml').unlink(missing_ok=True)
+      - name: Syntax prüfen
+        run: |
+          python -m py_compile brain_line2.py archive-connector.py
+      - name: Patch committen
+        run: |
+          git config user.name "KRISTA Linie 2"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Brain Connector direkt aktivieren" || exit 0
+          git push
