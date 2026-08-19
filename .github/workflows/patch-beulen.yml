@@ -1,0 +1,46 @@
+name: Patch Beulen Loader
+on:
+  push:
+    branches: [line2/beulen-2026-08-19]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: line2/beulen-2026-08-19
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Patch topbar
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('public/ui/topbar.js')
+          s=p.read_text(encoding='utf-8')
+          marker='  function cleanModuleNavigation() {'
+          insert='''  function loadCurrentBeulen() {\n    const path = window.location.pathname.toLowerCase();\n    if (path.includes("/admin")) loadScriptOnce("/public/ui/admin-employee-beulen.js", "data-krista-admin-employee-beulen");\n    if (path.includes("/kristine")) loadScriptOnce("/public/ui/kristine-beulen.js", "data-krista-kristine-beulen");\n    if (path.includes("kristool-preview")) loadScriptOnce("/public/ui/kriszeit-beulen.js", "data-krista-kriszeit-beulen");\n  }\n\n'''
+          if 'function loadCurrentBeulen()' not in s:
+              if marker not in s: raise SystemExit('topbar marker fehlt')
+              s=s.replace(marker,insert+marker,1)
+          call='    loadKriszeitToolbar();\n'
+          if '    loadCurrentBeulen();\n' not in s:
+              if call not in s: raise SystemExit('topbar call marker fehlt')
+              s=s.replace(call,call+'    loadCurrentBeulen();\n',1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          node --check public/ui/topbar.js
+          node --check public/ui/admin-employee-beulen.js
+          node --check public/ui/kristine-beulen.js
+          node --check public/ui/kriszeit-beulen.js
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/patch-beulen.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/ui/topbar.js .github/workflows/patch-beulen.yml
+          git commit -m "Linie 2: Beulen-Loader aktivieren"
+          git push origin HEAD:line2/beulen-2026-08-19
