@@ -172,7 +172,7 @@ _BRAIN_UI = r'''
 .krista-brain-top-inner{max-width:1540px;margin:auto;padding:13px 18px;display:grid;grid-template-columns:280px 1fr 190px;gap:18px;align-items:center}
 .krista-brain-brand{display:flex;align-items:center;gap:11px;color:#fff;text-decoration:none}.krista-brain-mark{width:44px;height:44px;border-radius:12px;background:linear-gradient(145deg,#f2dda7,#caa74f);color:#20251f;display:grid;place-items:center;font-size:23px;font-weight:950}.krista-brain-brand strong{display:block;font-size:17px}.krista-brain-brand small{display:block;color:#cbd5ce;margin-top:2px}
 .krista-brain-nav{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}.krista-brain-nav a{color:#fff;text-decoration:none;border:1px solid #46564c;background:#25362d;padding:9px 12px;border-radius:10px;font-weight:850;font-size:12px}.krista-brain-nav a.active{background:#368a55;border-color:#58a875}.krista-brain-user{text-align:right}.krista-brain-user strong{display:block}.krista-brain-user small{color:#c6d0c9}
-.brain-capture-viewer-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.brain-capture-viewer-tools button{height:auto;padding:7px 9px;border-radius:8px;background:#fff;color:#111;border:1px solid #cfd2d0;font-weight:800}.brain-capture-viewer-tools .brain-viewer-status{font-size:11px;color:#9aa4ae;margin-left:auto}.capture-pdf-shell{min-height:650px!important}.capture-pdf-shell iframe#capturePdfPreview{width:100%!important;height:650px!important;background:#262626}
+.brain-capture-viewer-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.brain-capture-viewer-tools button{height:auto;padding:7px 9px;border-radius:8px;background:#fff;color:#111;border:1px solid #cfd2d0;font-weight:800}.brain-capture-viewer-tools .brain-viewer-status{font-size:11px;color:#9aa4ae;margin-left:auto}.capture-pdf-shell{min-height:650px!important;position:relative;overflow:hidden}.capture-pdf-shell iframe#capturePdfPreview{width:100%!important;height:650px!important;background:#262626}.brain-loupe-capture{position:absolute;inset:0;z-index:20;cursor:crosshair;background:transparent}.brain-loupe{position:absolute;width:360px;height:240px;z-index:21;overflow:hidden;border:2px solid #fff;border-radius:16px;box-shadow:0 12px 35px rgba(0,0,0,.45);pointer-events:none;background:#222}.brain-loupe iframe{position:absolute!important;border:0!important;max-width:none!important;max-height:none!important}.brain-loupe-label{position:absolute;right:7px;top:7px;z-index:22;background:#111;color:#fff;border-radius:999px;padding:4px 7px;font-size:10px;font-weight:900}
 @media(max-width:900px){.krista-brain-top-inner{grid-template-columns:1fr}.krista-brain-nav{justify-content:flex-start}.krista-brain-user{text-align:left}.capture-pdf-shell{min-height:520px!important}.capture-pdf-shell iframe#capturePdfPreview{height:520px!important}}
 </style>
 <script id="kristaBrainLine2Script">
@@ -184,16 +184,26 @@ _BRAIN_UI = r'''
     top.innerHTML=`<div class="krista-brain-top-inner"><a class="krista-brain-brand" href="${go('kristower')}"><span class="krista-brain-mark">K</span><span><strong>KRISTA</strong><small>Einfach. Intuitiv. Gemeinsam.</small></span></a><nav class="krista-brain-nav"><a href="${go('kristower')}">⌂ KRISTOWER</a><a href="${go('kriszeit')}">⏱ KRISZEIT</a><a class="active" href="/">🧠 THE BRAIN</a><a href="${go('kristine')}">✦ KRISTINE</a><a href="${go('krisadmin')}">⚙ KRISADMIN</a><a href="${go('tasks')}">📌 AUFGABEN</a></nav><div class="krista-brain-user"><strong>Alexander Krista</strong><small>The Brain</small></div></div>`;
     document.body.insertBefore(top,document.body.firstChild);
   }
-  let zoom=100;
+  let zoom=100,loupeFactor=0;
   function viewerUrl(src){
     const base=String(src||'').split('#')[0];
     return base+(base?'#toolbar=1&navpanes=0&zoom='+(zoom==='width'?'page-width':zoom):'');
   }
-  function applyZoom(){const f=document.getElementById('capturePdfPreview');if(!f||!f.src)return;f.src=viewerUrl(f.src);const s=document.querySelector('.brain-viewer-status');if(s)s.textContent=zoom==='width'?'Breite':zoom+' %'}
+  function applyZoom(){const f=document.getElementById('capturePdfPreview');if(!f||!f.src)return;stopLoupe();f.src=viewerUrl(f.src);const s=document.querySelector('.brain-viewer-status');if(s)s.textContent=zoom==='width'?'Breite':zoom+' %'}
+  function stopLoupe(){loupeFactor=0;document.querySelector('.brain-loupe-capture')?.remove();document.querySelector('.brain-loupe')?.remove();document.querySelectorAll('[data-loupe]').forEach(b=>b.classList.remove('active'))}
+  function startLoupe(factor,button){
+    stopLoupe();loupeFactor=factor;button?.classList.add('active');
+    const f=document.getElementById('capturePdfPreview'),shell=f?.closest('.capture-pdf-shell');if(!f||!shell||!f.src)return;
+    const cap=document.createElement('div');cap.className='brain-loupe-capture';
+    const lens=document.createElement('div');lens.className='brain-loupe';lens.innerHTML='<span class="brain-loupe-label">'+factor+'×</span><iframe title="Superlupe"></iframe>';
+    const lf=lens.querySelector('iframe');lf.src=f.src;shell.append(cap,lens);
+    const move=e=>{const r=shell.getBoundingClientRect(),x=Math.max(0,Math.min(r.width,e.clientX-r.left)),y=Math.max(0,Math.min(r.height,e.clientY-r.top)),lw=lens.offsetWidth,lh=lens.offsetHeight;let lx=x+22,ly=y+22;if(lx+lw>r.width)lx=x-lw-22;if(ly+lh>r.height)ly=y-lh-22;lens.style.left=Math.max(0,lx)+'px';lens.style.top=Math.max(0,ly)+'px';lf.style.width=r.width+'px';lf.style.height=f.getBoundingClientRect().height+'px';lf.style.transform='scale('+factor+')';lf.style.transformOrigin='0 0';lf.style.left=(-x*factor+lw/2)+'px';lf.style.top=(-y*factor+lh/2)+'px'};
+    cap.addEventListener('mousemove',move);cap.addEventListener('mouseleave',()=>{lens.style.display='none'});cap.addEventListener('mouseenter',()=>{lens.style.display='block'});cap.addEventListener('click',stopLoupe);
+  }
   function addViewer(){
     const f=document.getElementById('capturePdfPreview'),shell=f?.closest('.capture-pdf-shell');if(!f||!shell||shell.previousElementSibling?.classList?.contains('brain-capture-viewer-tools'))return;
-    const t=document.createElement('div');t.className='brain-capture-viewer-tools';t.innerHTML='<button data-z="minus">−</button><button data-z="100">100 %</button><button data-z="width">↔ Breite</button><button data-z="plus">+</button><button data-z="200">2×</button><button data-z="300">3×</button><button data-z="400">4×</button><span class="brain-viewer-status">Breite</span>';shell.parentNode.insertBefore(t,shell);zoom='width';
-    t.addEventListener('click',e=>{const z=e.target?.dataset?.z;if(!z)return;if(z==='minus')zoom=Math.max(50,(Number(zoom)||100)-25);else if(z==='plus')zoom=Math.min(400,(Number(zoom)||100)+25);else if(z==='width')zoom='width';else zoom=Number(z);applyZoom()});
+    const t=document.createElement('div');t.className='brain-capture-viewer-tools';t.innerHTML='<button data-z="minus">−</button><button data-z="100">100 %</button><button data-z="width">↔ Breite</button><button data-z="plus">+</button><button data-loupe="2">🔎 2×</button><button data-loupe="3">🔎 3×</button><button data-loupe="4">🔎 4×</button><span class="brain-viewer-status">Breite</span>';shell.parentNode.insertBefore(t,shell);zoom='width';
+    t.addEventListener('click',e=>{const z=e.target?.dataset?.z,l=e.target?.dataset?.loupe;if(l){startLoupe(Number(l),e.target);return}if(!z)return;if(z==='minus')zoom=Math.max(50,(Number(zoom)||100)-25);else if(z==='plus')zoom=Math.min(400,(Number(zoom)||100)+25);else if(z==='width')zoom='width';else zoom=Number(z);applyZoom()});
     f.addEventListener('load',()=>{if(!String(f.src).includes('zoom='))applyZoom()});
     t.addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();zoom=Math.max(50,Math.min(400,(Number(zoom)||100)+(e.deltaY<0?25:-25)));applyZoom()},{passive:false});
   }
