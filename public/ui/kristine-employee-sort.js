@@ -45,8 +45,6 @@
 
     if (/\b(buro|office|verwaltung|administration|backoffice)\b/.test(fields)) return true;
 
-    // Rückfall für den bestehenden Mitarbeiterstamm, solange die Gruppe noch
-    // nicht bei allen Stammdaten explizit gesetzt ist.
     const name = norm(employee.name || employee.employeeName || employee.nickname || employee.rufname);
     return [
       "alexander krista",
@@ -62,11 +60,42 @@
       .localeCompare(String(b?.name || b?.employeeName || ""), "de", { sensitivity: "base" });
   }
 
+  function currentPlanningDays() {
+    try {
+      if (typeof planningView !== "undefined" && planningView === "day" && typeof selectedPlanningDate === "function") {
+        return [selectedPlanningDate()];
+      }
+      if (typeof planningView !== "undefined" && planningView === "month") return [];
+      if (typeof weekDays === "function") return weekDays();
+    } catch {}
+    return [];
+  }
+
+  function employeeHasPlanning(employeeId, days) {
+    if (!days.length) return false;
+    return (data?.assignments || []).some((assignment) =>
+      String(assignment?.employeeId || "") === String(employeeId || "") &&
+      days.includes(String(assignment?.date || ""))
+    );
+  }
+
   function planningEmployees() {
+    const days = currentPlanningDays();
     return (masterEmployees || [])
       .filter(isVisibleEmployee)
       .slice()
-      .sort((a, b) => Number(isOfficeEmployee(a)) - Number(isOfficeEmployee(b)) || alpha(a, b));
+      .sort((a, b) => {
+        const aOffice = isOfficeEmployee(a);
+        const bOffice = isOfficeEmployee(b);
+        if (aOffice !== bOffice) return Number(aOffice) - Number(bOffice);
+        if (aOffice && bOffice) return alpha(a, b);
+
+        // Produktive MA ohne Einteilung zuerst; innerhalb beider Gruppen A–Z.
+        const aAssigned = employeeHasPlanning(a.id ?? a.employeeId, days);
+        const bAssigned = employeeHasPlanning(b.id ?? b.employeeId, days);
+        if (aAssigned !== bAssigned) return Number(aAssigned) - Number(bAssigned);
+        return alpha(a, b);
+      });
   }
 
   function employeeByAnyId(employeeId) {
@@ -157,6 +186,47 @@
       .forEach((row) => grid.appendChild(row.card));
   }
 
+  function installPlanningSidebar() {
+    const panel = document.getElementById("planningCardsPanel");
+    const calendar = document.querySelector(".planning-calendar-card");
+    if (!panel || !calendar || document.getElementById("kristaPlanningWorkspace")) return;
+    const parent = panel.parentElement;
+    if (!parent || calendar.parentElement !== parent) return;
+
+    const workspace = document.createElement("div");
+    workspace.id = "kristaPlanningWorkspace";
+    workspace.className = "krista-planning-workspace";
+    parent.insertBefore(workspace, panel);
+    workspace.appendChild(panel);
+    workspace.appendChild(calendar);
+    panel.open = true;
+
+    if (!document.getElementById("kristaPlanningSidebarStyle")) {
+      const style = document.createElement("style");
+      style.id = "kristaPlanningSidebarStyle";
+      style.textContent = `
+        .krista-planning-workspace{display:grid;grid-template-columns:285px minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
+        .krista-planning-workspace #planningCardsPanel{position:sticky;top:14px;margin:0;max-height:calc(100vh - 28px);overflow:auto}
+        .krista-planning-workspace #planningCardsPanel>summary .small{display:none}
+        .krista-planning-workspace #planningCardsPanel .planning-panel-body{padding:0 10px 10px}
+        .krista-planning-workspace #planningCardsPanel .planning-pools{display:grid;gap:9px;padding-top:10px}
+        .krista-planning-workspace #planningCardsPanel .pool-column{padding:8px}
+        .krista-planning-workspace #planningCardsPanel .pool-lane-wrap{display:block}
+        .krista-planning-workspace #planningCardsPanel .pool-scroll-btn{display:none!important}
+        .krista-planning-workspace #planningCardsPanel .pool-list{display:grid;gap:6px;overflow:visible;padding:0}
+        .krista-planning-workspace #planningCardsPanel .pool-card{width:100%;min-width:0;max-width:none}
+        .krista-planning-workspace .planning-calendar-card{margin:0;min-width:0}
+        @media(max-width:1000px){
+          .krista-planning-workspace{grid-template-columns:1fr}
+          .krista-planning-workspace #planningCardsPanel{position:static;max-height:none}
+          .krista-planning-workspace #planningCardsPanel .pool-list{display:flex;overflow-x:auto}
+          .krista-planning-workspace #planningCardsPanel .pool-card{min-width:180px;width:auto}
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }
+
   function installPlanningSort() {
     if (typeof window.renderEmployeePlanning !== "function" || window.renderEmployeePlanning.__kristaSorted) return;
     const original = window.renderEmployeePlanning;
@@ -186,6 +256,7 @@
   }
 
   function install() {
+    installPlanningSidebar();
     installPlanningSort();
     installControlSort();
     if (typeof window.renderWeek === "function") window.renderWeek();
