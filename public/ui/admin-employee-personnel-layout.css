@@ -1,0 +1,15 @@
+/* Linie 2 · Personalakte luftiger auf breiten Admin-Ansichten */
+#empPersonnelDocumentsSection.employee-personnel-section{padding:18px 20px}
+#empPersonnelDocumentsSection .employee-personnel-head{margin-bottom:14px;align-items:flex-start}
+#empPersonnelDocumentsSection .employee-personnel-head>strong{font-size:18px}
+#empPersonnelDocumentsSection .personnel-add-grid{grid-template-columns:minmax(260px,1.3fr) minmax(220px,.9fr) minmax(180px,.7fr) minmax(360px,1.6fr);gap:14px 16px;align-items:end;margin-top:18px}
+#empPersonnelDocumentsSection .personnel-add-grid>div{min-width:0}
+#empPersonnelDocumentsSection .personnel-add-grid label{display:block;margin-bottom:6px}
+#empPersonnelDocumentsSection .personnel-add-grid input,#empPersonnelDocumentsSection .personnel-add-grid select{width:100%;min-width:0;min-height:48px}
+#empPersonnelDocumentsSection #empPersonnelDocFile{width:100%}
+#empPersonnelDocumentsSection .personnel-add-grid .full{grid-column:1/-1}
+#empPersonnelDocumentsSection #empPersonnelDocNote{max-width:none;width:100%}
+#empPersonnelDocumentsSection #empPersonnelDocAdd{min-height:46px;padding:10px 16px}
+#empPersonnelDocumentsSection .employee-personnel-list{margin-top:6px}
+@media(max-width:1250px){#empPersonnelDocumentsSection .personnel-add-grid{grid-template-columns:repeat(2,minmax(260px,1fr))}}
+@media(max-width:760px){#empPersonnelDocumentsSection .personnel-add-grid{grid-template-columns:1fr}}
