@@ -4,87 +4,31 @@
   const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";
 
   const WORLDS = [
-    {
-      key: "kristower",
-      label: "KRISTOWER",
-      icon: "⌂",
-      href: "/kontrollzentrum",
-      subtitle: "Überblick, Führung und Entscheidungen"
-    },
-    {
-      key: "kriszeit",
-      label: "KRISZEIT",
-      icon: "⏱",
-      href: "/kristool-preview/",
-      subtitle: "Zeitkontrolle, Auswertung und Finkzeit"
-    },
-    {
-      key: "brain",
-      label: "THE BRAIN",
-      icon: "🧠",
-      href: BRAIN_URL,
-      external: true,
-      subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen"
-    },
-    {
-      key: "kristine",
-      label: "KRISTINE",
-      icon: "✦",
-      href: "/kristine#planning",
-      subtitle: "Planung, Leitstand und Baustellen"
-    },
-    {
-      key: "krisadmin",
-      label: "KRISADMIN",
-      icon: "⚙",
-      href: "/admin/ui",
-      subtitle: "Mitarbeiter, Fahrzeuge und Stammdaten"
-    },
-    {
-      key: "tasks",
-      label: "AUFGABEN",
-      icon: "📌",
-      href: "/kristine#tasks",
-      subtitle: "Offene Aufgaben und Erinnerungen"
-    }
+    { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
+    { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
+    { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
+    { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Planung und Leitstand" },
+    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Mitarbeiter, Fahrzeuge und Stammdaten" },
+    { key: "tasks", label: "AUFGABEN", icon: "📌", href: "/kristine#tasks", subtitle: "Offene Aufgaben und Erinnerungen" }
   ];
-
-  const SUBNAV = {
-    kriszeit: [
-      { label: "🧾 Kontrolle", href: "/kristool-preview/" },
-      { label: "⏰ Zeitmodelle · Urlaub · Feiertage", href: "/kristine#schedules" }
-    ],
-    kristine: [
-      { label: "📅 Planung", href: "/kristine#planning" },
-      { label: "🧾 Leitstand", href: "/kristine#control" },
-      { label: "🏗️ Baustellen", href: "/kristine#sites" }
-    ]
-  };
 
   function tokenized(href, external = false) {
     const url = new URL(href, window.location.origin);
-
-    if (external || url.origin !== window.location.origin) {
-      return url.href;
-    }
-
+    if (external || url.origin !== window.location.origin) return url.href;
     const token = new URLSearchParams(window.location.search).get("token");
     if (token) url.searchParams.set("token", token);
-
     return `${url.pathname}${url.search}${url.hash}`;
   }
 
   function inferActive() {
     const pathname = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
-
     if (hash === "#tasks") return "tasks";
     if (hash === "#schedules") return "kriszeit";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
     if (pathname.includes("/admin")) return "krisadmin";
     if (pathname.includes("/kristine")) return "kristine";
-
     return "kristine";
   }
 
@@ -105,34 +49,23 @@
   function activateKristineHash() {
     const pathname = window.location.pathname.toLowerCase();
     if (!pathname.includes("/kristine") || typeof window.showTab !== "function") return;
-
     const hash = window.location.hash.replace("#", "").toLowerCase();
     const allowed = ["planning", "control", "sites", "tasks", "schedules", "kristool"];
-
     if (hash && allowed.includes(hash)) {
       window.showTab(hash);
       return;
     }
-
     window.showTab("planning");
   }
 
   function cleanKristineModuleNav() {
     const pathname = window.location.pathname.toLowerCase();
     if (!pathname.includes("/kristine")) return;
-
     const nav = document.querySelector(".krista-module-nav");
     if (!nav) return;
-
     nav.querySelectorAll("button").forEach((button) => {
       const text = String(button.textContent || "").toLowerCase();
-      const remove =
-        text.includes("kristool") ||
-        text.includes("aufgaben") ||
-        text.includes("zeitmodelle") ||
-        text.includes("urlaub") ||
-        text.includes("feiertage");
-
+      const remove = text.includes("kristool") || text.includes("aufgaben") || text.includes("zeitmodelle") || text.includes("urlaub") || text.includes("feiertage") || text.includes("baustellen");
       if (remove) button.remove();
     });
   }
@@ -140,69 +73,48 @@
   function cleanAdminModuleNav() {
     const pathname = window.location.pathname.toLowerCase();
     if (!pathname.includes("/admin")) return;
-
     const nav = document.querySelector(".bar.krista-module-nav");
     if (!nav) return;
-
     nav.querySelectorAll("button").forEach((button) => {
       const text = String(button.textContent || "").toLowerCase();
-      const remove =
-        text.includes("tagesrapport") ||
-        text.includes("chefzentrale");
-
-      if (remove) button.remove();
+      if (text.includes("tagesrapport") || text.includes("chefzentrale")) button.remove();
     });
   }
 
   function renameKriszeitSurface() {
     const pathname = window.location.pathname.toLowerCase();
     if (!pathname.includes("kristool-preview")) return;
-
     document.title = document.title.replace(/KRISTOOL/gi, "KRISZEIT");
     document.querySelectorAll(".eyebrow").forEach((el) => {
-      if (/kristool/i.test(el.textContent || "")) {
-        el.textContent = String(el.textContent || "").replace(/KRISTOOL/gi, "KRISZEIT");
-      }
+      if (/kristool/i.test(el.textContent || "")) el.textContent = String(el.textContent || "").replace(/KRISTOOL/gi, "KRISZEIT");
     });
   }
 
-  function loadKristineEmployeeSort() {
-    const pathname = window.location.pathname.toLowerCase();
-    if (!pathname.includes("/kristine")) return;
-    if (document.querySelector('script[data-krista-employee-sort]')) return;
-
+  function loadScriptOnce(src, dataKey) {
+    if (document.querySelector(`script[${dataKey}]`)) return;
     const script = document.createElement("script");
-    script.src = "/public/ui/kristine-employee-sort.js";
-    script.dataset.kristaEmployeeSort = "1";
+    script.src = src;
+    script.setAttribute(dataKey, "1");
     script.defer = true;
     document.head.appendChild(script);
   }
 
-  function loadAdminEmployeeDocumentCompleteness() {
-    const pathname = window.location.pathname.toLowerCase();
-    if (!pathname.includes("/admin")) return;
-    if (document.querySelector('script[data-krista-employee-document-completeness]')) return;
+  function loadKristineEmployeeSort() {
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-employee-sort.js", "data-krista-employee-sort");
+  }
 
-    const script = document.createElement("script");
-    script.src = "/public/ui/employee-document-completeness.js";
-    script.dataset.kristaEmployeeDocumentCompleteness = "1";
-    script.defer = true;
-    document.head.appendChild(script);
+  function loadAdminEmployeeDocumentCompleteness() {
+    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
+  }
+
+  function loadKriszeitToolbar() {
+    if (window.location.pathname.toLowerCase().includes("kristool-preview")) loadScriptOnce("/public/ui/kriszeit-toolbar.js", "data-krista-kriszeit-toolbar");
   }
 
   function cleanModuleNavigation() {
     cleanKristineModuleNav();
     cleanAdminModuleNav();
     renameKriszeitSurface();
-  }
-
-  function subnavHtml(active) {
-    const items = SUBNAV[active] || [];
-    if (!items.length) return "";
-
-    return `<div class="krista-shell-subnav" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 18px;background:#173d2a;border-top:1px solid rgba(255,255,255,.10)">
-      ${items.map((item) => `<a href="${tokenized(item.href)}" style="color:#fff;text-decoration:none;padding:7px 10px;border-radius:8px;background:rgba(255,255,255,.08);font-size:13px;font-weight:750">${item.label}</a>`).join("")}
-    </div>`;
   }
 
   function buildTopbar(mount, options = {}) {
@@ -215,35 +127,16 @@
       <div class="krista-shell-main">
         <a class="krista-brand" href="${tokenized("/kontrollzentrum")}" aria-label="KRISTA Start">
           <span class="krista-mark" aria-hidden="true">K</span>
-          <span class="krista-brand-copy">
-            <strong>KRISTA</strong>
-            <small>Einfach. Intuitiv. Gemeinsam.</small>
-          </span>
+          <span class="krista-brand-copy"><strong>KRISTA</strong><small>Einfach. Intuitiv. Gemeinsam.</small></span>
         </a>
-
         <nav class="krista-world-nav" aria-label="KRISTA Arbeitswelten">
           ${WORLDS.map((item) => `
-            <a
-              class="krista-world-link ${item.key === active ? "active" : ""}"
-              ${item.key === active ? 'aria-current="page"' : ""}
-              href="${tokenized(item.href, item.external)}"
-              ${item.external ? 'rel="noopener"' : ""}
-              title="${item.subtitle}"
-            >
-              <span class="krista-world-icon" aria-hidden="true">${item.icon}</span>
-              <span>${item.label}</span>
-            </a>
-          `).join("")}
+            <a class="krista-world-link ${item.key === active ? "active" : ""}" ${item.key === active ? 'aria-current="page"' : ""} href="${tokenized(item.href, item.external)}" ${item.external ? 'rel="noopener"' : ""} title="${item.subtitle}">
+              <span class="krista-world-icon" aria-hidden="true">${item.icon}</span><span>${item.label}</span>
+            </a>`).join("")}
         </nav>
-
-        <div class="krista-user" aria-label="Angemeldeter Benutzer">
-          <strong>Alexander Krista</strong>
-          <small>Build ${build}</small>
-        </div>
-      </div>
-      ${subnavHtml(active)}
-    `;
-
+        <div class="krista-user" aria-label="Angemeldeter Benutzer"><strong>Alexander Krista</strong><small>Build ${build}</small></div>
+      </div>`;
     document.body.classList.add("krista-ui");
   }
 
@@ -258,16 +151,15 @@
       mount.dataset.kristaRendered = "1";
       buildTopbar(mount);
     });
-
     cleanModuleNavigation();
     loadKristineEmployeeSort();
     loadAdminEmployeeDocumentCompleteness();
+    loadKriszeitToolbar();
     activateKristineHash();
   });
 
   window.addEventListener("hashchange", function () {
     activateKristineHash();
-
     const mount = document.getElementById("kristaTopbar");
     if (mount) buildTopbar(mount);
   });
