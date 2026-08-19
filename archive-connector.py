@@ -8480,6 +8480,8 @@ def pdf_inline():
 # Linie 2 · The Brain direkte Erweiterung
 import brain_line2 as _brain_line2
 _brain_line2.install(globals())
+import brain_viewer_hotfix as _brain_viewer_hotfix
+_brain_viewer_hotfix.install(globals())
 
 if __name__ == "__main__":
     print()
