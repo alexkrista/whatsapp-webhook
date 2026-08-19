@@ -1,9 +1,14 @@
 # coding: utf-8
-"""Brain: Dunja-PDF-Viewer + Drucken + OP-Liste + Materialhistorie."""
+"""Brain: Dunja-PDF-Viewer + Drucken + OP-Liste + Materialhistorie + WW-Lieferantenmap."""
 
 
 def install(ns):
-    # Zusatzmodule zuerst ergänzen; sie arbeiten auf derselben Brain-Seite.
+    # Feste WW-Dokument-Zuordnung zuerst laden. Materialsuche/-historie nutzt sie dann
+    # als fachliche Wahrheit; OCR bleibt nur Fallback.
+    import brain_supplier_enrichment
+    brain_supplier_enrichment.install(ns)
+
+    # Zusatzmodule; sie arbeiten auf derselben Brain-Seite.
     import brain_incoming_op
     brain_incoming_op.install(ns)
     import brain_material_history
@@ -106,4 +111,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V5 aktiv: Dunja direkt + Drucken + OP-Liste + Materialhistorie")
+    print("✅ Brain Viewer V5 aktiv: Dunja direkt + Drucken + OP-Liste + Materialhistorie + WW-Lieferantenmap")
