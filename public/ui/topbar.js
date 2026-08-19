@@ -178,6 +178,18 @@
     document.head.appendChild(script);
   }
 
+  function loadAdminEmployeeDocumentCompleteness() {
+    const pathname = window.location.pathname.toLowerCase();
+    if (!pathname.includes("/admin")) return;
+    if (document.querySelector('script[data-krista-employee-document-completeness]')) return;
+
+    const script = document.createElement("script");
+    script.src = "/public/ui/employee-document-completeness.js";
+    script.dataset.kristaEmployeeDocumentCompleteness = "1";
+    script.defer = true;
+    document.head.appendChild(script);
+  }
+
   function cleanModuleNavigation() {
     cleanKristineModuleNav();
     cleanAdminModuleNav();
@@ -249,6 +261,7 @@
 
     cleanModuleNavigation();
     loadKristineEmployeeSort();
+    loadAdminEmployeeDocumentCompleteness();
     activateKristineHash();
   });
 
