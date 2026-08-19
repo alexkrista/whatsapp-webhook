@@ -65,6 +65,7 @@ def install(ns):
 .capture-pdf-shell.brain-preview-loading::after{content:'PDF-Vorschau wird vorbereitet …';position:absolute;inset:0;display:grid;place-items:center;background:rgba(12,14,16,.84);color:#cbd4df;font-size:13px;z-index:4;pointer-events:none}
 #capturePdfPageImage{display:block;max-width:none;height:auto;margin:0 auto;background:#fff;box-shadow:0 3px 18px rgba(0,0,0,.32)}
 #capturePdfPageImage[hidden]{display:none!important}#pdfPrint{white-space:nowrap}
+.pdf-super-stage{padding-top:0!important}
 '''
 
     script = r'''
