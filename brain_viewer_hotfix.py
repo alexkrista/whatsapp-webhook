@@ -1,5 +1,5 @@
 # coding: utf-8
-"""Brain-Hotfix: Dunja-PDF-Superviewer zuverlässig und unabhängig von der OCR-Analyse starten."""
+"""Brain-Hotfix: Dunja-PDF-Superviewer zuverlässig starten + Drucken im Brain-PDF-Viewer."""
 
 
 def install(ns):
@@ -8,10 +8,6 @@ def install(ns):
     if not page or app is None:
         return
 
-    # Eigener, sehr kleiner Preview-Upload. Er macht bewusst KEIN OCR und keine
-    # Lieferantenerkennung, sondern legt nur die PDF für den bestehenden
-    # PyMuPDF-Superviewer ab. Damit hängt die Vorschau nicht mehr davon ab,
-    # ob /incoming/capture/analyze den previewToken erfolgreich mitliefert.
     if "brain_capture_preview_upload" not in app.view_functions:
         from flask import request, jsonify
         import brain_line2
@@ -36,12 +32,11 @@ def install(ns):
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
 
-    if "kristaBrainViewerReliableV3" in page:
+    if "kristaBrainViewerReliableV4" in page:
         ns["MOBILE_PAGE"] = page
         return
 
     css = r'''
-/* Brain Viewer V3: alter Browser-PDF-Viewer / Leertext nie unter dem Superviewer anzeigen */
 #capturePdfPreview.brain-super-hidden,
 #capturePdfEmpty.brain-super-hidden{
   display:none!important;
@@ -64,69 +59,68 @@ def install(ns):
   z-index:4;
   pointer-events:none;
 }
+#pdfPrint{white-space:nowrap}
 '''
 
     script = r'''
-<script id="kristaBrainViewerReliableV3">
+<script id="kristaBrainViewerReliableV4">
 (function(){
+  function installPrintButton(){
+    const original=document.getElementById('pdfOriginal');
+    if(!original||document.getElementById('pdfPrint'))return;
+    const button=document.createElement('button');
+    button.id='pdfPrint';
+    button.type='button';
+    button.textContent='🖨 Drucken';
+    button.addEventListener('click',()=>{
+      const href=String(original.href||'');
+      if(!href||href.endsWith('#'))return;
+      const printWindow=window.open(href,'_blank');
+      if(!printWindow)return;
+      const tryPrint=()=>{try{printWindow.focus();printWindow.print()}catch(_){}};
+      try{printWindow.addEventListener('load',()=>setTimeout(tryPrint,700),{once:true})}catch(_){setTimeout(tryPrint,1200)}
+      setTimeout(tryPrint,1600);
+    });
+    original.parentNode.insertBefore(button,original);
+  }
+
   const fileInput=document.getElementById('captureFile');
   const frame=document.getElementById('capturePdfPreview');
   const empty=document.getElementById('capturePdfEmpty');
   const tools=document.getElementById('captureSuperTools');
   const shell=frame?.closest('.capture-pdf-shell');
-  if(!fileInput||!frame||!empty||!tools||!shell)return;
 
-  function currentImage(){return document.getElementById('capturePdfPageImage')}
+  installPrintButton();
 
-  function syncSingleViewer(){
-    const image=currentImage();
-    const superActive=!tools.hidden && !!(image && !image.hidden && image.getAttribute('src'));
-    frame.classList.toggle('brain-super-hidden',superActive);
-    empty.classList.toggle('brain-super-hidden',superActive);
-    if(superActive){frame.hidden=true;empty.hidden=true}
-  }
-
-  async function primePreview(file){
-    if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf'))return;
-    shell.classList.add('brain-preview-loading');
-    try{
-      const fd=new FormData();fd.append('file',file);
-      // Absichtlich enthält die URL '/incoming/capture/analyze'.
-      // Der bereits vorhandene Brain-V2 fetch-Wrapper fängt die Antwort ab,
-      // liest previewToken und ruft seinen internen activate()-Pfad auf.
-      // Dadurch bleiben Seitenwechsel, Zoom, Breite und Lupe unverändert erhalten.
-      const response=await fetch('/incoming/capture/analyze-preview',{method:'POST',body:fd,cache:'no-store'});
-      const data=await response.clone().json().catch(()=>({}));
-      if(!response.ok||!data.ok)throw new Error(data.error||'PDF-Vorschau fehlgeschlagen');
-      // activate() läuft im bestehenden Fetch-Wrapper asynchron; kurz danach synchronisieren.
-      setTimeout(syncSingleViewer,0);
-      setTimeout(syncSingleViewer,120);
-      setTimeout(syncSingleViewer,450);
-    }catch(error){
-      console.error('Dunja PDF-Superviewer Preview-Upload:',error);
-      // Fallback bleibt der bestehende Browser-Viewer, falls der Superviewer wirklich ausfällt.
-      frame.classList.remove('brain-super-hidden');
-      empty.classList.remove('brain-super-hidden');
-    }finally{
-      shell.classList.remove('brain-preview-loading');
+  if(fileInput&&frame&&empty&&tools&&shell){
+    function currentImage(){return document.getElementById('capturePdfPageImage')}
+    function syncSingleViewer(){
+      const image=currentImage();
+      const superActive=!tools.hidden && !!(image && !image.hidden && image.getAttribute('src'));
+      frame.classList.toggle('brain-super-hidden',superActive);
+      empty.classList.toggle('brain-super-hidden',superActive);
+      if(superActive){frame.hidden=true;empty.hidden=true}
     }
+    async function primePreview(file){
+      if(!file||!String(file.name||'').toLowerCase().endsWith('.pdf'))return;
+      shell.classList.add('brain-preview-loading');
+      try{
+        const fd=new FormData();fd.append('file',file);
+        const response=await fetch('/incoming/capture/analyze-preview',{method:'POST',body:fd,cache:'no-store'});
+        const data=await response.clone().json().catch(()=>({}));
+        if(!response.ok||!data.ok)throw new Error(data.error||'PDF-Vorschau fehlgeschlagen');
+        setTimeout(syncSingleViewer,0);setTimeout(syncSingleViewer,120);setTimeout(syncSingleViewer,450);
+      }catch(error){
+        console.error('Dunja PDF-Superviewer Preview-Upload:',error);
+        frame.classList.remove('brain-super-hidden');empty.classList.remove('brain-super-hidden');
+      }finally{shell.classList.remove('brain-preview-loading')}
+    }
+    fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0];if(file)primePreview(file)},true);
+    const observer=new MutationObserver(()=>{syncSingleViewer();installPrintButton()});
+    observer.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','src','class','href']});
+    setInterval(()=>{syncSingleViewer();installPrintButton()},700);
+    syncSingleViewer();
   }
-
-  // Capture-Listener: startet sofort beim Auswählen; unabhängig von OCR/Analyse.
-  fileInput.addEventListener('change',()=>{
-    const file=fileInput.files?.[0];
-    if(file)primePreview(file);
-  },true);
-
-  const observer=new MutationObserver(syncSingleViewer);
-  observer.observe(tools,{attributes:true,attributeFilter:['hidden']});
-  observer.observe(frame,{attributes:true,attributeFilter:['hidden','src','class']});
-  observer.observe(empty,{attributes:true,attributeFilter:['hidden','class']});
-  const image=currentImage();
-  if(image)observer.observe(image,{attributes:true,attributeFilter:['hidden','src']});
-
-  setInterval(syncSingleViewer,500);
-  syncSingleViewer();
 })();
 </script>
 '''
@@ -134,4 +128,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V3 aktiv: Preview unabhängig von OCR/Analyse")
+    print("✅ Brain Viewer V4 aktiv: Preview + Drucken")
