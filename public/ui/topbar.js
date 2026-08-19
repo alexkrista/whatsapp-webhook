@@ -130,6 +130,13 @@
     if (window.location.pathname.toLowerCase().includes("kristool-preview")) loadScriptOnce("/public/ui/kriszeit-toolbar.js", "data-krista-kriszeit-toolbar");
   }
 
+  function loadCurrentBeulen() {
+    const path = window.location.pathname.toLowerCase();
+    if (path.includes("/admin")) loadScriptOnce("/public/ui/admin-employee-beulen.js", "data-krista-admin-employee-beulen");
+    if (path.includes("/kristine")) loadScriptOnce("/public/ui/kristine-beulen.js", "data-krista-kristine-beulen");
+    if (path.includes("kristool-preview")) loadScriptOnce("/public/ui/kriszeit-beulen.js", "data-krista-kriszeit-beulen");
+  }
+
   function cleanModuleNavigation() {
     cleanKristineModuleNav();
     cleanAdminModuleNav();
@@ -177,6 +184,7 @@
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
+    loadCurrentBeulen();
     activateKristineHash();
   });
 
