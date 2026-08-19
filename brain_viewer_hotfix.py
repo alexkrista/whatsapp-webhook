@@ -1,11 +1,13 @@
 # coding: utf-8
-"""Brain: Dunja-PDF-Viewer zuverlässig starten + Drucken + OP-Liste."""
+"""Brain: Dunja-PDF-Viewer + Drucken + OP-Liste + Materialhistorie."""
 
 
 def install(ns):
-    # OP-Liste zuerst ergänzen; sie arbeitet auf derselben lokalen Capture-DB.
+    # Zusatzmodule zuerst ergänzen; sie arbeiten auf derselben Brain-Seite.
     import brain_incoming_op
     brain_incoming_op.install(ns)
+    import brain_material_history
+    brain_material_history.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     app = ns.get("app")
@@ -104,4 +106,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V5 aktiv: Dunja direkt + Drucken + OP-Liste")
+    print("✅ Brain Viewer V5 aktiv: Dunja direkt + Drucken + OP-Liste + Materialhistorie")
