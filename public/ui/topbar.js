@@ -49,6 +49,18 @@
     }
   ];
 
+  const SUBNAV = {
+    kriszeit: [
+      { label: "🧾 Kontrolle", href: "/kristool-preview/" },
+      { label: "⏰ Zeitmodelle · Urlaub · Feiertage", href: "/kristine#schedules" }
+    ],
+    kristine: [
+      { label: "📅 Planung", href: "/kristine#planning" },
+      { label: "🧾 Leitstand", href: "/kristine#control" },
+      { label: "🏗️ Baustellen", href: "/kristine#sites" }
+    ]
+  };
+
   function tokenized(href, external = false) {
     const url = new URL(href, window.location.origin);
 
@@ -66,13 +78,28 @@
     const pathname = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
 
+    if (hash === "#tasks") return "tasks";
+    if (hash === "#schedules") return "kriszeit";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
     if (pathname.includes("/admin")) return "krisadmin";
-    if (hash === "#tasks") return "tasks";
     if (pathname.includes("/kristine")) return "kristine";
 
     return "kristine";
+  }
+
+  function normalizeActive(value) {
+    const raw = String(value || "").toLowerCase();
+    if (raw === "kristool") return "kriszeit";
+    if (raw === "krisplan") return "kristine";
+    return raw;
+  }
+
+  function activeForLocation(configured) {
+    const hash = window.location.hash.toLowerCase();
+    if (hash === "#tasks") return "tasks";
+    if (hash === "#schedules") return "kriszeit";
+    return normalizeActive(configured) || inferActive();
   }
 
   function activateKristineHash() {
@@ -87,8 +114,6 @@
       return;
     }
 
-    // KRISTINE startet künftig in der Planung. Das alte KRISTOOL-Dashboard
-    // bleibt technisch vorhanden, ist aber keine eigene Navigationsebene mehr.
     window.showTab("planning");
   }
 
@@ -123,20 +148,42 @@
       const text = String(button.textContent || "").toLowerCase();
       const remove =
         text.includes("tagesrapport") ||
-        text.includes("chefzentrale") ||
-        text.includes("ideen");
+        text.includes("chefzentrale");
 
       if (remove) button.remove();
+    });
+  }
+
+  function renameKriszeitSurface() {
+    const pathname = window.location.pathname.toLowerCase();
+    if (!pathname.includes("kristool-preview")) return;
+
+    document.title = document.title.replace(/KRISTOOL/gi, "KRISZEIT");
+    document.querySelectorAll(".eyebrow").forEach((el) => {
+      if (/kristool/i.test(el.textContent || "")) {
+        el.textContent = String(el.textContent || "").replace(/KRISTOOL/gi, "KRISZEIT");
+      }
     });
   }
 
   function cleanModuleNavigation() {
     cleanKristineModuleNav();
     cleanAdminModuleNav();
+    renameKriszeitSurface();
+  }
+
+  function subnavHtml(active) {
+    const items = SUBNAV[active] || [];
+    if (!items.length) return "";
+
+    return `<div class="krista-shell-subnav" style="display:flex;gap:8px;flex-wrap:wrap;padding:8px 18px;background:#173d2a;border-top:1px solid rgba(255,255,255,.10)">
+      ${items.map((item) => `<a href="${tokenized(item.href)}" style="color:#fff;text-decoration:none;padding:7px 10px;border-radius:8px;background:rgba(255,255,255,.08);font-size:13px;font-weight:750">${item.label}</a>`).join("")}
+    </div>`;
   }
 
   function buildTopbar(mount, options = {}) {
-    const active = options.active || mount.dataset.kristaActive || inferActive();
+    const configured = options.active || mount.dataset.kristaActive || "";
+    const active = activeForLocation(configured);
     const build = options.build || mount.dataset.kristaBuild || "0023.23";
 
     mount.className = "krista-shell-topbar";
@@ -170,6 +217,7 @@
           <small>Build ${build}</small>
         </div>
       </div>
+      ${subnavHtml(active)}
     `;
 
     document.body.classList.add("krista-ui");
