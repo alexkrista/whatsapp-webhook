@@ -5,7 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readWorktimeModels, readJobMeta }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -481,14 +481,13 @@ function clampOfficialStart(actualTime) {
   }
 
   async function getBootstrap() {
-    const [assignments, states, tasks, timeEvents, employees, latestGps, worktimeModels] = await Promise.all([
+    const [assignments, states, tasks, timeEvents, employees, latestGps] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
       readJson(TIME_EVENTS, []),
       typeof readEmployees === "function" ? readEmployees() : [],
       readGpsImport("latest"),
-      typeof readWorktimeModels === "function" ? readWorktimeModels() : [],
     ]);
     // Status für die Oberfläche immer aus den HEUTIGEN Zeitereignissen ableiten.
     // states.json ist mitarbeiterbezogen und kann noch den Status vom Vortag enthalten.
@@ -550,7 +549,7 @@ function clampOfficialStart(actualTime) {
       enrichedAssignments.push(row);
     }
 
-    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, worktimeModels, gpsImport: gpsImportSummary(latestGps) };
+    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
@@ -1622,70 +1621,6 @@ const open = taskId
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
 
-
-  function employeeScheduleForDate(employee, worktimeModels, date) {
-    const modelId = String(employee?.worktimeModelId || "krista-standard");
-    const models = Array.isArray(worktimeModels) ? worktimeModels : [];
-    const model = models.find(row => String(row?.id || "") === modelId) || models[0] || null;
-    const d = new Date(`${date}T12:00:00`);
-    if (!model || Number.isNaN(d.getTime())) {
-      return { scheduledFree:false, targetHours:null, modelName:model?.name || modelId };
-    }
-
-    const weekday = d.getDay(); // 0 So ... 6 Sa
-
-    // Neues/administratives Modell: days[] Montag ... Sonntag.
-    if (Array.isArray(model.days) && model.days.length) {
-      const index = (weekday + 6) % 7;
-      const rule = model.days[index] || {};
-      const target = Number(rule.shouldHours ?? rule.targetHours ?? 0);
-      return {
-        scheduledFree: rule.isWorkDay === false || target <= 0,
-        targetHours: Math.max(0, target),
-        modelName: String(model.name || modelId)
-      };
-    }
-
-    // Bestehendes Modell: seasons[].weekdays.
-    const month = d.getMonth() + 1;
-    const season = (model.seasons || []).find(row => (row.months || []).includes(month));
-    const rule = season?.weekdays?.[String(weekday)] || {};
-    const target = Number(rule.targetHours ?? 0);
-    return {
-      scheduledFree: rule.free === true || !rule.from || !rule.to || target <= 0,
-      targetHours: Math.max(0, target),
-      modelName: String(model.name || modelId)
-    };
-  }
-
-  function dailyAllowanceModelOf(employee, employeeRule = null) {
-    const direct = String(employee?.dailyAllowanceModel || "").trim().toLowerCase();
-    if (["maler","buak","site6","none"].includes(direct)) return direct;
-    if (employeeRule?.buak === true) return "buak";
-    return /\bmaler\b/i.test(String(employee?.role || "")) ? "maler" : "none";
-  }
-
-  function dailyAllowanceFor(model, siteMinutes) {
-    const minutes = Math.max(0, Number(siteMinutes || 0));
-    if (model === "buak") {
-      if (minutes >= 540) return { eligible:true, type:"buak_gross", label:"BUAK groß" };
-      if (minutes >= 180) return { eligible:true, type:"buak_klein", label:"BUAK klein" };
-      return { eligible:false, type:"buak", label:"BUAK" };
-    }
-    if (model === "site6") {
-      return minutes >= 360
-        ? { eligible:true, type:"site6", label:"Baustelle ≥ 6 Std." }
-        : { eligible:false, type:"site6", label:"Baustelle ≥ 6 Std." };
-    }
-    if (model === "maler") {
-      // Bestehende Maler-Regel unverändert lassen.
-      return minutes > 180
-        ? { eligible:true, type:"maler", label:"Maler · Taggeld" }
-        : { eligible:false, type:"maler", label:"Maler · Taggeld" };
-    }
-    return { eligible:false, type:"none", label:"Kein Taggeld" };
-  }
-
   // KRISTOOL Tagesarbeitsliste:
   // 1) tatsächliche Fahrer aus GPS
   // 2) danach Teammitglieder ohne eigene Fahrt
@@ -1693,7 +1628,7 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [gpsData, employees, events, states, corrections, releases, assignments, employeeWorkRules, worktimeModels] = await Promise.all([
+      const [gpsData, employees, events, states, corrections, releases, assignments, employeeWorkRules] = await Promise.all([
         readGpsImport("latest"),
         typeof readEmployees === "function" ? readEmployees() : [],
         readJson(TIME_EVENTS, []),
@@ -1702,7 +1637,6 @@ const open = taskId
         readJson(DAY_RELEASES, []),
         readJson(ASSIGNMENTS, []),
         readJson(EMPLOYEE_WORK_RULES, {}),
-        typeof readWorktimeModels === "function" ? readWorktimeModels() : [],
       ]);
 
       if (gpsData && reconcileGpsMappings(gpsData, employees)) {
@@ -1753,8 +1687,6 @@ const open = taskId
         const employeeFinkzeit=finkzeitPersonnelNumber(employee);
         const absence=employeeAbsenceForDay(assignments,employee,date);
         const employeeRule=(employeeWorkRules||{})[employeeId]||{activityMode:"productive",buak:false};
-        const schedule=employeeScheduleForDate(employee,worktimeModels,date);
-        const dailyAllowanceModel=dailyAllowanceModelOf(employee,employeeRule);
 
         items.push({
           employeeId,
@@ -1763,10 +1695,6 @@ const open = taskId
           employeeIdentityKey: employeeFinkzeit ? `fink:${employeeFinkzeit}` : `legacy:${employeeId}`,
           activityMode:employeeRule.activityMode||"productive",
           buak:employeeRule.buak===true,
-          dailyAllowanceModel,
-          scheduledFree:schedule.scheduledFree===true,
-          scheduledTargetHours:schedule.targetHours,
-          worktimeModelName:schedule.modelName,
           role: ownRows.length ? "driver" : "team",
           driverKey: driverKeys[0] || "",
           ownTripCount: ownRows.length,
@@ -2276,7 +2204,6 @@ const open = taskId
       for (const employee of people) {
         const employeeId = String(employee.id || employee.employeeId);
         const employeeName = String(employee.name || employee.employeeName || employee.nickname || employeeId);
-        const allowanceModel = dailyAllowanceModelOf(employee);
         const rows = [];
 
         for (const date of dates) {
@@ -2301,15 +2228,9 @@ const open = taskId
           );
           const override = parseOverride(correction?.note || "");
 
-          const allowance = dailyAllowanceFor(allowanceModel, siteMinutes);
-          const taggeld = finalFlag(override.taggeld, allowance.eligible);
           rows.push({
             date,
-            taggeld,
-            taggeldModel: allowanceModel,
-            taggeldType: allowance.type,
-            taggeldLabel: allowance.label,
-            siteMinutes,
+            taggeld: finalFlag(override.taggeld, siteMinutes > 180),
             flMinutes,
             flDay: finalFlag(override.fl, flMinutes > 0),
             chMinutes,
@@ -2321,7 +2242,6 @@ const open = taskId
           employeeId,
           employeeName,
           personalNumber: personalNo(employee),
-          dailyAllowanceModel: allowanceModel,
           rows,
         });
       }
@@ -2541,61 +2461,11 @@ const open = taskId
     }
   });
 
-
-  async function sendEscalatedTaskReminders() {
-    if (typeof sendWhatsApp !== "function" || typeof readEmployees !== "function") return;
-    const p = viennaParts(new Date());
-    const hour = Number(p.hour || 0);
-    if (hour < 7) return; // keine Eskalationsmeldung in der Nacht
-    const today = `${p.year}-${p.month}-${p.day}`;
-    const tasks = await readJson(TASKS, []);
-    const employees = await readEmployees().catch(() => []);
-    const employeeById = new Map((employees || []).map(e => [String(e.id || e.employeeId || ""), e]));
-    let changed = false;
-
-    for (const task of Array.isArray(tasks) ? tasks : []) {
-      const repeats = Math.max(1, Number(task.repeatCount || task.reminderLevel || 1) || 1);
-      if (task.status === "done" || repeats < 4 || String(task.lastReminderDate || "") === today) continue;
-      const employee = employeeById.get(String(task.assigneeId || ""));
-      const phone = String(employee?.phone || employee?.whatsapp || employee?.mobile || "").replace(/\D/g, "");
-      if (!phone) continue;
-      const lines = [
-        `🚨 Aufgabe eskaliert · ${repeats}. Wiederholung`,
-        `*${task.title || "Aufgabe"}*`,
-        task.jobName ? `🏗️ ${task.jobName}${task.jobId ? ` (#${task.jobId})` : ""}` : "",
-        task.dueDate ? `📅 Fällig: ${String(task.dueDate).split("-").reverse().join(".")}` : "",
-        "Diese Aufgabe bleibt bis zur Erledigung täglich in Erinnerung."
-      ].filter(Boolean);
-      try {
-        await sendWhatsApp({
-          to: phone,
-          reply: lines.join("\n"),
-          buttons: [
-            ...(task.contactPhone ? [{ id: `task_call:${task.id}`, title: "Anrufen" }] : []),
-            { id: `task_done:${task.id}`, title: "Erledigt" }
-          ]
-        });
-        task.lastReminderDate = today;
-        task.escalatedAt = task.escalatedAt || new Date().toISOString();
-        changed = true;
-        console.log("🚨 Aufgaben-Eskalation versendet", { taskId: task.id, repeats, assigneeId: task.assigneeId });
-      } catch (error) {
-        console.error("❌ Aufgaben-Eskalation fehlgeschlagen", { taskId: task.id, error: String(error?.message || error) });
-      }
-    }
-    if (changed) await writeJson(TASKS, tasks);
-  }
-
-  // Einmal kurz nach Start und danach stündlich prüfen. lastReminderDate verhindert Doppelversand.
-  setTimeout(() => sendEscalatedTaskReminders().catch(error => console.error("Aufgaben-Eskalationsprüfung:", error)), 20000);
-  setInterval(() => sendEscalatedTaskReminders().catch(error => console.error("Aufgaben-Eskalationsprüfung:", error)), 60 * 60 * 1000);
-
   app.put("/kristine/api/tasks", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const previousTasks = await readJson(TASKS, []);
       const previousIds = new Set(previousTasks.map(t => String(t.id || "")));
-      const previousById = new Map(previousTasks.map(t => [String(t.id || ""), t]));
       const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
       const employees = typeof readEmployees === "function" ? await readEmployees() : [];
       const employeeById = new Map(employees.map(e => [String(e.id || ""), e]));
@@ -2624,14 +2494,9 @@ const open = taskId
           contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
           dueDate: String(t.dueDate || "").slice(0, 10),
           reminder: String(t.reminder || "").trim().slice(0, 500),
-          reminderLevel: Math.max(1, Math.min(4, Number(t.reminderLevel || t.repeatCount || 1) || 1)),
-          repeatCount: Math.max(1, Number(t.repeatCount || t.reminderLevel || 1) || 1),
           status: t.status === "done" ? "done" : "open",
-          createdAt: t.createdAt || previousById.get(String(t.id || ""))?.createdAt || new Date().toISOString(),
-          updatedAt: t.updatedAt || new Date().toISOString(),
+          createdAt: t.createdAt || new Date().toISOString(),
           completedAt: t.completedAt || null,
-          escalatedAt: t.escalatedAt || previousById.get(String(t.id || ""))?.escalatedAt || ((Number(t.repeatCount || t.reminderLevel || 1) >= 4) ? new Date().toISOString() : null),
-          lastReminderDate: t.lastReminderDate || previousById.get(String(t.id || ""))?.lastReminderDate || null,
         };
         if (row.title) clean.push(row);
       }
