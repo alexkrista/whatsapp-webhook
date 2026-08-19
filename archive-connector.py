@@ -8477,6 +8477,10 @@ def pdf_inline():
         return jsonify({"ok": False, "error": "PDF konnte nicht geöffnet werden"}), 500
 
 
+# Linie 2 · The Brain direkte Erweiterung
+import brain_line2 as _brain_line2
+_brain_line2.install(globals())
+
 if __name__ == "__main__":
     print()
     print("KRISTINE ARCHIV CONNECTOR")
