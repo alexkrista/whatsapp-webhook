@@ -1,0 +1,38 @@
+name: task-escalation-patch
+on:
+  push:
+    branches: [line2/task-escalation-server-2026-08-19]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: line2/task-escalation-server-2026-08-19
+      - name: Patch kristine.js
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('kristine.js')
+          s=p.read_text(encoding='utf-8')
+          marker='installTaskEscalation(app'
+          if marker not in s:
+              needle='  // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.\n'
+              insert='  require("./task-escalation-server").installTaskEscalation(app, { dataDir, requireAdmin, sendWhatsApp, readEmployees });\n\n'
+              if needle not in s:
+                  raise SystemExit('Hook-Stelle nicht gefunden')
+              s=s.replace(needle, insert+needle, 1)
+              p.write_text(s, encoding='utf-8')
+          PY
+          node --check kristine.js
+          node --check task-escalation-server.js
+      - name: Commit ohne Workflow
+        run: |
+          git config user.name "krista-bot"
+          git config user.email "krista-bot@users.noreply.github.com"
+          git rm .github/workflows/task-escalation-patch.yml
+          git add kristine.js task-escalation-server.js
+          git commit -m "Aufgaben-Eskalation in Kristine aktivieren" || true
+          git push
