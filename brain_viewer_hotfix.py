@@ -7,6 +7,8 @@ def install(ns):
     # als fachliche Wahrheit; OCR bleibt nur Fallback.
     import brain_supplier_enrichment
     brain_supplier_enrichment.install(ns)
+    import brain_capture_supplier_fix
+    brain_capture_supplier_fix.install(ns)
 
     # Zusatzmodule; sie arbeiten auf derselben Brain-Seite.
     import brain_incoming_op
