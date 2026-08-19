@@ -78,7 +78,7 @@ def install(ns):
   function revokeLocalUrl(){if(localObjectUrl){try{URL.revokeObjectURL(localObjectUrl)}catch(_){}localObjectUrl=''}}
   function pageUrl(){return '/incoming/capture/preview-page?token='+encodeURIComponent(state.token)+'&page='+state.page+'&scale='+Number(state.scale).toFixed(2)}
   function stopLoupe(){state.loupe=0;loupe.style.display='none';tools.querySelectorAll('[data-capture-loupe]').forEach(b=>b.classList.remove('active'))}
-  function nativeViewerOff(){frame.hidden=true;frame.removeAttribute('src');frame.setAttribute('aria-hidden','true')}
+  function nativeViewerOff(){if(!frame.hidden)frame.hidden=true;if(frame.hasAttribute('src'))frame.removeAttribute('src');if(frame.getAttribute('aria-hidden')!=='true')frame.setAttribute('aria-hidden','true')}
   function hideEmpty(){empty.hidden=true;empty.classList.add('brain-super-hidden')}
   function showEmpty(){empty.classList.remove('brain-super-hidden');empty.hidden=false}
   function resetPreview(){state.token='';state.page=1;state.pages=1;state.width=0;state.pending=false;stopLoupe();tools.hidden=true;image.hidden=true;image.removeAttribute('src');shell.classList.remove('brain-preview-loading');nativeViewerOff();revokeLocalUrl();if(openPdf){openPdf.hidden=true;openPdf.removeAttribute('href')}showEmpty()}
@@ -90,6 +90,8 @@ def install(ns):
   }
   function render(){if(!state.token)return;stopLoupe();status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;nativeViewerOff();hideEmpty();image.hidden=false;image.src=pageUrl()}
   function fitWidth(){if(!state.width||!shell.clientWidth){render();return}state.scale=Math.max(.35,Math.min(4.5,Math.max(300,shell.clientWidth-22)/state.width));render()}
+
+  const realFetch=window.fetch.bind(window);
   async function activate(token){
     if(!token)return;
     state.token=token;state.page=1;state.pages=1;state.scale=1.45;state.width=0;
@@ -100,18 +102,13 @@ def install(ns):
     }catch(error){state.pending=false;shell.classList.remove('brain-preview-loading');console.error('Dunja PDF-Viewer:',error);tools.hidden=true;image.hidden=true;hideEmpty()}
   }
 
-  /* Wichtig: showCapturePdf aus archive-connector.py darf KEIN blob: mehr in
-     den iframe setzen. Das war neben dem Analyse-Upload ein zweiter kompletter
-     PDF-Viewer und bei großen Dateien unnötig teuer. */
+  /* showCapturePdf aus archive-connector.py darf KEIN blob: in den iframe setzen. */
   const safeShowCapturePdf=function(file){if(file)beginFile(file);else resetPreview()};
   try{window.showCapturePdf=safeShowCapturePdf}catch(_){}
   try{showCapturePdf=safeShowCapturePdf}catch(_){}
   nativeViewerOff();
 
-  /* Nur EIN Upload: /incoming/capture/analyze liefert durch brain_line2 bereits
-     previewToken mit. Wir lauschen auf genau diese Antwort und starten daraus
-     die seitenweise Vorschau. */
-  const realFetch=window.fetch.bind(window);
+  /* Nur EIN Upload: /incoming/capture/analyze liefert bereits previewToken mit. */
   window.fetch=async function(input,init){
     const response=await realFetch(input,init);
     try{
@@ -137,10 +134,9 @@ def install(ns):
   image.addEventListener('mousemove',e=>{if(!state.loupe)return;const r=image.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const z=state.loupe,lw=loupe.offsetWidth||340,lh=loupe.offsetHeight||235;loupe.style.display='block';loupe.style.left=Math.min(window.innerWidth-lw-8,e.clientX+24)+'px';loupe.style.top=Math.max(8,Math.min(window.innerHeight-lh-8,e.clientY-lh/2))+'px';loupe.style.backgroundImage='url("'+image.src+'")';loupe.style.backgroundSize=(r.width*z)+'px '+(r.height*z)+'px';loupe.style.backgroundPosition=(-x*z+lw/2)+'px '+(-y*z+lh/2)+'px'});
   image.addEventListener('mouseleave',()=>loupe.style.display='none');
 
-  /* Capture-Phase: schon vor dem normalen onchange den nativen Viewer sperren. */
   fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0];if(file)beginFile(file);else resetPreview()},true);
-  const frameObserver=new MutationObserver(()=>{if(frame.getAttribute('src'))frame.removeAttribute('src');nativeViewerOff()});
-  frameObserver.observe(frame,{attributes:true,attributeFilter:['src','hidden','style','class']});
+  const frameObserver=new MutationObserver(()=>{if(frame.hasAttribute('src'))frame.removeAttribute('src');nativeViewerOff()});
+  frameObserver.observe(frame,{attributes:true,attributeFilter:['src']});
   const pageObserver=new MutationObserver(installPrintButton);pageObserver.observe(document.documentElement,{childList:true,subtree:true});installPrintButton();
 })();
 </script>
