@@ -116,7 +116,14 @@
   }
 
   function loadAdminEmployeePersonnelFile() {
-    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/admin-employee-personnel-file.js", "data-krista-employee-personnel-file");
+    if (!window.location.pathname.toLowerCase().includes("/admin")) return;
+    try {
+      Object.defineProperty(window, "employeeMasters", {
+        configurable: true,
+        get() { return typeof employeeMasters !== "undefined" ? employeeMasters : []; }
+      });
+    } catch {}
+    loadScriptOnce("/public/ui/admin-employee-personnel-file.js", "data-krista-employee-personnel-file");
   }
 
   function loadKriszeitToolbar() {
