@@ -2,7 +2,8 @@
 
 const FINK_ABSENCE = {
   "pause": ["Pause","003"], "mittag": ["Pause","003"],
-  "büro": ["Büro","022"], "buero": ["Büro","022"],
+  "baustelle < 120 km": ["Baustelle < 120 km","022"], "baustelle unter 120 km": ["Baustelle < 120 km","022"],
+  "büro": ["Büro",""], "buero": ["Büro",""],
   "urlaub": ["Urlaub","900"], "krank": ["Krank","901"], "krankenstand": ["Krank","901"],
   "arzt": ["Arzt","902"], "berufsschule": ["Berufsschule","903"], "feiertag": ["Feiertag","904"],
   "schulung extern": ["Schulung extern","905"], "schulung intern": ["Schulung intern","909"],
