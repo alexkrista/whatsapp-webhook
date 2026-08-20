@@ -4,6 +4,7 @@
 - Historische LG-Umsätze kommen aus der Eingangsrechnungserfassung / WinWorker.
 - Nur wenn Dunja eine neue LG-Rechnung auf „geprüft“ setzt, werden erkannte
   Farb-Lagerpositionen zum aktuellen Lager addiert.
+- The Brain bekommt denselben Farben-Einstieg wie die übrigen KRISTA-Arbeitswelten.
 """
 from __future__ import annotations
 
@@ -55,6 +56,53 @@ def _sync_stock_and_turnover(ns, row):
     payload["text"] = str(row.get("pdfText") or "")
     payload["sourceInvoiceId"] = row.get("id")
     return request("/admin/api/paint/lg-incoming-sync", method="POST", payload=payload)
+
+
+def _install_farben_navigation(ns):
+    """The Brain hat einen eigenen lokalen Kopf – Farben dort ebenfalls einbauen."""
+    app = ns.get("app")
+    if app is None:
+        return
+
+    allowed = ns.get("MOBILE_ALLOWED_PATHS")
+    if isinstance(allowed, set):
+        allowed.add("/brain-farben")
+
+    if "brain_farben" not in app.view_functions:
+        from flask import redirect
+        from urllib.parse import quote
+
+        @app.get("/brain-farben")
+        def brain_farben():
+            base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
+            token = str(ns.get("KRISTINE_ADMIN_TOKEN") or "").strip()
+            location = base + "/admin/paint"
+            if token:
+                location += "?token=" + quote(token, safe="")
+            return redirect(location, code=302)
+
+    page = str(ns.get("MOBILE_PAGE") or "")
+    if not page:
+        return
+
+    # Der lokale Brain-Kopf ist bewusst separat vom Render-Topbar gebaut.
+    # Deshalb muss FARBEN hier ebenfalls ausdrücklich ergänzt werden.
+    if "/brain-farben\">🎨 FARBEN" not in page:
+        page = page.replace(
+            '<a href="/" class="active" aria-current="page">🧠 THE BRAIN</a><a href="/brain-go/kristine">',
+            '<a href="/" class="active" aria-current="page">🧠 THE BRAIN</a><a href="/brain-farben">🎨 FARBEN</a><a href="/brain-go/kristine">',
+            1,
+        )
+
+    # Zusätzlich als Direkteinstieg neben Projekte / Rechnungen / Material.
+    if 'id="modePaint"' not in page:
+        page = page.replace(
+            '<button id="modeMaterial" class="mode" type="button">🔎 Material</button>',
+            '<button id="modeMaterial" class="mode" type="button">🔎 Material</button>\n      <button id="modePaint" class="mode" type="button" onclick="window.location.href=\'/brain-farben\'">🎨 Farben & Lager</button>',
+            1,
+        )
+
+    ns["MOBILE_PAGE"] = page
 
 
 def _historical_backfill(ns):
@@ -122,6 +170,8 @@ def install(ns):
     app = ns.get("app")
     if app is None:
         return
+
+    _install_farben_navigation(ns)
 
     original = app.view_functions.get("incoming_capture_status")
     if original and not getattr(original, "_krista_lg_sync", False):
