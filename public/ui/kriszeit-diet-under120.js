@@ -30,16 +30,31 @@
   function under120Allowance(minutes){
     const value=Math.max(0,Number(minutes||0));
     return {
-      eligible:value>=360,
+      eligible:value>360,
       type:"site6_under120",
       label:"Diät < 120 km",
-      rule:"ab 6:00 h Baustelle < 120 km"
+      rule:"mehr als 6:00 h Baustelle < 120 km"
     };
   }
 
   function install(){
     if(installed)return true;
-    if(typeof dietCalculation!=="function"||typeof renderDietPanel!=="function")return false;
+    if(typeof allowanceForMinutes!=="function"||typeof dietCalculation!=="function"||typeof renderDietPanel!=="function")return false;
+
+    // Die allgemeine 6-Stunden-Regel ist ebenfalls strikt: 6:00 genau reicht nicht.
+    const originalAllowanceForMinutes=allowanceForMinutes;
+    allowanceForMinutes=function(model,siteMinutes){
+      if(model==="site6"){
+        const value=Math.max(0,Number(siteMinutes||0));
+        return {
+          eligible:value>360,
+          type:"site6",
+          label:"Baustelle > 6 Std.",
+          rule:"mehr als 6:00 h Baustelle"
+        };
+      }
+      return originalAllowanceForMinutes.apply(this,arguments);
+    };
 
     const originalDietCalculation=dietCalculation;
     dietCalculation=function(){
