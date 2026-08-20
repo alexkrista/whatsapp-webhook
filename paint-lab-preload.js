@@ -9,6 +9,7 @@ const path = require("path");
 const expressPath = require.resolve("express");
 const originalExpress = require("express");
 const { registerPaintLiveFix } = require("./paint-live-fix");
+const { registerPaintOrderformFix } = require("./paint-orderform-fix");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
@@ -59,10 +60,11 @@ function wrappedExpress(...args) {
       try {
         registerPaintLiveFix(app, opts);
         registerPaintHtmlHotfix(app, opts.publicDir);
+        registerPaintOrderformFix(app, opts);
         registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + Inventur + LG Bestellwesen registriert");
+        console.log("KRISTINE Farben & Lager + offizielle LG-Bestellliste + Inventur + LG Bestellwesen registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
