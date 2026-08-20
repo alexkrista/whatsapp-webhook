@@ -6,7 +6,36 @@
   let installed=false;
   let lastSignature="";
 
+  function norm(value){
+    return String(value||"")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  }
+
+  function currentEmployee(){
+    try{
+      if(typeof currentEmployeeMaster==="function"){
+        const employee=currentEmployeeMaster();
+        if(employee)return employee;
+      }
+    }catch{}
+    try{
+      const id=String(state?.activeEmployeeId||document.getElementById("employeeSelect")?.value||"");
+      return (state?.bootstrap?.employees||[]).find(row=>String(row?.id||row?.employeeId||"")===id)||null;
+    }catch{return null}
+  }
+
+  function isAlex(){
+    const employee=currentEmployee();
+    const name=norm([employee?.nickname,employee?.name,employee?.employeeName].filter(Boolean).join(" "));
+    return /\balex(?:ander)?\b/.test(name);
+  }
+
   function fixedUnder120(){
+    // Diese Sonderregel gilt ausschließlich für Alex. Alle anderen behalten
+    // ihre bestehenden, individuellen Diätenmodelle unverändert.
+    if(!isAlex())return null;
+
     const card=document.getElementById("finkModelTimeCard");
     if(!card||card.hidden)return null;
     const text=String(card.textContent||"").replace(/\s+/g," ");
@@ -39,22 +68,7 @@
 
   function install(){
     if(installed)return true;
-    if(typeof allowanceForMinutes!=="function"||typeof dietCalculation!=="function"||typeof renderDietPanel!=="function")return false;
-
-    // Die allgemeine 6-Stunden-Regel ist ebenfalls strikt: 6:00 genau reicht nicht.
-    const originalAllowanceForMinutes=allowanceForMinutes;
-    allowanceForMinutes=function(model,siteMinutes){
-      if(model==="site6"){
-        const value=Math.max(0,Number(siteMinutes||0));
-        return {
-          eligible:value>360,
-          type:"site6",
-          label:"Baustelle > 6 Std.",
-          rule:"mehr als 6:00 h Baustelle"
-        };
-      }
-      return originalAllowanceForMinutes.apply(this,arguments);
-    };
+    if(typeof dietCalculation!=="function"||typeof renderDietPanel!=="function")return false;
 
     const originalDietCalculation=dietCalculation;
     dietCalculation=function(){
@@ -65,7 +79,7 @@
       return {
         ...result,
         siteMinutes:fixed.minutes,
-        allowanceModel:"site6",
+        allowanceModel:"site6_under120",
         allowance,
         taggeldAutomatic:allowance.eligible
       };
@@ -77,12 +91,12 @@
       let restoreSegments=null;
       try{
         // Die Basisfunktion zeigt bei komplett leerer Tagesfolie sonst nur den
-        // Leerzustand. Für eine fixe 022-Finkzeit reicht ein temporärer Block,
+        // Leerzustand. Für Alex' fixe 022-Finkzeit reicht ein temporärer Block,
         // der ausschließlich während der Diätenberechnung existiert.
         if(fixed&&typeof state!=="undefined"&&Array.isArray(state.segments)&&state.segments.length===0){
           restoreSegments=state.segments;
           state.segments=[{
-            id:"__krista_model_diet_under120__",
+            id:"__krista_alex_model_diet_under120__",
             type:"work",
             from:fixed.from,
             to:fixed.to,
