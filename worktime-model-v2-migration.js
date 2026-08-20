@@ -31,16 +31,19 @@ function patch(){
       if(!model.blocks.finkTarget.rows.length){model.blocks.finkTarget.rows=[clone(alexTarget)];changed=true}
       if(!model.blocks.finkFixed.rows.length){model.blocks.finkFixed.rows=[clone(alexFixed)];changed=true}
       for(const row of model.blocks.finkFixed.rows){
-        const oldCode=String(row?.activityCode||"");
-        const oldLabel=String(row?.activityLabel||"");
-        if(oldCode==="022"||/^(büro|buero)$/i.test(oldLabel)||String(row?.id||"")==="alex-fink-mo-fr"){
+        const oldCode=String(row?.activityCode||"").trim();
+        const oldLabel=String(row?.activityLabel||"").trim();
+        const isOldOffice=oldCode==="022"||/^(büro|buero)$/i.test(oldLabel);
+        const isEmptyAlexDefault=String(row?.id||"")==="alex-fink-mo-fr"&&!oldCode&&!oldLabel;
+        if(isOldOffice||isEmptyAlexDefault){
           if(row.activityCode!=="SITE_LT120"){row.activityCode="SITE_LT120";changed=true}
           if(row.activityLabel!=="Baustelle < 120 km"){row.activityLabel="Baustelle < 120 km";changed=true}
         }
       }
       if(model.automaticTime!==true){model.automaticTime=true;changed=true}
       if(Number(model.automaticPayrollHours)!==6.8){model.automaticPayrollHours=6.8;changed=true}
-      if(model.payrollReason!=="Baustelle < 120 km"){model.payrollReason="Baustelle < 120 km";changed=true}
+      const oldReason=String(model.payrollReason||"").trim();
+      if(!oldReason||/^(büro|buero)$/i.test(oldReason)){model.payrollReason="Baustelle < 120 km";changed=true}
       if(model.projectTimeSource!=="actual_stamps"){model.projectTimeSource="actual_stamps";changed=true}
     }
   }
