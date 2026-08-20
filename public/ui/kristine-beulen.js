@@ -2,6 +2,7 @@
 
 (function(){
   function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+  function ensureScript(src,key){if(document.querySelector(`script[${key}]`))return;const s=document.createElement("script");s.src=src;s.setAttribute(key,"1");s.defer=true;document.head.appendChild(s)}
   function installStyle(){
     if(document.getElementById("kristaBeulenStyle"))return;
     const s=document.createElement("style");s.id="kristaBeulenStyle";s.textContent=`
@@ -48,7 +49,7 @@
     if(typeof window.renderControl==="function"&&!window.renderControl.__kristaBeulen){const old=window.renderControl;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceUnknown,0);return v};wrapped.__kristaBeulen=true;window.renderControl=wrapped}
     if(typeof window.renderTasks==="function"&&!window.renderTasks.__kristaBeulen){const old=window.renderTasks;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceTaskRows,0);return v};wrapped.__kristaBeulen=true;window.renderTasks=wrapped}
   }
-  function install(){installStyle();wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(wrapFunctions,300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
+  function install(){installStyle();ensureScript("/public/ui/kristine-time-models-v2.js","data-krista-time-models-v2");wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(wrapFunctions,300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install,{once:true});else install();
   setInterval(()=>{wrapFunctions();enhanceUnknown();enhanceTaskRows()},3000);
 })();
