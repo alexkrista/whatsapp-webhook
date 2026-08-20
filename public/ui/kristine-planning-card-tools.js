@@ -76,11 +76,30 @@
     try{return (data?.assignments||[]).some(row=>String(row?.employeeId||"")===String(targetEmployee?.id||"")&&String(row?.date||"")===String(date||"")&&String(row?.jobId||"")===String(source?.jobId||"")&&String(row?.from||"")===String(from||"")&&String(row?.to||"")===String(to||""))}catch{return false}
   }
 
+  function cleanTargetIdentity(source,targetEmployee){
+    const clone={...source};
+    // Der Server löst Mitarbeiter zuerst über Fink-/Personalnummer auf und erst
+    // danach über employeeId. Beim Kopieren auf einen anderen Mitarbeiter dürfen
+    // deshalb keinerlei Identitätsfelder der Quellperson mitwandern.
+    delete clone.finkzeitPersonnelNumber;
+    delete clone.finkzeitPersonalNumber;
+    delete clone.personalnummerFinkzeit;
+    delete clone.personnelNumber;
+    delete clone.personalNumber;
+    delete clone.personnelNo;
+    delete clone.employeeNumber;
+    delete clone.persNr;
+    delete clone.employeeIdentityKey;
+    clone.employeeId=String(targetEmployee?.id||targetEmployee?.employeeId||"");
+    clone.employeeName=String(targetEmployee?.name||targetEmployee?.employeeName||clone.employeeId);
+    return clone;
+  }
+
   async function createCopyForTarget(source,targetEmployee,date){
     let type="site";try{type=typeof cardTypeOf==="function"?cardTypeOf(source):String(source.cardType||"site")}catch{}
     if(type!=="site"){
       if(typeof createSpecialAssignment!=="function")return null;
-      return createSpecialAssignment(type,targetEmployee,date,source);
+      return createSpecialAssignment(type,targetEmployee,date,cleanTargetIdentity(source,targetEmployee));
     }
 
     let from=String(source.from||""),to=String(source.to||"");
@@ -104,11 +123,9 @@
 
     if(typeof subtractWindowFromExisting==="function")subtractWindowFromExisting(targetEmployee.id,date,from,to);
     const clone={
-      ...source,
+      ...cleanTargetIdentity(source,targetEmployee),
       id:typeof id==="function"?id():`${Date.now()}_${Math.random().toString(36).slice(2)}`,
       date:String(date),
-      employeeId:String(targetEmployee.id),
-      employeeName:targetEmployee.name||String(targetEmployee.id),
       from,
       to
     };
