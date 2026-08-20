@@ -7,6 +7,7 @@
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
+    { key: "farben", label: "FARBEN", icon: "🎨", href: "/admin/paint", subtitle: "Farbsuche, Mischrezepte, Lager und Bestellung" },
     { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Planung und Leitstand" },
     { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Mitarbeiter, Fahrzeuge und Stammdaten" },
     { key: "tasks", label: "AUFGABEN", icon: "📌", href: "/kristine#tasks", subtitle: "Offene Aufgaben und Erinnerungen" }
@@ -27,6 +28,7 @@
     if (hash === "#schedules") return "kriszeit";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
+    if (pathname.includes("/admin/paint")) return "farben";
     if (pathname.includes("/admin")) return "krisadmin";
     if (pathname.includes("/kristine")) return "kristine";
     return "kristine";
