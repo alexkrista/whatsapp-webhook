@@ -1,13 +1,13 @@
 "use strict";
 
 // Datei: morning-status.js
-// Build 0025.2 · Produktion/Büro klar getrennt
+// Build 0025.3 · Produktion/Büro konsequent getrennt
 // KRISTA: 06:45 Morgenbegrüßung, 07:00 Startprüfung,
-// 08:00 Chefstatus nur Produktion, 15:00 Planung morgen nur Produktion,
-// 15:30 Nachfassung nur Produktion.
+// 08:00 Chefstatus, 15:00 Planung morgen, 15:30 Nachfassung – jeweils nur Produktion.
 //
 // Büro bleibt vollständig in Planung, Urlaub/Krank/ZA/Feiertagen und
-// Arbeitszeitmodellen enthalten, wird aber nicht als fehlende Produktion gemeldet.
+// Arbeitszeitmodellen enthalten, bekommt aber keine Morgen-/Start-Erinnerungen
+// und wird nicht als fehlende Produktion gemeldet.
 
 const fsp = require("fs/promises");
 const path = require("path");
@@ -189,21 +189,29 @@ function isOfficeEmployee(employee) {
   }
 
   // Bestehender KRISTA-Stamm: Übergangs-Fallback bis alle Mitarbeiter sauber
-  // mit Büro/Produktion gekennzeichnet sind. Entspricht der aktuellen UI-Sortierung.
-  const name = normalizeEmployeeField(
-    employee.name ||
-    employee.employeeName ||
-    employee.nickname ||
-    employee.rufname
-  );
+  // mit Büro/Produktion gekennzeichnet sind. Alle Namensfelder werden gemeinsam
+  // geprüft, damit auch ein Rufname wie "Geri" zuverlässig greift.
+  const identity = [
+    employee.name,
+    employee.employeeName,
+    employee.nickname,
+    employee.rufname,
+    employee.firstName,
+    employee.vorname,
+  ]
+    .map(normalizeEmployeeField)
+    .filter(Boolean)
+    .join(" ");
 
-  return [
+  const fixedOfficeNames = [
     "alexander krista",
     "alex krista",
     "bettina eberle nigsch",
     "dunja turtscher",
     "judith krista",
-  ].includes(name);
+  ];
+
+  return fixedOfficeNames.some((name) => identity.includes(name)) || /\bgeri\b/.test(identity);
 }
 
 function productionEmployees(employees) {
@@ -970,10 +978,10 @@ async function runSixFortyFive(
     }
 
     const employeesToCheck = onlyEmployeeId
-      ? activeEmployees(state.employees).filter(
+      ? productionEmployees(state.employees).filter(
           (employee) => String(employee.id) === String(onlyEmployeeId)
         )
-      : activeEmployees(state.employees);
+      : productionEmployees(state.employees);
 
     const statuses = employeesToCheck.map(
       (employee) => statusForEmployee({ employee, ...state, date })
@@ -1011,6 +1019,7 @@ async function runSixFortyFive(
       date,
       sent,
       suppressed: statuses.length - recipients.length,
+      productionEmployees: statuses.length,
     });
 
     return {
@@ -1037,23 +1046,23 @@ async function runSevenOClock(
     }
 
     const employeesToCheck = onlyEmployeeId
-  ? activeEmployees(state.employees).filter(
-      (employee) => String(employee.id) === String(onlyEmployeeId)
-    )
-  : activeEmployees(state.employees);
+      ? productionEmployees(state.employees).filter(
+          (employee) => String(employee.id) === String(onlyEmployeeId)
+        )
+      : productionEmployees(state.employees);
 
-const statuses = employeesToCheck.map(
-  (employee) =>
-    statusForEmployee({
-      employee,
-      ...state,
-      date,
-    })
-);
+    const statuses = employeesToCheck.map(
+      (employee) =>
+        statusForEmployee({
+          employee,
+          ...state,
+          date,
+        })
+    );
 
-const missing = statuses.filter(
-  (status) => status.category === "missing"
-);
+    const missing = statuses.filter(
+      (status) => status.category === "missing"
+    );
 
     for (const status of missing) {
       try {
@@ -1092,6 +1101,7 @@ const missing = statuses.filter(
       date,
       reminded: missing.length,
       suppressed,
+      productionEmployees: statuses.length,
     });
 
     return {
@@ -1350,8 +1360,8 @@ const missing = statuses.filter(
     {
       timezone: TZ,
       jobs: [
-        "06:45 Morgenbegrüßung",
-        "07:00 Startprüfung",
+        "06:45 Morgenbegrüßung · nur Produktion",
+        "07:00 Startprüfung · nur Produktion",
         "08:00 Chefstatus · nur Produktion",
         "Mo–Do 15:00 Planung morgen · nur Produktion",
         "Mo–Do 15:30 Nachfassung · nur Produktion",
