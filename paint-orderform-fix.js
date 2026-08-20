@@ -3,21 +3,38 @@
 // Offizielle Little-Greene-Bestellliste = Artikelwahrheit.
 // Excel dient nur als strukturierte Importquelle; laufender Bestand bleibt in KRISTINE.
 // Inventur zeigt bewusst nur LG BASES + COLOURANTS. Sample Pots / Marketing werden
-// mit eingelesen, aber nicht inventarisiert und koennen spaeter als Bestellzusatz genutzt werden.
+// mit eingelesen, aber nicht inventarisiert und koennen als Bestellzusatz genutzt werden.
+//
+// WICHTIG: Die Bestellliste nennt Hi White als HI, aeltere Lagerdaten / Innovatint
+// koennen H verwenden. Intern werden diese Varianten auf EINEN Basis-Schluessel
+// zusammengefuehrt, die Anzeige bleibt fuer Menschen lesbar: "HI · Hi White" usw.
 
-const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 let XLSX = null;
 try { XLSX = require("xlsx"); } catch {}
 
-const BASE_NAMES = {
-  H: "Hi White", HI: "Hi White",
-  M: "Medium", D: "Deep",
-  XD: "Extra Deep", X: "Extra Deep",
-  T: "Transparent", Y: "Yellow",
-  W: "White ASP", P: "Pastel",
-  BC: "Blue BC", TC: "Blue TC",
+const BASES = {
+  H:  { code:"HI", name:"Hi White" },
+  HI: { code:"HI", name:"Hi White" },
+  "HI WHITE": { code:"HI", name:"Hi White" },
+  M:  { code:"M", name:"Medium" },
+  MEDIUM: { code:"M", name:"Medium" },
+  D:  { code:"D", name:"Deep" },
+  DEEP: { code:"D", name:"Deep" },
+  XD: { code:"XD", name:"Extra Deep" },
+  X:  { code:"XD", name:"Extra Deep" },
+  "EXTRA DEEP": { code:"XD", name:"Extra Deep" },
+  T:  { code:"T", name:"Transparent" },
+  TRANSPARENT: { code:"T", name:"Transparent" },
+  Y:  { code:"Y", name:"Yellow" },
+  YELLOW: { code:"Y", name:"Yellow" },
+  W:  { code:"W", name:"White ASP" },
+  "WHITE ASP": { code:"W", name:"White ASP" },
+  P:  { code:"P", name:"Pastel" },
+  PASTEL: { code:"P", name:"Pastel" },
+  BC: { code:"BC", name:"Blue BC" },
+  TC: { code:"TC", name:"Blue TC" },
 };
 
 function registerPaintOrderformFix(app, options = {}) {
@@ -44,7 +61,10 @@ function registerPaintOrderformFix(app, options = {}) {
     const n = Number(raw); return Number.isFinite(n) ? n : fallback;
   };
   const norm = v => clean(v).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-  const baseName = code => BASE_NAMES[clean(code,20).toUpperCase()] || clean(code,80);
+  const baseInfo = (code, fallbackName="") => {
+    const raw = clean(code || fallbackName,80).toUpperCase();
+    return BASES[raw] || { code: clean(code,20).toUpperCase() || clean(fallbackName,20).toUpperCase(), name: clean(fallbackName || code,80) };
+  };
   const sizeNorm = value => {
     const raw=clean(value,50).toLowerCase().replace(/litre|liter|ltr/g,"l").replace(/\s+/g,"");
     if(/^250ml$|^0[.,]?25l$/.test(raw))return"0.25 L";
@@ -62,7 +82,15 @@ function registerPaintOrderformFix(app, options = {}) {
     const m=sizeNorm(value).match(/^([0-9.]+)\s*L$/i); return m?Number(m[1])*1000:0;
   };
   const safeId = value => clean(value,220).replace(/[^A-Za-z0-9_-]+/g,"_").replace(/^_+|_+$/g,"");
-  const articleKey = a => `${norm(a.product)}|${norm(a.baseCode||a.baseName)}|${sizeNorm(a.size)}`;
+  const canonicalArticle = a => {
+    if (clean(a?.category).toLowerCase()==="colourant") return a;
+    const info=baseInfo(a?.baseCode,a?.baseName);
+    return {...a,baseCode:info.code,baseName:info.name};
+  };
+  const articleKey = raw => {
+    const a=canonicalArticle(raw||{});
+    return `${norm(a.product)}|${norm(a.baseCode||a.baseName)}|${sizeNorm(a.size)}`;
+  };
 
   async function ensureRoot(){ await fsp.mkdir(root,{recursive:true}); }
   async function readJson(file,fallback){ try{return JSON.parse(await fsp.readFile(file,"utf8"));}catch{return fallback;} }
@@ -82,17 +110,20 @@ function registerPaintOrderformFix(app, options = {}) {
     const counts={bases:0,colourants:0,samplePots:0,marketing:0};
     let currentProduct="", currentSize="";
 
+    // Herstellerstruktur exakt uebernehmen:
+    // PRODUCT | SIZE | BASE | SKU | QUANTITY | Price | Total
     const baseRows=rowsOf(workbook,"LG BASES");
     for(let i=1;i<baseRows.length;i++){
       const row=baseRows[i]||[];
       if(clean(row[0])) currentProduct=clean(row[0],180);
       if(clean(row[1])) currentSize=sizeNorm(row[1]);
-      const baseCode=clean(row[2],20).toUpperCase();
+      const rawBase=clean(row[2],30);
       const sku=clean(row[3],100);
-      if(!currentProduct||!currentSize||!baseCode||!sku)continue;
+      if(!currentProduct||!currentSize||!rawBase||!sku||/^TOTAL/i.test(sku))continue;
+      const info=baseInfo(rawBase);
       articles.push({
         id:`LG-${safeId(sku)}`, manufacturer:"Little Greene", category:"base", inventory:true, orderable:true, orderSection:"bases",
-        product:currentProduct, baseCode, baseName:baseName(baseCode), size:currentSize, sizeMl:sizeMl(currentSize),
+        product:currentProduct, baseCode:info.code, baseName:info.name, size:currentSize, sizeMl:sizeMl(currentSize),
         ean:"", stockCode:sku, stock:0, targetStock:0, minimumStock:0, purchasePrice:num(row[5],0), salePrice:0,
         active:true, source:"Official LG Order Form / LG BASES", updatedAt:new Date().toISOString(),
       }); counts.bases++;
@@ -105,7 +136,7 @@ function registerPaintOrderformFix(app, options = {}) {
       if(!code||!size||!colour||!sku||/^TOTAL/i.test(sku))continue;
       articles.push({
         id:`LG-${safeId(sku)}`, manufacturer:"Little Greene", category:"colourant", inventory:true, orderable:true, orderSection:"colourants",
-        product:"Colourants", baseCode:code, baseName:`${code} · ${colour}`, size, sizeMl:sizeMl(size),
+        product:"Colourants", baseCode:code, baseName:colour, size, sizeMl:sizeMl(size),
         ean:"", stockCode:sku, stock:0, targetStock:0, minimumStock:0, purchasePrice:num(row[5],0), salePrice:0,
         active:true, source:"Official LG Order Form / COLOURANTS", updatedAt:new Date().toISOString(),
       }); counts.colourants++;
@@ -142,17 +173,18 @@ function registerPaintOrderformFix(app, options = {}) {
   }
 
   function mergeWithExisting(parsed, previous) {
-    const bySku=new Map(previous.filter(a=>clean(a.stockCode)).map(a=>[clean(a.stockCode).toUpperCase(),a]));
-    const byKey=new Map(previous.map(a=>[articleKey(a),a]));
+    const normalizedPrevious=(Array.isArray(previous)?previous:[]).map(canonicalArticle);
+    const bySku=new Map(normalizedPrevious.filter(a=>clean(a.stockCode)).map(a=>[clean(a.stockCode).toUpperCase(),a]));
+    const byKey=new Map(normalizedPrevious.map(a=>[articleKey(a),a]));
     return parsed.articles.map(a=>{
       const old=bySku.get(clean(a.stockCode).toUpperCase())||byKey.get(articleKey(a));
       if(!old)return a;
       return {
         ...a,
         ean:clean(old.ean)||a.ean,
-        stock:Number.isFinite(Number(old.stock))?Number(old.stock):a.stock,
-        targetStock:Number.isFinite(Number(old.targetStock))?Number(old.targetStock):Number(old.minimumStock||a.targetStock||0),
-        minimumStock:Number.isFinite(Number(old.minimumStock))?Number(old.minimumStock):Number(old.targetStock||a.minimumStock||0),
+        stock:Number.isFinite(Number(old.stock))?Math.max(0,Number(old.stock)):a.stock,
+        targetStock:Number.isFinite(Number(old.targetStock))?Math.max(0,Number(old.targetStock)):Math.max(0,Number(old.minimumStock||0)),
+        minimumStock:Number.isFinite(Number(old.minimumStock))?Math.max(0,Number(old.minimumStock)):Math.max(0,Number(old.targetStock||0)),
         salePrice:Number(old.salePrice||a.salePrice||0),
         createdAt:old.createdAt||a.createdAt,
       };
@@ -166,6 +198,22 @@ function registerPaintOrderformFix(app, options = {}) {
     const sku=clean(a?.stockCode).toUpperCase();
     if(/^020606/.test(sku)||/^0299/.test(sku))return false;
     return !!clean(a?.product)&&!!clean(a?.size);
+  }
+
+  function publicInventoryRow(raw){
+    const a=canonicalArticle(raw||{});
+    const category=clean(a.category).toLowerCase()||"base";
+    const target=Math.max(0,Number(a.targetStock??a.minimumStock??0));
+    const minimum=Math.max(0,Number(a.minimumStock??a.targetStock??0));
+    const stock=Math.max(0,Number(a.stock||0));
+    const baseLabel=category==="colourant"
+      ? `${clean(a.baseCode)} · ${clean(a.baseName||a.baseCode)}`
+      : `${clean(a.baseCode)} · ${clean(a.baseName||a.baseCode)}`;
+    return {
+      id:a.id||"", category, product:a.product||"", baseName:a.baseName||a.baseCode||"", baseCode:a.baseCode||"", baseLabel,
+      size:sizeNorm(a.size), ean:a.ean||"", stockCode:a.stockCode||"", purchasePrice:Number(a.purchasePrice||0),
+      targetStock:target, minimumStock:minimum, stock, difference:minimum-stock,
+    };
   }
 
   // First route wins: official order form is handled here; legacy workbook falls through to paint-lab.js.
@@ -186,15 +234,33 @@ function registerPaintOrderformFix(app, options = {}) {
     }catch(e){return res.status(500).json({ok:false,error:String(e?.message||e)});}
   });
 
-  // Inventur = nur das, was Alexander wirklich zaehlt: Bases + Colourants.
+  // Inventur = nur das, was wirklich gezaehlt wird: Bases + Colourants.
   app.get("/admin/api/paint/inventory", async(req,res)=>{
     if(!requireAdmin(req,res))return;
     const rows=await readJson(articlesFile,[]);
-    const items=rows.filter(a=>a&&a.active!==false&&inferInventory(a)).map(a=>{
-      const target=Number(a.targetStock??a.minimumStock??0), minimum=Number(a.minimumStock??a.targetStock??0), stock=Number(a.stock||0);
-      return {id:a.id||"",category:a.category||"base",product:a.product||"",baseName:a.baseName||a.baseCode||"",baseCode:a.baseCode||"",size:sizeNorm(a.size),ean:a.ean||"",stockCode:a.stockCode||"",purchasePrice:Number(a.purchasePrice||0),targetStock:target,minimumStock:minimum,stock,difference:target-stock};
-    });
+    const items=rows.filter(a=>a&&a.active!==false&&inferInventory(a)).map(publicInventoryRow);
     res.json({ok:true,items,count:items.length,scope:"LG BASES + COLOURANTS"});
+  });
+
+  // Mindestbestand ist KRISTINE-Stammdatum und darf direkt in der Inventur gepflegt werden.
+  // Bis wir bewusst zwei verschiedene Werte brauchen, ist targetStock = minimumStock.
+  app.post("/admin/api/paint/inventory/levels", async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const changes=Array.isArray(req.body?.rows)?req.body.rows:[];
+      if(!changes.length)return res.json({ok:true,changed:0});
+      const articles=await readJson(articlesFile,[]);
+      const byId=new Map(articles.map(a=>[String(a.id||""),a]));
+      let changed=0;
+      for(const row of changes){
+        const a=byId.get(String(row.articleId||"")); if(!a)continue;
+        const value=num(row.minimumStock,NaN); if(!Number.isFinite(value)||value<0)continue;
+        const next=Math.max(0,Math.round(value*1000)/1000);
+        if(Number(a.minimumStock)!==next||Number(a.targetStock)!==next){a.minimumStock=next;a.targetStock=next;a.updatedAt=new Date().toISOString();changed++;}
+      }
+      if(changed)await writeJson(articlesFile,articles);
+      res.json({ok:true,changed});
+    }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)});}
   });
 
   app.get("/admin/api/paint/order-catalog", async(req,res)=>{
