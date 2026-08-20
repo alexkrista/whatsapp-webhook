@@ -1,14 +1,14 @@
 "use strict";
 
 // Registriert Farben/Lager + Little-Greene-Bestellwesen direkt nach dem ersten app.use().
-// Zusätzlich wird /admin/paint über einen kleinen HTML-Hotfix ausgeliefert.
 // Die komplette Farben-Seite ist absichtlich "notranslate": Produkt-, Farb- und
-// Basisnamen wie Stock, Hi White, Deep, NCS oder RAL dürfen vom Browser niemals
-// übersetzt werden.
+// Basisnamen wie Stock, Hi White, Deep, NCS oder RAL duerfen vom Browser niemals
+// uebersetzt werden.
 const fs = require("fs");
 const path = require("path");
 const expressPath = require.resolve("express");
 const originalExpress = require("express");
+const { registerPaintLiveFix } = require("./paint-live-fix");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 
@@ -53,6 +53,10 @@ function wrappedExpress(...args) {
         publicDir: path.join(process.cwd(), "public"),
       };
       try {
+        // Muss VOR den eigentlichen APIs stehen: der Middleware-Fix reichert
+        // Antworten mit dem echten KRISTINE-Lagerbestand an und uebernimmt
+        // beim Excel-Import die historische LG-GJ-Basis.
+        registerPaintLiveFix(app, opts);
         registerPaintHtmlHotfix(app, opts.publicDir);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
