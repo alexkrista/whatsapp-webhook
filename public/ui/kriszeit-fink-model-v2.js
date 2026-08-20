@@ -23,6 +23,24 @@
     return (block.rows||[]).find(row=>Array.isArray(row.days)&&row.days.map(Number).includes(day)&&row.from&&row.to)||null;
   }
   function finkCode(row){const code=String(row?.activityCode||"");return /^\d{3,4}$/.test(code)?code:""}
+  function min(hm){const m=String(hm||"").match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null}
+  function splitFixed(row){
+    const start=min(row.from),end=min(row.to);if(start===null||end===null||end<=start)return [];
+    const breaks=[
+      {from:row.pauseFrom,to:row.pauseTo,label:"Pause",code:"003"},
+      {from:row.lunchFrom,to:row.lunchTo,label:"Pause",code:"003"}
+    ].map(b=>({...b,a:min(b.from),z:min(b.to)})).filter(b=>b.a!==null&&b.z!==null&&b.z>b.a&&b.z>start&&b.a<end).sort((a,b)=>a.a-b.a);
+    const out=[];let cursor=start;
+    const toHm=n=>`${String(Math.floor(n/60)).padStart(2,"0")}:${String(n%60).padStart(2,"0")}`;
+    for(const br of breaks){
+      const a=Math.max(start,br.a),z=Math.min(end,br.z);
+      if(a>cursor)out.push({from:toHm(cursor),to:toHm(a),label:row.activityLabel||" ",code:finkCode(row)});
+      if(z>a)out.push({from:toHm(a),to:toHm(z),label:br.label,code:br.code});
+      cursor=Math.max(cursor,z);
+    }
+    if(cursor<end)out.push({from:toHm(cursor),to:toHm(end),label:row.activityLabel||" ",code:finkCode(row)});
+    return out;
+  }
 
   function install(){
     if(window.__kristaFinkModelV2Installed)return true;
@@ -38,14 +56,16 @@
         const model=modelFor(employee,models);if(!model?.blocks?.finkFixed?.enabled)continue;
         const nr=typeof fperson==="function"?fperson(employee):"";if(!nr)continue;
         for(const date of (typeof fdates==="function"?fdates(from,to):[])){
-          // Abwesenheit hat Vorrang vor fixer Büro-/Finkzeit.
+          // Urlaub/Krank/Feiertag usw. hat Vorrang vor fixer Büro-/Finkzeit.
           try{if(typeof assignmentAbsence==="function"&&assignmentAbsence(employee.id||employee.employeeId,date))continue}catch{}
           const fixed=fixedRow(model,date);if(!fixed)continue;
           const dateLabel=typeof fdate==="function"?fdate(date):date;
           result.rows=(result.rows||[]).filter(r=>!(String(r?.[0]||"")===String(nr)&&String(r?.[2]||"")===String(dateLabel)));
           const name=typeof fname==="function"?fname(employee.name||employee.employeeName):String(employee.name||employee.employeeName||"");
-          const duration=typeof fhours==="function"?fhours(fixed.from,fixed.to):"";
-          result.rows.push([nr,name,dateLabel,fixed.from,fixed.to,duration,fixed.activityLabel||" ",finkCode(fixed)||" "]);
+          for(const part of splitFixed(fixed)){
+            const duration=typeof fhours==="function"?fhours(part.from,part.to):"";
+            result.rows.push([nr,name,dateLabel,part.from,part.to,duration,part.label||" ",part.code||" "]);
+          }
         }
       }
       result.rows.sort((a,b)=>String(a?.[0]||"").localeCompare(String(b?.[0]||""),"de",{numeric:true})||String(a?.[2]||"").localeCompare(String(b?.[2]||""))||String(a?.[3]||"").localeCompare(String(b?.[3]||"")));
