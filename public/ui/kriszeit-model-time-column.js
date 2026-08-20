@@ -39,6 +39,9 @@
   function esc(value){
     return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   }
+  function norm(value){
+    return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  }
   async function loadModels(){
     if(modelCache)return modelCache;
     try{
@@ -62,6 +65,15 @@
       return (state?.bootstrap?.employees||[]).find(row=>String(row?.id||row?.employeeId||"")===id)||null;
     }catch{return null}
   }
+  function modelForEmployee(emp,models){
+    const direct=models.find(row=>String(row?.id||"")===String(emp?.worktimeModelId||""));
+    if(direct)return direct;
+    const name=norm([emp?.nickname,emp?.name,emp?.employeeName].filter(Boolean).join(" "));
+    if(/\balex(?:ander)?\b/.test(name))return models.find(row=>String(row?.id||"")==="office-alex")||null;
+    if(/\bjudith\b/.test(name))return models.find(row=>String(row?.id||"")==="office-judith")||null;
+    if(/\bgeri\b|\bgerry\b/.test(name))return models.find(row=>String(row?.id||"")==="office-geri")||null;
+    return null;
+  }
   function activeDate(){
     try{return String(state?.activeDate||document.getElementById("dateSelect")?.value||"").slice(0,10)}catch{return String(document.getElementById("dateSelect")?.value||"").slice(0,10)}
   }
@@ -81,9 +93,8 @@
     const code=String(row?.activityCode||"").trim();
     const label=String(row?.activityLabel||"").trim();
     if(label)return label;
-    if(code==="SITE_LT120")return "Baustelle < 120 km";
+    if(code==="022"||code==="SITE_LT120")return "Baustelle < 120 km";
     if(code==="SITE_GE120")return "Baustelle ≥ 120 km";
-    if(code==="022")return "Büro";
     return code||"Finkzeit";
   }
   function timeDetail(row){
@@ -97,9 +108,15 @@
     const style=document.createElement("style");
     style.id="kristaModelTimeColumnStyle";
     style.textContent=`
-      .comparison-grid.has-fink-model.phase-times{grid-template-columns:minmax(330px,.95fr) minmax(250px,.62fr) minmax(410px,1.15fr)}
-      .comparison-grid.has-fink-model.phase-regie{grid-template-columns:minmax(320px,.78fr) minmax(250px,.58fr) minmax(500px,1.25fr)}
-      .comparison-grid.has-fink-model.phase-release{grid-template-columns:minmax(320px,.72fr) minmax(250px,.58fr) minmax(520px,1.35fr)}
+      .fink-model-card[hidden]{display:none!important}
+      .comparison-grid.has-fink-model.phase-times,
+      .comparison-grid.has-fink-model.phase-regie,
+      .comparison-grid.has-fink-model.phase-release{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+      .comparison-grid.has-fink-model.phase-times .gps-card,
+      .comparison-grid.has-fink-model.phase-regie .regie-card,
+      .comparison-grid.has-fink-model.phase-release .release-card{grid-column:1/-1;min-height:0!important}
+      .comparison-grid.has-fink-model.phase-times .gps-card,
+      .comparison-grid.has-fink-model.phase-regie .regie-card{max-height:none}
       .fink-model-card header{grid-template-columns:35px 1fr auto!important}
       .fink-model-step{background:#315f7f!important}
       .fink-model-pill{background:#e8f1f7!important;color:#315f7f!important}
@@ -111,8 +128,9 @@
       .fink-model-note{font-size:12px;line-height:1.5;color:#69736d;background:#f7f7f5;border-radius:11px;padding:11px 12px}
       .fink-model-empty{display:grid;place-items:center;min-height:180px;text-align:center;color:#7d857f;padding:20px}
       .truth-card.actual-productivity header p{font-weight:750;color:#2e6942}
-      @media(max-width:1150px){
+      @media(max-width:1000px){
         .comparison-grid.has-fink-model.phase-times,.comparison-grid.has-fink-model.phase-regie,.comparison-grid.has-fink-model.phase-release{grid-template-columns:1fr}
+        .comparison-grid.has-fink-model.phase-times .gps-card,.comparison-grid.has-fink-model.phase-regie .regie-card,.comparison-grid.has-fink-model.phase-release .release-card{grid-column:auto}
       }
     `;
     document.head.appendChild(style);
@@ -125,6 +143,7 @@
       card=document.createElement("article");
       card.id="finkModelTimeCard";
       card.className="fink-model-card";
+      card.hidden=true;
       const truth=grid.querySelector(".truth-card");
       if(truth)truth.insertAdjacentElement("afterend",card);else grid.prepend(card);
     }
@@ -148,14 +167,14 @@
     const emp=employee();
     const date=activeDate();
     const empId=String(emp?.id||emp?.employeeId||"");
-    const key=`${empId}|${date}`;
+    const key=`${empId}|${date}|${String(emp?.worktimeModelId||"")}`;
     if(!force&&key===lastKey)return;
     lastKey=key;
     busy=true;
     try{
       ensureStyle();
       const models=await loadModels();
-      const model=models.find(row=>String(row?.id||"")===String(emp?.worktimeModelId||""))||null;
+      const model=modelForEmployee(emp,models);
       const block=model?.blocks?.finkFixed;
       const row=fixedRow(model,date);
       const absence=absenceLabel();
@@ -170,6 +189,7 @@
 
       if(!relevant){
         card.hidden=true;
+        card.innerHTML="";
         grid.classList.remove("has-fink-model");
       }else{
         card.hidden=false;
@@ -178,7 +198,6 @@
         let total="–";
         if(absence){
           body=`<div class="fink-model-empty"><div><strong>${esc(absence)}</strong><br><small>Abwesenheit hat Vorrang vor der fixen Modellzeit.</small></div></div>`;
-          total="–";
         }else if(row){
           total=durationLabel(netMinutes(row));
           body=`<div class="fink-model-body">
@@ -186,7 +205,7 @@
             <div class="fink-model-note">Automatisch aus Arbeitszeitmodell <strong>${esc(model?.name||"")}</strong>. Diese Zeit ist die Fink-Ausgabe; echte Projektstempel bleiben davon getrennt.</div>
           </div>`;
         }else{
-          body=`<div class="fink-model-empty"><div><strong>Keine fixe Finkzeit für diesen Wochentag</strong><br><small>Im Arbeitszeitmodell ist für ${esc(date)} keine Zeitzeile hinterlegt.</small></div></div>`;
+          body=`<div class="fink-model-empty"><div><strong>Keine fixe Finkzeit für diesen Wochentag</strong><br><small>Im Arbeitszeitmodell ${esc(model?.name||"")} ist für ${esc(date)} keine Zeitzeile hinterlegt.</small></div></div>`;
         }
         card.innerHTML=`<header><span class="step-number fink-model-step">F</span><div><h3>FINKZEIT</h3><p>Fixe Ausgabe aus Arbeitszeitmodell</p></div><span class="pill fink-model-pill">MODELL</span></header>${body}<footer><span>Finkzeit</span><strong>${esc(total)}</strong></footer>`;
       }
