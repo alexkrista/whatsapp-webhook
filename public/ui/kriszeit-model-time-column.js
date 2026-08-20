@@ -4,6 +4,7 @@
   if(!location.pathname.toLowerCase().includes("kristool-preview"))return;
 
   let modelCache=null;
+  let modelCacheAt=0;
   let lastKey="";
   let busy=false;
 
@@ -42,16 +43,18 @@
   function norm(value){
     return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   }
-  async function loadModels(){
-    if(modelCache)return modelCache;
+  async function loadModels(force=false){
+    const fresh=Array.isArray(modelCache)&&modelCache.length&&Date.now()-modelCacheAt<5000;
+    if(!force&&fresh)return modelCache;
     try{
-      const response=await fetch(withToken("/kristine/api/worktime-models-v2"),{credentials:"same-origin"});
+      const response=await fetch(withToken("/kristine/api/worktime-models-v2"),{credentials:"same-origin",cache:"no-store"});
       const body=await response.json();
-      modelCache=response.ok&&body?.ok!==false&&Array.isArray(body?.models)?body.models:[];
-    }catch{
-      modelCache=[];
-    }
-    return modelCache;
+      if(response.ok&&body?.ok!==false&&Array.isArray(body?.models)){
+        modelCache=body.models;
+        modelCacheAt=Date.now();
+      }
+    }catch{}
+    return Array.isArray(modelCache)?modelCache:[];
   }
   function employee(){
     try{
@@ -65,14 +68,27 @@
       return (state?.bootstrap?.employees||[]).find(row=>String(row?.id||row?.employeeId||"")===id)||null;
     }catch{return null}
   }
+  function expectedOfficeModelId(emp){
+    const name=norm([emp?.nickname,emp?.name,emp?.employeeName].filter(Boolean).join(" "));
+    if(/\balex(?:ander)?\b/.test(name))return "office-alex";
+    if(/\bjudith\b/.test(name))return "office-judith";
+    if(/\bgeri\b|\bgerry\b/.test(name))return "office-geri";
+    return "";
+  }
+  function alexFallbackRow(){
+    return {id:"alex-fink-fallback",days:[1,2,3,4,5],from:"07:00",to:"13:48",lunchFrom:"",lunchTo:"",pauseFrom:"",pauseTo:"",activityCode:"022",activityLabel:"Baustelle < 120 km"};
+  }
+  function pseudoModel(id){
+    if(id==="office-alex")return {id,name:"Alex",blocks:{finkFixed:{enabled:true,rows:[alexFallbackRow()]}}};
+    if(id==="office-judith")return {id,name:"Judith",blocks:{finkFixed:{enabled:true,rows:[]}}};
+    if(id==="office-geri")return {id,name:"Geri",blocks:{finkFixed:{enabled:true,rows:[]}}};
+    return null;
+  }
   function modelForEmployee(emp,models){
     const direct=models.find(row=>String(row?.id||"")===String(emp?.worktimeModelId||""));
     if(direct)return direct;
-    const name=norm([emp?.nickname,emp?.name,emp?.employeeName].filter(Boolean).join(" "));
-    if(/\balex(?:ander)?\b/.test(name))return models.find(row=>String(row?.id||"")==="office-alex")||null;
-    if(/\bjudith\b/.test(name))return models.find(row=>String(row?.id||"")==="office-judith")||null;
-    if(/\bgeri\b|\bgerry\b/.test(name))return models.find(row=>String(row?.id||"")==="office-geri")||null;
-    return null;
+    const expected=expectedOfficeModelId(emp);
+    return models.find(row=>String(row?.id||"")===expected)||pseudoModel(expected);
   }
   function activeDate(){
     try{return String(state?.activeDate||document.getElementById("dateSelect")?.value||"").slice(0,10)}catch{return String(document.getElementById("dateSelect")?.value||"").slice(0,10)}
@@ -85,9 +101,12 @@
   }
   function fixedRow(model,date){
     const block=model?.blocks?.finkFixed;
-    if(block?.enabled!==true||!date)return null;
+    if(!date)return null;
     const day=weekday(date);
-    return (block.rows||[]).find(row=>Array.isArray(row?.days)&&row.days.map(Number).includes(day)&&row.from&&row.to)||null;
+    const row=(block?.rows||[]).find(row=>Array.isArray(row?.days)&&row.days.map(Number).includes(day)&&row.from&&row.to)||null;
+    if(row)return row;
+    if(String(model?.id||"")==="office-alex"&&day>=1&&day<=5)return alexFallbackRow();
+    return null;
   }
   function activity(row){
     const code=String(row?.activityCode||"").trim();
@@ -111,26 +130,32 @@
       .fink-model-card[hidden]{display:none!important}
       .comparison-grid.has-fink-model.phase-times,
       .comparison-grid.has-fink-model.phase-regie,
-      .comparison-grid.has-fink-model.phase-release{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+      .comparison-grid.has-fink-model.phase-release{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;align-items:start}
       .comparison-grid.has-fink-model.phase-times .gps-card,
       .comparison-grid.has-fink-model.phase-regie .regie-card,
-      .comparison-grid.has-fink-model.phase-release .release-card{grid-column:1/-1;min-height:0!important}
-      .comparison-grid.has-fink-model.phase-times .gps-card,
-      .comparison-grid.has-fink-model.phase-regie .regie-card{max-height:none}
+      .comparison-grid.has-fink-model.phase-release .release-card{grid-column:1/-1;min-height:0!important;height:auto!important}
+      .comparison-grid.has-fink-model article{min-height:0}
+      .fink-model-card{min-height:0!important}
       .fink-model-card header{grid-template-columns:35px 1fr auto!important}
       .fink-model-step{background:#315f7f!important}
       .fink-model-pill{background:#e8f1f7!important;color:#315f7f!important}
-      .fink-model-body{padding:18px;display:flex;flex:1;flex-direction:column;gap:13px}
-      .fink-model-main{border:1px solid #d9e4eb;background:#f5f9fb;border-radius:13px;padding:15px}
+      .fink-model-body{padding:14px;display:flex;flex-direction:column;gap:10px}
+      .fink-model-main{border:1px solid #d9e4eb;background:#f5f9fb;border-radius:12px;padding:13px}
       .fink-model-main span{display:block;color:#6c7880;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
-      .fink-model-main strong{display:block;font-size:18px;margin-top:4px;color:#244d69}
-      .fink-model-time{font-weight:800;margin-top:8px;line-height:1.5}
-      .fink-model-note{font-size:12px;line-height:1.5;color:#69736d;background:#f7f7f5;border-radius:11px;padding:11px 12px}
-      .fink-model-empty{display:grid;place-items:center;min-height:180px;text-align:center;color:#7d857f;padding:20px}
+      .fink-model-main strong{display:block;font-size:18px;margin-top:3px;color:#244d69}
+      .fink-model-time{font-weight:800;margin-top:6px;line-height:1.4}
+      .fink-model-note{font-size:11px;line-height:1.45;color:#69736d;background:#f7f7f5;border-radius:10px;padding:9px 10px}
+      .fink-model-empty{display:grid;place-items:center;min-height:110px;text-align:center;color:#7d857f;padding:16px}
       .truth-card.actual-productivity header p{font-weight:750;color:#2e6942}
+      .comparison-grid.has-fink-model.phase-release .release-card .release-summary{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(0,1.2fr);gap:14px;align-items:start}
+      .comparison-grid.has-fink-model.phase-release .release-card .release-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px 12px}
+      .comparison-grid.has-fink-model.phase-release .release-card textarea{min-height:58px!important}
+      .comparison-grid.has-fink-model.phase-release .release-card .release-actions{margin-top:10px}
       @media(max-width:1000px){
-        .comparison-grid.has-fink-model.phase-times,.comparison-grid.has-fink-model.phase-regie,.comparison-grid.has-fink-model.phase-release{grid-template-columns:1fr}
+        .comparison-grid.has-fink-model.phase-times,.comparison-grid.has-fink-model.phase-regie,.comparison-grid.has-fink-model.phase-release{grid-template-columns:1fr!important}
         .comparison-grid.has-fink-model.phase-times .gps-card,.comparison-grid.has-fink-model.phase-regie .regie-card,.comparison-grid.has-fink-model.phase-release .release-card{grid-column:auto}
+        .comparison-grid.has-fink-model.phase-release .release-card .release-summary{grid-template-columns:1fr}
+        .comparison-grid.has-fink-model.phase-release .release-card .release-checks{grid-template-columns:1fr}
       }
     `;
     document.head.appendChild(style);
@@ -167,21 +192,21 @@
     const emp=employee();
     const date=activeDate();
     const empId=String(emp?.id||emp?.employeeId||"");
-    const key=`${empId}|${date}|${String(emp?.worktimeModelId||"")}`;
+    const expected=expectedOfficeModelId(emp);
+    const key=`${empId}|${date}|${String(emp?.worktimeModelId||"")}|${expected}`;
     if(!force&&key===lastKey)return;
     lastKey=key;
     busy=true;
     try{
       ensureStyle();
-      const models=await loadModels();
+      const models=await loadModels(false);
       const model=modelForEmployee(emp,models);
-      const block=model?.blocks?.finkFixed;
       const row=fixedRow(model,date);
       const absence=absenceLabel();
-      const relevant=Boolean(block?.enabled===true);
+      const relevant=Boolean(expected||model?.blocks?.finkFixed?.enabled===true);
       const grid=document.getElementById("comparisonGrid");
       const card=ensureCard();
-      const isAlex=String(model?.id||"")==="office-alex";
+      const isAlex=String(model?.id||expected)==="office-alex";
       setActualProductivity(isAlex);
 
       window.__kristaHasFixedModelTime=Boolean(row&&!absence);
@@ -202,10 +227,12 @@
           total=durationLabel(netMinutes(row));
           body=`<div class="fink-model-body">
             <div class="fink-model-main"><span>Tätigkeit</span><strong>${esc(activity(row))}</strong><div class="fink-model-time">${esc(timeDetail(row))}</div></div>
-            <div class="fink-model-note">Automatisch aus Arbeitszeitmodell <strong>${esc(model?.name||"")}</strong>. Diese Zeit ist die Fink-Ausgabe; echte Projektstempel bleiben davon getrennt.</div>
+            <div class="fink-model-note">Automatisch aus Arbeitszeitmodell <strong>${esc(model?.name||"Fixmodell")}</strong>. Diese Zeit ist die Fink-Ausgabe; echte Projektstempel bleiben davon getrennt.</div>
           </div>`;
         }else{
-          body=`<div class="fink-model-empty"><div><strong>Keine fixe Finkzeit für diesen Wochentag</strong><br><small>Im Arbeitszeitmodell ${esc(model?.name||"")} ist für ${esc(date)} keine Zeitzeile hinterlegt.</small></div></div>`;
+          const hint=model?.blocks?.finkFixed?.enabled===false?"Fixe Ausgabe ist im Modell derzeit ausgeschaltet.":"Für diesen Wochentag ist im Modell keine fixe Zeitzeile hinterlegt.";
+          body=`<div class="fink-model-empty"><div><strong>Keine fixe Finkzeit für diesen Wochentag</strong><br><small>${esc(hint)}</small></div></div>`;
+          lastKey="";
         }
         card.innerHTML=`<header><span class="step-number fink-model-step">F</span><div><h3>FINKZEIT</h3><p>Fixe Ausgabe aus Arbeitszeitmodell</p></div><span class="pill fink-model-pill">MODELL</span></header>${body}<footer><span>Finkzeit</span><strong>${esc(total)}</strong></footer>`;
       }
@@ -215,7 +242,7 @@
 
   function start(){
     render(true);
-    setInterval(()=>render(false),350);
+    setInterval(()=>render(false),700);
     document.addEventListener("change",event=>{
       if(event.target?.id==="dateSelect"||event.target?.id==="employeeSelect"){
         lastKey="";
