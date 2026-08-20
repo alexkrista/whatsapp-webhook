@@ -1,8 +1,10 @@
 "use strict";
 
 // Registriert Farben/Lager + Little-Greene-Bestellwesen direkt nach dem ersten app.use().
-// Zusätzlich wird /admin/paint vorübergehend über einen kleinen HTML-Hotfix ausgeliefert,
-// damit ein Tippfehler im Inline-JavaScript die Oberfläche nicht blockiert.
+// Zusätzlich wird /admin/paint über einen kleinen HTML-Hotfix ausgeliefert.
+// Die komplette Farben-Seite ist absichtlich "notranslate": Produkt-, Farb- und
+// Basisnamen wie Stock, Hi White, Deep, NCS oder RAL dürfen vom Browser niemals
+// übersetzt werden.
 const fs = require("fs");
 const path = require("path");
 const expressPath = require.resolve("express");
@@ -21,10 +23,17 @@ function registerPaintHtmlHotfix(app, publicDir) {
     const file = path.join(publicDir, "paint-lab.html");
     fs.readFile(file, "utf8", (error, html) => {
       if (error) return next(error);
-      const fixed = String(html).replace(
+      let fixed = String(html).replace(
         "function showTabhname){",
         "function showTab(name){"
       );
+
+      if (!/name=["']google["'][^>]*notranslate/i.test(fixed)) {
+        fixed = fixed.replace("<head>", '<head>\n<meta name="google" content="notranslate">');
+      }
+      fixed = fixed.replace(/<body(?:\s[^>]*)?>/i, '<body class="notranslate" translate="no">');
+
+      res.set("Content-Language", "de");
       res.type("html").send(fixed);
     });
   });
