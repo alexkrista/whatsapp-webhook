@@ -10,12 +10,15 @@
 
     const originalScheduledFree=selectedEmployeeScheduledFree;
     selectedEmployeeScheduledFree=function(){
+      // Eine fixe Modell-Finkzeit ist ein echter Arbeitstag. Dann darf der
+      // Ersatz-Haken "Heute nicht gearbeitet" niemals angeboten werden.
+      if(window.__kristaHasFixedModelTime===true)return false;
       if(originalScheduledFree())return true;
       try{
         const item=typeof activeQueueItem==="function"?activeQueueItem():null;
         const absence=typeof absenceLabelForItem==="function"?absenceLabelForItem(item):"";
         const segments=(typeof state!=="undefined"&&Array.isArray(state.segments))?state.segments:[];
-        return !absence&&segments.length===0;
+        return !absence&&segments.length===0&&window.__kristaHasFixedModelTime!==true;
       }catch{
         return originalScheduledFree();
       }
@@ -42,6 +45,7 @@
   function install(){
     if(!location.pathname.toLowerCase().includes("kristool-preview"))return;
     ensureScript("/public/ui/kriszeit-fink-model-v2.js","data-krista-fink-model-v2");
+    ensureScript("/public/ui/kriszeit-model-time-column.js","data-krista-model-time-column");
     const actions=document.querySelector(".date-workbench .export-actions");if(!actions)return;
     let left=actions.querySelector(".krista-kriszeit-actions-left");if(!left)return;
     let btn=document.getElementById("openDailyReportKriszeit");
