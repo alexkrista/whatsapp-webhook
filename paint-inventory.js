@@ -50,6 +50,8 @@ function registerPaintInventory(app, options = {}) {
   async function appendJsonl(file,value){ await ensureRoot(); await fsp.appendFile(file,JSON.stringify(value)+"\n","utf8"); }
 
   function publicInventory(rows){
+    // Absichtlich NICHT alphabetisch sortieren: Die Artikelreihenfolge aus dem
+    // ursprünglichen Lagerstamm entspricht der physischen Regal-/Produktfolge.
     return (Array.isArray(rows)?rows:[]).filter(a=>a&&a.active!==false).map(a=>{
       const target=Number(a.targetStock ?? a.minimumStock ?? 0);
       const minimum=Number(a.minimumStock ?? a.targetStock ?? 0);
@@ -59,7 +61,7 @@ function registerPaintInventory(app, options = {}) {
         size:sizeNorm(a.size), ean:a.ean||"", stockCode:a.stockCode||"", purchasePrice:Number(a.purchasePrice||0),
         targetStock:target, minimumStock:minimum, stock, difference:target-stock
       };
-    }).sort((a,b)=>String(a.product).localeCompare(String(b.product),"de")||String(a.baseName).localeCompare(String(b.baseName),"de")||Number(parseFloat(b.size)||0)-Number(parseFloat(a.size)||0));
+    });
   }
 
   app.get("/admin/api/paint/inventory", async(req,res)=>{
