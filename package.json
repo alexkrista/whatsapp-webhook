@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node -r ./worktime-model-presets.js -r ./worktime-model-v2-migration.js -r ./employee-document-persistence.js server.js"
+    "start": "node -r ./paint-lab-preload.js -r ./worktime-model-presets.js -r ./worktime-model-v2-migration.js -r ./employee-document-persistence.js server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
