@@ -9,6 +9,8 @@ def install(ns):
     brain_incoming_op.install(ns)
     import brain_material_history
     brain_material_history.install(ns)
+    import brain_lg_sync
+    brain_lg_sync.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     app = ns.get("app")
