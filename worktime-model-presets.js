@@ -25,7 +25,7 @@ function netHours(row){
 function row(id,days=[],from="",to="",lunchFrom="",lunchTo="",pauseFrom="",pauseTo="",activityCode="",activityLabel=""){
   return { id, days, from, to, lunchFrom, lunchTo, pauseFrom, pauseTo, activityCode, activityLabel };
 }
-function alexFixedRow(){ return row("alex-fink-mo-fr",[1,2,3,4,5],"07:00","13:48","","","","","022","Büro"); }
+function alexFixedRow(){ return row("alex-fink-mo-fr",[1,2,3,4,5],"07:00","13:48","","","","","022","Baustelle < 120 km"); }
 function emptyBlocks({fixed=false,alex=false}={}){
   return {
     planning:{label:"Planungsstunden",rows:[]},
@@ -39,7 +39,7 @@ const OFFICE_MODELS = [
   {id:"office-dunja",name:"Dunja",officeModel:true,configured:false,automaticTime:false,blocks:emptyBlocks()},
   {id:"office-geri",name:"Geri",officeModel:true,configured:false,automaticTime:false,blocks:emptyBlocks({fixed:true})},
   {id:"office-judith",name:"Judith",officeModel:true,configured:false,automaticTime:false,blocks:emptyBlocks({fixed:true})},
-  {id:"office-alex",name:"Alex",officeModel:true,configured:true,automaticTime:true,automaticPayrollHours:6.8,payrollReason:"Büro",projectTimeSource:"actual_stamps",blocks:emptyBlocks({fixed:true,alex:true})}
+  {id:"office-alex",name:"Alex",officeModel:true,configured:true,automaticTime:true,automaticPayrollHours:6.8,payrollReason:"Baustelle < 120 km",projectTimeSource:"actual_stamps",blocks:emptyBlocks({fixed:true,alex:true})}
 ].map(x=>({active:true,systemProtected:false,timeModelVersion:2,...x}));
 
 function currentSeason(model){
