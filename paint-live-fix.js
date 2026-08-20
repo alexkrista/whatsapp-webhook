@@ -1,10 +1,9 @@
 "use strict";
 
-// Laufzeit-Hotfix fuer KRISTINE Farben & Lager.
-// 1) Lagerartikel werden unabhaengig davon gematcht, ob die Basis als H/M/D/XD
-//    oder als Hi White/Medium/Deep/Extra Deep gespeichert ist.
-// 2) Beim Excel-Erstimport werden die alten, datierten LG-Bestellblaetter als
-//    Startwert fuer die Geschaeftsjahres-Auswertung uebernommen (01.11-31.10).
+// Laufzeit-Hilfe fuer KRISTINE Farben & Lager.
+// Lager und Umsatz sind strikt getrennt:
+// - Excel liefert nur Artikelstamm / Sollwerte / EAN / Startdaten.
+// - Umsatz kommt ausschliesslich aus der Eingangsrechnungserfassung.
 
 const fs = require("fs");
 const path = require("path");
@@ -30,13 +29,11 @@ function registerPaintLiveFix(app, options = {}) {
   const articlesFile = path.join(root, "articles.json");
   const purchasesFile = path.join(root, "lg-purchases.json");
 
-  const clean = (v) => String(v ?? "").trim();
-  const norm = (v) => clean(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const canonicalBase = (v) => {
-    const raw = clean(v);
-    return BASES[raw.toUpperCase()] || raw;
-  };
-  const sizeNorm = (value) => {
+  const clean = v => String(v ?? "").trim();
+  const norm = v => clean(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const canonicalBase = v => BASES[clean(v).toUpperCase()] || clean(v);
+  const canonicalProduct = v => norm(v).replace(/^lg\s+/, "");
+  const sizeNorm = value => {
     const raw = clean(value).toLowerCase().replace(/litre|liter|ltr/g, "l").replace(/\s+/g, "");
     if (!raw) return "";
     if (/^250ml$|^0[.,]?25l$/.test(raw)) return "0.25 L";
@@ -50,7 +47,7 @@ function registerPaintLiveFix(app, options = {}) {
     if (/^10l$/.test(raw)) return "10 L";
     return clean(value);
   };
-  const keyOf = (product, base, size) => `${norm(product)}|${norm(canonicalBase(base))}|${sizeNorm(size)}`;
+  const keyOf = (product, base, size) => `${canonicalProduct(product)}|${norm(canonicalBase(base))}|${sizeNorm(size)}`;
 
   function readArticles() {
     try {
@@ -59,21 +56,27 @@ function registerPaintLiveFix(app, options = {}) {
     } catch { return []; }
   }
 
+  function writeArticles(rows) {
+    fs.mkdirSync(root, { recursive: true });
+    const tmp = `${articlesFile}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(rows, null, 2), "utf8");
+    fs.renameSync(tmp, articlesFile);
+  }
+
   function enrichStocks(payload) {
     if (!payload || payload.ok !== true || !Array.isArray(payload.products)) return payload;
     const articles = readArticles();
-    if (!articles.length) return payload;
     const byKey = new Map();
-    for (const a of articles) {
-      const base = a.baseName || canonicalBase(a.baseCode);
-      byKey.set(keyOf(a.product, base, a.size), a);
-    }
+    for (const a of articles) byKey.set(keyOf(a.product, a.baseName || a.baseCode, a.size), a);
+    let matched = 0;
     for (const p of payload.products) {
       for (const s of Array.isArray(p.sizes) ? p.sizes : []) {
         const a = byKey.get(keyOf(p.productName, p.baseName || p.baseCode, s.size));
         if (!a) continue;
+        matched += 1;
         s.stock = Number(a.stock || 0);
-        s.minimumStock = Number(a.minimumStock || 0);
+        s.targetStock = Number(a.targetStock ?? a.minimumStock ?? 0);
+        s.minimumStock = Number(a.minimumStock ?? a.targetStock ?? 0);
         s.purchasePrice = Number(a.purchasePrice || 0);
         s.salePrice = Number(a.salePrice || 0);
         s.ean = a.ean || "";
@@ -82,83 +85,65 @@ function registerPaintLiveFix(app, options = {}) {
       }
     }
     payload.stockArticles = articles.length;
+    payload.stockMatched = matched;
     return payload;
   }
 
-  function parseSheetDate(name) {
-    const s = clean(name);
-    let m = s.match(/(\d{1,2})[.\-_ ](\d{1,2})[.\-_ ](\d{2,4})/);
-    if (!m) m = s.match(/(?:^|\D)(\d{2})(\d{2})(\d{4})(?:\D|$)/);
-    if (!m) {
-      const m6 = s.match(/(?:^|\D)(\d{2})(\d{2})(\d{2})(?:\D|$)/);
-      if (m6) m = [m6[0], m6[1], m6[2], String(2000 + Number(m6[3]))];
-    }
-    if (!m) return "";
-    const d = Number(m[1]), mo = Number(m[2]);
-    let y = Number(m[3]);
-    if (y < 100) y += 2000;
-    const dt = new Date(Date.UTC(y, mo - 1, d));
-    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return "";
-    return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-  }
-
-  function sheetTotal(sheet) {
+  function applyExcelTargets(base64) {
+    if (!XLSX || !base64 || !fs.existsSync(articlesFile)) return;
+    const wb = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer", cellDates: true });
+    const sheet = wb.Sheets["Lagerliste Farben"];
+    if (!sheet) return;
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
-    const candidates = [];
-    for (let r = 0; r < Math.min(10, rows.length); r += 1) {
-      for (const v of rows[r] || []) {
-        if (typeof v !== "number" || !Number.isFinite(v)) continue;
-        if (v >= 100 && v <= 100000) candidates.push(v);
-      }
+    const targets = new Map();
+    for (let r = 9; r < rows.length; r += 1) {
+      const row = rows[r] || [];
+      const product = clean(row[1]);
+      const size = sizeNorm(row[2]);
+      const base = canonicalBase(row[3]);
+      const target = Number(row[12]); // Spalte M = Soll
+      if (!product || !size || !base || !Number.isFinite(target)) continue;
+      targets.set(keyOf(product, base, size), target);
     }
-    return candidates.length ? Math.max(...candidates) : 0;
+    const articles = readArticles();
+    let changed = 0;
+    for (const a of articles) {
+      const target = targets.get(keyOf(a.product, a.baseName || a.baseCode, a.size));
+      if (!Number.isFinite(target)) continue;
+      if (Number(a.targetStock) !== target) { a.targetStock = target; changed += 1; }
+      if (!Number.isFinite(Number(a.minimumStock))) a.minimumStock = target;
+    }
+    if (changed) writeArticles(articles);
   }
 
-  function seedTurnoverFromExcel(base64) {
-    if (!XLSX || !base64) return { rows: 0, total: 0 };
-    const workbook = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer", cellDates: true });
-    const byDate = new Map();
-    for (const name of workbook.SheetNames || []) {
-      const invoiceDate = parseSheetDate(name);
-      if (!invoiceDate) continue;
-      const total = Number(sheetTotal(workbook.Sheets[name]) || 0);
-      if (total <= 0) continue;
-      const old = byDate.get(invoiceDate);
-      // Doppelte/alte Versionen desselben Bestelltages (z.B. BEst 17042026)
-      // nicht doppelt zaehlen. Die hoehere/finale Summe gewinnt.
-      if (!old || total > old.netAmount) byDate.set(invoiceDate, {
-        invoiceRef: `Excel-Historie ${invoiceDate}`,
-        invoiceDate,
-        netAmount: Number(total.toFixed(2)),
-        source: "excel-history",
-        estimated: true,
-        createdAt: new Date().toISOString()
-      });
+  function removeWrongExcelTurnoverSeeds() {
+    try {
+      if (!fs.existsSync(purchasesFile)) return;
+      const rows = JSON.parse(fs.readFileSync(purchasesFile, "utf8"));
+      if (!Array.isArray(rows)) return;
+      const cleanRows = rows.filter(x => String(x?.source || "") !== "excel-history");
+      if (cleanRows.length !== rows.length) {
+        fs.writeFileSync(purchasesFile, JSON.stringify(cleanRows, null, 2), "utf8");
+        console.log(`KRISTINE LG: ${rows.length - cleanRows.length} falsche Excel-Umsatzzeilen entfernt`);
+      }
+    } catch (error) {
+      console.error("KRISTINE LG Umsatzbereinigung:", error?.message || error);
     }
-    fs.mkdirSync(root, { recursive: true });
-    let existing = [];
-    try { existing = JSON.parse(fs.readFileSync(purchasesFile, "utf8")); } catch {}
-    if (!Array.isArray(existing)) existing = [];
-    const actual = existing.filter(x => String(x?.source || "") !== "excel-history");
-    const seeds = [...byDate.values()].sort((a,b) => a.invoiceDate.localeCompare(b.invoiceDate));
-    fs.writeFileSync(purchasesFile, JSON.stringify([...actual, ...seeds], null, 2), "utf8");
-    return { rows: seeds.length, total: Number(seeds.reduce((s,x)=>s+x.netAmount,0).toFixed(2)) };
   }
+  removeWrongExcelTurnoverSeeds();
 
   app.use((req, res, next) => {
-    const isColor = req.method === "GET" && /^\/admin\/api\/paint\/color\//.test(req.path || req.url || "");
-    const isExcelImport = req.method === "POST" && (req.path || req.url || "").startsWith("/admin/api/paint/import-excel");
+    const url = req.path || req.url || "";
+    const isColor = req.method === "GET" && /^\/admin\/api\/paint\/color\//.test(url);
+    const isExcelImport = req.method === "POST" && url.startsWith("/admin/api/paint/import-excel");
     if (!isColor && !isExcelImport) return next();
-
     const originalJson = res.json.bind(res);
     res.json = function fixedJson(body) {
       try {
         if (isColor) body = enrichStocks(body);
         if (isExcelImport && body && body.ok === true) {
           const base64 = clean(req.body?.base64).replace(/^data:.*?;base64,/, "");
-          const hist = seedTurnoverFromExcel(base64);
-          body.lgHistoryRows = hist.rows;
-          body.lgHistoryTotal = hist.total;
+          applyExcelTargets(base64);
         }
       } catch (error) {
         console.error("KRISTINE Farben/Lager Laufzeit-Fix:", error?.message || error);
