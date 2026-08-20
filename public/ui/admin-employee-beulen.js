@@ -57,15 +57,12 @@
     const worktime=document.getElementById("empWorktimeModel");
     if(!worktime)return;
 
-    // Ein früherer UI-Hotfix hatte die Zuordnung absichtlich schreibgeschützt.
-    // Die Modelllogik liegt jetzt zentral im Arbeitszeitmodell; die Mitarbeiterkarte
-    // darf deshalb wieder ausschließlich die Modell-ID zuordnen.
-    worktime.disabled=false;
-    worktime.classList.remove("employee-rule-readonly");
-    worktime.style.pointerEvents="auto";
-    worktime.style.cursor="pointer";
+    if(worktime.disabled)worktime.disabled=false;
+    if(worktime.classList.contains("employee-rule-readonly"))worktime.classList.remove("employee-rule-readonly");
+    if(worktime.style.pointerEvents!=="auto")worktime.style.pointerEvents="auto";
+    if(worktime.style.cursor!=="pointer")worktime.style.cursor="pointer";
     const label=worktime.closest("div")?.querySelector("label");
-    if(label)label.textContent="Arbeitszeitmodell";
+    if(label&&label.textContent!=="Arbeitszeitmodell")label.textContent="Arbeitszeitmodell";
 
     if(!worktime.dataset.kristaModelAssignment){
       worktime.dataset.kristaModelAssignment="1";
@@ -132,5 +129,15 @@
     installStyle();installDropzone();enableWorktimeAssignment();
   }
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{install();loadWorktimeModelCache()},{once:true});else{install();loadWorktimeModelCache()}
-  new MutationObserver(()=>{installDropzone();enableWorktimeAssignment()}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","class"]});
+
+  let observerScheduled=false;
+  new MutationObserver(()=>{
+    if(observerScheduled)return;
+    observerScheduled=true;
+    requestAnimationFrame(()=>{
+      observerScheduled=false;
+      installDropzone();
+      enableWorktimeAssignment();
+    });
+  }).observe(document.documentElement,{childList:true,subtree:true});
 })();
