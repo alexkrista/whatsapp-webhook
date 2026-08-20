@@ -1,13 +1,11 @@
 "use strict";
 
-// Registriert das Farben-/Lager-Modul direkt nach dem ersten app.use().
-// In server.js ist das erste Middleware-Setup express.json(...), dadurch
-// funktionieren unsere POST/PUT-Routen bereits mit req.body, ohne server.js
-// selbst anfassen zu müssen.
+// Registriert Farben/Lager + Little-Greene-Bestellwesen direkt nach dem ersten app.use().
 const path = require("path");
 const expressPath = require.resolve("express");
 const originalExpress = require("express");
 const { registerPaintLab } = require("./paint-lab");
+const { registerPaintCommercial } = require("./paint-commercial");
 
 function wrappedExpress(...args) {
   const app = originalExpress(...args);
@@ -18,14 +16,16 @@ function wrappedExpress(...args) {
     const result = originalUse(...useArgs);
     if (!registered) {
       registered = true;
+      const opts = {
+        dataDir: process.env.DATA_DIR || "/var/data",
+        publicDir: path.join(process.cwd(), "public"),
+      };
       try {
-        registerPaintLab(app, {
-          dataDir: process.env.DATA_DIR || "/var/data",
-          publicDir: path.join(process.cwd(), "public"),
-        });
-        console.log("KRISTINE Farben & Lager registriert");
+        registerPaintLab(app, opts);
+        registerPaintCommercial(app, opts);
+        console.log("KRISTINE Farben & Lager + LG Bestellwesen registriert");
       } catch (error) {
-        console.error("KRISTINE Farben & Lager konnte nicht registriert werden:", error?.message || error);
+        console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
     }
     return result;
