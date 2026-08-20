@@ -21,6 +21,39 @@
       @media(max-width:620px){.krista-planning-workspace #planningCardsPanel .pool-list{grid-template-columns:1fr!important}.krista-unknown-row{grid-template-columns:1fr}}
     `;document.head.appendChild(s);
   }
+  function installTimeModelLayoutFix(){
+    if(document.getElementById("kristaTimeModelLayoutFix"))return;
+    const s=document.createElement("style");s.id="kristaTimeModelLayoutFix";s.textContent=`
+      #scheduleModelList,.tm2-card,.tm2-block,.tm2-rows,.tm2-row,.tm2-head,.tm2-block-head,.tm2-savebar{min-width:0!important;max-width:100%!important;box-sizing:border-box!important}
+      .tm2-card{overflow:hidden!important}
+      .tm2-head>div:first-child,.tm2-block-head>div:first-child{min-width:0!important}
+      .tm2-head-actions,.tm2-fixed-toggle{flex:0 0 auto!important}
+      .tm2-row{grid-template-columns:minmax(205px,1.55fr) repeat(6,minmax(76px,.7fr)) minmax(72px,.55fr) 32px!important;gap:6px!important}
+      .tm2-row.has-activity{grid-template-columns:minmax(190px,1.25fr) repeat(6,minmax(68px,.58fr)) minmax(130px,1fr) minmax(68px,.5fr) 32px!important;gap:6px!important}
+      .tm2-days{min-width:0!important;flex-wrap:nowrap!important;gap:4px!important;overflow:visible!important}
+      .tm2-day{width:30px!important;min-width:30px!important;height:30px!important;font-size:12px!important}
+      .tm2-field{min-width:0!important;max-width:100%!important}
+      .tm2-field label{font-size:9px!important;white-space:nowrap!important}
+      .tm2-field input,.tm2-field select{display:block!important;min-width:0!important;max-width:100%!important;width:100%!important;padding:6px!important;font-size:12px!important;box-sizing:border-box!important}
+      .tm2-net{min-width:0!important;padding:7px 5px!important;font-size:12px!important}
+      .tm2-remove{width:30px!important;min-width:30px!important;height:30px!important}
+      .tm2-block-head{flex-wrap:wrap!important}
+      .tm2-savebar{flex-wrap:wrap!important;padding-right:0!important}
+      @media(max-width:1050px){
+        .tm2-row,.tm2-row.has-activity{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important}
+        .tm2-days{grid-column:1/-1!important}
+        .tm2-row.has-activity .tm2-activity{grid-column:1/3!important}
+        .tm2-net{align-self:end!important}
+        .tm2-remove{align-self:end!important;justify-self:end!important}
+      }
+      @media(max-width:700px){
+        .tm2-row,.tm2-row.has-activity{grid-template-columns:1fr 1fr!important}
+        .tm2-days{grid-column:1/-1!important;flex-wrap:wrap!important}
+        .tm2-row.has-activity .tm2-activity{grid-column:1/-1!important}
+        .tm2-fixed-toggle{width:100%!important}
+      }
+    `;document.head.appendChild(s);
+  }
   function unknownItems(){
     const out=[];
     try{Object.values(data?.states||{}).forEach(state=>(state?.timeline||[]).forEach(x=>{if(x?.type==="assignment_deviation")out.push({state,x})}))}catch{}
@@ -49,7 +82,7 @@
     if(typeof window.renderControl==="function"&&!window.renderControl.__kristaBeulen){const old=window.renderControl;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceUnknown,0);return v};wrapped.__kristaBeulen=true;window.renderControl=wrapped}
     if(typeof window.renderTasks==="function"&&!window.renderTasks.__kristaBeulen){const old=window.renderTasks;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceTaskRows,0);return v};wrapped.__kristaBeulen=true;window.renderTasks=wrapped}
   }
-  function install(){installStyle();ensureScript("/public/ui/kristine-time-models-v2.js","data-krista-time-models-v2");wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(wrapFunctions,300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
+  function install(){installStyle();installTimeModelLayoutFix();ensureScript("/public/ui/kristine-time-models-v2.js","data-krista-time-models-v2");wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(()=>{installTimeModelLayoutFix();wrapFunctions()},300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install,{once:true});else install();
   setInterval(()=>{wrapFunctions();enhanceUnknown();enhanceTaskRows()},3000);
 })();
