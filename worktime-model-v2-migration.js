@@ -6,7 +6,7 @@ const DATA_DIR=process.env.DATA_DIR||"/var/data";
 const FILE=path.join(DATA_DIR,"_system","worktime-models.json");
 const clone=value=>JSON.parse(JSON.stringify(value));
 const alexTarget={id:"alex-soll-mo-fr",days:[1,2,3,4,5],from:"07:00",to:"13:48",lunchFrom:"",lunchTo:"",pauseFrom:"",pauseTo:"",activityCode:"",activityLabel:""};
-const alexFixed={...alexTarget,id:"alex-fink-mo-fr",activityCode:"022",activityLabel:"Büro"};
+const alexFixed={...alexTarget,id:"alex-fink-mo-fr",activityCode:"SITE_LT120",activityLabel:"Baustelle < 120 km"};
 
 function ensureBlock(model,key,label){
   model.timeModelVersion=2;
@@ -30,9 +30,17 @@ function patch(){
     if(String(model.id)==="office-alex"){
       if(!model.blocks.finkTarget.rows.length){model.blocks.finkTarget.rows=[clone(alexTarget)];changed=true}
       if(!model.blocks.finkFixed.rows.length){model.blocks.finkFixed.rows=[clone(alexFixed)];changed=true}
+      for(const row of model.blocks.finkFixed.rows){
+        const oldCode=String(row?.activityCode||"");
+        const oldLabel=String(row?.activityLabel||"");
+        if(oldCode==="022"||/^(büro|buero)$/i.test(oldLabel)||String(row?.id||"")==="alex-fink-mo-fr"){
+          if(row.activityCode!=="SITE_LT120"){row.activityCode="SITE_LT120";changed=true}
+          if(row.activityLabel!=="Baustelle < 120 km"){row.activityLabel="Baustelle < 120 km";changed=true}
+        }
+      }
       if(model.automaticTime!==true){model.automaticTime=true;changed=true}
       if(Number(model.automaticPayrollHours)!==6.8){model.automaticPayrollHours=6.8;changed=true}
-      if(model.payrollReason!=="Büro"){model.payrollReason="Büro";changed=true}
+      if(model.payrollReason!=="Baustelle < 120 km"){model.payrollReason="Baustelle < 120 km";changed=true}
       if(model.projectTimeSource!=="actual_stamps"){model.projectTimeSource="actual_stamps";changed=true}
     }
   }
