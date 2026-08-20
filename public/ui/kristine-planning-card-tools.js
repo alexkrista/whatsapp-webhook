@@ -87,6 +87,105 @@
     else if(typeof renderPlanning==="function")renderPlanning();
   }
 
+  function exactDuplicate(source,targetEmployee,date,from,to){
+    try{
+      return (data?.assignments||[]).some(row=>
+        String(row?.employeeId||"")===String(targetEmployee?.id||"")&&
+        String(row?.date||"")===String(date||"")&&
+        String(row?.jobId||"")===String(source?.jobId||"")&&
+        String(row?.from||"")===String(from||"")&&
+        String(row?.to||"")===String(to||"")
+      );
+    }catch{return false}
+  }
+
+  async function createCrossEmployeeCopy(source,targetEmployee,date){
+    let type="site";
+    try{type=typeof cardTypeOf==="function"?cardTypeOf(source):String(source.cardType||"site")}catch{}
+
+    if(type!=="site"){
+      if(typeof createSpecialAssignment!=="function")return null;
+      return createSpecialAssignment(type,targetEmployee,date,source);
+    }
+
+    let from=String(source.from||"");
+    let to=String(source.to||"");
+    const rule=typeof modelDayWindow==="function"?modelDayWindow(targetEmployee.id,date):{from:"07:00",to:"17:00"};
+    if(!from)from=rule.from;
+    if(!to)to=rule.to;
+
+    const existing=typeof siteSegments==="function"?siteSegments(targetEmployee.id,date):[];
+    if(existing.length&&typeof askSegmentWindow==="function"){
+      const selected=await askSegmentWindow({
+        employee:targetEmployee,
+        date,
+        jobName:source.jobName||source.jobId||"Baustelle",
+        suggestion:{from,to}
+      });
+      if(!selected)return null;
+      from=selected.from;to=selected.to;
+    }
+
+    if(typeof validateSegmentWindow==="function"){
+      const check=validateSegmentWindow(targetEmployee.id,date,from,to);
+      if(!check?.ok){alert(check?.message||"Bitte ein gültiges Zeitfenster eingeben.");return null}
+      if(check.warning&&!confirm(check.warning))return null;
+    }
+
+    if(exactDuplicate(source,targetEmployee,date,from,to)){
+      try{if(typeof toast==="function")toast(`${targetEmployee.name||"Mitarbeiter"} ist für dieses Zeitfenster bereits auf der Baustelle eingeplant.`)}catch{}
+      return {duplicate:true};
+    }
+
+    if(typeof subtractWindowFromExisting==="function")subtractWindowFromExisting(targetEmployee.id,date,from,to);
+    const clone={
+      ...source,
+      id:typeof id==="function"?id():`${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      date,
+      employeeId:String(targetEmployee.id),
+      employeeName:targetEmployee.name||String(targetEmployee.id),
+      from,
+      to
+    };
+    if(typeof rawCardHours==="function")clone.hours=rawCardHours(clone);
+    try{data.assignments.push(clone)}catch{return null}
+    if(typeof normalizeEmployeeDaySegments==="function")normalizeEmployeeDaySegments(targetEmployee.id,date);
+    return clone;
+  }
+
+  function employeeDropTarget(target){
+    const cell=target?.closest?.(".matrix-cell.dropzone");
+    if(!cell)return null;
+    const code=String(cell.getAttribute("ondrop")||"");
+    const match=code.match(/planningEmployeeDrop\(event\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
+    return match?{cell,date:match[1],employeeId:match[2]}:null;
+  }
+
+  async function interceptCrossEmployeeDrop(event){
+    const target=employeeDropTarget(event.target);
+    if(!target)return;
+    let payload="";
+    try{payload=String(event.dataTransfer?.getData("text/plain")||"")}catch{}
+    if(!payload||payload.startsWith("pooljob:")||payload.startsWith("pooltype:"))return;
+    const source=assignmentById(payload);
+    if(!source)return;
+
+    // Nur der bislang fehlerhafte Fall: gleicher Tag, anderer Mitarbeiter.
+    // Datumswechsel bleibt bei der bestehenden, funktionierenden Logik.
+    if(String(source.date)!==String(target.date)||String(source.employeeId)===String(target.employeeId))return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    target.cell.classList.remove("dragover");
+    suppressClickUntil=Date.now()+600;
+
+    const employee=employeeForId(target.employeeId);
+    if(!employee)return;
+    const created=await createCrossEmployeeCopy(source,employee,target.date);
+    if(created&&!created.duplicate&&typeof saveAssignments==="function")await saveAssignments(true);
+    else if(typeof renderPlanning==="function")renderPlanning();
+  }
+
   async function copyExistingToEmployee(event,date,employeeId,original){
     const payload=(()=>{try{return typeof droppedPayload==="function"?String(droppedPayload(event)||""):String(event?.dataTransfer?.getData("text/plain")||"")}catch{return ""}})();
     if(!payload||payload.startsWith("pooljob:")||payload.startsWith("pooltype:"))return original.apply(this,arguments);
@@ -102,21 +201,8 @@
     event.currentTarget?.classList?.remove("dragover");
     suppressClickUntil=Date.now()+500;
 
-    let type="";
-    try{type=typeof cardTypeOf==="function"?cardTypeOf(source):String(source.cardType||"site")}catch{type="site"}
-    let created=null;
-
-    if(type==="site"){
-      if(typeof placeSiteAssignment!=="function")return original.apply(this,arguments);
-      const template={...source,id:(typeof id==="function"?id():`${Date.now()}_${Math.random()}`)};
-      const hasExisting=typeof siteSegments==="function"?siteSegments(targetEmployee.id,date).length>0:false;
-      created=await placeSiteAssignment(template,targetEmployee,date,{forceDialog:hasExisting});
-    }else{
-      if(typeof createSpecialAssignment!=="function")return original.apply(this,arguments);
-      created=await createSpecialAssignment(type,targetEmployee,date,source);
-    }
-
-    if(created&&typeof saveAssignments==="function")await saveAssignments(true);
+    const created=await createCrossEmployeeCopy(source,targetEmployee,date);
+    if(created&&!created.duplicate&&typeof saveAssignments==="function")await saveAssignments(true);
     else if(typeof renderPlanning==="function")renderPlanning();
   }
 
@@ -136,6 +222,9 @@
     if(installed)return;
     installed=true;
 
+    document.addEventListener("drop",event=>{
+      interceptCrossEmployeeDrop(event).catch(error=>console.error("Planung: Mitarbeiter-Kopie fehlgeschlagen:",error));
+    },true);
     document.addEventListener("dragstart",event=>{
       if(event.target?.closest?.(".assignment[data-assignment-id],.monthitem[data-assignment-id]"))suppressClickUntil=Date.now()+900;
     },true);
