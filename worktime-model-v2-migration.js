@@ -6,7 +6,7 @@ const DATA_DIR=process.env.DATA_DIR||"/var/data";
 const FILE=path.join(DATA_DIR,"_system","worktime-models.json");
 const clone=value=>JSON.parse(JSON.stringify(value));
 const alexTarget={id:"alex-soll-mo-fr",days:[1,2,3,4,5],from:"07:00",to:"13:48",lunchFrom:"",lunchTo:"",pauseFrom:"",pauseTo:"",activityCode:"",activityLabel:""};
-const alexFixed={...alexTarget,id:"alex-fink-mo-fr",activityCode:"SITE_LT120",activityLabel:"Baustelle < 120 km"};
+const alexFixed={...alexTarget,id:"alex-fink-mo-fr",activityCode:"022",activityLabel:"Baustelle < 120 km"};
 
 function ensureBlock(model,key,label){
   model.timeModelVersion=2;
@@ -33,17 +33,18 @@ function patch(){
       for(const row of model.blocks.finkFixed.rows){
         const oldCode=String(row?.activityCode||"").trim();
         const oldLabel=String(row?.activityLabel||"").trim();
-        const isOldOffice=oldCode==="022"||/^(büro|buero)$/i.test(oldLabel);
+        const isLegacySite=oldCode==="SITE_LT120";
+        const isOldOffice=/^(büro|buero)$/i.test(oldLabel)||(oldCode==="022"&&/büro|buero/i.test(oldLabel));
         const isEmptyAlexDefault=String(row?.id||"")==="alex-fink-mo-fr"&&!oldCode&&!oldLabel;
-        if(isOldOffice||isEmptyAlexDefault){
-          if(row.activityCode!=="SITE_LT120"){row.activityCode="SITE_LT120";changed=true}
+        if(isLegacySite||isOldOffice||isEmptyAlexDefault){
+          if(row.activityCode!=="022"){row.activityCode="022";changed=true}
           if(row.activityLabel!=="Baustelle < 120 km"){row.activityLabel="Baustelle < 120 km";changed=true}
         }
       }
       if(model.automaticTime!==true){model.automaticTime=true;changed=true}
       if(Number(model.automaticPayrollHours)!==6.8){model.automaticPayrollHours=6.8;changed=true}
       const oldReason=String(model.payrollReason||"").trim();
-      if(!oldReason||/^(büro|buero)$/i.test(oldReason)){model.payrollReason="Baustelle < 120 km";changed=true}
+      if(!oldReason||/^(büro|buero)$/i.test(oldReason)||oldReason==="Baustelle < 120 km"){if(model.payrollReason!=="Baustelle < 120 km"){model.payrollReason="Baustelle < 120 km";changed=true}}
       if(model.projectTimeSource!=="actual_stamps"){model.projectTimeSource="actual_stamps";changed=true}
     }
   }
