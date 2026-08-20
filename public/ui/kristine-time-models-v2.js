@@ -11,8 +11,7 @@
   ];
   const ACTIVITIES=[
     ["","Tätigkeit wählen"],
-    ["022","022 · Büro"],
-    ["SITE_LT120","Baustelle < 120 km"],
+    ["022","022 · Baustelle < 120 km"],
     ["SITE_GE120","Baustelle ≥ 120 km"],
     ["913","913 · Werkstatt"],
     ["917","917 · Firma aufräumen"],
@@ -62,9 +61,10 @@
   }
 
   function activityOptions(row){
-    const known=ACTIVITIES.some(([code])=>code===String(row.activityCode||""));
-    const custom=!known&&row.activityLabel?`<option value="${esc(row.activityCode||"CUSTOM")}" data-label="${esc(row.activityLabel)}" selected>${esc(row.activityLabel)}</option>`:"";
-    return custom+ACTIVITIES.map(([code,label])=>`<option value="${esc(code)}" data-label="${esc(label.replace(/^\d{3} · /,""))}" ${String(row.activityCode||"")===code?"selected":""}>${esc(label)}</option>`).join("");
+    const code=String(row.activityCode||"")==="SITE_LT120"?"022":String(row.activityCode||"");
+    const known=ACTIVITIES.some(([knownCode])=>knownCode===code);
+    const custom=!known&&row.activityLabel?`<option value="${esc(code||"CUSTOM")}" data-label="${esc(row.activityLabel)}" selected>${esc(row.activityLabel)}</option>`:"";
+    return custom+ACTIVITIES.map(([optionCode,label])=>`<option value="${esc(optionCode)}" data-label="${esc(label.replace(/^\d{3} · /,""))}" ${code===optionCode?"selected":""}>${esc(label)}</option>`).join("");
   }
   function rowHtml(model,blockKey,row){
     const fixed=blockKey==="finkFixed";
@@ -150,7 +150,10 @@
       if(event.target.matches("[data-fixed-enabled]")){model.blocks.finkFixed.enabled=event.target.checked;return}
       const rowEl=event.target.closest(".tm2-row");if(!rowEl)return;const r=rowBy(model.id,rowEl.dataset.block,rowEl.dataset.row);if(!r)return;
       const field=event.target.dataset.field;if(!field)return;
-      if(field==="activity"){r.activityCode=event.target.value;r.activityLabel=event.target.selectedOptions[0]?.dataset.label||event.target.selectedOptions[0]?.textContent||""}else r[field]=event.target.value;
+      if(field==="activity"){
+        r.activityCode=event.target.value;
+        r.activityLabel=event.target.selectedOptions[0]?.dataset.label||event.target.selectedOptions[0]?.textContent||"";
+      }else r[field]=event.target.value;
       const net=rowEl.querySelector(".tm2-net");if(net)net.textContent=hours(netHours(r));
     });
   }
