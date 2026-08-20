@@ -47,6 +47,7 @@
     ensureScript("/public/ui/kriszeit-fink-model-v2.js","data-krista-fink-model-v2");
     ensureScript("/public/ui/kriszeit-model-time-column.js","data-krista-model-time-column");
     ensureScript("/public/ui/kriszeit-model-binding-hotfix.js","data-krista-model-binding-hotfix");
+    ensureScript("/public/ui/kriszeit-diet-under120.js","data-krista-diet-under120");
     const actions=document.querySelector(".date-workbench .export-actions");if(!actions)return;
     let left=actions.querySelector(".krista-kriszeit-actions-left");if(!left)return;
     let btn=document.getElementById("openDailyReportKriszeit");
