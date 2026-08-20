@@ -38,29 +38,7 @@
     cell.dataset.kristaPlanningEmployee=match[2];
     return {cell,date:match[1],employeeId:match[2]};
   }
-  function employeeDropTarget(event){
-    const path=typeof event?.composedPath==="function"?event.composedPath():[];
-    for(const el of path){
-      if(el?.matches?.(".matrix-cell.dropzone")){
-        const parsed=parseEmployeeDropCell(el);
-        if(parsed)return parsed;
-      }
-    }
-    return parseEmployeeDropCell(event?.target?.closest?.(".matrix-cell.dropzone"));
-  }
-  function decorateCards(){
-    document.querySelectorAll(".assignment[data-assignment-id],.monthitem[data-assignment-id]").forEach(card=>{
-      if(card.classList.contains("segment-split"))return;
-      card.classList.add("krista-planning-editable");
-      card.title="Klicken: Zeitfenster bearbeiten · Ziehen: kopieren";
-    });
-    document.querySelectorAll(".segment-row").forEach(row=>{
-      if(!assignmentIdFromSegmentRow(row))return;
-      row.classList.add("krista-planning-editable-segment");
-      row.title="Klicken: Zeitfenster bearbeiten";
-    });
-    document.querySelectorAll(".matrix-cell.dropzone[ondrop*='planningEmployeeDrop']").forEach(parseEmployeeDropCell);
-  }
+
   function installStyle(){
     if(document.getElementById("kristaPlanningCardToolsStyle"))return;
     const style=document.createElement("style");
@@ -98,7 +76,7 @@
     try{return (data?.assignments||[]).some(row=>String(row?.employeeId||"")===String(targetEmployee?.id||"")&&String(row?.date||"")===String(date||"")&&String(row?.jobId||"")===String(source?.jobId||"")&&String(row?.from||"")===String(from||"")&&String(row?.to||"")===String(to||""))}catch{return false}
   }
 
-  async function createCrossEmployeeCopy(source,targetEmployee,date){
+  async function createCopyForTarget(source,targetEmployee,date){
     let type="site";try{type=typeof cardTypeOf==="function"?cardTypeOf(source):String(source.cardType||"site")}catch{}
     if(type!=="site"){
       if(typeof createSpecialAssignment!=="function")return null;
@@ -108,6 +86,7 @@
     let from=String(source.from||""),to=String(source.to||"");
     const rule=typeof modelDayWindow==="function"?modelDayWindow(targetEmployee.id,date):{from:"07:00",to:"17:00"};
     if(!from)from=rule.from;if(!to)to=rule.to;
+
     const existing=typeof siteSegments==="function"?siteSegments(targetEmployee.id,date):[];
     if(existing.length&&typeof askSegmentWindow==="function"){
       const selected=await askSegmentWindow({employee:targetEmployee,date,jobName:source.jobName||source.jobId||"Baustelle",suggestion:{from,to}});
@@ -122,50 +101,88 @@
       try{if(typeof toast==="function")toast(`${targetEmployee.name||"Mitarbeiter"} ist für dieses Zeitfenster bereits auf der Baustelle eingeplant.`)}catch{}
       return {duplicate:true};
     }
+
     if(typeof subtractWindowFromExisting==="function")subtractWindowFromExisting(targetEmployee.id,date,from,to);
-    const clone={...source,id:typeof id==="function"?id():`${Date.now()}_${Math.random().toString(36).slice(2)}`,date,employeeId:String(targetEmployee.id),employeeName:targetEmployee.name||String(targetEmployee.id),from,to};
+    const clone={
+      ...source,
+      id:typeof id==="function"?id():`${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      date:String(date),
+      employeeId:String(targetEmployee.id),
+      employeeName:targetEmployee.name||String(targetEmployee.id),
+      from,
+      to
+    };
     if(typeof rawCardHours==="function")clone.hours=rawCardHours(clone);
     try{data.assignments.push(clone)}catch{return null}
     if(typeof normalizeEmployeeDaySegments==="function")normalizeEmployeeDaySegments(targetEmployee.id,date);
     return clone;
   }
 
-  async function interceptCrossEmployeeDrop(event){
-    const target=employeeDropTarget(event);if(!target)return false;
-    let payload=activeDragAssignmentId;
-    if(!payload){try{payload=String(event.dataTransfer?.getData("text/plain")||"")}catch{}}
-    if(!payload||payload.startsWith("pooljob:")||payload.startsWith("pooltype:"))return false;
-    const source=assignmentById(payload);if(!source)return false;
-
-    // Nur gleicher Tag + anderer Mitarbeiter. Datumswechsel bleibt im Grundcode.
-    if(String(source.date)!==String(target.date)||String(source.employeeId)===String(target.employeeId))return false;
-
+  async function handleEmployeeCellDrop(event,meta){
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    target.cell.classList.remove("dragover");
+    meta.cell.classList.remove("dragover");
     suppressClickUntil=Date.now()+700;
 
-    const employee=employeeForId(target.employeeId);if(!employee)return true;
-    const created=await createCrossEmployeeCopy(source,employee,target.date);
-    if(created&&!created.duplicate&&typeof saveAssignments==="function")await saveAssignments(true);else if(typeof renderPlanning==="function")renderPlanning();
-    return true;
+    let payload=activeDragAssignmentId;
+    if(!payload){try{payload=String(event.dataTransfer?.getData("text/plain")||"")}catch{}}
+    if(!payload)return;
+
+    // Pool-Karten sollen weiterhin exakt durch die bewährte Grundlogik laufen.
+    if(payload.startsWith("pooljob:")||payload.startsWith("pooltype:")){
+      if(typeof window.planningEmployeeDrop==="function")await window.planningEmployeeDrop(event,meta.date,meta.employeeId);
+      return;
+    }
+
+    const source=assignmentById(payload);if(!source)return;
+    if(String(source.employeeId)===String(meta.employeeId)&&String(source.date)===String(meta.date))return;
+
+    const targetEmployee=employeeForId(meta.employeeId);if(!targetEmployee)return;
+    const created=await createCopyForTarget(source,targetEmployee,meta.date);
+    if(created&&!created.duplicate&&typeof saveAssignments==="function")await saveAssignments(true);
+    else if(typeof renderPlanning==="function")renderPlanning();
+  }
+
+  function bindEmployeeDropCells(){
+    document.querySelectorAll(".matrix-cell.dropzone").forEach(cell=>{
+      const meta=parseEmployeeDropCell(cell);if(!meta)return;
+      if(cell.dataset.kristaDirectEmployeeDrop==="1")return;
+
+      // Entscheidend: der alte Inline-Handler wird entfernt. Ab hier existiert
+      // für diese Mitarbeiter-Zelle nur noch EIN Drop-Weg mit der Ziel-ID.
+      cell.removeAttribute("ondrop");
+      cell.dataset.kristaDirectEmployeeDrop="1";
+      cell.addEventListener("drop",event=>{
+        handleEmployeeCellDrop(event,{cell,date:cell.dataset.kristaPlanningDate,employeeId:cell.dataset.kristaPlanningEmployee})
+          .catch(error=>console.error("Planung: Mitarbeiter-Kopie fehlgeschlagen:",error));
+      });
+    });
+  }
+
+  function decorateCards(){
+    document.querySelectorAll(".assignment[data-assignment-id],.monthitem[data-assignment-id]").forEach(card=>{
+      if(card.classList.contains("segment-split"))return;
+      card.classList.add("krista-planning-editable");
+      card.title="Klicken: Zeitfenster bearbeiten · Ziehen: kopieren";
+    });
+    document.querySelectorAll(".segment-row").forEach(row=>{
+      if(!assignmentIdFromSegmentRow(row))return;
+      row.classList.add("krista-planning-editable-segment");
+      row.title="Klicken: Zeitfenster bearbeiten";
+    });
+    bindEmployeeDropCells();
   }
 
   function install(){
     installStyle();decorateCards();
     if(installed)return;installed=true;
 
-    // Capture ist absichtlich VOR dem alten inline ondrop. So kann der alte Weg
-    // nicht mehr mit der Quell-person (z. B. Clemens) weiterlaufen.
     document.addEventListener("dragstart",event=>{
       const card=event.target?.closest?.(".assignment[data-assignment-id],.monthitem[data-assignment-id]");
       if(!card)return;
       activeDragAssignmentId=String(card.dataset.assignmentId||"");
       suppressClickUntil=Date.now()+900;
-    },true);
-    document.addEventListener("drop",event=>{
-      interceptCrossEmployeeDrop(event).catch(error=>console.error("Planung: Mitarbeiter-Kopie fehlgeschlagen:",error));
     },true);
     document.addEventListener("dragend",event=>{
       if(event.target?.closest?.(".assignment[data-assignment-id],.monthitem[data-assignment-id]"))suppressClickUntil=Date.now()+350;
@@ -185,5 +202,5 @@
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{install();setTimeout(decorateCards,250)},{once:true});
   else{install();setTimeout(decorateCards,250)}
-  setInterval(decorateCards,1200);
+  setInterval(decorateCards,700);
 })();
