@@ -2,6 +2,7 @@
 
 (function(){
   function withToken(path){const u=new URL(path,location.origin),token=new URLSearchParams(location.search).get("token");if(token)u.searchParams.set("token",token);return `${u.pathname}${u.search}${u.hash}`}
+  function ensureScript(src,key){if(document.querySelector(`script[${key}]`))return;const s=document.createElement("script");s.src=src;s.setAttribute(key,"1");s.defer=true;document.head.appendChild(s)}
 
   function installNoWorkConfirmation(){
     if(window.__kristaNoWorkConfirmationInstalled)return;
@@ -40,6 +41,7 @@
 
   function install(){
     if(!location.pathname.toLowerCase().includes("kristool-preview"))return;
+    ensureScript("/public/ui/kriszeit-fink-model-v2.js","data-krista-fink-model-v2");
     const actions=document.querySelector(".date-workbench .export-actions");if(!actions)return;
     let left=actions.querySelector(".krista-kriszeit-actions-left");if(!left)return;
     let btn=document.getElementById("openDailyReportKriszeit");
