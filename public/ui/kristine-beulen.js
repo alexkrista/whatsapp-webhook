@@ -82,7 +82,7 @@
     if(typeof window.renderControl==="function"&&!window.renderControl.__kristaBeulen){const old=window.renderControl;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceUnknown,0);return v};wrapped.__kristaBeulen=true;window.renderControl=wrapped}
     if(typeof window.renderTasks==="function"&&!window.renderTasks.__kristaBeulen){const old=window.renderTasks;const wrapped=function(){const v=old.apply(this,arguments);setTimeout(enhanceTaskRows,0);return v};wrapped.__kristaBeulen=true;window.renderTasks=wrapped}
   }
-  function install(){installStyle();installTimeModelLayoutFix();ensureScript("/public/ui/kristine-time-models-v2.js","data-krista-time-models-v2");wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(()=>{installTimeModelLayoutFix();wrapFunctions()},300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
+  function install(){installStyle();installTimeModelLayoutFix();ensureScript("/public/ui/kristine-time-models-v2.js","data-krista-time-models-v2");ensureScript("/public/ui/kristine-planning-card-tools.js","data-krista-planning-card-tools");wrapFunctions();enhanceUnknown();enhanceTaskRows();setTimeout(()=>{installTimeModelLayoutFix();wrapFunctions()},300);setTimeout(()=>{enhanceUnknown();enhanceTaskRows()},600)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install,{once:true});else install();
   setInterval(()=>{wrapFunctions();enhanceUnknown();enhanceTaskRows()},3000);
 })();
