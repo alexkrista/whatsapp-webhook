@@ -11,6 +11,7 @@ const originalExpress = require("express");
 const { registerPaintLiveFix } = require("./paint-live-fix");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
+const { registerPaintInventory } = require("./paint-inventory");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -32,6 +33,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("<head>", '<head>\n<meta name="google" content="notranslate">');
       }
       fixed = fixed.replace(/<body(?:\s[^>]*)?>/i, '<body class="notranslate" translate="no">');
+      if (!fixed.includes("/public/paint-inventory-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -53,14 +57,12 @@ function wrappedExpress(...args) {
         publicDir: path.join(process.cwd(), "public"),
       };
       try {
-        // Muss VOR den eigentlichen APIs stehen: der Middleware-Fix reichert
-        // Antworten mit dem echten KRISTINE-Lagerbestand an und uebernimmt
-        // beim Excel-Import die historische LG-GJ-Basis.
         registerPaintLiveFix(app, opts);
         registerPaintHtmlHotfix(app, opts.publicDir);
+        registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Bestellwesen registriert");
+        console.log("KRISTINE Farben & Lager + Inventur + LG Bestellwesen registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
