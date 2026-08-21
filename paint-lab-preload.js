@@ -10,6 +10,7 @@ const expressPath = require.resolve("express");
 const originalExpress = require("express");
 const { registerPaintLiveFix } = require("./paint-live-fix");
 const { registerPaintOrderformFix } = require("./paint-orderform-fix");
+const { registerPaintWallpaperOrder } = require("./paint-wallpaper-order");
 const { registerPaintOrderSummaryFix } = require("./paint-order-summary-fix");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
@@ -38,6 +39,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-wallpaper-order-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-wallpaper-order-ui.js"></script>\n</body>');
+      }
       if (!fixed.includes("/public/paint-camera-scan.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-camera-scan.js"></script>\n</body>');
       }
@@ -65,11 +69,12 @@ function wrappedExpress(...args) {
         registerPaintLiveFix(app, opts);
         registerPaintHtmlHotfix(app, opts.publicDir);
         registerPaintOrderformFix(app, opts);
+        registerPaintWallpaperOrder(app, opts);
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Bestellentwurf + Kamera-Scan registriert");
+        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Bestellentwurf + Tapeten + Kamera-Scan registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
