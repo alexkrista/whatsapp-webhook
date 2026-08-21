@@ -4,6 +4,41 @@ const Module = require("module");
 const originalLoad = Module._load;
 let wrapped = false;
 
+function normalizeName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function withChefPhoneFallback(options = {}) {
+  const chefPhone = String(options.chefPhoneNumber || "").replace(/\D/g, "");
+  const originalReadEmployees = options.readEmployees;
+  if (!chefPhone || typeof originalReadEmployees !== "function") return options;
+
+  return {
+    ...options,
+    readEmployees: async (...args) => {
+      const employees = await originalReadEmployees(...args);
+      return (employees || []).map((employee) => {
+        const currentPhone = String(employee?.phone || "").replace(/\D/g, "");
+        if (currentPhone) return employee;
+
+        const officialName = normalizeName(employee?.name || employee?.employeeName || "");
+        const nickname = normalizeName(employee?.nickname || employee?.rufname || "");
+        const isAlexanderKrista =
+          officialName === "alexander krista" ||
+          officialName === "alex krista" ||
+          (officialName.endsWith(" krista") && (nickname === "alex" || nickname === "alexander"));
+
+        return isAlexanderKrista ? { ...employee, phone: chefPhone } : employee;
+      });
+    },
+  };
+}
+
 Module._load = function kristineInboxLoader(request, parent, isMain) {
   const exported = originalLoad.apply(this, arguments);
   if (!wrapped && (request === "./kristine" || request.endsWith("/kristine")) && exported && typeof exported.registerKristine === "function") {
@@ -11,8 +46,9 @@ Module._load = function kristineInboxLoader(request, parent, isMain) {
     const originalRegister = exported.registerKristine;
     const { registerKristineInbox } = require("./kristine-inbox");
     exported.registerKristine = function registerKristineWithInbox(app, options) {
-      const result = originalRegister(app, options);
-      registerKristineInbox(app, { dataDir: options.dataDir, requireAdmin: options.requireAdmin });
+      const effectiveOptions = withChefPhoneFallback(options);
+      const result = originalRegister(app, effectiveOptions);
+      registerKristineInbox(app, { dataDir: effectiveOptions.dataDir, requireAdmin: effectiveOptions.requireAdmin });
       return result;
     };
   }
