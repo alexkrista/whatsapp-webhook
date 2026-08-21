@@ -52,6 +52,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-readability.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-readability.js"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-inventory-scan.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan.js"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -82,7 +85,7 @@ function wrappedExpress(...args) {
         registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Excel-Sollwerte + lesbare Tabellen + Bestellentwurf + Tapeten + Kamera-Scan registriert");
+        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Inventur-Scanner + Excel-Sollwerte + lesbare Tabellen + Bestellentwurf + Tapeten + Kamera-Scan registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
