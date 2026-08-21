@@ -52,11 +52,13 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-readability.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-readability.js"></script>\n</body>');
       }
-      if (!fixed.includes("/public/paint-inventory-scan.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan.js"></script>\n</body>');
-      }
+      // EAN-Kompatibilität MUSS vor dem Inventur-Scanner geladen werden, damit
+      // dessen erster /inventory-Aufruf bereits mit dem LG-EAN-Master ergänzt wird.
       if (!fixed.includes("/public/paint-scan-compat.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-scan-compat.js"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-scan-compat.js?v=20260821-1018"></script>\n</body>');
+      }
+      if (!fixed.includes("/public/paint-inventory-scan.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan.js?v=20260821-1018"></script>\n</body>');
       }
 
       res.set("Content-Language", "de");
