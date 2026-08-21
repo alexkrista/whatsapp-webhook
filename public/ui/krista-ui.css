@@ -61,10 +61,10 @@
 .krista-world-link:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.27);transform:translateY(-1px)}
 .krista-world-link.active{background:var(--kr-green);border-color:#69a47d;box-shadow:0 6px 18px rgba(15,57,32,.34)}
 .krista-world-icon{font-size:15px;line-height:1}
+.krista-mobile-menu{display:none}
 
 .krista-user{text-align:right;display:flex;flex-direction:column}
 .krista-user strong{font-size:13px}.krista-user small{margin-top:4px;color:rgba(255,255,255,.6)}
-
 
 /* Shared module navigation under the fixed product header */
 .krista-module-nav{
@@ -101,9 +101,51 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
   .krista-world-nav{justify-content:flex-start;overflow-x:auto;padding-bottom:3px}
 }
 @media(max-width:760px){
-  .krista-shell-main{grid-template-columns:1fr;padding:13px 14px;gap:11px}
-  .krista-world-nav{justify-content:flex-start;overflow-x:auto}
-  .krista-world-link{flex:0 0 auto}
+  /* Mobile: Kopf belegt keinen Bildschirm und ist ausdrücklich NICHT sticky. */
+  .krista-shell-topbar{position:relative!important;top:auto!important}
+  .krista-shell-main{
+    min-height:54px;
+    grid-template-columns:minmax(0,1fr) auto!important;
+    padding:8px 10px!important;
+    gap:8px!important;
+    align-items:center;
+  }
+  .krista-brand{gap:8px}
+  .krista-mark{width:34px;height:34px;border-radius:10px;font-size:18px}
+  .krista-brand-copy strong{font-size:15px}
+  .krista-brand-copy small{display:none}
+  .krista-user{display:none!important}
+
+  .krista-mobile-menu{
+    display:inline-flex;
+    min-height:36px!important;
+    padding:7px 10px;
+    border:1px solid rgba(255,255,255,.2);
+    border-radius:10px;
+    background:rgba(255,255,255,.08);
+    color:#fff;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    font:850 12.5px/1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  .krista-world-nav{
+    display:none;
+    grid-column:1/-1;
+    overflow:visible;
+    padding:4px 0 2px;
+    gap:6px;
+    flex-direction:column;
+    align-items:stretch;
+  }
+  .krista-shell-topbar.menu-open .krista-world-nav{display:flex}
+  .krista-world-link{
+    width:100%;
+    min-height:40px;
+    justify-content:flex-start;
+    padding:9px 12px;
+    flex:0 0 auto;
+  }
   .krista-module-nav{overflow-x:auto!important;flex-wrap:nowrap!important}
   .krista-module-nav button,.krista-module-nav a{white-space:nowrap!important;flex:0 0 auto!important}
 }
@@ -112,16 +154,13 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
   grid-template-columns:230px minmax(560px,1fr) 170px;
   max-width:1480px;
 }
-.krista-world-nav{
-  gap:8px;
-}
-.krista-world-link{
-  padding-inline:14px;
-}
-.krista-user small{
-  font-variant-numeric:tabular-nums;
-}
+.krista-world-nav{gap:8px}
+.krista-world-link{padding-inline:14px}
+.krista-user small{font-variant-numeric:tabular-nums}
 @media(max-width:1050px){
   .krista-shell-main{grid-template-columns:205px 1fr}
   .krista-user{display:none}
+}
+@media(max-width:760px){
+  .krista-shell-main{grid-template-columns:minmax(0,1fr) auto!important}
 }
