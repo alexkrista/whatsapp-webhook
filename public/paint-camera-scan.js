@@ -24,27 +24,23 @@
 
   const actions=document.createElement("div");
   actions.className="camera-scan-actions";
-  actions.innerHTML=`
-    <button id="cameraScanBtn" class="btn primary" type="button">📷 Kamera öffnen</button>
-    <button id="cameraPhotoBtn" class="btn" type="button">📸 Barcode fotografieren</button>
-    <input id="cameraPhotoInput" type="file" accept="image/*" capture="environment" hidden>
-  `;
+  actions.innerHTML='<button id="cameraScanBtn" class="btn primary" type="button">📷 Barcode scannen</button>';
+
   const panel=document.createElement("div");
   panel.id="cameraScanPanel";
   panel.className="camera-scan-panel";
   panel.hidden=true;
   panel.innerHTML='<div id="cameraReader"></div>';
+
   const hint=document.createElement("div");
   hint.className="camera-hint";
-  hint.textContent="Am iPhone muss die Kamera aus Sicherheitsgründen durch einen echten Fingertipp geöffnet werden. Falls Live-Scan blockiert ist, funktioniert „Barcode fotografieren“ als Reserve.";
+  hint.textContent="EAN-Strichcode quer ins Zielfeld halten. Das rechteckige Zielfeld entspricht dem Barcode auf der Dose.";
 
   card.insertBefore(actions,ean);
   card.insertBefore(panel,ean);
   card.insertBefore(hint,ean.nextSibling);
 
   const button=document.getElementById("cameraScanBtn");
-  const photoButton=document.getElementById("cameraPhotoBtn");
-  const photoInput=document.getElementById("cameraPhotoInput");
   let scanner=null;
   let starting=false;
   let locked=false;
@@ -56,7 +52,7 @@
     const raw=String(error?.message||error||"");
     const lower=(name+" "+raw).toLowerCase();
     if(lower.includes("notallowed")||lower.includes("permission")||lower.includes("denied")||lower.includes("security")){
-      return "Kamera ist für diese Website nicht erlaubt. Am iPhone in den Website-/Browser-Einstellungen für protokoll.krista.at die Kamera auf „Erlauben“ stellen und danach erneut auf Kamera öffnen tippen";
+      return "Kamera ist für diese Website nicht erlaubt. Am iPhone in den Website-/Browser-Einstellungen für protokoll.krista.at die Kamera auf „Erlauben“ stellen und danach erneut auf Barcode scannen tippen";
     }
     if(lower.includes("notfound")||lower.includes("devicesnotfound"))return "Keine Kamera gefunden";
     if(lower.includes("notreadable")||lower.includes("trackstarterror"))return "Kamera ist gerade von einer anderen App belegt. Kamera-App schließen und nochmals probieren";
@@ -110,7 +106,7 @@
     }catch{}
     scanner=null;
     panel.hidden=true;
-    button.textContent="📷 Kamera öffnen";
+    button.textContent="📷 Barcode scannen";
     button.classList.add("primary");
     if(clearStatus)setStatus("");
   }
@@ -155,30 +151,10 @@
       setStatus("Kamera aktiv · EAN-Strichcode quer vor die Kamera halten");
     }catch(error){
       await stopCamera(false);
-      setStatus(friendlyCameraError(error)+". Alternativ „Barcode fotografieren“ verwenden oder EAN manuell eingeben.");
+      setStatus(friendlyCameraError(error)+". EAN kann weiterhin manuell eingegeben werden.");
     }finally{
       starting=false;
       button.disabled=false;
-    }
-  }
-
-  async function scanPhoto(file){
-    if(!file)return;
-    setStatus("Barcode-Foto wird gelesen …");
-    photoButton.disabled=true;
-    try{
-      await stopCamera(false);
-      await loadScannerLibrary();
-      panel.hidden=false;
-      scanner=new window.Html5Qrcode("cameraReader",{verbose:false});
-      const decoded=await scanner.scanFile(file,true);
-      await acceptCode(decoded);
-    }catch(error){
-      await stopCamera(false);
-      setStatus("Kein Barcode erkannt. Bitte näher fotografieren, Barcode gerade halten und nochmals probieren. "+friendlyCameraError(error));
-    }finally{
-      photoButton.disabled=false;
-      photoInput.value="";
     }
   }
 
@@ -196,15 +172,13 @@
       history.replaceState(null,"",url.pathname+url.search+url.hash);
     }catch{}
     requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      setStatus("Bereit zum Scannen · am iPhone einmal „Kamera öffnen“ antippen");
+      setStatus("Bereit zum Scannen · am iPhone einmal „Barcode scannen“ antippen");
       if(window.matchMedia?.("(max-width:900px),(pointer:coarse)")?.matches)button.focus();
       else ean.focus();
     }));
   }
 
   button.addEventListener("click",startCamera);
-  photoButton.addEventListener("click",()=>photoInput.click());
-  photoInput.addEventListener("change",event=>scanPhoto(event.target.files?.[0]));
   document.querySelectorAll("[data-tab]").forEach(tab=>tab.addEventListener("click",()=>{if(tab.dataset.tab!=="scan"&&scanner)stopCamera(true)}));
   window.addEventListener("pagehide",()=>{if(scanner)stopCamera(false)});
 
