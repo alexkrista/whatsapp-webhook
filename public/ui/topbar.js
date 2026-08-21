@@ -114,7 +114,7 @@
   }
 
   function loadKristineInbox() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox.js", "data-krista-inbox");
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260821-0925", "data-krista-inbox-v2");
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
