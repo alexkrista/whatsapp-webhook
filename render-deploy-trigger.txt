@@ -1,0 +1,4 @@
+Render deploy trigger
+2026-08-21 15:16 Europe/Vienna
+
+Purpose: trigger a normal GitHub push event after the LG inventory fix. No runtime logic depends on this file.
