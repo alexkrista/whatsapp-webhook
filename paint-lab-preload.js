@@ -16,6 +16,7 @@ const { registerPaintInventoryExcel } = require("./paint-inventory-excel");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
+const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -60,6 +61,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-scan.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan.js?v=20260821-1018"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-inventory-scan-insights.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan-insights.js?v=20260821-1038"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -88,9 +92,10 @@ function wrappedExpress(...args) {
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventoryExcel(app, opts);
         registerPaintInventory(app, opts);
+        registerPaintInventoryInsights(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Inventur-Scanner + Excel-Sollwerte + lesbare Tabellen + Bestellentwurf + Tapeten + Kamera-Scan registriert");
+        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Inventur-Scanner + Scan-Einblicke + Excel-Sollwerte + lesbare Tabellen + Bestellentwurf + Tapeten + Kamera-Scan registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
