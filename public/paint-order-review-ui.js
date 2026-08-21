@@ -200,7 +200,8 @@
     if (!minInput || !targetInput || !suggestEl) return;
     const stock = stockInput && stockInput.value !== "" ? Number(stockInput.value) : Number(row.dataset.stock || 0);
     const value = suggested(stock, minInput.value, targetInput.value);
-    suggestEl.textContent = String(value);
+    const nextText = String(value);
+    if (suggestEl.textContent !== nextText) suggestEl.textContent = nextText;
     if (suggestCell) suggestCell.className = "inv-num inventory-suggest " + (value > 0 ? "need" : "ok");
     if (orderInput && row.dataset.orderMode !== "manual") orderInput.value = String(value);
   }
