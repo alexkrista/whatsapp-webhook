@@ -2,14 +2,29 @@
 
 (function(){
   const PENDING_KEY="kristaInboxPendingTaskItems";
-  let current=null,dragDepth=0;
+  let current=null;
+  let dragDepth=0;
+  let routing=false;
+
   const routeNames={task:"Aufgabe",invoice:"Rechnung",filing:"Ablage",appointment:"Termin",order:"Bestellung"};
   const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const tokenUrl=p=>{const u=new URL(p,location.origin),t=new URLSearchParams(location.search).get("token");if(t&&u.origin===location.origin)u.searchParams.set("token",t);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
-  async function api(p,o={}){const r=await fetch(tokenUrl(p),o),txt=await r.text();let j;try{j=txt?JSON.parse(txt):null}catch{}if(!r.ok)throw new Error(j?.error||txt||r.statusText);return j}
+  const tokenUrl=p=>{
+    const u=new URL(p,location.origin),t=new URLSearchParams(location.search).get("token");
+    if(t&&u.origin===location.origin)u.searchParams.set("token",t);
+    return u.origin===location.origin?u.pathname+u.search+u.hash:u.href;
+  };
+
+  async function api(p,o={}){
+    const r=await fetch(tokenUrl(p),o),txt=await r.text();
+    let j;try{j=txt?JSON.parse(txt):null}catch{}
+    if(!r.ok)throw new Error(j?.error||txt||r.statusText);
+    return j;
+  }
+
   function pending(){try{return JSON.parse(sessionStorage.getItem(PENDING_KEY)||"[]")}catch{return[]}}
   function savePending(rows){sessionStorage.setItem(PENDING_KEY,JSON.stringify(rows||[]));renderPending()}
   function addPending(item){const rows=pending();if(!rows.some(x=>x.id===item.id))rows.push(item);savePending(rows)}
+
   function taskAssigneeChoices(){
     const source=document.getElementById("tAssigneeSelect");
     const options=source?[...source.options].filter(o=>o.value):[];
@@ -18,37 +33,216 @@
     if(!preferred&&source?.value)preferred=options.find(o=>o.value===source.value);
     return {options,preferred};
   }
+
   function taskAssigneeOptionsHtml(){
     const {options,preferred}=taskAssigneeChoices();
     if(!options.length)return '<option value="">– Mitarbeiter auswählen –</option>';
-    return options.map(o=>{const name=String(o.dataset.name||o.textContent||"").trim();return `<option value="${esc(o.value)}" ${preferred&&o.value===preferred.value?'selected':''}>${esc(name)}</option>`}).join("");
+    return options.map(o=>{
+      const name=String(o.dataset.name||o.textContent||"").trim();
+      return `<option value="${esc(o.value)}" ${preferred&&o.value===preferred.value?'selected':''}>${esc(name)}</option>`;
+    }).join("");
   }
+
   function selectedInboxAssignee(){
     const select=document.getElementById("kristaInboxAssignee");
-    if(select?.value){const option=select.selectedOptions?.[0];return {id:select.value,name:String(option?.textContent||"").trim()}}
+    if(select?.value){
+      const option=select.selectedOptions?.[0];
+      return {id:select.value,name:String(option?.textContent||"").trim()};
+    }
     const {preferred}=taskAssigneeChoices();
     return preferred?{id:preferred.value,name:String(preferred.dataset.name||preferred.textContent||"").trim()}:{id:"",name:""};
   }
-  function installCss(){if(document.getElementById("kristaInboxCss"))return;const s=document.createElement("style");s.id="kristaInboxCss";s.textContent=`
+
+  function installCss(){
+    if(document.getElementById("kristaInboxCss"))return;
+    const s=document.createElement("style");
+    s.id="kristaInboxCss";
+    s.textContent=`
 .krista-inbox-button{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:850;cursor:pointer;white-space:nowrap}.krista-inbox-button:hover{background:rgba(255,255,255,.15)}
 .krista-inbox-drop{position:fixed;inset:0;z-index:40000;display:none;place-items:center;background:rgba(17,37,24,.84);padding:24px}.krista-inbox-drop.open{display:grid}.krista-inbox-drop>div{width:min(700px,100%);padding:46px 24px;border:3px dashed rgba(255,255,255,.75);border-radius:24px;text-align:center;color:#fff}.krista-inbox-drop strong{font-size:26px;display:block}.krista-inbox-drop span{display:block;margin-top:8px;opacity:.8}
-.krista-inbox-modal-bg{position:fixed;inset:0;z-index:40010;display:none;place-items:center;padding:18px;background:rgba(0,0,0,.52)}.krista-inbox-modal-bg.open{display:grid}.krista-inbox-modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:20px;padding:20px;box-shadow:0 25px 80px rgba(0,0,0,.3)}.krista-inbox-head{display:flex;justify-content:space-between;gap:14px}.krista-inbox-head h2{margin:0}.krista-inbox-reco{margin:14px 0;padding:13px;border-radius:12px;background:#edf6ef;border:1px solid #cbe0d0}.krista-inbox-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}.krista-inbox-meta div{padding:8px 0;border-bottom:1px solid #eee}.krista-inbox-assignee{margin-top:14px;padding:12px;border:1px solid #d9e5dc;border-radius:12px;background:#f7fbf8}.krista-inbox-assignee label{display:block;margin-bottom:6px}.krista-inbox-assignee select{width:100%;background:#fff}.krista-inbox-routes{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.krista-inbox-routes button{background:#fff;color:#222;border:1px solid #ccc}.krista-inbox-routes button.recommended{background:#27713d;color:#fff;border-color:#27713d}.krista-inbox-preview{white-space:pre-wrap;margin-top:14px;padding:12px;border-radius:12px;background:#f7f7f4;font-size:12px;max-height:220px;overflow:auto}.krista-inbox-pending{margin-top:12px;padding:11px;border-radius:11px;background:#edf6ef;border:1px solid #cbe0d0}.krista-inbox-pending a{font-weight:800}.krista-inbox-pending button{padding:4px 7px;margin-left:6px}@media(max-width:700px){.krista-inbox-meta{grid-template-columns:1fr}.krista-inbox-button span{display:none}}
-`;document.head.appendChild(s)}
+.krista-inbox-modal-bg{position:fixed;inset:0;z-index:40010;display:none;place-items:center;padding:18px;background:rgba(0,0,0,.52)}.krista-inbox-modal-bg.open{display:grid}.krista-inbox-modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:20px;padding:20px;box-shadow:0 25px 80px rgba(0,0,0,.3)}.krista-inbox-head{display:flex;justify-content:space-between;gap:14px}.krista-inbox-head h2{margin:0}.krista-inbox-reco{margin:14px 0;padding:13px;border-radius:12px;background:#edf6ef;border:1px solid #cbe0d0}.krista-inbox-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}.krista-inbox-meta div{padding:8px 0;border-bottom:1px solid #eee}.krista-inbox-assignee{margin-top:14px;padding:12px;border:1px solid #d9e5dc;border-radius:12px;background:#f7fbf8}.krista-inbox-assignee label{display:block;margin-bottom:6px}.krista-inbox-assignee select{width:100%;background:#fff}.krista-inbox-routes{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.krista-inbox-routes button{background:#fff;color:#222;border:1px solid #ccc}.krista-inbox-routes button.recommended{background:#27713d;color:#fff;border-color:#27713d}.krista-inbox-routes button:disabled{opacity:.55;cursor:wait}.krista-inbox-route-status{margin-top:10px;padding:9px 11px;border-radius:9px;font-size:12px;display:none}.krista-inbox-route-status.show{display:block;background:#eef7ee;color:#145829}.krista-inbox-route-status.error{display:block;background:#fde7e7;color:#8b1f1f}.krista-inbox-preview{white-space:pre-wrap;margin-top:14px;padding:12px;border-radius:12px;background:#f7f7f4;font-size:12px;max-height:220px;overflow:auto}.krista-inbox-pending{margin-top:12px;padding:11px;border-radius:11px;background:#edf6ef;border:1px solid #cbe0d0}.krista-inbox-pending a{font-weight:800}.krista-inbox-pending button{padding:4px 7px;margin-left:6px}@media(max-width:700px){.krista-inbox-meta{grid-template-columns:1fr}.krista-inbox-button span{display:none}}
+`;
+    document.head.appendChild(s);
+  }
+
   function installDom(){
     if(document.getElementById("kristaInboxDrop"))return;
-    document.body.insertAdjacentHTML("beforeend",`<div id="kristaInboxDrop" class="krista-inbox-drop"><div><strong>📥 Hier ablegen</strong><span>KRISTINE liest die Datei und fragt danach, wohin sie gehört.</span></div></div><div id="kristaInboxModalBg" class="krista-inbox-modal-bg"><div class="krista-inbox-modal"><div class="krista-inbox-head"><div><h2>📥 KRISTINE Eingang</h2><div id="kristaInboxFile" class="small"></div></div><button id="kristaInboxClose" class="secondary">Schließen</button></div><div id="kristaInboxContent"></div></div></div><input id="kristaInboxPicker" type="file" multiple hidden>`);
-    kristaInboxClose.onclick=()=>kristaInboxModalBg.classList.remove("open");kristaInboxModalBg.onclick=e=>{if(e.target===kristaInboxModalBg)kristaInboxModalBg.classList.remove("open")};kristaInboxPicker.onchange=e=>importFiles(e.target.files);
+    document.body.insertAdjacentHTML("beforeend",`<div id="kristaInboxDrop" class="krista-inbox-drop"><div><strong>📥 Hier ablegen</strong><span>KRISTINE liest die Datei und fragt danach, wohin sie gehört.</span></div></div><div id="kristaInboxModalBg" class="krista-inbox-modal-bg"><div class="krista-inbox-modal"><div class="krista-inbox-head"><div><h2>📥 KRISTINE Eingang</h2><div id="kristaInboxFile" class="small"></div></div><button id="kristaInboxClose" type="button" class="secondary">Schließen</button></div><div id="kristaInboxContent"></div></div></div><input id="kristaInboxPicker" type="file" multiple hidden>`);
+    kristaInboxClose.onclick=()=>kristaInboxModalBg.classList.remove("open");
+    kristaInboxModalBg.onclick=e=>{if(e.target===kristaInboxModalBg)kristaInboxModalBg.classList.remove("open")};
+    kristaInboxPicker.onchange=e=>importFiles(e.target.files);
+    kristaInboxContent.addEventListener("click",onInboxContentClick);
   }
-  function installButton(){const top=document.querySelector(".krista-shell-main");if(!top||document.getElementById("kristaInboxButton"))return;const b=document.createElement("button");b.id="kristaInboxButton";b.type="button";b.className="krista-inbox-button";b.innerHTML="📥 <span>EINGANG</span>";b.title="Mail, Foto, PDF oder Dokument in KRISTINE ziehen";b.onclick=()=>kristaInboxPicker.click();const user=top.querySelector(".krista-user");top.insertBefore(b,user||null)}
-  async function importFiles(list){for(const file of [...(list||[])]){if(file.size>12*1024*1024){alert(file.name+" ist größer als 12 MB.");continue}try{const data=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result||"").split(",").pop());r.onerror=no;r.readAsDataURL(file)});showBusy(file.name);const d=await api("/kristine/api/inbox/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:file.name,type:file.type,data})});showAnalysis(d.item)}catch(e){alert("Eingang: "+e.message)}}}
-  function showBusy(name){current=null;kristaInboxFile.textContent=name;kristaInboxContent.innerHTML='<div class="krista-inbox-reco">KRISTINE liest und analysiert …</div>';kristaInboxModalBg.classList.add("open")}
-  function showAnalysis(item){current=item;const a=item.analysis||{},rec=a.recommended||"filing",pct=Math.round(Number(a.confidence||0)*100);kristaInboxFile.textContent=item.name;kristaInboxContent.innerHTML=`<div class="krista-inbox-reco"><strong>KRISTINE empfiehlt: ${esc(routeNames[rec]||"Ablage")}</strong> · ${pct}%<br><span class="small">${esc((a.reasons||[]).join(" · ")||"Inhalt wurde analysiert.")}</span></div><div class="krista-inbox-meta"><div><strong>Betreff</strong><br>${esc(a.subject||"–")}</div><div><strong>Fällig/Termin</strong><br>${esc(a.dueDate||"–")}</div><div><strong>Kontakt</strong><br>${esc(a.contactName||"–")}</div><div><strong>Telefon</strong><br>${esc(a.contactPhone||"–")}</div><div><strong>E-Mail</strong><br>${esc(a.contactEmail||"–")}</div><div><strong>Erkannt</strong><br>${esc(a.product||a.colorName||"–")}</div></div><div class="krista-inbox-assignee"><label for="kristaInboxAssignee"><strong>Aufgabe für</strong></label><select id="kristaInboxAssignee">${taskAssigneeOptionsHtml()}</select><div class="small" style="margin-top:5px">Standard: Alexander Krista · bei Bedarf ändern.</div></div><div class="krista-inbox-routes">${["task","invoice","filing","appointment","order"].map(r=>`<button data-route="${r}" class="${r===rec?'recommended':''}">${routeNames[r]}</button>`).join("")}</div>${a.excerpt?`<div class="krista-inbox-preview">${esc(a.excerpt)}</div>`:""}`;kristaInboxContent.querySelectorAll("[data-route]").forEach(b=>b.onclick=()=>route(item,b.dataset.route));kristaInboxModalBg.classList.add("open")}
-  async function route(item,r){const assignee=r==="task"?selectedInboxAssignee():null;await api(`/kristine/api/inbox/${encodeURIComponent(item.id)}/route`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({route:r,assigneeId:assignee?.id||"",assigneeName:assignee?.name||""})});if(r==="task"){item._assignee=assignee;return fillTask(item)}kristaInboxContent.insertAdjacentHTML("afterbegin",`<div class="krista-inbox-reco"><strong>${routeNames[r]}</strong> ist als Ziel vorgemerkt. Die Fachfunktion wird als nächster Schritt angeschlossen.</div>`)}
-  function setValue(id,value){const el=document.getElementById(id);if(el&&value){el.value=value;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}}
-  function fillTask(item){const a=item.analysis||{},assignee=item._assignee||selectedInboxAssignee();if(typeof window.showTab==="function")window.showTab("tasks");location.hash="tasks";setValue("tTitle",a.title||a.subject||item.name);setValue("tDueDate",a.dueDate);setValue("tContactName",a.contactName);setValue("tContactPhone",a.contactPhone);setValue("tContactEmail",a.contactEmail);if(assignee?.id)setValue("tAssigneeSelect",assignee.id);const details=[a.summary,a.excerpt&&a.excerpt!==a.summary?a.excerpt:"",`📎 Original im KRISTINE-Eingang: ${item.name}`].filter(Boolean).join("\n\n");setValue("tReminder",details.slice(0,8000));const other=document.querySelector('input[name="taskType"][value="Sonstiges"]');if(other){other.checked=true;other.dispatchEvent(new Event("change",{bubbles:true}))}addPending({id:item.id,name:item.name});renderPending();kristaInboxModalBg.classList.remove("open");document.querySelector("#tasks .task-create-card")?.scrollIntoView({behavior:"smooth",block:"start"})}
-  function renderPending(){const card=document.querySelector("#tasks .task-create-card");if(!card)return;let box=document.getElementById("kristaInboxPending");if(!box){box=document.createElement("div");box.id="kristaInboxPending";box.className="krista-inbox-pending";const actions=card.querySelector(".actions");actions?.before(box)}const rows=pending();box.style.display=rows.length?"block":"none";box.innerHTML=rows.length?`<strong>📎 Anhänge für diese Aufgabe</strong><br>${rows.map(x=>`<a target="_blank" rel="noopener" href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(x.id)}/file`)}">${esc(x.name)}</a><button type="button" class="secondary" data-remove="${esc(x.id)}">×</button>`).join("<br>")}`:"";box.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>savePending(rows.filter(x=>x.id!==b.dataset.remove)))}
-  function hookTaskSave(){if(window.__kristaInboxTaskHook||typeof window.addTask!=="function")return;window.__kristaInboxTaskHook=true;const original=window.addTask;window.addTask=async function(){const rows=pending(),before=new Set((window.data?.tasks||[]).map(x=>String(x.id)));const result=await original.apply(this,arguments);if(rows.length){const created=(window.data?.tasks||[]).find(x=>!before.has(String(x.id)));if(created){for(const item of rows){try{await api(`/kristine/api/inbox/${encodeURIComponent(item.id)}/link-task`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:created.id})})}catch(e){console.warn("Anhang konnte nicht verknüpft werden",e)}}savePending([])}}return result}}
-  function dragOn(){dragDepth++;kristaInboxDrop.classList.add("open")};function dragOff(){dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)kristaInboxDrop.classList.remove("open")}
-  function boot(){if(!location.pathname.toLowerCase().includes("/kristine"))return;installCss();installDom();installButton();renderPending();hookTaskSave();new MutationObserver(()=>{installButton();renderPending();hookTaskSave()}).observe(document.body,{childList:true,subtree:true});document.addEventListener("dragenter",e=>{if(e.dataTransfer?.types?.includes("Files"))dragOn()});document.addEventListener("dragleave",e=>{if(e.dataTransfer?.types?.includes("Files"))dragOff()});document.addEventListener("dragover",e=>{if(e.dataTransfer?.types?.includes("Files")){e.preventDefault();e.dataTransfer.dropEffect="copy"}});document.addEventListener("drop",e=>{if(e.dataTransfer?.files?.length){e.preventDefault();dragDepth=0;kristaInboxDrop.classList.remove("open");importFiles(e.dataTransfer.files)}})}
+
+  function installButton(){
+    const top=document.querySelector(".krista-shell-main");
+    if(!top||document.getElementById("kristaInboxButton"))return;
+    const b=document.createElement("button");
+    b.id="kristaInboxButton";b.type="button";b.className="krista-inbox-button";
+    b.innerHTML="📥 <span>EINGANG</span>";b.title="Mail, Foto, PDF oder Dokument in KRISTINE ziehen";
+    b.onclick=()=>kristaInboxPicker.click();
+    const user=top.querySelector(".krista-user");top.insertBefore(b,user||null);
+  }
+
+  async function importFiles(list){
+    for(const file of [...(list||[])]){
+      if(file.size>12*1024*1024){alert(file.name+" ist größer als 12 MB.");continue}
+      try{
+        const data=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result||"").split(",").pop());r.onerror=no;r.readAsDataURL(file)});
+        showBusy(file.name);
+        const d=await api("/kristine/api/inbox/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:file.name,type:file.type,data})});
+        showAnalysis(d.item);
+      }catch(e){alert("Eingang: "+e.message)}
+    }
+  }
+
+  function showBusy(name){
+    current=null;
+    kristaInboxFile.textContent=name;
+    kristaInboxContent.innerHTML='<div class="krista-inbox-reco">KRISTINE liest und analysiert …</div>';
+    kristaInboxModalBg.classList.add("open");
+  }
+
+  function showAnalysis(item){
+    current=item;
+    routing=false;
+    const a=item.analysis||{},rec=a.recommended||"filing",pct=Math.round(Number(a.confidence||0)*100);
+    kristaInboxFile.textContent=item.name;
+    kristaInboxContent.innerHTML=`<div class="krista-inbox-reco"><strong>KRISTINE empfiehlt: ${esc(routeNames[rec]||"Ablage")}</strong> · ${pct}%<br><span class="small">${esc((a.reasons||[]).join(" · ")||"Inhalt wurde analysiert.")}</span></div><div class="krista-inbox-meta"><div><strong>Betreff</strong><br>${esc(a.subject||"–")}</div><div><strong>Fällig/Termin</strong><br>${esc(a.dueDate||"–")}</div><div><strong>Kontakt</strong><br>${esc(a.contactName||"–")}</div><div><strong>Telefon</strong><br>${esc(a.contactPhone||"–")}</div><div><strong>E-Mail</strong><br>${esc(a.contactEmail||"–")}</div><div><strong>Erkannt</strong><br>${esc(a.product||a.colorName||"–")}</div></div><div class="krista-inbox-assignee"><label for="kristaInboxAssignee"><strong>Aufgabe für</strong></label><select id="kristaInboxAssignee">${taskAssigneeOptionsHtml()}</select><div class="small" style="margin-top:5px">Standard: Alexander Krista · bei Bedarf ändern.</div></div><div class="krista-inbox-routes">${["task","invoice","filing","appointment","order"].map(r=>`<button type="button" data-inbox-route="${r}" class="${r===rec?'recommended':''}">${routeNames[r]}</button>`).join("")}</div><div id="kristaInboxRouteStatus" class="krista-inbox-route-status"></div>${a.excerpt?`<div class="krista-inbox-preview">${esc(a.excerpt)}</div>`:""}`;
+    kristaInboxModalBg.classList.add("open");
+  }
+
+  function setRouteStatus(text,type="show"){
+    const el=document.getElementById("kristaInboxRouteStatus");
+    if(!el)return;
+    el.textContent=text||"";
+    el.className="krista-inbox-route-status "+(text?type:"");
+  }
+
+  function setRouteButtonsDisabled(disabled){
+    document.querySelectorAll("#kristaInboxContent [data-inbox-route]").forEach(button=>button.disabled=!!disabled);
+  }
+
+  async function persistRoute(item,r,assignee){
+    return api(`/kristine/api/inbox/${encodeURIComponent(item.id)}/route`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({route:r,assigneeId:assignee?.id||"",assigneeName:assignee?.name||""})
+    });
+  }
+
+  async function onInboxContentClick(event){
+    const button=event.target.closest("[data-inbox-route]");
+    if(!button||!current||routing)return;
+    event.preventDefault();event.stopPropagation();
+    const r=button.dataset.inboxRoute;
+    if(!routeNames[r])return;
+    const item=current;
+    const assignee=r==="task"?selectedInboxAssignee():null;
+
+    if(r==="task"){
+      item._assignee=assignee;
+      fillTask(item);
+      persistRoute(item,r,assignee).catch(error=>{
+        console.warn("KRISTINE Eingang: Routing konnte nicht gespeichert werden",error);
+      });
+      return;
+    }
+
+    routing=true;setRouteButtonsDisabled(true);setRouteStatus(`${routeNames[r]} wird übernommen …`);
+    try{
+      await persistRoute(item,r,assignee);
+      setRouteStatus(`${routeNames[r]} ist vorgemerkt. Die Fachfunktion wird als nächster Schritt angeschlossen.`);
+    }catch(error){
+      console.error("KRISTINE Eingang Routing",error);
+      setRouteStatus(`Konnte nicht übernommen werden: ${error.message||error}`,"error");
+    }finally{
+      routing=false;setRouteButtonsDisabled(false);
+    }
+  }
+
+  function setValue(id,value){
+    const el=document.getElementById(id);
+    if(el&&value){el.value=value;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}
+  }
+
+  function fillTask(item){
+    const a=item.analysis||{},assignee=item._assignee||selectedInboxAssignee();
+    if(typeof window.showTab==="function")window.showTab("tasks");
+    location.hash="tasks";
+    setValue("tTitle",a.title||a.subject||item.name);
+    setValue("tDueDate",a.dueDate);
+    setValue("tContactName",a.contactName);
+    setValue("tContactPhone",a.contactPhone);
+    setValue("tContactEmail",a.contactEmail);
+    if(assignee?.id)setValue("tAssigneeSelect",assignee.id);
+    const details=[a.summary,a.excerpt&&a.excerpt!==a.summary?a.excerpt:"",`📎 Original im KRISTINE-Eingang: ${item.name}`].filter(Boolean).join("\n\n");
+    setValue("tReminder",details.slice(0,8000));
+    const other=document.querySelector('input[name="taskType"][value="Sonstiges"]');
+    if(other){other.checked=true;other.dispatchEvent(new Event("change",{bubbles:true}))}
+    addPending({id:item.id,name:item.name});renderPending();
+    kristaInboxModalBg.classList.remove("open");
+    document.querySelector("#tasks .task-create-card")?.scrollIntoView({behavior:"smooth",block:"start"});
+  }
+
+  function renderPending(){
+    const card=document.querySelector("#tasks .task-create-card");if(!card)return;
+    let box=document.getElementById("kristaInboxPending");
+    if(!box){box=document.createElement("div");box.id="kristaInboxPending";box.className="krista-inbox-pending";const actions=card.querySelector(".actions");actions?.before(box)}
+    const rows=pending();box.style.display=rows.length?"block":"none";
+    box.innerHTML=rows.length?`<strong>📎 Anhänge für diese Aufgabe</strong><br>${rows.map(x=>`<a target="_blank" rel="noopener" href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(x.id)}/file`)}">${esc(x.name)}</a><button type="button" class="secondary" data-remove="${esc(x.id)}">×</button>`).join("<br>")}`:"";
+    box.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>savePending(rows.filter(x=>x.id!==b.dataset.remove)));
+  }
+
+  async function taskIds(){
+    try{
+      const state=await api("/kristine/api/bootstrap");
+      return new Set((state.tasks||[]).map(row=>String(row.id)));
+    }catch{return new Set()}
+  }
+
+  async function newestTaskNotIn(before){
+    try{
+      const state=await api("/kristine/api/bootstrap");
+      return (state.tasks||[])
+        .filter(row=>!before.has(String(row.id)))
+        .sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")))[0]||null;
+    }catch{return null}
+  }
+
+  function hookTaskSave(){
+    if(window.__kristaInboxTaskHook||typeof window.addTask!=="function")return;
+    window.__kristaInboxTaskHook=true;
+    const original=window.addTask;
+    window.addTask=async function(){
+      const rows=pending();
+      const before=rows.length?await taskIds():new Set();
+      const result=await original.apply(this,arguments);
+      if(rows.length){
+        const created=await newestTaskNotIn(before);
+        if(created){
+          for(const item of rows){
+            try{await api(`/kristine/api/inbox/${encodeURIComponent(item.id)}/link-task`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:created.id})})}
+            catch(e){console.warn("Anhang konnte nicht verknüpft werden",e)}
+          }
+          savePending([]);
+        }
+      }
+      return result;
+    };
+  }
+
+  function dragOn(){dragDepth++;kristaInboxDrop.classList.add("open")}
+  function dragOff(){dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)kristaInboxDrop.classList.remove("open")}
+
+  function boot(){
+    if(!location.pathname.toLowerCase().includes("/kristine"))return;
+    installCss();installDom();installButton();renderPending();hookTaskSave();
+    new MutationObserver(()=>{installButton();renderPending();hookTaskSave()}).observe(document.body,{childList:true,subtree:true});
+    document.addEventListener("dragenter",e=>{if(e.dataTransfer?.types?.includes("Files"))dragOn()});
+    document.addEventListener("dragleave",e=>{if(e.dataTransfer?.types?.includes("Files"))dragOff()});
+    document.addEventListener("dragover",e=>{if(e.dataTransfer?.types?.includes("Files")){e.preventDefault();e.dataTransfer.dropEffect="copy"}});
+    document.addEventListener("drop",e=>{if(e.dataTransfer?.files?.length){e.preventDefault();dragDepth=0;kristaInboxDrop.classList.remove("open");importFiles(e.dataTransfer.files)}});
+  }
+
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
 })();
