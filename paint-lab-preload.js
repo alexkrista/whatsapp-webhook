@@ -68,7 +68,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan-insights.js?v=20260821-1038"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-inventory-ist-input.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ist-input.js?v=20260821-1143"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ist-input.js?v=20260821-1333"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-inventory-counter-fix.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-counter-fix.js?v=20260821-1152"></script>\n</body>');
