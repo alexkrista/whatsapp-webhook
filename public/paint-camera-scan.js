@@ -1,5 +1,7 @@
 "use strict";
 (function(){
+  const params=new URLSearchParams(location.search);
+  const directScan=params.get("scan")==="1";
   const ean=document.getElementById("ean");
   const scanInfo=document.getElementById("scanInfo");
   if(!ean)return;
@@ -40,19 +42,18 @@
   let starting=false;
   let locked=false;
 
-  function tokenized(url){
-    const token=new URLSearchParams(location.search).get("token")||"";
-    if(!token)return url;
-    return url+(url.includes("?")?"&":"?")+"token="+encodeURIComponent(token);
-  }
-
   function setStatus(text){if(scanInfo)scanInfo.textContent=text||""}
 
   function loadScannerLibrary(){
     if(window.Html5Qrcode)return Promise.resolve();
     return new Promise((resolve,reject)=>{
       const existing=document.querySelector('script[data-lg-camera-lib]');
-      if(existing){existing.addEventListener("load",()=>resolve(),{once:true});existing.addEventListener("error",()=>reject(new Error("Scanner-Bibliothek konnte nicht geladen werden")),{once:true});return;}
+      if(existing){
+        if(window.Html5Qrcode)return resolve();
+        existing.addEventListener("load",()=>resolve(),{once:true});
+        existing.addEventListener("error",()=>reject(new Error("Scanner-Bibliothek konnte nicht geladen werden")),{once:true});
+        return;
+      }
       const script=document.createElement("script");
       script.src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
       script.async=true;
@@ -119,14 +120,47 @@
     }catch(error){
       await stopCamera(false);
       const msg=String(error?.message||error||"Kamera konnte nicht gestartet werden");
-      setStatus(msg+". EAN kann weiterhin manuell eingegeben werden.");
+      setStatus(msg+". Bitte den Kamera-Button antippen oder EAN manuell eingeben.");
     }finally{
       starting=false;
       button.disabled=false;
     }
   }
 
+  function openScanTab(){
+    const scanTab=document.querySelector('[data-tab="scan"]');
+    if(scanTab && !scanTab.classList.contains("active")) scanTab.click();
+    else if(typeof window.showTab==="function") window.showTab("scan");
+  }
+
+  function isPhoneLike(){
+    return window.matchMedia?.("(max-width: 900px), (pointer: coarse)")?.matches || window.innerWidth<=900;
+  }
+
+  async function enterDirectScan(){
+    openScanTab();
+    // scan=1 ist nur der Einsprung. Danach entfernen, damit ein Refresh nicht ungefragt die Kamera erneut öffnet.
+    try{
+      const url=new URL(location.href);
+      url.searchParams.delete("scan");
+      history.replaceState(null,"",url.pathname+url.search+url.hash);
+    }catch{}
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    if(isPhoneLike()){
+      // Auf iPhone/Android versuchen wir direkt die Rückkamera zu öffnen.
+      // Falls der Browser dafür noch eine Benutzeraktion verlangt, bleibt der große Kamera-Button als Fallback sichtbar.
+      await startCamera();
+    }else{
+      ean.focus();
+    }
+  }
+
   button.addEventListener("click",startCamera);
   document.querySelectorAll("[data-tab]").forEach(tab=>tab.addEventListener("click",()=>{if(tab.dataset.tab!=="scan"&&scanner)stopCamera(true)}));
   window.addEventListener("pagehide",()=>{if(scanner)stopCamera(false)});
+
+  if(directScan){
+    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",enterDirectScan,{once:true});
+    else setTimeout(enterDirectScan,0);
+  }
 })();
