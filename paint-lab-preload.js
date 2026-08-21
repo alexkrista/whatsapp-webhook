@@ -19,6 +19,7 @@ const { registerPaintInventory } = require("./paint-inventory");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
 const { registerPaintLegacySollImport } = require("./paint-legacy-soll-import");
+const { registerPaintInventoryRecovery } = require("./paint-inventory-recovery");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -55,11 +56,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-readability.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-readability.js"></script>\n</body>');
       }
-      // EAN-Kompatibilität MUSS vor dem Inventur-Scanner geladen werden. Seit 11:59
-      // wird die volle 13-stellige EAN direkt gegen Material + Gebinde + Basis geprüft;
-      // SKU allein darf keine Dose mehr einem falschen Produkt zuordnen.
+      // EAN-Kompatibilität MUSS vor dem Inventur-Scanner geladen werden.
       if (!fixed.includes("/public/paint-scan-compat.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-scan-compat.js?v=20260821-1159"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-scan-compat.js?v=20260821-1535"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-inventory-scan.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan.js?v=20260821-1018"></script>\n</body>');
@@ -68,13 +67,16 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-scan-insights.js?v=20260821-1038"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-inventory-ist-input.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ist-input.js?v=20260821-1340"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ist-input.js?v=20260821-1535"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-inventory-counter-fix.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-counter-fix.js?v=20260821-1152"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-legacy-soll-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-legacy-soll-ui.js?v=20260821-1248"></script>\n</body>');
+      }
+      if (!fixed.includes("/public/paint-inventory-recovery-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-recovery-ui.js?v=20260821-1535"></script>\n</body>');
       }
 
       res.set("Content-Language", "de");
@@ -107,9 +109,10 @@ function wrappedExpress(...args) {
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
         registerPaintLegacySollImport(app, opts);
+        registerPaintInventoryRecovery(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Inventur-Scanner + Scan-Einblicke + echter Inventur-Zähler + exakte EAN-Identität + alter Excel-Sollstand + Excel-Sollwerte + lesbare Tabellen + Bestellentwurf + Tapeten + Kamera-Scan registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur + sauberer Recovery-Neuaufbau registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
