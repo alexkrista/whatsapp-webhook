@@ -12,6 +12,7 @@ const { registerPaintLiveFix } = require("./paint-live-fix");
 const { registerPaintOrderformFix } = require("./paint-orderform-fix");
 const { registerPaintWallpaperOrder } = require("./paint-wallpaper-order");
 const { registerPaintOrderSummaryFix } = require("./paint-order-summary-fix");
+const { registerPaintInventoryExcel } = require("./paint-inventory-excel");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
@@ -74,10 +75,11 @@ function wrappedExpress(...args) {
         registerPaintOrderformFix(app, opts);
         registerPaintWallpaperOrder(app, opts);
         registerPaintOrderSummaryFix(app, opts);
+        registerPaintInventoryExcel(app, opts);
         registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Bestellentwurf + Tapeten + Kamera-Scan registriert");
+        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Excel-Sollwerte + Bestellentwurf + Tapeten + Kamera-Scan registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
