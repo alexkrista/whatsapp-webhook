@@ -45,6 +45,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-camera-scan.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-camera-scan.js"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-inventory-plan-fix.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-plan-fix.js"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
