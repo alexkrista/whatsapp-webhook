@@ -11,9 +11,19 @@
       headers: { "Content-Type": "application/json", ...(opt.headers || {}) },
     });
     const data = await response.json().catch(() => ({ ok: false, error: "Keine JSON-Antwort" }));
-    if (!response.ok || data.ok === false) throw new Error(data.error || ("HTTP " + response.status));
+    if (!response.ok || data.ok === false) {
+      const detail = [data.error, data.invalidCount ? `${data.invalidCount} ungültige Zeilen` : "", data.unknownCount ? `${data.unknownCount} unbekannte SKU` : ""].filter(Boolean).join(" · ");
+      throw new Error(detail || ("HTTP " + response.status));
+    }
     return data;
   }
+
+  const fileBase64 = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   function suggested(stock, minimum, target) {
     stock = Math.max(0, Number(stock || 0));
@@ -69,7 +79,7 @@
       .plan-list-top{padding:16px 18px 12px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start;justify-content:space-between}.plan-list-top h2{margin:0 0 4px;font-size:21px}.plan-list-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
       .plan-list-filter{margin:10px 18px 8px;width:calc(100% - 36px);padding:10px 12px;border:1px solid #cfd1ca;border-radius:10px;font-size:15px}
       .plan-list-scroll{overflow:auto;padding:0 18px 16px}.plan-list-head,.plan-list-row{display:grid;grid-template-columns:minmax(210px,1.55fr) 95px minmax(160px,1.15fr) 84px 84px 100px;gap:8px;align-items:center}.plan-list-head{position:sticky;top:0;z-index:2;background:#fff;padding:8px 0 7px;border-bottom:1px solid var(--line);font-size:11px;font-weight:900;color:var(--muted)}.plan-list-row{padding:6px 0;border-bottom:1px solid #eceee8}.plan-list-row.dirty{background:#fffaf0}.plan-list-code{font-size:10px;color:var(--muted);margin-top:2px}.plan-list-num{width:74px;padding:7px;border:1px solid #aeb5ad;border-radius:8px;font-weight:900;text-align:center}.plan-list-ek{text-align:right;font-weight:800}.plan-list-status{padding:0 18px 14px;font-size:12px;color:var(--muted)}
-      @media(max-width:760px){.plan-list-modal{padding:0}.plan-list-card{max-height:100vh;height:100vh;border-radius:0}.plan-list-top{padding:12px}.plan-list-filter{margin:8px 12px;width:calc(100% - 24px)}.plan-list-scroll{padding:0 12px 14px}.plan-list-head{display:none}.plan-list-row{grid-template-columns:1fr 72px 72px;gap:5px 8px;padding:10px 0}.plan-list-row>div:nth-child(1){grid-column:1/-1;font-weight:900}.plan-list-row>div:nth-child(2),.plan-list-row>div:nth-child(3){font-size:12px}.plan-list-row>div:nth-child(6){display:none}.plan-list-num{width:68px}.plan-list-row:before{content:""}}
+      @media(max-width:760px){.plan-list-modal{padding:0}.plan-list-card{max-height:100vh;height:100vh;border-radius:0}.plan-list-top{padding:12px;display:block}.plan-list-actions{margin-top:9px;justify-content:flex-start}.plan-list-actions .btn{flex:1 1 auto}.plan-list-filter{margin:8px 12px;width:calc(100% - 24px)}.plan-list-scroll{padding:0 12px 14px}.plan-list-head{display:none}.plan-list-row{grid-template-columns:1fr 72px 72px;gap:5px 8px;padding:10px 0}.plan-list-row>div:nth-child(1){grid-column:1/-1;font-weight:900}.plan-list-row>div:nth-child(2),.plan-list-row>div:nth-child(3){font-size:12px}.plan-list-row>div:nth-child(6){display:none}.plan-list-num{width:68px}}
     `;
     document.head.appendChild(style);
   }
@@ -83,7 +93,7 @@
     modal.className = "plan-list-modal";
     modal.innerHTML = `
       <div class="plan-list-card" role="dialog" aria-modal="true" aria-label="Lager-Sollwerte">
-        <div class="plan-list-top"><div><h2>Lager-Sollwerte</h2><div class="muted">Schnellliste zum Eintippen · Mindest = Bestellschwelle · Soll = Auffüllziel</div></div><div class="plan-list-actions"><button id="inventoryPlanListClose" class="btn" type="button">Schließen</button><button id="inventoryPlanListSave" class="btn primary" type="button">Sollwerte speichern</button></div></div>
+        <div class="plan-list-top"><div><h2>Lager-Sollwerte</h2><div class="muted">Schnellliste zum Eintippen · Mindest = Bestellschwelle · Soll = Auffüllziel</div></div><div class="plan-list-actions"><button id="inventoryPlanExcelDownload" class="btn" type="button">Excel herunterladen</button><button id="inventoryPlanExcelImport" class="btn" type="button">Excel einlesen</button><input id="inventoryPlanExcelFile" type="file" accept=".xlsx,.xls" hidden><button id="inventoryPlanListClose" class="btn" type="button">Schließen</button><button id="inventoryPlanListSave" class="btn primary" type="button">Sollwerte speichern</button></div></div>
         <input id="inventoryPlanListFilter" class="plan-list-filter" placeholder="Material, Gebinde, Basis oder SKU filtern …">
         <div class="plan-list-scroll"><div class="plan-list-head"><span>Material</span><span>Gebinde</span><span>Basis</span><span>Mindest</span><span>Soll</span><span>EK</span></div><div id="inventoryPlanListBody"></div></div>
         <div id="inventoryPlanListStatus" class="plan-list-status"></div>
@@ -96,6 +106,9 @@
       modal.querySelectorAll("[data-plan-list-row]").forEach(row => { row.hidden = !!q && !String(row.dataset.search || "").includes(q); });
     });
     modal.querySelector("#inventoryPlanListSave").onclick = savePlanList;
+    modal.querySelector("#inventoryPlanExcelDownload").onclick = downloadPlanExcel;
+    modal.querySelector("#inventoryPlanExcelImport").onclick = () => modal.querySelector("#inventoryPlanExcelFile")?.click();
+    modal.querySelector("#inventoryPlanExcelFile").addEventListener("change", importPlanExcel);
     return modal;
   }
 
@@ -111,6 +124,19 @@
 
   function findSourceRow(articleId) {
     return [...document.querySelectorAll("[data-inv-row]")].find(row => String(row.dataset.id || "") === String(articleId || "")) || null;
+  }
+
+  function applyServerChanges(changes) {
+    (Array.isArray(changes) ? changes : []).forEach(change => {
+      const source = findSourceRow(change.articleId);
+      if (!source) return;
+      const min = source.querySelector(".inventory-min");
+      const target = source.querySelector(".inventory-target");
+      if (min) min.value = String(change.minimumStock ?? 0);
+      if (target) target.value = String(change.targetStock ?? 0);
+      source.dataset.levelDirty = "0";
+      recalcRow(source);
+    });
   }
 
   async function savePlanList() {
@@ -140,6 +166,38 @@
       status.textContent = `Gespeichert: ${Number(result.changed || 0)} Soll/Mindest-Werte`;
     } catch (error) {
       status.textContent = error.message;
+    }
+  }
+
+  function downloadPlanExcel() {
+    const join = "/admin/api/paint/inventory/levels.xlsx".includes("?") ? "&" : "?";
+    const url = "/admin/api/paint/inventory/levels.xlsx" + (token ? join + "token=" + encodeURIComponent(token) : "");
+    window.location.href = url;
+  }
+
+  async function importPlanExcel(event) {
+    const input = event.target;
+    const file = input?.files?.[0];
+    if (!file) return;
+    const modal = ensureModal();
+    const status = modal.querySelector("#inventoryPlanListStatus");
+    if (!confirm(`Soll-/Mindestwerte aus „${file.name}“ einlesen? Nur diese beiden Werte werden geändert.`)) {
+      input.value = "";
+      return;
+    }
+    status.textContent = "Excel wird geprüft und eingelesen …";
+    try {
+      const result = await api("/admin/api/paint/inventory/levels.xlsx", {
+        method: "POST",
+        body: JSON.stringify({ name: file.name, base64: await fileBase64(file) }),
+      });
+      applyServerChanges(result.changes || []);
+      renderPlanList();
+      modal.querySelector("#inventoryPlanListStatus").textContent = `Excel eingelesen: ${Number(result.changed || 0)} geändert · ${Number(result.read || 0)} geprüft`;
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      input.value = "";
     }
   }
 
