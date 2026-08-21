@@ -38,6 +38,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-camera-scan.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-camera-scan.js"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -66,7 +69,7 @@ function wrappedExpress(...args) {
         registerPaintInventory(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + editierbarer Bestellentwurf registriert");
+        console.log("KRISTINE Farben & Lager + LG Herstellerstruktur + Inventur + Bestellentwurf + Kamera-Scan registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
