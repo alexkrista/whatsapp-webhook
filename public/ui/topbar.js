@@ -7,7 +7,7 @@
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
-    { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
+    { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
     { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Planung und Leitstand" },
     { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Mitarbeiter, Fahrzeuge und Stammdaten" },
     { key: "tasks", label: "AUFGABEN", icon: "📌", href: "/kristine#tasks", subtitle: "Offene Aufgaben und Erinnerungen" }
@@ -149,20 +149,24 @@
     renameKriszeitSurface();
   }
 
-  function setupMobileMenu(mount) {
+  function setupMobileMenu(mount, active) {
     const button = mount.querySelector(".krista-mobile-menu");
     const nav = mount.querySelector(".krista-world-nav");
     if (!button || !nav) return;
+    const activeWorld = WORLDS.find(item => item.key === active) || WORLDS[0];
 
     const setOpen = (open) => {
       mount.classList.toggle("menu-open", !!open);
       button.setAttribute("aria-expanded", open ? "true" : "false");
-      button.innerHTML = open ? '<span aria-hidden="true">×</span><span>Schließen</span>' : '<span aria-hidden="true">☰</span><span>Menü</span>';
+      button.innerHTML = open
+        ? '<span aria-hidden="true">×</span><span>Schließen</span>'
+        : `<span aria-hidden="true">${activeWorld.icon}</span><span>${activeWorld.label}</span><span aria-hidden="true">▾</span>`;
     };
 
     button.addEventListener("click", () => setOpen(!mount.classList.contains("menu-open")));
     nav.querySelectorAll("a").forEach(link => link.addEventListener("click", () => setOpen(false)));
     window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); }, { passive: true });
+    setOpen(false);
   }
 
   function buildTopbar(mount, options = {}) {
@@ -177,7 +181,7 @@
           <span class="krista-mark" aria-hidden="true">K</span>
           <span class="krista-brand-copy"><strong>KRISTA</strong><small>Einfach. Intuitiv. Gemeinsam.</small></span>
         </a>
-        <button class="krista-mobile-menu" type="button" aria-expanded="false" aria-controls="kristaWorldNav"><span aria-hidden="true">☰</span><span>Menü</span></button>
+        <button class="krista-mobile-menu" type="button" aria-expanded="false" aria-controls="kristaWorldNav"></button>
         <nav id="kristaWorldNav" class="krista-world-nav" aria-label="KRISTA Arbeitswelten">
           ${WORLDS.map((item) => `
             <a class="krista-world-link ${item.key === active ? "active" : ""}" ${item.key === active ? 'aria-current="page"' : ""} href="${tokenized(item.href, item.external)}" ${item.external ? 'rel="noopener"' : ""} title="${item.subtitle}">
@@ -187,7 +191,7 @@
         <div class="krista-user" aria-label="Angemeldeter Benutzer"><strong>Alexander Krista</strong><small>Build ${build}</small></div>
       </div>`;
     document.body.classList.add("krista-ui");
-    setupMobileMenu(mount);
+    setupMobileMenu(mount, active);
   }
 
   window.createKristaTopbar = function createKristaTopbar(options = {}) {
