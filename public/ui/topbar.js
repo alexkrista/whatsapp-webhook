@@ -136,6 +136,12 @@
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260823-intelligence", "data-krista-baustellen-intelligence");
   }
 
+  function loadTowerSignals() {
+    if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260823-signals", "data-krista-tower-signals");
+    }
+  }
+
   function loadKrisadminHome() {
     const path = window.location.pathname.toLowerCase();
     if (path.includes("/admin") && !path.includes("/admin/paint") && !path.includes("/admin/akte") && !path.includes("/admin/pdf") && !path.includes("/admin/download")) {
@@ -198,7 +204,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0024.05";
+    const build = options.build || mount.dataset.kristaBuild || "0024.06";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
@@ -238,6 +244,7 @@
     loadKristineFinanceApproval();
     loadKristineInbox();
     loadBaustellenKnowledgeStack();
+    loadTowerSignals();
     loadKrisadminHome();
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
