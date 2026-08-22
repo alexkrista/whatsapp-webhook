@@ -4,13 +4,18 @@
 WinWorker kennzeichnet Lastschrift/Einzug ueber seinen Zahlungsstatus bzw. ggf.
 ueber eine Zahlungsart-Spalte. Solche Rechnungen bleiben in KRISTINE sichtbar,
 bis der lokale Zahlungsstatus durch den spaeteren CAMT-Abgleich auf paid gesetzt
-wird. Ein WinWorker-Status wie "Lastschrift beglichen" entfernt den Beleg daher
-nicht vorzeitig aus der Erwartungsliste.
+wird.
+
+Wichtig fuer den einmaligen Altbestands-Cutover:
+- Vor dem Cutover-Stichtag werden alte WW-Einzuege gar nicht mehr geladen.
+- Neue/aktuelle WW-Einzuege werden gesammelt in EINER SQLite-Transaktion vorgemerkt,
+  nicht mehr einzeln pro Rechnung. Das verhindert das minutenlange Haengen beim
+  ersten OP-Aufruf.
 """
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from brain_finance_source import FinanceStore, norm_method, norm_status
 from brain_finance_runtime import _parse_finance_task
@@ -24,6 +29,14 @@ def _norm(value):
 
 def _identifier(name):
     return "[" + str(name or "").replace("]", "]]" ) + "]"
+
+
+def _iso_day(value):
+    raw = str(value or "").strip()[:10]
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except Exception:
+        return None
 
 
 def _pick_columns(cursor):
@@ -78,6 +91,27 @@ def install(ns):
 
     store = FinanceStore(ns)
 
+    def direct_debit_cutoff():
+        """Fixer Cutover-Stichtag; vor Initialisierung: heute - 14 Tage."""
+        fallback = date.today() - timedelta(days=14)
+        try:
+            con = store.con()
+            try:
+                exists = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='brain_direct_debit_cutover_state'"
+                ).fetchone()
+                if not exists:
+                    return fallback
+                row = con.execute(
+                    "SELECT cutoff_date FROM brain_direct_debit_cutover_state WHERE id=1"
+                ).fetchone()
+                parsed = _iso_day(row["cutoff_date"] if row else "")
+                return parsed or fallback
+            finally:
+                con.close()
+        except Exception:
+            return fallback
+
     def approval_index():
         if not callable(kristine_api):
             return {}
@@ -92,7 +126,29 @@ def install(ns):
         except Exception:
             return {}
 
+    def persist_current_debits(source_ids):
+        ids = sorted({str(x or "").strip() for x in source_ids if str(x or "").strip()})
+        if not ids:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        con = store.con()
+        try:
+            for sid in ids:
+                con.execute(
+                    """INSERT INTO brain_payment_meta
+                       (source,source_id,payment_method,payment_status,payment_id,note,updated_at)
+                       VALUES('WinWorker',?,'direct_debit','open','',?,?)
+                       ON CONFLICT(source,source_id) DO UPDATE SET
+                         payment_method='direct_debit',
+                         updated_at=excluded.updated_at""",
+                    (sid, "WW Einzug erkannt", now),
+                )
+            con.commit()
+        finally:
+            con.close()
+
     def ww_direct_debits():
+        cutoff = direct_debit_cutoff()
         meta = store.meta()
         legacy = store.legacy()
         con = sql_connection("WinWorker_Projekte_Standard")
@@ -101,6 +157,7 @@ def install(ns):
             due_col, payment_col = _pick_columns(cur)
             due_sql = f", e.{_identifier(due_col)} AS ddDueDate" if due_col else ", NULL AS ddDueDate"
             payment_sql = f", e.{_identifier(payment_col)} AS ddPaymentHint" if payment_col else ", NULL AS ddPaymentHint"
+            due_expr = f"COALESCE(e.{_identifier(due_col)},e.dzBelegdatum)" if due_col else "e.dzBelegdatum"
             sql = """
                 SELECT e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,
                        e.lVonAdrIndex,e.sZahlungsStatus,dm.sDocID,
@@ -109,14 +166,16 @@ def install(ns):
                 FROM dbo.Eingangsbelege e
                 LEFT JOIN dbo.DokumentenManagement dm ON dm.gID=e.gDMID
                 LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden k ON k.StammIndex=e.lVonAdrIndex
-                ORDER BY e.dzBelegdatum,e.cID
+                WHERE """ + due_expr + """ >= ?
+                ORDER BY """ + due_expr + """,e.cID
             """
-            rows = cur.execute(sql).fetchall()
+            rows = cur.execute(sql, cutoff.isoformat()).fetchall()
         finally:
             con.close()
 
         keep = []
         docs = []
+        newly_detected = []
         for r in rows:
             sid = f"ww:{int(r.cID)}"
             ex = meta.get(("WinWorker", sid), {})
@@ -134,31 +193,33 @@ def install(ns):
                 truth = _norm(hint_value)
                 raw_debit = truth in {"1", "true", "ja", "yes", "x", "j"}
 
-            # WW ist fuer die Zahlungsart fuehrend. Einmal erkannt, lokal merken,
-            # damit der Beleg selbst dann bis CAMT sichtbar bleibt, wenn WW spaeter
-            # nur noch einen allgemeinen Status wie "bezahlt" liefert.
             if raw_debit and method != "direct_debit" and local_status != "paid":
-                try:
-                    saved = store.set_meta("WinWorker", sid, method="direct_debit")
-                    ex = dict(ex)
-                    ex.update(saved)
-                    meta[("WinWorker", sid)] = ex
-                    method = "direct_debit"
-                    local_status = norm_status(ex.get("paymentStatus"))
-                except Exception as exc:
-                    print("⚠ WW Einzug konnte nicht vorgemerkt werden:", sid, exc)
-                    method = "direct_debit"
+                method = "direct_debit"
+                newly_detected.append(sid)
 
             if method != "direct_debit":
                 continue
-            # Raus ausschliesslich nach lokalem Zahlungsabschluss (spaeter CAMT).
             if local_status == "paid" or legacy_paid:
+                continue
+
+            invoice_date = iso_date(r.dzBelegdatum) if callable(iso_date) else str(r.dzBelegdatum or "")[:10]
+            due_raw = getattr(r, "ddDueDate", None)
+            due_date = iso_date(due_raw) if due_raw is not None and callable(iso_date) else str(due_raw or "")[:10]
+            due_date = due_date or invoice_date or ""
+            expected = _iso_day(due_date)
+            if expected is not None and expected < cutoff:
                 continue
 
             doc = str(getattr(r, "sDocID", "") or "").strip()
             if doc:
                 docs.append(doc)
-            keep.append((r, sid, doc, raw_status))
+            keep.append((r, sid, doc, raw_status, invoice_date, due_date))
+
+        # Einmalige Sammelschreibung statt hunderten Einzel-Commits.
+        try:
+            persist_current_debits(newly_detected)
+        except Exception as exc:
+            print("⚠ WW Einzuege konnten nicht gesammelt vorgemerkt werden:", exc)
 
         paths = {}
         if callable(lookup_paths) and docs:
@@ -168,13 +229,9 @@ def install(ns):
                 paths = {}
 
         out = []
-        for r, sid, doc, raw_status in keep:
+        for r, sid, doc, raw_status, invoice_date, due_date in keep:
             company = str(getattr(r, "sFirma", "") or "").strip()
             person = " ".join(x for x in [str(getattr(r, "sVorname", "") or "").strip(), str(getattr(r, "sName", "") or "").strip()] if x)
-            invoice_date = iso_date(r.dzBelegdatum) if callable(iso_date) else str(r.dzBelegdatum or "")[:10]
-            due_raw = getattr(r, "ddDueDate", None)
-            due_date = iso_date(due_raw) if due_raw is not None and callable(iso_date) else str(due_raw or "")[:10]
-            due_date = due_date or invoice_date or ""
             found = paths.get(doc, {}) if doc else {}
             out.append({
                 "id": sid,
@@ -315,4 +372,4 @@ def install(ns):
         payments_page_with_debits._krista_direct_debit = True
         app.view_functions["brain_incoming_payments_page"] = payments_page_with_debits
 
-    print("✅ OP Einzug: WW-Lastschriften bleiben bis CAMT sichtbar · getrennt von Zu zahlen")
+    print("✅ OP Einzug: aktueller Cutover schnell · alte WW-Einzuege nicht mehr gescannt · danach CAMT")
