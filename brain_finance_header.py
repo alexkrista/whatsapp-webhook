@@ -3,9 +3,13 @@
 
 The Brain soll keine eigene Kopf-Variante mehr haben. Der lokale Connector bekommt
 auf jeder HTML-Seite denselben Produktkopf wie KRISTOWER/KRISTINE/KRISZEIT/LG.
-Die Links auf die Render-Module werden serverseitig mit dem vorhandenen
-KRISTINE-Admin-Token versehen, damit Navigation aus dem privaten Brain nicht auf
-403/Forbidden bzw. unvollstaendig authentifizierten Seiten landet.
+
+Wichtig fuer die Navigation: Render schuetzt KRISTOWER/KRISTINE per ADMIN_TOKEN
+und KRISZEIT braucht denselben Token fuer seine API-Aufrufe. Beim Wechsel von
+Render zu The Brain wird der bereits gueltige Token als ``krista_token`` an den
+privaten Tailscale-Host uebergeben, dort in einem HttpOnly-Cookie gehalten und
+bei jedem Ruecksprung zu Render wieder verwendet. Damit haengt die Navigation
+nicht mehr von einem eventuell veralteten lokalen KRISTINE_ADMIN_TOKEN ab.
 """
 
 from urllib.parse import quote
@@ -17,23 +21,19 @@ def install(ns):
         return
 
     render_base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
-    admin_token = str(ns.get("KRISTINE_ADMIN_TOKEN") or "").strip()
+    configured_admin_token = str(
+        ns.get("KRISTINE_ADMIN_TOKEN") or ns.get("ADMIN_TOKEN") or ""
+    ).strip()
 
-    def render_url(path, fragment=""):
+    def render_url(path, fragment="", token=""):
         path = str(path or "/")
         url = render_base + path
-        if admin_token:
-            url += ("&" if "?" in url else "?") + "token=" + quote(admin_token, safe="")
+        effective_token = str(token or configured_admin_token or "").strip()
+        if effective_token:
+            url += ("&" if "?" in url else "?") + "token=" + quote(effective_token, safe="")
         if fragment:
             url += "#" + str(fragment).lstrip("#")
         return url
-
-    kristower_url = render_url("/kontrollzentrum")
-    kriszeit_url = render_url("/kristool-preview/")
-    lg_url = render_url("/admin/paint?scan=1")
-    kristine_url = render_url("/kristine", "planning")
-    krisadmin_url = render_url("/admin/ui")
-    tasks_url = render_url("/kristine", "tasks")
 
     css = r'''
 <style id="kristaBrainGlobalHeaderCss">
@@ -46,7 +46,15 @@ def install(ns):
 </style>
 '''
 
-    head = f'''
+    def build_head(admin_token):
+        kristower_url = render_url("/kontrollzentrum", token=admin_token)
+        kriszeit_url = render_url("/kristool-preview/", token=admin_token)
+        lg_url = render_url("/admin/paint?scan=1", token=admin_token)
+        kristine_url = render_url("/kristine", "planning", token=admin_token)
+        krisadmin_url = render_url("/admin/ui", token=admin_token)
+        tasks_url = render_url("/kristine", "tasks", token=admin_token)
+
+        return f'''
 <header class="krista-shell-topbar" id="kristaBrainGlobalHeader">
   <div class="krista-shell-main">
     <a class="krista-brand" href="{kristower_url}" aria-label="KRISTA Start">
@@ -71,6 +79,7 @@ def install(ns):
  const h=document.getElementById('kristaBrainGlobalHeader'),b=document.getElementById('kristaBrainMobileMenu');if(!h||!b)return;
  const setOpen=o=>{{h.classList.toggle('menu-open',!!o);b.setAttribute('aria-expanded',o?'true':'false');b.innerHTML=o?'<span>×</span><span>Schließen</span>':'<span>🧠</span><span>THE BRAIN</span><span>▾</span>'}};
  b.addEventListener('click',()=>setOpen(!h.classList.contains('menu-open')));document.getElementById('kristaBrainWorldNav')?.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>setOpen(false)));window.addEventListener('resize',()=>{{if(innerWidth>760)setOpen(false)}},{{passive:true}});
+ try{{const u=new URL(window.location.href);if(u.searchParams.has('krista_token')){{u.searchParams.delete('krista_token');history.replaceState(null,'',u.pathname+(u.search||'')+u.hash)}}}}catch(_){{}}
 }})();
 </script>
 '''
@@ -81,12 +90,19 @@ def install(ns):
     @app.after_request
     def krista_brain_global_header(response):
         try:
+            from flask import request
+
             content_type = str(response.headers.get("Content-Type") or "").lower()
             if "text/html" not in content_type:
                 return response
             html = response.get_data(as_text=True)
             if "kristaBrainGlobalHeader" in html:
                 return response
+
+            incoming_token = str(request.args.get("krista_token") or "").strip()
+            cookie_token = str(request.cookies.get("krista_render_token") or "").strip()
+            effective_token = incoming_token or cookie_token or configured_admin_token
+            head = build_head(effective_token)
 
             # Alte Brain-Kopfvarianten entfernen. Damit bleibt auf jeder Seite
             # genau ein gemeinsamer KRISTA-Produktkopf stehen.
@@ -104,10 +120,20 @@ def install(ns):
                     html = html[:body_end + 1] + head + html[body_end + 1:]
                     response.set_data(html)
                     response.headers["Content-Type"] = "text/html; charset=utf-8"
+
+            if incoming_token:
+                response.set_cookie(
+                    "krista_render_token",
+                    incoming_token,
+                    max_age=60 * 60 * 24 * 30,
+                    httponly=True,
+                    secure=bool(request.is_secure),
+                    samesite="Lax",
+                )
             return response
         except Exception as exc:
             print("⚠ KRISTA-Produktkopf konnte in The Brain nicht eingesetzt werden:", exc)
             return response
 
     app._krista_brain_global_header = True
-    print("✅ The Brain: ein KRISTA-Produktkopf · Navigation authentifiziert")
+    print("✅ The Brain: ein KRISTA-Produktkopf · Render-Token-Bridge aktiv")
