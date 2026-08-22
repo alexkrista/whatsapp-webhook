@@ -30,6 +30,78 @@
     return `${(value / 1024 / 1024).toFixed(1).replace(".0", "")} MB`;
   }
 
+  function isMailItem(item) {
+    const name = String(item?.name || item?.storedFilename || "").toLowerCase();
+    const mime = String(item?.mimeType || "").toLowerCase();
+    return name.endsWith(".msg") || name.endsWith(".eml") || mime.includes("ms-outlook") || mime === "message/rfc822";
+  }
+
+  async function fetchInboxItem(itemId) {
+    const response = await fetch(tokenUrl(`/kristine/api/inbox/${encodeURIComponent(String(itemId || ""))}`));
+    const text = await response.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!response.ok) throw new Error(json?.error || text || response.statusText);
+    return json?.item || null;
+  }
+
+  async function openMailPreview(itemId) {
+    const preview = window.open("", "_blank");
+    if (!preview) {
+      alert("Mail-Vorschau konnte nicht geöffnet werden. Bitte Pop-ups für KRISTINE erlauben.");
+      return;
+    }
+    try { preview.opener = null; } catch {}
+
+    preview.document.open();
+    preview.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>KRISTINE Mail</title></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;color:#222">Mail wird geladen …</body></html>');
+    preview.document.close();
+
+    try {
+      const item = await fetchInboxItem(itemId);
+      if (!item) throw new Error("Mail nicht gefunden");
+      const analysis = item.analysis || {};
+      const body = String(item.textPreview || analysis.excerpt || analysis.summary || "").trim();
+      const meta = [
+        analysis.contactName ? `<div><strong>Kontakt:</strong> ${esc(analysis.contactName)}</div>` : "",
+        analysis.contactEmail ? `<div><strong>E-Mail:</strong> ${esc(analysis.contactEmail)}</div>` : "",
+        analysis.contactPhone ? `<div><strong>Telefon:</strong> ${esc(analysis.contactPhone)}</div>` : "",
+        analysis.dueDate ? `<div><strong>Termin/Fällig:</strong> ${esc(analysis.dueDate)}</div>` : ""
+      ].filter(Boolean).join("");
+
+      preview.document.open();
+      preview.document.write(`<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(analysis.subject || item.name || "KRISTINE Mail")}</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f3f1ec;color:#222}
+main{max-width:980px;margin:0 auto;padding:24px}
+.card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 2px 15px rgba(0,0,0,.07)}
+h1{font-size:22px;margin:0 0 8px}.file{font-size:12px;color:#777;margin-bottom:16px}.meta{display:grid;gap:4px;padding:12px;background:#f7f7f4;border-radius:10px;margin-bottom:16px;font-size:13px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0}
+a{display:inline-block;margin-top:16px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:9px 12px;font-weight:750}
+</style>
+</head>
+<body>
+<main><div class="card">
+<h1>${esc(analysis.subject || item.name || "Mail")}</h1>
+<div class="file">${esc(item.name || "")}</div>
+${meta ? `<div class="meta">${meta}</div>` : ""}
+<pre>${esc(body || "Für diese MSG-Datei konnte kein lesbarer Mailtext extrahiert werden.")}</pre>
+<a href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`)}" download="${esc(item.name || "mail.msg")}">Originaldatei herunterladen</a>
+</div></main>
+</body></html>`);
+      preview.document.close();
+    } catch (error) {
+      preview.document.open();
+      preview.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>KRISTINE Mail</title></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;color:#8b1f1f"><strong>Mail konnte nicht gelesen werden.</strong><br>${esc(String(error?.message || error))}</body></html>`);
+      preview.document.close();
+    }
+  }
+
   async function fetchTaskAttachments(taskId, force = false) {
     const id = String(taskId || "");
     if (!id) return [];
@@ -81,7 +153,8 @@
       .krista-task-attachment-name{font-weight:750;overflow-wrap:anywhere}
       .krista-task-attachment-meta{font-size:11px;color:#707070;margin-top:2px}
       .krista-task-attachment-links{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-      .krista-task-attachment-links a{display:inline-flex;align-items:center;text-decoration:none;background:#fff;color:#222;border:1px solid #ccc;border-radius:8px;padding:6px 8px;font-size:11px;font-weight:750}
+      .krista-task-attachment-links a,.krista-task-attachment-links button{display:inline-flex;align-items:center;text-decoration:none;background:#fff;color:#222;border:1px solid #ccc;border-radius:8px;padding:6px 8px;font-size:11px;font-weight:750}
+      .krista-task-attachment-links button{cursor:pointer}
       .krista-task-attachment-empty{font-size:12px;color:#777}
       @media(max-width:900px){
         #taskList .krista-task-row{grid-template-columns:minmax(180px,1fr) auto}
@@ -127,8 +200,15 @@
     panel.innerHTML = `<h5>📎 Anlagen · ${items.length}</h5>${items.map((item) => {
       const href = tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`);
       const meta = [item.mimeType || "", bytesLabel(item.size)].filter(Boolean).join(" · ");
-      return `<div class="krista-task-attachment-row"><div><div class="krista-task-attachment-name">${esc(item.name || "Anlage")}</div>${meta ? `<div class="krista-task-attachment-meta">${esc(meta)}</div>` : ""}</div><div class="krista-task-attachment-links"><a href="${href}" target="_blank" rel="noopener">Öffnen</a><a href="${href}" download="${esc(item.name || "Anlage")}">Herunterladen</a></div></div>`;
+      const openAction = isMailItem(item)
+        ? `<button type="button" data-mail-preview="${esc(String(item.id || ""))}">Mail lesen</button>`
+        : `<a href="${href}" target="_blank" rel="noopener">Öffnen</a>`;
+      return `<div class="krista-task-attachment-row"><div><div class="krista-task-attachment-name">${esc(item.name || "Anlage")}</div>${meta ? `<div class="krista-task-attachment-meta">${esc(meta)}</div>` : ""}</div><div class="krista-task-attachment-links">${openAction}<a href="${href}" download="${esc(item.name || "Anlage")}">Herunterladen</a></div></div>`;
     }).join("")}`;
+
+    panel.querySelectorAll("[data-mail-preview]").forEach((button) => {
+      button.addEventListener("click", () => openMailPreview(button.dataset.mailPreview));
+    });
     return panel;
   }
 
