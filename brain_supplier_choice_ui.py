@@ -236,7 +236,12 @@ def install(ns):
     }catch(error){editMsg.textContent=error.message||String(error)}finally{button.disabled=false}
   };
 
-  const observer=new MutationObserver(()=>decorateSelected());observer.observe(captureSelectedSupplierBox,{childList:true,subtree:true});decorateSelected();
+  const observer=new MutationObserver(()=>{
+    const card=captureSelectedSupplierBox.querySelector('.capture-selected');
+    if(card&&!card.querySelector('.capture-supplier-card-actions'))decorateSelected();
+  });
+  observer.observe(captureSelectedSupplierBox,{childList:true,subtree:true});
+  decorateSelected();
 })();
 </script>
 '''
