@@ -17,6 +17,7 @@ from brain_finance_runtime import install as _finance_install
 from brain_capture_edit import install as _capture_edit_install
 from brain_currency_payment_v2 import install as _currency_payment_install
 from brain_finance_test_bridge import install as _finance_test_bridge_install
+from brain_finance_direct_debit import install as _direct_debit_install
 from brain_home_nav import install as _home_nav_install
 
 
@@ -25,4 +26,5 @@ def install(ns):
     _finance_install(ns)
     _currency_payment_install(ns)
     _finance_test_bridge_install(ns)
+    _direct_debit_install(ns)
     _home_nav_install(ns)
