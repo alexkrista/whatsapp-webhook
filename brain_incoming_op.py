@@ -8,7 +8,7 @@ geführt.
 """
 from brain_finance_runtime import install as _finance_install
 from brain_capture_edit import install as _capture_edit_install
-from brain_currency_payment import install as _currency_payment_install
+from brain_currency_payment_v2 import install as _currency_payment_install
 
 
 def install(ns):
