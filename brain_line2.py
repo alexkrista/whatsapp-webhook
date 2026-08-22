@@ -268,6 +268,43 @@ def _register_preview(ns):
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 400
 
+    @app.get("/incoming/capture/preview-text")
+    def brain_capture_preview_text():
+        try:
+            path = _preview_path(request.args.get("token"))
+            page_no = max(1, int(request.args.get("page", 1)))
+            with pymupdf.open(path) as doc:
+                if page_no > doc.page_count:
+                    raise ValueError("PDF-Seite existiert nicht.")
+                page = doc[page_no - 1]
+                rect = page.rect
+                words = page.get_text("words") or []
+                meaningful = "".join(str(w[4] or "") for w in words if len(w) > 4).strip()
+                if len(meaningful) < 20:
+                    try:
+                        lang = str(ns.get("CAPTURE_OCR_LANG") or "deu+eng")
+                        dpi = int(ns.get("CAPTURE_OCR_DPI") or 190)
+                        textpage = page.get_textpage_ocr(language=lang, dpi=dpi, full=True)
+                        words = page.get_text("words", textpage=textpage) or []
+                    except Exception:
+                        pass
+                payload = []
+                for word in words:
+                    if len(word) < 5:
+                        continue
+                    x0, y0, x1, y1, text = word[:5]
+                    text = str(text or "")
+                    if not text.strip():
+                        continue
+                    payload.append({
+                        "x0": round(float(x0), 3), "y0": round(float(y0), 3),
+                        "x1": round(float(x1), 3), "y1": round(float(y1), 3),
+                        "text": text,
+                    })
+                return jsonify(ok=True, page=page_no, width=float(rect.width), height=float(rect.height), words=payload)
+        except Exception as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+
 
 def _terms(query):
     return [x for x in re.split(r"\s+", str(query or "").strip()) if len(x) >= 2]
@@ -338,116 +375,80 @@ def _install_material_search(ns):
         key = (query.lower(), limit_i, stamp)
         cached = _cache_get(_QUERY_CACHE, _QUERY_CACHE_LOCK, key, 45)
         if cached is not None:
-            cached["cached"] = True
             return cached
-
-        archive = _archive_prefilter(ns, query, 900)
-        live = _capture_prefilter(query, ns["CAPTURE_DB"], "live", 450)
-        test = _capture_prefilter(query, ns["CAPTURE_TEST_DB"], "test", 250)
-        exact, similar, seen = [], [], set()
+        rows = _archive_prefilter(ns, query) + _capture_prefilter(query, ns["CAPTURE_DB"], "live") + _capture_prefilter(query, ns["CAPTURE_TEST_DB"], "test")
+        results = []
         scanned = 0
-        qnorm = norm_supplier(query)
-        qtokens = [x for x in qnorm.split() if len(x) >= 2]
-
-        def classify(base, raw):
-            nonlocal scanned
-            if not str(raw or "").strip():
-                return
+        seen = set()
+        for row in rows:
+            text = str(row.get("text") or row.get("pdf_text") or "")
+            if not text.strip():
+                continue
             scanned += 1
-            hit = material_search_result(raw, query)
-            if hit.get("matched"):
-                base.update(materialMatches=list(hit.get("matches") or []), matchScore=int(hit.get("score") or 0), matchType="exact" if hit.get("ideal") else "good", matchCount=int(hit.get("matchCount") or 1))
-                exact.append(base)
-                return
-            idx = ns["_material_search_index"](raw)
-            best_ratio, best_line = 0.0, ""
-            for line in idx.get("lines") or []:
-                lnorm = norm_supplier(line)
-                if not lnorm:
-                    continue
-                ratio = difflib.SequenceMatcher(None, qnorm, lnorm[:max(len(qnorm)*3, 40)]).ratio()
-                if qtokens:
-                    token_ratio = max((difflib.SequenceMatcher(None,t,w).ratio() for t in qtokens for w in lnorm.split()), default=0.0)
-                    ratio = max(ratio, token_ratio * .88)
-                if ratio > best_ratio:
-                    best_ratio, best_line = ratio, line
-            if best_ratio >= .62 and best_line:
-                base.update(materialMatches=[focus(best_line, query)], matchScore=int(best_ratio*1000), matchType="similar", matchCount=1)
-                similar.append(base)
+            hit = material_search_result(text, query)
+            if not hit:
+                continue
+            path = str(row.get("path") or row.get("pdf_path") or "")
+            identity = str(row.get("logical_id") or row.get("doc_id") or path or row.get("filename") or "")
+            if identity in seen:
+                continue
+            seen.add(identity)
+            supplier_name = str(row.get("supplier_name") or "").strip()
+            supplier_address = str(row.get("supplier_address") or "").strip()
+            if not supplier_name:
+                supplier = extract_supplier(text)
+                supplier_name = supplier.get("name") or "Lieferant nicht sicher erkannt"
+                supplier_address = supplier.get("address") or ""
+            date = str(row.get("invoice_date") or "")
+            if not date:
+                date = extract_date(text)
+            amount = row.get("gross_amount")
+            if amount is None:
+                amount = extract_amount(text)
+            base = {
+                "filename": row.get("filename") or Path(path).name,
+                "path": path,
+                "invoiceDate": date,
+                "invoiceDateTime": date,
+                "amount": amount,
+                "supplierName": supplier_name,
+                "supplierAddress": supplier_address,
+                "supplierNumber": row.get("supplier_number") or "",
+                "materialMatches": [],
+                "matchScore": 0,
+                "matchType": "",
+            }
+            base.update(hit)
+            results.append(base)
+            if len(results) >= limit_i * 3:
+                break
+        results.sort(key=lambda x: (0 if x.get("matchType") == "exact" else 1, -float(x.get("matchScore") or 0), str(x.get("invoiceDate") or "")), reverse=False)
+        result = {
+            "query": query,
+            "results": results[:limit_i],
+            "exactCount": sum(1 for x in results if x.get("matchType") == "exact"),
+            "similarCount": sum(1 for x in results if x.get("matchType") == "similar"),
+            "scanned": scanned,
+        }
+        _cache_put(_QUERY_CACHE, _QUERY_CACHE_LOCK, key, result)
+        return result
 
-        for row in archive:
-            raw = str(row.get("text") or "")
-            path = str(row.get("path") or "")
-            unique = ("archive", path or str(row.get("logical_id") or row.get("filename") or ""))
-            if unique in seen: continue
-            seen.add(unique)
-            supplier = extract_supplier(raw) or {}
-            dt = extract_date(raw, row.get("modified"), row.get("doc_year"))
-            classify({"filename":row.get("filename") or "","path":path,"docId":row.get("logical_id") or "","invoiceDate":dt.date().isoformat() if dt else None,"invoiceDateTime":dt.isoformat(timespec="seconds") if dt else None,"amount":extract_amount(raw),"supplierName":supplier.get("name") or "Lieferant nicht sicher erkannt","supplierAddress":supplier.get("address") or "","supplierNumber":supplier.get("supplierNumber") or "","sourceOfTruth":"PDF-Archiv","materialMatches":[],"matchScore":0,"matchType":""}, raw)
-
-        for row in live + test:
-            raw = str(row.get("pdf_text") or "")
-            path = str(row.get("pdf_path") or "")
-            unique = (row.get("_area"), str(row.get("doc_id") or path))
-            if unique in seen: continue
-            seen.add(unique)
-            date_iso = str(row.get("invoice_date") or "")
-            classify({"filename":Path(path).name if path else str(row.get("doc_id") or ""),"path":path,"docId":row.get("doc_id") or "","invoiceDate":date_iso or None,"invoiceDateTime":date_iso+"T00:00:00" if date_iso else None,"amount":float(row.get("gross_amount") or 0),"supplierName":row.get("supplier_name") or "Lieferant","supplierAddress":row.get("supplier_address") or "","supplierNumber":row.get("supplier_number") or "","sourceOfTruth":"KRISTINE Testgelände" if row.get("_area")=="test" else "KRISTINE Eingangsrechnungen","trainingMode":row.get("_area")=="test","materialMatches":[],"matchScore":0,"matchType":""}, raw)
-
-        date_key = lambda x: str(x.get("invoiceDateTime") or "")
-        exact.sort(key=lambda x:(2 if x.get("matchType")=="exact" else 1,int(x.get("matchScore") or 0),date_key(x)), reverse=True)
-        similar.sort(key=lambda x:(int(x.get("matchScore") or 0),date_key(x)), reverse=True)
-        data = {"query":query,"results":(exact+similar)[:limit_i],"exactCount":len(exact),"similarCount":len(similar),"scanned":scanned,"candidateCount":len(archive)+len(live)+len(test),"fastPrefilter":True}
-        _cache_put(_QUERY_CACHE, _QUERY_CACHE_LOCK, key, data)
-        return data
-
+    fast_search._brain_fast_material = True
     ns["global_material_search"] = fast_search
 
 
-def _install_lookup_caches(ns):
-    original_address = ns.get("ww_address_search")
-    if callable(original_address):
-        def cached_address(query, limit=25):
-            key = ("address", str(query or "").strip().lower(), int(limit or 25))
-            value = _cache_get(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, 35)
-            if value is None:
-                value = original_address(query, limit)
-                _cache_put(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, value)
-            return value
-        ns["ww_address_search"] = cached_address
-
-    original_ww = ns.get("ww_incoming_for_address")
-    if callable(original_ww):
-        def cached_ww(address_id):
-            key = ("ww-incoming", str(address_id or ""))
-            value = _cache_get(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, 30)
-            if value is None:
-                value = original_ww(address_id)
-                _cache_put(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, value)
-            return value
-        ns["ww_incoming_for_address"] = cached_ww
-
-    original_paths = ns.get("_pdf_paths_by_docids")
-    if callable(original_paths):
-        def cached_paths(doc_ids, include_text=False):
-            ids = tuple(sorted(str(x or "").strip() for x in doc_ids if str(x or "").strip()))
-            key = ("pdfpaths", ids, bool(include_text), _mtime(ns["DB"]))
-            value = _cache_get(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, 60)
-            if value is None:
-                value = original_paths(doc_ids, include_text)
-                _cache_put(_LOOKUP_CACHE, _LOOKUP_CACHE_LOCK, key, value)
-            return value
-        ns["_pdf_paths_by_docids"] = cached_paths
+def _install_viewer_page(ns):
+    page = str(ns.get("MOBILE_PAGE") or "")
+    ns["MOBILE_PAGE"] = _inject_page(page)
 
 
 def install(ns):
     global _INSTALLED
     if _INSTALLED:
         return
-    _INSTALLED = True
-    ns["MOBILE_PAGE"] = _inject_page(ns["MOBILE_PAGE"])
     _register_navigation(ns)
     _register_preview(ns)
     _install_material_search(ns)
-    _install_lookup_caches(ns)
-    print("✅ The Brain Linie 2 direkt aktiv: Kopf · schnelle Materialsuche · Dunja PDF-Superviewer")
+    _install_viewer_page(ns)
+    _INSTALLED = True
+    print("✅ The Brain Linie 2 aktiv: Navigation · PDF-Superviewer · schnelle Materialsuche")
