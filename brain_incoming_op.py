@@ -30,6 +30,7 @@ from brain_finance_reconciliation_bridge import install as _reconciliation_bridg
 from brain_invoice_intake import install as _invoice_intake_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
+from brain_header_dedup import install as _header_dedup_install
 from brain_finance_header import install as _finance_header_install
 
 
@@ -45,4 +46,7 @@ def install(ns):
     _invoice_intake_install(ns)
     _home_nav_install(ns)
     _op_tools_install(ns)
+    # Reihenfolge absichtlich so: after_request läuft rückwärts.
+    # Globaler Kopf wird zuerst eingesetzt, danach wird nur der alte Linie-2-Kopf entfernt.
+    _header_dedup_install(ns)
     _finance_header_install(ns)
