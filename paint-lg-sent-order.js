@@ -167,8 +167,14 @@ function registerPaintLgSentOrder(app, options = {}) {
     };
   }
 
+  function viennaDay(now = new Date()) {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const value = type => parts.find(part => part.type === type)?.value || "";
+    return `${value("year")}${value("month")}${value("day")}`;
+  }
+
   function nextOrderId(history, now = new Date()) {
-    const day = now.toISOString().slice(0, 10).replace(/-/g, "");
+    const day = viennaDay(now);
     const prefix = `LG-${day}-`;
     const count = history.filter(order => String(order?.id || "").startsWith(prefix)).length + 1;
     return `${prefix}${String(count).padStart(3, "0")}`;
@@ -178,10 +184,14 @@ function registerPaintLgSentOrder(app, options = {}) {
     const historyRaw = await readJson(ordersFile, []);
     const history = Array.isArray(historyRaw) ? historyRaw : [];
     const fp = fingerprint(positions);
-    const duplicate = [...history].reverse().find(order => order?.fingerprint === fp && order?.status !== "cancelled");
+    const now = new Date();
+    const duplicate = [...history].reverse().find(order => {
+      if (order?.fingerprint !== fp || order?.status === "cancelled") return false;
+      const sentMs = Date.parse(order?.sentAt || "");
+      return Number.isFinite(sentMs) && now.getTime() - sentMs >= 0 && now.getTime() - sentMs <= 15 * 60 * 1000;
+    });
     if (duplicate) return { order: duplicate, duplicate: true };
 
-    const now = new Date();
     const sums = summarizePositions(positions);
     const order = {
       id: nextOrderId(history, now),
