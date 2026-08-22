@@ -133,6 +133,7 @@
     loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260823-knowledge", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260823-cockpit", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260823-chronik", "data-krista-baustellen-chronik");
+    loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260823-intelligence", "data-krista-baustellen-intelligence");
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
@@ -190,7 +191,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0024.03";
+    const build = options.build || mount.dataset.kristaBuild || "0024.04";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
