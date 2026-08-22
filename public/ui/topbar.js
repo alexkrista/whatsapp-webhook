@@ -113,6 +113,10 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
   }
 
+  function loadKristineFinanceApproval() {
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
+  }
+
   function loadKristineInbox() {
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260821-0925", "data-krista-inbox-v2");
   }
@@ -129,7 +133,7 @@
         get() { return typeof employeeMasters !== "undefined" ? employeeMasters : []; }
       });
     } catch {}
-    loadScriptOnce("/public/ui/admin-employee-personnel-file.js", "data-krista-employee-personnel-file");
+    loadScriptOnce("/public/ui/admin-employee-personnel-file.js", "data-krista-admin-employee-personnel-file");
   }
 
   function loadKriszeitToolbar() {
@@ -209,6 +213,7 @@
     loadKristineEmployeeSort();
     loadKristinePlanningSidebarFix();
     loadKristineTaskList();
+    loadKristineFinanceApproval();
     loadKristineInbox();
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
