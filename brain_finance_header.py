@@ -1,11 +1,10 @@
 # coding: utf-8
-"""Einheitlicher The-Brain-Kopf fuer alle Unterseiten.
+"""Einheitlicher KRISTA-Produktkopf fuer alle HTML-Seiten von The Brain.
 
-Die Startseite ist die Referenz: KRISTINE / The Brain / Firmenwissen.
-Jede weitere HTML-Seite des lokalen Brain-Connectors bekommt exakt denselben
-Kopf per after_request. Dadurch muss kein neues Modul seinen eigenen Kopf bauen
-und spaetere Wrapper (OP, CAMT, Revolut, Erfassung, Material usw.) koennen ihn
-nicht mehr versehentlich verlieren.
+The Brain soll keine eigene Kopf-Variante mehr haben. Der lokale Connector bekommt
+auf jeder HTML-Seite denselben Produktkopf wie KRISTOWER/KRISTINE/KRISZEIT/LG.
+Die Links auf die Render-Module zeigen bewusst auf protokoll.krista.at; THE BRAIN
+bleibt auf dem privaten Tailscale-Host.
 """
 
 
@@ -14,42 +13,70 @@ def install(ns):
     if app is None:
         return
 
+    render_base = "https://protokoll.krista.at"
+
     css = r'''
-<style id="kristaFinanceBrainHeadCss">
-.brain-finance-head{max-width:1500px;margin:0 auto;padding:24px 18px 4px;display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
-.brain-finance-brand{color:#eef2f4;text-decoration:none;display:block}.brain-finance-brand small{display:block;color:#9da8b3;font-size:13px;font-weight:750;letter-spacing:.02em;margin-bottom:4px}.brain-finance-brand strong{display:block;font-size:31px;line-height:1.05;letter-spacing:-.02em}.brain-finance-home{color:#dce3e8;text-decoration:none;font-weight:850;padding-top:18px}.brain-finance-home:hover{text-decoration:underline}
-.brain-finance-head+main.shell{padding-top:12px}
-@media(max-width:620px){.brain-finance-head{padding-top:18px}.brain-finance-brand strong{font-size:27px}.brain-finance-home{padding-top:15px;font-size:13px}}
+<style id="kristaBrainGlobalHeaderCss">
+.krista-shell-topbar{position:relative;z-index:200;color:#fff;background:radial-gradient(circle at 12% -20%,rgba(90,145,108,.28),transparent 34%),linear-gradient(135deg,#17211b,#253129);border-bottom:1px solid rgba(255,255,255,.1);box-shadow:0 8px 28px rgba(12,18,14,.2);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.krista-shell-main{max-width:1480px;margin:auto;min-height:76px;padding:14px 22px;display:grid;grid-template-columns:230px minmax(560px,1fr) 170px;gap:18px;align-items:center}
+.krista-brand{display:flex;align-items:center;gap:12px;color:#fff;text-decoration:none;min-width:0}.krista-mark{width:46px;height:46px;display:grid;place-items:center;flex:0 0 auto;border-radius:14px;background:linear-gradient(145deg,#f2e7c8,#b58d43);color:#262018;font-size:23px;font-weight:950;box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 7px 20px rgba(0,0,0,.22)}.krista-brand-copy{display:flex;flex-direction:column;min-width:0}.krista-brand-copy strong{font-size:19px;letter-spacing:.06em;line-height:1}.krista-brand-copy small{margin-top:5px;color:rgba(255,255,255,.65);white-space:nowrap}
+.krista-world-nav{display:flex;justify-content:center;align-items:center;gap:8px;min-width:0}.krista-world-link{min-height:42px;padding:9px 14px;border-radius:11px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.055);color:#fff;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:800 12.5px/1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}.krista-world-link:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.27)}.krista-world-link.active{background:#2f7d4a;border-color:#69a47d;box-shadow:0 6px 18px rgba(15,57,32,.34)}.krista-world-icon{font-size:15px;line-height:1}.krista-mobile-menu{display:none}.krista-user{text-align:right;display:flex;flex-direction:column}.krista-user strong{font-size:13px}.krista-user small{margin-top:4px;color:rgba(255,255,255,.6)}
+@media(max-width:1050px){.krista-shell-main{grid-template-columns:205px 1fr}.krista-user{display:none}.krista-world-nav{justify-content:flex-start;overflow-x:auto;padding-bottom:3px}}
+@media(max-width:760px){.krista-shell-main{min-height:54px;grid-template-columns:minmax(0,1fr) auto;padding:8px 10px;gap:8px}.krista-brand{gap:8px}.krista-mark{width:34px;height:34px;border-radius:10px;font-size:18px}.krista-brand-copy strong{font-size:15px}.krista-brand-copy small{display:none}.krista-mobile-menu{display:inline-flex;min-height:36px;padding:7px 10px;border:1px solid rgba(255,255,255,.2);border-radius:10px;background:rgba(255,255,255,.08);color:#fff;align-items:center;justify-content:center;gap:6px;font:850 12.5px/1 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}.krista-world-nav{display:none;grid-column:1/-1;overflow:visible;padding:4px 0 2px;gap:6px;flex-direction:column;align-items:stretch}.krista-shell-topbar.menu-open .krista-world-nav{display:flex}.krista-world-link{width:100%;min-height:40px;justify-content:flex-start;padding:9px 12px}.krista-user{display:none}}
 </style>
 '''
-    head = r'''
-<header class="brain-finance-head" id="kristaFinanceBrainHead">
-  <a class="brain-finance-brand" href="/"><small>KRISTINE</small><strong>The Brain</strong></a>
-  <a class="brain-finance-home" href="/">Firmenwissen</a>
+
+    head = f'''
+<header class="krista-shell-topbar" id="kristaBrainGlobalHeader">
+  <div class="krista-shell-main">
+    <a class="krista-brand" href="{render_base}/kontrollzentrum" aria-label="KRISTA Start">
+      <span class="krista-mark" aria-hidden="true">K</span>
+      <span class="krista-brand-copy"><strong>KRISTA</strong><small>Einfach. Intuitiv. Gemeinsam.</small></span>
+    </a>
+    <button class="krista-mobile-menu" id="kristaBrainMobileMenu" type="button" aria-expanded="false"><span>🧠</span><span>THE BRAIN</span><span>▾</span></button>
+    <nav class="krista-world-nav" id="kristaBrainWorldNav" aria-label="KRISTA Arbeitswelten">
+      <a class="krista-world-link" href="{render_base}/kontrollzentrum"><span class="krista-world-icon">⌂</span><span>KRISTOWER</span></a>
+      <a class="krista-world-link" href="{render_base}/kristool-preview/"><span class="krista-world-icon">⏱</span><span>KRISZEIT</span></a>
+      <a class="krista-world-link active" href="/" aria-current="page"><span class="krista-world-icon">🧠</span><span>THE BRAIN</span></a>
+      <a class="krista-world-link" href="{render_base}/admin/paint?scan=1"><span class="krista-world-icon">🎨</span><span>LG</span></a>
+      <a class="krista-world-link" href="{render_base}/kristine#planning"><span class="krista-world-icon">✦</span><span>KRISTINE</span></a>
+      <a class="krista-world-link" href="{render_base}/admin/ui"><span class="krista-world-icon">⚙</span><span>KRISADMIN</span></a>
+      <a class="krista-world-link" href="{render_base}/kristine#tasks"><span class="krista-world-icon">📌</span><span>AUFGABEN</span></a>
+    </nav>
+    <div class="krista-user"><strong>Alexander Krista</strong><small>The Brain</small></div>
+  </div>
 </header>
+<script id="kristaBrainGlobalHeaderJs">
+(function(){{
+ const h=document.getElementById('kristaBrainGlobalHeader'),b=document.getElementById('kristaBrainMobileMenu');if(!h||!b)return;
+ const setOpen=o=>{{h.classList.toggle('menu-open',!!o);b.setAttribute('aria-expanded',o?'true':'false');b.innerHTML=o?'<span>×</span><span>Schließen</span>':'<span>🧠</span><span>THE BRAIN</span><span>▾</span>'}};
+ b.addEventListener('click',()=>setOpen(!h.classList.contains('menu-open')));document.getElementById('kristaBrainWorldNav')?.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>setOpen(false)));window.addEventListener('resize',()=>{{if(innerWidth>760)setOpen(false)}},{{passive:true}});
+}})();
+</script>
 '''
 
-    # / und /mobile sind bereits die Referenzoberflaeche und besitzen diesen Kopf
-    # nativ. Alle echten Unterseiten werden hier zentral vereinheitlicht.
-    reference_paths = {"/", "/mobile", "/mobile/"}
-
-    if getattr(app, "_krista_finance_head_after_request", False):
+    if getattr(app, "_krista_brain_global_header", False):
         return
 
     from flask import request
 
     @app.after_request
-    def krista_finance_brain_head(response):
+    def krista_brain_global_header(response):
         try:
-            if request.path in reference_paths:
-                return response
             content_type = str(response.headers.get("Content-Type") or "").lower()
             if "text/html" not in content_type:
                 return response
             html = response.get_data(as_text=True)
-            if "kristaFinanceBrainHead" in html:
+            if "kristaBrainGlobalHeader" in html:
                 return response
-            if "</head>" in html and "kristaFinanceBrainHeadCss" not in html:
+
+            # Alte Brain-Unterseiten-Kopfvariante entfernen, falls sie in einem
+            # gecachten/wrappenden View noch mitgeliefert wird.
+            import re
+            html = re.sub(r'<style id="kristaFinanceBrainHeadCss">.*?</style>', '', html, flags=re.I | re.S)
+            html = re.sub(r'<header class="brain-finance-head" id="kristaFinanceBrainHead">.*?</header>', '', html, flags=re.I | re.S)
+
+            if "</head>" in html:
                 html = html.replace("</head>", css + "</head>", 1)
             body_pos = html.find("<body")
             if body_pos >= 0:
@@ -60,8 +87,8 @@ def install(ns):
                     response.headers["Content-Type"] = "text/html; charset=utf-8"
             return response
         except Exception as exc:
-            print("⚠ The-Brain-Kopf konnte nicht eingesetzt werden:", exc)
+            print("⚠ KRISTA-Produktkopf konnte in The Brain nicht eingesetzt werden:", exc)
             return response
 
-    app._krista_finance_head_after_request = True
-    print("✅ The-Brain-Kopf: einheitlich auf allen Unterseiten")
+    app._krista_brain_global_header = True
+    print("✅ The Brain: ein KRISTA-Produktkopf auf allen HTML-Seiten")
