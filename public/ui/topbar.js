@@ -110,7 +110,7 @@
   }
 
   function loadKristineTaskList() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js", "data-krista-task-list");
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
   }
 
   function loadKristineInbox() {
