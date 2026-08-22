@@ -1,0 +1,33 @@
+name: LG Excel order test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'paint-lg-order-*.js'
+      - 'public/paint-lg-order-excel-ui.js'
+      - 'paint-lab-preload.js'
+      - 'assets/lg-order-template/**'
+      - 'TEST/lg-order-excel.test.js'
+      - '.github/workflows/lg-order-excel-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Syntax check
+        run: |
+          node --check paint-lg-order-excel.js
+          node --check paint-lg-order-template-bootstrap.js
+          node --check paint-lg-order-excel-core.js
+          node --check public/paint-lg-order-excel-ui.js
+          node --check paint-lab-preload.js
+      - name: Integration test
+        run: node TEST/lg-order-excel.test.js
