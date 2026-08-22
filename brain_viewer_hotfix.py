@@ -7,6 +7,8 @@ def install(ns):
     brain_supplier_enrichment.install(ns)
     import brain_local_suppliers
     brain_local_suppliers.install(ns)
+    import brain_supplier_choice_ui
+    brain_supplier_choice_ui.install(ns)
     import brain_incoming_op
     brain_incoming_op.install(ns)
     import brain_material_history
