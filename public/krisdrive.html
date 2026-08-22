@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10233f">
+  <title>KRISDRIVE · Live-Fuhrpark</title>
+  <link rel="stylesheet" href="/public/ui/krista-ui.css">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#10233f;background:#eef1f3}
+    *{box-sizing:border-box}body{margin:0;background:#eef1f3}.wrap{max-width:1460px;margin:0 auto;padding:20px}
+    .hero{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+    .hero h1{margin:0;font-size:34px;letter-spacing:-.03em}.eyebrow{font-size:12px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;opacity:.55;margin-bottom:5px}.sub{color:#66717d;margin-top:5px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:0;border-radius:12px;background:#10233f;color:#fff;padding:11px 15px;font:inherit;font-weight:800;cursor:pointer}.btn.secondary{background:#fff;color:#10233f;border:1px solid #d8dee3}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin:0 0 14px}.stat{background:#fff;border:1px solid #dde3e7;border-radius:16px;padding:14px}.stat strong{display:block;font-size:25px}.stat small{color:#71808c}
+    .mapcard{background:#fff;border:1px solid #dde3e7;border-radius:20px;padding:10px;box-shadow:0 8px 30px rgba(16,35,63,.06)}#map{height:440px;border-radius:14px;overflow:hidden}.mapfallback{height:440px;border-radius:14px;display:grid;place-items:center;background:#f5f7f8;color:#6a7782;text-align:center;padding:30px}
+    .bar{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 4px 2px;flex-wrap:wrap}.fresh{font-size:13px;color:#6f7a84}.warning{background:#fff3cd;border:1px solid #efd98a;border-radius:12px;padding:10px 12px;color:#665214;margin-top:12px;display:none}.warning.show{display:block}
+    .fleet{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-top:14px}.vehicle{background:#fff;border:1px solid #dde3e7;border-radius:18px;padding:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}.vehicle:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(16,35,63,.08)}
+    .vhead{display:flex;justify-content:space-between;gap:10px}.vname{font-size:20px;font-weight:850}.plate{font-size:13px;color:#687681;margin-top:2px}.status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 9px;font-size:12px;font-weight:850;white-space:nowrap;background:#edf0f2}.dot{width:8px;height:8px;border-radius:50%;background:#8a949b}.status.driving{background:#e4f6e9;color:#165a2c}.status.driving .dot{background:#27a34c}.status.ignition_on,.status.active_session{background:#e8f1ff;color:#24568a}.status.ignition_on .dot,.status.active_session .dot{background:#377cc2}.status.parked,.status.online{background:#eef1f3;color:#4d5b65}.status.offline{background:#f2f2f2;color:#818181}.status.not_configured,.status.waiting_device{background:#fff2d8;color:#725100}.status.not_configured .dot,.status.waiting_device .dot{background:#d59a24}
+    .driver{font-size:16px;font-weight:750;margin:14px 0 9px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric{background:#f5f7f8;border-radius:12px;padding:9px 10px}.metric small{display:block;color:#75818a;font-size:11px}.metric strong{display:block;margin-top:2px}.address{margin-top:10px;font-size:13px;color:#53616c;min-height:34px}.foot{display:flex;justify-content:space-between;gap:8px;margin-top:10px;font-size:11px;color:#85919a}
+    .marker{width:34px;height:34px;border-radius:50% 50% 50% 10%;transform:rotate(-45deg);background:#10233f;border:3px solid white;box-shadow:0 4px 12px rgba(0,0,0,.25);display:grid;place-items:center}.marker span{transform:rotate(45deg);font-size:16px}.marker.driving{background:#248c45}.marker.offline{background:#80878d}.marker.waiting_device,.marker.not_configured{background:#c58a18}
+    @media(max-width:760px){.wrap{padding:13px}.hero h1{font-size:29px}.stats{grid-template-columns:1fr 1fr}#map,.mapfallback{height:360px}.fleet{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div id="kristaTopbar" data-krista-active="krisdrive" data-krista-build="KRISDRIVE"></div>
+  <main class="wrap">
+    <div class="hero">
+      <div><div class="eyebrow">KRISTA Fuhrpark</div><h1>🚐 KRISDRIVE</h1><div class="sub">Live-Fahrzeuge · Fahrer · Position · Fahrten</div></div>
+      <div class="actions"><button class="btn secondary" id="showAll">Alle anzeigen</button><button class="btn" id="refresh">↻ Aktualisieren</button></div>
+    </div>
+
+    <section class="stats">
+      <div class="stat"><strong id="countAll">–</strong><small>Fahrzeuge</small></div>
+      <div class="stat"><strong id="countLive">–</strong><small>mit Live-Position</small></div>
+      <div class="stat"><strong id="countDriving">–</strong><small>unterwegs</small></div>
+      <div class="stat"><strong id="countMissing">–</strong><small>Fahrer fehlt</small></div>
+    </section>
+
+    <section class="mapcard">
+      <div id="map"></div>
+      <div class="bar"><span class="fresh" id="fresh">Live-Daten werden geladen …</span><span class="fresh">Quelle: gps.krista.at · Aktualisierung alle 5 s</span></div>
+      <div id="warning" class="warning"></div>
+    </section>
+
+    <section id="fleet" class="fleet"></section>
+  </main>
+
+  <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="/public/ui/topbar.js"></script>
+  <script>
+  (()=>{
+    const token=new URLSearchParams(location.search).get('token')||'';
+    const api=path=>`${path}${path.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`;
+    const fleet=document.getElementById('fleet');
+    const warning=document.getElementById('warning');
+    let map=null,markers=new Map(),firstFit=true,lastRows=[];
+
+    const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const statusText=s=>({driving:'fährt',ignition_on:'Zündung an',active_session:'Fahrt aktiv',parked:'steht',online:'online',offline:'offline',waiting_device:'Tracker wartet',not_configured:'noch kein Tracker'})[s]||s||'unbekannt';
+    const when=v=>{if(!v)return '–';const d=new Date(v);return Number.isNaN(d.getTime())?'–':new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d)};
+    const speed=v=>v===null||v===undefined?'–':`${Math.round(Number(v))} km/h`;
+
+    function initMap(){
+      if(!window.maplibregl){document.getElementById('map').outerHTML='<div class="mapfallback">Karte konnte nicht geladen werden.<br>Die Fahrzeugliste funktioniert trotzdem.</div>';return;}
+      map=new maplibregl.Map({container:'map',style:'https://tiles.openfreemap.org/styles/liberty',center:[9.60,47.22],zoom:9});
+      map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+    }
+
+    function fit(rows=lastRows){
+      if(!map)return;
+      const coords=rows.map(r=>[Number(r.position?.lng),Number(r.position?.lat)]).filter(([x,y])=>Number.isFinite(x)&&Number.isFinite(y)&&Math.abs(x)>0.001&&Math.abs(y)>0.001);
+      if(!coords.length)return;
+      if(coords.length===1){map.flyTo({center:coords[0],zoom:13});return;}
+      const bounds=coords.reduce((b,c)=>b.extend(c),new maplibregl.LngLatBounds(coords[0],coords[0]));
+      map.fitBounds(bounds,{padding:65,maxZoom:14,duration:500});
+    }
+
+    function updateMarkers(rows){
+      if(!map)return;
+      const keep=new Set();
+      rows.forEach(row=>{
+        const lng=Number(row.position?.lng),lat=Number(row.position?.lat);if(!Number.isFinite(lng)||!Number.isFinite(lat)||Math.abs(lng)<.001||Math.abs(lat)<.001)return;
+        const id=String(row.vehicle?.id||'');keep.add(id);
+        let marker=markers.get(id);
+        if(!marker){
+          const el=document.createElement('div');el.className=`marker ${row.status}`;el.innerHTML='<span>🚐</span>';
+          marker=new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([lng,lat]).addTo(map);markers.set(id,marker);
+        }
+        marker.setLngLat([lng,lat]);marker.getElement().className=`marker ${row.status}`;
+        marker.setPopup(new maplibregl.Popup({offset:25}).setHTML(`<strong>${esc(row.vehicle?.label)}</strong><br>${esc(row.driver?.employeeName||'Fahrer unbekannt')}<br>${esc(statusText(row.status))} · ${esc(speed(row.position?.speedKmh))}`));
+      });
+      [...markers.entries()].forEach(([id,m])=>{if(!keep.has(id)){m.remove();markers.delete(id)}});
+      if(firstFit){firstFit=false;setTimeout(()=>fit(rows),150)}
+    }
+
+    function card(row){
+      const pos=row.position||{};const driver=row.driver?.employeeName||'';const missing=row.session?.unresolvedDriver&&!driver;
+      const canRaw=pos.odometerRaw===null||pos.odometerRaw===undefined?'–':Number(pos.odometerRaw).toLocaleString('de-AT');
+      return `<article class="vehicle" data-id="${esc(row.vehicle?.id)}">
+        <div class="vhead"><div><div class="vname">${esc(row.vehicle?.label||'Fahrzeug')}</div><div class="plate">${esc(row.vehicle?.plate||'')}</div></div><span class="status ${esc(row.status)}"><i class="dot"></i>${esc(statusText(row.status))}</span></div>
+        <div class="driver">👤 ${esc(driver||(missing?'Fahrer fehlt':'–'))}</div>
+        <div class="meta">
+          <div class="metric"><small>Geschwindigkeit</small><strong>${esc(speed(pos.speedKmh))}</strong></div>
+          <div class="metric"><small>Zündung</small><strong>${pos.ignition===true?'EIN':pos.ignition===false?'AUS':'–'}</strong></div>
+          <div class="metric"><small>CAN Kilometer · roh</small><strong>${esc(canRaw)}</strong></div>
+          <div class="metric"><small>Tracker</small><strong>${esc(row.tracking?.trackerModel||'–')}</strong></div>
+        </div>
+        <div class="address">📍 ${esc(pos.address||(!row.tracking?'Tracker noch nicht gekoppelt':'Noch keine Position'))}</div>
+        <div class="foot"><span>letztes Signal ${esc(when(pos.lastSeen||row.device?.lastUpdate))}</span><span>${row.session?.buzzerWanted?'🔊 Fahrerwarnung aktiv':''}</span></div>
+      </article>`;
+    }
+
+    function render(data){
+      lastRows=data.vehicles||[];
+      document.getElementById('countAll').textContent=lastRows.length;
+      document.getElementById('countLive').textContent=lastRows.filter(r=>r.position?.lat!=null&&r.position?.lng!=null).length;
+      document.getElementById('countDriving').textContent=lastRows.filter(r=>r.status==='driving').length;
+      document.getElementById('countMissing').textContent=lastRows.filter(r=>r.session?.unresolvedDriver&&!r.driver?.employeeName).length;
+      document.getElementById('fresh').textContent=`Stand ${new Intl.DateTimeFormat('de-AT',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(data.generatedAt||Date.now()))}`;
+      warning.textContent=data.traccarError||'';warning.classList.toggle('show',Boolean(data.traccarError));
+      fleet.innerHTML=lastRows.length?lastRows.map(card).join(''):'<div class="vehicle">Noch keine Fahrzeuge im KRISTA-Fahrzeugstamm.</div>';
+      updateMarkers(lastRows);
+      fleet.querySelectorAll('.vehicle[data-id]').forEach(el=>el.addEventListener('click',()=>{
+        const row=lastRows.find(r=>String(r.vehicle?.id)===el.dataset.id);const p=row?.position;if(map&&p?.lng!=null&&p?.lat!=null)map.flyTo({center:[Number(p.lng),Number(p.lat)],zoom:15});
+      }));
+    }
+
+    async function load(){
+      try{const r=await fetch(api('/kristine/api/krisdrive/live'),{credentials:'same-origin'});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`Fehler ${r.status}`);render(d)}
+      catch(e){warning.textContent=e.message;warning.classList.add('show')}
+    }
+
+    document.getElementById('refresh').addEventListener('click',load);
+    document.getElementById('showAll').addEventListener('click',()=>fit());
+    initMap();load();setInterval(load,5000);
+  })();
+  </script>
+</body>
+</html>
