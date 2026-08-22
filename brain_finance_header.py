@@ -3,9 +3,12 @@
 
 The Brain soll keine eigene Kopf-Variante mehr haben. Der lokale Connector bekommt
 auf jeder HTML-Seite denselben Produktkopf wie KRISTOWER/KRISTINE/KRISZEIT/LG.
-Die Links auf die Render-Module zeigen bewusst auf protokoll.krista.at; THE BRAIN
-bleibt auf dem privaten Tailscale-Host.
+Die Links auf die Render-Module werden serverseitig mit dem vorhandenen
+KRISTINE-Admin-Token versehen, damit Navigation aus dem privaten Brain nicht auf
+403/Forbidden bzw. unvollstaendig authentifizierten Seiten landet.
 """
+
+from urllib.parse import quote
 
 
 def install(ns):
@@ -13,7 +16,24 @@ def install(ns):
     if app is None:
         return
 
-    render_base = "https://protokoll.krista.at"
+    render_base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
+    admin_token = str(ns.get("KRISTINE_ADMIN_TOKEN") or "").strip()
+
+    def render_url(path, fragment=""):
+        path = str(path or "/")
+        url = render_base + path
+        if admin_token:
+            url += ("&" if "?" in url else "?") + "token=" + quote(admin_token, safe="")
+        if fragment:
+            url += "#" + str(fragment).lstrip("#")
+        return url
+
+    kristower_url = render_url("/kontrollzentrum")
+    kriszeit_url = render_url("/kristool-preview/")
+    lg_url = render_url("/admin/paint?scan=1")
+    kristine_url = render_url("/kristine", "planning")
+    krisadmin_url = render_url("/admin/ui")
+    tasks_url = render_url("/kristine", "tasks")
 
     css = r'''
 <style id="kristaBrainGlobalHeaderCss">
@@ -29,19 +49,19 @@ def install(ns):
     head = f'''
 <header class="krista-shell-topbar" id="kristaBrainGlobalHeader">
   <div class="krista-shell-main">
-    <a class="krista-brand" href="{render_base}/kontrollzentrum" aria-label="KRISTA Start">
+    <a class="krista-brand" href="{kristower_url}" aria-label="KRISTA Start">
       <span class="krista-mark" aria-hidden="true">K</span>
       <span class="krista-brand-copy"><strong>KRISTA</strong><small>Einfach. Intuitiv. Gemeinsam.</small></span>
     </a>
     <button class="krista-mobile-menu" id="kristaBrainMobileMenu" type="button" aria-expanded="false"><span>🧠</span><span>THE BRAIN</span><span>▾</span></button>
     <nav class="krista-world-nav" id="kristaBrainWorldNav" aria-label="KRISTA Arbeitswelten">
-      <a class="krista-world-link" href="{render_base}/kontrollzentrum"><span class="krista-world-icon">⌂</span><span>KRISTOWER</span></a>
-      <a class="krista-world-link" href="{render_base}/kristool-preview/"><span class="krista-world-icon">⏱</span><span>KRISZEIT</span></a>
+      <a class="krista-world-link" href="{kristower_url}"><span class="krista-world-icon">⌂</span><span>KRISTOWER</span></a>
+      <a class="krista-world-link" href="{kriszeit_url}"><span class="krista-world-icon">⏱</span><span>KRISZEIT</span></a>
       <a class="krista-world-link active" href="/" aria-current="page"><span class="krista-world-icon">🧠</span><span>THE BRAIN</span></a>
-      <a class="krista-world-link" href="{render_base}/admin/paint?scan=1"><span class="krista-world-icon">🎨</span><span>LG</span></a>
-      <a class="krista-world-link" href="{render_base}/kristine#planning"><span class="krista-world-icon">✦</span><span>KRISTINE</span></a>
-      <a class="krista-world-link" href="{render_base}/admin/ui"><span class="krista-world-icon">⚙</span><span>KRISADMIN</span></a>
-      <a class="krista-world-link" href="{render_base}/kristine#tasks"><span class="krista-world-icon">📌</span><span>AUFGABEN</span></a>
+      <a class="krista-world-link" href="{lg_url}"><span class="krista-world-icon">🎨</span><span>LG</span></a>
+      <a class="krista-world-link" href="{kristine_url}"><span class="krista-world-icon">✦</span><span>KRISTINE</span></a>
+      <a class="krista-world-link" href="{krisadmin_url}"><span class="krista-world-icon">⚙</span><span>KRISADMIN</span></a>
+      <a class="krista-world-link" href="{tasks_url}"><span class="krista-world-icon">📌</span><span>AUFGABEN</span></a>
     </nav>
     <div class="krista-user"><strong>Alexander Krista</strong><small>The Brain</small></div>
   </div>
@@ -58,8 +78,6 @@ def install(ns):
     if getattr(app, "_krista_brain_global_header", False):
         return
 
-    from flask import request
-
     @app.after_request
     def krista_brain_global_header(response):
         try:
@@ -70,11 +88,12 @@ def install(ns):
             if "kristaBrainGlobalHeader" in html:
                 return response
 
-            # Alte Brain-Unterseiten-Kopfvariante entfernen, falls sie in einem
-            # gecachten/wrappenden View noch mitgeliefert wird.
+            # Alte Brain-Kopfvarianten entfernen. Damit bleibt auf jeder Seite
+            # genau ein gemeinsamer KRISTA-Produktkopf stehen.
             import re
             html = re.sub(r'<style id="kristaFinanceBrainHeadCss">.*?</style>', '', html, flags=re.I | re.S)
             html = re.sub(r'<header class="brain-finance-head" id="kristaFinanceBrainHead">.*?</header>', '', html, flags=re.I | re.S)
+            html = re.sub(r'<header class="krista-brain-head">.*?</header>', '', html, flags=re.I | re.S)
 
             if "</head>" in html:
                 html = html.replace("</head>", css + "</head>", 1)
@@ -91,4 +110,4 @@ def install(ns):
             return response
 
     app._krista_brain_global_header = True
-    print("✅ The Brain: ein KRISTA-Produktkopf auf allen HTML-Seiten")
+    print("✅ The Brain: ein KRISTA-Produktkopf · Navigation authentifiziert")
