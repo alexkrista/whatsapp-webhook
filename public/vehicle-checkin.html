@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10233f">
+  <title>KRISTINE · Fahrer anmelden</title>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#10233f;background:#eef2f5}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}
+    .card{width:min(460px,100%);background:#fff;border-radius:24px;padding:28px;box-shadow:0 18px 50px rgba(16,35,63,.14)}
+    .eyebrow{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;opacity:.55}
+    h1{font-size:30px;margin:8px 0 4px}.plate{font-size:17px;opacity:.72;margin-bottom:24px}
+    .state{border-radius:16px;padding:16px;margin:18px 0;background:#f4f7f9;line-height:1.45}
+    .ok{background:#e8f5ed;color:#174e2b}.error{background:#fff0ee;color:#7b2b24}
+    button,a.button{width:100%;border:0;border-radius:16px;padding:16px 18px;font-size:17px;font-weight:800;cursor:pointer;text-decoration:none;text-align:center;display:block}
+    button{background:#10233f;color:white}button:disabled{opacity:.45;cursor:default}.secondary{background:#edf1f4;color:#10233f;margin-top:10px}
+    .small{font-size:13px;opacity:.65;margin-top:16px;text-align:center}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="eyebrow">KRISTINE Fahrzeug</div>
+    <h1 id="vehicleName">Fahrzeug wird erkannt …</h1>
+    <div class="plate" id="plate"></div>
+    <div class="state" id="state">NFC-Anmeldung wird vorbereitet.</div>
+    <button id="checkin" disabled>Als Fahrer anmelden</button>
+    <a class="button secondary" id="openKgo" href="/public/kristine-go.html">KRISTINE GO öffnen</a>
+    <div class="small">Das Handy wird nicht getrackt. Es dient nur zur Fahreridentifikation.</div>
+  </main>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  const vehicleId = q.get("vehicle") || "";
+  const nfcToken = q.get("tag") || "";
+  const employeeId = localStorage.getItem("kristineGoEmployeeId") || "";
+  const state = document.getElementById("state");
+  const button = document.getElementById("checkin");
+  const openKgo = document.getElementById("openKgo");
+
+  function show(text, kind="") {
+    state.textContent = text;
+    state.className = `state ${kind}`.trim();
+  }
+
+  async function json(url, options={}) {
+    const response = await fetch(url, {
+      credentials:"same-origin",
+      ...options,
+      headers:{"Accept":"application/json", ...(options.body?{"Content-Type":"application/json"}:{}), ...(options.headers||{})}
+    });
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok || data.ok===false) throw new Error(data.error || `Fehler ${response.status}`);
+    return data;
+  }
+
+  async function init() {
+    if(!vehicleId || !nfcToken) return show("Dieser NFC-Tag ist nicht vollständig eingerichtet.", "error");
+    try {
+      const info = await json(`/kristine/api/vehicle-tracking/nfc-info?vehicle=${encodeURIComponent(vehicleId)}&tag=${encodeURIComponent(nfcToken)}`);
+      document.getElementById("vehicleName").textContent = info.vehicle.label || "Fahrzeug";
+      document.getElementById("plate").textContent = info.vehicle.plate || "";
+      if(!employeeId) {
+        show("Bitte KRISTINE GO einmal öffnen und deinen Mitarbeiter auswählen. Danach den NFC-Tag nochmals scannen.", "error");
+        openKgo.href = "/public/kristine-go.html";
+        return;
+      }
+      button.disabled = false;
+      show("Fahrzeug erkannt. Ein Tipp genügt.");
+      setTimeout(() => { if(!button.disabled) button.click(); }, 300);
+    } catch(error) {
+      show(error.message, "error");
+    }
+  }
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    show("Fahrer wird angemeldet …");
+    try {
+      const data = await json("/kristine/api/vehicle-tracking/checkin", {
+        method:"POST",
+        body:JSON.stringify({ vehicleId, nfcToken, employeeId })
+      });
+      show(`✓ ${data.driver.employeeName} fährt ${data.vehicle.label}.`, "ok");
+      button.textContent = "Angemeldet";
+      if(navigator.vibrate) navigator.vibrate([70,40,70]);
+    } catch(error) {
+      show(error.message, "error");
+      button.disabled = false;
+    }
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
