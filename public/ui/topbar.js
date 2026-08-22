@@ -2,6 +2,7 @@
 
 (function () {
   const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";
+  const BRAIN_ORIGIN = new URL(BRAIN_URL).origin;
 
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
@@ -15,8 +16,14 @@
 
   function tokenized(href, external = false) {
     const url = new URL(href, window.location.origin);
-    if (external || url.origin !== window.location.origin) return url.href;
     const token = new URLSearchParams(window.location.search).get("token");
+    if (external || url.origin !== window.location.origin) {
+      // THE BRAIN läuft auf dem privaten Tailscale-Host. Den bereits gültigen
+      // Render-Admin-Token nehmen wir beim Wechsel mit; Brain speichert ihn dort
+      // nur als HttpOnly-Cookie und verwendet ihn für den Rücksprung zu KRISTA.
+      if (token && url.origin === BRAIN_ORIGIN) url.searchParams.set("krista_token", token);
+      return url.href;
+    }
     if (token) url.searchParams.set("token", token);
     return `${url.pathname}${url.search}${url.hash}`;
   }
