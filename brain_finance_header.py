@@ -1,9 +1,11 @@
 # coding: utf-8
-"""Einheitlicher The-Brain-Kopf fuer die Finance-Unterseiten.
+"""Einheitlicher The-Brain-Kopf fuer alle Unterseiten.
 
-Der Kopf wird absichtlich per after_request anhand des echten URL-Pfads injiziert.
-Damit bleibt er auch dann erhalten, wenn andere Finance-Module spaeter denselben
-Flask-Endpoint wrappen/ersetzen (OP, Einzug-Cutover, CAMT-Bridge usw.).
+Die Startseite ist die Referenz: KRISTINE / The Brain / Firmenwissen.
+Jede weitere HTML-Seite des lokalen Brain-Connectors bekommt exakt denselben
+Kopf per after_request. Dadurch muss kein neues Modul seinen eigenen Kopf bauen
+und spaetere Wrapper (OP, CAMT, Revolut, Erfassung, Material usw.) koennen ihn
+nicht mehr versehentlich verlieren.
 """
 
 
@@ -27,11 +29,9 @@ def install(ns):
 </header>
 '''
 
-    finance_paths = {
-        "/incoming/payments",
-        "/incoming/revolut",
-        "/incoming/reconciliation",
-    }
+    # / und /mobile sind bereits die Referenzoberflaeche und besitzen diesen Kopf
+    # nativ. Alle echten Unterseiten werden hier zentral vereinheitlicht.
+    reference_paths = {"/", "/mobile", "/mobile/"}
 
     if getattr(app, "_krista_finance_head_after_request", False):
         return
@@ -41,7 +41,7 @@ def install(ns):
     @app.after_request
     def krista_finance_brain_head(response):
         try:
-            if request.path not in finance_paths:
+            if request.path in reference_paths:
                 return response
             content_type = str(response.headers.get("Content-Type") or "").lower()
             if "text/html" not in content_type:
@@ -49,19 +49,19 @@ def install(ns):
             html = response.get_data(as_text=True)
             if "kristaFinanceBrainHead" in html:
                 return response
-            if "</head>" in html:
+            if "</head>" in html and "kristaFinanceBrainHeadCss" not in html:
                 html = html.replace("</head>", css + "</head>", 1)
             body_pos = html.find("<body")
             if body_pos >= 0:
                 body_end = html.find(">", body_pos)
                 if body_end >= 0:
                     html = html[:body_end + 1] + head + html[body_end + 1:]
-            response.set_data(html)
-            response.headers["Content-Type"] = "text/html; charset=utf-8"
+                    response.set_data(html)
+                    response.headers["Content-Type"] = "text/html; charset=utf-8"
             return response
         except Exception as exc:
-            print("⚠ Finance-Kopf konnte nicht eingesetzt werden:", exc)
+            print("⚠ The-Brain-Kopf konnte nicht eingesetzt werden:", exc)
             return response
 
     app._krista_finance_head_after_request = True
-    print("✅ Finance-Kopf V2: pfadbasiert auf OP / Revolut / CAMT")
+    print("✅ The-Brain-Kopf: einheitlich auf allen Unterseiten")
