@@ -1,0 +1,35 @@
+"use strict";
+
+(function(){
+  const VERSION="2026-08-23-signals-1";
+  const token=new URLSearchParams(location.search).get("token")||"";
+  const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
+  async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
+  const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+  const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
+  const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
+
+  function installCss(){if(document.getElementById('towerSignalsCss'))return;const s=document.createElement('style');s.id='towerSignalsCss';s.textContent=`
+    .ts-wrap{margin:0 0 12px;border:1px solid #ddd9cf;background:#fffefa;border-radius:16px;padding:14px 15px;box-shadow:0 5px 18px rgba(23,33,27,.045)}.ts-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}.ts-head h2{margin:0;font-size:15px}.ts-head p{margin:3px 0 0;font-size:10.5px;color:#707670}.ts-count{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:#eef3ee;color:#315b3d;padding:6px 9px;font-size:10px;font-weight:900}.ts-list{display:grid;gap:6px}.ts-row{display:grid;grid-template-columns:9px 86px minmax(0,1fr) auto;gap:9px;align-items:center;border:1px solid #e5e1d8;border-radius:11px;background:#fbfaf6;padding:9px 10px;color:#252925;text-decoration:none}.ts-row:hover{border-color:#a9bdaa;background:#f5faf6}.ts-dot{width:8px;height:8px;border-radius:50%;background:#2f7d4a}.ts-row.high .ts-dot{background:#a84540}.ts-row.medium .ts-dot{background:#c98428}.ts-number{font-weight:900;font-size:11px}.ts-copy strong{display:block;font-size:11px}.ts-copy span{display:block;margin-top:2px;font-size:9.5px;color:#707670;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ts-value{text-align:right;font-size:10.5px;font-weight:900;white-space:nowrap}.ts-empty{padding:13px;border-radius:10px;background:#eef6ef;color:#315b3d;font-size:10.5px}.ts-footer{display:flex;justify-content:flex-end;margin-top:8px}.ts-footer a{font-size:10px;font-weight:850;color:#2f6c40;text-decoration:none}@media(max-width:760px){.ts-row{grid-template-columns:8px 62px minmax(0,1fr)}.ts-value{display:none}.ts-head{flex-direction:column}.ts-count{align-self:flex-start}}
+  `;document.head.appendChild(s)}
+
+  function assignments(b){for(const c of [b?.assignments,b?.planning?.assignments,b?.data?.assignments]){if(Array.isArray(c))return c;if(c&&typeof c==='object')return Object.values(c).flat().filter(Boolean)}return[]}
+  function aid(a){return String(a?.jobId??a?.siteId??a?.job?.jobId??a?.job?.id??'')}
+  function hm(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
+  function ah(a){const e=num(a?.hours??a?.plannedHours??a?.durationHours);if(e>0)return e;const f=hm(a?.from??a?.startTime),t=hm(a?.to??a?.endTime);return f!==null&&t!==null&&t>f?(t-f)/60:0}
+  function futureMap(b){const today=new Date().toISOString().slice(0,10),map={};for(const a of assignments(b)){const day=String(a.date||a.day||'').slice(0,10);if(day&&day<today)continue;const id=aid(a);if(!id)continue;map[id]=(map[id]||0)+ah(a)}return map}
+  function calc(j){return j?.calculation||{}}
+  function actual(j){const c=calc(j);return num(c.orderHours??c.actualHours)}
+  function target(j){return num(calc(j).calculatedHours)}
+  function contract(j){return num(j.contractAmount??calc(j).contractAmount)}
+  function dateValue(j){return j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
+  function ageDays(j){const raw=dateValue(j);if(!raw)return null;const d=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(d.getTime())?null:Math.max(0,Math.floor((Date.now()-d.getTime())/86400000))}
+
+  function signals(jobs,b){const plan=futureMap(b),rows=[];for(const j of jobs){const id=String(j.jobId),t=target(j),a=actual(j),remaining=Math.max(0,t-a),p=plan[id]||0,amount=contract(j);if(j.status==='Auftrag'&&p<=0){rows.push({severity:'high',score:100,title:'Auftrag ohne Einteilung',detail:`${j.name||id} · ${hours(t)} Soll noch nicht verplant`,job:j,value:amount?money(amount):hours(t)});continue}if(j.status==='Laufend'&&t>0&&a>t){rows.push({severity:'high',score:95+(a-t),title:'Stunden über Soll',detail:`${j.name||id} · ${hours(a)} Ist / ${hours(t)} Soll`,job:j,value:'+'+hours(a-t)});continue}if(j.status==='Fertig – nicht abgerechnet'){rows.push({severity:'high',score:92,title:'Fertig · Abrechnung offen',detail:`${j.name||id} · Baustelle wartet auf Abrechnung`,job:j,value:amount?money(amount):'prüfen'});continue}if(j.status==='Laufend'&&remaining>0&&p<=0){rows.push({severity:'medium',score:80+remaining/10,title:'Restarbeit ohne Planung',detail:`${j.name||id} · ${hours(remaining)} Reststunden`,job:j,value:hours(remaining)});continue}if(j.status==='Angebot'){const age=ageDays(j);if(age!==null&&age>=14){rows.push({severity:age>=28?'high':'medium',score:50+Math.min(40,age),title:'Angebot nachfassen',detail:`${j.name||id} · ${age} Tage alt`,job:j,value:amount?money(amount):age+' T.'})}}}return rows.sort((x,y)=>y.score-x.score).slice(0,8)}
+
+  function render(rows){const dash=document.querySelector('.dashboard'),main=document.querySelector('body>main');if(!main||document.getElementById('towerSignals'))return;const wrap=document.createElement('section');wrap.id='towerSignals';wrap.className='ts-wrap';wrap.innerHTML=`<div class="ts-head"><div><h2>Heute wichtig</h2><p>KRISTOWER zieht automatisch die Baustellen nach oben, bei denen eine Entscheidung oder Aktion sinnvoll ist.</p></div><span class="ts-count">${rows.length?rows.length+' Signale':'alles ruhig'}</span></div>${rows.length?`<div class="ts-list">${rows.map(r=>`<a class="ts-row ${r.severity}" href="${tokenUrl('/public/baustellen.html')}#${encodeURIComponent(r.job.jobId)}"><span class="ts-dot"></span><span class="ts-number">#${r.job.jobId}</span><span class="ts-copy"><strong>${r.title}</strong><span>${r.detail}</span></span><span class="ts-value">${r.value}</span></a>`).join('')}</div>`:'<div class="ts-empty">✓ Aus den aktuell angebundenen Baustellendaten ist kein akuter Handlungsbedarf erkennbar.</div>'}<div class="ts-footer"><a href="${tokenUrl('/public/baustellen.html')}">Alle Baustellen öffnen →</a></div>`;if(dash)main.insertBefore(wrap,dash);else main.appendChild(wrap)}
+
+  async function load(){try{const [j,b]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({}))]);render(signals(j.jobs||[],b||{}))}catch(e){console.warn('Tower Baustellen-Signale',e)}}
+  function init(){installCss();load();window.TowerBaustellenSignals={version:VERSION,reload:load}}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
