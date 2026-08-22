@@ -14,6 +14,7 @@ const { registerPaintWallpaperOrder } = require("./paint-wallpaper-order");
 const { registerPaintOrderSummaryFix } = require("./paint-order-summary-fix");
 const { registerPaintOrderReview } = require("./paint-order-review");
 const { registerPaintLgOrderExcel } = require("./paint-lg-order-excel");
+const { registerPaintLgSentOrder } = require("./paint-lg-sent-order");
 const { registerPaintInventoryExcel } = require("./paint-inventory-excel");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
@@ -89,6 +90,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-lg-order-excel-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-order-excel-ui.js?v=20260822-1845"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-lg-sent-order-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-lg-sent-order-ui.js?v=20260822-2134"></script>\n</body>');
+      }
       if (!fixed.includes("/public/paint-return-stock-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260822-2058"></script>\n</body>');
       }
@@ -119,6 +123,7 @@ function wrappedExpress(...args) {
         registerPaintWallpaperOrder(app, opts);
         registerPaintOrderReview(app, opts);
         registerPaintLgOrderExcel(app, opts);
+        registerPaintLgSentOrder(app, opts);
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventoryExcel(app, opts);
         registerPaintInventory(app, opts);
@@ -129,7 +134,7 @@ function wrappedExpress(...args) {
         registerPaintInventoryRecovery(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur + Rueckware + Bestellpruefung + LG-Excel + sauberer Recovery-Neuaufbau registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + sauberer Recovery-Neuaufbau registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
