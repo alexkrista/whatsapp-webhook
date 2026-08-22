@@ -6,6 +6,7 @@
 
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
+    { key: "baustellen", label: "BAUSTELLEN", icon: "▤", href: "/public/baustellen.html", subtitle: "Aufträge, laufende Baustellen, Angebote und Stunden" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
     { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
@@ -18,9 +19,6 @@
     const url = new URL(href, window.location.origin);
     const token = new URLSearchParams(window.location.search).get("token");
     if (external || url.origin !== window.location.origin) {
-      // THE BRAIN läuft auf dem privaten Tailscale-Host. Den bereits gültigen
-      // Render-Admin-Token nehmen wir beim Wechsel mit; Brain speichert ihn dort
-      // nur als HttpOnly-Cookie und verwendet ihn für den Rücksprung zu KRISTA.
       if (token && url.origin === BRAIN_ORIGIN) url.searchParams.set("krista_token", token);
       return url.href;
     }
@@ -33,6 +31,7 @@
     const hash = window.location.hash.toLowerCase();
     if (hash === "#tasks") return "tasks";
     if (hash === "#schedules") return "kriszeit";
+    if (pathname.includes("baustellen.html")) return "baustellen";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
     if (pathname.includes("/admin/paint")) return "farben";
@@ -183,7 +182,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0023.23";
+    const build = options.build || mount.dataset.kristaBuild || "0024.01";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
