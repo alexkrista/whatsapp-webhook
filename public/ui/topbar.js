@@ -103,6 +103,7 @@
     const script = document.createElement("script");
     script.src = src;
     script.setAttribute(dataKey, "1");
+    script.async = false;
     script.defer = true;
     document.head.appendChild(script);
   }
@@ -127,8 +128,11 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260821-0925", "data-krista-inbox-v2");
   }
 
-  function loadBaustellenKnowledgeHub() {
-    if (window.location.pathname.toLowerCase().includes("baustellen.html")) loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260822-knowledge", "data-krista-baustellen-knowledge");
+  function loadBaustellenKnowledgeStack() {
+    if (!window.location.pathname.toLowerCase().includes("baustellen.html")) return;
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260823-knowledge", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260823-cockpit", "data-krista-baustellen-cockpit");
+    loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260823-chronik", "data-krista-baustellen-chronik");
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
@@ -186,7 +190,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0024.02";
+    const build = options.build || mount.dataset.kristaBuild || "0024.03";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
@@ -225,7 +229,7 @@
     loadKristineTaskList();
     loadKristineFinanceApproval();
     loadKristineInbox();
-    loadBaustellenKnowledgeHub();
+    loadBaustellenKnowledgeStack();
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
