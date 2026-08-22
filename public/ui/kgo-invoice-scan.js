@@ -16,14 +16,13 @@
     return String(document.getElementById("kgEmployeeName")?.textContent || "Mitarbeiter").trim();
   }
 
-  function toast(text, error = false) {
+  function toast(text) {
     const existing = document.getElementById("kgToast");
     if (existing) {
       existing.textContent = text;
-      existing.classList.add("kg-toast-show");
-      if (error) existing.dataset.kind = "error"; else delete existing.dataset.kind;
+      existing.classList.add("is-visible");
       clearTimeout(existing._invoiceTimer);
-      existing._invoiceTimer = setTimeout(() => existing.classList.remove("kg-toast-show"), 4200);
+      existing._invoiceTimer = setTimeout(() => existing.classList.remove("is-visible"), 4200);
       return;
     }
     alert(text);
@@ -42,12 +41,12 @@
     const id = employeeId();
     const name = employeeName();
     if (!id) {
-      toast("Bitte zuerst den Mitarbeiter auswählen.", true);
+      toast("Bitte zuerst den Mitarbeiter auswählen.");
       return;
     }
     if (!file) return;
     if (file.size > 12 * 1024 * 1024) {
-      toast("Rechnung ist größer als 12 MB.", true);
+      toast("Rechnung ist größer als 12 MB.");
       return;
     }
 
@@ -77,7 +76,7 @@
         ? "✓ Rechnung war bereits im Eingangskorb."
         : `✓ Rechnung im Eingangskorb · ${name}`);
     } catch (error) {
-      toast("Rechnung konnte nicht abgelegt werden: " + String(error?.message || error), true);
+      toast("Rechnung konnte nicht abgelegt werden: " + String(error?.message || error));
     } finally {
       button.disabled = false;
       button.innerHTML = original;
