@@ -4,14 +4,17 @@ const fsp = require("fs/promises");
 const fs = require("fs");
 const path = require("path");
 const XLSX = require("xlsx");
+const CFB = XLSX.CFB;
+try { CFB?.utils?.use_zlib?.(require("zlib")); } catch {}
 
 const TEMPLATE_NAME = "Order form MAY 2026 LG_PRICE KRISTA.xlsx";
 const SHEET_CONFIG = Object.freeze({
-  "LG BASES": { skuCol: "D", qtyCol: "E", priceCol: "F", totalCol: "G", startRow: 2, endRow: 142, totalCell: "G143" },
-  "COLOURANTS": { skuCol: "D", qtyCol: "E", priceCol: "F", totalCol: "G", startRow: 2, endRow: 16, totalCell: "G18" },
-  "LG SAMPLE POTS": { skuCol: "C", qtyCol: "D", priceCol: "E", totalCol: "F", startRow: 2, endRow: 206, totalCell: "F207" },
-  "LG MARKETING": { skuCol: "C", qtyCol: "D", priceCol: "E", totalCol: "F", startRow: 2, endRow: 36, totalCell: "F37" },
+  "LG BASES": { xml: "xl/worksheets/sheet2.xml", skuCol: "D", qtyCol: "E", priceCol: "F", totalCol: "G", startRow: 2, endRow: 142, totalCell: "G143" },
+  "COLOURANTS": { xml: "xl/worksheets/sheet3.xml", skuCol: "D", qtyCol: "E", priceCol: "F", totalCol: "G", startRow: 2, endRow: 16, totalCell: "G18" },
+  "LG SAMPLE POTS": { xml: "xl/worksheets/sheet4.xml", skuCol: "C", qtyCol: "D", priceCol: "E", totalCol: "F", startRow: 2, endRow: 206, totalCell: "F207" },
+  "LG MARKETING": { xml: "xl/worksheets/sheet5.xml", skuCol: "C", qtyCol: "D", priceCol: "E", totalCol: "F", startRow: 2, endRow: 36, totalCell: "F37" },
 });
+const SUMMARY_XML = "xl/worksheets/sheet1.xml";
 
 function registerPaintLgOrderExcel(app, options = {}) {
   const dataDir = options.dataDir || process.env.DATA_DIR || "/var/data";
@@ -89,18 +92,6 @@ function registerPaintLgOrderExcel(app, options = {}) {
     const n = Number(ws?.[address]?.v);
     return Number.isFinite(n) ? n : NaN;
   }
-  function preserveCell(ws, address, patch) {
-    ws[address] = { ...(ws[address] || {}), ...patch };
-  }
-  function clearValueKeepStyle(ws, address) {
-    const cell = ws[address];
-    if (!cell) return;
-    delete cell.v; delete cell.w; delete cell.f; cell.t = "n";
-  }
-  function formulaNumber(ws, address, formula, value) {
-    preserveCell(ws, address, { t: "n", f: formula.replace(/^=/, ""), v: money2(value) });
-    delete ws[address].w;
-  }
 
   function buildTemplateIndex(workbook) {
     const bySku = new Map();
@@ -114,7 +105,6 @@ function registerPaintLgOrderExcel(app, options = {}) {
         const price = cellNumber(ws, `${cfg.priceCol}${row}`);
         if (!Number.isFinite(price)) throw new Error(`LG-Vorlage: Preis für SKU ${sku} fehlt`);
         bySku.set(sku, { sheetName, row, price: money2(price), cfg });
-        clearValueKeepStyle(ws, `${cfg.qtyCol}${row}`);
       }
     }
     return bySku;
@@ -128,29 +118,127 @@ function registerPaintLgOrderExcel(app, options = {}) {
     return index.size;
   }
 
-  function setTemplateTotals(workbook, sheetTotals, grandTotal) {
-    const bases = workbook.Sheets["LG BASES"];
-    const colourants = workbook.Sheets["COLOURANTS"];
-    const samples = workbook.Sheets["LG SAMPLE POTS"];
-    const marketing = workbook.Sheets["LG MARKETING"];
-    const summary = workbook.Sheets["Zusammenfassung"];
+  function normalizedZipPath(value) {
+    return String(value || "").replace(/^Root Entry\/?/i, "").replace(/^\/+/, "").replace(/\\/g, "/");
+  }
 
-    formulaNumber(bases, "G143", "SUM(G2:G142)", sheetTotals["LG BASES"] || 0);
-    formulaNumber(colourants, "G18", "SUM(G2:G16)", sheetTotals.COLOURANTS || 0);
-    formulaNumber(samples, "F207", "SUM(F2:F206)", sheetTotals["LG SAMPLE POTS"] || 0);
-    formulaNumber(marketing, "F37", "SUM(F2:F36)", sheetTotals["LG MARKETING"] || 0);
-    formulaNumber(bases, "G145", "G143+COLOURANTS!G18+'LG SAMPLE POTS'!F207+'LG MARKETING'!F37", grandTotal);
+  function zipEntry(cfb, filePath) {
+    const target = normalizedZipPath(filePath).toLowerCase();
+    const paths = Array.isArray(cfb?.FullPaths) ? cfb.FullPaths : [];
+    for (let i = 0; i < paths.length; i += 1) {
+      if (normalizedZipPath(paths[i]).toLowerCase() === target) return cfb.FileIndex[i];
+    }
+    const found = CFB?.find?.(cfb, filePath) || CFB?.find?.(cfb, `/${filePath}`);
+    if (found) return found;
+    throw new Error(`LG-Vorlage: ZIP-Datei '${filePath}' fehlt`);
+  }
 
-    formulaNumber(summary, "B9", "'LG BASES'!G143", sheetTotals["LG BASES"] || 0);
-    formulaNumber(summary, "B10", "COLOURANTS!G18", sheetTotals.COLOURANTS || 0);
-    formulaNumber(summary, "B11", "'LG SAMPLE POTS'!F207", sheetTotals["LG SAMPLE POTS"] || 0);
-    formulaNumber(summary, "B12", "'LG MARKETING'!F37", sheetTotals["LG MARKETING"] || 0);
-    formulaNumber(summary, "B13", "SUM(B9:B12)", grandTotal);
-    const now = new Date();
-    preserveCell(summary, "E2", { t: "s", v: `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}` });
+  function readXml(cfb, filePath) {
+    const entry = zipEntry(cfb, filePath);
+    return Buffer.from(entry.content || []).toString("utf8");
+  }
 
-    workbook.Workbook = workbook.Workbook || {};
-    workbook.Workbook.CalcPr = { ...(workbook.Workbook.CalcPr || {}), calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true };
+  function writeXml(cfb, filePath, xml) {
+    const entry = zipEntry(cfb, filePath);
+    const bytes = Buffer.from(xml, "utf8");
+    entry.content = bytes;
+    entry.size = bytes.length;
+  }
+
+  function regexEscape(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function stripCellType(attrs) {
+    return String(attrs || "").replace(/\s+t="[^"]*"/g, "");
+  }
+
+  function replaceCell(xml, ref, innerXml) {
+    const r = regexEscape(ref);
+    const selfClosing = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\s*/>`);
+    if (selfClosing.test(xml)) {
+      return xml.replace(selfClosing, (_all, attrs) => `<c${stripCellType(attrs)}>${innerXml}</c>`);
+    }
+    const paired = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>[\\s\\S]*?<\\/c>`);
+    if (paired.test(xml)) {
+      return xml.replace(paired, (_all, attrs) => `<c${stripCellType(attrs)}>${innerXml}</c>`);
+    }
+    throw new Error(`LG-Vorlage: Zelle ${ref} fehlt`);
+  }
+
+  function clearNumericCell(xml, ref) {
+    const r = regexEscape(ref);
+    const selfClosing = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\s*/>`);
+    if (selfClosing.test(xml)) return xml.replace(selfClosing, (_all, attrs) => `<c${stripCellType(attrs)}/>`);
+    const paired = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>[\\s\\S]*?<\\/c>`);
+    if (paired.test(xml)) return xml.replace(paired, (_all, attrs) => `<c${stripCellType(attrs)}/>`);
+    throw new Error(`LG-Vorlage: Zelle ${ref} fehlt`);
+  }
+
+  function numericCell(xml, ref, value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) throw new Error(`Ungültiger Zahlenwert für ${ref}`);
+    return replaceCell(xml, ref, `<v>${n}</v>`);
+  }
+
+  function formulaCell(xml, ref, formula, cachedValue) {
+    const f = String(formula).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return replaceCell(xml, ref, `<f>${f}</f><v>${money2(cachedValue)}</v>`);
+  }
+
+  function patchOriginalXlsx(templateBuffer, index, openItems, sheetTotals, grandTotal) {
+    if (!CFB?.read || !CFB?.write) throw new Error("ZIP-Engine für originales LG-Excel ist nicht verfügbar");
+    const cfb = CFB.read(templateBuffer, { type: "buffer" });
+    const xmlBySheet = new Map();
+    for (const [sheetName, cfg] of Object.entries(SHEET_CONFIG)) xmlBySheet.set(sheetName, readXml(cfb, cfg.xml));
+
+    // Zuerst sämtliche Mengen leeren und die vorhandenen Zeilensummen auf 0
+    // setzen. So kann auch eine später manuell gespeicherte Preislisten-Vorlage
+    // niemals alte Bestellmengen in eine neue Bestellung übernehmen.
+    for (const slot of index.values()) {
+      let xml = xmlBySheet.get(slot.sheetName);
+      const qtyRef = `${slot.cfg.qtyCol}${slot.row}`;
+      const totalRef = `${slot.cfg.totalCol}${slot.row}`;
+      xml = clearNumericCell(xml, qtyRef);
+      xml = formulaCell(xml, totalRef, `${qtyRef}*${slot.cfg.priceCol}${slot.row}`, 0);
+      xmlBySheet.set(slot.sheetName, xml);
+    }
+
+    for (const item of openItems) {
+      const slot = index.get(item.stockCode);
+      const qtyRef = `${slot.cfg.qtyCol}${slot.row}`;
+      const totalRef = `${slot.cfg.totalCol}${slot.row}`;
+      const lineTotal = money2(Number(item.quantity || 0) * Number(slot.price || 0));
+      let xml = xmlBySheet.get(slot.sheetName);
+      xml = numericCell(xml, qtyRef, item.quantity);
+      xml = formulaCell(xml, totalRef, `${qtyRef}*${slot.cfg.priceCol}${slot.row}`, lineTotal);
+      xmlBySheet.set(slot.sheetName, xml);
+    }
+
+    let bases = xmlBySheet.get("LG BASES");
+    let colourants = xmlBySheet.get("COLOURANTS");
+    let samples = xmlBySheet.get("LG SAMPLE POTS");
+    let marketing = xmlBySheet.get("LG MARKETING");
+    bases = formulaCell(bases, "G143", "SUM(G2:G142)", sheetTotals["LG BASES"] || 0);
+    bases = formulaCell(bases, "G145", "G143+COLOURANTS!G18+'LG SAMPLE POTS'!F207+'LG MARKETING'!F37", grandTotal);
+    colourants = formulaCell(colourants, "G18", "SUM(G2:G16)", sheetTotals.COLOURANTS || 0);
+    samples = formulaCell(samples, "F207", "SUM(F2:F206)", sheetTotals["LG SAMPLE POTS"] || 0);
+    marketing = formulaCell(marketing, "F37", "SUM(F2:F36)", sheetTotals["LG MARKETING"] || 0);
+    xmlBySheet.set("LG BASES", bases);
+    xmlBySheet.set("COLOURANTS", colourants);
+    xmlBySheet.set("LG SAMPLE POTS", samples);
+    xmlBySheet.set("LG MARKETING", marketing);
+
+    let summary = readXml(cfb, SUMMARY_XML);
+    summary = formulaCell(summary, "B9", "'LG BASES'!G143", sheetTotals["LG BASES"] || 0);
+    summary = formulaCell(summary, "B10", "COLOURANTS!G18", sheetTotals.COLOURANTS || 0);
+    summary = formulaCell(summary, "B11", "'LG SAMPLE POTS'!F207", sheetTotals["LG SAMPLE POTS"] || 0);
+    summary = formulaCell(summary, "B12", "'LG MARKETING'!F37", sheetTotals["LG MARKETING"] || 0);
+    summary = formulaCell(summary, "B13", "SUM(B9:B12)", grandTotal);
+
+    for (const [sheetName, cfg] of Object.entries(SHEET_CONFIG)) writeXml(cfb, cfg.xml, xmlBySheet.get(sheetName));
+    writeXml(cfb, SUMMARY_XML, summary);
+    return Buffer.from(CFB.write(cfb, { type: "buffer", fileType: "zip", compression: true }));
   }
 
   app.get("/admin/api/paint/order-review/xlsx-template/status", async (req, res) => {
@@ -167,13 +255,13 @@ function registerPaintLgOrderExcel(app, options = {}) {
       if (!base64) return res.status(400).json({ ok: false, error: "Excel-Datei fehlt" });
       const bytes = Buffer.from(base64, "base64");
       if (bytes.length < 10000 || bytes.length > 5_000_000) return res.status(400).json({ ok: false, error: "Ungültige Excel-Dateigröße" });
-      const workbook = XLSX.read(bytes, { type: "buffer", cellStyles: true, cellFormula: true, cellDates: true });
+      const workbook = XLSX.read(bytes, { type: "buffer", cellFormula: true, cellDates: true });
       const skuCount = validateTemplate(workbook);
       await ensureRoot();
       const tmp = `${templateFile}.tmp`;
       await fsp.writeFile(tmp, bytes);
       await fsp.rename(tmp, templateFile);
-      const meta = { name, installedAt: new Date().toISOString(), skuCount, sheets: workbook.SheetNames };
+      const meta = { name, installedAt: new Date().toISOString(), source: "manual-upload", skuCount, sheets: workbook.SheetNames };
       await writeJson(templateMetaFile, meta);
       res.json({ ok: true, installed: true, template: meta });
     } catch (error) {
@@ -189,7 +277,8 @@ function registerPaintLgOrderExcel(app, options = {}) {
       if (!order.openItems.length) return res.status(409).json({ ok: false, error: "Keine offenen Little-Greene-Bestellpositionen." });
 
       const templateBuffer = await fsp.readFile(templateFile);
-      const workbook = XLSX.read(templateBuffer, { type: "buffer", cellStyles: true, cellFormula: true, cellDates: true });
+      const workbook = XLSX.read(templateBuffer, { type: "buffer", cellFormula: true, cellDates: true });
+      validateTemplate(workbook);
       const index = buildTemplateIndex(workbook);
       const missing = [];
       const priceMismatches = [];
@@ -199,28 +288,38 @@ function registerPaintLgOrderExcel(app, options = {}) {
       for (const item of order.openItems) {
         const sku = clean(item.stockCode, 100).toUpperCase();
         const slot = index.get(sku);
-        if (!sku || !slot) { missing.push({ sku: sku || "(keine SKU)", product: item.product, quantity: item.quantity }); continue; }
+        if (!sku || !slot) {
+          missing.push({ sku: sku || "(keine SKU)", product: item.product, quantity: item.quantity });
+          continue;
+        }
         const kristinePrice = money2(item.purchasePrice);
         const lgPrice = money2(slot.price);
         if (Math.abs(kristinePrice - lgPrice) > 0.005) priceMismatches.push({ sku, product: item.product, kristinePrice, lgPrice });
-        const quantity = Number(item.quantity || 0);
-        const lineTotal = money2(quantity * lgPrice);
-        const ws = workbook.Sheets[slot.sheetName];
-        preserveCell(ws, `${slot.cfg.qtyCol}${slot.row}`, { t: "n", v: quantity });
-        formulaNumber(ws, `${slot.cfg.totalCol}${slot.row}`, `${slot.cfg.qtyCol}${slot.row}*${slot.cfg.priceCol}${slot.row}`, lineTotal);
+        const lineTotal = money2(Number(item.quantity || 0) * lgPrice);
         sheetTotals[slot.sheetName] = money2(sheetTotals[slot.sheetName] + lineTotal);
         lgTotal = money2(lgTotal + lineTotal);
       }
 
       if (missing.length || priceMismatches.length) {
-        return res.status(409).json({ ok: false, error: missing.length ? "LG-Excel kann nicht erstellt werden: SKU-Zuordnung unvollständig." : "LG-Excel kann nicht erstellt werden: Bestellpreise stimmen nicht überein.", missing, priceMismatches, kristineTotal: order.kristineTotal, lgTotal });
+        return res.status(409).json({
+          ok: false,
+          error: missing.length ? "LG-Excel kann nicht erstellt werden: SKU-Zuordnung unvollständig." : "LG-Excel kann nicht erstellt werden: Bestellpreise stimmen nicht überein.",
+          missing,
+          priceMismatches,
+          kristineTotal: order.kristineTotal,
+          lgTotal,
+        });
       }
       if (Math.abs(order.kristineTotal - lgTotal) > 0.005) {
         return res.status(409).json({ ok: false, error: "Preisprüfung fehlgeschlagen: KRISTINE-Gesamt und Little-Greene-Excel unterscheiden sich.", kristineTotal: order.kristineTotal, lgTotal });
       }
 
-      setTemplateTotals(workbook, sheetTotals, lgTotal);
-      const bytes = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true, compression: true });
+      const bytes = patchOriginalXlsx(templateBuffer, index, order.openItems, sheetTotals, lgTotal);
+      // Nach dem Patch noch einmal parsbar prüfen. Dadurch liefern wir niemals
+      // eine beschädigte Excel-Datei aus.
+      const check = XLSX.read(bytes, { type: "buffer", cellFormula: true });
+      if (!check?.Sheets?.Zusammenfassung || !check?.Sheets?.["LG BASES"]) throw new Error("Ausgabe-Excel konnte nicht verifiziert werden");
+
       const day = new Date().toISOString().slice(0, 10);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename=\"LittleGreene_Bestellung_${day}.xlsx\"`);
@@ -229,7 +328,7 @@ function registerPaintLgOrderExcel(app, options = {}) {
       res.setHeader("X-Order-Positions", String(order.openPositions));
       res.setHeader("X-Order-Pieces", String(order.pieces));
       res.setHeader("X-Price-Check", "ok");
-      res.send(Buffer.from(bytes));
+      res.send(bytes);
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
