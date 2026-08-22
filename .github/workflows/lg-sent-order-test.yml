@@ -1,0 +1,31 @@
+name: LG sent order snapshot test
+
+on:
+  push:
+    paths:
+      - "paint-lg-sent-order.js"
+      - "public/paint-lg-sent-order-ui.js"
+      - "TEST/lg-sent-order.test.js"
+      - "paint-lab-preload.js"
+      - ".github/workflows/lg-sent-order-test.yml"
+  pull_request:
+    paths:
+      - "paint-lg-sent-order.js"
+      - "public/paint-lg-sent-order-ui.js"
+      - "TEST/lg-sent-order.test.js"
+      - "paint-lab-preload.js"
+      - ".github/workflows/lg-sent-order-test.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node --check paint-lg-sent-order.js
+      - run: node --check public/paint-lg-sent-order-ui.js
+      - run: node TEST/lg-sent-order.test.js
