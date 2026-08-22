@@ -7,6 +7,12 @@ wieder bearbeitbar gemacht und Zahlungsweg/Fremdwährung direkt bei der Erfassun
 geführt. Der TEST-/Revolut-Bridge erzeugt auch im Testgelände sofort die
 Freigabe-Aufgabe und hält die Revolut-Ansicht in derselben Area.
 """
+import os
+
+# Fester Standard-Freigeber für Rechnungen. Kann bei Bedarf per Environment
+# bewusst überschrieben werden, aber ohne Konfiguration geht die Aufgabe an Alex0780.
+os.environ.setdefault("KRISTINE_FINANCE_APPROVER_ID", "Alex0780")
+
 from brain_finance_runtime import install as _finance_install
 from brain_capture_edit import install as _capture_edit_install
 from brain_currency_payment_v2 import install as _currency_payment_install
