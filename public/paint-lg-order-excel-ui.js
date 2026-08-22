@@ -12,4 +12,9 @@
   script.src = "/public/paint-lg-order-excel-ui-core.js?v=20260822-2012";
   script.async = false;
   (document.body || document.documentElement).appendChild(script);
+
+  const minimumScript = document.createElement("script");
+  minimumScript.src = "/public/paint-order-minimum-ui.js?v=20260822-2118";
+  minimumScript.async = false;
+  (document.body || document.documentElement).appendChild(minimumScript);
 })();
