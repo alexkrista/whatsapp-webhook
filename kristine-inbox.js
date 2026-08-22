@@ -3,9 +3,11 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const { parseMsg, getMsgAttachment, available: msgReaderAvailable } = require("./kristine-msg-reader");
 
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const OWN_DOMAINS = ["krista.at"];
+const MSG_READER_VERSION = "msgreader-1.28";
 
 function safeFilename(value) {
   const name = path.basename(String(value || "Datei")).replace(/[\x00-\x1f<>:"/\\|?*]+/g, "_").trim();
@@ -80,6 +82,20 @@ function decodeText(buffer, filename, mimeType) {
     return normalizeSpaces(buffer.toString("utf8"));
   }
   return "";
+}
+
+function decodeInbox(buffer, filename, mimeType) {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".msg" && msgReaderAvailable()) {
+    try {
+      const parsed = parseMsg(buffer);
+      parsed.mail.reader = MSG_READER_VERSION;
+      return { text: parsed.text, mail: parsed.mail };
+    } catch (error) {
+      console.warn("⚠️ KRISTINE MSG konnte nicht strukturiert gelesen werden, Fallback aktiv:", String(error?.message || error));
+    }
+  }
+  return { text: decodeText(buffer, filename, mimeType), mail: null };
 }
 
 const MONTHS = {
@@ -213,10 +229,27 @@ function analyzeText(text, filename, mimeType) {
   };
 }
 
+function applyMailToAnalysis(analysis, mail) {
+  if (!mail) return analysis;
+  const senderEmail = String(mail.senderEmail || "").toLowerCase();
+  const body = String(mail.body || "").trim();
+  return {
+    ...analysis,
+    subject: mail.subject || analysis.subject,
+    title: mail.subject || analysis.title,
+    contactName: mail.senderName || analysis.contactName,
+    contactEmail: senderEmail || analysis.contactEmail,
+    excerpt: body ? body.slice(0, 5000) : analysis.excerpt,
+    textAvailable: Boolean(body || mail.bodyHtml || analysis.textAvailable),
+    mailReader: mail.reader || MSG_READER_VERSION,
+  };
+}
+
 function analyzeInboxBuffer(buffer, filename, mimeType) {
-  const text = decodeText(buffer, filename, mimeType);
-  const analysis = analyzeText(text, filename, mimeType);
-  return { text, analysis };
+  const decoded = decodeInbox(buffer, filename, mimeType);
+  const analysisSource = decoded.mail?.body || decoded.text;
+  const analysis = applyMailToAnalysis(analyzeText(analysisSource, filename, mimeType), decoded.mail);
+  return { text: decoded.text, analysis, mail: decoded.mail };
 }
 
 function registerKristineInbox(app, { dataDir, requireAdmin }) {
@@ -230,6 +263,27 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
   function itemPath(id) { return path.join(ITEMS, `${String(id).replace(/[^A-Za-z0-9_-]/g, "")}.json`); }
   async function readItem(id) { try { return JSON.parse(await fsp.readFile(itemPath(id), "utf8")); } catch { return null; } }
   async function writeItem(item) { await ensure(); await fsp.writeFile(itemPath(item.id), JSON.stringify(item, null, 2), "utf8"); }
+  function originalFilePath(item) { return path.join(FILES, item.id, safeFilename(item.storedFilename || item.name)); }
+  function isMsgItem(item) { return path.extname(String(item?.storedFilename || item?.name || "")).toLowerCase() === ".msg"; }
+
+  async function hydrateMsgItem(item) {
+    if (!item || !isMsgItem(item) || !msgReaderAvailable()) return item;
+    if (item.mail?.reader === MSG_READER_VERSION && item.mail?.body !== undefined) return item;
+    const file = originalFilePath(item);
+    if (!fs.existsSync(file)) return item;
+    try {
+      const buffer = await fsp.readFile(file);
+      const parsed = analyzeInboxBuffer(buffer, item.name, item.mimeType);
+      item.mail = parsed.mail;
+      item.analysis = parsed.analysis;
+      item.textPreview = parsed.text.slice(0, 12000);
+      item.updatedAt = new Date().toISOString();
+      await writeItem(item);
+    } catch (error) {
+      console.warn("⚠️ Bestehende MSG konnte nicht neu gelesen werden:", item.id, String(error?.message || error));
+    }
+    return item;
+  }
 
   app.post("/kristine/api/inbox/import", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -248,7 +302,7 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
       await fsp.mkdir(dir, { recursive: true });
       const originalPath = path.join(dir, name);
       await fsp.writeFile(originalPath, buffer);
-      const { text, analysis } = analyzeInboxBuffer(buffer, name, mimeType);
+      const { text, analysis, mail } = analyzeInboxBuffer(buffer, name, mimeType);
       const now = new Date().toISOString();
       const item = {
         id,
@@ -263,6 +317,7 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
         analysis,
         textPreview: text.slice(0, 12000),
         storedFilename: name,
+        ...(mail ? { mail } : {}),
       };
       await writeItem(item);
       res.json({ ok: true, item });
@@ -289,17 +344,38 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
     if (!requireAdmin(req, res)) return;
     const item = await readItem(req.params.id);
     if (!item) return res.status(404).send("Eingang nicht gefunden");
-    const file = path.join(FILES, item.id, safeFilename(item.storedFilename || item.name));
+    const file = originalFilePath(item);
     if (!fs.existsSync(file)) return res.status(404).send("Originaldatei fehlt");
     res.setHeader("Content-Type", item.mimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(item.name || "Datei")}`);
     res.sendFile(file);
   });
 
-  app.get("/kristine/api/inbox/:id", async (req, res) => {
+  app.get("/kristine/api/inbox/:id/msg-attachment/:index", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const item = await readItem(req.params.id);
+    if (!item) return res.status(404).send("Eingang nicht gefunden");
+    if (!isMsgItem(item)) return res.status(400).send("Keine MSG-Datei");
+    const file = originalFilePath(item);
+    if (!fs.existsSync(file)) return res.status(404).send("Originaldatei fehlt");
+    try {
+      const buffer = await fsp.readFile(file);
+      const attachment = getMsgAttachment(buffer, req.params.index);
+      if (!attachment) return res.status(404).send("Mail-Anlage nicht gefunden");
+      const disposition = String(req.query.download || "") === "1" ? "attachment" : "inline";
+      res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.name || "Anlage")}`);
+      res.send(attachment.content);
+    } catch (error) {
+      res.status(500).send(`Mail-Anlage konnte nicht gelesen werden: ${String(error?.message || error)}`);
+    }
+  });
+
+  app.get("/kristine/api/inbox/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    let item = await readItem(req.params.id);
     if (!item) return res.status(404).json({ ok: false, error: "Eingang nicht gefunden" });
+    item = await hydrateMsgItem(item);
     res.json({ ok: true, item });
   });
 
@@ -345,7 +421,7 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
-  console.log("✅ KRISTINE Eingang registriert");
+  console.log(`✅ KRISTINE Eingang registriert · MSG Reader ${msgReaderAvailable() ? "aktiv" : "Fallback"}`);
 }
 
 module.exports = { registerKristineInbox, analyzeInboxBuffer, extractMsgText };
