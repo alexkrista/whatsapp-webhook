@@ -18,6 +18,7 @@ const { registerPaintInventoryExcel } = require("./paint-inventory-excel");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
+const { registerPaintReturnStock } = require("./paint-return-stock");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
 const { registerPaintLegacySollImport } = require("./paint-legacy-soll-import");
@@ -88,6 +89,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-lg-order-excel-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-order-excel-ui.js?v=20260822-1845"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-return-stock-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260822-2058"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -118,13 +122,14 @@ function wrappedExpress(...args) {
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventoryExcel(app, opts);
         registerPaintInventory(app, opts);
+        registerPaintReturnStock(app, opts);
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
         registerPaintLegacySollImport(app, opts);
         registerPaintInventoryRecovery(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur + Bestellpruefung + LG-Excel + sauberer Recovery-Neuaufbau registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur + Rueckware + Bestellpruefung + LG-Excel + sauberer Recovery-Neuaufbau registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
