@@ -20,6 +20,7 @@ from brain_finance_test_bridge import install as _finance_test_bridge_install
 from brain_finance_direct_debit import install as _direct_debit_install
 from brain_finance_reconciliation import install as _reconciliation_install
 from brain_finance_reconciliation_bridge import install as _reconciliation_bridge_install
+from brain_invoice_intake import install as _invoice_intake_install
 from brain_home_nav import install as _home_nav_install
 
 
@@ -31,4 +32,5 @@ def install(ns):
     _direct_debit_install(ns)
     _reconciliation_install(ns)
     _reconciliation_bridge_install(ns)
+    _invoice_intake_install(ns)
     _home_nav_install(ns)
