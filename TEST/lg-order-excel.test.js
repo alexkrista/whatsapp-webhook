@@ -33,8 +33,6 @@ async function jsonFetch(url) {
   process.env.DATA_DIR = tmp;
   process.env.ADMIN_TOKEN = "";
 
-  // Load after DATA_DIR is set. The wrapper installs the exact approved
-  // KRISTA template from the verified base64 chunks.
   const { registerPaintLgOrderExcel } = require("../paint-lg-order-excel");
   const root = path.join(tmp, "_kristine", "paint");
   const articlesFile = path.join(root, "articles.json");
@@ -68,7 +66,7 @@ async function jsonFetch(url) {
     assert.strictEqual(status.body.installed, true);
 
     const good = await fetch(`${base}/admin/api/paint/order-review/xlsx`);
-    assert.strictEqual(good.status, 200, await good.text().catch(() => ""));
+    if (good.status !== 200) throw new Error(`Good export returned ${good.status}: ${await good.text()}`);
     const out = Buffer.from(await good.arrayBuffer());
     assert.strictEqual(good.headers.get("x-price-check"), "ok");
     assert.strictEqual(good.headers.get("x-kristine-total"), "85.67");
@@ -85,7 +83,6 @@ async function jsonFetch(url) {
     assert.strictEqual(Number(wb.Sheets.Zusammenfassung.B13.v.toFixed(2)), 85.67);
     assert.strictEqual(sha256(cfbEntry(out, "xl/media/image1.jpeg")), originalImageHash, "summary logo/image changed");
 
-    // Price mismatch must block the Excel export.
     const wrongPrice = [{ ...goodArticles[0], purchasePrice: 5.22 }];
     await fsp.writeFile(articlesFile, JSON.stringify(wrongPrice, null, 2), "utf8");
     const priceFail = await jsonFetch(`${base}/admin/api/paint/order-review/xlsx`);
@@ -93,7 +90,6 @@ async function jsonFetch(url) {
     assert.ok(Array.isArray(priceFail.body.priceMismatches) && priceFail.body.priceMismatches.length === 1);
     assert.strictEqual(priceFail.body.priceMismatches[0].sku, "020605HHHHH");
 
-    // Missing SKU must also block export.
     const missingSku = [{ ...goodArticles[0], stockCode: "DOES-NOT-EXIST", purchasePrice: 5.21 }];
     await fsp.writeFile(articlesFile, JSON.stringify(missingSku, null, 2), "utf8");
     const skuFail = await jsonFetch(`${base}/admin/api/paint/order-review/xlsx`);
