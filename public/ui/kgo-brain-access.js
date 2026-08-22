@@ -43,6 +43,15 @@
     window.open(BRAIN_URL, "_blank", "noopener");
   }
 
+  function loadInvoiceScanner() {
+    if (document.querySelector('script[data-kgo-invoice-scan]')) return;
+    const script = document.createElement("script");
+    script.src = "/public/ui/kgo-invoice-scan.js?v=20260822-1";
+    script.defer = true;
+    script.setAttribute("data-kgo-invoice-scan", "1");
+    document.head.appendChild(script);
+  }
+
   function install() {
     const employeeName = document.getElementById("kgEmployeeName");
     const card = document.getElementById("kgBrainCard");
@@ -61,6 +70,7 @@
     observer.observe(button, { attributes: true, attributeFilter: ["disabled"] });
 
     syncBrainAccess();
+    loadInvoiceScanner();
   }
 
   if (document.readyState === "loading") {
