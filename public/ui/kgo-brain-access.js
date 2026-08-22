@@ -46,7 +46,7 @@
   function loadInvoiceScanner() {
     if (document.querySelector('script[data-kgo-invoice-scan]')) return;
     const script = document.createElement("script");
-    script.src = "/public/ui/kgo-invoice-scan.js?v=20260822-1";
+    script.src = "/public/ui/kgo-invoice-scan.js?v=20260822-2";
     script.defer = true;
     script.setAttribute("data-kgo-invoice-scan", "1");
     document.head.appendChild(script);
