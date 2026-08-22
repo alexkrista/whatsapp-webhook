@@ -6,12 +6,11 @@
 
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
-    { key: "baustellen", label: "BAUSTELLEN", icon: "▤", href: "/public/baustellen.html", subtitle: "Aufträge, laufende Baustellen, Angebote und Stunden" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
     { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
     { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Planung und Leitstand" },
-    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Mitarbeiter, Fahrzeuge und Stammdaten" },
+    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/public/baustellen.html", subtitle: "Baustellen, Mitarbeiter, Fahrzeuge und Stammdaten" },
     { key: "tasks", label: "AUFGABEN", icon: "📌", href: "/kristine#tasks", subtitle: "Offene Aufgaben und Erinnerungen" }
   ];
 
@@ -31,7 +30,7 @@
     const hash = window.location.hash.toLowerCase();
     if (hash === "#tasks") return "tasks";
     if (hash === "#schedules") return "kriszeit";
-    if (pathname.includes("baustellen.html")) return "baustellen";
+    if (pathname.includes("baustellen.html")) return "krisadmin";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
     if (pathname.includes("/admin/paint")) return "farben";
@@ -44,6 +43,7 @@
     const raw = String(value || "").toLowerCase();
     if (raw === "kristool") return "kriszeit";
     if (raw === "krisplan") return "kristine";
+    if (raw === "baustellen") return "krisadmin";
     return raw;
   }
 
@@ -127,6 +127,10 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260821-0925", "data-krista-inbox-v2");
   }
 
+  function loadBaustellenKnowledgeHub() {
+    if (window.location.pathname.toLowerCase().includes("baustellen.html")) loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260822-knowledge", "data-krista-baustellen-knowledge");
+  }
+
   function loadAdminEmployeeDocumentCompleteness() {
     if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
   }
@@ -182,7 +186,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0024.01";
+    const build = options.build || mount.dataset.kristaBuild || "0024.02";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
@@ -221,6 +225,7 @@
     loadKristineTaskList();
     loadKristineFinanceApproval();
     loadKristineInbox();
+    loadBaustellenKnowledgeHub();
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
