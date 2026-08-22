@@ -45,29 +45,62 @@
     return json?.item || null;
   }
 
+  function personLabel(person) {
+    if (!person) return "";
+    if (typeof person === "string") return person;
+    return String(person.label || (person.name && person.email ? `${person.name} <${person.email}>` : (person.email || person.name || "")));
+  }
+
+  function mailDateLabel(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    try {
+      return new Intl.DateTimeFormat("de-AT", { weekday:"short", day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }).format(date);
+    } catch { return raw; }
+  }
+
+  function mailAttachmentHref(itemId, index, download = false) {
+    const suffix = download ? "?download=1" : "";
+    return tokenUrl(`/kristine/api/inbox/${encodeURIComponent(itemId)}/msg-attachment/${encodeURIComponent(index)}${suffix}`);
+  }
+
   async function openMailPreview(itemId) {
     const preview = window.open("", "_blank");
     if (!preview) {
-      alert("Mail-Vorschau konnte nicht geöffnet werden. Bitte Pop-ups für KRISTINE erlauben.");
+      alert("Mail-Reader konnte nicht geöffnet werden. Bitte Pop-ups für KRISTINE erlauben.");
       return;
     }
     try { preview.opener = null; } catch {}
 
     preview.document.open();
-    preview.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>KRISTINE Mail</title></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;color:#222">Mail wird geladen …</body></html>');
+    preview.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>KRISTINE Mail</title></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;color:#222;background:#f3f1ec">Mail wird sauber gelesen …</body></html>');
     preview.document.close();
 
     try {
       const item = await fetchInboxItem(itemId);
       if (!item) throw new Error("Mail nicht gefunden");
       const analysis = item.analysis || {};
-      const body = String(item.textPreview || analysis.excerpt || analysis.summary || "").trim();
-      const meta = [
-        analysis.contactName ? `<div><strong>Kontakt:</strong> ${esc(analysis.contactName)}</div>` : "",
-        analysis.contactEmail ? `<div><strong>E-Mail:</strong> ${esc(analysis.contactEmail)}</div>` : "",
-        analysis.contactPhone ? `<div><strong>Telefon:</strong> ${esc(analysis.contactPhone)}</div>` : "",
-        analysis.dueDate ? `<div><strong>Termin/Fällig:</strong> ${esc(analysis.dueDate)}</div>` : ""
-      ].filter(Boolean).join("");
+      const mail = item.mail || {};
+      const subject = mail.subject || analysis.subject || item.name || "Mail";
+      const senderName = mail.senderName || analysis.contactName || "";
+      const senderEmail = mail.senderEmail || analysis.contactEmail || "";
+      const sender = senderName && senderEmail && senderName.toLowerCase() !== senderEmail.toLowerCase()
+        ? `${senderName} <${senderEmail}>`
+        : (senderEmail || senderName || "–");
+      const to = (mail.to || []).map(personLabel).filter(Boolean).join("; ");
+      const cc = (mail.cc || []).map(personLabel).filter(Boolean).join("; ");
+      const sentAt = mailDateLabel(mail.sentAt);
+      const body = String(mail.body || analysis.excerpt || item.textPreview || analysis.summary || "").trim();
+      const bodyHtml = String(mail.bodyHtml || "").trim();
+      const innerAttachments = Array.isArray(mail.attachments) ? mail.attachments : [];
+      const attachmentHtml = innerAttachments.length ? `<div class="attachments"><div class="attachments-title">📎 ${innerAttachments.length} Mail-Anlage${innerAttachments.length === 1 ? "" : "n"}</div><div class="attachment-list">${innerAttachments.map((att) => {
+        const openHref = mailAttachmentHref(item.id, att.index, false);
+        const downloadHref = mailAttachmentHref(item.id, att.index, true);
+        const meta = [att.mimeType || "", bytesLabel(att.size)].filter(Boolean).join(" · ");
+        return `<div class="attachment"><div class="attachment-copy"><strong>${esc(att.name || "Anlage")}</strong>${meta ? `<small>${esc(meta)}</small>` : ""}</div><div class="attachment-actions"><a href="${openHref}" target="_blank" rel="noopener">Öffnen</a><a href="${downloadHref}">Speichern</a></div></div>`;
+      }).join("")}</div></div>` : "";
 
       preview.document.open();
       preview.document.write(`<!doctype html>
@@ -75,26 +108,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(analysis.subject || item.name || "KRISTINE Mail")}</title>
+<title>${esc(subject)}</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f3f1ec;color:#222}
-main{max-width:980px;margin:0 auto;padding:24px}
-.card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 2px 15px rgba(0,0,0,.07)}
-h1{font-size:22px;margin:0 0 8px}.file{font-size:12px;color:#777;margin-bottom:16px}.meta{display:grid;gap:4px;padding:12px;background:#f7f7f4;border-radius:10px;margin-bottom:16px;font-size:13px}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0}
-a{display:inline-block;margin-top:16px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:9px 12px;font-weight:750}
+:root{font-family:Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif;color:#222;background:#f3f1ec}*{box-sizing:border-box}body{margin:0;background:#f3f1ec}.top{background:#111;color:#fff;padding:13px 20px;font-weight:800;letter-spacing:.02em}.wrap{max-width:1080px;margin:0 auto;padding:22px}.mail{background:#fff;border-radius:16px;box-shadow:0 2px 18px rgba(0,0,0,.08);overflow:hidden}.head{padding:22px 24px 18px;border-bottom:1px solid #ece9e2}.subject{font-size:23px;font-weight:800;line-height:1.25;margin-bottom:16px}.sender{display:flex;gap:12px;align-items:flex-start}.avatar{width:42px;height:42px;border-radius:50%;background:#27713d;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex:0 0 42px}.from{font-weight:750}.meta{font-size:13px;color:#666;line-height:1.55;margin-top:2px}.meta b{color:#333}.attachments{padding:14px 24px;border-bottom:1px solid #ece9e2;background:#faf9f6}.attachments-title{font-weight:800;font-size:13px;margin-bottom:9px}.attachment-list{display:grid;gap:7px}.attachment{background:#fff;border:1px solid #ddd8cf;border-radius:10px;padding:8px 10px;display:flex;justify-content:space-between;gap:12px;align-items:center}.attachment-copy{min-width:0}.attachment-copy strong{display:block;overflow-wrap:anywhere}.attachment-copy small{display:block;color:#777;margin-top:2px}.attachment-actions{display:flex;gap:6px;flex-wrap:wrap}.attachment-actions a,.footer a{display:inline-flex;text-decoration:none;border:1px solid #cfcac1;background:#fff;color:#222;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:750}.body{padding:24px;min-height:300px}.plain{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.55 Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif;margin:0}.html-frame{border:0;width:100%;min-height:560px;background:#fff}.footer{padding:12px 24px 18px;border-top:1px solid #ece9e2;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.footer .hint{color:#777;font-size:12px;margin-right:auto}@media(max-width:700px){.wrap{padding:10px}.head,.body,.attachments,.footer{padding-left:15px;padding-right:15px}.subject{font-size:19px}.attachment{align-items:flex-start;flex-direction:column}.html-frame{min-height:620px}}
 </style>
 </head>
 <body>
-<main><div class="card">
-<h1>${esc(analysis.subject || item.name || "Mail")}</h1>
-<div class="file">${esc(item.name || "")}</div>
-${meta ? `<div class="meta">${meta}</div>` : ""}
-<pre>${esc(body || "Für diese MSG-Datei konnte kein lesbarer Mailtext extrahiert werden.")}</pre>
-<a href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`)}" download="${esc(item.name || "mail.msg")}">Originaldatei herunterladen</a>
-</div></main>
+<div class="top">KRISTINE · Mail</div>
+<div class="wrap"><article class="mail">
+<header class="head">
+<div class="subject">${esc(subject)}</div>
+<div class="sender"><div class="avatar">${esc((senderName || senderEmail || "M").trim().charAt(0).toUpperCase() || "M")}</div><div><div class="from">${esc(sender)}</div><div class="meta">${to ? `<div><b>An:</b> ${esc(to)}</div>` : ""}${cc ? `<div><b>Cc:</b> ${esc(cc)}</div>` : ""}${sentAt ? `<div><b>Gesendet:</b> ${esc(sentAt)}</div>` : ""}</div></div></div>
+</header>
+${attachmentHtml}
+<section class="body">${bodyHtml ? '<iframe id="kristaMailHtml" class="html-frame" sandbox=""></iframe>' : `<pre class="plain">${esc(body || "Kein lesbarer Nachrichtentext vorhanden.")}</pre>`}</section>
+<footer class="footer"><span class="hint">Original bleibt unverändert in KRISTINE gespeichert.</span><a href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`)}" download="${esc(item.name || "mail.msg")}">Original .msg speichern</a></footer>
+</article></div>
 </body></html>`);
       preview.document.close();
+
+      if (bodyHtml) {
+        const frame = preview.document.getElementById("kristaMailHtml");
+        if (frame) {
+          frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: cid:"><style>html,body{margin:0;padding:0;background:#fff;color:#222;font:15px/1.55 Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif}body{overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{color:#17662f}</style></head><body>${bodyHtml}</body></html>`;
+        }
+      }
     } catch (error) {
       preview.document.open();
       preview.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>KRISTINE Mail</title></head><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;color:#8b1f1f"><strong>Mail konnte nicht gelesen werden.</strong><br>${esc(String(error?.message || error))}</body></html>`);
