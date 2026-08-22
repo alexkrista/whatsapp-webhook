@@ -9,6 +9,8 @@ def install(ns):
     brain_local_suppliers.install(ns)
     import brain_supplier_choice_ui
     brain_supplier_choice_ui.install(ns)
+    import brain_capture_edit
+    brain_capture_edit.install(ns)
     import brain_incoming_op
     brain_incoming_op.install(ns)
     import brain_material_history
@@ -28,31 +30,30 @@ def install(ns):
         page,
         flags=re.I | re.S,
     )
-    page = re.sub(r'<script id="kristaBrainViewerReliableV[78]">.*?</script>', '', page, flags=re.I | re.S)
-
-    if "kristaBrainViewerReliableV9" in page:
-        ns["MOBILE_PAGE"] = page
-        return
+    page = re.sub(r'<script id="kristaBrainViewerReliableV[789]">.*?</script>', '', page, flags=re.I | re.S)
 
     css = r'''
-/* V9: Der native Browser-PDF-iframe bleibt komplett aus. Große PDFs werden
-   nur einmal hochgeladen und danach seitenweise als Bild gerendert. */
+/* V10: robuster Bildviewer + echte Textauswahl als unsichtbare Textebene. */
 #capturePdfPreview{
   display:none!important;visibility:hidden!important;width:0!important;height:0!important;
   min-height:0!important;margin:0!important;padding:0!important;border:0!important;
   position:absolute!important;pointer-events:none!important
 }
 #capturePdfEmpty.brain-super-hidden{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important}
-.capture-pdf-shell{align-items:flex-start!important;justify-content:flex-start!important}
+.capture-pdf-shell{align-items:flex-start!important;justify-content:flex-start!important;position:relative!important}
 .capture-pdf-shell.brain-preview-loading::after{content:'PDF wird gelesen und Vorschau vorbereitet …';position:absolute;inset:0;display:grid;place-items:center;background:rgba(12,14,16,.84);color:#cbd4df;font-size:13px;z-index:4;pointer-events:none}
-#capturePdfPageImage{display:block;max-width:none;height:auto;margin:0 auto;background:#fff;box-shadow:0 3px 18px rgba(0,0,0,.32)}
+#capturePdfPageImage{display:block;max-width:none;height:auto;margin:0 auto;background:#fff;box-shadow:0 3px 18px rgba(0,0,0,.32);user-select:none;-webkit-user-select:none}
 #capturePdfPageImage[hidden]{display:none!important}
-#pdfPrint{white-space:nowrap}
-.pdf-super-stage{padding-top:0!important}
+#capturePdfTextLayer{position:absolute;z-index:3;pointer-events:auto;user-select:text;-webkit-user-select:text;transform-origin:0 0;color:transparent;line-height:1;overflow:visible}
+#capturePdfTextLayer[hidden]{display:none!important}
+#capturePdfTextLayer span{position:absolute;display:block;white-space:pre;color:transparent;cursor:text;user-select:text;-webkit-user-select:text;transform-origin:0 0}
+#capturePdfTextLayer span::selection{background:rgba(70,135,255,.38);color:transparent}
+#capturePdfTextLayer span::-moz-selection{background:rgba(70,135,255,.38);color:transparent}
+#pdfPrint{white-space:nowrap}.pdf-super-stage{padding-top:0!important}
 '''
 
     script = r'''
-<script id="kristaBrainViewerReliableV9">
+<script id="kristaBrainViewerReliableV10">
 (function(){
   function installPrintButton(){
     const original=document.getElementById('pdfOriginal');
@@ -74,47 +75,74 @@ def install(ns):
   }
   let image=document.getElementById('capturePdfPageImage');
   if(!image){image=document.createElement('img');image.id='capturePdfPageImage';image.alt='PDF Vorschau';image.hidden=true;shell.appendChild(image)}
+  let textLayer=document.getElementById('capturePdfTextLayer');
+  if(!textLayer){textLayer=document.createElement('div');textLayer.id='capturePdfTextLayer';textLayer.hidden=true;shell.appendChild(textLayer)}
   let loupe=document.getElementById('capturePreviewLoupe');
   if(!loupe){loupe=document.createElement('div');loupe.id='capturePreviewLoupe';loupe.className='capture-preview-loupe';document.body.appendChild(loupe)}
 
   const status=document.getElementById('capturePreviewStatus'),prev=document.getElementById('capturePreviewPrev'),next=document.getElementById('capturePreviewNext');
-  const state={token:'',page:1,pages:1,scale:1.45,width:0,loupe:0,pending:false};
+  const state={token:'',page:1,pages:1,scale:1.45,width:0,height:0,loupe:0,pending:false,textRequest:0};
   let localObjectUrl='';
 
   function revokeLocalUrl(){if(localObjectUrl){try{URL.revokeObjectURL(localObjectUrl)}catch(_){}localObjectUrl=''}}
   function pageUrl(){return '/incoming/capture/preview-page?token='+encodeURIComponent(state.token)+'&page='+state.page+'&scale='+Number(state.scale).toFixed(2)}
+  function textUrl(){return '/incoming/capture/preview-text?token='+encodeURIComponent(state.token)+'&page='+state.page}
   function stopLoupe(){state.loupe=0;loupe.style.display='none';tools.querySelectorAll('[data-capture-loupe]').forEach(b=>b.classList.remove('active'))}
   function nativeViewerOff(){if(!frame.hidden)frame.hidden=true;if(frame.hasAttribute('src'))frame.removeAttribute('src');if(frame.getAttribute('aria-hidden')!=='true')frame.setAttribute('aria-hidden','true')}
   function hideEmpty(){empty.hidden=true;empty.classList.add('brain-super-hidden')}
   function showEmpty(){empty.classList.remove('brain-super-hidden');empty.hidden=false}
-  function resetPreview(){state.token='';state.page=1;state.pages=1;state.width=0;state.pending=false;stopLoupe();tools.hidden=true;image.hidden=true;image.removeAttribute('src');shell.classList.remove('brain-preview-loading');nativeViewerOff();revokeLocalUrl();if(openPdf){openPdf.hidden=true;openPdf.removeAttribute('href')}showEmpty()}
+  function clearTextLayer(){state.textRequest++;textLayer.innerHTML='';textLayer.hidden=true}
+  function resetPreview(){state.token='';state.page=1;state.pages=1;state.width=0;state.height=0;state.pending=false;stopLoupe();clearTextLayer();tools.hidden=true;image.hidden=true;image.removeAttribute('src');shell.classList.remove('brain-preview-loading');nativeViewerOff();revokeLocalUrl();if(openPdf){openPdf.hidden=true;openPdf.removeAttribute('href')}showEmpty()}
   function beginFile(file){
     if(!file)return resetPreview();
-    state.pending=true;state.token='';tools.hidden=true;image.hidden=true;image.removeAttribute('src');stopLoupe();nativeViewerOff();hideEmpty();shell.classList.add('brain-preview-loading');
+    state.pending=true;state.token='';tools.hidden=true;image.hidden=true;image.removeAttribute('src');stopLoupe();clearTextLayer();nativeViewerOff();hideEmpty();shell.classList.add('brain-preview-loading');
     revokeLocalUrl();
     if(openPdf){localObjectUrl=URL.createObjectURL(file);openPdf.href=localObjectUrl;openPdf.hidden=false}
   }
-  function render(){if(!state.token)return;stopLoupe();status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;nativeViewerOff();hideEmpty();image.hidden=false;image.src=pageUrl()}
+
+  async function renderTextLayer(){
+    if(!state.token||!state.width||!state.height)return clearTextLayer();
+    const requestId=++state.textRequest;
+    try{
+      const r=await realFetch(textUrl(),{cache:'no-store'}),d=await r.json();
+      if(requestId!==state.textRequest)return;
+      if(!r.ok||!d.ok)throw new Error(d.error||'Text konnte nicht geladen werden');
+      const imgRect=image.getBoundingClientRect(),shellRect=shell.getBoundingClientRect();
+      const renderedWidth=image.offsetWidth||imgRect.width||state.width*state.scale;
+      const renderedHeight=image.offsetHeight||imgRect.height||state.height*state.scale;
+      const sx=renderedWidth/Number(d.width||state.width||1),sy=renderedHeight/Number(d.height||state.height||1);
+      textLayer.style.left=(image.offsetLeft||Math.max(0,imgRect.left-shellRect.left+shell.scrollLeft))+'px';
+      textLayer.style.top=(image.offsetTop||Math.max(0,imgRect.top-shellRect.top+shell.scrollTop))+'px';
+      textLayer.style.width=renderedWidth+'px';textLayer.style.height=renderedHeight+'px';
+      textLayer.innerHTML=(d.words||[]).map(w=>{
+        const x=Number(w.x0||0)*sx,y=Number(w.y0||0)*sy,ww=Math.max(1,(Number(w.x1||0)-Number(w.x0||0))*sx),hh=Math.max(1,(Number(w.y1||0)-Number(w.y0||0))*sy);
+        const text=String(w.text||'');if(!text)return '';
+        const fs=Math.max(6,hh*.86);
+        return '<span style="left:'+x+'px;top:'+y+'px;width:'+ww+'px;height:'+hh+'px;font-size:'+fs+'px">'+text.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</span>';
+      }).join('');
+      textLayer.hidden=!(d.words||[]).length;
+    }catch(error){if(requestId===state.textRequest){textLayer.innerHTML='';textLayer.hidden=true;console.debug('PDF-Textebene:',error)}}
+  }
+
+  function render(){if(!state.token)return;stopLoupe();status.textContent=state.page+' / '+state.pages;prev.disabled=state.page<=1;next.disabled=state.page>=state.pages;tools.hidden=false;nativeViewerOff();hideEmpty();clearTextLayer();image.hidden=false;image.src=pageUrl()}
   function fitWidth(){if(!state.width||!shell.clientWidth){render();return}state.scale=Math.max(.35,Math.min(4.5,Math.max(300,shell.clientWidth-22)/state.width));render()}
 
   const realFetch=window.fetch.bind(window);
   async function activate(token){
     if(!token)return;
-    state.token=token;state.page=1;state.pages=1;state.scale=1.45;state.width=0;
+    state.token=token;state.page=1;state.pages=1;state.scale=1.45;state.width=0;state.height=0;
     try{
       const r=await realFetch('/incoming/capture/preview-info?token='+encodeURIComponent(token),{cache:'no-store'}),d=await r.json();
       if(!r.ok||!d.ok)throw new Error(d.error||'PDF-Vorschau fehlgeschlagen');
-      state.pages=Number(d.pages||1);state.width=Number(d.width||0);state.pending=false;shell.classList.remove('brain-preview-loading');fitWidth();
-    }catch(error){state.pending=false;shell.classList.remove('brain-preview-loading');console.error('Dunja PDF-Viewer:',error);tools.hidden=true;image.hidden=true;hideEmpty()}
+      state.pages=Number(d.pages||1);state.width=Number(d.width||0);state.height=Number(d.height||0);state.pending=false;shell.classList.remove('brain-preview-loading');fitWidth();
+    }catch(error){state.pending=false;shell.classList.remove('brain-preview-loading');console.error('Dunja PDF-Viewer:',error);tools.hidden=true;image.hidden=true;clearTextLayer();hideEmpty()}
   }
 
-  /* showCapturePdf aus archive-connector.py darf KEIN blob: in den iframe setzen. */
   const safeShowCapturePdf=function(file){if(file)beginFile(file);else resetPreview()};
   try{window.showCapturePdf=safeShowCapturePdf}catch(_){}
   try{showCapturePdf=safeShowCapturePdf}catch(_){}
   nativeViewerOff();
 
-  /* Nur EIN Upload: /incoming/capture/analyze liefert bereits previewToken mit. */
   window.fetch=async function(input,init){
     const response=await realFetch(input,init);
     try{
@@ -129,6 +157,7 @@ def install(ns):
     return response;
   };
 
+  image.addEventListener('load',()=>{renderTextLayer()});
   prev?.addEventListener('click',()=>{if(state.page>1){state.page--;render()}});
   next?.addEventListener('click',()=>{if(state.page<state.pages){state.page++;render()}});
   document.getElementById('capturePreviewMinus')?.addEventListener('click',()=>{state.scale=Math.max(.35,state.scale-.2);render()});
@@ -139,7 +168,6 @@ def install(ns):
   shell.addEventListener('wheel',e=>{if(!e.ctrlKey||!state.token)return;e.preventDefault();state.scale=Math.max(.35,Math.min(4.5,state.scale+(e.deltaY<0?.18:-.18)));render()},{passive:false});
   image.addEventListener('mousemove',e=>{if(!state.loupe)return;const r=image.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const z=state.loupe,lw=loupe.offsetWidth||340,lh=loupe.offsetHeight||235;loupe.style.display='block';loupe.style.left=Math.min(window.innerWidth-lw-8,e.clientX+24)+'px';loupe.style.top=Math.max(8,Math.min(window.innerHeight-lh-8,e.clientY-lh/2))+'px';loupe.style.backgroundImage='url("'+image.src+'")';loupe.style.backgroundSize=(r.width*z)+'px '+(r.height*z)+'px';loupe.style.backgroundPosition=(-x*z+lw/2)+'px '+(-y*z+lh/2)+'px'});
   image.addEventListener('mouseleave',()=>loupe.style.display='none');
-
   fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0];if(file)beginFile(file);else resetPreview()},true);
   const frameObserver=new MutationObserver(()=>{if(frame.hasAttribute('src'))frame.removeAttribute('src');nativeViewerOff()});
   frameObserver.observe(frame,{attributes:true,attributeFilter:['src']});
@@ -151,4 +179,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Viewer V9 aktiv: ein Upload · kein nativer iframe · Seitenviewer")
+    print("✅ Brain Viewer V10 aktiv: Bildviewer + markierbare Textebene")
