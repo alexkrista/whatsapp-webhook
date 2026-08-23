@@ -135,6 +135,8 @@
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260823-cockpit", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260823-chronik", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260823-intelligence", "data-krista-baustellen-intelligence");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260823-livehours1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260823-gallery1", "data-krista-baustellen-foto-gallery");
   }
 
   function loadTowerSignals() {
@@ -205,7 +207,7 @@
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
-    const build = options.build || mount.dataset.kristaBuild || "0024.06";
+    const build = options.build || mount.dataset.kristaBuild || "0024.07";
 
     mount.className = "krista-shell-topbar";
     mount.innerHTML = `
