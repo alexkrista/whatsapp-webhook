@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-23-legacy-id-display-1";
+  const VERSION="2026-08-23-legacy-id-display-2";
 
   function isRealJobNumber(value){
     return /^\d{5}$/.test(String(value||"").trim());
@@ -59,7 +59,6 @@
     if(number)number.textContent="";
     if(name&&(!String(name.textContent||"").trim()||/^ohne bezeichnung$/i.test(String(name.textContent||"").trim())))name.textContent=display;
 
-    // Zusatzschichten der neuen Baustellen-Wissensseite ebenfalls sauber halten.
     const cockpitTitle=document.querySelector("#bcShell .bc-title");
     if(cockpitTitle&&cockpitTitle.textContent.includes("#"+id)){
       cockpitTitle.textContent=display;
@@ -69,8 +68,18 @@
     });
   }
 
+  function loadFotoGallery(){
+    if(document.querySelector("script[data-baustellen-foto-gallery]"))return;
+    const script=document.createElement("script");
+    script.src="/public/ui/baustellen-foto-gallery.js?v=20260823-gallery1";
+    script.defer=true;
+    script.setAttribute("data-baustellen-foto-gallery","1");
+    document.head.appendChild(script);
+  }
+
   function install(){
     if(!location.pathname.toLowerCase().includes("baustellen.html"))return;
+    loadFotoGallery();
     normalizeRows();
 
     const list=document.getElementById("jobList");
