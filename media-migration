@@ -171,6 +171,83 @@ async function migrateLegacyMediaForDate({ dataDir, date }) {
   return { ok: true, date, scanned, imported, unresolvedEmployees, added };
 }
 
+async function listJobDayDirectories(dataDir, jobId) {
+  const root = path.join(dataDir, jobId);
+  if (!fs.existsSync(root)) return [];
+  const out = [];
+  const top = await fsp.readdir(root, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of top) {
+    if (!entry.isDirectory()) continue;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      out.push({ date: entry.name, dir: path.join(root, entry.name) });
+      continue;
+    }
+    if (!/^\d{4}$/.test(entry.name)) continue;
+    const year = entry.name;
+    const months = await fsp.readdir(path.join(root, year), { withFileTypes: true }).catch(() => []);
+    for (const monthEntry of months) {
+      if (!monthEntry.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) continue;
+      const month = monthEntry.name;
+      const days = await fsp.readdir(path.join(root, year, month), { withFileTypes: true }).catch(() => []);
+      for (const dayEntry of days) {
+        if (!dayEntry.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) continue;
+        out.push({ date: `${year}-${month}-${dayEntry.name}`, dir: path.join(root, year, month, dayEntry.name) });
+      }
+    }
+  }
+
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+async function listJobMedia({ dataDir, jobId }) {
+  const safeId = String(jobId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(safeId)) return [];
+
+  const reviews = await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
+  const reviewByFile = new Map();
+  for (const entry of reviews) {
+    const file = String(entry?.file || "").replace(/\\/g, "/");
+    if (file) reviewByFile.set(file, entry);
+  }
+
+  const items = [];
+  const dayDirs = await listJobDayDirectories(dataDir, safeId);
+  for (const row of dayDirs) {
+    const logs = await readJsonLines(path.join(row.dir, "log.jsonl"));
+    const files = (await fsp.readdir(row.dir).catch(() => [])).filter((name) => mediaKind(name));
+    for (const filename of files) {
+      const full = path.join(row.dir, filename);
+      const relative = path.relative(dataDir, full).split(path.sep).join("/");
+      const review = reviewByFile.get(relative) || null;
+      const ts = timestampFromFilename(filename);
+      const matchingLog = logs.find((entry) => {
+        const rawTs = Number(entry?.raw?.timestamp || 0);
+        const fileTs = timestampFromFilename(entry?.file || "");
+        return (ts && rawTs === ts) || (ts && fileTs === ts) || String(entry?.file || "") === filename;
+      }) || null;
+      const at = review?.at || review?.capturedAt || hmFromTimestampSeconds(ts || matchingLog?.raw?.timestamp);
+      const content = String(review?.content || matchingLog?.text || matchingLog?.raw?.image?.caption || matchingLog?.raw?.video?.caption || "").trim();
+      items.push({
+        id: review?.id || `${row.date}_${filename}`,
+        jobId: safeId,
+        date: row.date,
+        at,
+        kind: mediaKind(filename),
+        filename,
+        file: relative,
+        employeeId: review?.employeeId || "",
+        employeeName: review?.employeeName || "",
+        content,
+        source: review?.source || "Baustellenprotokoll",
+        url: `/admin/api/job/${encodeURIComponent(safeId)}/media-file?file=${encodeURIComponent(relative)}`,
+      });
+    }
+  }
+
+  return items.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")) || a.filename.localeCompare(b.filename, "de"));
+}
+
 function registerMediaMigration(app, { dataDir, requireAdmin }) {
   app.post("/admin/api/media-migration/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -186,6 +263,38 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
   });
+
+  app.get("/admin/api/job/:jobId/media", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const jobId = String(req.params.jobId || "").trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return res.status(400).json({ ok: false, error: "Ungültige Baustelle" });
+      const media = await listJobMedia({ dataDir, jobId });
+      res.json({ ok: true, jobId, count: media.length, media });
+    } catch (error) {
+      console.error("Baustellen media list failed:", error);
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.get("/admin/api/job/:jobId/media-file", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const jobId = String(req.params.jobId || "").trim();
+      const relative = String(req.query.file || "").replace(/\\/g, "/");
+      if (!/^[A-Za-z0-9_-]+$/.test(jobId) || !relative || relative.includes("..") || !relative.startsWith(`${jobId}/`)) {
+        return res.status(400).send("Ungültige Mediendatei");
+      }
+      const full = path.resolve(dataDir, relative);
+      const root = path.resolve(dataDir, jobId) + path.sep;
+      if (!full.startsWith(root) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) return res.status(404).send("Datei nicht gefunden");
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      return res.sendFile(full);
+    } catch (error) {
+      console.error("Baustellen media file failed:", error);
+      res.status(500).send(String(error?.message || error));
+    }
+  });
 }
 
-module.exports = { migrateLegacyMediaForDate, registerMediaMigration };
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia };
