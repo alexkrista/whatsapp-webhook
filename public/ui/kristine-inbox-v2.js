@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-21-0925";
+  const VERSION="2026-08-24-1208";
   const PENDING_KEY="kristaInboxPendingTaskItems";
   const ROUTES={task:"Aufgabe",invoice:"Rechnung",filing:"Ablage",appointment:"Termin",order:"Bestellung"};
   let current=null;
@@ -101,6 +101,16 @@
   async function persistRoute(item,route,assignee){return api(`/kristine/api/inbox/${encodeURIComponent(item.id)}/route`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({route,assigneeId:assignee?.id||"",assigneeName:assignee?.name||""})})}
 
   function setValue(id,value){const el=document.getElementById(id);if(!el||value===undefined||value===null||value==="")return;el.value=value;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}
+  function openTaskEditor(){
+    const attempt=()=>{
+      if(typeof window.openTaskCreateModal==="function"){window.openTaskCreateModal();return true}
+      const launch=document.querySelector("[data-krista-new-task]");
+      if(launch){launch.click();return true}
+      return false;
+    };
+    if(attempt())return;
+    setTimeout(()=>{if(!attempt())setTimeout(attempt,180)},60);
+  }
   function fillTask(item,assignee){
     const a=item.analysis||{};
     if(typeof window.showTab==="function")window.showTab("tasks");location.hash="tasks";
@@ -108,8 +118,10 @@
     if(assignee?.id){setValue("tAssigneeSelect",assignee.id);setValue("tAssigneeId",assignee.id);setValue("tAssigneeName",assignee.name)}
     const details=[a.summary,a.excerpt&&a.excerpt!==a.summary?a.excerpt:"",`📎 Original im KRISTINE-Eingang: ${item.name}`].filter(Boolean).join("\n\n");setValue("tReminder",details.slice(0,8000));
     const other=document.querySelector('input[name="taskType"][value="Sonstiges"]');if(other){other.checked=true;other.dispatchEvent(new Event("change",{bubbles:true}))}
-    addPending({id:item.id,name:item.name});closeModal();
-    document.querySelector("#tasks .task-create-card")?.scrollIntoView({behavior:"smooth",block:"start"});
+    addPending({id:item.id,name:item.name});
+    closeModal();
+    openTaskEditor();
+    setTimeout(openTaskEditor,120);
   }
 
   async function route(route,event){
