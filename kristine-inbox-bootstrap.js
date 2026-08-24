@@ -47,6 +47,7 @@ Module._load = function kristineInboxLoader(request, parent, isMain) {
     const { registerKristineInbox } = require("./kristine-inbox");
     const { registerKristineInvoiceIntake } = require("./kristine-invoice-intake");
     const { registerKristineUserAccess } = require("./kristine-user-access");
+    const { registerEmployeeContactEmail } = require("./employee-contact-email");
     exported.registerKristine = function registerKristineWithInbox(app, options) {
       const effectiveOptions = withChefPhoneFallback(options);
 
@@ -61,6 +62,11 @@ Module._load = function kristineInboxLoader(request, parent, isMain) {
       const shared = { dataDir: effectiveOptions.dataDir, requireAdmin: effectiveOptions.requireAdmin };
       registerKristineInbox(app, shared);
       registerKristineInvoiceIntake(app, shared);
+      registerEmployeeContactEmail(app, {
+        dataDir: effectiveOptions.dataDir,
+        requireAdmin: effectiveOptions.requireAdmin,
+        readEmployees: effectiveOptions.readEmployees,
+      });
       return result;
     };
   }
