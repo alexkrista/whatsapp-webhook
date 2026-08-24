@@ -36,6 +36,7 @@ from brain_capture_global_drop import install as _capture_global_drop_install
 from brain_capture_learning import install as _capture_learning_install
 from brain_capture_duplicate_guard import install as _capture_duplicate_guard_install
 from brain_capture_learning_ui import install as _capture_learning_ui_install
+from brain_capture_tax_ui import install as _capture_tax_ui_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
 from brain_header_dedup import install as _header_dedup_install
@@ -60,6 +61,7 @@ def install(ns):
     _capture_learning_install(ns)
     _capture_duplicate_guard_install(ns)
     _capture_learning_ui_install(ns)
+    _capture_tax_ui_install(ns)
     _home_nav_install(ns)
     _op_tools_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
