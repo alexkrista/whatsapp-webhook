@@ -120,6 +120,10 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
   }
 
+  function loadKristineTaskCreateModal() {
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-create-modal.js?v=20260824-1202", "data-krista-task-create-modal");
+  }
+
   function loadKristineFinanceApproval() {
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
   }
@@ -153,7 +157,7 @@
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
-    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
+    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-admin-employee-document-completeness");
   }
 
   function loadAdminEmployeePersonnelFile() {
@@ -244,6 +248,7 @@
     loadKristineEmployeeSort();
     loadKristinePlanningSidebarFix();
     loadKristineTaskList();
+    loadKristineTaskCreateModal();
     loadKristineFinanceApproval();
     loadKristineInbox();
     loadBaustellenKnowledgeStack();
