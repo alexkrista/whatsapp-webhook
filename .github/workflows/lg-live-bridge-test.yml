@@ -1,0 +1,36 @@
+name: LG live bridge syntax
+
+on:
+  push:
+    branches:
+      - feature/lg-live-mischmaschine
+  pull_request:
+    paths:
+      - 'paint-live-bridge.js'
+      - 'paint-lab-preload.js'
+      - 'public/paint-live-mix-ui.js'
+      - 'tools/innovatint-kristine-bridge.ps1'
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node syntax
+        run: |
+          node --check paint-live-bridge.js
+          node --check paint-lab-preload.js
+          node --check public/paint-live-mix-ui.js
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("tools/innovatint-kristine-bridge.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            exit 1
+          }
