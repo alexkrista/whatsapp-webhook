@@ -18,7 +18,8 @@
     .mix-live-pill.wait{background:#fff0cf;color:#8a5a08}
     .mix-status-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;font-size:12px;color:#666}
     .mix-status-line strong{font-weight:850}
-    .stock .stockOrder{display:block;width:100%;margin-top:6px;padding:4px 6px;border:0;border-radius:7px;background:#ffffffb8;color:#24402f;font-size:10px;font-weight:850;cursor:pointer}
+    .stock .stockOrder{display:block;width:100%;margin-top:6px;padding:5px 6px;border:0;border-radius:7px;background:#ffffffc9;color:#24402f;font-size:10px;font-weight:850;cursor:pointer}
+    .stock .stockOrder.remove{color:#8a2e27;background:#fff7f6}
     .stock .stockOrder:disabled{opacity:.55;cursor:wait}
     .live-note{font-size:12px;color:#6c746b;margin-top:7px}
   `;
@@ -30,6 +31,27 @@
   }
 
   function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function norm(value) { return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim(); }
+  function baseKey(value) {
+    const n = norm(value);
+    if (["h","hi","hiwhite"].includes(n)) return "hiwhite";
+    if (["m","medium"].includes(n)) return "medium";
+    if (["d","deep"].includes(n)) return "deep";
+    if (["xd","x","extradeep"].includes(n)) return "extradeep";
+    if (["t","transparent"].includes(n)) return "transparent";
+    if (["y","yellow"].includes(n)) return "yellow";
+    if (["p","pastel"].includes(n)) return "pastel";
+    if (["w","white","whiteasp"].includes(n)) return "whiteasp";
+    return n;
+  }
+  function sizeKey(value) {
+    const raw = String(value ?? "").toLowerCase().replace(/litre|liter|ltr/g,"l").replace(/\s+/g,"").replace(",", ".");
+    if (/^250ml$|^0\.25l$/.test(raw)) return "0.25l";
+    if (/^500ml$|^0\.5l$/.test(raw)) return "0.5l";
+    if (/^750ml$|^0\.75l$/.test(raw)) return "0.75l";
+    return raw;
+  }
+  function identity(product, base, size) { return `${norm(product)}|${baseKey(base)}|${sizeKey(size)}`; }
 
   function ensureStatusLine() {
     const card = qEl.closest(".card");
@@ -60,7 +82,7 @@
 
     if (status.online) {
       const machine = status.bridge?.machine ? ` · ${esc(status.bridge.machine)}` : "";
-      row.innerHTML = `<span class="mix-live-pill">● Mischmaschine LIVE</span><span><strong>Innovatint verbunden</strong>${machine} · Lagerbestand kommt aus Render</span>`;
+      row.innerHTML = `<span class="mix-live-pill">● Mischmaschine LIVE</span><span><strong>Innovatint verbunden</strong>${machine} · Lagerbestand aus Inventur/Lagerbuch</span>`;
       return;
     }
 
@@ -111,6 +133,26 @@
     return await waitForLive(queued.requestId, generation);
   }
 
+  async function mergeAuditedStock(data) {
+    const ledger = await api("/admin/api/paint/stock-ledger");
+    const byIdentity = new Map((ledger.items || []).map(row => [row.identityKey || identity(row.product, row.baseName || row.baseCode, row.size), row]));
+
+    for (const product of data?.products || []) {
+      for (const size of product.sizes || []) {
+        const key = identity(product.productName, product.baseName || product.baseCode, size.size);
+        const row = byIdentity.get(key);
+        if (!row) {
+          size.stock = null;
+          size.articleId = "";
+          continue;
+        }
+        Object.assign(size, row);
+      }
+    }
+    data.stockSource = "movement-ledger";
+    return data;
+  }
+
   function renderHits(rows) {
     resultsEl.innerHTML = "";
     for (const hit of rows || []) {
@@ -130,21 +172,37 @@
     resultsEl.style.display = "none";
     qEl.value = hit.code || hit.name || "";
     detailEl.classList.remove("hidden");
-    detailEl.innerHTML = `<span class="mix-live-pill">● Live Mischmaschine</span><p class="muted">Mischbare Produkte werden geladen …</p>`;
+    detailEl.innerHTML = `<span class="mix-live-pill">● Live Mischmaschine</span><p class="muted">Mischbare Produkte + Inventurbestand werden geladen …</p>`;
     try {
-      const data = await liveProducts(hit, generation);
+      const raw = await liveProducts(hit, generation);
+      if (generation !== liveGeneration) return;
+      const data = await mergeAuditedStock(raw);
       if (generation !== liveGeneration) return;
       renderLiveDetail(data);
     } catch (error) {
       if (String(error?.message || error) === "abgebrochen") return;
-      detailEl.innerHTML = `<span class="mix-live-pill offline">● Mischmaschine NICHT LIVE</span><p class="muted">${esc(error?.message || error)}</p>`;
+      detailEl.innerHTML = `<span class="mix-live-pill offline">● Mischmaschine/Lager nicht verfügbar</span><p class="muted">${esc(error?.message || error)}</p>`;
       await refreshBridgeStatus();
     }
   }
 
+  function orderButton(size, product) {
+    if (!size.identityKey) return "";
+    const qty = Math.max(0, Number(size.effectiveOrderQuantity || 0));
+    const removing = qty > 0;
+    const label = removing ? `Bestellung: ${qty} · entfernen` : "+ 1 bestellen";
+    return `<button class="stockOrder${removing ? " remove" : ""}"
+      data-action="${removing ? "remove" : "add"}"
+      data-product="${esc(size.product || product.productName || "")}"
+      data-base-code="${esc(size.baseCode || product.baseCode || "")}"
+      data-base-name="${esc(size.baseName || product.baseName || "")}"
+      data-size="${esc(size.size || "")}"
+      data-stock-code="${esc(size.stockCode || "")}">${esc(label)}</button>`;
+  }
+
   function renderLiveDetail(data) {
     const color = data?.color || {};
-    let html = `<div class="selected"><div><h2>${esc(color.name || color.code || "")}</h2><div class="muted">${esc(color.code || "")}</div><div class="live-note">Mischbarkeit + Basis LIVE aus Innovatint · IST/Soll/EAN/Preis aus KRISTINE/Render</div></div><span class="mix-live-pill">● Mischmaschine LIVE</span></div>`;
+    let html = `<div class="selected"><div><h2>${esc(color.name || color.code || "")}</h2><div class="muted">${esc(color.code || "")}</div><div class="live-note">Mischbarkeit + Basis LIVE aus Innovatint · IST aus Inventur/Lagerbuch · Soll/EAN/Preis aus KRISTINE</div></div><span class="mix-live-pill">● Mischmaschine LIVE</span></div>`;
 
     if (data?.products?.length) {
       html += `<div style="margin-top:14px">`;
@@ -156,10 +214,8 @@
           const price = Number(size.purchasePrice || 0) > 0 ? `EK ${money(size.purchasePrice)}` : "";
           const target = Number(size.targetStock || 0);
           const extra = target > 0 ? `Soll ${target}` : "";
-          const orderButton = size.articleId
-            ? `<button class="stockOrder" data-article-id="${esc(size.articleId)}">+ Bestellung</button>`
-            : "";
-          html += `<div class="stock ${stockClass(stock)}" title="EAN ${esc(size.ean || "")}">${esc(size.size)}: ${stockText}<small>${[price,extra].filter(Boolean).join(" · ")}</small>${orderButton}</div>`;
+          const source = size.stockSource === "ledger" ? "Inventur/Lagerbuch" : "";
+          html += `<div class="stock ${stockClass(stock)}" title="EAN ${esc(size.ean || "")}">${esc(size.size)}: ${stockText}<small>${[price,extra,source].filter(Boolean).join(" · ")}</small>${orderButton(size, product)}</div>`;
         }
         html += `</div></div>`;
       }
@@ -173,26 +229,33 @@
     detailEl.querySelectorAll(".stockOrder").forEach(button => {
       button.addEventListener("click", event => {
         event.stopPropagation();
-        addOneToOrder(button.dataset.articleId, button);
+        changeDirectOrder(button);
       });
     });
   }
 
-  async function addOneToOrder(articleId, button) {
-    if (!articleId) return;
+  async function changeDirectOrder(button) {
     const oldText = button.textContent;
     button.disabled = true;
     button.textContent = "…";
     try {
-      const review = await api("/admin/api/paint/order-review");
-      const item = (review.items || []).find(row => String(row.articleId) === String(articleId));
-      if (!item) throw new Error("Artikel nicht in Bestellstamm");
-      const next = Math.max(0, Number(item.quantity || 0)) + 1;
-      await api("/admin/api/paint/order-review", {
+      const add = button.dataset.action === "add";
+      const result = await api("/admin/api/paint/order-direct", {
         method: "POST",
-        body: JSON.stringify({ rows: [{ articleId, mode: "manual", quantity: next }] }),
+        body: JSON.stringify({
+          product: button.dataset.product,
+          baseCode: button.dataset.baseCode,
+          baseName: button.dataset.baseName,
+          size: button.dataset.size,
+          stockCode: button.dataset.stockCode,
+          mode: "manual",
+          quantity: add ? 1 : 0,
+        }),
       });
-      button.textContent = `Bestellung: ${next}`;
+      const qty = Math.max(0, Number(result.item?.effectiveOrderQuantity || 0));
+      button.dataset.action = qty > 0 ? "remove" : "add";
+      button.classList.toggle("remove", qty > 0);
+      button.textContent = qty > 0 ? `Bestellung: ${qty} · entfernen` : "+ 1 bestellen";
       if (typeof loadCommercial === "function") await loadCommercial();
     } catch (error) {
       button.textContent = oldText;
@@ -226,8 +289,6 @@
         renderHits(rows || []);
       } catch (error) {
         if (String(error?.message || error) === "abgebrochen") return;
-        // Für Little Greene KEIN stiller Rückfall mehr auf den alten importierten
-        // Katalog: sonst sieht der Benutzer wieder die falsche Basis/Lager-Zuordnung.
         resultsEl.innerHTML = `<div class="hit"><div><b>Mischmaschine nicht live</b><div class="muted">${esc(error?.message || error)}</div></div></div>`;
         resultsEl.style.display = "block";
         detailEl.classList.add("hidden");
@@ -240,8 +301,6 @@
     button.addEventListener("click", () => setTimeout(renderBridgeStatus, 0));
   });
 
-  // Der alte Excel-Erstimport bleibt nur als Notfall-Backend erhalten.
-  // Im laufenden Lagerbetrieb ist Render die einzige Bestandsquelle.
   for (const card of document.querySelectorAll("#tab-admin .card")) {
     if (/Excel-Erstimport/i.test(card.textContent || "")) card.classList.add("hidden");
   }
