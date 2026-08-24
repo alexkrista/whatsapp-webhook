@@ -30,6 +30,7 @@ from brain_finance_direct_debit_cutover import install as _direct_debit_cutover_
 from brain_finance_reconciliation import install as _reconciliation_install
 from brain_finance_reconciliation_bridge import install as _reconciliation_bridge_install
 from brain_invoice_intake import install as _invoice_intake_install
+from brain_capture_global_drop import install as _capture_global_drop_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
 from brain_header_dedup import install as _header_dedup_install
@@ -48,6 +49,7 @@ def install(ns):
     _reconciliation_install(ns)
     _reconciliation_bridge_install(ns)
     _invoice_intake_install(ns)
+    _capture_global_drop_install(ns)
     _home_nav_install(ns)
     _op_tools_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
