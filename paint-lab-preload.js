@@ -19,6 +19,7 @@ const { registerPaintInventoryExcel } = require("./paint-inventory-excel");
 const { registerPaintLab } = require("./paint-lab");
 const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
+const { registerPaintOutflow } = require("./paint-outflow");
 const { registerPaintReturnStock } = require("./paint-return-stock");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
@@ -96,6 +97,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-return-stock-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260822-2058"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-outflow-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260824-1215"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -127,6 +131,7 @@ function wrappedExpress(...args) {
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventoryExcel(app, opts);
         registerPaintInventory(app, opts);
+        registerPaintOutflow(app, opts);
         registerPaintReturnStock(app, opts);
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
@@ -134,7 +139,7 @@ function wrappedExpress(...args) {
         registerPaintInventoryRecovery(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + sauberer Recovery-Neuaufbau registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur + Abgang + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + sauberer Recovery-Neuaufbau registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
