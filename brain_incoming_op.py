@@ -34,6 +34,7 @@ from brain_finance_reconciliation_bridge import install as _reconciliation_bridg
 from brain_invoice_intake import install as _invoice_intake_install
 from brain_capture_global_drop import install as _capture_global_drop_install
 from brain_capture_learning import install as _capture_learning_install
+from brain_capture_duplicate_guard import install as _capture_duplicate_guard_install
 from brain_capture_learning_ui import install as _capture_learning_ui_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
@@ -57,6 +58,7 @@ def install(ns):
     _invoice_intake_install(ns)
     _capture_global_drop_install(ns)
     _capture_learning_install(ns)
+    _capture_duplicate_guard_install(ns)
     _capture_learning_ui_install(ns)
     _home_nav_install(ns)
     _op_tools_install(ns)
