@@ -25,6 +25,7 @@ const { registerPaintInventoryInsights } = require("./paint-inventory-insights")
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
 const { registerPaintLegacySollImport } = require("./paint-legacy-soll-import");
 const { registerPaintInventoryRecovery } = require("./paint-inventory-recovery");
+const { registerPaintLiveBridge } = require("./paint-live-bridge");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -100,6 +101,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-outflow-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260824-1215"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-live-mix-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-live-mix-ui.js?v=20260824-1923"></script>\n</body>');
+      }
 
       res.set("Content-Language", "de");
       res.type("html").send(fixed);
@@ -137,9 +141,10 @@ function wrappedExpress(...args) {
         registerPaintInventoryCounter(app, opts);
         registerPaintLegacySollImport(app, opts);
         registerPaintInventoryRecovery(app, opts);
+        registerPaintLiveBridge(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur + Abgang + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + sauberer Recovery-Neuaufbau registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur + Abgang + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + Live-Mischmaschine + sauberer Recovery-Neuaufbau registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
