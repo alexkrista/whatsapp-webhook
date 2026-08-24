@@ -102,7 +102,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260824-1215"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-live-mix-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-live-mix-ui.js?v=20260824-1923"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-live-mix-ui.js?v=20260824-2145"></script>\n</body>');
       }
 
       res.set("Content-Language", "de");
