@@ -129,7 +129,7 @@
   }
 
   function loadKristineInbox() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260821-0925", "data-krista-inbox-v2");
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260824-1208", "data-krista-inbox-v2");
   }
 
   function loadBaustellenKnowledgeStack() {
@@ -157,7 +157,7 @@
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
-    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-admin-employee-document-completeness");
+    if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
   }
 
   function loadAdminEmployeePersonnelFile() {
