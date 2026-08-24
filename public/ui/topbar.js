@@ -116,6 +116,10 @@
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-planning-sidebar-fix.js", "data-krista-planning-sidebar-fix");
   }
 
+  function loadKristineControlHistoryFix() {
+    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-control-history-fix.js?v=20260824-1555", "data-krista-control-history-fix");
+  }
+
   function loadKristineTaskList() {
     if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
   }
@@ -247,6 +251,7 @@
     cleanModuleNavigation();
     loadKristineEmployeeSort();
     loadKristinePlanningSidebarFix();
+    loadKristineControlHistoryFix();
     loadKristineTaskList();
     loadKristineTaskCreateModal();
     loadKristineFinanceApproval();
