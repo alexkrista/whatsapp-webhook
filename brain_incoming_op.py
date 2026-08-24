@@ -24,6 +24,7 @@ from brain_capture_edit import install as _capture_edit_install
 from brain_currency_payment_v2 import install as _currency_payment_install
 from brain_finance_test_bridge import install as _finance_test_bridge_install
 from brain_revolut_panel_fix import install as _revolut_panel_fix_install
+from brain_finance_kassa import install as _kassa_install
 from brain_test_promote import install as _test_promote_install
 from brain_finance_direct_debit import install as _direct_debit_install
 from brain_finance_direct_debit_cutover import install as _direct_debit_cutover_install
@@ -43,6 +44,7 @@ def install(ns):
     _currency_payment_install(ns)
     _finance_test_bridge_install(ns)
     _revolut_panel_fix_install(ns)
+    _kassa_install(ns)
     _test_promote_install(ns)
     _direct_debit_install(ns)
     _direct_debit_cutover_install(ns)
