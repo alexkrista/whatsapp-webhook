@@ -82,6 +82,7 @@ function registerPaintLiveBridge(app, options = {}) {
   }
 
   const clean = (value, max = 500) => String(value ?? "").trim().slice(0, max);
+  const asArray = value => Array.isArray(value) ? value : (value === null || value === undefined ? [] : [value]);
   const norm = value => clean(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
   const baseKey = value => {
     const n = norm(value);
@@ -108,12 +109,12 @@ function registerPaintLiveBridge(app, options = {}) {
 
   async function enrichProducts(item) {
     const articles = await readJson(articlesFile, []);
-    const rows = Array.isArray(item.result) ? item.result : [];
+    const rows = asArray(item.result);
     const list = Array.isArray(articles) ? articles : [];
 
     const products = rows.map(row => {
-      const productName = clean(row.name || row.productName, 180);
-      const machineBase = clean(row.baseCode || row.baseName, 80);
+      const productName = clean(row?.name || row?.productName, 180);
+      const machineBase = clean(row?.baseCode || row?.baseName, 80);
       const wantedProduct = norm(productName);
       const wantedBase = baseKey(machineBase);
 
@@ -138,7 +139,7 @@ function registerPaintLiveBridge(app, options = {}) {
       })).sort((a, b) => Number(b.nominalAmount || 0) - Number(a.nominalAmount || 0));
 
       return {
-        productId: Number(row.id || row.productId || 0),
+        productId: Number(row?.id || row?.productId || 0),
         productName,
         baseCode: machineBase,
         baseName: machineBase,
@@ -285,7 +286,10 @@ function registerPaintLiveBridge(app, options = {}) {
       if (!item) return res.status(404).json({ ok: false, error: "Request nicht gefunden" });
       if (item.status !== "done") return res.json({ ok: true, requestId: item.requestId, status: item.status });
       if (item.error) return res.json({ ok: true, requestId: item.requestId, status: "done", error: item.error, result: null });
-      const result = item.operation === "productsForColour" ? await enrichProducts(item) : item.result;
+      let result;
+      if (item.operation === "productsForColour") result = await enrichProducts(item);
+      else if (item.operation === "searchColours") result = asArray(item.result);
+      else result = item.result;
       res.json({ ok: true, requestId: item.requestId, status: "done", result, error: null });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
