@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-home-users-1";
+  const VERSION="2026-08-24-home-users-2";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
 
@@ -16,7 +16,7 @@
 
   function ensureUserAdmin(){
     if(document.querySelector('script[data-krista-user-admin]'))return;
-    const s=document.createElement("script");s.src="/public/ui/krisadmin-user-admin.js?v=20260824-users1";s.setAttribute("data-krista-user-admin","1");s.defer=true;document.head.appendChild(s);
+    const s=document.createElement("script");s.src="/public/ui/krisadmin-user-admin.js?v=20260824-users2";s.setAttribute("data-krista-user-admin","1");s.defer=true;document.head.appendChild(s);
   }
 
   function invoke(name){const fn=window[name];if(typeof fn==="function")return fn();alert("Diese Funktion ist noch nicht geladen. Bitte Seite einmal aktualisieren.")}
