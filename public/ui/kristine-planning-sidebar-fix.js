@@ -1,6 +1,16 @@
 "use strict";
 
 (function () {
+  function loadFinishBillingDrop() {
+    if (document.querySelector("script[data-krista-finish-billing-drop]")) return;
+    const script = document.createElement("script");
+    script.src = "/public/ui/kristine-finish-billing-drop.js?v=20260824-finishbilling1";
+    script.async = false;
+    script.defer = true;
+    script.setAttribute("data-krista-finish-billing-drop", "1");
+    document.head.appendChild(script);
+  }
+
   function movePlanningCardsBesideCalendar() {
     const panel = document.getElementById("planningCardsPanel");
     const calendar = document.querySelector(".planning-calendar-card");
@@ -63,6 +73,7 @@
   }
 
   function install() {
+    loadFinishBillingDrop();
     movePlanningCardsBesideCalendar();
     setTimeout(movePlanningCardsBesideCalendar, 0);
     setTimeout(movePlanningCardsBesideCalendar, 250);
