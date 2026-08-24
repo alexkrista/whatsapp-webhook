@@ -9,6 +9,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const nodemailer = require("nodemailer");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { readLatestStockMap, stockForArticle } = require("./paint-stock-ledger");
 
 const LG_ORDER_EMAIL = "export.orders@thelittlegreene.com";
 const LG_ACCOUNT_CODE = "FAR207";
@@ -68,18 +69,18 @@ function registerPaintOrderSummaryFix(app, options = {}) {
     };
   }
 
-  function suggestion(a) {
+  function suggestion(a, stockValue) {
     const category = clean(a.category).toLowerCase();
     if (category === "sample-pot" || category === "marketing") return 0;
-    const stock = Math.max(0, Number(a.stock || 0));
+    const stock = Math.max(0, Number(stockValue ?? a.stock ?? 0));
     const minimum = Math.max(0, Number(a.minimumStock || 0));
     const target = Math.max(minimum, Number(a.targetStock ?? minimum) || 0);
-    return stock < minimum ? Math.max(0, Math.ceil(target - stock)) : 0;
+    return stock <= minimum ? Math.max(0, Math.ceil(target - stock)) : 0;
   }
 
-  function effectiveQuantity(a) {
+  function effectiveQuantity(a, stockValue) {
     const override = nullableNonNegative(a.orderQuantityOverride);
-    return override === null ? suggestion(a) : override;
+    return override === null ? suggestion(a, stockValue) : override;
   }
 
   function normalizeWallpaperRows(saved) {
@@ -95,15 +96,17 @@ function registerPaintOrderSummaryFix(app, options = {}) {
   }
 
   async function openOrderSummary() {
-    const [articles, wallpaperSaved] = await Promise.all([
+    const [articles, wallpaperSaved, latestStock] = await Promise.all([
       readJson(articlesFile, []),
       readJson(wallpaperOrderFile, { items: [] }),
+      readLatestStockMap(root),
     ]);
 
     const items = articles
       .filter(a => a && a.active !== false && a.orderable !== false && String(a.manufacturer || "Little Greene").toLowerCase().includes("little greene"))
       .map(a => {
-        const quantity = effectiveQuantity(a);
+        const resolved = stockForArticle(a, latestStock);
+        const quantity = effectiveQuantity(a, resolved.stock);
         const price = Number(a.purchasePrice || 0);
         return {
           articleId: a.id || "",
@@ -114,10 +117,11 @@ function registerPaintOrderSummaryFix(app, options = {}) {
           baseName: a.baseName || a.baseCode || "",
           size: a.size || "",
           category: a.category || "",
-          stock: Number(a.stock || 0),
+          stock: resolved.stock,
+          stockSource: resolved.source,
           minimumStock: Number(a.minimumStock || 0),
           targetStock: Number(a.targetStock || 0),
-          suggestedQuantity: suggestion(a),
+          suggestedQuantity: suggestion(a, resolved.stock),
           manualQuantity: nullableNonNegative(a.orderQuantityOverride),
           quantity,
           purchasePrice: price,
@@ -141,6 +145,7 @@ function registerPaintOrderSummaryFix(app, options = {}) {
       count: paintCount + wallpaperRolls,
       total,
       totalExcludesWallpaper: wallpaperItems.length > 0,
+      stockSource: "Inventur/Lagerbuch",
     };
   }
 
