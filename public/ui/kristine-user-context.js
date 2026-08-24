@@ -1,12 +1,13 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-0902";
+  const VERSION="2026-08-24-0912";
   const USER_KEY="kristaCurrentUserId";
   const TASK_VIEW_KEY="kristaTaskOwnerView";
   let currentUserId="";
   let pendingTaskCreation=null;
   let booted=false;
+  let promptShown=false;
 
   const norm=v=>String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
@@ -32,7 +33,7 @@
   }
   function current(){return findEmployee(currentUserId)||null}
   function currentId(){return employeeId(current())||currentUserId||""}
-  function currentName(){return employeeName(current())||"Benutzer"}
+  function currentName(){return current()?employeeName(current()):""}
   function can(permission){
     const e=current();
     if(!e)return false;
@@ -53,8 +54,7 @@
       localStorage.getItem("kristineGoEmployeeId")
     ].filter(Boolean);
     for(const id of candidates){if(findEmployee(id))return String(id)}
-    const alex=employees().find(isAlexander);
-    return alex?employeeId(alex):(employees()[0]?employeeId(employees()[0]):"");
+    return "";
   }
 
   function setCurrentUser(id,{persist=true}={}){
@@ -95,22 +95,28 @@
   function ensureUserPicker(){
     let bg=document.getElementById("kristaUserPickBg");if(bg)return bg;
     bg=document.createElement("div");bg.id="kristaUserPickBg";bg.className="krista-user-pick-bg";
-    bg.innerHTML=`<div class="krista-user-pick"><h3>Benutzer festlegen</h3><div class="small">Dieser Benutzer wird auf diesem Gerät gespeichert und für „Von“, persönliche Aufgaben und Berechtigungen verwendet.</div><select id="kristaUserPickSelect"></select><div class="krista-user-pick-actions"><button type="button" class="secondary" data-user-cancel>Abbrechen</button><button type="button" class="green" data-user-save>Übernehmen</button></div></div>`;
+    bg.innerHTML=`<div class="krista-user-pick"><h3>Wer arbeitet gerade mit KRISTINE?</h3><div class="small">Einmal auf diesem Gerät festlegen. Damit werden persönliche Aufgaben, „Von“-Felder und Berechtigungen automatisch richtig gesetzt.</div><select id="kristaUserPickSelect"></select><div class="krista-user-pick-actions"><button type="button" class="secondary" data-user-cancel>Abbrechen</button><button type="button" class="green" data-user-save>Übernehmen</button></div></div>`;
     document.body.appendChild(bg);
-    bg.addEventListener("click",e=>{if(e.target===bg||e.target.closest("[data-user-cancel]"))bg.classList.remove("open")});
+    bg.addEventListener("click",e=>{if((e.target===bg||e.target.closest("[data-user-cancel]"))&&current())bg.classList.remove("open")});
     bg.querySelector("[data-user-save]").onclick=()=>{const id=bg.querySelector("#kristaUserPickSelect")?.value;if(setCurrentUser(id))bg.classList.remove("open")};
     return bg;
   }
 
   function openUserPicker(){
     const bg=ensureUserPicker();const select=bg.querySelector("#kristaUserPickSelect");
-    select.innerHTML=employees().sort((a,b)=>employeeName(a).localeCompare(employeeName(b),"de")).map(e=>`<option value="${esc(employeeId(e))}" ${employeeId(e)===currentId()?"selected":""}>${esc(employeeName(e))}</option>`).join("");
+    select.innerHTML='<option value="">– Benutzer auswählen –</option>'+employees().sort((a,b)=>employeeName(a).localeCompare(employeeName(b),"de")).map(e=>`<option value="${esc(employeeId(e))}" ${employeeId(e)===currentId()?"selected":""}>${esc(employeeName(e))}</option>`).join("");
+    const cancel=bg.querySelector("[data-user-cancel]");if(cancel)cancel.hidden=!current();
     bg.classList.add("open");
   }
 
   function renderIdentity(){
-    const host=document.querySelector(".krista-user");if(!host||!current())return;
+    const host=document.querySelector(".krista-user");if(!host)return;
     host.classList.add("krista-user-context");
+    if(!current()){
+      host.innerHTML='<button type="button"><strong>Benutzer wählen</strong></button><small>einmalig auf diesem Gerät</small>';
+      host.querySelector("button").onclick=openUserPicker;
+      return;
+    }
     host.innerHTML=`<button type="button" title="Benutzer auf diesem Gerät ändern"><strong>${esc(currentName())}</strong></button><small>${roleFor(current())==="admin"?"Chef / Admin":"Benutzer"}</small>`;
     host.querySelector("button").onclick=openUserPicker;
   }
@@ -140,8 +146,11 @@
     }
     const view=taskView();
     const people=employees().sort((a,b)=>employeeName(a).localeCompare(employeeName(b),"de"));
+    const renderKey=[currentId(),view,can("financeApproval")?"1":"0",...people.map(e=>employeeId(e)+":"+employeeName(e))].join("|");
+    if(bar.dataset.renderKey===renderKey){const select=bar.querySelector("select");if(select&&select.value!==view)select.value=view;return}
+    bar.dataset.renderKey=renderKey;
     bar.innerHTML=`<label for="kristaTaskOwnerFilter">Anzeigen</label><select id="kristaTaskOwnerFilter"><option value="me" ${view==="me"?"selected":""}>Meine Aufgaben · ${esc(currentName())}</option>${people.map(e=>`<option value="${esc(employeeId(e))}" ${view===employeeId(e)?"selected":""}>${esc(employeeName(e))}</option>`).join("")}<option value="all" ${view==="all"?"selected":""}>Alle Aufgaben</option></select><span class="krista-task-userhint">Angemeldet: ${esc(currentName())}</span>`;
-    bar.querySelector("select").onchange=e=>{localStorage.setItem(TASK_VIEW_KEY,e.target.value||"me");if(typeof window.renderTasks==="function")window.renderTasks()};
+    bar.querySelector("select").onchange=e=>{localStorage.setItem(TASK_VIEW_KEY,e.target.value||"me");bar.dataset.renderKey="";if(typeof window.renderTasks==="function")window.renderTasks()};
   }
 
   function installRenderScope(){
@@ -204,6 +213,7 @@
     if(typeof window.addTask==="function"&&!window.addTask.__kristaUserCreator){
       const originalAdd=window.addTask;
       const wrappedAdd=async function(){
+        if(!current()){openUserPicker();return}
         updateCreatorField();
         const before=new Set(((typeof data!=="undefined"&&Array.isArray(data.tasks))?data.tasks:[]).map(t=>String(t.id||"")));
         pendingTaskCreation={before,id:currentId(),name:currentName()};
@@ -223,8 +233,17 @@
 
   function refresh(){
     if(!employees().length)return;
-    if(!currentUserId)setCurrentUser(resolveInitialUser(),{persist:true});
-    else if(!current())setCurrentUser(resolveInitialUser(),{persist:true});
+    if(!currentUserId){
+      const resolved=resolveInitialUser();
+      if(resolved)setCurrentUser(resolved,{persist:true});
+      else{
+        installStyle();renderIdentity();installTaskCreatorHooks();guardFinanceActions();
+        if(!promptShown){promptShown=true;setTimeout(openUserPicker,120)}
+        return;
+      }
+    } else if(!current()){
+      currentUserId="";localStorage.removeItem(USER_KEY);promptShown=false;return refresh();
+    }
     installStyle();renderIdentity();updateCreatorField();ensureTaskViewFilter();installRenderScope();installModalScope();installTaskCreatorHooks();guardFinanceActions();
   }
 
