@@ -5,12 +5,14 @@ on:
     branches:
       - feature/lg-live-mischmaschine
       - feature/lg-stock-ledger-order-fix
+      - feature/lg-order-summary-ledger
   pull_request:
     paths:
       - 'paint-live-bridge.js'
       - 'paint-stock-ledger.js'
       - 'paint-stock-ledger-api.js'
       - 'paint-order-review.js'
+      - 'paint-order-summary-fix.js'
       - 'paint-lab-preload.js'
       - 'public/paint-live-mix-ui.js'
       - 'tools/innovatint-kristine-bridge.ps1'
@@ -29,6 +31,7 @@ jobs:
           node --check paint-stock-ledger.js
           node --check paint-stock-ledger-api.js
           node --check paint-order-review.js
+          node --check paint-order-summary-fix.js
           node --check paint-lab-preload.js
           node --check public/paint-live-mix-ui.js
       - name: PowerShell syntax
