@@ -46,8 +46,17 @@ Module._load = function kristineInboxLoader(request, parent, isMain) {
     const originalRegister = exported.registerKristine;
     const { registerKristineInbox } = require("./kristine-inbox");
     const { registerKristineInvoiceIntake } = require("./kristine-invoice-intake");
+    const { registerKristineUserAccess } = require("./kristine-user-access");
     exported.registerKristine = function registerKristineWithInbox(app, options) {
       const effectiveOptions = withChefPhoneFallback(options);
+
+      // Vor KRISTINE selbst registrieren: so kann der Freigabeschutz die Aufgaben-PUT-Route absichern.
+      registerKristineUserAccess(app, {
+        dataDir: effectiveOptions.dataDir,
+        requireAdmin: effectiveOptions.requireAdmin,
+        readEmployees: effectiveOptions.readEmployees,
+      });
+
       const result = originalRegister(app, effectiveOptions);
       const shared = { dataDir: effectiveOptions.dataDir, requireAdmin: effectiveOptions.requireAdmin };
       registerKristineInbox(app, shared);
