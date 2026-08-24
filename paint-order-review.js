@@ -3,6 +3,7 @@
 const fsp = require("fs/promises");
 const path = require("path");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { readLatestStockMap, stockForArticle } = require("./paint-stock-ledger");
 
 function registerPaintOrderReview(app, options = {}) {
   const dataDir = options.dataDir || process.env.DATA_DIR || "/var/data";
@@ -39,24 +40,18 @@ function registerPaintOrderReview(app, options = {}) {
     await fsp.rename(tmp, file);
   }
 
-  function suggestion(article) {
+  function suggestion(article, stockValue) {
     const category = clean(article?.category, 40).toLowerCase();
     if (category === "sample-pot" || category === "marketing") return 0;
-    const stock = Math.max(0, Number(article?.stock || 0));
+    const stock = Math.max(0, Number(stockValue ?? article?.stock ?? 0));
     const minimum = Math.max(0, Number(article?.minimumStock || 0));
     const target = Math.max(minimum, Number(article?.targetStock ?? minimum) || 0);
-    // KRISTA-Regel: Sobald IST den Mindestbestand ERREICHT (oder darunter liegt),
-    // wird bis zum Sollbestand aufgefüllt.
     return stock <= minimum ? Math.max(0, Math.ceil(target - stock)) : 0;
   }
 
-  function effectiveQuantity(article) {
-    const manual = nullableNonNegative(article?.orderQuantityOverride);
-    return manual === null ? suggestion(article) : manual;
-  }
-
-  function publicRow(article) {
-    const suggestedQuantity = suggestion(article);
+  function publicRow(article, latestStock) {
+    const resolved = stockForArticle(article, latestStock);
+    const suggestedQuantity = suggestion(article, resolved.stock);
     const manualQuantity = nullableNonNegative(article?.orderQuantityOverride);
     const quantity = manualQuantity === null ? suggestedQuantity : manualQuantity;
     const purchasePrice = Math.max(0, Number(article?.purchasePrice || 0));
@@ -69,7 +64,8 @@ function registerPaintOrderReview(app, options = {}) {
       baseName: clean(article?.baseName || article?.baseCode, 100),
       stockCode: clean(article?.stockCode, 100),
       ean: clean(article?.ean, 100),
-      stock: Math.max(0, Number(article?.stock || 0)),
+      stock: resolved.stock,
+      stockSource: resolved.source,
       minimumStock: Math.max(0, Number(article?.minimumStock || 0)),
       targetStock: Math.max(0, Number(article?.targetStock || 0)),
       suggestedQuantity,
@@ -83,10 +79,13 @@ function registerPaintOrderReview(app, options = {}) {
   }
 
   async function summary() {
-    const articles = await readJson(articlesFile, []);
+    const [articles, latestStock] = await Promise.all([
+      readJson(articlesFile, []),
+      readLatestStockMap(root),
+    ]);
     const items = (Array.isArray(articles) ? articles : [])
       .filter(article => article && article.active !== false && article.orderable !== false && isLittleGreene(article))
-      .map(publicRow)
+      .map(article => publicRow(article, latestStock))
       .sort((a, b) => a.orderIndex - b.orderIndex || a.product.localeCompare(b.product, "de"));
     const openItems = items.filter(item => item.quantity > 0);
     return {
@@ -96,6 +95,7 @@ function registerPaintOrderReview(app, options = {}) {
       pieces: openItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       total: Number(openItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0).toFixed(2)),
       rule: "IST <= Mindest => bis Soll auffuellen",
+      stockSource: "Inventur/Lagerbuch",
     };
   }
 
