@@ -1,14 +1,14 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-users-1";
-  const USER_KEY="kristaCurrentUserId";
+  const VERSION="2026-08-24-users-2";
+  const USER_KEY="kristaCurrentUserIdV2";
   let snapshot=null;
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const token=()=>new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token()&&u.origin===location.origin)u.searchParams.set("token",token());return u.pathname+u.search+u.hash};
-  const actorId=()=>localStorage.getItem(USER_KEY)||"";
+  const actorId=()=>localStorage.getItem(USER_KEY)||sessionStorage.getItem("kristaCurrentSessionUserIdV2")||"";
 
   async function api(path,options={}){
     const headers={...(options.headers||{})};
@@ -36,7 +36,6 @@
     return bg;
   }
 
-  function roleLabel(role){return role==="admin"?"Chef / Admin":role==="office"?"Büro":"Benutzer"}
   function currentActor(){return snapshot?.users?.find(u=>String(u.employeeId)===String(actorId()))||null}
 
   function permissionControl(user,key,label){
@@ -85,7 +84,6 @@
     if(status){status.textContent="Speichert …";status.className="kau-status"}if(button)button.disabled=true;
     try{
       snapshot=await api("/kristine/api/user-access",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({actorId:actorId(),users:collect()})});
-      if(status){status.textContent=`✓ Gespeichert von ${snapshot.updatedBy||'Alexander'}`;status.className="kau-status ok"}
       render();const s=document.getElementById("kauStatus");if(s){s.textContent=`✓ Gespeichert von ${snapshot.updatedBy||'Alexander'}`;s.className="kau-status ok"}
     }catch(error){if(status){status.textContent=error.message||String(error);status.className="kau-status error"}}
     finally{const b=document.getElementById("kauSave");if(b)b.disabled=false}
