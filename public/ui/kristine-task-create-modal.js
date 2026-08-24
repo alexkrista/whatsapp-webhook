@@ -1,12 +1,18 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-1202";
+  const VERSION="2026-08-24-1525";
   let installed=false;
 
   function card(){return document.querySelector("#tasks .task-create-card")}
   function backdrop(){return document.getElementById("kristaTaskCreateBackdrop")}
+  function tasksActive(){return !!document.getElementById("tasks")?.classList.contains("active")}
   function isOpen(){return backdrop()?.classList.contains("open")}
+  function syncScrollLock(){
+    const shouldLock=!!(isOpen()&&tasksActive());
+    document.body.classList.toggle("krista-task-create-open",shouldLock);
+    if(!tasksActive()&&isOpen())backdrop()?.classList.remove("open");
+  }
 
   function installStyle(){
     if(document.getElementById("kristaTaskCreateModalStyle"))return;
@@ -72,20 +78,24 @@
   }
 
   function open(){
+    if(!tasksActive()){
+      document.body.classList.remove("krista-task-create-open");
+      return;
+    }
     const bg=ensureBackdrop();if(!bg)return;
     bg.classList.add("open");
-    document.body.classList.add("krista-task-create-open");
+    syncScrollLock();
     setTimeout(()=>document.getElementById("tTitle")?.focus(),40);
   }
 
   function close(){
-    const bg=backdrop();if(!bg)return;
-    bg.classList.remove("open");
+    const bg=backdrop();
+    if(bg)bg.classList.remove("open");
     document.body.classList.remove("krista-task-create-open");
   }
 
   function maybeOpenForPrefill(event){
-    if(event?.isTrusted)return;
+    if(event?.isTrusted||!tasksActive())return;
     const title=document.getElementById("tTitle");
     if(title&&String(title.value||"").trim())open();
   }
@@ -101,10 +111,24 @@
     if(tasks&&!tasks.dataset.kristaTaskModalObserver){
       tasks.dataset.kristaTaskModalObserver="1";
       new MutationObserver(()=>{
+        if(!tasksActive()){syncScrollLock();return}
         const pending=document.getElementById("kristaInboxPending");
         if(pending&&pending.style.display!=="none"&&String(pending.textContent||"").trim())open();
       }).observe(tasks,{childList:true,subtree:true});
     }
+  }
+
+  function wrapShowTab(){
+    const fn=window.showTab;
+    if(typeof fn!=="function"||fn.__kristaTaskCreateModal)return;
+    const wrapped=function(id){
+      if(id!=="tasks")close();
+      const result=fn.apply(this,arguments);
+      syncScrollLock();
+      return result;
+    };
+    wrapped.__kristaTaskCreateModal=true;
+    window.showTab=wrapped;
   }
 
   function wrapAddTask(){
@@ -125,12 +149,15 @@
 
   function install(){
     if(!location.pathname.toLowerCase().includes("/kristine"))return;
-    installStyle();ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapAddTask();
+    installStyle();ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapShowTab();wrapAddTask();syncScrollLock();
     if(!installed){
       installed=true;
       document.addEventListener("keydown",event=>{if(event.key==="Escape"&&isOpen())close()});
-      window.addEventListener("hashchange",()=>setTimeout(()=>{ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapAddTask()},0));
-      setInterval(()=>{ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapAddTask()},1800);
+      window.addEventListener("hashchange",()=>setTimeout(()=>{
+        if(location.hash.replace("#","").toLowerCase()!=="tasks")close();
+        ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapShowTab();wrapAddTask();syncScrollLock();
+      },0));
+      setInterval(()=>{ensureLaunchButton();ensureBackdrop();watchInboxPrefill();wrapShowTab();wrapAddTask();syncScrollLock()},1800);
       console.info("KRISTINE Aufgabenmaske",VERSION);
     }
   }
