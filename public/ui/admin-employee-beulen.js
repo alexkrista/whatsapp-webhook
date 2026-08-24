@@ -126,6 +126,7 @@
   function install(){
     ensureCss("/public/ui/admin-employee-personnel-layout.css","kristaPersonnelLayoutCss");
     ensureScript("/public/ui/admin-employee-ui-polish.js","data-krista-admin-employee-polish");
+    ensureScript("/public/ui/admin-employee-email.js?v=20260824-email1","data-krista-admin-employee-email");
     installStyle();installDropzone();enableWorktimeAssignment();
   }
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{install();loadWorktimeModelCache()},{once:true});else{install();loadWorktimeModelCache()}
