@@ -13,8 +13,14 @@ express.response.send = function paintLiveBrowserFixSend(body) {
           "</body>",
           '<script src="/public/paint-live-result-normalizer.js?v=20260825-0825"></script>\n</body>'
         );
-        body = Buffer.isBuffer(body) ? Buffer.from(html, "utf8") : html;
       }
+      if (!html.includes("/public/paint-live-recipe-ui.js")) {
+        html = html.replace(
+          "</body>",
+          '<script src="/public/paint-live-recipe-ui.js?v=20260825-0902"></script>\n</body>'
+        );
+      }
+      body = Buffer.isBuffer(body) ? Buffer.from(html, "utf8") : html;
     }
   } catch {}
   return originalSend.call(this, body);
