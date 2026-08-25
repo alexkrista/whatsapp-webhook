@@ -109,21 +109,13 @@ def install(ns):
     top.append(project,material);
     bottom.append(captureNav);
 
-    // Nicht mehr indirekt über .click() auf den versteckten Originalbutton gehen.
-    // Die Basisseite stellt setSearchMode('capture') bereit; das ist der echte
-    // Einstieg in die Erfassungsansicht und initialisiert captureSection/initCapture.
+    // Der native Brain-Endpunkt öffnet die Erfassung bereits selbst im capture-Modus.
+    // Deshalb hier bewusst keine Abhängigkeit mehr von setSearchMode oder dem
+    // versteckten Originalbutton: echte Navigation ist der robusteste Einstieg.
     captureNav.addEventListener('click',e=>{
       e.preventDefault();
       e.stopPropagation();
-      try{
-        if(typeof setSearchMode==='function'){
-          setSearchMode('capture');
-          return;
-        }
-      }catch(error){console.error('Erfassen öffnen:',error)}
-      // Fallback nur für alte Brain-Stände.
-      if(typeof captureOriginal.onclick==='function')captureOriginal.onclick.call(captureOriginal,e);
-      else captureOriginal.click();
+      window.location.href='/incoming-capture';
     });
 
     const op=captureNav.cloneNode(true);
