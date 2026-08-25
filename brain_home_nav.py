@@ -3,6 +3,9 @@
 
 
 def install(ns):
+    import brain_service_runtime
+    brain_service_runtime.install(ns)
+
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:
         return
