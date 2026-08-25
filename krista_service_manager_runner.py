@@ -27,6 +27,7 @@ AUTOSTART_FILE = (
     / r"Microsoft\Windows\Start Menu\Programs\Startup\KRISTA_Dienste.vbs"
 )
 
+_original_status_snapshot = base._status_snapshot
 base.PORT = PORT
 base.MANAGER_VERSION = RUNNER_VERSION
 
@@ -149,7 +150,7 @@ def _restart_manager_later() -> None:
 
 
 def _status_snapshot() -> dict:
-    data = base._status_snapshot()
+    data = _original_status_snapshot()
     data["managerVersion"] = RUNNER_VERSION
 
     autostart_ok = _ensure_windows_autostart()
