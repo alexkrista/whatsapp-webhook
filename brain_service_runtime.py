@@ -11,8 +11,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.0-services"
-SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "5060"))
+BRAIN_CONNECTOR_VERSION = "0.14.1-services"
+SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
 RUNTIME_FILE = RUNTIME_DIR / "brain-runtime.json"
@@ -53,10 +53,12 @@ def _spawn_manager() -> bool:
             | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
     try:
+        env = os.environ.copy()
+        env["KRISTA_SERVICE_MANAGER_PORT"] = str(SERVICE_MANAGER_PORT)
         subprocess.Popen(
             [sys.executable, str(manager)],
             cwd=str(REPO_ROOT),
-            env=os.environ.copy(),
+            env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
