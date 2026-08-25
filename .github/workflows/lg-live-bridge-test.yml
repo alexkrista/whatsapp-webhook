@@ -20,10 +20,12 @@ on:
       - 'paint-order-review.js'
       - 'paint-order-summary-fix.js'
       - 'paint-lab-preload.js'
+      - 'paint-inventory-save-preload.js'
       - 'public/paint-live-mix-ui.js'
       - 'public/paint-mix-history-ui.js'
       - 'public/paint-catalog-sync-ui.js'
       - 'public/paint-product-order-ui.js'
+      - 'public/paint-inventory-save-fix.js'
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
@@ -49,10 +51,12 @@ jobs:
           node --check paint-order-review.js
           node --check paint-order-summary-fix.js
           node --check paint-lab-preload.js
+          node --check paint-inventory-save-preload.js
           node --check public/paint-live-mix-ui.js
           node --check public/paint-mix-history-ui.js
           node --check public/paint-catalog-sync-ui.js
           node --check public/paint-product-order-ui.js
+          node --check public/paint-inventory-save-fix.js
           node --check public/paint-unmixed-scan-fix.js
       - name: PowerShell syntax
         shell: pwsh
