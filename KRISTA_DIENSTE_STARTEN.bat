@@ -23,7 +23,7 @@ if /I not "%~1"=="--silent" (
 )
 
 powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command ^
-  "$env:KRISTA_SERVICE_MANAGER_PORT='%KRISTA_SERVICE_MANAGER_PORT%'; Start-Process -WindowStyle Hidden -FilePath '%PYEXE%' -ArgumentList '""%~dp0krista_service_manager_runner.py""' -WorkingDirectory '%~dp0'" >nul 2>&1
+  "$env:KRISTA_SERVICE_MANAGER_PORT='%KRISTA_SERVICE_MANAGER_PORT%'; Start-Process -WindowStyle Hidden -FilePath '%PYEXE%' -ArgumentList @('%~dp0krista_service_manager_runner.py') -WorkingDirectory '%~dp0'" >nul 2>&1
 
 if /I "%~1"=="--silent" exit /b 0
 
