@@ -21,11 +21,14 @@ on:
       - 'paint-order-summary-fix.js'
       - 'paint-lab-preload.js'
       - 'paint-inventory-save-preload.js'
+      - 'paint-consumption-docs-preload.js'
+      - 'public/lg-product-knowledge.json'
       - 'public/paint-live-mix-ui.js'
       - 'public/paint-mix-history-ui.js'
       - 'public/paint-catalog-sync-ui.js'
       - 'public/paint-product-order-ui.js'
       - 'public/paint-inventory-save-fix.js'
+      - 'public/paint-consumption-docs-ui.js'
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
@@ -52,12 +55,15 @@ jobs:
           node --check paint-order-summary-fix.js
           node --check paint-lab-preload.js
           node --check paint-inventory-save-preload.js
+          node --check paint-consumption-docs-preload.js
           node --check public/paint-live-mix-ui.js
           node --check public/paint-mix-history-ui.js
           node --check public/paint-catalog-sync-ui.js
           node --check public/paint-product-order-ui.js
           node --check public/paint-inventory-save-fix.js
+          node --check public/paint-consumption-docs-ui.js
           node --check public/paint-unmixed-scan-fix.js
+          node -e "JSON.parse(require('fs').readFileSync('public/lg-product-knowledge.json','utf8'))"
       - name: PowerShell syntax
         shell: pwsh
         run: |
