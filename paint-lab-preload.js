@@ -23,10 +23,9 @@ const { registerPaintOutflow } = require("./paint-outflow");
 const { registerPaintReturnStock } = require("./paint-return-stock");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
-const { registerPaintLegacySollImport } = require("./paint-legacy-soll-import");
-const { registerPaintInventoryRecovery } = require("./paint-inventory-recovery");
 const { registerPaintLiveBridge } = require("./paint-live-bridge");
 const { registerPaintStockLedgerApi } = require("./paint-stock-ledger-api");
+const { registerPaintRuntimeSafety } = require("./paint-runtime-safety");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -48,6 +47,14 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("<head>", '<head>\n<meta name="google" content="notranslate">');
       }
       fixed = fixed.replace(/<body(?:\s[^>]*)?>/i, '<body class="notranslate" translate="no">');
+
+      // Altimport ist abgeschlossen. Die Karte wird serverseitig entfernt, damit
+      // auch Browser mit altem JavaScript keinen Excel-Neuimport mehr anbieten.
+      fixed = fixed.replace(
+        /<div class="card"><h2>Excel-Erstimport<\/h2>[\s\S]*?<div id="excelStatus" class="status"><\/div><\/div>/i,
+        ""
+      );
+
       if (!fixed.includes("/public/paint-inventory-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js"></script>\n</body>');
       }
@@ -81,12 +88,6 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-inventory-counter-fix.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-counter-fix.js?v=20260821-1152"></script>\n</body>');
       }
-      if (!fixed.includes("/public/paint-legacy-soll-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-legacy-soll-ui.js?v=20260821-1248"></script>\n</body>');
-      }
-      if (!fixed.includes("/public/paint-inventory-recovery-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-recovery-ui.js?v=20260821-1535"></script>\n</body>');
-      }
       if (!fixed.includes("/public/paint-order-review-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-order-review-ui.js?v=20260821-2211"></script>\n</body>');
       }
@@ -103,7 +104,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260824-1215"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-live-mix-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-live-mix-ui.js?v=20260824-2205"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-live-mix-ui.js?v=20260825-0831"></script>\n</body>');
       }
 
       res.set("Content-Language", "de");
@@ -135,18 +136,20 @@ function wrappedExpress(...args) {
         registerPaintLgSentOrder(app, opts);
         registerPaintOrderSummaryFix(app, opts);
         registerPaintInventoryExcel(app, opts);
+
+        // Muss vor den alten Routen stehen: Inventur/Lagerbuch ist Master und
+        // Altimport/Recovery sind im laufenden Betrieb gesperrt.
+        registerPaintRuntimeSafety(app, opts);
         registerPaintInventory(app, opts);
         registerPaintOutflow(app, opts);
         registerPaintReturnStock(app, opts);
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
-        registerPaintLegacySollImport(app, opts);
-        registerPaintInventoryRecovery(app, opts);
         registerPaintStockLedgerApi(app, opts);
         registerPaintLiveBridge(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur + Abgang + Rueckware + Bestellpruefung + LG-Excel + Gesendet-Snapshot + Live-Mischmaschine + Lagerbuch registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur-Master + Abgang + Rueckware + Bestellpruefung + LG-Excel-Ausgabe + Live-Mischmaschine + Lagerbuch registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
