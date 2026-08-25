@@ -89,11 +89,6 @@ def install(ns):
     if(incoming)incoming.remove();
     material.textContent='🧾 Eingangsrechnungen / Material';
 
-    // WICHTIG: Den originalen Erfassen-Button nicht aus seinem ursprünglichen
-    // Container verschieben. Die Brain-Basisseite nutzt dort teils delegierte
-    // Click-Handler. Ein Verschieben in unsere 2x2-Navigation trennt diese Logik.
-    // Deshalb bleibt das Original unsichtbar an Ort und Stelle; oben zeigen wir
-    // nur einen Stellvertreter, der den echten Original-Click auslöst.
     const captureOriginal=capture;
     const captureNav=captureOriginal.cloneNode(true);
     captureNav.id='modeCaptureHome';
@@ -114,10 +109,21 @@ def install(ns):
     top.append(project,material);
     bottom.append(captureNav);
 
+    // Nicht mehr indirekt über .click() auf den versteckten Originalbutton gehen.
+    // Die Basisseite stellt setSearchMode('capture') bereit; das ist der echte
+    // Einstieg in die Erfassungsansicht und initialisiert captureSection/initCapture.
     captureNav.addEventListener('click',e=>{
       e.preventDefault();
       e.stopPropagation();
-      captureOriginal.click();
+      try{
+        if(typeof setSearchMode==='function'){
+          setSearchMode('capture');
+          return;
+        }
+      }catch(error){console.error('Erfassen öffnen:',error)}
+      // Fallback nur für alte Brain-Stände.
+      if(typeof captureOriginal.onclick==='function')captureOriginal.onclick.call(captureOriginal,e);
+      else captureOriginal.click();
     });
 
     const op=captureNav.cloneNode(true);
