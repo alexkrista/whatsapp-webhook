@@ -1,8 +1,8 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-25-services-1";
-  const MANAGER="http://127.0.0.1:5060";
+  const VERSION="2026-08-25-services-2";
+  const MANAGER="http://127.0.0.1:8765";
   let timer=null;
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
@@ -92,7 +92,7 @@
   function renderOffline(error){
     const content=document.getElementById("kristaServicesContent");if(!content)return;
     content.className="ksvc-empty";
-    content.innerHTML=`<strong>🔴 Lokaler KRISTA Dienstemanager ist nicht erreichbar.</strong><br><br>Das ist beim allerersten Mal normal. Am Firmen-PC im Projektordner einmal <strong>KRISTA_DIENSTE_STARTEN.bat</strong> doppelklicken. Danach hier auf „Aktualisieren“.<br><br><span class="ksvc-detail">${esc(error?.message||error||'')}</span>`;
+    content.innerHTML=`<strong>🔴 Lokaler KRISTA Dienstemanager ist nicht erreichbar.</strong><br><br>Am Firmen-PC im Projektordner einmal <strong>KRISTA_DIENSTE_STARTEN.bat</strong> doppelklicken. Danach hier auf „Aktualisieren“.<br><br><span class="ksvc-detail">${esc(error?.message||error||'')}</span>`;
   }
 
   async function load(){
