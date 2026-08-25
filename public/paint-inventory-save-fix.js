@@ -23,7 +23,8 @@
     const button=document.getElementById("inventorySave");
     if(!button||saving)return;
     const count=dirtyRows().length;
-    button.textContent=count?`Änderungen speichern (${count})`:"Inventur + Bestellung speichern";
+    const label=count?`Änderungen speichern (${count})`:"Inventur + Bestellung speichern";
+    if(button.textContent!==label) button.textContent=label;
   }
 
   function prepareInput(input){
@@ -35,6 +36,7 @@
     input.value=stock;
     input.placeholder="";
     input.dataset.originalStock=stock;
+    row.dataset.stockDirty="0";
     input.addEventListener("focus",()=>setTimeout(()=>{try{input.select()}catch{}},0));
     const mark=()=>{
       const current=String(input.value??"").trim();
@@ -48,7 +50,10 @@
     input.addEventListener("change",mark);
   }
 
-  function installInputs(){document.querySelectorAll(".inventory-ist").forEach(prepareInput);updateSaveButton();}
+  function installInputs(){
+    document.querySelectorAll(".inventory-ist").forEach(prepareInput);
+    updateSaveButton();
+  }
 
   async function saveAll(){
     if(saving)return;
@@ -76,7 +81,7 @@
 
     saving=true;
     const button=document.getElementById("inventorySave");
-    if(button){button.disabled=true;button.textContent="Speichert …";}
+    if(button){button.disabled=true;if(button.textContent!=="Speichert …")button.textContent="Speichert …";}
     if(status)status.textContent="Änderungen werden gespeichert …";
 
     try{
@@ -105,14 +110,14 @@
 
       if(status)status.textContent=`Gespeichert: ${changedCount} Ist · ${changedLevels} Soll/Mindest · ${changedOrders} Bestellmengen ✓`;
       document.dispatchEvent(new CustomEvent("kristine:paint-stock-changed",{detail:{source:"inventory-manual-save"}}));
-      setTimeout(()=>document.getElementById("inventoryReload")?.click(),450);
+      setTimeout(()=>document.getElementById("inventoryReload")?.click(),300);
     }catch(error){
       if(status)status.textContent=`NICHT gespeichert: ${String(error?.message||error)}`;
       alert(`Speichern fehlgeschlagen:\n${String(error?.message||error)}`);
     }finally{
       saving=false;
       if(button)button.disabled=false;
-      setTimeout(updateSaveButton,500);
+      setTimeout(updateSaveButton,400);
     }
   }
 
@@ -124,6 +129,22 @@
     saveAll();
   },true);
 
-  installInputs();
-  new MutationObserver(()=>installInputs()).observe(document.body,{childList:true,subtree:true});
+  function startObserver(){
+    const wrap=document.getElementById("inventoryWrap");
+    if(wrap){
+      new MutationObserver(()=>installInputs()).observe(wrap,{childList:true,subtree:true});
+      installInputs();
+      return;
+    }
+    const boot=new MutationObserver(()=>{
+      const found=document.getElementById("inventoryWrap");
+      if(!found)return;
+      boot.disconnect();
+      new MutationObserver(()=>installInputs()).observe(found,{childList:true,subtree:true});
+      installInputs();
+    });
+    boot.observe(document.body,{childList:true,subtree:true});
+  }
+
+  startObserver();
 })();
