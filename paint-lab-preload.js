@@ -28,6 +28,7 @@ const { registerPaintStockLedgerApi } = require("./paint-stock-ledger-api");
 const { registerPaintRuntimeSafety } = require("./paint-runtime-safety");
 const { registerPaintMixHistory } = require("./paint-mix-history");
 const { registerPaintCatalogSync } = require("./paint-catalog-sync");
+const { registerPaintColorStockOverlay } = require("./paint-color-stock-overlay");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -159,11 +160,13 @@ function wrappedExpress(...args) {
         registerPaintMixHistory(app, opts);
         registerPaintLiveBridge(app, opts);
 
-        // Muss vor paint-lab stehen: neue Mischdaten werden zuerst nur geprüft.
+        // Muss vor paint-lab stehen: Mischdaten erst pruefen und Farbsuche danach
+        // mit dem autoritativen Bestand aus Inventur/Lagerbuch ueberlagern.
         registerPaintCatalogSync(app, opts);
+        registerPaintColorStockOverlay(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur-Master + Abgang + Misch-History + Mischdaten-Vergleich + Bestellpruefung + LG-Excel-Ausgabe + Lagerbuch registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur-Master + Abgang + Misch-History + Mischdaten-Vergleich + Farbsuche-Lageroverlay + Bestellpruefung + LG-Excel-Ausgabe + Lagerbuch registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
