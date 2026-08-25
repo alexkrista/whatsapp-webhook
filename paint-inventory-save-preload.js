@@ -11,7 +11,7 @@ express.response.send = function paintInventorySaveFixSend(body) {
       if (!html.includes("/public/paint-inventory-save-fix.js")) {
         html = html.replace(
           "</body>",
-          '<script src="/public/paint-inventory-save-fix.js?v=20260825-1533"></script>\n</body>'
+          '<script src="/public/paint-inventory-save-fix.js?v=20260825-1548"></script>\n</body>'
         );
         body = Buffer.isBuffer(body) ? Buffer.from(html, "utf8") : html;
       }
