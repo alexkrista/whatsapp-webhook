@@ -10,6 +10,8 @@ on:
   pull_request:
     paths:
       - 'paint-live-bridge.js'
+      - 'paint-mix-history.js'
+      - 'paint-outflow.js'
       - 'paint-stock-ledger.js'
       - 'paint-stock-ledger-api.js'
       - 'paint-runtime-safety.js'
@@ -17,6 +19,8 @@ on:
       - 'paint-order-summary-fix.js'
       - 'paint-lab-preload.js'
       - 'public/paint-live-mix-ui.js'
+      - 'public/paint-mix-history-ui.js'
+      - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
 
 jobs:
@@ -30,6 +34,8 @@ jobs:
       - name: Node syntax
         run: |
           node --check paint-live-bridge.js
+          node --check paint-mix-history.js
+          node --check paint-outflow.js
           node --check paint-stock-ledger.js
           node --check paint-stock-ledger-api.js
           node --check paint-runtime-safety.js
@@ -37,6 +43,8 @@ jobs:
           node --check paint-order-summary-fix.js
           node --check paint-lab-preload.js
           node --check public/paint-live-mix-ui.js
+          node --check public/paint-mix-history-ui.js
+          node --check public/paint-unmixed-scan-fix.js
       - name: PowerShell syntax
         shell: pwsh
         run: |
