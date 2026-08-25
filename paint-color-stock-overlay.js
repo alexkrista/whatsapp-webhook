@@ -14,8 +14,22 @@ function registerPaintColorStockOverlay(app, options = {}) {
 
   function productKey(value) {
     let key = norm(value);
-    // Innovatint verwendet bei diesen beiden Produkten den Zusatz "Emulsion",
-    // das Little-Greene-Lager/Bestellformular nicht.
+
+    // Innovatint und der offizielle LG-Lagerstamm verwenden bei einzelnen
+    // Produkten unterschiedliche Bezeichnungen. Nur bekannte, eindeutige
+    // Abweichungen werden hier zusammengeführt.
+    const aliases = {
+      absolutemattemulsion: "absolutematt",
+      absolutematt: "absolutematt",
+      intelligentmattemulsion: "intelligentmatt",
+      intelligentmatt: "intelligentmatt",
+      intelligentmasonrypaint: "masonrypaint",
+      masonrypaint: "masonrypaint",
+    };
+    if (aliases[key]) return aliases[key];
+
+    // Weitere Emulsion-Bezeichnungen bleiben kompatibel mit dem bisherigen
+    // Mapping, ohne andere Produktfamilien anzufassen.
     key = key.replace(/emulsion$/, "");
     return key;
   }
