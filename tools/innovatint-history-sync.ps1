@@ -33,7 +33,7 @@ function Save-State($State) {
 function Invoke-InnovatintPost([string]$Service, [hashtable]$Body) {
     $uri = "$InnovatintBaseUrl/suite6/test/$Service"
     $result = Invoke-RestMethod -Uri $uri -Method Post -Body $Body -TimeoutSec 20
-    if ($null -ne $result.error -and [string]$result.error -ne '') { throw "Innovatint $Service: $($result.error)" }
+    if ($null -ne $result.error -and [string]$result.error -ne '') { throw "Innovatint ${Service}: $($result.error)" }
     return $result.r
 }
 
@@ -122,7 +122,7 @@ function Resolve-HistoryService([datetime]$From, [datetime]$To) {
                 return [pscustomobject]@{ service = $service; rows = $rows }
             }
         } catch {
-            Write-Log "Probe $service: $($_.Exception.Message)"
+            Write-Log "Probe ${service}: $($_.Exception.Message)"
         }
     }
     throw 'Kein History-Service erkannt. Probe-Log liegt unter C:\KRISTINE\innovatint-history-sync.log.'
