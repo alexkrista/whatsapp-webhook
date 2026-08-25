@@ -12,6 +12,7 @@ on:
       - 'paint-live-bridge.js'
       - 'paint-mix-history.js'
       - 'paint-catalog-sync.js'
+      - 'paint-color-stock-overlay.js'
       - 'paint-outflow.js'
       - 'paint-stock-ledger.js'
       - 'paint-stock-ledger-api.js'
@@ -39,6 +40,7 @@ jobs:
           node --check paint-live-bridge.js
           node --check paint-mix-history.js
           node --check paint-catalog-sync.js
+          node --check paint-color-stock-overlay.js
           node --check paint-outflow.js
           node --check paint-stock-ledger.js
           node --check paint-stock-ledger-api.js
