@@ -9,6 +9,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
 
+const ACCESS_BRIDGE_VERSION = "1.1.0";
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || "").trim();
 const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || "").trim();
@@ -140,6 +141,18 @@ function installRoutes(app) {
   if (!app || app.__kristaAccessBridgeInstalled) return;
   app.__kristaAccessBridgeInstalled = true;
 
+  // Bewusst öffentlicher, ungefährlicher Healthcheck: keine Personen-, Token-
+  // oder Zutrittsdaten. Dient ausschließlich dazu festzustellen, ob genau
+  // dieses Bridge-Modul im laufenden Cloud-Prozess registriert ist.
+  app.get("/kristine/api/access-health", (req, res) => {
+    res.json({
+      ok: true,
+      service: "krista-access-bridge",
+      version: ACCESS_BRIDGE_VERSION,
+      time: new Date().toISOString(),
+    });
+  });
+
   app.get("/kristine/api/access-presence", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -177,7 +190,7 @@ function installRoutes(app) {
     }
   });
 
-  console.log("KRISTINE Zutritt Cloud Bridge aktiv");
+  console.log(`KRISTINE Zutritt Cloud Bridge aktiv · ${ACCESS_BRIDGE_VERSION}`);
 }
 
 // Preload-Hook: Nach dem ERSTEN app.use() (express.json) werden unsere Routen
@@ -207,4 +220,4 @@ wrappedExpress.request = originalExpress.request;
 wrappedExpress.response = originalExpress.response;
 require.cache[expressPath].exports = wrappedExpress;
 
-module.exports = { installRoutes, personPresence };
+module.exports = { installRoutes, personPresence, ACCESS_BRIDGE_VERSION };
