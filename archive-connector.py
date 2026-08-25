@@ -53,6 +53,16 @@ def protect_remote_archive_access():
     if _request_is_local():
         return None
 
+    # KRISTINE ACCESS CONTROL V3 AUTH
+    # Physisch nur am Tailscale-Listener; zusätzlich KRISTINE Admin-Token.
+    if request.path.startswith("/access-control/"):
+        if request.method == "OPTIONS":
+            return None
+        supplied = str(request.headers.get("X-Krista-Token") or "")
+        if KRISTINE_ADMIN_TOKEN and hmac.compare_digest(supplied, KRISTINE_ADMIN_TOKEN):
+            return None
+        return jsonify({"ok": False, "error": "Zutritt nicht freigegeben"}), 403
+
     # Über Tailscale nur die minimale Handy-API freigeben.
     if request.path not in MOBILE_ALLOWED_PATHS and not request.path.startswith("/incoming/capture/"):
         return jsonify({"ok": False, "error": "Nicht verfügbar"}), 404
@@ -96,6 +106,16 @@ def archive_security_headers(response):
         "form-action 'self'; "
         "frame-ancestors 'none'"
     )
+    # KRISTINE ACCESS CONTROL V3 CORS
+    if request.path.startswith("/access-control/"):
+        origin = str(request.headers.get("Origin") or "")
+        if origin == "https://protokoll.krista.at":
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, Content-Type"
+            response.headers["Access-Control-Max-Age"] = "600"
+
     return response
 
 
@@ -8475,6 +8495,42 @@ def pdf_inline():
     except Exception as e:
         print("PDF-Ausgabe-Fehler:", e)
         return jsonify({"ok": False, "error": "PDF konnte nicht geöffnet werden"}), 500
+
+
+
+# KRISTINE ACCESS CONTROL V3 ROUTES
+def _access_gantner_token():
+    data = json.loads(Path(r"C:\Kristine\Zutritt\config.json").read_text(encoding="utf-8"))
+    token = str(data.get("admin_token") or "").strip()
+    if not token:
+        raise RuntimeError("Gantner admin_token fehlt")
+    return token
+
+
+def _access_local_json(url):
+    req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=8) as response:
+        return json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+
+
+@app.get("/access-control/status")
+def access_control_status():
+    try:
+        token = urllib.parse.quote(_access_gantner_token())
+        return jsonify(_access_local_json(f"http://127.0.0.1:8788/api/status/{token}"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.post("/access-control/toggle/<int:door>")
+def access_control_toggle(door):
+    if door not in {1, 2, 3}:
+        return jsonify({"ok": False, "error": "Unbekannte Tür"}), 400
+    try:
+        token = urllib.parse.quote(_access_gantner_token())
+        return jsonify(_access_local_json(f"http://127.0.0.1:8788/api/door-toggle/{door}/{token}"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 # Linie 2 · The Brain direkte Erweiterung

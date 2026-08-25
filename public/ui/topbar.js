@@ -270,6 +270,7 @@
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
     loadCurrentBeulen();
+    loadScriptOnce("/public/ui/access-status-ui.js?v=20260825-accessv3", "data-krista-access-status-v3");
     activateKristineHash();
   });
 
