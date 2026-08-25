@@ -52,6 +52,15 @@
     document.head.appendChild(script);
   }
 
+  function loadOfficeMode() {
+    if (document.querySelector('script[data-kgo-office-mode]')) return;
+    const script = document.createElement("script");
+    script.src = "/public/ui/kgo-office-mode.js?v=20260825-0826";
+    script.defer = true;
+    script.setAttribute("data-kgo-office-mode", "1");
+    document.head.appendChild(script);
+  }
+
   function install() {
     const employeeName = document.getElementById("kgEmployeeName");
     const card = document.getElementById("kgBrainCard");
@@ -71,6 +80,7 @@
 
     syncBrainAccess();
     loadInvoiceScanner();
+    loadOfficeMode();
   }
 
   if (document.readyState === "loading") {
