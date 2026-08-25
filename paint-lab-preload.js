@@ -115,6 +115,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-catalog-sync-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-catalog-sync-ui.js?v=20260825-1202"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-product-order-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-product-order-ui.js?v=20260825-1441"></script>\n</body>');
+      }
 
       // Farbsuche und Rezeptanzeige laufen bewusst aus KRISTINEs lokalem
       // Innovatint-Katalog. Die Mischmaschine muss dafuer nicht dauerhaft wach sein.
