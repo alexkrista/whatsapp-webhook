@@ -160,6 +160,12 @@
     }
   }
 
+  function loadKrisadminServices() {
+    const path = window.location.pathname.toLowerCase();
+    const isKrisadmin = path.includes("baustellen.html") || (path.includes("/admin") && !path.includes("/admin/paint") && !path.includes("/admin/akte") && !path.includes("/admin/pdf") && !path.includes("/admin/download"));
+    if (isKrisadmin) loadScriptOnce("/public/ui/krisadmin-services.js?v=20260825-services1", "data-krista-krisadmin-services");
+  }
+
   function loadAdminEmployeeDocumentCompleteness() {
     if (window.location.pathname.toLowerCase().includes("/admin")) loadScriptOnce("/public/ui/employee-document-completeness.js", "data-krista-employee-document-completeness");
   }
@@ -259,6 +265,7 @@
     loadBaustellenKnowledgeStack();
     loadTowerSignals();
     loadKrisadminHome();
+    loadKrisadminServices();
     loadAdminEmployeeDocumentCompleteness();
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
