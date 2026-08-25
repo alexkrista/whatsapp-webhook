@@ -87,10 +87,21 @@ def install(ns):
 
     if(paint)paint.remove();
     if(incoming)incoming.remove();
-    capture.textContent='📥 Erfassen';
     material.textContent='🧾 Eingangsrechnungen / Material';
 
-    const nodes=[project,material,capture];
+    // WICHTIG: Den originalen Erfassen-Button nicht aus seinem ursprünglichen
+    // Container verschieben. Die Brain-Basisseite nutzt dort teils delegierte
+    // Click-Handler. Ein Verschieben in unsere 2x2-Navigation trennt diese Logik.
+    // Deshalb bleibt das Original unsichtbar an Ort und Stelle; oben zeigen wir
+    // nur einen Stellvertreter, der den echten Original-Click auslöst.
+    const captureOriginal=capture;
+    const captureNav=captureOriginal.cloneNode(true);
+    captureNav.id='modeCaptureHome';
+    captureNav.removeAttribute('onclick');
+    captureNav.textContent='📥 Erfassen';
+    captureOriginal.style.display='none';
+
+    const nodes=[project,material,captureOriginal];
     const host=commonAncestor(nodes);
     if(!host)return;
 
@@ -101,9 +112,15 @@ def install(ns):
     if(first&&first.parentElement===host)host.insertBefore(wrapper,first);else host.insertBefore(wrapper,host.firstChild);
     wrapper.append(top,bottom);
     top.append(project,material);
-    bottom.append(capture);
+    bottom.append(captureNav);
 
-    const op=capture.cloneNode(true);
+    captureNav.addEventListener('click',e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      captureOriginal.click();
+    });
+
+    const op=captureNav.cloneNode(true);
     op.id='modePayments';op.classList.remove('active');op.removeAttribute('onclick');op.textContent='💶 OP';
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
