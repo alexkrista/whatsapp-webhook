@@ -27,6 +27,7 @@ const { registerPaintLiveBridge } = require("./paint-live-bridge");
 const { registerPaintStockLedgerApi } = require("./paint-stock-ledger-api");
 const { registerPaintRuntimeSafety } = require("./paint-runtime-safety");
 const { registerPaintMixHistory } = require("./paint-mix-history");
+const { registerPaintCatalogSync } = require("./paint-catalog-sync");
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
@@ -110,6 +111,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-mix-history-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-mix-history-ui.js?v=20260825-1135"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-catalog-sync-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-catalog-sync-ui.js?v=20260825-1202"></script>\n</body>');
+      }
 
       // Farbsuche und Rezeptanzeige laufen bewusst aus KRISTINEs lokalem
       // Innovatint-Katalog. Die Mischmaschine muss dafuer nicht dauerhaft wach sein.
@@ -154,9 +158,12 @@ function wrappedExpress(...args) {
         registerPaintStockLedgerApi(app, opts);
         registerPaintMixHistory(app, opts);
         registerPaintLiveBridge(app, opts);
+
+        // Muss vor paint-lab stehen: neue Mischdaten werden zuerst nur geprüft.
+        registerPaintCatalogSync(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);
-        console.log("KRISTINE Farben & Lager + LG + Inventur-Master + Abgang + Misch-History + Bestellpruefung + LG-Excel-Ausgabe + Lagerbuch registriert");
+        console.log("KRISTINE Farben & Lager + LG + Inventur-Master + Abgang + Misch-History + Mischdaten-Vergleich + Bestellpruefung + LG-Excel-Ausgabe + Lagerbuch registriert");
       } catch (error) {
         console.error("KRISTINE Farben/Lager konnte nicht registriert werden:", error?.message || error);
       }
