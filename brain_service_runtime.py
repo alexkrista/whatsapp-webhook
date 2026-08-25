@@ -11,7 +11,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.1-services"
+BRAIN_CONNECTOR_VERSION = "0.14.2-services"
 SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
@@ -42,7 +42,7 @@ def _manager_alive() -> bool:
 
 
 def _spawn_manager() -> bool:
-    manager = REPO_ROOT / "krista_service_manager.py"
+    manager = REPO_ROOT / "krista_service_manager_runner.py"
     if not manager.is_file():
         return False
     flags = 0
