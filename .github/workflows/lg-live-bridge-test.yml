@@ -3,6 +3,7 @@ name: LG live bridge syntax
 on:
   push:
     branches:
+      - main
       - feature/lg-live-mischmaschine
       - feature/lg-stock-ledger-order-fix
       - feature/lg-order-summary-ledger
@@ -11,6 +12,7 @@ on:
       - 'paint-live-bridge.js'
       - 'paint-stock-ledger.js'
       - 'paint-stock-ledger-api.js'
+      - 'paint-runtime-safety.js'
       - 'paint-order-review.js'
       - 'paint-order-summary-fix.js'
       - 'paint-lab-preload.js'
@@ -30,6 +32,7 @@ jobs:
           node --check paint-live-bridge.js
           node --check paint-stock-ledger.js
           node --check paint-stock-ledger-api.js
+          node --check paint-runtime-safety.js
           node --check paint-order-review.js
           node --check paint-order-summary-fix.js
           node --check paint-lab-preload.js
