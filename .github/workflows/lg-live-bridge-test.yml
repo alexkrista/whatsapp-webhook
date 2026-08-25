@@ -23,6 +23,7 @@ on:
       - 'public/paint-live-mix-ui.js'
       - 'public/paint-mix-history-ui.js'
       - 'public/paint-catalog-sync-ui.js'
+      - 'public/paint-product-order-ui.js'
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
@@ -51,6 +52,7 @@ jobs:
           node --check public/paint-live-mix-ui.js
           node --check public/paint-mix-history-ui.js
           node --check public/paint-catalog-sync-ui.js
+          node --check public/paint-product-order-ui.js
           node --check public/paint-unmixed-scan-fix.js
       - name: PowerShell syntax
         shell: pwsh
