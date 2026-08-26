@@ -1,0 +1,92 @@
+{
+  "manufacturer": "Little Greene",
+  "source": "https://www.littlegreene.de/advice-hub/product-advice-sheets-paint",
+  "checkedAt": "2026-08-26",
+  "note": "Es werden nur Hersteller-Links gespeichert, keine PDF-Kopien. Betriebsanweisungen werden ergänzt, sobald die offizielle/gesetzeskonforme Quelle geklärt ist.",
+  "products": [
+    {
+      "name": "Absolute Matt",
+      "aliases": ["Absolute Matt", "Absolute Matt Emulsion"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/aScd2mGnmrmGqW5R_LGTDSAbsoluteMatt_DENOV25.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3cbkaF0TcGI9H4_11499-LGRAS_DE_2024_AbsoluteMatt.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Distemper",
+      "aliases": ["Distemper"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYaz0aF0TcGI0uj_LGTDSDistemper_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZxYzw4F3NbkBXw38_11499-LGRAS_DE_2024_Distemper.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Eggshell",
+      "aliases": ["Intelligent Eggshell"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYa10aF0TcGI0um_LGTDSIntelligentEggshell_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3cfkaF0TcGI9H6_11499-LGRAS_DE_2024_IntEggshell.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Exterior Eggshell",
+      "aliases": ["Intelligent Exterior Eggshell", "Exterior Eggshell"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYa4EaF0TcGI0un_LGTDSIntelligentExteriorEggshell_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3chkaF0TcGI9H7_11499-LGRAS_DE_2024_IntExtEggshell.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Gloss",
+      "aliases": ["Intelligent Gloss"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Z-P8TXdAxsiBv7Sj_LGTDSIntelligentGloss_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3cjkaF0TcGI9H8_11499-LGRAS_DE_2024_IntGloss.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Matt",
+      "aliases": ["Intelligent Matt", "Intelligent Matt Emulsion", "LG Intelligent Matt (Ultimatt) Emulsion"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYa9kaF0TcGI0us_LGTDSIntelligentMatt_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3clUaF0TcGI9H9_11499-LGRAS_DE_2024_IntMattEmulsion.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Limewash",
+      "aliases": ["Limewash", "Lime Wash"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYa_0aF0TcGI0ut_LGTDSLimewash_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3cmkaF0TcGI9H-_11499-LGRAS_DE_2024_Limewash.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Masonry Paint",
+      "aliases": ["Intelligent Masonry Paint", "Masonry Paint"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYbCEaF0TcGI0uu_LGTDSIntelligentMasonryPaint_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3coEaF0TcGI9H__11499-LGRAS_DE_2024_MasonryPaint.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Wall Primer Sealer",
+      "aliases": ["Wall Primer Sealer"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYbD0aF0TcGI0uv_LGTDSWallPrimerSealer_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZxYz3IF3NbkBXw3__11499-LGRAS_DE_2024_WallPrimerSealer.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Satin",
+      "aliases": ["Intelligent Satin"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYbGEaF0TcGI0ux_LGTDSIntelligentSatin_DE.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Z6HqM5bqstJ9-M2k_11499-LGRAS_DE_2024_IntSatin%5B20%5D.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent Floor Paint",
+      "aliases": ["Intelligent Floor Paint", "Floor Paint"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZtrNN7zzk9ZrXF0Q_LGTDSIntelligentFloorPaint_DE24-1.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZxYz0IF3NbkBXw39_11499-LGRAS_DE_2024_IntFloorPaint.pdf",
+      "operatingInstructionUrl": null
+    },
+    {
+      "name": "Intelligent ASP",
+      "aliases": ["Intelligent ASP", "Intelligent ASP (All Surface Primer)", "All Surface Primer"],
+      "productDataSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/ZrYbKUaF0TcGI0u0_LGTDSIntelligentASP_DE24.pdf",
+      "regulatoryAdviceSheet": "https://wwwlittlegreenecom.cdn.prismic.io/wwwlittlegreenecom/Zr3cwUaF0TcGI9IE_11499-LGRAS_DE_2024_IntASP.pdf",
+      "operatingInstructionUrl": null
+    }
+  ]
+}
