@@ -1,23 +1,30 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "KRISTA_SERVICE_MANAGER_PORT=8765"
+set "INSTALLER=%~dp0krista_service_install.ps1"
 
-set "PYEXE="
-for /f "delims=" %%P in ('py -3 -c "import sys; print(sys.executable)" 2^>nul') do if not defined PYEXE set "PYEXE=%%P"
-if not defined PYEXE (
-  for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYEXE set "PYEXE=%%P"
-)
-if not defined PYEXE (
-  echo Python wurde nicht gefunden.
+if not exist "%INSTALLER%" (
+  echo KRISTA Installer fehlt: %INSTALLER%
   pause
   exit /b 1
 )
 
-powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command ^
-  "$env:KRISTA_SERVICE_MANAGER_PORT='8765'; Start-Process -WindowStyle Hidden -FilePath '%PYEXE%' -ArgumentList @('%~dp0krista_service_manager_bg.py') -WorkingDirectory '%~dp0'" >nul 2>&1
+echo KRISTA Dienste werden mit Windows-Administratorrechten eingerichtet ...
+echo Es erscheint einmal die Windows-Sicherheitsabfrage.
 
-echo KRISTA Dienste laufen im Hintergrund.
-echo Test: http://127.0.0.1:8765/healthz
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p='%INSTALLER%'; $a='-NoProfile -ExecutionPolicy Bypass -File ""'+$p+'""'; $x=Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $a -Wait -PassThru; exit $x.ExitCode"
+
+if errorlevel 1 (
+  echo.
+  echo KRISTA Dienste konnten nicht eingerichtet werden.
+  echo Bitte die Windows-Sicherheitsabfrage mit Ja bestaetigen.
+  pause
+  exit /b 1
+)
+
+echo.
+echo KRISTA Dienste sind eingerichtet und laufen im Hintergrund.
+echo In KRISADMIN auf Dienste - Aktualisieren klicken.
 timeout /t 3 /nobreak >nul
 endlocal
