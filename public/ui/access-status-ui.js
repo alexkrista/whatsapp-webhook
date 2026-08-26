@@ -7,6 +7,7 @@
   const BRAIN="https://pc-alex02.tail610122.ts.net";
   let last=null;
   const doorHolds=new Map();
+  const doorLocks=new Map();
 
   function taskUrl(){
     const u=new URL("/kristine",location.origin);
@@ -61,6 +62,7 @@
       .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}
       .krista-door-state{font-weight:950!important;opacity:.9}
       .krista-door-lamp.pending{opacity:.6!important;pointer-events:none!important}
+      .krista-door-lamp.syncing{opacity:.82!important;pointer-events:none!important;cursor:wait!important}
 
       @media(max-width:1380px){
         .krista-shell-main.krista-access-v4{grid-template-columns:160px minmax(0,1fr) auto!important;padding-inline:10px!important;gap:7px!important}
@@ -154,6 +156,16 @@
     return {...d,gantner};
   }
 
+  function isDoorLocked(n){
+    const key=String(n);
+    const until=Number(doorLocks.get(key)||0);
+    if(!until||Date.now()>=until){
+      doorLocks.delete(key);
+      return false;
+    }
+    return true;
+  }
+
   function doorVisual(d,x){
     if(!d?.online)return{color:"yellow",state:"?"};
     if(x?.mode==="OPEN")return{color:"green",state:"OFFEN"};
@@ -175,9 +187,10 @@
     for(const n of[1,2,3]){
       const x=doors[String(n)]||{};
       const v=doorVisual(d,x);
-      const action=v.state==="OFFEN"?"Klick: auf ZU stellen":v.state==="ZU"?"Klick: generell öffnen":"Status unbekannt";
+      const locked=isDoorLocked(n);
+      const action=locked?"Schaltung bestätigt · bitte kurz warten":v.state==="OFFEN"?"Klick: auf ZU stellen":v.state==="ZU"?"Klick: generell öffnen":"Status unbekannt";
       const reason=String(x.reason||"").replace(/"/g,"&quot;");
-      h+=`<button class="krista-door-lamp" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
+      h+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
 
     slot.innerHTML=h;
@@ -186,13 +199,14 @@
   }
 
   async function toggle(btn){
+    const door=Number(btn.dataset.door);
+    if(isDoorLocked(door))return;
     if(!token){alert("Admin-Token fehlt.");return;}
     btn.classList.add("pending");
     const dot=btn.querySelector(".krista-dot");
     if(dot)dot.className="krista-dot yellow";
     const state=btn.querySelector(".krista-door-state");
     if(state)state.textContent="…";
-    const door=Number(btn.dataset.door);
     try{
       const r=await fetch(`${BRAIN}/access-control/toggle/${door}`,{
         method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"
@@ -203,14 +217,17 @@
       const confirmed=d.status?.doors?.[String(door)];
       if(confirmed){
         doorHolds.set(String(door),{door:{...confirmed},until:Date.now()+8000});
+        doorLocks.set(String(door),Date.now()+6000);
       }
       if(last&&d.status?.doors){
         last={...last,gantner:{...(last.gantner||{}),...d.status}};
         draw(last);
       }
       setTimeout(load,2500);
+      setTimeout(load,6200);
     }catch(e){
       doorHolds.delete(String(door));
+      doorLocks.delete(String(door));
       alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
       load();
     }
