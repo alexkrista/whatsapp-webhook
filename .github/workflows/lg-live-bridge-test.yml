@@ -22,6 +22,7 @@ on:
       - 'paint-lab-preload.js'
       - 'paint-inventory-save-preload.js'
       - 'paint-consumption-docs-preload.js'
+      - 'paint-ral-classic-names-preload.js'
       - 'public/lg-product-knowledge.json'
       - 'public/paint-live-mix-ui.js'
       - 'public/paint-mix-history-ui.js'
@@ -56,6 +57,7 @@ jobs:
           node --check paint-lab-preload.js
           node --check paint-inventory-save-preload.js
           node --check paint-consumption-docs-preload.js
+          node --check paint-ral-classic-names-preload.js
           node --check public/paint-live-mix-ui.js
           node --check public/paint-mix-history-ui.js
           node --check public/paint-catalog-sync-ui.js
@@ -64,6 +66,7 @@ jobs:
           node --check public/paint-consumption-docs-ui.js
           node --check public/paint-unmixed-scan-fix.js
           node -e "JSON.parse(require('fs').readFileSync('public/lg-product-knowledge.json','utf8'))"
+          node -e "const r=require('./paint-ral-classic-names-preload'); if(Object.keys(r.RAL_CLASSIC_NAMES).length!==216||r.RAL_CLASSIC_NAMES['7021']!=='Schwarzgrau') process.exit(1)"
       - name: PowerShell syntax
         shell: pwsh
         run: |
