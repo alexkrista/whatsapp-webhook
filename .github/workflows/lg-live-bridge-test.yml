@@ -24,12 +24,14 @@ on:
       - 'paint-consumption-docs-preload.js'
       - 'paint-ral-classic-names-preload.js'
       - 'public/lg-product-knowledge.json'
+      - 'public/lg-product-doc-links-de.json'
       - 'public/paint-live-mix-ui.js'
       - 'public/paint-mix-history-ui.js'
       - 'public/paint-catalog-sync-ui.js'
       - 'public/paint-product-order-ui.js'
       - 'public/paint-inventory-save-fix.js'
       - 'public/paint-consumption-docs-ui.js'
+      - 'public/paint-material-docs-de.js'
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
@@ -64,8 +66,10 @@ jobs:
           node --check public/paint-product-order-ui.js
           node --check public/paint-inventory-save-fix.js
           node --check public/paint-consumption-docs-ui.js
+          node --check public/paint-material-docs-de.js
           node --check public/paint-unmixed-scan-fix.js
           node -e "JSON.parse(require('fs').readFileSync('public/lg-product-knowledge.json','utf8'))"
+          node -e "const d=JSON.parse(require('fs').readFileSync('public/lg-product-doc-links-de.json','utf8')); if(!Array.isArray(d.products)||d.products.length<12||!String(d.source||'').includes('littlegreene.de')) process.exit(1)"
           node -e "const t=require('fs').readFileSync('paint-ral-classic-names-preload.js','utf8'); const n=(t.match(/\"[0-9]{4}\":/g)||[]).length; if(n!==216||!t.includes('\"7021\":\"Schwarzgrau\"')) { console.error({n}); process.exit(1) }"
       - name: PowerShell syntax
         shell: pwsh
