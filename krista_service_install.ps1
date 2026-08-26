@@ -31,29 +31,34 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     }
 Start-Sleep -Milliseconds 900
 
-$Action = New-ScheduledTaskAction \
-    -Execute $PythonExe \
-    -Argument ('"' + $Runner + '"') \
-    -WorkingDirectory $RepoRoot
+$ActionArgs = @{
+    Execute = $PythonExe
+    Argument = ('"' + $Runner + '"')
+    WorkingDirectory = $RepoRoot
+}
+$Action = New-ScheduledTaskAction @ActionArgs
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$Settings = New-ScheduledTaskSettingsSet \
-    -StartWhenAvailable \
-    -AllowStartIfOnBatteries \
-    -DontStopIfGoingOnBatteries \
-    -MultipleInstances IgnoreNew \
-    -RestartCount 5 \
-    -RestartInterval (New-TimeSpan -Minutes 1)
+$SettingsArgs = @{
+    StartWhenAvailable = $true
+    AllowStartIfOnBatteries = $true
+    DontStopIfGoingOnBatteries = $true
+    MultipleInstances = 'IgnoreNew'
+    RestartCount = 5
+    RestartInterval = (New-TimeSpan -Minutes 1)
+}
+$Settings = New-ScheduledTaskSettingsSet @SettingsArgs
 
-Register-ScheduledTask \
-    -TaskName $TaskName \
-    -Action $Action \
-    -Trigger $Trigger \
-    -Principal $Principal \
-    -Settings $Settings \
-    -Description 'KRISTA lokaler Dienstemanager. Startet und ueberwacht lokale KRISTA-Dienste.' \
-    -Force | Out-Null
-
+$RegisterArgs = @{
+    TaskName = $TaskName
+    Action = $Action
+    Trigger = $Trigger
+    Principal = $Principal
+    Settings = $Settings
+    Description = 'KRISTA lokaler Dienstemanager. Startet und ueberwacht lokale KRISTA-Dienste.'
+    Force = $true
+}
+Register-ScheduledTask @RegisterArgs | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
 $Ready = $false
