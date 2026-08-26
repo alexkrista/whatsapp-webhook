@@ -1,9 +1,12 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-25-services-3";
+  const VERSION="2026-08-26-services-4";
   const MANAGER="http://127.0.0.1:8765";
   let timer=null;
+  let lampTimer=null;
+  let lampObserver=null;
+  let lampLevel="red";
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const token=()=>new URLSearchParams(location.search).get("token")||"";
@@ -14,6 +17,8 @@
     style.id="kristaServicesCss";
     style.textContent=`
       .ksvc-open{background:#20372a!important;border-color:#20372a!important;color:#fff!important;font-weight:850!important}
+      .ksvc-top-lamp{min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;background:rgba(255,255,255,.07)!important;color:#fff!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;font:800 10.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif!important;cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important}
+      .ksvc-top-lamp:hover{background:rgba(255,255,255,.14)!important}.ksvc-top-lamp .ksvc-lamp-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#c64646}.ksvc-top-lamp.green .ksvc-lamp-dot{background:#55c77a}.ksvc-top-lamp.red .ksvc-lamp-dot{background:#ef6860}
       .ksvc-bg{position:fixed;inset:0;z-index:70050;background:rgba(6,10,8,.58);display:none;place-items:center;padding:18px;backdrop-filter:blur(2px)}.ksvc-bg.open{display:grid}
       .ksvc-modal{width:min(1180px,100%);max-height:92vh;overflow:auto;background:#f5f4ef;border-radius:20px;box-shadow:0 28px 100px rgba(0,0,0,.32);border:1px solid #d7d5ce}
       .ksvc-head{position:sticky;top:0;z-index:2;background:#17211b;color:#fff;padding:17px 20px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.ksvc-head h2{margin:0;font-size:21px}.ksvc-head small{display:block;color:#c7d0ca;margin-top:4px}.ksvc-head-actions{display:flex;gap:8px;align-items:center}.ksvc-head button{min-width:auto}
@@ -39,6 +44,54 @@
     button.id="kristaServicesButton";button.type="button";button.className="ksvc-open";button.textContent="🩺 Dienste";
     button.onclick=open;
     host.appendChild(button);
+  }
+
+  function applyLamp(){
+    const button=document.getElementById("kristaServicesTopLamp");
+    if(!button)return;
+    button.classList.toggle("green",lampLevel==="green");
+    button.classList.toggle("red",lampLevel!=="green");
+    button.title=lampLevel==="green"?"Dienste okay · klicken für Details":"Dienstefehler · klicken für Details";
+  }
+
+  function mountTopLamp(){
+    const slot=document.getElementById("kristaAccessSlot");
+    if(!slot)return null;
+    let button=document.getElementById("kristaServicesTopLamp");
+    if(!button){
+      button=document.createElement("button");
+      button.id="kristaServicesTopLamp";
+      button.type="button";
+      button.className="ksvc-top-lamp red";
+      button.innerHTML='<span class="ksvc-lamp-dot" aria-hidden="true"></span><span>Dienste</span>';
+      button.onclick=open;
+      slot.appendChild(button);
+    }
+    applyLamp();
+    if(!lampObserver){
+      lampObserver=new MutationObserver(()=>queueMicrotask(()=>{if(!document.getElementById("kristaServicesTopLamp"))mountTopLamp()}));
+      lampObserver.observe(slot,{childList:true});
+    }
+    return button;
+  }
+
+  async function refreshLamp(){
+    mountTopLamp();
+    try{
+      const data=await managerFetch("/api/status");
+      const rows=Array.isArray(data.rows)?data.rows:[];
+      lampLevel=rows.some(row=>row?.level==="red")?"red":"green";
+    }catch(_){
+      lampLevel="red";
+    }
+    applyLamp();
+  }
+
+  function startLamp(){
+    mountTopLamp();
+    refreshLamp();
+    if(lampTimer)return;
+    lampTimer=setInterval(refreshLamp,10000);
   }
 
   function ensureModal(){
@@ -84,12 +137,14 @@
     const content=document.getElementById("kristaServicesContent");if(!content)return;
     const rows=Array.isArray(data.rows)?data.rows:[];
     const green=rows.filter(x=>x.level==="green").length,yellow=rows.filter(x=>x.level==="yellow").length,red=rows.filter(x=>x.level==="red").length;
+    lampLevel=red>0?"red":"green";applyLamp();
     content.className="";
     content.innerHTML=`<div class="ksvc-summary"><span class="ksvc-chip">🟢 ${green} okay</span><span class="ksvc-chip">🟡 ${yellow} beachten</span><span class="ksvc-chip">🔴 ${red} Fehler</span><span class="ksvc-chip">Git ${esc(data.repo?.branch||'–')} · ${esc(data.repo?.shortCommit||'–')}${data.repo?.dirty?' · lokale Änderungen':''}</span></div><div class="ksvc-table">${rows.map(row=>`<div class="ksvc-row"><div class="ksvc-service"><span class="ksvc-icon">${esc(row.icon||'•')}</span><div><strong>${esc(row.name||row.id)}</strong><div class="ksvc-detail">${esc(row.detail||'')}</div>${row.lastError?`<div class="ksvc-error">⚠ ${esc(row.lastError)}</div>`:''}</div></div><div><span class="ksvc-label">Status</span><span class="ksvc-status ksvc-${esc(row.level||'red')}">${esc(row.status||'–')}</span></div><div class="ksvc-value"><span class="ksvc-label">Version</span><strong>${esc(row.version||'–')}</strong></div><div class="ksvc-value"><span class="ksvc-label">Git / aktuell</span>${commitCell(row)}</div><div class="ksvc-value"><span class="ksvc-label">Laufzeit</span>${esc(uptime(row.uptimeSeconds))}</div><div class="ksvc-action"><span class="ksvc-label">Aktion</span>${actionCell(row)}</div></div>`).join("")}</div>`;
     content.querySelectorAll("[data-service][data-action]").forEach(button=>button.onclick=()=>runAction(button.dataset.service,button.dataset.action,button));
   }
 
   function renderOffline(error){
+    lampLevel="red";applyLamp();
     const content=document.getElementById("kristaServicesContent");if(!content)return;
     content.className="ksvc-empty";
     content.innerHTML=`<strong>🔴 Lokaler KRISTA Dienstemanager ist nicht erreichbar.</strong><br><br>Am Firmen-PC im Projektordner einmal <strong>KRISTA_START.cmd</strong> doppelklicken. Danach hier auf „Aktualisieren“.<br><br><span class="ksvc-detail">${esc(error?.message||error||'')}</span>`;
@@ -123,5 +178,5 @@
   window.openKrisadminServices=open;
   window.KrisadminServices={open,close,load,version:VERSION};
   installCss();
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",mountButton,{once:true});else mountButton();
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{mountButton();startLamp()},{once:true});else{mountButton();startLamp()}
 })();
