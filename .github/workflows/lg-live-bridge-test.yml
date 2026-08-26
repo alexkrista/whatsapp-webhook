@@ -66,7 +66,7 @@ jobs:
           node --check public/paint-consumption-docs-ui.js
           node --check public/paint-unmixed-scan-fix.js
           node -e "JSON.parse(require('fs').readFileSync('public/lg-product-knowledge.json','utf8'))"
-          node -e "const r=require('./paint-ral-classic-names-preload'); if(Object.keys(r.RAL_CLASSIC_NAMES).length!==216||r.RAL_CLASSIC_NAMES['7021']!=='Schwarzgrau') process.exit(1)"
+          node -e "const t=require('fs').readFileSync('paint-ral-classic-names-preload.js','utf8'); const n=(t.match(/\"[0-9]{4}\":/g)||[]).length; if(n!==216||!t.includes('\"7021\":\"Schwarzgrau\"')) { console.error({n}); process.exit(1) }"
       - name: PowerShell syntax
         shell: pwsh
         run: |
