@@ -13,8 +13,14 @@ express.response.send = function paintConsumptionDocsSend(body) {
           "</body>",
           '<script src="/public/paint-consumption-docs-ui.js?v=20260825-1610"></script>\n</body>'
         );
-        body = Buffer.isBuffer(body) ? Buffer.from(html, "utf8") : html;
       }
+      if (!html.includes("/public/paint-material-docs-de.js")) {
+        html = html.replace(
+          "</body>",
+          '<script src="/public/paint-material-docs-de.js?v=20260826-1310"></script>\n</body>'
+        );
+      }
+      body = Buffer.isBuffer(body) ? Buffer.from(html, "utf8") : html;
     }
   } catch {}
   return previousSend.call(this, body);
