@@ -1,25 +1,211 @@
 "use strict";
 (function(){
-  if(window.__kristaAccessStatusV3)return;window.__kristaAccessStatusV3=true;
-  const token=new URLSearchParams(location.search).get("token")||"",BRAIN="https://pc-alex02.tail610122.ts.net",isKristine=location.pathname.toLowerCase().includes("/kristine");
+  if(window.__kristaAccessStatusV4)return;
+  window.__kristaAccessStatusV4=true;
+
+  const token=new URLSearchParams(location.search).get("token")||"";
+  const BRAIN="https://pc-alex02.tail610122.ts.net";
   let last=null;
-  function css(){if(document.getElementById("kristaAccessV3Css"))return;const s=document.createElement("style");s.id="kristaAccessV3Css";s.textContent=`
-  .krista-shell-main.krista-access-v3{grid-template-columns:230px minmax(390px,1fr) auto 150px}
-  .krista-access-slot{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
-  .krista-door-lamp,.krista-system-lamp{border:1px solid rgba(255,255,255,.18)!important;background:rgba(255,255,255,.07)!important;color:#fff!important;border-radius:10px!important;min-height:38px!important;padding:7px 9px!important;display:inline-flex!important;align-items:center!important;gap:6px!important;font:800 11.5px/1 system-ui!important;cursor:pointer;white-space:nowrap}
-  .krista-door-lamp:hover,.krista-system-lamp:hover{background:rgba(255,255,255,.14)!important}.krista-dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#e7b34d}.krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}.krista-door-lamp.pending{opacity:.65;pointer-events:none}
-  @media(max-width:1180px){.krista-shell-main.krista-access-v3{grid-template-columns:200px minmax(0,1fr) auto}.krista-access-slot{grid-column:3}.krista-user{display:none}}
-  @media(max-width:760px){.krista-shell-main.krista-access-v3{grid-template-columns:minmax(0,1fr) auto!important}.krista-access-slot{grid-column:1/-1;justify-content:flex-start;overflow-x:auto;padding:2px 0}.krista-door-lamp,.krista-system-lamp{flex:0 0 auto}}`;document.head.appendChild(s)}
-  function removeOldEntrance(){document.querySelectorAll(".krista-shell-main > a,.krista-shell-main > button").forEach(el=>{if(String(el.textContent||"").trim().toUpperCase()==="EINGANG"&&!el.classList.contains("krista-door-lamp"))el.remove()})}
-  function mount(){const main=document.querySelector(".krista-shell-main");if(!main)return null;removeOldEntrance();let slot=document.getElementById("kristaAccessSlot");if(!slot){slot=document.createElement("div");slot.id="kristaAccessSlot";slot.className="krista-access-slot";main.insertBefore(slot,main.querySelector(".krista-user")||null);main.classList.add("krista-access-v3")}return slot}
-  function overall(d){if(!d?.online)return"red";const vals=Object.values(d.services||{});if(vals.some(x=>x?.state==="bad"))return"red";if(vals.some(x=>x?.state==="warn"))return"yellow";return"green"}
-  function draw(d){last=d;const slot=mount();if(!slot)return;let h=`<button class="krista-system-lamp" data-system><span class="krista-dot ${overall(d)}"></span><span>SYSTEM</span></button>`;
-    if(isKristine){const doors=d?.gantner?.doors||{},labels={1:"Eingang",2:"Lager",3:"Büro"};for(const n of[1,2,3]){const x=doors[String(n)]||{},c=!d?.online?"yellow":x.mode==="OPEN"?"green":x.mode==="NORMAL"?"red":"yellow";h+=`<button class="krista-door-lamp" data-door="${n}" title="${String(x.reason||"").replace(/"/g,"&quot;")}"><span class="krista-dot ${c}"></span><span>${labels[n]}</span></button>`}}
-    slot.innerHTML=h;slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)))}
-  async function toggle(btn){if(!token){alert("Admin-Token fehlt.");return}btn.classList.add("pending");const dot=btn.querySelector(".krista-dot");if(dot)dot.className="krista-dot yellow";const door=Number(btn.dataset.door);
-    try{const r=await fetch(`${BRAIN}/access-control/toggle/${door}`,{method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const d=await r.json();if(!d.ok)throw new Error(d.error||"Schalten fehlgeschlagen");if(last&&d.status?.doors){last={...last,gantner:{...(last.gantner||{}),...d.status}};draw(last)}setTimeout(load,9000)}
-    catch(e){alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");load()}}
-  async function load(){try{const r=await fetch("/kristine/api/access-status?token="+encodeURIComponent(token),{cache:"no-store"});draw(await r.json())}catch(e){draw({online:false,services:{}})}}
-  function start(){css();if(mount()){load();setInterval(load,5000)}else setTimeout(start,250)}
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",start);else start();
+
+  function taskUrl(){
+    const u=new URL("/kristine",location.origin);
+    if(token)u.searchParams.set("token",token);
+    u.hash="tasks";
+    return `${u.pathname}${u.search}${u.hash}`;
+  }
+
+  function css(){
+    if(document.getElementById("kristaAccessV4Css"))return;
+    const s=document.createElement("style");
+    s.id="kristaAccessV4Css";
+    s.textContent=`
+      .krista-shell-main.krista-access-v4{
+        grid-template-columns:185px minmax(0,1fr) auto!important;
+        max-width:1780px!important;
+        min-height:64px!important;
+        padding:10px 16px!important;
+        gap:10px!important;
+        align-items:center!important;
+      }
+      .krista-shell-main.krista-access-v4 .krista-user{display:none!important}
+      .krista-shell-main.krista-access-v4 .krista-brand{gap:9px!important}
+      .krista-shell-main.krista-access-v4 .krista-mark{width:40px!important;height:40px!important;border-radius:11px!important;font-size:20px!important}
+      .krista-shell-main.krista-access-v4 .krista-brand-copy strong{font-size:17px!important}
+      .krista-shell-main.krista-access-v4 .krista-brand-copy small{font-size:11px!important;margin-top:3px!important}
+      .krista-shell-main.krista-access-v4 .krista-world-nav{
+        display:flex!important;flex-wrap:nowrap!important;justify-content:center!important;
+        align-items:center!important;gap:5px!important;min-width:0!important;overflow:visible!important;padding:0!important;
+      }
+      .krista-shell-main.krista-access-v4 .krista-world-link{
+        min-height:36px!important;padding:7px 9px!important;border-radius:9px!important;
+        gap:5px!important;font-size:11px!important;flex:0 1 auto!important;min-width:0!important;
+      }
+      .krista-shell-main.krista-access-v4 .krista-world-icon{font-size:13px!important}
+      .krista-access-slot{
+        display:flex!important;align-items:center!important;justify-content:flex-end!important;
+        gap:5px!important;min-width:0!important;white-space:nowrap!important;
+      }
+      .krista-quick-task,.krista-door-lamp,.krista-system-lamp{
+        min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;
+        border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;
+        background:rgba(255,255,255,.07)!important;color:#fff!important;text-decoration:none!important;
+        display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;
+        font:800 10.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif!important;
+        cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important;
+      }
+      .krista-quick-task:hover,.krista-door-lamp:hover,.krista-system-lamp:hover{background:rgba(255,255,255,.14)!important}
+      .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
+      .krista-system-lamp{padding-inline:7px!important}
+      .krista-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#e7b34d}
+      .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}
+      .krista-door-state{font-weight:950!important;opacity:.9}
+      .krista-door-lamp.pending{opacity:.6!important;pointer-events:none!important}
+
+      @media(max-width:1380px){
+        .krista-shell-main.krista-access-v4{grid-template-columns:160px minmax(0,1fr) auto!important;padding-inline:10px!important;gap:7px!important}
+        .krista-shell-main.krista-access-v4 .krista-brand-copy small{display:none!important}
+        .krista-shell-main.krista-access-v4 .krista-world-link{padding-inline:7px!important;font-size:10.5px!important}
+        .krista-access-slot{gap:4px!important}
+        .krista-door-state{display:none!important}
+      }
+      @media(max-width:1120px){
+        .krista-shell-main.krista-access-v4 .krista-world-icon{display:none!important}
+        .krista-shell-main.krista-access-v4 .krista-world-link{padding-inline:6px!important;font-size:10px!important}
+        .krista-quick-task{padding-inline:7px!important}
+      }
+      @media(max-width:900px){
+        .krista-shell-main.krista-access-v4{grid-template-columns:minmax(0,1fr) auto!important;padding:8px 10px!important}
+        .krista-shell-main.krista-access-v4 .krista-brand{grid-column:1!important}
+        .krista-shell-main.krista-access-v4 .krista-mobile-menu{grid-column:2!important}
+        .krista-shell-main.krista-access-v4 .krista-world-nav{display:none!important;grid-column:1/-1!important;overflow:visible!important;flex-direction:column!important;align-items:stretch!important}
+        .krista-shell-topbar.menu-open .krista-world-nav{display:flex!important}
+        .krista-shell-main.krista-access-v4 .krista-world-link{width:100%!important;justify-content:flex-start!important;font-size:12px!important;min-height:38px!important}
+        .krista-shell-main.krista-access-v4 .krista-world-icon{display:inline!important}
+        .krista-access-slot{grid-column:1/-1!important;justify-content:flex-start!important;overflow-x:auto!important;padding-top:2px!important}
+        .krista-door-state{display:inline!important}
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function cleanLegacy(main){
+    main.querySelectorAll(":scope > a,:scope > button").forEach(el=>{
+      if(el.closest("#kristaAccessSlot"))return;
+      const text=String(el.textContent||"").replace(/\s+/g," ").trim().toUpperCase();
+      if(text==="EINGANG"||text==="SYSTEM"||text==="SYSTEMSTATUS")el.remove();
+    });
+  }
+
+  function removeTaskFromWorldNav(main){
+    const nav=main.querySelector(".krista-world-nav");
+    if(!nav)return;
+    nav.querySelectorAll("a").forEach(a=>{
+      const text=String(a.textContent||"").replace(/\s+/g," ").trim().toUpperCase();
+      const href=String(a.getAttribute("href")||"");
+      if(text.includes("AUFGABEN")||href.includes("#tasks"))a.remove();
+    });
+  }
+
+  function mount(){
+    const main=document.querySelector(".krista-shell-main");
+    if(!main)return null;
+    cleanLegacy(main);
+    removeTaskFromWorldNav(main);
+    main.classList.add("krista-access-v4");
+    main.classList.remove("krista-access-v3");
+    let slot=document.getElementById("kristaAccessSlot");
+    if(!slot){
+      slot=document.createElement("div");
+      slot.id="kristaAccessSlot";
+      slot.className="krista-access-slot";
+      main.appendChild(slot);
+    }
+    return slot;
+  }
+
+  function overall(d){
+    if(!d?.online)return"red";
+    const vals=Object.values(d.services||{});
+    if(vals.some(x=>x?.state==="bad"))return"red";
+    if(vals.some(x=>x?.state==="warn"))return"yellow";
+    return"green";
+  }
+
+  function doorVisual(d,x){
+    if(!d?.online)return{color:"yellow",state:"?"};
+    if(x?.mode==="OPEN")return{color:"green",state:"OFFEN"};
+    if(x?.mode==="NORMAL")return{color:"red",state:"ZU"};
+    return{color:"yellow",state:"?"};
+  }
+
+  function draw(d){
+    last=d;
+    const slot=mount();
+    if(!slot)return;
+    const taskActive=location.pathname.toLowerCase().includes("/kristine")&&location.hash.toLowerCase()==="#tasks";
+    let h=`<a class="krista-quick-task${taskActive?" active":""}" href="${taskUrl()}" title="Aufgaben öffnen"><span aria-hidden="true">📌</span><span>Aufgaben</span></a>`;
+    h+=`<button class="krista-system-lamp" data-system title="Systemstatus öffnen"><span class="krista-dot ${overall(d)}"></span><span>SYS</span></button>`;
+
+    const doors=d?.gantner?.doors||{};
+    const labels={1:"Eingang",2:"Lager",3:"Büro"};
+    for(const n of[1,2,3]){
+      const x=doors[String(n)]||{};
+      const v=doorVisual(d,x);
+      const action=v.state==="OFFEN"?"Klick: auf ZU stellen":v.state==="ZU"?"Klick: generell öffnen":"Status unbekannt";
+      const reason=String(x.reason||"").replace(/"/g,"&quot;");
+      h+=`<button class="krista-door-lamp" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
+    }
+
+    slot.innerHTML=h;
+    slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
+    slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
+  }
+
+  async function toggle(btn){
+    if(!token){alert("Admin-Token fehlt.");return;}
+    btn.classList.add("pending");
+    const dot=btn.querySelector(".krista-dot");
+    if(dot)dot.className="krista-dot yellow";
+    const state=btn.querySelector(".krista-door-state");
+    if(state)state.textContent="…";
+    const door=Number(btn.dataset.door);
+    try{
+      const r=await fetch(`${BRAIN}/access-control/toggle/${door}`,{
+        method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"
+      });
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const d=await r.json();
+      if(!d.ok)throw new Error(d.error||"Schalten fehlgeschlagen");
+      if(last&&d.status?.doors){
+        last={...last,gantner:{...(last.gantner||{}),...d.status}};
+        draw(last);
+      }
+      setTimeout(load,2500);
+    }catch(e){
+      alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
+      load();
+    }
+  }
+
+  async function load(){
+    try{
+      const r=await fetch("/kristine/api/access-status?token="+encodeURIComponent(token),{cache:"no-store"});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      draw(await r.json());
+    }catch(e){
+      draw({online:false,services:{},gantner:{doors:{}}});
+    }
+  }
+
+  function start(){
+    css();
+    if(mount()){
+      load();
+      setInterval(load,5000);
+      window.addEventListener("hashchange",()=>setTimeout(load,50));
+    }else setTimeout(start,250);
+  }
+
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",start,{once:true});
+  else start();
 })();
