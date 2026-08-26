@@ -1,9 +1,9 @@
 # coding: utf-8
 """KRISTA Dienstemanager im Hintergrund.
 
-Startet/restartet The Brain nicht mehr direkt als nackten Python-Prozess,
-sondern ueber den produktiven Windows-SYSTEM-Task. Status kommt primaer
-ueber den echten Healthcheck auf Port 5051.
+Der Manager laeuft als eigener Windows-SYSTEM-Task. Dadurch kann KRISADMIN
+den produktiven Brain-Task sicher starten und neu starten, ohne offene
+Konsolenfenster oder manuelle PowerShell-Befehle.
 """
 from __future__ import annotations
 
@@ -16,11 +16,12 @@ from pathlib import Path
 
 import krista_service_manager as base
 
-WRAPPER_VERSION = "1.2.0"
+WRAPPER_VERSION = "1.3.0"
 REPO_ROOT = Path(__file__).resolve().parent
 WRAPPER_PATH = Path(__file__).resolve()
 PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 BRAIN_TASK_NAME = "Kristine The Brain Dienst"
+MANAGER_TASK_NAME = "KRISTA Dienstemanager"
 
 _original_status_snapshot = base._status_snapshot
 base.PORT = PORT
@@ -49,6 +50,36 @@ def _powershell(script: str, timeout: float = 12.0) -> subprocess.CompletedProce
     )
 
 
+def _current_identity() -> str:
+    if os.name != "nt":
+        return str(os.environ.get("USER") or "")
+    try:
+        cp = subprocess.run(
+            ["whoami"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return (cp.stdout or "").strip()
+    except Exception:
+        return str(os.environ.get("USERNAME") or "")
+
+
+def _is_system_context() -> bool:
+    identity = _current_identity().lower().strip()
+    return identity in {"system", "nt authority\\system"} or identity.endswith("\\system")
+
+
+def _require_system_context() -> None:
+    if _is_system_context():
+        return
+    raise RuntimeError(
+        "KRISTA Dienstemanager laeuft noch nicht als SYSTEM. "
+        "Einmal KRISTA_START.cmd ausfuehren und die Windows-Sicherheitsabfrage mit Ja bestaetigen."
+    )
+
+
 def _brain_http_ok() -> bool:
     code, body = base._http_json("http://127.0.0.1:5051/status", timeout=2.2)
     return code == 200 and bool(body.get("ok", True))
@@ -72,7 +103,8 @@ def _start_brain(existing: dict | None = None) -> int:
         return int(process.get("pid") or 0)
 
     if os.name != "nt":
-        raise RuntimeError("Brain-SYSTEM-Task ist nur unter Windows verfuegbar")
+        raise RuntimeError("Brain-Windows-Task ist nur unter Windows verfuegbar")
+    _require_system_context()
 
     quoted = BRAIN_TASK_NAME.replace("'", "''")
     cp = _powershell(
@@ -97,10 +129,9 @@ def _start_brain(existing: dict | None = None) -> int:
 
 def _restart_brain() -> int:
     if os.name != "nt":
-        raise RuntimeError("Brain-SYSTEM-Task ist nur unter Windows verfuegbar")
+        raise RuntimeError("Brain-Windows-Task ist nur unter Windows verfuegbar")
+    _require_system_context()
 
-    # Als SYSTEM darf der Dienstemanager auch den SYSTEM-Brain-Prozess sauber
-    # beenden. Danach den produktiven Scheduled Task wieder starten.
     process = base._discover_brain_process()
     old_pid = int(process.get("pid") or 0)
     if old_pid:
@@ -158,6 +189,8 @@ def _status_snapshot() -> dict:
     data = _original_status_snapshot()
     data["managerVersion"] = WRAPPER_VERSION
 
+    identity = _current_identity() or "unbekannt"
+    system_context = _is_system_context()
     brain_ok = _brain_http_ok()
     brain_task_state = _brain_task_state()
 
@@ -167,14 +200,19 @@ def _status_snapshot() -> dict:
     for row in data.get("rows") or []:
         if row.get("id") == "manager":
             row["version"] = WRAPPER_VERSION
-            row["detail"] = f"Port {PORT} · SYSTEM-Hintergrund"
+            row["detail"] = f"Port {PORT} · {'SYSTEM' if system_context else identity} · Windows-Task"
+            if not system_context:
+                row["level"] = "yellow"
+                row["status"] = "laeuft · Rechte fehlen"
+                row["lastError"] = "Einmal KRISTA_START.cmd ausfuehren und Windows-Abfrage mit Ja bestaetigen."
 
         elif row.get("id") == "brain":
-            # Port 5051 ist die Wahrheit. Prozess-Erkennung ist bei SYSTEM-
-            # Prozessen aus einem normalen Benutzerkontext nicht verlaesslich.
+            running_commit = str(row.get("runningCommit") or "")
+            current_commit = str(row.get("currentCommit") or "")
+            update_waits = bool(running_commit and current_commit and running_commit != current_commit)
             if brain_ok:
-                row["level"] = "green"
-                row["status"] = "laeuft"
+                row["level"] = "yellow" if update_waits else "green"
+                row["status"] = "laeuft · Update wartet" if update_waits else "laeuft"
                 row["detail"] = f"Port 5051 · Windows-Task {brain_task_state or 'Running'}"
                 row["canStart"] = False
                 row["canRestart"] = True
@@ -210,4 +248,7 @@ base._status_snapshot = _status_snapshot
 
 
 if __name__ == "__main__":
+    # Alte Fehlermeldungen (z. B. frueherer PermissionDenied) beim sauberen
+    # Dienststart nicht weiter anzeigen.
+    base._set_manager_error("")
     base.main()
