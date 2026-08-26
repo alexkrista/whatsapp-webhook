@@ -6,6 +6,7 @@
   const token=new URLSearchParams(location.search).get("token")||"";
   const BRAIN="https://pc-alex02.tail610122.ts.net";
   let last=null;
+  const doorHolds=new Map();
 
   function taskUrl(){
     const u=new URL("/kristine",location.origin);
@@ -131,6 +132,28 @@
     return"green";
   }
 
+  function applyDoorHolds(d){
+    if(!d)return d;
+    const now=Date.now();
+    const gantner={...(d.gantner||{})};
+    const doors={...(gantner.doors||{})};
+    for(const [key,held] of doorHolds.entries()){
+      if(now>=held.until){
+        doorHolds.delete(key);
+        continue;
+      }
+      const cloudMode=String(doors[key]?.mode||"");
+      const heldMode=String(held.door?.mode||"");
+      if(cloudMode&&cloudMode===heldMode){
+        doorHolds.delete(key);
+        continue;
+      }
+      doors[key]={...(doors[key]||{}),...(held.door||{})};
+    }
+    gantner.doors=doors;
+    return {...d,gantner};
+  }
+
   function doorVisual(d,x){
     if(!d?.online)return{color:"yellow",state:"?"};
     if(x?.mode==="OPEN")return{color:"green",state:"OFFEN"};
@@ -139,6 +162,7 @@
   }
 
   function draw(d){
+    d=applyDoorHolds(d);
     last=d;
     const slot=mount();
     if(!slot)return;
@@ -176,12 +200,17 @@
       if(!r.ok)throw new Error("HTTP "+r.status);
       const d=await r.json();
       if(!d.ok)throw new Error(d.error||"Schalten fehlgeschlagen");
+      const confirmed=d.status?.doors?.[String(door)];
+      if(confirmed){
+        doorHolds.set(String(door),{door:{...confirmed},until:Date.now()+8000});
+      }
       if(last&&d.status?.doors){
         last={...last,gantner:{...(last.gantner||{}),...d.status}};
         draw(last);
       }
       setTimeout(load,2500);
     }catch(e){
+      doorHolds.delete(String(door));
       alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
       load();
     }
