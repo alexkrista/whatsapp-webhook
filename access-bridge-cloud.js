@@ -76,12 +76,19 @@ async function sendChefWhatsApp(message){
   });
   if(!response.ok){const body=await response.text().catch(()=> "");throw new Error(`WhatsApp HTTP ${response.status}: ${body.slice(0,500)}`);}
 }
+function retiredService(key,service){
+  const label=normalizeName(service?.label||key);
+  return label==="wlan wachter"||label==="wlan waechter"||label.includes("wlan wachter")||label.includes("wlan waechter");
+}
 async function statusPayload(){
   const row=await readJson(STATUS_FILE,null);
   if(!row) return {ok:true,online:false,stale:true,ageSeconds:null,services:{cloud:{label:"KRISTINE Cloud / Render",state:"ok",detail:"Diese Seite läuft"}},gantner:null};
   const received=Date.parse(row.receivedAt||"");
   const ageSeconds=Number.isFinite(received)?Math.max(0,Math.round((Date.now()-received)/1000)):999999;
   const services={...(row.services||{})};
+  for(const [key,service] of Object.entries(services)){
+    if(retiredService(key,service)) delete services[key];
+  }
   services.cloud={label:"KRISTINE Cloud / Render",state:"ok",detail:"Status-API erreichbar"};
   return {ok:true,...row,services,online:ageSeconds<=40,stale:ageSeconds>40,ageSeconds};
 }
