@@ -58,8 +58,23 @@ def install(ns):
                     flags=re.I | re.S,
                 )
 
+            # Die beiden vorhandenen Bearbeiten-Funktionen sind absichtlich lokal
+            # gekapselt. Fuer den stabilen Arbeitsmodus stellen wir nur diese zwei
+            # Funktionen nach aussen, damit ein einziger robuster Event-Handler die
+            # Klicks uebernimmt. Daten-/Speicherlogik bleibt unveraendert.
+            html = html.replace(
+                "  function stopEdit(reset=true){",
+                "  window.kristaCaptureStartEdit=startEdit;\n  function stopEdit(reset=true){",
+                1,
+            )
+            html = html.replace(
+                "  drop.onclick=()=>input.click();",
+                "  window.kristaOpenInvoiceIntake=openItem;\n  drop.onclick=()=>input.click();",
+                1,
+            )
+
             override = r'''
-<style id="kristaCaptureWorkMode0148">
+<style id="kristaCaptureWorkMode0149">
 body.capture-wide{scroll-behavior:auto!important}
 body.capture-wide .capture-workbench{height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;align-items:start!important}
 body.capture-wide .capture-preview-column,
@@ -71,17 +86,18 @@ body.capture-wide .capture-pdf-empty{min-height:260px!important}
 #capturePdfPreview[hidden]{display:none!important}
 #capturePdfPageImage,#capturePdfTextLayer,#captureSuperTools,#capturePreviewLoupe,#captureFenceOverlay{display:none!important}
 .capture-work-mode-tag{display:inline-flex;margin-left:8px;padding:3px 7px;border-radius:999px;border:1px solid #4d9464;background:#173421;color:#b9f3ca;font:800 10px/1.2 system-ui}
+#invoiceIntakeList [data-intake],#captureRecent [data-edit-invoice]{pointer-events:auto!important;position:relative!important;z-index:20!important;cursor:pointer!important}
 /* Test-/Echtbelege unten bleiben sichtbar und editierbar, aber separat gekapselt. */
 #captureRecent{contain:layout paint style}
 #captureRecent>.card{contain:layout paint style;box-shadow:none!important}
 </style>
-<script id="kristaCaptureWorkMode0148Js">
+<script id="kristaCaptureWorkMode0149Js">
 (function(){
   function workbench(){return document.querySelector('.capture-workbench')}
   function start(){
     const b=document.getElementById('captureAreaBanner');
     if(b&&!document.getElementById('captureWorkModeTag')){
-      const s=document.createElement('span');s.id='captureWorkModeTag';s.className='capture-work-mode-tag';s.textContent='Arbeitsmodus 0.14.8';b.appendChild(s);
+      const s=document.createElement('span');s.id='captureWorkModeTag';s.className='capture-work-mode-tag';s.textContent='Arbeitsmodus 0.14.9';b.appendChild(s);
     }
 
     // Nur die grosse Kostenentwicklung aus dem normalen Arbeitsweg nehmen.
@@ -95,13 +111,31 @@ body.capture-wide .capture-pdf-empty{min-height:260px!important}
     if(recent)recent.style.display='';
     document.getElementById('captureLazyBottomBar')?.remove();
 
-    // Wird oben im Rechnungseingang auf Bearbeiten geklickt, danach sichtbar zum
-    // Pruefplatz springen. Die bestehende Intake-Logik selbst bleibt unangetastet.
+    // Ein robuster Klickweg fuer beide Bearbeiten-Schaltflaechen. Damit kann kein
+    // anderer Capture-Listener den Button vor seinem eigenen onclick deaktivieren.
     document.addEventListener('click',e=>{
-      const button=e.target?.closest?.('#invoiceIntakeList [data-intake]');
-      if(!button)return;
-      setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),350);
+      const intake=e.target?.closest?.('#invoiceIntakeList [data-intake]');
+      if(intake&&typeof window.kristaOpenInvoiceIntake==='function'){
+        e.preventDefault();e.stopImmediatePropagation();
+        const old=intake.textContent;intake.disabled=true;intake.textContent='PDF wird geladen …';
+        Promise.resolve(window.kristaOpenInvoiceIntake(intake.dataset.intake,intake.dataset.name,intake.dataset.stamp))
+          .then(()=>setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),60))
+          .catch(err=>alert(err?.message||String(err)))
+          .finally(()=>{if(document.body.contains(intake)){intake.disabled=false;intake.textContent=old}});
+        return;
+      }
+      const edit=e.target?.closest?.('#captureRecent [data-edit-invoice]');
+      if(edit&&typeof window.kristaCaptureStartEdit==='function'){
+        e.preventDefault();e.stopImmediatePropagation();
+        const id=Number(edit.dataset.editInvoice||0);if(!id)return;
+        const old=edit.textContent;edit.disabled=true;edit.textContent='Öffne …';
+        Promise.resolve(window.kristaCaptureStartEdit(id))
+          .then(()=>setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),40))
+          .catch(err=>alert(err?.message||String(err)))
+          .finally(()=>{if(document.body.contains(edit)){edit.disabled=false;edit.textContent=old}});
+      }
     },true);
+
     document.getElementById('captureFile')?.addEventListener('change',()=>{
       setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),100);
     },true);
@@ -119,4 +153,4 @@ body.capture-wide .capture-pdf-empty{min-height:260px!important}
             return response
 
     app.__krista_capture_work_mode = True
-    print("✅ Eingangsrechnungen Arbeitsmodus 0.14.8 aktiv · Testbelege + Bearbeiten sichtbar")
+    print("✅ Eingangsrechnungen Arbeitsmodus 0.14.9 aktiv · Bearbeiten-Klicks robust")
