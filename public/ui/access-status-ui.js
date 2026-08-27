@@ -48,7 +48,7 @@
         display:flex!important;align-items:center!important;justify-content:flex-end!important;
         gap:5px!important;min-width:0!important;white-space:nowrap!important;
       }
-      .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp{
+      .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp,.krista-services-lamp{
         min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;
         border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;
         background:rgba(255,255,255,.07)!important;color:#fff!important;text-decoration:none!important;
@@ -56,9 +56,9 @@
         font:800 10.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif!important;
         cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important;
       }
-      .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover{background:rgba(255,255,255,.14)!important}
+      .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover,.krista-services-lamp:hover{background:rgba(255,255,255,.14)!important}
       .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
-      .krista-system-lamp{padding-inline:7px!important}
+      .krista-system-lamp,.krista-services-lamp{padding-inline:7px!important}
       .krista-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#e7b34d}
       .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}
       .krista-door-state{font-weight:950!important;opacity:.9}
@@ -135,6 +135,12 @@
     return"green";
   }
 
+  function servicesColor(d){
+    if(!d?.online)return"red";
+    const vals=Object.values(d.services||{});
+    return vals.some(x=>x?.state==="bad")?"red":"green";
+  }
+
   function applyDoorHolds(d){
     if(!d)return d;
     const now=Date.now();
@@ -195,9 +201,12 @@
       const reason=String(x.reason||"").replace(/"/g,"&quot;");
       h+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
+    const svcColor=servicesColor(d);
+    h+=`<button class="krista-services-lamp" data-services title="${svcColor==="green"?"Dienste okay":"Mindestens ein Dienst hat einen Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button>`;
 
     slot.innerHTML=h;
     slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
+    slot.querySelector("[data-services]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
     slot.querySelector("[data-gate]")?.addEventListener("click",e=>pulseGate(e.currentTarget));
     slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
   }
