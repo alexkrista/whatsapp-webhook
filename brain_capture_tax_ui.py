@@ -1,10 +1,17 @@
 # coding: utf-8
-"""KRISTINE Capture UI: MwSt je Kontierungszeile, ruhige saubere Kontierungszeilen."""
+"""KRISTINE Capture UI: MwSt je Kontierungszeile, ruhige saubere Kontierungszeilen.
+
+Wichtig fuer Stabilitaet: Der fruehere MutationObserver beobachtete den kompletten
+Unterbaum und polishAllocations() schrieb bei jedem Lauf erneut label.textContent.
+Diese Text-Aenderung loeste den Observer selbst wieder aus -> Endlosschleife im
+Browser, Seite wurde nach kurzer Zeit klicktot. Jetzt nur direkte Zeilenaenderungen
+beobachten und DOM-Texte nur schreiben, wenn sie sich wirklich aendern.
+"""
 
 
 def install(ns):
     page = str(ns.get("MOBILE_PAGE") or "")
-    if not page or "kristaCaptureTaxUiV1" in page:
+    if not page or "kristaCaptureTaxUiV2" in page:
         return
 
     css = r'''
@@ -57,16 +64,17 @@ def install(ns):
 '''
 
     script = r'''
-<script id="kristaCaptureTaxUiV1">
+<script id="kristaCaptureTaxUiV2">
 (function(){
   const num=v=>{const n=Number(String(v??'').replace(',','.'));return Number.isFinite(n)?n:0};
+  const hintText='MwSt gehört je Kontierungszeile zur Netto-Aufteilung. Standard meist ein Satz; bei gemischten Sätzen weitere Zeile verwenden.';
 
   function hideInvoiceVat(){
     const vat=document.getElementById('captureVat');
     const wrap=vat?.parentElement;
     if(!vat||!wrap)return;
-    wrap.hidden=true;
-    wrap.style.display='none';
+    if(!wrap.hidden)wrap.hidden=true;
+    if(wrap.style.display!=='none')wrap.style.display='none';
     wrap.classList.remove('capture-money-row','capture-span-1','capture-span-2','capture-span-3','full');
   }
 
@@ -76,7 +84,8 @@ def install(ns):
     const vat=document.getElementById('captureVat');
     if(!net||!gross||!vat)return;
     if(String(net.value||'').trim()===''||String(gross.value||'').trim()==='')return;
-    vat.value=(Math.round((num(gross.value)-num(net.value))*100)/100).toFixed(2);
+    const next=(Math.round((num(gross.value)-num(net.value))*100)/100).toFixed(2);
+    if(vat.value!==next)vat.value=next;
   }
 
   function polishAllocations(){
@@ -85,10 +94,10 @@ def install(ns):
     host.querySelectorAll('.capture-allocation').forEach(row=>{
       const vatInput=row.querySelector('[data-field="vatRate"]');
       const vatLabel=vatInput?.parentElement?.querySelector('.formlabel');
-      if(vatLabel)vatLabel.textContent='USt %';
+      if(vatLabel&&vatLabel.textContent!=='USt %')vatLabel.textContent='USt %';
       const netInput=row.querySelector('[data-field="netAmount"]');
       const netLabel=netInput?.parentElement?.querySelector('.formlabel');
-      if(netLabel)netLabel.textContent='Netto';
+      if(netLabel&&netLabel.textContent!=='Netto')netLabel.textContent='Netto';
     });
 
     let hint=document.getElementById('captureTaxAllocationHint');
@@ -98,10 +107,12 @@ def install(ns):
       hint.className='capture-tax-allocation-hint';
       host.insertAdjacentElement('afterend',hint);
     }
-    hint.textContent='MwSt gehört je Kontierungszeile zur Netto-Aufteilung. Standard meist ein Satz; bei gemischten Sätzen weitere Zeile verwenden.';
+    if(hint.textContent!==hintText)hint.textContent=hintText;
   }
 
   function hook(){
+    if(document.documentElement.dataset.kristaTaxUiV2==='1')return;
+    document.documentElement.dataset.kristaTaxUiV2='1';
     hideInvoiceVat();
     polishAllocations();
     syncHiddenVat();
@@ -115,7 +126,9 @@ def install(ns):
 
     const host=document.getElementById('captureAllocations');
     if(host){
-      new MutationObserver(()=>polishAllocations()).observe(host,{childList:true,subtree:true});
+      // renderCaptureAllocations() ersetzt direkte Zeilen im Host. Mehr muessen wir
+      // nicht beobachten; subtree=true war die Ursache der Browser-Endlosschleife.
+      new MutationObserver(()=>polishAllocations()).observe(host,{childList:true,subtree:false});
       host.addEventListener('input',e=>{if(e.target?.matches?.('[data-field="netAmount"],[data-field="vatRate"]'))syncHiddenVat()});
       host.addEventListener('change',e=>{if(e.target?.matches?.('[data-field="netAmount"],[data-field="vatRate"]'))syncHiddenVat()});
     }
@@ -123,12 +136,14 @@ def install(ns):
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',hook,{once:true});
   else hook();
-  setTimeout(()=>{hideInvoiceVat();polishAllocations();syncHiddenVat()},350);
 })();
 </script>
 '''
 
+    # Alten V1-Block aus bereits gepatchten Snapshots sicher ersetzen, falls vorhanden.
+    import re
+    page = re.sub(r'<script\s+id=["\']kristaCaptureTaxUiV1["\'][^>]*>.*?</script>', '', page, flags=re.I|re.S)
     page = page.replace("</head>", css + "\n</head>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Capture Tax UI: USt oben verborgen · MwSt je Kontierungszeile · Zeilen sauber")
+    print("✅ Capture Tax UI V2: Observer stabil · keine selbst-ausloesende DOM-Schleife")
