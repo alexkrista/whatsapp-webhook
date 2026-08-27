@@ -11,7 +11,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.12"
+BRAIN_CONNECTOR_VERSION = "0.14.13"
 SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
