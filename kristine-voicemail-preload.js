@@ -50,6 +50,36 @@ function callerPhone(...values) {
   }
   return "";
 }
+function tidyCallerName(value) {
+  let name = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;:.\-]+|[\s,;:.\-]+$/g, "")
+    .replace(/^(?:die\s+)?firma\s+/i, "")
+    .replace(/^(?:frau|herr)\s+/i, "")
+    .trim();
+  // Bei „Firma Schlenker in Rosenau“ soll nur „Schlenker“ in den Betreff.
+  name = name.split(/\s+(?:in|aus|von)\s+/i)[0].trim();
+  const words = name.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 5 || name.length > 70) return "";
+  if (/^(?:ich|wir|das|hier|guten|hallo|bitte|telefon|voicemail)$/i.test(name)) return "";
+  return name;
+}
+function callerNameFromTranscript(value) {
+  const text = cleanText(value, 4000).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const patterns = [
+    /\bhier\s+ist\s+(?:die\s+)?firma\s+([^,.!?]{2,80})/i,
+    /\bhier\s+ist\s+(?:frau\s+|herr\s+)?([^,.!?]{2,80})/i,
+    /\bmein\s+name\s+ist\s+([^,.!?]{2,80})/i,
+    /\bich\s+bin\s+(?:frau\s+|herr\s+)?([^,.!?]{2,80})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const name = tidyCallerName(match?.[1] || "");
+    if (name) return name;
+  }
+  return "";
+}
 function extractResponsesText(json) {
   if (!json) return "";
   if (typeof json.output_text === "string") return json.output_text.trim();
@@ -144,17 +174,21 @@ async function enrichVoicemailItem(item) {
     const rawTranscript = await transcribeAudio(attachment.content, attachment.name);
     if (!rawTranscript) throw new Error("kein erkennbarer Sprachinhalt");
     const transcript = await polishTranscript(rawTranscript);
+    const callerName = callerNameFromTranscript(transcript) || callerNameFromTranscript(rawTranscript);
     item.analysis = {
       ...item.analysis,
       confidence: 0.99,
-      reasons: ["NFON-Voicemail erkannt", "Sprachnachricht transkribiert"],
+      reasons: ["NFON-Voicemail erkannt", "Sprachnachricht transkribiert", ...(callerName ? ["Anrufername erkannt"] : [])],
+      contactName: callerName || item.analysis.contactName || "",
+      title: callerName ? `Rückruf ${callerName}` : (phone ? `Rückruf ${phone}` : "Voicemail beantworten"),
       summary: transcript,
-      excerpt: `${phone ? `Voicemail von ${phone}` : "Voicemail"}\n\n${transcript}`,
+      excerpt: `${callerName ? `Voicemail von ${callerName}${phone ? ` · ${phone}` : ""}` : (phone ? `Voicemail von ${phone}` : "Voicemail")}\n\n${transcript}`,
       textAvailable: true,
     };
     item.voicemail = {
       provider: "NFON",
       callerPhone: phone,
+      callerName,
       attachmentName: attachment.name,
       rawTranscript,
       transcript,
