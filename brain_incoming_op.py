@@ -21,6 +21,7 @@ _finance_runtime.FinanceStore = _FinanceStoreV2
 _finance_install = _finance_runtime.install
 
 from brain_capture_edit import install as _capture_edit_install
+from brain_capture_edit_fast import install as _capture_edit_fast_install
 from brain_currency_payment_v2 import install as _currency_payment_install
 from brain_finance_test_bridge import install as _finance_test_bridge_install
 from brain_revolut_task_guard import install as _revolut_task_guard_install
@@ -49,6 +50,7 @@ from brain_finance_header import install as _finance_header_install
 
 def install(ns):
     _capture_edit_install(ns)
+    _capture_edit_fast_install(ns)
     _finance_install(ns)
     _currency_payment_install(ns)
     _finance_test_bridge_install(ns)
