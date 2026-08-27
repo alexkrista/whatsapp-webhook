@@ -8,6 +8,7 @@
   let last=null;
   const doorHolds=new Map();
   const doorLocks=new Map();
+  let gateLockedUntil=0;
 
   function taskUrl(){
     const u=new URL("/kristine",location.origin);
@@ -47,7 +48,7 @@
         display:flex!important;align-items:center!important;justify-content:flex-end!important;
         gap:5px!important;min-width:0!important;white-space:nowrap!important;
       }
-      .krista-quick-task,.krista-door-lamp,.krista-system-lamp{
+      .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp{
         min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;
         border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;
         background:rgba(255,255,255,.07)!important;color:#fff!important;text-decoration:none!important;
@@ -55,14 +56,14 @@
         font:800 10.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif!important;
         cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important;
       }
-      .krista-quick-task:hover,.krista-door-lamp:hover,.krista-system-lamp:hover{background:rgba(255,255,255,.14)!important}
+      .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover{background:rgba(255,255,255,.14)!important}
       .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
       .krista-system-lamp{padding-inline:7px!important}
       .krista-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#e7b34d}
       .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}
       .krista-door-state{font-weight:950!important;opacity:.9}
-      .krista-door-lamp.pending{opacity:.6!important;pointer-events:none!important}
-      .krista-door-lamp.syncing{opacity:.82!important;pointer-events:none!important;cursor:wait!important}
+      .krista-door-lamp.pending,.krista-gate-lamp.pending{opacity:.6!important;pointer-events:none!important}
+      .krista-door-lamp.syncing,.krista-gate-lamp.syncing{opacity:.82!important;pointer-events:none!important;cursor:wait!important}
 
       @media(max-width:1380px){
         .krista-shell-main.krista-access-v4{grid-template-columns:160px minmax(0,1fr) auto!important;padding-inline:10px!important;gap:7px!important}
@@ -181,6 +182,8 @@
     const taskActive=location.pathname.toLowerCase().includes("/kristine")&&location.hash.toLowerCase()==="#tasks";
     let h=`<a class="krista-quick-task${taskActive?" active":""}" href="${taskUrl()}" title="Aufgaben öffnen"><span aria-hidden="true">📌</span><span>Aufgaben</span></a>`;
     h+=`<button class="krista-system-lamp" data-system title="Systemstatus öffnen"><span class="krista-dot ${overall(d)}"></span><span>SYS</span></button>`;
+    const gateLocked=Date.now()<gateLockedUntil;
+    h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":"Tor öffnen"}"><span class="krista-dot yellow"></span><span>TOR</span></button>`;
 
     const doors=d?.gantner?.doors||{};
     const labels={1:"Eingang",2:"Lager",3:"Büro"};
@@ -195,9 +198,37 @@
 
     slot.innerHTML=h;
     slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
+    slot.querySelector("[data-gate]")?.addEventListener("click",e=>pulseGate(e.currentTarget));
     slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
   }
 
+  async function pulseGate(btn){
+    if(Date.now()<gateLockedUntil)return;
+    if(!token){alert("Admin-Token fehlt.");return;}
+    btn.classList.add("pending");
+    try{
+      const r=await fetch(`${BRAIN}/access-control/gate`,{
+        method:"POST",
+        headers:{"X-Krista-Token":token},
+        mode:"cors",
+        cache:"no-store"
+      });
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const d=await r.json();
+      if(!d.ok)throw new Error(d.error||"Tor-Impuls fehlgeschlagen");
+
+      gateLockedUntil=Date.now()+10000;
+      if(last)draw(last);
+      setTimeout(()=>{
+        gateLockedUntil=0;
+        if(last)draw(last);
+      },10200);
+    }catch(e){
+      gateLockedUntil=0;
+      alert("Torsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
+      if(last)draw(last);
+    }
+  }
   async function toggle(btn){
     const door=Number(btn.dataset.door);
     if(isDoorLocked(door))return;

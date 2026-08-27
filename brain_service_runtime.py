@@ -11,7 +11,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.3-services"
+BRAIN_CONNECTOR_VERSION = "0.14.4-gate"
 SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
@@ -93,8 +93,45 @@ def _write_runtime() -> None:
         print("⚠️ Brain-Laufzeitstatus konnte nicht geschrieben werden:", exc)
 
 
+def _install_gate_route(ns) -> None:
+    """Header-Torimpuls: Browser -> Tailscale -> Brain -> localhost:8787."""
+    app = ns.get("app")
+    if app is None or getattr(app, "__krista_gate_header_installed", False):
+        return
+
+    from flask import jsonify
+    import urllib.request
+
+    def krista_access_control_gate():
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:8787/admin/gate/open",
+                data=b"",
+                method="POST",
+                headers={
+                    "Accept": "text/html",
+                    "User-Agent": "KRISTA-Brain-Gate/1.0",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=12) as response:
+                if int(response.status) != 200:
+                    raise RuntimeError(f"Tor-Gateway HTTP {response.status}")
+            return jsonify({"ok": True, "gate": "impulse"})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 502
+
+    app.add_url_rule(
+        "/access-control/gate",
+        "krista_access_control_gate",
+        krista_access_control_gate,
+        methods=["POST"],
+    )
+    app.__krista_gate_header_installed = True
+    print("KRISTA Tor-Headerroute aktiv")
+
 def install(ns) -> None:
     _write_runtime()
+    _install_gate_route(ns)
     if not _manager_alive():
         started = _spawn_manager()
         if started:
