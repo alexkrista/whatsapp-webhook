@@ -1,13 +1,13 @@
 # coding: utf-8
 """KRISTINE Eingangsrechnungen: stabiler Arbeitsmodus.
 
-Solange der Browser auf /incoming-capture beim blossen Scrollen abstuerzt, wird
-fuer genau diese Seite bewusst auf die komplexesten UI-Erweiterungen verzichtet.
-Die Kern-Erfassung, Rechnungseingang, Zahlungslogik und Kontierung bleiben aktiv.
-Viewer-Hotfix, Fence-UI, globaler Drop und die beiden spekulativen Scroll-Hotfixes
-werden aus der ausgelieferten HTML-Seite entfernt. Damit haben wir einen sauberen,
-arbeitsfaehigen Referenzstand und koennen die Erweiterungen spaeter einzeln wieder
-zuschalten.
+Der Arbeitsmodus laesst die Kern-Erfassung und alle vorhandenen Test-/Echtbelege
+voll benutzbar, verzichtet auf /incoming-capture aber vorlaeufig auf die
+komplexesten Browser-Erweiterungen, die den Scroll-Absturz ausloesen koennten.
+
+Wichtig: Testbelege werden NICHT ausgeblendet. "Zuletzt erfasst" bleibt sichtbar
+und damit auch die bestehende Bearbeiten-Funktion. Nur die grosse Kostenentwicklung
+wird fuer den normalen Erfassungsablauf ausgeblendet.
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ def install(ns):
                 return response
 
             html = response.get_data(as_text=True)
-            # Komplexe UI-Hooks fuer den Arbeitsmodus entfernen. Server-/Datenlogik
-            # bleibt aktiv; nur die Browser-Schicht wird fuer Stabilitaet vereinfacht.
+            # Nur komplexe Browser-Hooks entfernen. Server-/Datenlogik,
+            # Rechnungseingang, Bearbeiten und Testbelege bleiben unveraendert aktiv.
             script_ids = (
                 "kristaBrainViewerReliableV10",
                 "kristaCaptureLearningV1",
@@ -59,7 +59,7 @@ def install(ns):
                 )
 
             override = r'''
-<style id="kristaCaptureWorkMode0147">
+<style id="kristaCaptureWorkMode0148">
 body.capture-wide{scroll-behavior:auto!important}
 body.capture-wide .capture-workbench{height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;align-items:start!important}
 body.capture-wide .capture-preview-column,
@@ -71,21 +71,40 @@ body.capture-wide .capture-pdf-empty{min-height:260px!important}
 #capturePdfPreview[hidden]{display:none!important}
 #capturePdfPageImage,#capturePdfTextLayer,#captureSuperTools,#capturePreviewLoupe,#captureFenceOverlay{display:none!important}
 .capture-work-mode-tag{display:inline-flex;margin-left:8px;padding:3px 7px;border-radius:999px;border:1px solid #4d9464;background:#173421;color:#b9f3ca;font:800 10px/1.2 system-ui}
+/* Test-/Echtbelege unten bleiben sichtbar und editierbar, aber separat gekapselt. */
+#captureRecent{contain:layout paint style}
+#captureRecent>.card{contain:layout paint style;box-shadow:none!important}
 </style>
-<script id="kristaCaptureWorkMode0147Js">
+<script id="kristaCaptureWorkMode0148Js">
 (function(){
+  function workbench(){return document.querySelector('.capture-workbench')}
   function start(){
     const b=document.getElementById('captureAreaBanner');
     if(b&&!document.getElementById('captureWorkModeTag')){
-      const s=document.createElement('span');s.id='captureWorkModeTag';s.className='capture-work-mode-tag';s.textContent='Arbeitsmodus 0.14.7';b.appendChild(s);
+      const s=document.createElement('span');s.id='captureWorkModeTag';s.className='capture-work-mode-tag';s.textContent='Arbeitsmodus 0.14.8';b.appendChild(s);
     }
-    // Die beiden grossen Auswertungsbereiche brauchen wir fuer die Erfassung nicht.
-    // Sie bleiben aus dem sichtbaren Scrollpfad, die Daten-Endpunkte selbst bleiben intakt.
+
+    // Nur die grosse Kostenentwicklung aus dem normalen Arbeitsweg nehmen.
     const cost=document.getElementById('captureCostSummary')?.closest('.section');
-    const recent=document.getElementById('captureRecent')?.closest('.section');
     if(cost)cost.style.display='none';
-    if(recent)recent.style.display='none';
+
+    // Zuletzt erfasst inklusive TEST-Belegen und Bearbeiten MUSS sichtbar bleiben.
+    const recent=document.getElementById('captureRecent');
+    const recentSection=recent?.closest('.section');
+    if(recentSection)recentSection.style.display='';
+    if(recent)recent.style.display='';
     document.getElementById('captureLazyBottomBar')?.remove();
+
+    // Wird oben im Rechnungseingang auf Bearbeiten geklickt, danach sichtbar zum
+    // Pruefplatz springen. Die bestehende Intake-Logik selbst bleibt unangetastet.
+    document.addEventListener('click',e=>{
+      const button=e.target?.closest?.('#invoiceIntakeList [data-intake]');
+      if(!button)return;
+      setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),350);
+    },true);
+    document.getElementById('captureFile')?.addEventListener('change',()=>{
+      setTimeout(()=>workbench()?.scrollIntoView({behavior:'auto',block:'start'}),100);
+    },true);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -100,4 +119,4 @@ body.capture-wide .capture-pdf-empty{min-height:260px!important}
             return response
 
     app.__krista_capture_work_mode = True
-    print("✅ Eingangsrechnungen Arbeitsmodus 0.14.7 aktiv · komplexe Browser-Hooks aus")
+    print("✅ Eingangsrechnungen Arbeitsmodus 0.14.8 aktiv · Testbelege + Bearbeiten sichtbar")
