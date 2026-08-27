@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-1525";
+  const VERSION="2026-08-27-popupfix1";
   let installed=false;
 
   function card(){return document.querySelector("#tasks .task-create-card")}
@@ -107,15 +107,9 @@
       title.addEventListener("input",maybeOpenForPrefill);
       title.addEventListener("change",maybeOpenForPrefill);
     }
-    const tasks=document.getElementById("tasks");
-    if(tasks&&!tasks.dataset.kristaTaskModalObserver){
-      tasks.dataset.kristaTaskModalObserver="1";
-      new MutationObserver(()=>{
-        if(!tasksActive()){syncScrollLock();return}
-        const pending=document.getElementById("kristaInboxPending");
-        if(pending&&pending.style.display!=="none"&&String(pending.textContent||"").trim())open();
-      }).observe(tasks,{childList:true,subtree:true});
-    }
+    // Wichtig: Kein MutationObserver mehr auf #kristaInboxPending.
+    // Der Eingang oeffnet die Aufgabenmaske beim Uebernehmen selbst einmalig.
+    // So bleibt ein manuelles Schliessen auch bei noch vorhandenem Anhang respektiert.
   }
 
   function wrapShowTab(){
