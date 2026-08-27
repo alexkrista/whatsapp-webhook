@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.18"
+BRAIN_CONNECTOR_VERSION = "0.14.19"
 SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
@@ -251,6 +251,11 @@ def install(ns) -> None:
     _install_gate_route(ns)
     _install_manager_bootstrap_route(ns)
     _start_manager_watchdog(ns)
+    try:
+        from brain_service_proxy import install as install_service_proxy
+        install_service_proxy(ns)
+    except Exception as exc:
+        print("⚠️ KRISTA Dienste-Tailscale-Proxy:", exc)
     if not _manager_alive():
         started = _spawn_manager()
         if started:
