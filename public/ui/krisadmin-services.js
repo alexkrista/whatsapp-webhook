@@ -14,7 +14,11 @@
     document.getElementById("kristaServicesButton")?.remove();
   }
 
-  load("/public/ui/krisadmin-services-core.js?v=20260827-services-home1", "data-krista-services-core");
+  // Zuerst den Firmen-PC/Tailscale-Transport installieren. Der bestehende Core
+  // kann dadurch unverändert weiter seine localhost-URLs verwenden; der Shim
+  // leitet ausschließlich Dienstemanager-Aufrufe sicher über The Brain um.
+  load("/public/ui/krisadmin-services-remote.js?v=20260827-remote1", "data-krista-services-remote");
+  load("/public/ui/krisadmin-services-core.js?v=20260827-services-home2", "data-krista-services-core");
 
   // Dienste leben jetzt als eigenes Feld in KRISADMIN. Der alte Einzelbutton
   // auf der Baustellen-/Admin-Oberfläche wird nachgeladenen Zuständen sicher entfernt.
