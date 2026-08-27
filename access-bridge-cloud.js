@@ -78,7 +78,7 @@ async function sendChefWhatsApp(message){
 }
 function retiredService(key,service){
   const label=normalizeName(service?.label||key);
-  return label==="wlan wachter"||label==="wlan waechter"||label.includes("wlan wachter")||label.includes("wlan waechter");
+  return label==="wlan wachter"||label==="wlan waechter"||label.includes("wlan wachter")||label.includes("wlan waechter")||label==="firmen wlan"||label.includes("firmen wlan");
 }
 async function statusPayload(){
   const row=await readJson(STATUS_FILE,null);
