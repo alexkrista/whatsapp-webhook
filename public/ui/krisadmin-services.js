@@ -15,4 +15,7 @@
     load("/public/ui/baustellen-calculation-parser-fix.js?v=20260826-flatpos1", "data-krista-kalkulation-parser-fix");
     load("/public/ui/baustellen-calculation-grid-v2.js?v=20260826-grid2", "data-krista-kalkulation-grid-v2");
   }
+  if (location.pathname.toLowerCase().includes("access-admin.html")) {
+    load("/public/ui/access-learn-multi.js?v=20260827-multi2m", "data-krista-access-learn-multi");
+  }
 })();
