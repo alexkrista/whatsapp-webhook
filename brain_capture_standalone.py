@@ -81,7 +81,7 @@ body.capture-wide .capture-workbench{height:auto!important;min-height:0!importan
     try{if(typeof setSearchMode==='function')setSearchMode('capture')}catch(_){}
     const banner=document.getElementById('captureAreaBanner');
     if(banner&&!document.getElementById('captureStandaloneBadge')){
-      const b=document.createElement('span');b.id='captureStandaloneBadge';b.className='capture-standalone-badge';b.textContent='eigenes Modul 0.14.14';banner.appendChild(b);
+      const b=document.createElement('span');b.id='captureStandaloneBadge';b.className='capture-standalone-badge';b.textContent='eigenes Modul 0.14.15';banner.appendChild(b);
     }
   }
   document.addEventListener('dragover',e=>{
@@ -129,6 +129,7 @@ def install(ns):
     from brain_invoice_intake import install as intake_install
     from brain_capture_duplicate_guard import install as duplicate_install
     from brain_capture_tax_ui import install as tax_install
+    from brain_capture_accounts import install as accounts_install
     from brain_test_promote import install as promote_install
 
     edit_install(local)
@@ -137,6 +138,7 @@ def install(ns):
     intake_install(local)
     duplicate_install(local)
     tax_install(local)
+    accounts_install(local)
     promote_install(local)
 
     snapshot = _inject_shell(_clean_snapshot(str(local.get('MOBILE_PAGE') or '')))
@@ -152,4 +154,4 @@ def install(ns):
         return render_template_string(app.__krista_capture_standalone_page)
 
     app.__krista_capture_standalone = True
-    print('✅ Rechnungseingang eigenes Modul 0.14.14 · MOBILE_PAGE-Patchkette isoliert')
+    print('✅ Rechnungseingang eigenes Modul 0.14.15 · MOBILE_PAGE-Patchkette isoliert')
