@@ -160,3 +160,13 @@
   window.closeTaskCreateModal=close;
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install,{once:true});else install();
 })();
+
+// Aufgabe -> Termin ist bewusst ein eigenes, additives Modul.
+(function loadTaskCalendar(){
+  if(document.querySelector('script[data-krista-task-calendar]'))return;
+  const s=document.createElement('script');
+  s.src='/public/ui/kristine-task-calendar.js?v=20260827-task-calendar1';
+  s.defer=true;
+  s.setAttribute('data-krista-task-calendar','1');
+  document.head.appendChild(s);
+})();
