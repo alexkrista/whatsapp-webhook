@@ -35,5 +35,6 @@
   }
   if (location.pathname.toLowerCase().includes("access-admin.html")) {
     load("/public/ui/access-learn-multi.js?v=20260827-multi2m", "data-krista-access-learn-multi");
+    load("/public/ui/access-events-ui.js?v=20260827-zutritte1", "data-krista-access-events");
   }
 })();
