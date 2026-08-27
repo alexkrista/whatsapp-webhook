@@ -40,6 +40,7 @@ from brain_capture_tax_ui import install as _capture_tax_ui_install
 from brain_capture_stability import install as _capture_stability_install
 from brain_capture_scroll_fix import install as _capture_scroll_fix_install
 from brain_capture_scroll_isolation import install as _capture_scroll_isolation_install
+from brain_capture_work_mode import install as _capture_work_mode_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
 from brain_header_dedup import install as _header_dedup_install
@@ -68,6 +69,7 @@ def install(ns):
     _capture_stability_install(ns)
     _capture_scroll_fix_install(ns)
     _capture_scroll_isolation_install(ns)
+    _capture_work_mode_install(ns)
     _home_nav_install(ns)
     _op_tools_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
