@@ -300,12 +300,25 @@ function registerDayClose(app, {
       const tasks = Array.isArray(tasksRaw) ? tasksRaw : [];
       const previous = states[employeeId] && typeof states[employeeId] === "object" ? states[employeeId] : {};
       const state = {
+        ...previous,
         employeeId,
         employeeName: employeeLabel,
         mode: previous.mode || "idle",
         timeline: Array.isArray(previous.timeline) ? previous.timeline : [],
-        ...previous,
       };
+
+      // states.json ist mitarbeiterbezogen und kann noch den Modus von gestern tragen.
+      // Für einen Wechsel zählt ausschließlich der letzte echte Zeitevent von HEUTE.
+      const todays = events
+        .filter((event) => String(event?.employeeId || "") === employeeId && String(event?.date || "") === date)
+        .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
+      const lastRelevant = [...todays].reverse().find((event) => ["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(String(event?.type || "").toLowerCase()));
+      const lastType = String(lastRelevant?.type || "").toLowerCase();
+      if (!lastRelevant) state.mode = "idle";
+      else if (["start","weiter"].includes(lastType)) state.mode = "working";
+      else if (lastType === "pause") state.mode = "pause";
+      else if (lastType === "mittag") state.mode = "lunch";
+      else if (["ende","fertig","stop","stopp"].includes(lastType)) state.mode = "finished_day";
 
       if (state.mode === "finished_day") {
         return res.status(409).json({ ok:false, error:"Der Tag ist bereits abgeschlossen." });
@@ -338,9 +351,6 @@ function registerDayClose(app, {
       if (wasWorking && !isExpress) selected = await markJobRunningLocal(selected);
 
       const currentOverrideId = String(state.activeJobOverride?.date === date ? state.activeJobOverride?.jobId || "" : "");
-      const todays = events
-        .filter((event) => String(event?.employeeId || "") === employeeId && String(event?.date || "") === date)
-        .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
       const lastWork = [...todays].reverse().find((event) => ["start","weiter"].includes(String(event?.type || "").toLowerCase()));
       const alreadyCurrent = currentOverrideId === selected.jobId || (wasWorking && String(lastWork?.jobId || "") === selected.jobId);
 
