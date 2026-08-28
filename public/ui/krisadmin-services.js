@@ -14,9 +14,21 @@
     document.getElementById("kristaServicesButton")?.remove();
   }
 
+  function preferSingleServicesLamp() {
+    if (document.getElementById("kristaSingleServicesLampFix")) return;
+    const style = document.createElement("style");
+    style.id = "kristaSingleServicesLampFix";
+    // Der Access-Status und der Dienstemanager hatten beide eine eigene
+    // "Dienste"-Lampe im selben Slot. Sichtbar bleibt nur die Lampe des
+    // Dienstemanagers; sie öffnet direkt die Detail-/Neustart-Ansicht.
+    style.textContent = "#kristaAccessSlot .krista-services-lamp{display:none!important}";
+    document.head.appendChild(style);
+  }
+
   // Zuerst den Firmen-PC/Tailscale-Transport installieren. Der bestehende Core
   // kann dadurch unverändert weiter seine localhost-URLs verwenden; der Shim
   // leitet ausschließlich Dienstemanager-Aufrufe sicher über The Brain um.
+  preferSingleServicesLamp();
   load("/public/ui/krisadmin-services-remote.js?v=20260827-remote1", "data-krista-services-remote");
   load("/public/ui/krisadmin-services-core.js?v=20260827-services-home2", "data-krista-services-core");
 
