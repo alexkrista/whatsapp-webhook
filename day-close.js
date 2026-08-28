@@ -15,6 +15,8 @@ function registerDayClose(app, {
   const root = path.join(dataDir, "_kristine");
   const dayCloseFile = path.join(root, "day-closes.json");
   const timeEventsFile = path.join(root, "time-events.json");
+  const statesFile = path.join(root, "states.json");
+  const tasksFile = path.join(root, "tasks.json");
 
   async function readJson(file, fallback) {
     try {
@@ -27,6 +29,13 @@ function registerDayClose(app, {
   async function writeJson(file, value) {
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+  }
+
+  async function writeJsonAtomic(file, value) {
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
+    await fsp.writeFile(temp, JSON.stringify(value, null, 2), "utf8");
+    await fsp.rename(temp, file);
   }
 
   function normalizePhone(value) {
@@ -160,6 +169,235 @@ function registerDayClose(app, {
     d.setUTCDate(d.getUTCDate() - 1);
     return d.toISOString().slice(0, 10);
   }
+
+  // ===================== KGO Baustellenwechsel =====================
+  // Ein einziger, klarer Datenweg: KGO zeigt nur Auftrag + Laufend.
+  // Keine Angebote, keine fertigen/geschlossenen Baustellen und kein "UNBEKANNT".
+  function safeJobId(value) {
+    const id = String(value || "").trim();
+    return /^[A-Za-z0-9_-]{1,100}$/.test(id) && !id.startsWith("_");
+  }
+
+  async function readJobMetaLocal(jobId) {
+    if (!safeJobId(jobId)) return null;
+    const file = path.join(dataDir, jobId, ".meta.json");
+    try {
+      const meta = JSON.parse(await fsp.readFile(file, "utf8"));
+      return meta && typeof meta === "object" ? meta : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function activeJobRow(jobId, meta) {
+    if (!meta || !["Auftrag", "Laufend"].includes(String(meta.status || "").trim())) return null;
+    const street = [meta.street, meta.houseNumber].filter(Boolean).join(" ").trim();
+    const city = [meta.postalCode, meta.city].filter(Boolean).join(" ").trim();
+    return {
+      jobId: String(jobId),
+      jobName: String(meta.name || jobId).trim(),
+      status: String(meta.status || ""),
+      city: String(meta.city || "").trim(),
+      address: [street, city].filter(Boolean).join(", "),
+      contactName: String(meta.contactName || "").trim(),
+      contactPhone: String(meta.contactPhone || "").trim(),
+    };
+  }
+
+  async function listActiveJobs() {
+    const entries = await fsp.readdir(dataDir, { withFileTypes: true }).catch(() => []);
+    const rows = await Promise.all(entries
+      .filter((entry) => entry?.isDirectory?.() && safeJobId(entry.name))
+      .map(async (entry) => activeJobRow(entry.name, await readJobMetaLocal(entry.name))));
+
+    return rows.filter(Boolean).sort((left, right) => {
+      const statusOrder = (left.status === "Laufend" ? 0 : 1) - (right.status === "Laufend" ? 0 : 1);
+      if (statusOrder) return statusOrder;
+      const leftNumber = /^\d+$/.test(left.jobId) ? Number(left.jobId) : -1;
+      const rightNumber = /^\d+$/.test(right.jobId) ? Number(right.jobId) : -1;
+      if (leftNumber !== rightNumber) return rightNumber - leftNumber;
+      return left.jobName.localeCompare(right.jobName, "de");
+    });
+  }
+
+  function appendTimeline(state, type, text, job) {
+    const timeline = Array.isArray(state.timeline) ? state.timeline.slice(-99) : [];
+    timeline.push({
+      at: new Date().toISOString(),
+      type,
+      text,
+      jobId: job?.jobId || null,
+      jobName: job?.jobName || "",
+    });
+    state.timeline = timeline;
+  }
+
+  async function markJobRunningLocal(job) {
+    if (!job || job.status !== "Auftrag" || !safeJobId(job.jobId)) return job;
+    const file = path.join(dataDir, job.jobId, ".meta.json");
+    const meta = await readJobMetaLocal(job.jobId);
+    if (!meta || meta.status !== "Auftrag") return job;
+    const updated = { ...meta, status: "Laufend", updatedAt: new Date().toISOString() };
+    await writeJsonAtomic(file, updated);
+    return { ...job, status: "Laufend" };
+  }
+
+  function expressTask({ employeeId, employeeLabel, date, job }) {
+    const now = new Date().toISOString();
+    return {
+      id: `express_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title: `Expressbaustelle zuordnen: ${job.jobName}`,
+      assigneeId: "",
+      assigneeName: "Chef / Büro",
+      jobId: job.jobId,
+      jobName: job.jobName,
+      taskType: "Problem",
+      priority: "heute",
+      creatorId: employeeId,
+      creatorName: employeeLabel,
+      createdBy: employeeId,
+      dueDate: date,
+      note: `${employeeLabel} arbeitet auf einer Expressbaustelle. Bitte bestehender Baustelle zuordnen oder neue Baustelle anlegen und die Buchung danach bereinigen.`,
+      status: "open",
+      createdAt: now,
+      completedAt: null,
+      source: "kgo-express-site",
+    };
+  }
+
+  app.get("/kristine/api/active-jobs", async (req, res) => {
+    if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
+    try {
+      const jobs = await listActiveJobs();
+      return res.json({ ok: true, jobs, count: jobs.length });
+    } catch (error) {
+      logger.error("❌ KGO aktive Baustellen konnten nicht geladen werden", error);
+      return res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/switch-job", async (req, res) => {
+    if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.body?.employeeId || "").trim();
+      const date = String(req.body?.date || localDate()).trim();
+      const requestedJobId = String(req.body?.jobId || "").trim();
+      const expressName = String(req.body?.expressName || "").replace(/\s+/g, " ").trim().slice(0, 140);
+      if (!employeeId) return res.status(400).json({ ok:false, error:"Mitarbeiter fehlt." });
+
+      const employees = await readEmployees();
+      const employee = findEmployee(employees, employeeId);
+      if (!employee) return res.status(404).json({ ok:false, error:"Mitarbeiter nicht gefunden." });
+      const employeeLabel = employeeName(employee);
+
+      const [statesRaw, eventsRaw, tasksRaw] = await Promise.all([
+        readJson(statesFile, {}),
+        readJson(timeEventsFile, []),
+        readJson(tasksFile, []),
+      ]);
+      const states = statesRaw && typeof statesRaw === "object" && !Array.isArray(statesRaw) ? statesRaw : {};
+      const events = Array.isArray(eventsRaw) ? eventsRaw : [];
+      const tasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      const previous = states[employeeId] && typeof states[employeeId] === "object" ? states[employeeId] : {};
+      const state = {
+        employeeId,
+        employeeName: employeeLabel,
+        mode: previous.mode || "idle",
+        timeline: Array.isArray(previous.timeline) ? previous.timeline : [],
+        ...previous,
+      };
+
+      if (state.mode === "finished_day") {
+        return res.status(409).json({ ok:false, error:"Der Tag ist bereits abgeschlossen." });
+      }
+
+      let selected = null;
+      let isExpress = false;
+      if (expressName) {
+        if (expressName.length < 2) return res.status(400).json({ ok:false, error:"Bitte einen kurzen Namen für die Expressbaustelle eingeben." });
+        const compact = date.replace(/-/g, "");
+        selected = {
+          jobId: `express_${compact}_${employeeId}_${Date.now()}`.replace(/[^A-Za-z0-9_-]/g, "_"),
+          jobName: expressName,
+          status: "Express",
+          city: "",
+          address: "",
+          contactName: "",
+          contactPhone: "",
+          express: true,
+        };
+        isExpress = true;
+      } else {
+        if (!requestedJobId) return res.status(400).json({ ok:false, error:"Bitte Baustelle auswählen." });
+        const jobs = await listActiveJobs();
+        selected = jobs.find((job) => String(job.jobId) === requestedJobId) || null;
+        if (!selected) return res.status(409).json({ ok:false, error:"Diese Baustelle ist nicht mehr Auftrag/Laufend. Bitte Liste aktualisieren." });
+      }
+
+      const wasWorking = state.mode === "working";
+      if (wasWorking && !isExpress) selected = await markJobRunningLocal(selected);
+
+      const currentOverrideId = String(state.activeJobOverride?.date === date ? state.activeJobOverride?.jobId || "" : "");
+      const todays = events
+        .filter((event) => String(event?.employeeId || "") === employeeId && String(event?.date || "") === date)
+        .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
+      const lastWork = [...todays].reverse().find((event) => ["start","weiter"].includes(String(event?.type || "").toLowerCase()));
+      const alreadyCurrent = currentOverrideId === selected.jobId || (wasWorking && String(lastWork?.jobId || "") === selected.jobId);
+
+      state.activeAssignmentKey = null;
+      state.activeJobOverride = {
+        date,
+        jobId: selected.jobId,
+        jobName: selected.jobName,
+        city: selected.city || "",
+        address: selected.address || "",
+        contactName: selected.contactName || "",
+        contactPhone: selected.contactPhone || "",
+        status: selected.status || "",
+        express: isExpress,
+      };
+      state.pending = null;
+      if (["finished_site"].includes(state.mode)) state.mode = "idle";
+      appendTimeline(state, isExpress ? "express_site" : "site_selected", `${isExpress ? "Expressbaustelle" : "Baustelle"}: ${selected.jobName}`, selected);
+      states[employeeId] = state;
+
+      if (wasWorking && !alreadyCurrent) {
+        events.push({
+          id: `switch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          employeeId,
+          employeeName: employeeLabel,
+          date,
+          type: "weiter",
+          at: localTime(),
+          jobId: selected.jobId,
+          jobName: selected.jobName,
+          source: isExpress ? "kgo-express-site" : "kgo-site-picker",
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      if (isExpress) tasks.push(expressTask({ employeeId, employeeLabel, date, job:selected }));
+
+      await Promise.all([
+        writeJsonAtomic(statesFile, states),
+        wasWorking && !alreadyCurrent ? writeJsonAtomic(timeEventsFile, events) : Promise.resolve(),
+        isExpress ? writeJsonAtomic(tasksFile, tasks) : Promise.resolve(),
+      ]);
+
+      return res.json({
+        ok:true,
+        selected,
+        continued:wasWorking && !alreadyCurrent,
+        express:isExpress,
+        reply:isExpress
+          ? `Expressbaustelle „${selected.jobName}“ ist aktiv. Chef/Büro bekommt sie zur Zuordnung.`
+          : `Baustelle ${selected.jobId} · ${selected.jobName} ausgewählt.`,
+      });
+    } catch (error) {
+      logger.error("❌ KGO Baustellenwechsel fehlgeschlagen", error);
+      return res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
 
   app.post("/kristine/api/morning-check", async (req, res) => {
     if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
