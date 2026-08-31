@@ -151,4 +151,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Startnavigation V2: Projekte + Rechnungen/Material / Erfassen + Kreditoren-/Debitoren-OP + Ausgangsrechnungen")
+    print("Brain navigation V2: projects | incoming | creditor/debtor open items | outgoing invoices")

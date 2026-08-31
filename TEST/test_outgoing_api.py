@@ -72,6 +72,7 @@ class OutgoingApiTests(unittest.TestCase):
         pdf = self.client.get(f"/api/outgoing/invoices/{invoice_id}/pdf")
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b"%PDF"))
+        pdf.close()
         open_items = self.client.get("/api/outgoing/open-items").get_json()
         self.assertEqual(len(open_items["items"]), 1)
         self.assertEqual(open_items["items"][0]["openGross"], 10602.0)

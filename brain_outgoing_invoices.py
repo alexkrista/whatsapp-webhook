@@ -314,15 +314,15 @@ def install(ns):
                 threading.Event().wait(max(60, (target - now).total_seconds()))
                 try:
                     result = sync_from_ww()
-                    print(f"✅ Nächtlicher WW-Debitorenabgleich: {result['imported']} neu · {result['skipped']} vorhanden")
+                    print(f"KRISTINE WW debtor sync: {result['imported']} new | {result['skipped']} existing")
                 except Exception as exc:
-                    print(f"⚠ Nächtlicher WW-Debitorenabgleich fehlgeschlagen: {exc}")
+                    print(f"KRISTINE WW debtor sync failed: {exc}")
 
         threading.Thread(target=nightly_ww_sync, name="kristine-ww-debtor-sync", daemon=True).start()
 
     app._krista_outgoing = True
     _INSTALLED = True
-    print("✅ KRISTINE Ausgangsrechnungen + Debitoren-OP: WW-Abgleich 02:15 · TR/SR · Zahlungen · Korrekturen")
+    print("KRISTINE outgoing invoices + debtor open items: WW sync 02:15 | TR/SR | payments | corrections")
 
 
 OUTGOING_PAGE = r'''<!doctype html>
