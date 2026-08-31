@@ -1,0 +1,311 @@
+# coding: utf-8
+"""KRISTINE quick outgoing invoices: routes, UI, PDF and payments."""
+
+from __future__ import annotations
+
+import os
+from datetime import date, timedelta
+from pathlib import Path
+
+from brain_outgoing_pdf import render_invoice_pdf
+from brain_outgoing_store import OutgoingStore, TAX_MODES
+
+
+_INSTALLED = False
+
+
+def _json_error(jsonify, exc, status=400):
+    return jsonify({"ok": False, "error": str(exc)}), status
+
+
+def install(ns):
+    global _INSTALLED
+    app = ns.get("app")
+    if app is None or _INSTALLED or getattr(app, "_krista_outgoing", False):
+        return
+
+    from flask import jsonify, request, send_file
+
+    base_db = Path(ns.get("DB") or r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
+    db_path = Path(os.environ.get("KRISTINE_OUTGOING_DB", str(base_db.parent / "kristine_outgoing_invoices.db")))
+    output_root = Path(os.environ.get(
+        "KRISTINE_OUTGOING_DIR", r"N:\OneDrive\Dokumente\Kristine\Ausgangsrechnungen"
+    ))
+    store = OutgoingStore(db_path, output_root)
+    app.extensions["kristine_outgoing_store"] = store
+
+    search_projects = ns.get("search_projects")
+    terms_fn = ns.get("_terms")
+    sql_connection = ns.get("sql_connection")
+
+    def ww_open_items():
+        if not callable(sql_connection):
+            raise RuntimeError("WinWorker-Verbindung ist nicht verfügbar.")
+        con = sql_connection()
+        try:
+            cur = con.cursor()
+            cur.execute("""
+                SELECT
+                    CONVERT(varchar(36), b.gID) AS sourceId,
+                    b.sBuchNummer AS invoiceNumber,
+                    b.ProjektIndex AS projectIndex,
+                    COALESCE(p.sProjektNummer,b.sProjektNummer,'') AS projectNumber,
+                    b.KundenIndex AS customerIndex,
+                    COALESCE(k.sFirma,'') AS customerCompany,
+                    LTRIM(RTRIM(COALESCE(k.sVorname,'') + ' ' + COALESCE(k.sName,''))) AS customerName,
+                    COALESCE(b.sKunde,'') AS customerRaw,
+                    COALESCE(k.sStrasse,'') AS street,
+                    COALESCE(k.sPLZ,'') AS postalCode,
+                    COALESCE(k.sOrt,'') AS city,
+                    COALESCE(p.sProjekt,b.sProjekt,'') AS projectTitle,
+                    r.dzRechnungsdatum AS issueDate,
+                    r.ZahlungsZiel AS dueDate,
+                    r.dzCalcLeistungserbringungVon AS serviceFrom,
+                    r.dzCalcLeistungserbringungBis AS serviceTo,
+                    r.bIstAbschlag AS isPartial,
+                    r.bIstSchlussrechnung AS isFinal,
+                    r.cUmsatzNetto AS originalNet,
+                    COALESCE(r.cForderungBrutto,r.cOffenerPostenBrutto) AS originalGross,
+                    r.cOffenerPostenBrutto AS openGross,
+                    COALESCE(calc.fCalcMwStSatz,0) AS vatRate,
+                    COALESCE(b.sAutor,'') AS worker
+                FROM dbo.[Bücher] b
+                INNER JOIN dbo.Rechnung r ON r.gBuchID=b.gID
+                LEFT JOIN dbo.Projekte p ON p.ProjektIndex=b.ProjektIndex
+                LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden k ON k.StammIndex=b.KundenIndex
+                OUTER APPLY (
+                    SELECT TOP 1 bk.fCalcMwStSatz
+                    FROM dbo.[Bücher Kalkulation] bk
+                    WHERE bk.gBuchID=b.gID
+                    ORDER BY bk.Backup_BuchIndex DESC
+                ) calc
+                WHERE b.Buchart=7
+                  AND b.ErsterAusdruck>CONVERT(datetime,'18000101',112)
+                  AND b.Storno=0
+                  AND r.IstRechnungBeglichen=0
+                  AND r.cOffenerPostenBrutto>0.005
+                ORDER BY r.dzRechnungsdatum,b.sBuchNummer
+            """)
+            columns = [x[0] for x in cur.description]
+            result = []
+            for row in cur.fetchall():
+                item = dict(zip(columns, row))
+                for key in ("issueDate", "dueDate", "serviceFrom", "serviceTo"):
+                    value = item.get(key)
+                    item[key] = value.date().isoformat() if hasattr(value, "date") else str(value or "")[:10]
+                for key in ("originalNet", "originalGross", "openGross", "vatRate"):
+                    item[key] = str(item.get(key) or 0)
+                result.append(item)
+            return result
+        finally:
+            con.close()
+
+    @app.get("/outgoing/invoices")
+    def outgoing_page():
+        return OUTGOING_PAGE
+
+    @app.get("/api/outgoing/project-search")
+    def outgoing_project_search():
+        try:
+            query = str(request.args.get("q") or "").strip()
+            if len(query) < 2:
+                return jsonify({"ok": True, "projects": []})
+            if not callable(search_projects):
+                raise RuntimeError("WinWorker-Projektsuche ist nicht verfügbar.")
+            terms = terms_fn(query) if callable(terms_fn) else [x for x in query.split() if x]
+            return jsonify({"ok": True, "projects": search_projects(terms, include_metrics=False, limit=40)})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
+
+    @app.get("/api/outgoing/settings")
+    def outgoing_settings_get():
+        tax_modes = {
+            key: {**value, "rate": float(value["rate"])}
+            for key, value in TAX_MODES.items()
+        }
+        return jsonify({"ok": True, "settings": store.settings(), "taxModes": tax_modes})
+
+    @app.put("/api/outgoing/settings")
+    def outgoing_settings_put():
+        try:
+            return jsonify({"ok": True, "settings": store.update_settings(request.get_json(silent=True) or {})})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.post("/api/outgoing/sync-ww")
+    def outgoing_sync_ww():
+        try:
+            result = store.sync_ww_open_items(ww_open_items())
+            return jsonify({"ok": True, **result})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
+
+    @app.get("/api/outgoing/runs")
+    def outgoing_runs_get():
+        try:
+            return jsonify({"ok": True, "runs": store.runs(request.args.get("projectIndex"))})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
+
+    @app.post("/api/outgoing/runs")
+    def outgoing_runs_post():
+        try:
+            return jsonify({"ok": True, "run": store.create_run(request.get_json(silent=True) or {})})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.get("/api/outgoing/runs/<int:run_id>")
+    def outgoing_run_get(run_id):
+        try:
+            return jsonify({"ok": True, "run": store.run(run_id)})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 404)
+
+    @app.post("/api/outgoing/invoices")
+    def outgoing_invoice_post():
+        try:
+            return jsonify({"ok": True, "invoice": store.save_draft(request.get_json(silent=True) or {})})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.put("/api/outgoing/invoices/<int:invoice_id>")
+    def outgoing_invoice_put(invoice_id):
+        try:
+            return jsonify({"ok": True, "invoice": store.save_draft(request.get_json(silent=True) or {}, invoice_id)})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    def pdf_path_for(invoice):
+        issue = date.fromisoformat(str(invoice.get("issue_date"))[:10])
+        folder = output_root / issue.strftime("%Y") / issue.strftime("%m")
+        revision = int(invoice.get("revisionNo") or 0)
+        suffix = f"_V{revision + 1}" if revision else ""
+        name = f"{invoice.get('invoice_number')}_{invoice.get('kind')}{suffix}.pdf"
+        return folder / name
+
+    def enrich_correction(invoice):
+        original_id = invoice.get("corrects_invoice_id")
+        if not original_id:
+            return invoice
+        original = store.invoice(original_id)
+        invoice["correctedInvoice"] = {
+            "invoiceNumber": original.get("invoice_number"), "issueDate": original.get("issue_date")
+        }
+        return invoice
+
+    @app.post("/api/outgoing/invoices/<int:invoice_id>/issue")
+    def outgoing_invoice_issue(invoice_id):
+        try:
+            invoice = enrich_correction(store.prepare_issue(invoice_id))
+            destination = pdf_path_for(invoice)
+            if not destination.exists() or not invoice.get("pdf_sha256"):
+                render_invoice_pdf(invoice, store.settings(), destination)
+                invoice = store.attach_pdf(invoice_id, destination)
+            return jsonify({"ok": True, "invoice": invoice, "pdfUrl": f"/api/outgoing/invoices/{invoice_id}/pdf"})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.post("/api/outgoing/invoices/<int:invoice_id>/revision")
+    def outgoing_invoice_revision(invoice_id):
+        try:
+            return jsonify({"ok": True, "invoice": store.begin_revision(invoice_id)})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.get("/api/outgoing/invoices/<int:invoice_id>/preview.pdf")
+    def outgoing_invoice_preview(invoice_id):
+        try:
+            invoice = enrich_correction(store.invoice(invoice_id, live=True))
+            preview_root = output_root / "_Entwuerfe"
+            destination = preview_root / f"Entwurf_{invoice_id}.pdf"
+            render_invoice_pdf(invoice, store.settings(), destination)
+            return send_file(destination, mimetype="application/pdf", as_attachment=False, download_name=destination.name)
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.get("/api/outgoing/invoices/<int:invoice_id>/pdf")
+    def outgoing_invoice_pdf(invoice_id):
+        try:
+            invoice = store.invoice(invoice_id)
+            path = Path(str(invoice.get("pdf_path") or ""))
+            if not path.is_file():
+                raise ValueError("Rechnungs-PDF fehlt.")
+            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
+        except Exception as exc:
+            return _json_error(jsonify, exc, 404)
+
+    @app.post("/api/outgoing/runs/<int:run_id>/payments")
+    def outgoing_payment_post(run_id):
+        try:
+            return jsonify({"ok": True, "payment": store.add_payment(run_id, request.get_json(silent=True) or {}), "run": store.run(run_id)})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.post("/api/outgoing/payments/<int:payment_id>/reverse")
+    def outgoing_payment_reverse(payment_id):
+        try:
+            return jsonify({"ok": True, "payment": store.reverse_payment(payment_id)})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.post("/api/outgoing/invoices/<int:invoice_id>/corrections")
+    def outgoing_correction_post(invoice_id):
+        try:
+            return jsonify({"ok": True, "invoice": store.create_correction_draft(invoice_id, request.get_json(silent=True) or {})})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.get("/api/outgoing/periods")
+    def outgoing_periods_get():
+        return jsonify({"ok": True, "periods": store.periods()})
+
+    @app.post("/api/outgoing/periods/close")
+    def outgoing_period_close():
+        try:
+            data = request.get_json(silent=True) or {}
+            return jsonify({"ok": True, **store.close_period(data.get("period"), data.get("closedBy"))})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    app._krista_outgoing = True
+    _INSTALLED = True
+    print("✅ KRISTINE Ausgangsrechnungen: mehrere Läufe · TR/SR · Zahlungen · Storno/Gutschrift · Monatsabschluss")
+
+
+OUTGOING_PAGE = r'''<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KRISTINE · Ausgangsrechnungen</title>
+<style>
+:root{--bg:#0b0e12;--card:#12171d;--card2:#171e26;--line:#2a3440;--text:#eef3f7;--muted:#9aabb9;--blue:#70a8ff;--green:#7bd99b;--red:#ff8c8c;--amber:#f5ca68}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 18px;background:#0d1217ee;border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}.top h1{font-size:18px;margin:0}.top a{color:var(--text);text-decoration:none}.layout{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:14px;padding:14px;max-width:1600px;margin:auto}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.side{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 84px);overflow:auto}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}.grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}label{display:grid;gap:4px;color:var(--muted);font-size:12px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:9px 10px;min-height:40px}textarea{min-height:70px;resize:vertical}button{border:1px solid var(--line);border-radius:9px;background:#202a34;color:var(--text);padding:9px 12px;min-height:40px;font-weight:700}button.primary{background:#276bd2;border-color:#397ee9}button.good{background:#17643d;border-color:#248656}button.danger{background:#63252a;border-color:#8b383e}button.ghost{background:transparent}.muted{color:var(--muted)}.small{font-size:12px}.money{font-variant-numeric:tabular-nums;text-align:right}.run,.project,.invoice,.payment{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:var(--card2)}.run.active,.project.active{border-color:var(--blue)}.head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#26323e;color:#cbd8e3;font-size:11px}.pill.open{background:#173c29;color:#8de6ac}.pill.closed{background:#3e2d18;color:#f5ce87}.summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin:10px 0}.summary>div{padding:10px;background:#0e1318;border:1px solid var(--line);border-radius:9px}.summary strong{display:block;font-size:17px}.section{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.section h2,.section h3{margin:0 0 10px}.lines{width:100%;border-collapse:collapse}.lines th,.lines td{padding:5px;vertical-align:top}.lines th{font-size:11px;color:var(--muted);text-align:left}.lines input{min-width:70px}.lines .desc{min-width:250px}.date-control{display:grid;grid-template-columns:40px 1fr 40px;gap:4px}.date-control button{padding:0}.message{position:fixed;right:14px;bottom:14px;max-width:420px;padding:12px 14px;border-radius:10px;background:#15202a;border:1px solid var(--line);box-shadow:0 8px 30px #0008;z-index:20}.message.error{background:#441f24;border-color:#8b383e}.hide{display:none!important}.modal{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.modal>.card{width:min(700px,100%);max-height:90vh;overflow:auto}@media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.grid,.grid3,.summary{grid-template-columns:1fr 1fr}}@media(max-width:560px){.grid,.grid3,.summary{grid-template-columns:1fr}.top{align-items:flex-start}.lines{display:block;overflow:auto}}
+</style></head><body>
+<header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1></div><div class="row"><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
+<main class="layout"><aside class="card side"><label>Projekt, Kunde oder Nummer suchen<div class="row"><input id="search" class="grow" placeholder="z. B. 26025 oder Kundenname"><button id="searchButton">Suchen</button></div></label><div id="projects"></div><div class="section"><h3>Rechnungsläufe</h3><div id="runs" class="muted">Projekt auswählen.</div></div></aside><section><div id="empty" class="card">Projekt auswählen und einen Rechnungslauf anlegen.</div><div id="workspace" class="hide"></div></section></main>
+<div id="message" class="message hide"></div>
+<div id="runModal" class="modal hide"><div class="card"><div class="head"><h2>Neuer Rechnungslauf</h2><button data-close="runModal">×</button></div><div class="grid"><label>Bezeichnung<input id="runLabel" placeholder="z. B. Fassade / Zusatzauftrag"></label><label>Kunden-UID<input id="runUid"></label><label>Firma<input id="runCompany"></label><label>Name<input id="runName"></label><label>Straße<input id="runStreet"></label><label>PLZ<input id="runPostal"></label><label>Ort<input id="runCity"></label><label>Land<input id="runCountry" value="Österreich"></label></div><div class="row section"><button id="runSave" class="primary">Rechnungslauf anlegen</button><button data-close="runModal">Abbrechen</button></div></div></div>
+<div id="paymentModal" class="modal hide"><div class="card"><div class="head"><h2>Zahlung buchen</h2><button data-close="paymentModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Zu Rechnung<select id="payInvoice"></select></label><label>Datum<input id="payDate" type="date"></label><label>Brutto<input id="payGross" inputmode="decimal"></label><label>Netto (optional)<input id="payNet" inputmode="decimal"></label><label>USt (optional)<input id="payVat" inputmode="decimal"></label><label style="grid-column:1/-1">Text / Referenz<input id="payRef"></label></div><div class="row section"><button id="paySave" class="good">Zahlung buchen</button><button data-close="paymentModal">Abbrechen</button></div></div></div>
+<div id="correctionModal" class="modal hide"><div class="card"><div class="head"><h2>Korrekturbeleg</h2><button data-close="correctionModal">×</button></div><div class="grid"><label>Art<select id="correctionKind"><option value="GS">Gutschrift</option><option value="ST">Stornorechnung (nur offener Monat)</option></select></label><label>Datum<input id="correctionDate" type="date"></label><label id="creditGrossLabel">Gutschrift Brutto<input id="creditGross" inputmode="decimal"></label><label style="grid-column:1/-1">Begründung<input id="correctionReason"></label></div><div class="row section"><button id="correctionSave" class="danger">Korrekturentwurf anlegen</button><button data-close="correctionModal">Abbrechen</button></div></div></div>
+<div id="periodModal" class="modal hide"><div class="card"><div class="head"><h2>Monatsabschluss</h2><button data-close="periodModal">×</button></div><p class="muted">Nach dem Abschluss sind Rechnungen dieses Monats gesperrt. Korrekturen erfolgen nur noch über Gutschriften.</p><label>Monat<input id="periodValue" type="month"></label><div class="row section"><button id="periodClose" class="danger">Monat endgültig abschließen</button><button data-close="periodModal">Abbrechen</button></div><div id="closedPeriods" class="section small muted"></div></div></div>
+<script>
+(()=>{const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0)),today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);let selectedProject=null,selectedRun=null,editing=null,correctionTarget=null,settings={};
+function msg(t,error=false){const e=$('message');e.textContent=t;e.className='message'+(error?' error':'');setTimeout(()=>e.classList.add('hide'),4500)}async function api(url,opt={}){const r=await fetch(url,{cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');return d}function open(id){$(id).classList.remove('hide')}function close(id){$(id).classList.add('hide')}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>close(b.dataset.close));
+async function init(){const d=await api('/api/outgoing/settings');settings=d.settings;$('payDate').value=today();$('correctionDate').value=today();$('periodValue').value=today().slice(0,7)}
+async function search(){const q=$('search').value.trim();if(q.length<2)return;const d=await api('/api/outgoing/project-search?q='+encodeURIComponent(q));$('projects').innerHTML=d.projects.map((p,i)=>`<div class="project" data-p="${i}"><strong>${esc(p.projectNumber)} · ${esc(p.company||p.customer)}</strong><div class="small muted">${esc(p.title||p.site)}<br>${esc(p.address)}</div></div>`).join('')||'<div class="muted">Kein Projekt gefunden.</div>';[...$('projects').children].forEach((e,i)=>e.onclick=()=>selectProject(d.projects[i],e))}
+async function selectProject(p,e){selectedProject=p;document.querySelectorAll('.project').forEach(x=>x.classList.remove('active'));e?.classList.add('active');await loadRuns();$('empty').innerHTML=`<div class="head"><div><h2>${esc(p.projectNumber)} · ${esc(p.title)}</h2><div class="muted">${esc(p.company||p.customer)} · ${esc(p.address)}</div></div><button id="newRun" class="primary">Neuer Rechnungslauf</button></div>`;$('newRun').onclick=showRun}
+async function loadRuns(){if(!selectedProject)return;const d=await api('/api/outgoing/runs?projectIndex='+encodeURIComponent(selectedProject.projectIndex));$('runs').innerHTML=d.runs.map(x=>`<div class="run ${selectedRun?.id===x.id?'active':''}" data-id="${x.id}"><div class="head"><strong>${esc(x.label)}</strong><span class="pill ${x.status}">${x.status==='open'?'offen':'abgeschlossen'}</span></div><div class="small muted">${x.invoiceCount} Beleg(e) · offen ${money(x.currentOpen)}</div></div>`).join('')||'<div class="muted">Noch kein Lauf.</div>';document.querySelectorAll('.run').forEach(e=>e.onclick=()=>loadRun(Number(e.dataset.id)))}
+function showRun(){const p=selectedProject;$('runLabel').value=p.title||'Auftrag';$('runUid').value='';$('runCompany').value=p.company||'';$('runName').value=p.customer||[p.firstName,p.lastName].filter(Boolean).join(' ');$('runStreet').value=p.street||'';$('runPostal').value=p.postalCode||'';$('runCity').value=p.city||'';$('runCountry').value='Österreich';open('runModal')}
+async function saveRun(){const p=selectedProject,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:p.projectIndex,projectNumber:p.projectNumber,customerIndex:p.customerIndex,projectTitle:p.title,label:$('runLabel').value,customerUid:$('runUid').value,company:$('runCompany').value,customerName:$('runName').value,street:$('runStreet').value,postalCode:$('runPostal').value,city:$('runCity').value,country:$('runCountry').value})});close('runModal');await loadRuns();await loadRun(d.run.id)}
+async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedRun=d.run;editing=null;$('empty').classList.add('hide');$('workspace').classList.remove('hide');renderRun();await loadRuns()}
+function renderRun(){const r=selectedRun;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?'<button id="newInvoice" class="primary">Neue TR / Rechnung</button>':''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice());$('newPayment').onclick=showPayment;wireInvoices()}
+function invoiceList(xs){return (xs||[]).map(x=>`<div class="invoice"><div class="head"><div><strong>${esc(x.invoice_number||'Entwurf')} · ${esc(({TR:'Teilrechnung',SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind])}</strong><div class="small muted">${esc(x.issue_date)} · ${money(x.increment_gross)}${x.revisionNo?' · Version '+(x.revisionNo+1):''}</div></div><span class="pill ${x.status==='draft'?'open':'closed'}">${x.status==='draft'?'Entwurf':'ausgestellt'}</span></div><div class="row">${['TR','SR','RE'].includes(x.kind)?`<button data-edit="${x.id}" data-issued="${x.status==='issued'?'1':'0'}">${x.status==='issued'?'Ändern':'Bearbeiten'}</button>`:''}<a href="/api/outgoing/invoices/${x.id}/${x.status==='draft'?'preview.pdf':'pdf'}" target="_blank"><button>PDF</button></a>${x.status==='draft'?`<button class="good" data-issue="${x.id}">Abschließen</button>`:`<button class="danger" data-correct="${x.id}">Storno / Gutschrift</button>`}</div></div>`).join('')||'<div class="muted">Noch keine Rechnung.</div>'}
+function paymentList(xs){return (xs||[]).map((x,i)=>`<div class="payment head"><div><strong>${i+1}. Zahlung · ${esc(x.paymentDate)}</strong><div class="small muted">${esc(x.reference)}</div></div><strong>${money(x.gross)}</strong></div>`).join('')||'<div class="muted">Noch keine Zahlung gebucht.</div>'}
+function wireInvoices(){document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{try{let x=selectedRun.invoices.find(x=>x.id===Number(b.dataset.edit));if(b.dataset.issued==='1'){if(!confirm('Ausgestellte Rechnung als neue Version öffnen? Die bisherige Version bleibt archiviert.'))return;const d=await api('/api/outgoing/invoices/'+x.id+'/revision',{method:'POST',body:'{}'});x=d.invoice;await loadRun(selectedRun.id)}editInvoice(x)}catch(e){msg(e.message,true)}});document.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>issueInvoice(Number(b.dataset.issue)));document.querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>{correctionTarget=Number(b.dataset.correct);$('correctionKind').value='GS';$('creditGrossLabel').classList.remove('hide');open('correctionModal')})}
+function dateControl(id,label,value){return `<label>${label}<div class="date-control"><button type="button" data-date-minus="${id}">−</button><input id="${id}" type="date" value="${esc(value||today())}"><button type="button" data-date-plus="${id}">+</button></div></label>`}
+function editInvoice(x=null){editing=x;const due=new Date((x?.issue_date||today())+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=x?.lines?.length?x.lines:[{description:'Arbeiten lt. Auftrag',quantity:1,unit:'PA',unit_price:0,discount_percent:0}];$('editor').innerHTML=`<div class="card section"><div class="head"><h2>${x?'Entwurf bearbeiten':'Neue Rechnung'}</h2><button id="editorClose">×</button></div><div class="grid3"><label>Art<select id="invKind"><option value="TR">Teilrechnung</option><option value="SR">Schlussrechnung</option><option value="RE">Rechnung</option></select></label>${dateControl('invDate','Rechnungsdatum',x?.issue_date||today())}${dateControl('dueDate','Fällig am',x?.due_date||due.toISOString().slice(0,10))}${dateControl('serviceFrom','Leistung von',x?.service_from||today())}${dateControl('serviceTo','Leistung bis',x?.service_to||today())}<label>USt-Art<select id="taxMode"><option value="AT20">20 % Österreich</option><option value="CHLI81">8,1 % Schweiz / Liechtenstein</option><option value="RC19">0 % · § 19 Übergang Steuerschuld</option><option value="EU0">0 % · EU-Auslandslieferung</option></select></label><label id="recipientUidLabel">Kunden-UID<input id="recipientUid" value="${esc(x?.recipient_uid||selectedRun.customer_uid||'')}"></label><label>Deckungsrücklass %<input id="retention" inputmode="decimal" value="${x?.retention_percent||0}"></label><label>Rabatt %<input id="discount" inputmode="decimal" value="${x?.discount_percent||0}"></label><label>Skonto %<input id="cashDiscount" inputmode="decimal" value="${x?.cash_discount_percent||0}"></label>${dateControl('cashUntil','Skonto bis',x?.cash_discount_until||'')}<label>Betreff<input id="subject" value="${esc(x?.subject||selectedRun.label)}"></label></div><div class="section"><h3>Leistungen</h3><table class="lines"><thead><tr><th>Pos</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>EP netto</th><th>Rabatt %</th><th></th></tr></thead><tbody id="lineRows"></tbody></table><button id="addLine">+ Position</button></div><label class="section">Zusatztext<textarea id="notes">${esc(x?.notes||'')}</textarea></label><div class="row section"><button id="saveDraft" class="primary">Entwurf speichern</button><button id="savePreview">Speichern & PDF prüfen</button></div></div>`;$('invKind').value=x?.kind||'TR';$('taxMode').value=x?.tax_mode||'AT20';let model=lines.map(l=>({description:l.description||'',quantity:l.quantity||1,unit:l.unit||'PA',unitPrice:l.unit_price??l.unitPrice??0,discountPercent:l.discount_percent??l.discountPercent??0}));function renderLines(){$('lineRows').innerHTML=model.map((l,i)=>`<tr><td>${i+1}</td><td><input class="desc" data-f="description" data-i="${i}" value="${esc(l.description)}"></td><td><input data-f="quantity" data-i="${i}" value="${esc(l.quantity)}"></td><td><input data-f="unit" data-i="${i}" value="${esc(l.unit)}"></td><td><input data-f="unitPrice" data-i="${i}" value="${esc(l.unitPrice)}"></td><td><input data-f="discountPercent" data-i="${i}" value="${esc(l.discountPercent)}"></td><td><button data-del="${i}">×</button></td></tr>`).join('');$('lineRows').querySelectorAll('input').forEach(e=>e.oninput=()=>model[Number(e.dataset.i)][e.dataset.f]=e.value);$('lineRows').querySelectorAll('[data-del]').forEach(e=>e.onclick=()=>{model.splice(Number(e.dataset.del),1);renderLines()})}renderLines();$('addLine').onclick=()=>{model.push({description:'',quantity:1,unit:'PA',unitPrice:0,discountPercent:0});renderLines()};$('editorClose').onclick=()=>{$('editor').innerHTML=''};document.querySelectorAll('[data-date-minus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.dateMinus,-1));document.querySelectorAll('[data-date-plus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.datePlus,1));$('taxMode').onchange=()=>$('recipientUidLabel').classList.toggle('hide',!['RC19','EU0'].includes($('taxMode').value));$('taxMode').onchange();async function save(preview){const payload={runId:selectedRun.id,kind:$('invKind').value,issueDate:$('invDate').value,dueDate:$('dueDate').value,serviceFrom:$('serviceFrom').value,serviceTo:$('serviceTo').value,taxMode:$('taxMode').value,recipientUid:$('recipientUid').value,retentionPercent:$('retention').value,discountPercent:$('discount').value,cashDiscountPercent:$('cashDiscount').value,cashDiscountUntil:$('cashUntil').value,subject:$('subject').value,notes:$('notes').value,lines:model};const d=await api(editing?'/api/outgoing/invoices/'+editing.id:'/api/outgoing/invoices',{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=d.invoice;msg('Entwurf gespeichert.');await loadRun(selectedRun.id);if(preview)window.open('/api/outgoing/invoices/'+editing.id+'/preview.pdf','_blank')} $('saveDraft').onclick=()=>save(false).catch(e=>msg(e.message,true));$('savePreview').onclick=()=>save(true).catch(e=>msg(e.message,true))}
+function shiftDate(id,days){const e=$(id),d=new Date((e.value||today())+'T12:00:00');d.setDate(d.getDate()+days);e.value=d.toISOString().slice(0,10)}
+async function issueInvoice(id){if(!confirm('Rechnung jetzt nummerieren und abschließen?'))return;try{const d=await api('/api/outgoing/invoices/'+id+'/issue',{method:'POST',body:'{}'});msg('Rechnung '+d.invoice.invoice_number+' erstellt.');await loadRun(selectedRun.id);window.open(d.pdfUrl,'_blank')}catch(e){msg(e.message,true)}}
+function showPayment(){$('payInvoice').innerHTML='<option value="">Allgemein zum Rechnungslauf</option>'+selectedRun.invoices.filter(x=>x.status==='issued'&&!['ST','GS'].includes(x.kind)).map(x=>`<option value="${x.id}">${esc(x.invoice_number)} · ${money(x.increment_gross)}</option>`).join('');open('paymentModal')}
+async function savePayment(){try{await api('/api/outgoing/runs/'+selectedRun.id+'/payments',{method:'POST',body:JSON.stringify({invoiceId:$('payInvoice').value?Number($('payInvoice').value):null,paymentDate:$('payDate').value,gross:$('payGross').value,net:$('payNet').value||null,vat:$('payVat').value||null,reference:$('payRef').value})});close('paymentModal');msg('Zahlung gebucht.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
+async function saveCorrection(){try{const d=await api('/api/outgoing/invoices/'+correctionTarget+'/corrections',{method:'POST',body:JSON.stringify({kind:$('correctionKind').value,issueDate:$('correctionDate').value,gross:$('creditGross').value,reason:$('correctionReason').value})});close('correctionModal');msg('Korrekturentwurf angelegt.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
+async function showPeriods(){const d=await api('/api/outgoing/periods');$('closedPeriods').innerHTML='<strong>Abgeschlossene Monate</strong><br>'+(d.periods.map(x=>esc(x.period.slice(0,4)+'-'+x.period.slice(4))+' · '+esc(x.closed_at)).join('<br>')||'Noch keiner.');open('periodModal')}async function closePeriod(){const p=$('periodValue').value.replace('-','');if(!confirm('Monat '+$('periodValue').value+' endgültig abschließen?'))return;try{await api('/api/outgoing/periods/close',{method:'POST',body:JSON.stringify({period:p})});msg('Monat abgeschlossen.');showPeriods()}catch(e){msg(e.message,true)}}
+$('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=showPeriods;$('periodClose').onclick=closePeriod;$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');init().catch(e=>msg(e.message,true));})();
+</script></body></html>'''

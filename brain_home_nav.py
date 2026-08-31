@@ -126,6 +126,11 @@ def install(ns):
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
 
+    const outgoing=captureNav.cloneNode(true);
+    outgoing.id='modeOutgoing';outgoing.classList.remove('active');outgoing.removeAttribute('onclick');outgoing.textContent='🧾 Ausgangsrechnungen';
+    outgoing.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/invoices'});
+    bottom.appendChild(outgoing);
+
     material.onclick=e=>{e.preventDefault();prepareIncoming()};
     if(typeof go!=='undefined')go.onclick=()=>{
       if(searchMode==='incoming'||searchMode==='material')combinedSearch(q.value);
@@ -141,4 +146,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Startnavigation V2: Projekte + Rechnungen/Material / Erfassen + OP")
+    print("✅ Brain Startnavigation V2: Projekte + Rechnungen/Material / Erfassen + OP + Ausgangsrechnungen")
