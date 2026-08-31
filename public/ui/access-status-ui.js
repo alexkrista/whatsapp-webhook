@@ -141,6 +141,16 @@
     return vals.some(x=>x?.state==="bad")?"red":"green";
   }
 
+  function gateColor(d){
+    if(!d?.online)return"red";
+    const entries=Object.entries(d.services||{});
+    const gate=entries.find(([key,x])=>{
+      const text=`${key} ${x?.label||""} ${x?.detail||""}`.toLowerCase();
+      return text.includes("garagentor")||text.includes("garage")||text.includes("gate");
+    });
+    return gate&&gate[1]?.state==="bad"?"red":"green";
+  }
+
   function applyDoorHolds(d){
     if(!d)return d;
     const now=Date.now();
@@ -189,7 +199,8 @@
     let h=`<a class="krista-quick-task${taskActive?" active":""}" href="${taskUrl()}" title="Aufgaben öffnen"><span aria-hidden="true">📌</span><span>Aufgaben</span></a>`;
     h+=`<button class="krista-system-lamp" data-system title="Systemstatus öffnen"><span class="krista-dot ${overall(d)}"></span><span>SYS</span></button>`;
     const gateLocked=Date.now()<gateLockedUntil;
-    h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":"Tor öffnen"}"><span class="krista-dot yellow"></span><span>TOR</span></button>`;
+    const gateLamp=gateLocked?"yellow":gateColor(d);
+    h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":gateLamp==="green"?"Torsteuerung bereit · Klick: Tor-Impuls":"Torsteuerung nicht erreichbar"}"><span class="krista-dot ${gateLamp}"></span><span>TOR</span></button>`;
 
     const doors=d?.gantner?.doors||{};
     const labels={1:"Eingang",2:"Lager",3:"Büro"};
