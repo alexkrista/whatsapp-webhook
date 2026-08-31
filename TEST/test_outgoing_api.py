@@ -47,6 +47,7 @@ class OutgoingApiTests(unittest.TestCase):
 
     def test_full_invoice_flow_creates_pdf(self):
         self.assertEqual(self.client.get("/outgoing/invoices").status_code, 200)
+        self.assertEqual(self.client.get("/outgoing/open-items").status_code, 200)
         self.assertEqual(self.client.get("/api/outgoing/settings").status_code, 200)
         run_response = self.client.post("/api/outgoing/runs", json={
             "projectIndex": 1, "projectNumber": "26001", "customerIndex": 2, "label": "Auftrag A",
@@ -71,6 +72,15 @@ class OutgoingApiTests(unittest.TestCase):
         pdf = self.client.get(f"/api/outgoing/invoices/{invoice_id}/pdf")
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b"%PDF"))
+        open_items = self.client.get("/api/outgoing/open-items").get_json()
+        self.assertEqual(len(open_items["items"]), 1)
+        self.assertEqual(open_items["items"][0]["openGross"], 10602.0)
+        payment = self.client.post(f"/api/outgoing/runs/{run_id}/payments", json={
+            "invoiceId": invoice_id, "paymentDate": "2026-09-01", "gross": 1000, "reference": "Bank",
+        })
+        self.assertEqual(payment.status_code, 200, payment.get_data(as_text=True))
+        open_items = self.client.get("/api/outgoing/open-items").get_json()
+        self.assertEqual(open_items["items"][0]["openGross"], 9602.0)
 
 
 if __name__ == "__main__":

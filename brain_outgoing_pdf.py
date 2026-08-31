@@ -32,6 +32,16 @@ def de_date(value):
         return text
 
 
+def de_date_long(value):
+    text = str(value or "")[:10]
+    months = ("", "Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
+    try:
+        stamp = date.fromisoformat(text)
+        return f"{stamp.day}. {months[stamp.month]} {stamp.year}"
+    except ValueError:
+        return text
+
+
 def _kind_title(invoice):
     kind = invoice.get("kind")
     if kind == "TR":
@@ -48,6 +58,8 @@ def render_invoice_pdf(invoice, settings, destination):
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.platypus import (
             BaseDocTemplate, Frame, KeepTogether, PageTemplate, Paragraph, Spacer, Table, TableStyle,
         )
@@ -57,15 +69,27 @@ def render_invoice_pdf(invoice, settings, destination):
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     width, height = A4
-    left, right, top, bottom = 18 * mm, 16 * mm, 22 * mm, 25 * mm
+    left, right, top, bottom = 17 * mm, 18 * mm, 100 * mm, 27 * mm
+    regular_font, bold_font = "Helvetica", "Helvetica-Bold"
+    arial = Path(r"C:\Windows\Fonts\arial.ttf")
+    arial_bold = Path(r"C:\Windows\Fonts\arialbd.ttf")
+    if arial.exists() and arial_bold.exists():
+        try:
+            if "KristaArial" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("KristaArial", str(arial)))
+            if "KristaArialBold" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("KristaArialBold", str(arial_bold)))
+            regular_font, bold_font = "KristaArial", "KristaArialBold"
+        except Exception:
+            pass
     styles = getSampleStyleSheet()
-    base = ParagraphStyle("WW", parent=styles["Normal"], fontName="Helvetica", fontSize=8.4, leading=10.6, textColor=colors.black)
-    small = ParagraphStyle("WWSmall", parent=base, fontSize=7.2, leading=8.8)
-    tiny = ParagraphStyle("WWTiny", parent=base, fontSize=6.5, leading=7.8)
-    title = ParagraphStyle("WWTitle", parent=base, fontName="Helvetica-Bold", fontSize=14, leading=17)
+    base = ParagraphStyle("WW", parent=styles["Normal"], fontName=regular_font, fontSize=9.92, leading=11.9, textColor=colors.black)
+    small = ParagraphStyle("WWSmall", parent=base, fontSize=7.9, leading=9.2)
+    tiny = ParagraphStyle("WWTiny", parent=base, fontSize=6.84, leading=8.2)
+    title = ParagraphStyle("WWTitle", parent=base, fontName=bold_font, fontSize=12.76, leading=15.5)
     right_text = ParagraphStyle("WWRight", parent=base, alignment=TA_RIGHT)
-    heading = ParagraphStyle("WWHeading", parent=base, fontName="Helvetica-Bold", fontSize=8.5, leading=10.5)
-    note = ParagraphStyle("WWNote", parent=base, fontSize=8, leading=10)
+    heading = ParagraphStyle("WWHeading", parent=base, fontName=bold_font, fontSize=9.92, leading=11.9)
+    note = ParagraphStyle("WWNote", parent=base, fontSize=9.2, leading=11.2)
 
     run = invoice.get("run") or {}
     number = invoice.get("invoice_number") or invoice.get("invoiceNumber") or "ENTWURF"
@@ -73,24 +97,43 @@ def render_invoice_pdf(invoice, settings, destination):
     project_number = run.get("project_number") or ""
     worker = invoice.get("worker") or settings.get("default_worker") or ""
 
-    def footer(canvas, doc):
+    def ww_page(canvas, doc):
         canvas.saveState()
-        canvas.setFont("Helvetica", 6.5)
-        strip = (
-            f"{settings.get('company_name','')}  |  IBAN {settings.get('bank_iban','')}  |  "
-            f"BIC {settings.get('bank_bic','')}  |  {settings.get('company_uid','')}  |  "
-            f"EORI-Nr. {settings.get('company_eori','')}  |  DG-Nr. {settings.get('company_dg','')}"
+        logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
+        if logo.exists():
+            canvas.drawImage(str(logo), 235.5, height - 104.2, width=312.9, height=61.5, preserveAspectRatio=False, mask="auto")
+
+        recipient = [
+            run.get("customer_company") or "", run.get("customer_name") or "", run.get("customer_street") or "",
+            " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
+            run.get("customer_country") or "",
+        ]
+        canvas.setFillColor(colors.black)
+        canvas.setFont(regular_font, 9.92)
+        y = height - 168
+        for line in (x for x in recipient if x):
+            canvas.drawString(56.6, y, str(line))
+            y -= 11.9
+        canvas.setFont(bold_font, 10.8)
+        canvas.drawString(350.0, height - 169, f"Projekt: {project_number}")
+        canvas.setFont(regular_font, 9.96)
+        canvas.drawString(350.0, height - 184, f"Unser Bearbeiter: {worker}")
+
+        canvas.setFont(regular_font, 7.92)
+        bank = (
+            f"Sparkasse Feldkirch  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  "
+            f"{settings.get('company_uid','')}  |  EORI-Nr.  {settings.get('company_eori','')}  |  DG-Nr.  {settings.get('company_dg','')}"
         )
-        canvas.drawString(left, 17 * mm, strip[:180])
-        canvas.setFont("Helvetica-Bold", 7)
-        canvas.drawString(left, 12.5 * mm, settings.get("company_name", ""))
-        canvas.setFont("Helvetica", 6.5)
-        canvas.drawString(left, 9.5 * mm, (
-            f"{settings.get('company_street','')} | {settings.get('company_postal_city','')} | "
-            f"T {settings.get('company_phone','')} | {settings.get('company_email','')} | {settings.get('company_web','')}"
-        )[:180])
-        canvas.drawString(left, 6.5 * mm, settings.get("company_legal", "")[:190])
-        canvas.drawRightString(width - right, 12.5 * mm, f"[{document_title} {number}]  - {doc.page:02d} -")
+        canvas.drawString(36.7, 48.0, bank)
+        canvas.setFont(regular_font, 6.84)
+        canvas.drawString(36.5, 32.5, settings.get("company_name", ""))
+        canvas.drawString(168.6, 32.5, f"T {settings.get('company_phone','')}")
+        canvas.drawString(249.1, 32.5, settings.get("company_fn", ""))
+        canvas.drawString(334.1, 32.5, "Unbeschränkt haftender Gesellschafter: Farben Krista GmbH")
+        canvas.drawString(36.5, 22.7, f"{settings.get('company_street','')}  |  {settings.get('company_postal_city','')}")
+        canvas.drawString(168.6, 22.7, settings.get("company_email", ""))
+        canvas.drawString(249.1, 22.7, settings.get("company_web", ""))
+        canvas.drawString(334.1, 22.7, "Feldkircherstraße 45, 6820 Frastanz, FN 77707a, Firmenbuchgericht Feldkirch")
         canvas.restoreState()
 
     doc = BaseDocTemplate(
@@ -98,45 +141,32 @@ def render_invoice_pdf(invoice, settings, destination):
         topMargin=top, bottomMargin=bottom, title=f"{document_title} {number}",
         author=settings.get("company_name", "KRISTINE"), creator="KRISTINE",
     )
-    frame = Frame(left, bottom, width - left - right, height - top - bottom, id="normal")
-    doc.addPageTemplates(PageTemplate(id="ww", frames=[frame], onPage=footer))
+    frame = Frame(left, bottom, width - left - right, height - top - bottom, id="normal", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    doc.addPageTemplates(PageTemplate(id="ww", frames=[frame], onPage=ww_page))
     story = []
-
     story.append(Table([
-        [Paragraph(f"Unser Bearbeiter: {worker}<br/>Projekt: {project_number}", small),
-         Paragraph(f"{settings.get('company_name','')}<br/>T {settings.get('company_phone','')}<br/>{settings.get('company_email','')}", right_text)],
-    ], colWidths=[100 * mm, 76 * mm], style=TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ])))
-    story.append(Spacer(1, 11 * mm))
-    recipient = [run.get("customer_company") or "", run.get("customer_name") or "", run.get("customer_street") or "",
-                 " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
-                 run.get("customer_country") or ""]
-    story.append(Paragraph("<br/>".join(x for x in recipient if x), base))
-    story.append(Spacer(1, 8 * mm))
-    story.append(Table([
-        [Paragraph(document_title, title), Paragraph("Nr. :", right_text), Paragraph(str(number), heading)],
-        [Paragraph(invoice.get("subject") or "", base), "", Paragraph(de_date(invoice.get("issue_date")), base)],
-    ], colWidths=[112 * mm, 18 * mm, 46 * mm], style=TableStyle([
+        [Paragraph(document_title, title), Paragraph(de_date_long(invoice.get("issue_date")), right_text)],
+        [Paragraph("Nr. :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" + str(number), base), ""],
+    ], colWidths=[86 * mm, 89 * mm], style=TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "BOTTOM"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 3.5), ("BOTTOMPADDING", (0, 1), (-1, 1), 0),
+        ("LINEBELOW", (0, 0), (-1, 0), .65, colors.black),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
     ])))
     if invoice.get("corrects_invoice_id"):
         original = invoice.get("correctedInvoice") or {}
         story.append(Paragraph(
             f"zur Rechnung Nr. {original.get('invoiceNumber','')} vom {de_date(original.get('issueDate'))}", base
         ))
-    story.append(Spacer(1, 3 * mm))
+    story.append(Spacer(1, 7))
+    story.append(Paragraph(invoice.get("subject") or "", heading))
     story.append(Paragraph(
-        f"Die Leistung wurde zwischen dem {de_date(invoice.get('service_from'))} und dem {de_date(invoice.get('service_to'))} erbracht.", base
+        f"Die Leistung wird zwischen dem {de_date(invoice.get('service_from'))} und dem {de_date(invoice.get('service_to'))} erbracht.", base
     ))
-    story.append(Spacer(1, 4 * mm))
+    story.append(Spacer(1, 38))
 
-    line_rows = [[Paragraph("Pos", heading), Paragraph("Menge", heading), Paragraph("Einh.", heading),
-                  Paragraph("Leistung", heading), Paragraph("EP [EUR]", heading), Paragraph("GP [EUR]", heading)]]
+    line_rows = [["Pos", "Menge", "Einh.", "Leistung", "EP [EUR]", "GP [EUR]"]]
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
         net = _d(line.get("net"))
@@ -149,22 +179,30 @@ def render_invoice_pdf(invoice, settings, destination):
             money(line.get("quantity") or 1), str(line.get("unit") or ""), Paragraph(desc, base),
             money(ep), money(net),
         ])
-    line_table = Table(line_rows, repeatRows=1, colWidths=[10 * mm, 20 * mm, 14 * mm, 82 * mm, 24 * mm, 26 * mm])
+    line_table = Table(line_rows, repeatRows=1, colWidths=[19.5 * mm, 12 * mm, 19 * mm, 82.5 * mm, 21 * mm, 21 * mm])
     line_table.setStyle(TableStyle([
-        ("LINEBELOW", (0, 0), (-1, 0), .65, colors.black), ("LINEBELOW", (0, -1), (-1, -1), .35, colors.black),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5), ("LEADING", (0, 0), (-1, -1), 9.5),
+        ("FONTNAME", (0, 0), (-1, -1), regular_font),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
         ("ALIGN", (1, 1), (1, -1), "RIGHT"), ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 2),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 20), ("BOTTOMPADDING", (0, 1), (-1, -1), 1),
+        ("RIGHTPADDING", (1, 1), (1, -1), 4), ("LEFTPADDING", (2, 1), (2, -1), 3),
+        ("RIGHTPADDING", (4, 1), (4, -1), 5), ("LEFTPADDING", (5, 1), (5, -1), 3),
     ]))
     story.append(line_table)
-    story.append(Spacer(1, 3 * mm))
+    complex_summary = bool(
+        invoice.get("previousInvoices") or invoice.get("payments")
+        or _d(invoice.get("retention_percent")) or _d(invoice.get("cash_discount_percent"))
+    )
+    story.append(Spacer(1, 0 if complex_summary else 115))
 
     # Requested calculation summary: retention, discount, VAT, cash discount, then payments.
     calc = []
+    strong_rows = []
     def calc_row(label, rate, net, vat="", gross="", strong=False):
+        if strong:
+            strong_rows.append(len(calc))
         calc.append([Paragraph(label, heading if strong else base), rate, money(net) if net != "" else "",
                      money(vat) if vat != "" else "", money(gross) if gross != "" else ""])
     calc_row("Rechnungszwischensumme Netto:", "", invoice.get("line_subtotal_net"), strong=True)
@@ -178,17 +216,22 @@ def render_invoice_pdf(invoice, settings, destination):
         calc_row("Nettosumme:", "", invoice.get("cumulative_net"), strong=True)
     if _d(invoice.get("vat_rate")):
         calc_row("Mehrwertsteuer:", percent(invoice.get("vat_rate")), "", invoice.get("cumulative_vat"))
+    gross_row = len(calc)
     calc_row("Bruttosumme:", "", "", "", invoice.get("cumulative_gross"), strong=True)
     if _d(invoice.get("cash_discount_percent")):
         calc_row("Skonto:", percent(invoice.get("cash_discount_percent")), "", "", -_d(invoice.get("cash_discount_gross")))
         calc_row("Brutto mit Skonto:", "", "", "", invoice.get("cumulative_gross_discounted"), strong=True)
-    calc_table = Table(calc, colWidths=[72 * mm, 19 * mm, 28 * mm, 28 * mm, 29 * mm], hAlign="RIGHT")
-    calc_table.setStyle(TableStyle([
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.2),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.7), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.7),
-        ("LINEABOVE", (2, 0), (-1, 0), .45, colors.black),
-    ]))
-    story.append(KeepTogether([calc_table, Spacer(1, 3 * mm)]))
+    calc_style = [
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), regular_font),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
+        ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("LINEABOVE", (0, 0), (-1, 0), .75, colors.black),
+        ("LINEABOVE", (0, gross_row), (-1, gross_row), .75, colors.black),
+    ]
+    calc_style.extend(("FONTNAME", (0, row), (-1, row), bold_font) for row in strong_rows)
+    calc_table = Table(calc, colWidths=[80 * mm, 18 * mm, 26 * mm, 26 * mm, 25 * mm], hAlign="RIGHT")
+    calc_table.setStyle(TableStyle(calc_style))
+    story.append(KeepTogether([calc_table, Spacer(1, 1.5 * mm)]))
 
     previous = invoice.get("previousInvoices") or []
     if previous and invoice.get("kind") in {"TR", "SR"}:
@@ -199,16 +242,17 @@ def render_invoice_pdf(invoice, settings, destination):
         rows.append(["Summe bisher:", "", money(invoice.get("prior_net")), money(invoice.get("prior_vat")), money(invoice.get("prior_gross"))])
         rows.append(["Zuwachs mit dieser Rechnung:", "", money(invoice.get("increment_net")), money(invoice.get("increment_vat")), money(invoice.get("increment_gross"))])
         rows.append(["Summe:", "", money(invoice.get("cumulative_net")), money(invoice.get("cumulative_vat")), money(invoice.get("cumulative_gross"))])
-        t = Table(rows, colWidths=[61 * mm, 27 * mm, 29 * mm, 29 * mm, 30 * mm], repeatRows=2)
+        t = Table(rows, colWidths=[60 * mm, 27 * mm, 29 * mm, 29 * mm, 30 * mm], repeatRows=2)
         t.setStyle(TableStyle([
-            ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), bold_font),
+            ("FONTNAME", (0, 2), (-1, -1), regular_font),
+            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
             ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black), ("LINEABOVE", (0, -2), (-1, -2), .4, colors.black),
-            ("FONTNAME", (0, -2), (-1, -1), "Helvetica-Bold"), ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("FONTNAME", (0, -2), (-1, -1), bold_font), ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
         ]))
         story.append(t)
-        story.append(Spacer(1, 3 * mm))
+        story.append(Spacer(1, 1.5 * mm))
 
     payments = invoice.get("payments") or []
     if payments:
@@ -218,16 +262,17 @@ def render_invoice_pdf(invoice, settings, destination):
             label = pay.get("reference") or f"{index}. Zahlung"
             rows.append([label, de_date(pay.get("paymentDate")), money(pay.get("net")), money(pay.get("vat")), money(pay.get("gross"))])
         rows.append(["Summe Zahlungen:", "", money(invoice.get("paid_net_snapshot")), money(invoice.get("paid_vat_snapshot")), money(invoice.get("paid_gross_snapshot"))])
-        t = Table(rows, colWidths=[61 * mm, 27 * mm, 29 * mm, 29 * mm, 30 * mm], repeatRows=2)
+        t = Table(rows, colWidths=[60 * mm, 27 * mm, 29 * mm, 29 * mm, 30 * mm], repeatRows=2)
         t.setStyle(TableStyle([
-            ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), bold_font),
+            ("FONTNAME", (0, 2), (-1, -1), regular_font),
+            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
             ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black), ("LINEABOVE", (0, -1), (-1, -1), .4, colors.black),
-            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("FONTNAME", (0, -1), (-1, -1), bold_font),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
         ]))
         story.append(t)
-        story.append(Spacer(1, 3 * mm))
+        story.append(Spacer(1, 1.5 * mm))
 
     if invoice.get("kind") not in {"ST", "GS"}:
         due_rows = []
@@ -244,13 +289,13 @@ def render_invoice_pdf(invoice, settings, destination):
             money(_d(invoice.get("open_after_discount")) - (_d(invoice.get("open_after_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100")))) if _d(invoice.get("vat_rate")) else money(0),
             money(invoice.get("open_after_discount")),
         ])
-        due = Table(due_rows, colWidths=[88 * mm, 29 * mm, 29 * mm, 30 * mm])
+        due = Table(due_rows, colWidths=[87 * mm, 29 * mm, 29 * mm, 30 * mm])
         due.setStyle(TableStyle([
-            ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), bold_font),
             ("FONTSIZE", (0, 0), (-1, -1), 8.1), ("LINEABOVE", (0, 0), (-1, 0), .75, colors.black),
-            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ]))
-        story.append(KeepTogether([due, Spacer(1, 3 * mm)]))
+        story.append(KeepTogether([due, Spacer(1, 1.5 * mm)]))
 
     if invoice.get("tax_note"):
         story.append(Paragraph(invoice.get("tax_note"), heading))
@@ -264,4 +309,3 @@ def render_invoice_pdf(invoice, settings, destination):
 
     doc.build(story)
     return destination
-

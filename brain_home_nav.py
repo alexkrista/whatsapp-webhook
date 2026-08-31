@@ -122,9 +122,14 @@ def install(ns):
     });
 
     const op=captureNav.cloneNode(true);
-    op.id='modePayments';op.classList.remove('active');op.removeAttribute('onclick');op.textContent='💶 OP';
+    op.id='modePayments';op.classList.remove('active');op.removeAttribute('onclick');op.textContent='💶 Kreditoren-OP';
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
+
+    const debtor=captureNav.cloneNode(true);
+    debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
+    debtor.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/open-items'});
+    bottom.appendChild(debtor);
 
     const outgoing=captureNav.cloneNode(true);
     outgoing.id='modeOutgoing';outgoing.classList.remove('active');outgoing.removeAttribute('onclick');outgoing.textContent='🧾 Ausgangsrechnungen';
@@ -146,4 +151,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("✅ Brain Startnavigation V2: Projekte + Rechnungen/Material / Erfassen + OP + Ausgangsrechnungen")
+    print("✅ Brain Startnavigation V2: Projekte + Rechnungen/Material / Erfassen + Kreditoren-/Debitoren-OP + Ausgangsrechnungen")

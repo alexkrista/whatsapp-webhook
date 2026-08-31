@@ -499,6 +499,87 @@ class OutgoingStore:
                 raise ValueError("Rechnungslauf nicht gefunden.")
             return self._run_public(con, row, detail=True)
 
+    def debtor_open_items(self, as_of=None):
+        """Return customer open items; payments are allocated explicitly, then oldest first."""
+        today = date.fromisoformat(_iso_date(as_of or date.today().isoformat(), required=True, label="Stichtag"))
+        result = []
+        with self.connect() as con:
+            for run in con.execute("SELECT * FROM outgoing_runs ORDER BY customer_company,customer_name,id"):
+                invoices = list(con.execute(
+                    "SELECT * FROM outgoing_invoices WHERE run_id=? AND status='issued' ORDER BY due_date,issue_date,id",
+                    (run["id"],),
+                ))
+                charges = [x for x in invoices if x["kind"] in {"TR", "SR", "RE"} and _d(x["increment_gross"]) > 0]
+                corrections = {}
+                unlinked_credit = Decimal("0")
+                for inv in invoices:
+                    if inv["kind"] not in {"ST", "GS"} or _d(inv["increment_gross"]) >= 0:
+                        continue
+                    credit = -_money(inv["increment_gross"])
+                    target = inv["corrects_invoice_id"]
+                    if target:
+                        corrections[int(target)] = _money(corrections.get(int(target), Decimal("0")) + credit)
+                    else:
+                        unlinked_credit = _money(unlinked_credit + credit)
+
+                explicit = {}
+                unassigned = Decimal("0")
+                for payment in con.execute(
+                    "SELECT * FROM outgoing_payments WHERE run_id=? AND reversed_at IS NULL ORDER BY payment_date,id",
+                    (run["id"],),
+                ):
+                    gross = _money(payment["gross"])
+                    if payment["invoice_id"]:
+                        key = int(payment["invoice_id"])
+                        explicit[key] = _money(explicit.get(key, Decimal("0")) + gross)
+                    else:
+                        unassigned = _money(unassigned + gross)
+
+                credit_pool = _money(unassigned + unlinked_credit)
+                for inv in charges:
+                    charge = _money(_d(inv["increment_gross"]) - corrections.get(int(inv["id"]), Decimal("0")))
+                    if charge < 0:
+                        credit_pool = _money(credit_pool - charge)
+                        charge = Decimal("0")
+                    assigned = explicit.get(int(inv["id"]), Decimal("0"))
+                    if assigned > charge:
+                        credit_pool = _money(credit_pool + assigned - charge)
+                        assigned = charge
+                    remaining = _money(charge - assigned)
+                    allocated = min(remaining, credit_pool)
+                    credit_pool = _money(credit_pool - allocated)
+                    paid = _money(assigned + allocated)
+                    open_gross = _money(charge - paid)
+                    if open_gross <= 0:
+                        continue
+                    due = date.fromisoformat(inv["due_date"])
+                    overdue_days = max(0, (today - due).days)
+                    customer = str(run["customer_company"] or run["customer_name"] or "Ohne Kunde").strip()
+                    result.append({
+                        "runId": int(run["id"]), "invoiceId": int(inv["id"]),
+                        "source": inv["source"], "invoiceNumber": inv["invoice_number"], "kind": inv["kind"],
+                        "issueDate": inv["issue_date"], "dueDate": inv["due_date"], "currency": inv["currency"],
+                        "invoiceGross": _num(charge), "paidGross": _num(paid), "openGross": _num(open_gross),
+                        "overdueDays": overdue_days, "isOverdue": overdue_days > 0,
+                        "customerKey": str(run["customer_index"] or customer).strip(), "customer": customer,
+                        "customerName": run["customer_name"], "customerCompany": run["customer_company"],
+                        "projectIndex": run["project_index"], "projectNumber": run["project_number"],
+                        "projectTitle": run["project_title"], "runLabel": run["label"],
+                        "pdfAvailable": bool(inv["pdf_path"] and Path(inv["pdf_path"]).is_file()),
+                    })
+        result.sort(key=lambda x: (x["dueDate"], str(x["customer"]).casefold(), x["invoiceNumber"] or ""))
+        return result
+
+    def last_ww_sync(self):
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT created_at,payload_json FROM outgoing_audit WHERE entity='sync' AND action='ww_open_items' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if not row:
+                return {"at": "", "imported": 0, "skipped": 0}
+            payload = json.loads(row["payload_json"] or "{}")
+            return {"at": row["created_at"], "imported": int(payload.get("imported") or 0), "skipped": int(payload.get("skipped") or 0)}
+
     def _run_public(self, con, row, detail=False):
         data = _row(row)
         invoices = list(con.execute(
@@ -848,6 +929,7 @@ class OutgoingStore:
                     "invoiceNumber": number, "openGross": str(open_gross), "sourceId": source_id,
                 })
                 imported += 1
+            self._audit(con, "sync", None, "ww_open_items", {"imported": imported, "skipped": skipped})
             con.commit()
         return {"imported": imported, "skipped": skipped, "runIds": sorted(touched_runs)}
 

@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+import threading
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from brain_outgoing_pdf import render_invoice_pdf
@@ -12,6 +13,7 @@ from brain_outgoing_store import OutgoingStore, TAX_MODES
 
 
 _INSTALLED = False
+_SYNC_THREAD_STARTED = False
 
 
 def _json_error(jsonify, exc, status=400):
@@ -19,7 +21,7 @@ def _json_error(jsonify, exc, status=400):
 
 
 def install(ns):
-    global _INSTALLED
+    global _INSTALLED, _SYNC_THREAD_STARTED
     app = ns.get("app")
     if app is None or _INSTALLED or getattr(app, "_krista_outgoing", False):
         return
@@ -100,9 +102,42 @@ def install(ns):
         finally:
             con.close()
 
+    def sync_from_ww():
+        return store.sync_ww_open_items(ww_open_items())
+
+    def sync_is_due(minutes=5):
+        last = store.last_ww_sync().get("at")
+        if not last:
+            return True
+        try:
+            return datetime.now() - datetime.fromisoformat(last) >= timedelta(minutes=minutes)
+        except ValueError:
+            return True
+
     @app.get("/outgoing/invoices")
     def outgoing_page():
         return OUTGOING_PAGE
+
+    @app.get("/outgoing/open-items")
+    def outgoing_open_items_page():
+        return DEBTOR_OP_PAGE
+
+    @app.get("/api/outgoing/open-items")
+    def outgoing_open_items_get():
+        try:
+            synced = None
+            if request.args.get("sync") == "1" and callable(sql_connection) and sync_is_due():
+                synced = sync_from_ww()
+            items = store.debtor_open_items(request.args.get("asOf"))
+            total = round(sum(float(x["openGross"]) for x in items), 2)
+            overdue = round(sum(float(x["openGross"]) for x in items if x["isOverdue"]), 2)
+            return jsonify({
+                "ok": True, "items": items, "totalOpen": total, "totalOverdue": overdue,
+                "customerCount": len({x["customerKey"] for x in items}), "lastWwSync": store.last_ww_sync(),
+                "sync": synced,
+            })
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
 
     @app.get("/api/outgoing/project-search")
     def outgoing_project_search():
@@ -135,7 +170,7 @@ def install(ns):
     @app.post("/api/outgoing/sync-ww")
     def outgoing_sync_ww():
         try:
-            result = store.sync_ww_open_items(ww_open_items())
+            result = sync_from_ww()
             return jsonify({"ok": True, **result})
         except Exception as exc:
             return _json_error(jsonify, exc, 500)
@@ -267,9 +302,27 @@ def install(ns):
         except Exception as exc:
             return _json_error(jsonify, exc)
 
+    if callable(sql_connection) and not _SYNC_THREAD_STARTED:
+        _SYNC_THREAD_STARTED = True
+
+        def nightly_ww_sync():
+            while True:
+                now = datetime.now()
+                target = now.replace(hour=2, minute=15, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+                threading.Event().wait(max(60, (target - now).total_seconds()))
+                try:
+                    result = sync_from_ww()
+                    print(f"✅ Nächtlicher WW-Debitorenabgleich: {result['imported']} neu · {result['skipped']} vorhanden")
+                except Exception as exc:
+                    print(f"⚠ Nächtlicher WW-Debitorenabgleich fehlgeschlagen: {exc}")
+
+        threading.Thread(target=nightly_ww_sync, name="kristine-ww-debtor-sync", daemon=True).start()
+
     app._krista_outgoing = True
     _INSTALLED = True
-    print("✅ KRISTINE Ausgangsrechnungen: mehrere Läufe · TR/SR · Zahlungen · Storno/Gutschrift · Monatsabschluss")
+    print("✅ KRISTINE Ausgangsrechnungen + Debitoren-OP: WW-Abgleich 02:15 · TR/SR · Zahlungen · Korrekturen")
 
 
 OUTGOING_PAGE = r'''<!doctype html>
@@ -278,7 +331,7 @@ OUTGOING_PAGE = r'''<!doctype html>
 <style>
 :root{--bg:#0b0e12;--card:#12171d;--card2:#171e26;--line:#2a3440;--text:#eef3f7;--muted:#9aabb9;--blue:#70a8ff;--green:#7bd99b;--red:#ff8c8c;--amber:#f5ca68}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 18px;background:#0d1217ee;border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}.top h1{font-size:18px;margin:0}.top a{color:var(--text);text-decoration:none}.layout{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:14px;padding:14px;max-width:1600px;margin:auto}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.side{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 84px);overflow:auto}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}.grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}label{display:grid;gap:4px;color:var(--muted);font-size:12px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:9px 10px;min-height:40px}textarea{min-height:70px;resize:vertical}button{border:1px solid var(--line);border-radius:9px;background:#202a34;color:var(--text);padding:9px 12px;min-height:40px;font-weight:700}button.primary{background:#276bd2;border-color:#397ee9}button.good{background:#17643d;border-color:#248656}button.danger{background:#63252a;border-color:#8b383e}button.ghost{background:transparent}.muted{color:var(--muted)}.small{font-size:12px}.money{font-variant-numeric:tabular-nums;text-align:right}.run,.project,.invoice,.payment{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:var(--card2)}.run.active,.project.active{border-color:var(--blue)}.head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#26323e;color:#cbd8e3;font-size:11px}.pill.open{background:#173c29;color:#8de6ac}.pill.closed{background:#3e2d18;color:#f5ce87}.summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin:10px 0}.summary>div{padding:10px;background:#0e1318;border:1px solid var(--line);border-radius:9px}.summary strong{display:block;font-size:17px}.section{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.section h2,.section h3{margin:0 0 10px}.lines{width:100%;border-collapse:collapse}.lines th,.lines td{padding:5px;vertical-align:top}.lines th{font-size:11px;color:var(--muted);text-align:left}.lines input{min-width:70px}.lines .desc{min-width:250px}.date-control{display:grid;grid-template-columns:40px 1fr 40px;gap:4px}.date-control button{padding:0}.message{position:fixed;right:14px;bottom:14px;max-width:420px;padding:12px 14px;border-radius:10px;background:#15202a;border:1px solid var(--line);box-shadow:0 8px 30px #0008;z-index:20}.message.error{background:#441f24;border-color:#8b383e}.hide{display:none!important}.modal{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.modal>.card{width:min(700px,100%);max-height:90vh;overflow:auto}@media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.grid,.grid3,.summary{grid-template-columns:1fr 1fr}}@media(max-width:560px){.grid,.grid3,.summary{grid-template-columns:1fr}.top{align-items:flex-start}.lines{display:block;overflow:auto}}
 </style></head><body>
-<header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1></div><div class="row"><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
+<header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1></div><div class="row"><a href="/outgoing/open-items"><button class="ghost">Debitoren-OP</button></a><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
 <main class="layout"><aside class="card side"><label>Projekt, Kunde oder Nummer suchen<div class="row"><input id="search" class="grow" placeholder="z. B. 26025 oder Kundenname"><button id="searchButton">Suchen</button></div></label><div id="projects"></div><div class="section"><h3>Rechnungsläufe</h3><div id="runs" class="muted">Projekt auswählen.</div></div></aside><section><div id="empty" class="card">Projekt auswählen und einen Rechnungslauf anlegen.</div><div id="workspace" class="hide"></div></section></main>
 <div id="message" class="message hide"></div>
 <div id="runModal" class="modal hide"><div class="card"><div class="head"><h2>Neuer Rechnungslauf</h2><button data-close="runModal">×</button></div><div class="grid"><label>Bezeichnung<input id="runLabel" placeholder="z. B. Fassade / Zusatzauftrag"></label><label>Kunden-UID<input id="runUid"></label><label>Firma<input id="runCompany"></label><label>Name<input id="runName"></label><label>Straße<input id="runStreet"></label><label>PLZ<input id="runPostal"></label><label>Ort<input id="runCity"></label><label>Land<input id="runCountry" value="Österreich"></label></div><div class="row section"><button id="runSave" class="primary">Rechnungslauf anlegen</button><button data-close="runModal">Abbrechen</button></div></div></div>
@@ -308,4 +361,27 @@ async function savePayment(){try{await api('/api/outgoing/runs/'+selectedRun.id+
 async function saveCorrection(){try{const d=await api('/api/outgoing/invoices/'+correctionTarget+'/corrections',{method:'POST',body:JSON.stringify({kind:$('correctionKind').value,issueDate:$('correctionDate').value,gross:$('creditGross').value,reason:$('correctionReason').value})});close('correctionModal');msg('Korrekturentwurf angelegt.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
 async function showPeriods(){const d=await api('/api/outgoing/periods');$('closedPeriods').innerHTML='<strong>Abgeschlossene Monate</strong><br>'+(d.periods.map(x=>esc(x.period.slice(0,4)+'-'+x.period.slice(4))+' · '+esc(x.closed_at)).join('<br>')||'Noch keiner.');open('periodModal')}async function closePeriod(){const p=$('periodValue').value.replace('-','');if(!confirm('Monat '+$('periodValue').value+' endgültig abschließen?'))return;try{await api('/api/outgoing/periods/close',{method:'POST',body:JSON.stringify({period:p})});msg('Monat abgeschlossen.');showPeriods()}catch(e){msg(e.message,true)}}
 $('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=showPeriods;$('periodClose').onclick=closePeriod;$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');init().catch(e=>msg(e.message,true));})();
+</script></body></html>'''
+
+
+DEBTOR_OP_PAGE = r'''<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KRISTINE · Debitoren-OP</title>
+<style>
+:root{--bg:#0b0e12;--card:#12171d;--card2:#171e26;--line:#2a3440;--text:#eef3f7;--muted:#9aabb9;--blue:#70a8ff;--green:#7bd99b;--red:#ff8c8c;--amber:#f5ca68}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;background:#202a34;color:var(--text);padding:9px 12px;min-height:40px;font-weight:750}button.good{background:#17643d;border-color:#248656}button.ghost{background:transparent}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 18px;background:#0d1217ee;border-bottom:1px solid var(--line)}.top h1{font-size:18px;margin:0}.top a{color:var(--text);text-decoration:none}.wrap{max-width:1580px;margin:auto;padding:14px}.summary{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px}.summary strong{display:block;margin-top:4px;font-size:21px}.muted{color:var(--muted)}.small{font-size:12px}.toolbar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:12px 0}.toolbar label{display:grid;gap:4px;color:var(--muted);font-size:12px}.toolbar input,.toolbar select{min-height:40px;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:8px 10px}.toolbar input{min-width:280px}.group{margin:12px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}.group-head{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;background:#19212a}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:980px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-size:11px;background:#0f1419}td.money,th.money{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#26323e;font-size:11px}.pill.ww{background:#243b59;color:#a9cbff}.pill.late{background:#54272a;color:#ffb0b0}.pill.due{background:#3e321d;color:#f4d489}.actions{display:flex;gap:5px;justify-content:flex-end}.actions button{min-height:32px;padding:5px 8px;font-size:12px}.empty{padding:35px;text-align:center;color:var(--muted)}.modal{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.modal.hide,.hide{display:none}.modal>.card{width:min(520px,100%)}.modal label{display:grid;gap:4px;margin:9px 0;color:var(--muted);font-size:12px}.modal input{min-height:40px;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:8px 10px}.modal-actions{display:flex;gap:8px;margin-top:14px}.message{position:fixed;right:14px;bottom:14px;padding:11px 14px;background:#173c29;border:1px solid #248656;border-radius:9px}.message.error{background:#54272a;border-color:#8b383e}@media(max-width:720px){.summary{grid-template-columns:1fr 1fr}.top{align-items:flex-start}.toolbar input{min-width:0;width:100%}}@media print{body{background:#fff;color:#111}.top,.toolbar,.actions,.message,.modal{display:none!important}.wrap{max-width:none;padding:0}.card,.group{border-color:#aaa;background:#fff}.summary{grid-template-columns:repeat(4,1fr)}th{background:#eee;color:#333}th,td{border-color:#ccc;padding:5px 6px}.group{break-inside:avoid}.pill{border:1px solid #777;background:#fff!important;color:#111!important}}
+</style></head><body>
+<header class="top"><div><a href="/">← KRISTINE</a><h1>Debitoren · Offene Posten</h1><div id="syncInfo" class="small muted">WW-Abgleich wird geprüft …</div></div><div><a href="/outgoing/invoices"><button class="ghost">Ausgangsrechnungen</button></a> <button id="sync" class="ghost">Jetzt mit WW abgleichen</button> <button id="print" class="ghost">Drucken</button></div></header>
+<main class="wrap"><section class="summary"><div class="card">Gesamt offen<strong id="total">–</strong></div><div class="card">Davon überfällig<strong id="overdue">–</strong></div><div class="card">Kunden<strong id="customers">–</strong></div><div class="card">Rechnungen<strong id="count">–</strong></div></section><section class="toolbar"><label>Suche<input id="search" placeholder="Kunde, Rechnung oder Projekt"></label><label>Sortierung<select id="sort"><option value="due">Fälligkeit</option><option value="amount">Betrag absteigend</option><option value="customer">Kunde A–Z</option></select></label><label>Ansicht<select id="view"><option value="customer">Nach Kunden gruppiert</option><option value="list">Gesamtliste</option></select></label></section><section id="rows"><div class="empty">Offene Posten werden geladen …</div></section></main>
+<div id="payment" class="modal hide"><div class="card"><h2>Zahlung zuordnen</h2><div id="payTarget" class="muted"></div><label>Zahlungsdatum<input id="payDate" type="date"></label><label>Betrag brutto<input id="payGross" inputmode="decimal"></label><label>Text / Referenz<input id="payRef" placeholder="z. B. Bankeingang"></label><div class="modal-actions"><button id="paySave" class="good">Zahlung buchen</button><button id="payCancel">Abbrechen</button></div></div></div><div id="message" class="message hide"></div>
+<script>
+(()=>{const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0)),date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}.${m[2]}.${m[1]}`:(s||'–')},today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);let items=[],payItem=null;
+function msg(t,error=false){const e=$('message');e.textContent=t;e.className='message'+(error?' error':'');setTimeout(()=>e.classList.add('hide'),4500)}async function api(url,opt={}){const r=await fetch(url,{cache:'no-store',headers:{'Content-Type':'application/json'},...opt}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');return d}
+function sorted(xs){const mode=$('sort').value;xs=[...xs];if(mode==='amount')xs.sort((a,b)=>b.openGross-a.openGross||a.dueDate.localeCompare(b.dueDate));else if(mode==='customer')xs.sort((a,b)=>a.customer.localeCompare(b.customer,'de')||a.dueDate.localeCompare(b.dueDate));else xs.sort((a,b)=>a.dueDate.localeCompare(b.dueDate)||a.customer.localeCompare(b.customer,'de'));return xs}
+function row(x){const status=x.isOverdue?`<span class="pill late">${x.overdueDays} Tage überfällig</span>`:'<span class="pill due">offen</span>',source=x.source==='WW'?'<span class="pill ww">WW</span>':'<span class="pill">KRISTINE</span>',pdf=x.pdfAvailable?`<a href="/api/outgoing/invoices/${x.invoiceId}/pdf" target="_blank"><button>PDF</button></a>`:'';return `<tr><td>${status}</td><td>${date(x.dueDate)}<div class="small muted">RE ${date(x.issueDate)}</div></td><td><strong>${esc(x.customer)}</strong><div class="small muted">${esc(x.customerName||'')}</div></td><td><strong>${esc(x.invoiceNumber)}</strong><div class="small muted">${esc(x.kind)} · ${source}</div></td><td>${esc(x.projectNumber||'–')}<div class="small muted">${esc(x.projectTitle||x.runLabel||'')}</div></td><td class="money">${money(x.openGross)}<div class="small muted">von ${money(x.invoiceGross)}</div></td><td class="actions">${pdf}<button class="good" data-pay="${x.invoiceId}">Zahlung</button></td></tr>`}
+function table(xs){return `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Fällig / Rechnung</th><th>Kunde</th><th>Rechnung</th><th>Projekt</th><th class="money">Offen</th><th></th></tr></thead><tbody>${xs.map(row).join('')}</tbody></table></div>`}
+function render(){const q=$('search').value.trim().toLocaleLowerCase('de'),filtered=sorted(items.filter(x=>!q||[x.customer,x.customerName,x.invoiceNumber,x.projectNumber,x.projectTitle,x.runLabel].join(' ').toLocaleLowerCase('de').includes(q)));if(!filtered.length){$('rows').innerHTML='<div class="card empty">Keine passenden offenen Posten.</div>';return}if($('view').value==='list')$('rows').innerHTML=`<div class="group">${table(filtered)}</div>`;else{const groups=new Map();filtered.forEach(x=>{if(!groups.has(x.customerKey))groups.set(x.customerKey,[]);groups.get(x.customerKey).push(x)});$('rows').innerHTML=[...groups.values()].map(xs=>`<div class="group"><div class="group-head"><strong>${esc(xs[0].customer)}</strong><span>${xs.length} Rechnung(en) · <strong>${money(xs.reduce((s,x)=>s+x.openGross,0))}</strong></span></div>${table(xs)}</div>`).join('')}document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>openPayment(Number(b.dataset.pay)))}
+async function load(sync=false){const d=await api('/api/outgoing/open-items'+(sync?'?sync=1':''));items=d.items;$('total').textContent=money(d.totalOpen);$('overdue').textContent=money(d.totalOverdue);$('customers').textContent=d.customerCount;$('count').textContent=items.length;const s=d.lastWwSync;$('syncInfo').textContent=s.at?'Letzter WW-Abgleich: '+date(s.at)+' '+String(s.at).slice(11,16)+' Uhr':'Noch kein WW-Abgleich';render()}
+function openPayment(id){payItem=items.find(x=>x.invoiceId===id);if(!payItem)return;$('payTarget').textContent=`${payItem.customer} · Rechnung ${payItem.invoiceNumber} · offen ${money(payItem.openGross)}`;$('payDate').value=today();$('payGross').value=String(payItem.openGross).replace('.',',');$('payRef').value='';$('payment').classList.remove('hide')}
+async function savePayment(){try{await api(`/api/outgoing/runs/${payItem.runId}/payments`,{method:'POST',body:JSON.stringify({invoiceId:payItem.invoiceId,paymentDate:$('payDate').value,gross:$('payGross').value,reference:$('payRef').value})});$('payment').classList.add('hide');msg('Zahlung wurde zugeordnet.');await load(false)}catch(e){msg(e.message,true)}}
+$('search').oninput=render;$('sort').onchange=render;$('view').onchange=render;$('paySave').onclick=savePayment;$('payCancel').onclick=()=>$('payment').classList.add('hide');$('print').onclick=()=>window.print();$('sync').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-Rechnung(en) übernommen.`);await load(false)}catch(e){msg(e.message,true)}};load(true).catch(e=>msg(e.message,true));})();
 </script></body></html>'''

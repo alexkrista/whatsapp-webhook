@@ -69,6 +69,18 @@ class OutgoingStoreTests(unittest.TestCase):
         issued = self.store.prepare_issue(draft["id"])
         self.assertEqual(issued["invoice_number"], "2608001")
 
+    def test_debtor_open_items_allocate_unassigned_payment_oldest_first(self):
+        first = self.store.prepare_issue(self.store.save_draft(self.payload(amount="5000"))["id"])
+        second = self.store.prepare_issue(self.store.save_draft(self.payload(amount="10000"))["id"])
+        self.store.add_payment(self.run["id"], {
+            "paymentDate": "2026-08-31", "gross": "7000", "reference": "Bankeingang",
+        })
+        items = self.store.debtor_open_items("2026-09-20")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["invoiceId"], second["id"])
+        self.assertEqual(items[0]["openGross"], 5000.0)
+        self.assertEqual(items[0]["overdueDays"], 6)
+
     def test_zero_vat_requires_uid_and_note(self):
         payload = self.payload()
         payload["taxMode"] = "RC19"
@@ -124,6 +136,7 @@ class OutgoingStoreTests(unittest.TestCase):
         credit = self.store.prepare_issue(credit["id"])
         self.assertEqual(credit["invoice_number"], "2609001")
         self.assertEqual(credit["increment_gross"], -120.0)
+        self.assertEqual(self.store.debtor_open_items("2026-09-20")[0]["openGross"], 11880.0)
 
     def test_ww_open_item_import_is_idempotent_and_uses_opening_balance(self):
         row = {
@@ -139,6 +152,7 @@ class OutgoingStoreTests(unittest.TestCase):
         second = self.store.sync_ww_open_items([row])
         self.assertEqual(first["imported"], 1)
         self.assertEqual(second["skipped"], 1)
+        self.assertTrue(self.store.last_ww_sync()["at"])
         imported_run = self.store.run(first["runIds"][0])
         self.assertEqual(imported_run["currentOpen"], 3500.0)
 
