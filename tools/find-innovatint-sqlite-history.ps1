@@ -5,24 +5,72 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-PythonExe {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  if (-not (Test-Path -LiteralPath $Path)) { return $false }
+  if ($Path -match '(?i)\\WindowsApps\\') { return $false }
+
+  $oldPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "SilentlyContinue"
+    $output = & $Path -c "import sys,sqlite3; sys.stdout.write(sys.executable)" 2>&1
+    $code = $LASTEXITCODE
+    if ($code -eq 0 -and -not [string]::IsNullOrWhiteSpace(($output -join ''))) { return $true }
+  }
+  catch {}
+  finally { $ErrorActionPreference = $oldPreference }
+  return $false
+}
+
 function Find-PythonExe {
   $candidates = @(
     "C:\wuser\Python27\python.exe",
-    "C:\Python27\python.exe",
+    "C:\wuser\Python27\bin\python.exe",
     "C:\wuser\Innovatint\python.exe",
+    "C:\wuser\Innovatint\Python27\python.exe",
+    "C:\wuser\Innovatint\python\python.exe",
+    "C:\wuser\Innovatint\runtime\python.exe",
+    "C:\Python27\python.exe",
     "C:\Program Files (x86)\Python27\python.exe",
     "C:\Program Files\Python27\python.exe",
     "C:\Program Files (x86)\CPSColor\Python27\python.exe",
-    "C:\Program Files\CPSColor\Python27\python.exe"
+    "C:\Program Files\CPSColor\Python27\python.exe",
+    "C:\Program Files (x86)\Innovatint\Python27\python.exe",
+    "C:\Program Files (x86)\Datacolor\Python27\python.exe"
   )
   foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate) { return $candidate }
+    if (Test-PythonExe -Path $candidate) { return $candidate }
   }
+
+  # Innovatint/Suite6 bringt Python oft eingebettet an einem nicht standardisierten Ort mit.
+  # Deshalb zuerst lokal in den bekannten Programmverzeichnissen suchen und NICHT den
+  # Microsoft-Store-App-Alias aus WindowsApps verwenden.
+  $roots = @(
+    "C:\wuser",
+    "C:\Program Files (x86)\Innovatint",
+    "C:\Program Files\Innovatint",
+    "C:\Program Files (x86)\CPSColor",
+    "C:\Program Files\CPSColor",
+    "C:\Program Files (x86)\Datacolor",
+    "C:\Program Files\Datacolor",
+    "C:\Program Files (x86)\Chromaflo",
+    "C:\Program Files\Chromaflo"
+  )
+  foreach ($root in $roots) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    $found = @(Get-ChildItem -LiteralPath $root -Filter python.exe -Recurse -File -ErrorAction SilentlyContinue)
+    foreach ($item in $found) {
+      if (Test-PythonExe -Path $item.FullName) { return $item.FullName }
+    }
+  }
+
   foreach ($name in @("python.exe","python2.exe","python3.exe")) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd -and (Test-PythonExe -Path $cmd.Source)) { return $cmd.Source }
   }
-  throw "python.exe not found"
+
+  throw "Echtes python.exe mit sqlite3-Unterstuetzung nicht gefunden. Microsoft-Store-App-Alias wird absichtlich ignoriert."
 }
 
 if (-not (Test-Path -LiteralPath $DbPath)) {
@@ -30,6 +78,7 @@ if (-not (Test-Path -LiteralPath $DbPath)) {
 }
 
 $python = Find-PythonExe
+Write-Host ("Python gefunden: " + $python)
 $tempPy = Join-Path $env:TEMP ("kristine_sqlite_history_" + [guid]::NewGuid().ToString("N") + ".py")
 
 $py = @'
