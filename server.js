@@ -56,6 +56,7 @@ const { registerRegieAssistant } = require("./regie-assistant");
 const { registerDayClose } = require("./day-close");
 const { registerArchiveSearch } = require("./archive-search");
 const { registerTowerPlanning } = require("./tower-planning");
+const { installOutlookCalendar } = require("./kristine-outlook-calendar");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -1641,6 +1642,14 @@ registerTowerPlanning(app, {
   requireAdmin,
   readEmployees,
 });
+installOutlookCalendar(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  adminToken: ADMIN_TOKEN,
+  logger: console,
+});
+console.log("✅ KRISTINE Outlook-Kalender registriert");
 
 // ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {
