@@ -40,6 +40,7 @@ on:
       - 'tools/extract-innovatint-db-connection.ps1'
       - 'tools/find-innovatint-sqlite-history.ps1'
       - 'tools/find-innovatint-sqlite-native.ps1'
+      - 'tools/find-innovatint-sqlite-native-v2.ps1'
 
 jobs:
   syntax:
@@ -86,7 +87,8 @@ jobs:
             "tools/find-innovatint-db-config.ps1",
             "tools/extract-innovatint-db-connection.ps1",
             "tools/find-innovatint-sqlite-history.ps1",
-            "tools/find-innovatint-sqlite-native.ps1"
+            "tools/find-innovatint-sqlite-native.ps1",
+            "tools/find-innovatint-sqlite-native-v2.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -111,7 +113,8 @@ jobs:
             "tools/find-innovatint-db-config.ps1",
             "tools/extract-innovatint-db-connection.ps1",
             "tools/find-innovatint-sqlite-history.ps1",
-            "tools/find-innovatint-sqlite-native.ps1"
+            "tools/find-innovatint-sqlite-native.ps1",
+            "tools/find-innovatint-sqlite-native-v2.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
