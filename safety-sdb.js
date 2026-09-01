@@ -31,6 +31,15 @@ function first(text, patterns) {
   for (const pattern of patterns) { const match = pattern.exec(text); if (match?.[1]) return clean(match[1]); }
   return "";
 }
+function extractManufacturer(text) {
+  const compact = String(text || "").replace(/\r/g, "");
+  const block = section(compact, "1\\.3", "1\\.4") || compact.slice(0, 12000);
+  const value = first(block, [
+    /^\s*(?:Hersteller\s*\/\s*Lieferant|Hersteller|Lieferant|Firma|Unternehmen)\s*:\s*([^\n]{2,220})\s*$/im,
+  ]).replace(/\s+(?:Tel\.?|Telefon|Fax|E-?Mail|Internet)\s*[:.].*$/i, "").trim();
+  if (!value || /^(?:en[,\s]|der\s+das\b|des\s+sicherheitsdatenblatts?\b)/i.test(value)) return "";
+  return clean(value, 300);
+}
 function parseDate(raw) {
   const value = clean(raw, 30); let match;
   if ((match = value.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/))) return `${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`;
@@ -53,7 +62,7 @@ function extractMetadata(text, fileName = "") {
   const compact = text.replace(/\r/g, "");
   const firstPage = compact.slice(0, 9000);
   const product = first(firstPage, [/(?:Produktname|Handelsname|Bezeichnung des Gemischs|Product name)\s*[:\-]?\s*([^\n]{2,180})/i]) || clean(path.basename(fileName, path.extname(fileName)).replace(/\b(MSDS|SDB|Sicherheitsdatenblatt|DE|Deutsch)\b/gi," ").replace(/[()_]+/g," "));
-  const manufacturer = first(compact, [/(?:Hersteller|Lieferant|Firma|Unternehmen)\s*[:\-]?\s*([^\n]{2,180})/i, /(?:Einzelheiten zum Lieferanten[^\n]*\n)\s*([^\n]{2,180})/i]);
+  const manufacturer = extractManufacturer(compact);
   const productCode = first(firstPage, [/(?:Produktcode|Artikelnummer|Artikel-Nr\.?|Product code)\s*[:\-]?\s*([^\n]{1,100})/i]);
   const dateRaw = first(firstPage, [/(?:Überarbeitet am|Ausgabedatum|Erstellt am|Datum der letzten Ausgabe|Revision date)\s*[:\-]?\s*([^\n]{4,40})/i]);
   const version = first(firstPage, [/(?:Version|Revision|Überarbeitung)\s*[:\-]?\s*([\w.\-]{1,30})/i]);
@@ -152,11 +161,11 @@ function registerSafetySdb(app, { dataDir, requireAdmin }) {
     if(!authorized)return res.status(401).json({ok:false,error:"Agent nicht autorisiert"});
     const rows=Array.isArray(req.body?.documents)?req.body.documents:[]; const index=await readIndex(); let accepted=0;
     for(const row of rows.slice(0,2000)){if(!/^[a-f0-9]{64}$/i.test(row.sha256||"")||!clean(row.relativePath))continue;
-      const current=index.documents.find((x)=>x.sha256===row.sha256); if(current){current.lastSeenAt=new Date().toISOString();if(row.metadata&&typeof row.metadata==="object"){current.metadata=row.metadata;current.documentType=clean(row.metadata.documentType,80)||"unklar";current.reviewStatus=current.documentType==="sdb"?"pruefung_erforderlich":"nicht_sdb";}continue;}
+      const current=index.documents.find((x)=>x.sha256===row.sha256); if(current){current.lastSeenAt=new Date().toISOString();if(row.metadata&&typeof row.metadata==="object"){if(current.reviewStatus==="freigegeben"){current.latestAgentMetadata=row.metadata;current.reanalysisPending=true;}else{current.metadata=row.metadata;current.documentType=clean(row.metadata.documentType,80)||"unklar";current.reviewStatus=current.documentType==="sdb"?"pruefung_erforderlich":"nicht_sdb";}}continue;}
       const documentType=clean(row.metadata?.documentType,80)||"unklar";index.documents.unshift({id:crypto.randomUUID(),sha256:row.sha256.toLowerCase(),fileName:path.basename(clean(row.relativePath,1000)),size:Number(row.size)||0,modifiedAt:clean(row.modifiedAt,50),metadata:row.metadata||{},documentType,detectionStatus:"unklar",reviewStatus:documentType==="sdb"?"pruefung_erforderlich":"nicht_sdb",autoApproved:false,source:{type:"n_drive_agent",sourceOfTruth:"N:\\SdB",relativePath:clean(row.relativePath,1000)},createdAt:new Date().toISOString()}); accepted++;
     } index.updatedAt=new Date().toISOString(); await writeIndex(index); res.json({ok:true,accepted,total:index.documents.length});
   });
   console.log("✅ KRISTINE Arbeitssicherheit · SDB-Eingang registriert");
 }
 
-module.exports={STATUS,extractMetadata,compareVersions,diffSafety,classify,registerSafetySdb};
+module.exports={STATUS,extractMetadata,extractManufacturer,compareVersions,diffSafety,classify,registerSafetySdb};
