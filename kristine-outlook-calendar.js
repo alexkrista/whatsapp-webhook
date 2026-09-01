@@ -105,6 +105,43 @@ function installOutlookCalendar(app, deps = {}) {
     return body;
   }
 
+  async function redeemLoginSession(sessionId) {
+    const session = loginSessions.get(sessionId);
+    if (!session) throw Object.assign(new Error("Anmeldecode ist abgelaufen."), { code:"session_expired" });
+    if (session.status === "connected") return { account:session.account };
+    if (session.error) throw new Error(session.error);
+    if (session.redeeming) return null;
+    session.redeeming = true;
+    try {
+      const token = await tokenRequest({ client_id:CLIENT_ID, grant_type:"urn:ietf:params:oauth:grant-type:device_code", device_code:session.deviceCode });
+      const account = accountFromToken(token);
+      if (account !== EXPECTED_ACCOUNT) throw new Error(`Angemeldet als ${account || "unbekannt"}; für V1 ist nur ${EXPECTED_ACCOUNT} erlaubt.`);
+      if (!token.refresh_token) throw new Error("Microsoft hat keinen dauerhaften Refresh-Token geliefert. Bitte offline_access prüfen.");
+      token.account = account;
+      await saveToken(token);
+      const persisted = await loadToken();
+      if (accountFromToken(persisted) !== EXPECTED_ACCOUNT || !persisted.refresh_token) throw new Error("Der Outlook-Token-Cache konnte nach dem Speichern nicht verifiziert werden.");
+      session.status = "connected"; session.account = account;
+      await audit("auth_success", { account, scopes:SCOPES });
+      return { account };
+    } catch (error) {
+      if (["authorization_pending", "slow_down"].includes(error.code)) return null;
+      session.error = String(error?.message || error);
+      throw error;
+    } finally { session.redeeming = false; }
+  }
+
+  function pollLoginInBackground(sessionId) {
+    const run = async () => {
+      const session = loginSessions.get(sessionId);
+      if (!session || session.status === "connected" || session.error || Date.now() > session.expiresAt) return;
+      try { await redeemLoginSession(sessionId); } catch {}
+      const latest = loginSessions.get(sessionId);
+      if (latest && latest.status !== "connected" && !latest.error && Date.now() <= latest.expiresAt) setTimeout(run, Math.max(5, latest.interval) * 1000);
+    };
+    setTimeout(run, 1000);
+  }
+
   async function accessToken() {
     let token = await loadToken();
     if (!token) throw new Error("Outlook ist noch nicht angemeldet.");
@@ -204,7 +241,8 @@ function installOutlookCalendar(app, deps = {}) {
       if (!encryptionSecret()) return res.status(503).json({ ok:false, error:"Token-Verschlüsselung ist nicht konfiguriert." });
       const response = await fetch(`${LOGIN_ROOT}/devicecode`, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:new URLSearchParams({ client_id:CLIENT_ID, scope:SCOPES }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error_description || "Device Code konnte nicht erstellt werden.");
-      const sessionId = crypto.randomUUID(); loginSessions.set(sessionId, { deviceCode:body.device_code, interval:Number(body.interval || 5), expiresAt:Date.now() + Number(body.expires_in || 900) * 1000 });
+      const sessionId = crypto.randomUUID(); loginSessions.set(sessionId, { deviceCode:body.device_code, interval:Number(body.interval || 5), expiresAt:Date.now() + Number(body.expires_in || 900) * 1000, status:"pending", account:"", error:"", redeeming:false });
+      pollLoginInBackground(sessionId);
       res.json({ ok:true, sessionId, userCode:body.user_code, verificationUri:body.verification_uri, message:body.message, expiresIn:body.expires_in, interval:Number(body.interval || 5) });
     } catch (error) { res.status(502).json({ ok:false, error:String(error?.message || error) }); }
   });
@@ -214,17 +252,11 @@ function installOutlookCalendar(app, deps = {}) {
     const sessionId = String(req.body?.sessionId || ""); const session = loginSessions.get(sessionId);
     if (!session || Date.now() > session.expiresAt) return res.status(410).json({ ok:false, error:"Anmeldecode ist abgelaufen." });
     try {
-      const token = await tokenRequest({ client_id:CLIENT_ID, grant_type:"urn:ietf:params:oauth:grant-type:device_code", device_code:session.deviceCode });
-      const account = accountFromToken(token); if (account !== EXPECTED_ACCOUNT) throw new Error(`Angemeldet als ${account || "unbekannt"}; für V1 ist nur ${EXPECTED_ACCOUNT} erlaubt.`);
-      if (!token.refresh_token) throw new Error("Microsoft hat keinen dauerhaften Refresh-Token geliefert. Bitte offline_access prüfen.");
-      token.account = account; await saveToken(token);
-      const persisted = await loadToken();
-      if (accountFromToken(persisted) !== EXPECTED_ACCOUNT || !persisted.refresh_token) throw new Error("Der Outlook-Token-Cache konnte nach dem Speichern nicht verifiziert werden.");
-      loginSessions.delete(sessionId); await audit("auth_success", { account, scopes:SCOPES });
-      res.json({ ok:true, status:"connected", account });
+      const connected = await redeemLoginSession(sessionId);
+      if (!connected) return res.status(202).json({ ok:true, status:"pending", retryAfter:session.interval });
+      res.json({ ok:true, status:"connected", account:connected.account });
     } catch (error) {
-      if (["authorization_pending", "slow_down"].includes(error.code)) return res.status(202).json({ ok:true, status:"pending", retryAfter:error.code === "slow_down" ? session.interval + 5 : session.interval });
-      loginSessions.delete(sessionId); res.status(400).json({ ok:false, error:String(error?.message || error) });
+      res.status(400).json({ ok:false, error:String(error?.message || error) });
     }
   });
 
