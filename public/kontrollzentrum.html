@@ -64,7 +64,7 @@ function actualHours(j){return num(calc(j).actualHours ?? calc(j).orderHours)}
 function targetHours(j){return num(calc(j).calculatedHours)}
 function openOrderHours(j){if(j.status==='Auftrag')return Math.max(0,targetHours(j));if(j.status==='Laufend')return Math.max(0,targetHours(j)-actualHours(j));return 0}
 function contractAmount(j){return num(j.contractAmount ?? calc(j).contractAmount)}
-function dateValue(j){return j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
+function dateValue(j){return j.offerFollowUpAt||j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
 function offerProbability(j){const raw=dateValue(j);if(!raw)return null;const d=new Date(String(raw).slice(0,10)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const age=Math.max(0,Math.floor((Date.now()-d.getTime())/86400000));if(age<=7)return 1;if(age<=14)return .7;if(age<=21)return .5;if(age<=28)return .3;return 0}
 function assignmentRows(){const candidates=[bootstrap.assignments,bootstrap.planning?.assignments,bootstrap.data?.assignments];for(const c of candidates){if(Array.isArray(c))return c;if(c&&typeof c==='object')return Object.values(c).flat().filter(Boolean)}return []}
 function assignmentJobId(a){return String(a?.jobId??a?.siteId??a?.job?.jobId??a?.job?.id??'')}

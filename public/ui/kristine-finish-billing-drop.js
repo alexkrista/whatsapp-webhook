@@ -90,7 +90,7 @@
       api("/admin/api/jobs"),api("/kristine/api/bootstrap").catch(()=>({})),api(`/admin/api/job/${encodeURIComponent(jobId)}/days`).catch(()=>({detailed:[]})),api("/kristine/api/material-requests").catch(()=>({requests:[]}))
     ]);
     const job=(jobsRes.jobs||[]).find(j=>String(j.jobId)===String(jobId));if(!job)throw new Error("Baustelle nicht gefunden.");
-    if(job.status==="Angebot")throw new Error("Diese Baustelle ist noch ein Angebot. Erst Auftrag anlegen, dann abschließen.");
+    if(String(job.status||"").startsWith("Angebot"))throw new Error("Diese Baustelle ist noch ein Angebot. Erst Auftrag anlegen, dann abschließen.");
     if(job.status==="Geschlossen")throw new Error("Diese Baustelle ist bereits geschlossen.");
 
     const days=daysRes.detailed||[];

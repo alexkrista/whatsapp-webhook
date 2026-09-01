@@ -2197,7 +2197,9 @@ async function readJobMeta(jobId) {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
-      status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
+      status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
+      offerFollowUpAt: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.offerFollowUpAt || "")) ? String(meta.offerFollowUpAt) : "",
+      offerRejectedAt: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.offerRejectedAt || "")) ? String(meta.offerRejectedAt) : "",
       street: String(meta.street || "").trim(),
       houseNumber: String(meta.houseNumber || "").trim(),
       postalCode: String(meta.postalCode || "").trim(),
@@ -2249,7 +2251,9 @@ async function writeJobMeta(jobId, patch) {
     name: String(patch.name ?? existing.name ?? "").trim().slice(0, 120),
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
-    status: ["Angebot", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
+    status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
+    offerFollowUpAt: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.offerFollowUpAt ?? existing.offerFollowUpAt ?? "")) ? String(patch.offerFollowUpAt ?? existing.offerFollowUpAt) : "",
+    offerRejectedAt: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.offerRejectedAt ?? existing.offerRejectedAt ?? "")) ? String(patch.offerRejectedAt ?? existing.offerRejectedAt) : "",
     street: String(patch.street ?? existing.street ?? "").trim().slice(0, 140),
     houseNumber: String(patch.houseNumber ?? existing.houseNumber ?? "").trim().slice(0, 40),
     postalCode: String(patch.postalCode ?? existing.postalCode ?? "").trim().slice(0, 20),
@@ -2636,6 +2640,8 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       notes: req.body?.notes,
       favorite: req.body?.favorite,
       status: req.body?.status,
+      offerFollowUpAt: req.body?.offerFollowUpAt,
+      offerRejectedAt: req.body?.offerRejectedAt,
       street: req.body?.street,
       houseNumber: req.body?.houseNumber,
       postalCode: req.body?.postalCode,
@@ -2651,7 +2657,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
+    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
     if (changed.length) {

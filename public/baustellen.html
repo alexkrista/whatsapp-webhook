@@ -18,7 +18,7 @@
     <div><h1>Baustellen</h1><div class="subtitle">Übersicht aller Baustellen · Status zuerst, darin neueste Nummer zuerst</div></div>
     <div class="head-actions">
       <input id="search" class="search" type="search" placeholder="Baustelle suchen …" autocomplete="off">
-      <select id="statusFilter"><option value="">Alle Status</option><option>Auftrag</option><option>Laufend</option><option>Fertig – nicht abgerechnet</option><option>Angebot</option><option>Geschlossen</option></select>
+      <select id="statusFilter"><option value="">Alle Status</option><option>Auftrag</option><option>Laufend</option><option>Fertig – nicht abgerechnet</option><option>Angebot</option><option>Angebot – abgelehnt</option><option>Geschlossen</option></select>
       <button type="button" id="newJob">+ Neue Baustelle</button>
       <div class="sort-note">Sortierung: Status · Nummer absteigend</div>
     </div>
@@ -64,7 +64,7 @@
 <script>
 createKristaTopbar({active:'baustellen',build:'0024.01'});
 const token=new URLSearchParams(location.search).get('token')||'';
-const STATUS_ORDER=['Auftrag','Laufend','Fertig – nicht abgerechnet','Angebot','Geschlossen'];
+const STATUS_ORDER=['Auftrag','Laufend','Fertig – nicht abgerechnet','Angebot','Angebot – abgelehnt','Geschlossen'];
 const WEEKLY_CAPACITY_FALLBACK=312;
 let jobs=[],bootstrap={},scrollBeforeDetail=0;
 function withToken(path){const u=new URL(path,location.origin);if(token)u.searchParams.set('token',token);return u.pathname+u.search+u.hash}
@@ -82,7 +82,7 @@ function openOrderHours(j){const s=String(j.status||'');const target=targetHours
 function contractAmount(j){return num(j.contractAmount ?? calc(j).contractAmount)}
 function fullAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function mapsUrl(j){const a=fullAddress(j);return a?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a):'#'}
-function dateValue(j){return j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
+function dateValue(j){return j.offerFollowUpAt||j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
 function offerProbability(j){const raw=dateValue(j);if(!raw)return null;const d=new Date(String(raw).slice(0,10)+'T12:00:00');if(Number.isNaN(d.getTime()))return null;const age=Math.max(0,Math.floor((Date.now()-d.getTime())/86400000));if(age<=7)return 1;if(age<=14)return .7;if(age<=21)return .5;if(age<=28)return .3;return 0}
 function assignmentRows(){const candidates=[bootstrap.assignments,bootstrap.planning?.assignments,bootstrap.data?.assignments];for(const c of candidates){if(Array.isArray(c))return c;if(c&&typeof c==='object')return Object.values(c).flat().filter(Boolean)}return []}
 function assignmentJobId(a){return String(a?.jobId??a?.siteId??a?.job?.jobId??a?.job?.id??'')}

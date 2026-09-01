@@ -25,7 +25,7 @@
   function oldTotal(j){return num(calc(j).actualHours)}
   function oldOrder(j){const c=calc(j);const direct=Number(c.orderHours);return Number.isFinite(direct)?Math.max(0,direct):Math.max(0,oldTotal(j)-num(c.actualRegieHours))}
   function contract(j){return num(j.contractAmount??calc(j).contractAmount)}
-  function dateValue(j){return j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
+  function dateValue(j){return j.offerFollowUpAt||j.offerDate||j.createdAt||j.startDate||j.latestDay||''}
   function ageDays(j){const raw=dateValue(j);if(!raw)return null;const d=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(d.getTime())?null:Math.max(0,Math.floor((Date.now()-d.getTime())/86400000))}
   function nowMinutes(){const d=new Date();return d.getHours()*60+d.getMinutes()+d.getSeconds()/60}
 

@@ -301,7 +301,7 @@ function render(){
     <div class="edit" id="edit-${esc(j.jobId)}">
       <label>Baustellennummer ändern</label><input id="newid-${esc(j.jobId)}" value="${esc(j.jobId)}"><p class="actions"><button class="secondary" onclick="renameJob('${esc(j.jobId)}')">Nummer ändern</button></p>
       <label>Baustellenname</label><input id="name-${esc(j.jobId)}" value="${esc(j.name||'')}">
-      <label>Status</label><select id="status-${esc(j.jobId)}" class="wide"><option ${j.status==='Angebot'?'selected':''}>Angebot</option><option ${j.status==='Auftrag'?'selected':''}>Auftrag</option><option ${j.status==='Laufend'?'selected':''}>Laufend</option><option ${j.status==='Fertig – nicht abgerechnet'?'selected':''}>Fertig – nicht abgerechnet</option><option ${j.status==='Geschlossen'?'selected':''}>Geschlossen</option></select>
+      <label>Status</label><select id="status-${esc(j.jobId)}" class="wide"><option ${j.status==='Angebot'?'selected':''}>Angebot</option><option ${j.status==='Angebot – abgelehnt'?'selected':''}>Angebot – abgelehnt</option><option ${j.status==='Auftrag'?'selected':''}>Auftrag</option><option ${j.status==='Laufend'?'selected':''}>Laufend</option><option ${j.status==='Fertig – nicht abgerechnet'?'selected':''}>Fertig – nicht abgerechnet</option><option ${j.status==='Geschlossen'?'selected':''}>Geschlossen</option></select>
       <label>Straße</label><input id="street-${esc(j.jobId)}" value="${esc(j.street||'')}">
       <label>Hausnummer</label><input id="house-${esc(j.jobId)}" value="${esc(j.houseNumber||'')}">
       <label>PLZ</label><input id="postal-${esc(j.jobId)}" value="${esc(j.postalCode||'')}">
