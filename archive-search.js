@@ -631,6 +631,19 @@ function refinedProjectQuery(currentQuery, projectNumber) {
 
 function registerArchiveSearch(app) {
 
+  app.get("/api/tower/planning", async (req, res) => {
+    try {
+      const year = Number(req.query.year || 2026);
+      const response = await fetch(`${ARCHIVE_CONNECTOR}/tower/planning?year=${encodeURIComponent(year)}`, { headers:{Accept:"application/json"} });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) throw new Error(data?.error || `WW-Connector HTTP ${response.status}`);
+      res.setHeader("Cache-Control", "private, max-age=300");
+      return res.json(data);
+    } catch (err) {
+      return res.status(502).json({ok:false,error:String(err?.message || err)});
+    }
+  });
+
   app.get("/gehirn", async (req, res) => {
     const runtimeToken = String(req.query.token || "").trim();
     const backUrl = `/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}`;

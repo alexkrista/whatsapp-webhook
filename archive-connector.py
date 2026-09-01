@@ -3890,6 +3890,58 @@ def _customer_revenue_by_year(project_indices):
     return result
 
 
+def company_planning_year(year):
+    """Monatliche, deduplizierte WW-Rechnungsumsätze für den Tower."""
+    year = int(year)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute("""
+        WITH InvoiceRows AS (
+            SELECT
+                b.ProjektIndex,
+                LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
+                r.cUmsatzNetto,
+                COALESCE(r.dzRechnungsdatum,b.dzDocDatum,b.Geändert,b.dzInhaltGeaendert,b.Aufgenommen) AS Rechnungsdatum,
+                COALESCE(b.Geändert,b.dzInhaltGeaendert,b.dzDocDatum,b.Aufgenommen) AS VersionZeit,
+                b.gID
+            FROM dbo.[Bücher] AS b
+            INNER JOIN dbo.Rechnung AS r ON r.gBuchID = b.gID
+            WHERE NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+              AND ISNULL(b.Storno, 0) = 0
+              AND r.cUmsatzNetto IS NOT NULL
+        ), LatestPerInvoiceNumber AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY ProjektIndex, sBuchNummer
+                ORDER BY VersionZeit DESC, gID DESC
+            ) AS rn
+            FROM InvoiceRows
+        )
+        SELECT MONTH(Rechnungsdatum) AS UmsatzMonat,
+               SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoUmsatz,
+               COUNT(*) AS BelegAnzahl
+        FROM LatestPerInvoiceNumber
+        WHERE rn = 1 AND YEAR(Rechnungsdatum) = ?
+        GROUP BY MONTH(Rechnungsdatum)
+        ORDER BY UmsatzMonat
+    """, year).fetchall()
+    con.close()
+    monthly = [{"month": i, "netRevenue": 0.0, "invoiceCount": 0} for i in range(1, 13)]
+    for row in rows:
+        month = int(row.UmsatzMonat)
+        monthly[month - 1] = {
+            "month": month,
+            "netRevenue": float(row.NettoUmsatz or 0),
+            "invoiceCount": int(row.BelegAnzahl or 0),
+        }
+    return {
+        "year": year,
+        "monthlyRevenue": monthly,
+        "netRevenue": round(sum(x["netRevenue"] for x in monthly), 2),
+        "invoiceCount": sum(x["invoiceCount"] for x in monthly),
+        "revenueSource": "WinWorker Rechnungen netto · je Rechnungsnummer nur jüngste Version",
+    }
+
+
 def project_address_candidates(query, limit=30):
     terms = [x.strip() for x in str(query or "").split() if x.strip()]
     if not terms:
@@ -7643,6 +7695,15 @@ def project_address_search_api():
             "count": len(rows),
             "sourceOfTruth": "WinWorker Projekte + Kunden + Belegnummern",
         })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/tower/planning")
+def tower_planning_api():
+    try:
+        data = company_planning_year(request.args.get("year", 2026))
+        return jsonify({"ok": True, **data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
