@@ -26,6 +26,13 @@ function installOutlookCalendar(app, deps = {}) {
 
   const allowed = (req, res) => typeof requireAdmin !== "function" ? true : requireAdmin(req, res);
   const encryptionSecret = () => String(process.env.KRISTINE_OUTLOOK_TOKEN_KEY || deps.adminToken || process.env.ADMIN_TOKEN || "");
+  const adminToken = String(deps.adminToken || process.env.ADMIN_TOKEN || "");
+
+  function signedKgoLink(taskId) {
+    const task = String(taskId || "");
+    const signature = crypto.createHmac("sha256", adminToken).update(`kristine-outlook-link-v1:${task}`).digest("base64url");
+    return `${publicBaseUrl}/kristine/outlook-entry?task=${encodeURIComponent(task)}&sig=${encodeURIComponent(signature)}`;
+  }
 
   async function readJson(file, fallback) {
     try { return JSON.parse(await fsp.readFile(file, "utf8")); }
@@ -156,7 +163,7 @@ function installOutlookCalendar(app, deps = {}) {
   }
 
   async function graphCreate(appointment) {
-    const link = `${publicBaseUrl}/kristine?task=${encodeURIComponent(appointment.taskId)}#tasks`;
+    const link = signedKgoLink(appointment.taskId);
     const content = [appointment.details, appointment.location ? `Ort: ${appointment.location}` : "", `Direkt in KGO öffnen: ${link}`].filter(Boolean).join("\n\n");
     const event = {
       subject:appointment.title,
@@ -233,6 +240,17 @@ function installOutlookCalendar(app, deps = {}) {
       res.json({ ok:true, configured:Boolean(encryptionSecret()), connected, account:account || "", expectedAccount:EXPECTED_ACCOUNT, scopes:SCOPES });
     }
     catch (error) { res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:false, account:"", expectedAccount:EXPECTED_ACCOUNT, error:String(error?.message || error) }); }
+  });
+
+  app.get("/kristine/outlook-entry", (req, res) => {
+    const task = String(req.query.task || "");
+    const supplied = String(req.query.sig || "");
+    const expected = crypto.createHmac("sha256", adminToken).update(`kristine-outlook-link-v1:${task}`).digest("base64url");
+    const valid = supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+    if (!adminToken || !task || !valid) return res.status(403).send("Forbidden");
+    const browserSession = crypto.createHmac("sha256", adminToken).update("kristine-browser-session-v1").digest("base64url");
+    res.setHeader("Set-Cookie", `kristine_session=${browserSession}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
+    res.redirect(302, `/kristine?task=${encodeURIComponent(task)}#tasks`);
   });
 
   app.post("/kristine/api/outlook/login/start", async (req, res) => {

@@ -76,7 +76,7 @@ function jwt(account) {
     const retry = await call(routes, "POST", "/kristine/api/appointments/:id/retry", { params:{ id:create.body.appointment.id } });
     assert.equal(retry.body.outlookSynced, true);
     assert.equal(retry.body.appointment.outlook.eventId, "outlook-event-123");
-    assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\?task=task-42#tasks/);
+    assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/outlook-entry\?task=task-42&sig=/);
     assert.equal(graphPayload.transactionId, create.body.appointment.id);
 
     const stored = JSON.parse(fs.readFileSync(path.join(temporary, "_kristine", "appointments.json"), "utf8"));

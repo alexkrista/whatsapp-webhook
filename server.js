@@ -309,7 +309,9 @@ function isAllowedPdfSender(sender) {
 function requireAdmin(req, res) {
   if (!ADMIN_TOKEN) return true;
   const tok = req.headers["x-admin-token"] || req.query.token || "";
-  if (tok !== ADMIN_TOKEN) {
+  const cookies = Object.fromEntries(String(req.headers.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
+  const browserSession = crypto.createHmac("sha256", ADMIN_TOKEN).update("kristine-browser-session-v1").digest("base64url");
+  if (tok !== ADMIN_TOKEN && cookies.kristine_session !== browserSession) {
     res.status(403).send("Forbidden");
     return false;
   }
