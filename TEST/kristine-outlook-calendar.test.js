@@ -38,7 +38,7 @@ function jwt(account) {
   const originalKey = process.env.KRISTINE_OUTLOOK_TOKEN_KEY;
   process.env.KRISTINE_OUTLOOK_TOKEN_KEY = "test-only-encryption-key";
   const { app, routes } = appHarness();
-  installOutlookCalendar(app, { dataDir:temporary, requireAdmin:() => true, publicBaseUrl:"https://protokoll.krista.at", logger:{ error(){} } });
+  installOutlookCalendar(app, { dataDir:temporary, requireAdmin:() => true, publicBaseUrl:"https://protokoll.krista.at", logger:{ log(){}, error(){} } });
 
   try {
     global.fetch = async () => { throw new Error("network unavailable"); };
@@ -67,6 +67,12 @@ function jwt(account) {
     const poll = await call(routes, "POST", "/kristine/api/outlook/login/poll", { body:{ sessionId:start.body.sessionId } });
     assert.equal(poll.body.account, "alexander.krista@krista.at");
 
+    const restarted = appHarness();
+    installOutlookCalendar(restarted.app, { dataDir:temporary, requireAdmin:() => true, publicBaseUrl:"https://protokoll.krista.at", logger:{ log(){}, error(){} } });
+    const statusAfterRestart = await call(restarted.routes, "GET", "/kristine/api/outlook/status");
+    assert.equal(statusAfterRestart.body.connected, true, "persisted token must load in a new process/module instance");
+    assert.equal(statusAfterRestart.body.account, "alexander.krista@krista.at");
+
     const retry = await call(routes, "POST", "/kristine/api/appointments/:id/retry", { params:{ id:create.body.appointment.id } });
     assert.equal(retry.body.outlookSynced, true);
     assert.equal(retry.body.appointment.outlook.eventId, "outlook-event-123");
@@ -77,6 +83,8 @@ function jwt(account) {
     assert.equal(stored.length, 1, "Idempotent request must only create one internal appointment");
     assert.equal(stored[0].outlook.status, "synced");
     assert.equal(stored[0].outlook.eventId, "outlook-event-123");
+    const audit = fs.readFileSync(path.join(temporary, "_kristine", "outlook-calendar.jsonl"), "utf8");
+    for (const event of ["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error"]) assert.match(audit, new RegExp(`\"type\":\"${event}\"`));
     console.log("OK: internal save survives Graph failure; login, retry, Event-ID and KGO link work");
   } finally {
     global.fetch = originalFetch;

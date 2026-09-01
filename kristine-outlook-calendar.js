@@ -49,6 +49,9 @@ function installOutlookCalendar(app, deps = {}) {
     const row = { at:new Date().toISOString(), type, ...details };
     await fsp.mkdir(root, { recursive:true });
     await fsp.appendFile(logFile, `${JSON.stringify(row)}\n`, "utf8").catch(error => logger.error("Outlook-Auditlog fehlgeschlagen", error));
+    if (["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error"].includes(type)) {
+      (type === "graph_create_event_error" ? logger.error : logger.log)?.(`[KRISTINE Outlook] ${type}`, details);
+    }
   }
 
   function encryptionKey() {
@@ -63,6 +66,8 @@ function installOutlookCalendar(app, deps = {}) {
     const plaintext = Buffer.from(JSON.stringify({ ...token, stored_at:Date.now() }), "utf8");
     const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
     await atomicJson(tokenFile, { version:1, iv:iv.toString("base64"), tag:cipher.getAuthTag().toString("base64"), data:encrypted.toString("base64") });
+    const saved = await fsp.stat(tokenFile);
+    await audit("token_cache_saved", { account:accountFromToken(token), path:tokenFile, bytes:saved.size });
   }
 
   async function loadToken() {
@@ -70,7 +75,9 @@ function installOutlookCalendar(app, deps = {}) {
     if (!box) return null;
     const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(box.iv, "base64"));
     decipher.setAuthTag(Buffer.from(box.tag, "base64"));
-    return JSON.parse(Buffer.concat([decipher.update(Buffer.from(box.data, "base64")), decipher.final()]).toString("utf8"));
+    const token = JSON.parse(Buffer.concat([decipher.update(Buffer.from(box.data, "base64")), decipher.final()]).toString("utf8"));
+    await audit("token_cache_loaded", { account:accountFromToken(token), path:tokenFile });
+    return token;
   }
 
   function tokenClaims(idToken) {
@@ -130,12 +137,17 @@ function installOutlookCalendar(app, deps = {}) {
       event.end = { dateTime:`${appointment.date}T${appointment.to}:00`, timeZone:TIME_ZONE };
     }
     if (!event.location) delete event.location;
-    const response = await fetch(`${GRAPH_ROOT}/me/calendar/events`, {
-      method:"POST", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone=\"${TIME_ZONE}\"` }, body:JSON.stringify(event),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
-    return body;
+    try {
+      const response = await fetch(`${GRAPH_ROOT}/me/calendar/events`, {
+        method:"POST", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone=\"${TIME_ZONE}\"` }, body:JSON.stringify(event),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+      return body;
+    } catch (error) {
+      await audit("graph_create_event_error", { appointmentId:appointment.id, taskId:appointment.taskId, error:String(error?.message || error).slice(0, 1000) });
+      throw error;
+    }
   }
 
   function cleanInput(body) {
@@ -177,7 +189,12 @@ function installOutlookCalendar(app, deps = {}) {
 
   app.get("/kristine/api/outlook/status", async (req, res) => {
     if (!allowed(req, res)) return;
-    try { const token = await loadToken(); res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:Boolean(token), account:accountFromToken(token) || "", expectedAccount:EXPECTED_ACCOUNT }); }
+    try {
+      const token = await loadToken();
+      const account = accountFromToken(token);
+      const connected = Boolean(token && token.refresh_token && account === EXPECTED_ACCOUNT);
+      res.json({ ok:true, configured:Boolean(encryptionSecret()), connected, account:account || "", expectedAccount:EXPECTED_ACCOUNT, scopes:SCOPES });
+    }
     catch (error) { res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:false, account:"", expectedAccount:EXPECTED_ACCOUNT, error:String(error?.message || error) }); }
   });
 
@@ -199,7 +216,11 @@ function installOutlookCalendar(app, deps = {}) {
     try {
       const token = await tokenRequest({ client_id:CLIENT_ID, grant_type:"urn:ietf:params:oauth:grant-type:device_code", device_code:session.deviceCode });
       const account = accountFromToken(token); if (account !== EXPECTED_ACCOUNT) throw new Error(`Angemeldet als ${account || "unbekannt"}; für V1 ist nur ${EXPECTED_ACCOUNT} erlaubt.`);
-      token.account = account; await saveToken(token); loginSessions.delete(sessionId); await audit("outlook_login", { account });
+      if (!token.refresh_token) throw new Error("Microsoft hat keinen dauerhaften Refresh-Token geliefert. Bitte offline_access prüfen.");
+      token.account = account; await saveToken(token);
+      const persisted = await loadToken();
+      if (accountFromToken(persisted) !== EXPECTED_ACCOUNT || !persisted.refresh_token) throw new Error("Der Outlook-Token-Cache konnte nach dem Speichern nicht verifiziert werden.");
+      loginSessions.delete(sessionId); await audit("auth_success", { account, scopes:SCOPES });
       res.json({ ok:true, status:"connected", account });
     } catch (error) {
       if (["authorization_pending", "slow_down"].includes(error.code)) return res.status(202).json({ ok:true, status:"pending", retryAfter:error.code === "slow_down" ? session.interval + 5 : session.interval });

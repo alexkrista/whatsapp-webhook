@@ -127,7 +127,7 @@
     try{
       const start=await api("/kristine/api/outlook/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
       window.open(start.verificationUri,"_blank","noopener");
-      alert(`Microsoft-Anmeldung für Alex\n\nCode: ${start.userCode}\n\nDer Code wurde in einem neuen Fenster geöffnet. Dort als alexander.krista@krista.at anmelden.`);
+      setStatus(`Microsoft-Code ${start.userCode}: im geöffneten Fenster als alexander.krista@krista.at anmelden. KRISTINE wartet automatisch auf die Bestätigung …`,"warn");
       for(let attempt=0;attempt<90;attempt++){
         await new Promise(resolve=>setTimeout(resolve,Math.max(5,Number(start.interval||5))*1000));
         const response=await fetch((typeof tokenUrl==="function"?tokenUrl("/kristine/api/outlook/login/poll"):"/kristine/api/outlook/login/poll"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:start.sessionId})});
