@@ -5,7 +5,9 @@
 
   const token=new URLSearchParams(location.search).get("token")||"";
   const BRAIN="https://pc-alex02.tail610122.ts.net";
+  const MANAGER="http://127.0.0.1:8765";
   let last=null;
+  let servicesHealthy=false;
   const doorHolds=new Map();
   const doorLocks=new Map();
   let gateLockedUntil=0;
@@ -135,10 +137,8 @@
     return"green";
   }
 
-  function servicesColor(d){
-    if(!d?.online)return"red";
-    const vals=Object.values(d.services||{});
-    return vals.some(x=>x?.state==="bad")?"red":"green";
+  function servicesColor(){
+    return servicesHealthy?"green":"red";
   }
 
   function gateColor(d){
@@ -212,14 +212,68 @@
       const reason=String(x.reason||"").replace(/"/g,"&quot;");
       h+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
-    const svcColor=servicesColor(d);
-    h+=`<button class="krista-services-lamp" data-services title="${svcColor==="green"?"Dienste okay":"Mindestens ein Dienst hat einen Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button>`;
+    const svcColor=servicesColor();
+    h+=`<button class="krista-services-lamp" data-services title="${svcColor==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button>`;
 
     slot.innerHTML=h;
     slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
-    slot.querySelector("[data-services]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
+    slot.querySelector("[data-services]")?.addEventListener("click",openServices);
     slot.querySelector("[data-gate]")?.addEventListener("click",e=>pulseGate(e.currentTarget));
     slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
+  }
+
+  function openServices(){
+    if(typeof window.openKrisadminServices==="function"){
+      window.openKrisadminServices();
+      return;
+    }
+    let script=document.querySelector('script[data-krista-services-dialog]');
+    if(!script){
+      script=document.createElement("script");
+      script.src="/public/ui/krisadmin-services.js?v=20260901-lamp1";
+      script.setAttribute("data-krista-services-dialog","1");
+      script.async=false;
+      document.head.appendChild(script);
+    }
+    let tries=0;
+    const timer=setInterval(()=>{
+      tries++;
+      if(typeof window.openKrisadminServices==="function"){
+        clearInterval(timer);
+        window.openKrisadminServices();
+      }else if(tries>30){
+        clearInterval(timer);
+        location.href="/public/baustellen.html?token="+encodeURIComponent(token);
+      }
+    },100);
+  }
+
+  function updateServicesLamp(){
+    const button=document.querySelector("[data-services]");
+    if(!button)return;
+    const dot=button.querySelector(".krista-dot");
+    const color=servicesColor();
+    if(dot)dot.className="krista-dot "+color;
+    button.title=color==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler";
+  }
+
+  async function loadServicesStatus(){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),2200);
+    try{
+      const headers={};
+      if(token)headers["X-Krista-Admin-Token"]=token;
+      const r=await fetch(MANAGER+"/api/status",{headers,cache:"no-store",signal:controller.signal});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const d=await r.json();
+      const rows=Array.isArray(d.rows)?d.rows:[];
+      servicesHealthy=Boolean(d.ok)&&!rows.some(x=>String(x?.level||"").toLowerCase()==="red");
+    }catch(_){
+      servicesHealthy=false;
+    }finally{
+      clearTimeout(timeout);
+      updateServicesLamp();
+    }
   }
 
   async function pulseGate(btn){
@@ -298,8 +352,10 @@
     css();
     if(mount()){
       load();
+      loadServicesStatus();
       setInterval(load,5000);
-      window.addEventListener("hashchange",()=>setTimeout(load,50));
+      setInterval(loadServicesStatus,5000);
+      window.addEventListener("hashchange",()=>setTimeout(()=>{load();loadServicesStatus()},50));
     }else setTimeout(start,250);
   }
 
