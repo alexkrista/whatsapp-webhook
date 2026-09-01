@@ -37,6 +37,7 @@ on:
       - 'tools/innovatint-history-sync.ps1'
       - 'tools/find-innovatint-history.ps1'
       - 'tools/find-innovatint-db-config.ps1'
+      - 'tools/extract-innovatint-db-connection.ps1'
 
 jobs:
   syntax:
@@ -80,7 +81,8 @@ jobs:
             "tools/innovatint-kristine-bridge.ps1",
             "tools/innovatint-history-sync.ps1",
             "tools/find-innovatint-history.ps1",
-            "tools/find-innovatint-db-config.ps1"
+            "tools/find-innovatint-db-config.ps1",
+            "tools/extract-innovatint-db-connection.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -102,7 +104,8 @@ jobs:
         run: |
           $files = @(
             "tools/find-innovatint-history.ps1",
-            "tools/find-innovatint-db-config.ps1"
+            "tools/find-innovatint-db-config.ps1",
+            "tools/extract-innovatint-db-connection.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
