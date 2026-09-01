@@ -2579,6 +2579,8 @@ const open = taskId
     }
   });
 
+  require("./task-escalation-server").installTaskEscalation(app, { dataDir, requireAdmin, sendWhatsApp, readEmployees });
+
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
   return { handleMessage, localDateISO };
 }
