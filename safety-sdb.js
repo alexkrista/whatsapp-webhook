@@ -138,8 +138,8 @@ function registerSafetySdb(app, { dataDir, requireAdmin }) {
     if(!authorized)return res.status(401).json({ok:false,error:"Agent nicht autorisiert"});
     const rows=Array.isArray(req.body?.documents)?req.body.documents:[]; const index=await readIndex(); let accepted=0;
     for(const row of rows.slice(0,2000)){if(!/^[a-f0-9]{64}$/i.test(row.sha256||"")||!clean(row.relativePath))continue;
-      const current=index.documents.find((x)=>x.sha256===row.sha256); if(current){current.lastSeenAt=new Date().toISOString();continue;}
-      index.documents.unshift({id:crypto.randomUUID(),sha256:row.sha256.toLowerCase(),fileName:path.basename(clean(row.relativePath,1000)),size:Number(row.size)||0,modifiedAt:clean(row.modifiedAt,50),metadata:row.metadata||{},detectionStatus:"unklar",reviewStatus:"pruefung_erforderlich",autoApproved:false,source:{type:"n_drive_agent",sourceOfTruth:"N:\\SdB",relativePath:clean(row.relativePath,1000)},createdAt:new Date().toISOString()}); accepted++;
+      const current=index.documents.find((x)=>x.sha256===row.sha256); if(current){current.lastSeenAt=new Date().toISOString();if(row.metadata&&typeof row.metadata==="object"){current.metadata=row.metadata;current.documentType=clean(row.metadata.documentType,80)||"unklar";current.reviewStatus=current.documentType==="sdb"?"pruefung_erforderlich":"nicht_sdb";}continue;}
+      const documentType=clean(row.metadata?.documentType,80)||"unklar";index.documents.unshift({id:crypto.randomUUID(),sha256:row.sha256.toLowerCase(),fileName:path.basename(clean(row.relativePath,1000)),size:Number(row.size)||0,modifiedAt:clean(row.modifiedAt,50),metadata:row.metadata||{},documentType,detectionStatus:"unklar",reviewStatus:documentType==="sdb"?"pruefung_erforderlich":"nicht_sdb",autoApproved:false,source:{type:"n_drive_agent",sourceOfTruth:"N:\\SdB",relativePath:clean(row.relativePath,1000)},createdAt:new Date().toISOString()}); accepted++;
     } index.updatedAt=new Date().toISOString(); await writeIndex(index); res.json({ok:true,accepted,total:index.documents.length});
   });
   console.log("✅ KRISTINE Arbeitssicherheit · SDB-Eingang registriert");
