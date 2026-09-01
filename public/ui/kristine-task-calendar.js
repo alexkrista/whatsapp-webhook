@@ -1,9 +1,10 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-01-visit-protocol-v4";
+  const VERSION="2026-09-01-visit-recording-v5";
   let currentTask=null;
   let currentRequestId="";
+  let visitRecorder=null,visitStream=null,visitChunks=[],visitConsentAt="",discardVisitRecording=false,visitOwnMemo=false;
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const pad=n=>String(n).padStart(2,"0");
@@ -47,6 +48,7 @@
       .ktc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.ktc-actions button{font-weight:800}.ktc-google{background:#27713d!important;border-color:#27713d!important}.ktc-ics{background:#fff!important;color:#222!important}
       .kvp-bg{position:fixed;inset:0;z-index:80100;display:none;place-items:start center;padding:12px;background:rgba(0,0,0,.62);overflow:auto}.kvp-bg.open{display:grid}.kvp{width:min(760px,100%);background:#f6f4ef;border-radius:18px;padding:16px;box-shadow:0 24px 80px rgba(0,0,0,.4)}
       .kvp-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.kvp-head h2{margin:0 0 4px;font-size:22px}.kvp-card{background:#fff;border:1px solid #ddd8cf;border-radius:13px;padding:13px;margin-top:11px}.kvp-card h3{margin:0 0 9px;font-size:15px}.kvp-meta{display:grid;grid-template-columns:auto 1fr;gap:5px 11px;font-size:13px}.kvp-meta span{color:#777}.kvp-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}.kvp-actions a{display:flex;justify-content:center;align-items:center;text-decoration:none;border-radius:11px;padding:12px;font-weight:850;background:#27713d;color:#fff}.kvp-actions a.call{background:#315d91}.kvp label{display:block;font-size:12px;font-weight:750;color:#555;margin:9px 0 4px}.kvp textarea,.kvp input{width:100%}.kvp textarea{min-height:90px}.kvp-files{display:grid;gap:8px}.kvp-file{display:flex;gap:9px;align-items:center;padding:8px;border:1px solid #e3dfd7;border-radius:9px;text-decoration:none;color:#222}.kvp-file img{width:76px;height:58px;object-fit:cover;border-radius:7px}.kvp-save{width:100%;margin-top:12px;padding:13px;font-weight:900}.kvp-status{min-height:18px;margin-top:8px;font-size:12px;color:#27713d}
+      .kvp-rec{background:#f7f2e8;border:1px solid #dfd2b7;border-radius:11px;padding:11px;margin:10px 0}.kvp-rec-question{font-weight:800;line-height:1.45}.kvp-rec-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.kvp-rec-actions button{font-weight:800}.kvp-rec-live{color:#9c251d;font-weight:850}.kvp-recording{margin-top:9px;padding:9px;background:#fff;border-radius:9px}.kvp-recording audio{width:100%;margin-top:6px}.kvp-transcript{white-space:pre-wrap;font-size:13px;line-height:1.45;margin-top:7px}
       @media(max-width:620px){.ktc-bg{padding:8px}.ktc-grid{grid-template-columns:1fr}.ktc-grid .full{grid-column:auto}.ktc-actions button{width:100%}}
     `;document.head.appendChild(s);
   }
@@ -148,7 +150,8 @@
     bg=document.createElement("div");bg.id="kristaVisitProtocol";bg.className="kvp-bg";
     bg.innerHTML=`<section class="kvp" role="dialog" aria-modal="true"><div class="kvp-head"><div><h2 id="kvpTitle">Termin</h2><div id="kvpWhen" class="small"></div></div><button type="button" class="secondary" data-kvp-close>Schließen</button></div><div id="kvpMeta" class="kvp-card"></div><div id="kvpQuick" class="kvp-actions"></div><div class="kvp-card"><h3>Was ist zu tun?</h3><div id="kvpTodo"></div></div><div class="kvp-card"><h3>Fotos & Anlagen</h3><div id="kvpFiles" class="kvp-files"><span class="small">Wird geladen …</span></div></div><div class="kvp-card"><h3>Besprechung vor Ort</h3><label for="kvpDiscussion">Besprochen / Kundenwunsch</label><textarea id="kvpDiscussion" placeholder="Was wurde mit dem Kunden besprochen?"></textarea><label for="kvpWork">Vereinbarte Arbeiten</label><textarea id="kvpWork" placeholder="Welche Arbeiten sollen ausgeführt werden?"></textarea><label for="kvpEstimate">Preisschätzung</label><input id="kvpEstimate" placeholder="z. B. ca. 1.500–2.000 € netto"><label for="kvpNext">Nächste Schritte</label><textarea id="kvpNext" placeholder="Angebot, Material, Rückmeldung, Ausführung …"></textarea><button id="kvpSave" type="button" class="green kvp-save">Protokoll speichern</button><div class="kvp-actions"><button id="kvpOffer" type="button" class="secondary">Als Angebot vorbereiten</button><button id="kvpOrder" type="button" class="secondary">Direkt als Auftrag übernehmen</button></div><div id="kvpStatus" class="kvp-status"></div></div></section>`;
     document.body.appendChild(bg);bg.addEventListener("click",e=>{if(e.target===bg||e.target.closest("[data-kvp-close]"))bg.classList.remove("open")});
-    bg.querySelector("#kvpSave").addEventListener("click",saveVisitProtocol);bg.querySelector("#kvpOffer").addEventListener("click",()=>stageVisitProtocol("offer"));bg.querySelector("#kvpOrder").addEventListener("click",()=>stageVisitProtocol("order"));return bg;
+    const firstLabel=bg.querySelector("#kvpDiscussion")?.previousElementSibling;const rec=document.createElement("div");rec.className="kvp-rec";rec.innerHTML=`<div class="kvp-rec-question">Zuerst hörbar fragen: „Darf ich unser Gespräch für interne Zwecke aufnehmen und automatisch verschriftlichen?“</div><div id="kvpRecStatus" class="small">Noch keine Aufnahme.</div><div class="kvp-rec-actions"><button id="kvpRecStart" type="button">🎙 Gesprächsprotokoll · mit Zustimmung</button><button id="kvpOwnMemo" type="button" class="secondary">🧮 Kalkulationsprotokoll · eigene Notiz</button><button id="kvpRecStop" type="button" class="secondary" hidden>■ Aufnahme beenden</button></div><div id="kvpRecordings"></div>`;firstLabel?.parentNode?.insertBefore(rec,firstLabel);
+    bg.querySelector("#kvpSave").addEventListener("click",saveVisitProtocol);bg.querySelector("#kvpOffer").addEventListener("click",()=>stageVisitProtocol("offer"));bg.querySelector("#kvpOrder").addEventListener("click",()=>stageVisitProtocol("order"));bg.querySelector("#kvpRecStart").addEventListener("click",()=>startVisitRecording(false));bg.querySelector("#kvpOwnMemo").addEventListener("click",()=>startVisitRecording(true));bg.querySelector("#kvpRecStop").addEventListener("click",stopVisitRecording);return bg;
   }
 
   async function visitFiles(taskId){
@@ -156,12 +159,39 @@
     try{const r=await fetch(`/kristine/api/inbox/task/${encodeURIComponent(taskId)}`,{credentials:"same-origin"});const j=await r.json();if(!r.ok)throw new Error(j.error||"Anlagen nicht verfügbar");const items=Array.isArray(j.items)?j.items:[];host.innerHTML=items.length?items.map(item=>{const href=`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`,mime=String(item.mimeType||"");return `<a class="kvp-file" href="${href}" target="_blank" rel="noopener">${mime.startsWith("image/")?`<img src="${href}" alt="Foto">`:"📎"}<strong>${esc(item.name||"Anlage")}</strong></a>`}).join(""):"<span class=\"small\">Keine Fotos oder Anlagen verknüpft.</span>"}catch(e){host.innerHTML=`<span class="small">Anlagen konnten nicht geladen werden: ${esc(e.message)}</span>`}
   }
 
+  function renderVisitRecordings(){
+    const host=document.getElementById("kvpRecordings"),rows=currentTask?.visitProtocol?.recordings||[];if(!host)return;
+    host.innerHTML=rows.map(r=>{const title=r.kind==="own_memo"?"Kalkulationsprotokoll · eigene Notiz":"Gesprächsprotokoll · mit Zustimmung";const audio=r.audioUrl?`<audio controls preload="none" src="${r.audioUrl}"></audio>`:"";const transcript=r.transcript?`<div class="kvp-transcript">${esc(r.transcript)}</div>`:'<div class="small">Transkript nicht verfügbar.</div>';return `<div class="kvp-recording"><strong>${title}</strong><div class="small">${new Date(r.recordedAt||Date.now()).toLocaleString("de-AT")}</div>${audio}${transcript}</div>`}).join("");
+  }
+
+  async function startVisitRecording(ownMemo){
+    if(visitRecorder?.state==="recording")return;
+    try{
+      visitOwnMemo=!!ownMemo;visitChunks=[];discardVisitRecording=false;visitConsentAt="";visitStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const preferred=MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/webm";visitRecorder=new MediaRecorder(visitStream,{mimeType:preferred});visitRecorder.ondataavailable=e=>{if(e.data?.size)visitChunks.push(e.data)};visitRecorder.onstop=finishVisitRecording;visitRecorder.start(1000);
+      document.getElementById("kvpRecStart").disabled=true;document.getElementById("kvpOwnMemo").disabled=true;document.getElementById("kvpRecStop").hidden=false;document.getElementById("kvpRecStatus").innerHTML=ownMemo?'<span class="kvp-rec-live">● Kalkulationsprotokoll läuft · bitte ohne Kundenstimme</span>':'<span class="kvp-rec-live">● Gesprächsprotokoll läuft · Zustimmungsfrage jetzt stellen</span>';
+    }catch(e){document.getElementById("kvpRecStatus").textContent="Mikrofon nicht verfügbar: "+e.message}
+  }
+
+  function stopVisitRecording(){if(visitRecorder?.state==="recording")visitRecorder.stop()}
+
+  async function finishVisitRecording(){
+    visitStream?.getTracks().forEach(t=>t.stop());document.getElementById("kvpRecStart").disabled=false;document.getElementById("kvpOwnMemo").disabled=false;document.getElementById("kvpRecStop").hidden=true;
+    const blob=new Blob(visitChunks,{type:visitRecorder?.mimeType||"audio/webm"});visitChunks=[];
+    if(!visitOwnMemo&&!confirm("Ist am Anfang der Aufnahme ein klares Ja des Kunden enthalten?\n\nOK = speichern und transkribieren\nAbbrechen = Aufnahme endgültig verwerfen")){document.getElementById("kvpRecStatus").textContent="Aufnahme verworfen. Du kannst jetzt eine eigene interne Notiz aufnehmen.";return}
+    visitConsentAt=new Date().toISOString();document.getElementById("kvpRecStatus").textContent="Wird sicher gespeichert und transkribiert …";
+    try{
+      const response=await fetch(`/kristine/api/tasks/${encodeURIComponent(currentTask.id)}/visit-recording`,{method:"POST",credentials:"same-origin",headers:{"Content-Type":blob.type||"audio/webm","X-Consent-At":visitOwnMemo?`own-memo:${visitConsentAt}`:visitConsentAt,"X-Recording-Kind":visitOwnMemo?"own_memo":"customer_conversation"},body:blob});const json=await response.json();if(!response.ok)throw new Error(json.error||"Aufnahme konnte nicht gespeichert werden");
+      const recording={...json.recording,kind:visitOwnMemo?"own_memo":"customer_conversation"};currentTask.visitProtocol={...(currentTask.visitProtocol||{}),recordings:[...(currentTask.visitProtocol?.recordings||[]),recording]};await persistTasks();renderVisitRecordings();document.getElementById("kvpRecStatus").textContent=recording.transcript?"✓ Aufnahme und Transkript gespeichert":"✓ Aufnahme gespeichert; Transkript konnte nicht erstellt werden";
+    }catch(e){document.getElementById("kvpRecStatus").textContent="Fehler: "+e.message}
+  }
+
   function openVisitProtocol(taskId){
     const task=taskById(taskId);if(!task)return;currentTask=task;installStyle();const bg=ensureVisitProtocol(),a=task.appointment||{},saved=task.visitProtocol||{};
     document.getElementById("kvpTitle").textContent=task.title||"Termin";document.getElementById("kvpWhen").textContent=[a.date,a.from&&a.to?`${a.from}–${a.to}`:""].filter(Boolean).join(" · ");
     const address=task.address||task.jobName||"",contact=[task.contactName,task.contactPhone].filter(Boolean).join(" · ");document.getElementById("kvpMeta").innerHTML=`<h3>Terminübersicht</h3><div class="kvp-meta">${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:""}${contact?`<span>Kontakt</span><strong>${esc(contact)}</strong>`:""}<span>Status</span><strong>${task.status==="done"?"Erledigt":"Termin vereinbart"}</strong></div>`;
     document.getElementById("kvpQuick").innerHTML=`${address?`<a href="${mapsHref(address)}" target="_blank" rel="noopener">🧭 Navigation</a>`:""}${task.contactPhone?`<a class="call" href="tel:${esc(task.contactPhone)}">📞 Anrufen</a>`:""}`;
-    document.getElementById("kvpTodo").textContent=task.reminder||task.details||"Noch keine Arbeitsbeschreibung hinterlegt.";document.getElementById("kvpDiscussion").value=saved.discussion||"";document.getElementById("kvpWork").value=saved.work||"";document.getElementById("kvpEstimate").value=saved.estimate||"";document.getElementById("kvpNext").value=saved.nextSteps||"";document.getElementById("kvpStatus").textContent=saved.conversionTarget?`✓ Für ${saved.conversionTarget==="order"?"Auftrag":"Angebot"} vorbereitet`:saved.savedAt?"Zuletzt gespeichert: "+new Date(saved.savedAt).toLocaleString("de-AT"):"";bg.classList.add("open");visitFiles(taskId);
+    document.getElementById("kvpTodo").textContent=task.reminder||task.details||"Noch keine Arbeitsbeschreibung hinterlegt.";document.getElementById("kvpDiscussion").value=saved.discussion||"";document.getElementById("kvpWork").value=saved.work||"";document.getElementById("kvpEstimate").value=saved.estimate||"";document.getElementById("kvpNext").value=saved.nextSteps||"";document.getElementById("kvpStatus").textContent=saved.conversionTarget?`✓ Für ${saved.conversionTarget==="order"?"Auftrag":"Angebot"} vorbereitet`:saved.savedAt?"Zuletzt gespeichert: "+new Date(saved.savedAt).toLocaleString("de-AT"):"";bg.classList.add("open");renderVisitRecordings();visitFiles(taskId);
   }
 
   async function saveVisitProtocol(){

@@ -331,6 +331,37 @@ function pdfDownloadUrlFor(jobId, date) {
   return `${PUBLIC_BASE_URL}/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${token}`;
 }
 
+const visitRecordingRoot = path.join(DATA_DIR, "_kristine", "visit-recordings");
+app.post("/kristine/api/tasks/:taskId/visit-recording", express.raw({ type: ["audio/*", "application/octet-stream"], limit: "50mb" }), async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const taskId = String(req.params.taskId || "").trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(taskId)) return res.status(400).json({ ok:false, error:"Ungültige Aufgaben-ID." });
+    const consentAt = String(req.headers["x-consent-at"] || "").trim();
+    if (!consentAt) return res.status(400).json({ ok:false, error:"Die Zustimmung zur Aufnahme fehlt." });
+    const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+    if (!audio.length) return res.status(400).json({ ok:false, error:"Keine Aufnahme empfangen." });
+    const recordedAt = new Date().toISOString(), id = `visit-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+    const dir = path.join(visitRecordingRoot, taskId); await ensureDir(dir);
+    const filename = `${id}.webm`, audioPath = path.join(dir, filename); await fsp.writeFile(audioPath, audio);
+    let transcript = "", transcriptionError = "";
+    try { transcript = await transcribeAudio({ audioBuffer:audio, filename, mimeType:String(req.headers["content-type"] || "audio/webm") }); }
+    catch (error) { transcriptionError = String(error?.message || error).slice(0, 1000); }
+    const kind = req.headers["x-recording-kind"] === "own_memo" ? "own_memo" : "customer_conversation";
+    const record = { id, taskId, kind, consentAt, recordedAt, mimeType:String(req.headers["content-type"] || "audio/webm"), size:audio.length, sha256:crypto.createHash("sha256").update(audio).digest("hex"), transcript, transcriptionError };
+    await fsp.writeFile(path.join(dir, `${id}.json`), JSON.stringify(record, null, 2), "utf8");
+    console.log("visit_recording_saved", { taskId, id, consentAt, bytes:audio.length, transcribed:Boolean(transcript) });
+    res.status(201).json({ ok:true, recording:{ ...record, audioUrl:`/kristine/api/tasks/${encodeURIComponent(taskId)}/visit-recording/${encodeURIComponent(id)}` } });
+  } catch (error) { console.error("visit_recording_error", error); res.status(500).json({ ok:false, error:String(error?.message || error) }); }
+});
+app.get("/kristine/api/tasks/:taskId/visit-recording/:recordingId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const taskId=String(req.params.taskId||""), recordingId=String(req.params.recordingId||"");
+  if (!/^[A-Za-z0-9_-]+$/.test(taskId) || !/^[A-Za-z0-9_-]+$/.test(recordingId)) return res.status(400).send("Ungültige ID");
+  const audioPath=path.join(visitRecordingRoot,taskId,`${recordingId}.webm`);if(!fs.existsSync(audioPath))return res.status(404).send("Aufnahme nicht gefunden");
+  res.type("audio/webm").sendFile(audioPath);
+});
+
 // ===================== Folder structure (NEW + fallback) =====================
 function dayDirNew(jobId, dateStr) {
   const [Y, M, D] = String(dateStr).split("-");
