@@ -19,7 +19,7 @@
     if(document.getElementById("baustellenKnowledgeCss"))return;
     const s=document.createElement("style");s.id="baustellenKnowledgeCss";s.textContent=`
       .bk-subnav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 15px;padding:9px;background:#fffefa;border:1px solid #ddd9cf;border-radius:14px;box-shadow:0 5px 18px rgba(23,33,27,.045)}
-      .bk-subnav a{display:inline-flex;align-items:center;min-height:38px;padding:8px 11px;border-radius:9px;text-decoration:none;font-size:12px;font-weight:850;color:#252925;border:1px solid #d8d4ca;background:#fff}.bk-subnav a.active{background:#2f7d4a;color:#fff;border-color:#2f7d4a}.bk-subnav .push{margin-left:auto;color:#707670;font-size:11px;padding-right:5px}
+      .bk-subnav a,.bk-subnav button{display:inline-flex;align-items:center;min-height:38px;padding:8px 11px;border-radius:9px;text-decoration:none;font:850 12px/1 system-ui;color:#252925;border:1px solid #d8d4ca;background:#fff;cursor:pointer}.bk-subnav a.active{background:#2f7d4a;color:#fff;border-color:#2f7d4a}.bk-subnav .push{margin-left:auto;color:#707670;font-size:11px;padding-right:5px}
       .bk-tabs{display:flex;gap:6px;overflow-x:auto;padding:5px;margin:0 0 14px;background:#e9e6de;border-radius:13px}.bk-tabs button{border:0;border-radius:9px;background:transparent;color:#454945;min-height:38px;padding:8px 11px;font:800 12px/1 system-ui;white-space:nowrap;cursor:pointer}.bk-tabs button.active{background:#fff;color:#1f2821;box-shadow:0 2px 8px rgba(0,0,0,.08)}
       .bk-panel{display:none}.bk-panel.active{display:block}.bk-loading{padding:26px;text-align:center;color:#707670;background:#fff;border:1px solid #ddd9cf;border-radius:15px}
       .bk-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.bk-card{background:#fff;border:1px solid #ddd9cf;border-radius:15px;padding:15px;box-shadow:0 5px 18px rgba(23,33,27,.045);min-width:0}.bk-card h3{margin:0 0 11px;font-size:15px}.bk-card h4{margin:0 0 7px;font-size:13px}.bk-label{font-size:11px;color:#707670;font-weight:750}.bk-value{font-size:22px;font-weight:950;letter-spacing:-.03em;margin-top:4px}.bk-note{font-size:11px;color:#707670;margin-top:5px;line-height:1.45}.bk-wide{grid-column:1/-1}.bk-half{grid-column:span 2}.bk-third{grid-column:span 1}.bk-good{color:#2f7d4a}.bk-warn{color:#c98428}.bk-bad{color:#a84540}.bk-muted{color:#707670}
@@ -38,7 +38,7 @@
   function installKrisadminSubnav(){
     const main=document.querySelector("body>main");if(!main||document.getElementById("bkSubnav"))return;
     const nav=document.createElement("div");nav.id="bkSubnav";nav.className="bk-subnav";
-    nav.innerHTML=`<a class="active" href="${tokenUrl('/public/baustellen.html')}">🏗 Baustellen</a><a href="${tokenUrl('/admin/ui')}">👷 Mitarbeiter / Fahrzeuge / Betrieb</a><span class="push">KRISADMIN · Baustellen-Wissensdrehscheibe</span>`;
+    nav.innerHTML=`<a class="active" href="${tokenUrl('/public/baustellen.html')}">🏗 Baustellen</a><a href="${tokenUrl('/admin/ui')}">👷 Mitarbeiter / Fahrzeuge / Betrieb</a><button id="sdbOpen" type="button">🛡️ Arbeitssicherheit</button><span class="push">KRISADMIN · Baustellen-Wissensdrehscheibe</span>`;
     main.insertBefore(nav,main.firstChild);
   }
 
