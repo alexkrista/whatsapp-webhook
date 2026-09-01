@@ -631,6 +631,39 @@ function refinedProjectQuery(currentQuery, projectNumber) {
 
 function registerArchiveSearch(app) {
 
+  app.get("/api/tower/open-items", async (_req, res) => {
+    try {
+      const [debtorsResponse, creditorsResponse] = await Promise.all([
+        fetch(`${ARCHIVE_CONNECTOR}/api/outgoing/open-items`, { headers: { Accept: "application/json" } }),
+        fetch(`${ARCHIVE_CONNECTOR}/incoming/payment-open-items`, { headers: { Accept: "application/json" } }),
+      ]);
+      const [debtors, creditors] = await Promise.all([
+        debtorsResponse.json().catch(() => ({})),
+        creditorsResponse.json().catch(() => ({})),
+      ]);
+      if (!debtorsResponse.ok || debtors?.ok === false) {
+        throw new Error(debtors?.error || `Brain Debitoren HTTP ${debtorsResponse.status}`);
+      }
+      if (!creditorsResponse.ok || creditors?.ok === false) {
+        throw new Error(creditors?.error || `Brain Kreditoren HTTP ${creditorsResponse.status}`);
+      }
+      const customersTotal = Number(debtors?.totalOpen);
+      const suppliersTotal = Number(creditors?.total);
+      if (!Number.isFinite(customersTotal) || !Number.isFinite(suppliersTotal)) {
+        throw new Error("Brain liefert keine gültigen OP-Summen");
+      }
+      res.setHeader("Cache-Control", "private, max-age=60");
+      return res.json({
+        ok: true,
+        customers: { total: customersTotal, count: Array.isArray(debtors?.items) ? debtors.items.length : null },
+        suppliers: { total: suppliersTotal, count: Number.isFinite(Number(creditors?.count)) ? Number(creditors.count) : null },
+        balance: customersTotal - suppliersTotal,
+      });
+    } catch (err) {
+      return res.status(502).json({ ok: false, error: String(err?.message || err) });
+    }
+  });
+
   app.get("/api/tower/planning", async (req, res) => {
     try {
       const year = Number(req.query.year || 2026);
