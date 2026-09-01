@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-01-outlook-v1";
+  const VERSION="2026-09-01-outlook-auth-v2";
   let currentTask=null;
   let currentRequestId="";
 
@@ -124,18 +124,19 @@
 
   async function loginOutlook(){
     const button=document.getElementById("ktcLogin");button.disabled=true;
+    const microsoftWindow=window.open("about:blank","_blank");
     try{
       const start=await api("/kristine/api/outlook/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-      window.open(start.verificationUri,"_blank","noopener");
+      if(microsoftWindow)microsoftWindow.location.href=start.verificationUri;
       setStatus(`Microsoft-Code ${start.userCode}: im geöffneten Fenster als alexander.krista@krista.at anmelden. KRISTINE wartet automatisch auf die Bestätigung …`,"warn");
       for(let attempt=0;attempt<90;attempt++){
         await new Promise(resolve=>setTimeout(resolve,Math.max(5,Number(start.interval||5))*1000));
-        const response=await fetch((typeof tokenUrl==="function"?tokenUrl("/kristine/api/outlook/login/poll"):"/kristine/api/outlook/login/poll"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:start.sessionId})});
-        const result=await response.json();if(response.status===202)continue;if(!response.ok)throw new Error(result.error||"Outlook-Anmeldung fehlgeschlagen.");
+        const response=await fetch((typeof url==="function"?url("/kristine/api/outlook/login/poll"):"/kristine/api/outlook/login/poll"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:start.sessionId})});
+        const text=await response.text();let result={};try{result=JSON.parse(text)}catch{}if(response.status===202)continue;if(!response.ok)throw new Error(result.error||text||"Outlook-Anmeldung fehlgeschlagen.");
         setStatus("Outlook ist jetzt mit Alexander Krista verbunden.","ok");button.hidden=true;return;
       }
       throw new Error("Zeit für die Outlook-Anmeldung abgelaufen.");
-    }catch(e){setStatus(e.message,"bad")}finally{button.disabled=false}
+    }catch(e){if(microsoftWindow&&!microsoftWindow.closed)microsoftWindow.close();setStatus(e.message,"bad")}finally{button.disabled=false}
   }
 
   async function saveAppointment(){
