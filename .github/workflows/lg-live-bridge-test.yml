@@ -35,6 +35,7 @@ on:
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
+      - 'tools/find-innovatint-history.ps1'
 
 jobs:
   syntax:
@@ -76,7 +77,8 @@ jobs:
         run: |
           $files = @(
             "tools/innovatint-kristine-bridge.ps1",
-            "tools/innovatint-history-sync.ps1"
+            "tools/innovatint-history-sync.ps1",
+            "tools/find-innovatint-history.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
