@@ -15,6 +15,8 @@ python tools/sdb-agent.py --root "N:\SdB" --url "https://testinstanz.example"
 
 Auf dem Server wird dasselbe Geheimnis als `SDB_AGENT_TOKEN` gesetzt. Der Agent scannt rekursiv, cached Größe/Änderungszeit und berechnet SHA-256 nur für neue oder geänderte PDFs. Er sendet ausschließlich relative Pfade, Hashes, Größe und Änderungszeit über HTTPS; PDFs verlassen `N:` in diesem Flow nicht.
 
+Auf Windows kann ohne Python dieselbe Synchronisierung mit `tools/sdb-agent.ps1` ausgeführt werden. Die Konfiguration liegt neben dem Skript als `sdb-agent-config.json` mit dem Feld `token`; diese Datei darf nicht ins Repository eingecheckt werden.
+
 ## Grenzen des ersten Stands
 
 Textbasierte PDFs werden verarbeitet. Scans ohne Textebene und exotische SDB-Layouts können als `unklar` enden und benötigen später OCR bzw. manuelle Nachpflege. Die Felder Erste Hilfe und PSA werden abschnittsweise extrahiert; die Anzeige dient als Prüfgrundlage, nicht als automatische Sicherheitsfreigabe.
