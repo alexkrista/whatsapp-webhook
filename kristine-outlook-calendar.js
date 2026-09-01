@@ -194,6 +194,21 @@ function installOutlookCalendar(app, deps = {}) {
     }
   }
 
+  async function refreshOutlookLink(appointment) {
+    if (!appointment?.outlook?.eventId) throw new Error("Outlook-Event-ID fehlt.");
+    const link = signedKgoLink(appointment.taskId);
+    const content = [appointment.details, appointment.location ? `Ort: ${appointment.location}` : "", `Direkt in KGO öffnen: ${link}`].filter(Boolean).join("\n\n");
+    const response = await fetch(`${GRAPH_ROOT}/me/events/${encodeURIComponent(appointment.outlook.eventId)}`, {
+      method:"PATCH", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json" }, body:JSON.stringify({ body:{ contentType:"text", content } }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+    }
+    await audit("outlook_link_refreshed", { appointmentId:appointment.id, taskId:appointment.taskId, eventId:appointment.outlook.eventId });
+    return appointment;
+  }
+
   function cleanInput(body) {
     const allDay = !!body.allDay;
     const date = String(body.date || "");
@@ -302,6 +317,17 @@ function installOutlookCalendar(app, deps = {}) {
     if (!allowed(req, res)) return;
     try { const appointment = await syncAppointment(String(req.params.id)); res.json({ ok:true, appointment, outlookSynced:appointment.outlook.status === "synced" }); }
     catch (error) { res.status(404).json({ ok:false, error:String(error?.message || error) }); }
+  });
+
+  app.post("/kristine/api/appointments/:id/refresh-link", async (req, res) => {
+    if (!allowed(req, res)) return;
+    try {
+      const rows = await readJson(appointmentsFile, []);
+      const appointment = rows.find(row => row.id === String(req.params.id));
+      if (!appointment) throw new Error("KRISTINE-Termin nicht gefunden.");
+      await refreshOutlookLink(appointment);
+      res.json({ ok:true, appointmentId:appointment.id, eventId:appointment.outlook.eventId });
+    } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 
   return { syncAppointment };
