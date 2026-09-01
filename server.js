@@ -55,6 +55,7 @@ const { registerSafetySdb } = require("./safety-sdb");
 const { registerRegieAssistant } = require("./regie-assistant");
 const { registerDayClose } = require("./day-close");
 const { registerArchiveSearch } = require("./archive-search");
+const { registerTowerPlanning } = require("./tower-planning");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -1633,6 +1634,12 @@ kristine = registerKristine(app, {
     await appendJobHistory(id, { type: "status_changed", title: "Status automatisch auf Laufend gesetzt", detail: source, source });
     return true;
   }
+});
+
+registerTowerPlanning(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  readEmployees,
 });
 
 // ===================== WhatsApp Incoming =====================
