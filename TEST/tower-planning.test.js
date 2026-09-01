@@ -9,6 +9,19 @@ const express = require("express");
 
 const { registerTowerPlanning, cleanPlan, calculatePlan, calculateActualHours } = require("../tower-planning");
 
+test("Büro und Verwaltung zählen nicht zur produktiven Planung", () => {
+  const employees = [
+    { id: "maler", name: "Maler", role: "Maler", employmentPercent: 100, active: true },
+    { id: "buero", name: "Büro", role: "Büro", employmentPercent: 100, active: true },
+    { id: "verwaltung", name: "Verwaltung", team: "Verwaltung", employmentPercent: 50, active: true },
+  ];
+  const plan = cleanPlan({ employees: [
+    { employeeId: "buero", employeeName: "Büro", monthlyPercent: Array(12).fill(100) },
+  ] }, employees, 2026);
+  assert.deepEqual(plan.employees.map(row => row.employeeId), ["maler"]);
+  assert.equal(calculatePlan(plan).monthlyStaffFactor[0], 1);
+});
+
 test("Tower-Planung bildet die Werte der Referenzplanung ab", () => {
   const percentages = [100, 80, 100, 100, 100, 50, 70, 100, 100];
   const employees = percentages.map((employmentPercent, index) => ({

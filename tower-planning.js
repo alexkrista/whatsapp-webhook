@@ -26,12 +26,24 @@ function employeeName(employee) {
   return String(employee?.nickname || employee?.name || employee?.employeeName || employeeId(employee)).trim();
 }
 
+function isProductiveEmployee(employee) {
+  const classification = [employee?.role, employee?.team, employee?.department, employee?.area]
+    .map(value => String(value || "").trim().toLowerCase())
+    .join(" ");
+  return !/(^|\s)(büro|buero|office|verwaltung|administration|admin|buchhaltung)(\s|$)/i.test(classification);
+}
+
 function cleanPlan(input = {}, employees = [], year = new Date().getFullYear()) {
   const stored = new Map((Array.isArray(input.employees) ? input.employees : [])
     .map(row => [String(row?.employeeId || "").trim(), row])
     .filter(([id]) => id));
-  const live = (Array.isArray(employees) ? employees : [])
-    .filter(row => employeeId(row) && row?.active !== false)
+  const allLive = (Array.isArray(employees) ? employees : [])
+    .filter(row => employeeId(row) && row?.active !== false);
+  for (const employee of allLive) {
+    if (!isProductiveEmployee(employee)) stored.delete(employeeId(employee));
+  }
+  const live = allLive
+    .filter(isProductiveEmployee)
     .sort((a, b) => employeeName(a).localeCompare(employeeName(b), "de"));
   const rows = live.map(employee => {
     const id = employeeId(employee);
@@ -197,4 +209,4 @@ function registerTowerPlanning(app, { dataDir, requireAdmin, readEmployees }) {
   });
 }
 
-module.exports = { registerTowerPlanning, cleanPlan, calculatePlan, calculateActualHours };
+module.exports = { registerTowerPlanning, cleanPlan, calculatePlan, calculateActualHours, isProductiveEmployee };

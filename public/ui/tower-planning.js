@@ -186,7 +186,13 @@
       let changed = false;
       if (event.target.classList.contains("tp-setting")) { data.plan[event.target.dataset.key] = num(event.target.value); changed = true; }
       if (event.target.classList.contains("tp-productivity")) { data.plan.productivityPercent[Number(event.target.dataset.month)] = num(event.target.value); changed = true; }
-      if (event.target.classList.contains("tp-employee")) { data.plan.employees[Number(event.target.dataset.employee)].monthlyPercent[Number(event.target.dataset.month)] = num(event.target.value); changed = true; }
+      if (event.target.classList.contains("tp-employee")) {
+        const employee = data.plan.employees[Number(event.target.dataset.employee)];
+        const startMonth = Number(event.target.dataset.month);
+        const value = num(event.target.value);
+        for (let month = startMonth; month < 12; month += 1) employee.monthlyPercent[month] = value;
+        changed = true;
+      }
       if (!changed) return;
       renderTable();
       document.getElementById("tpStatus").textContent = "Ungespeichert";
