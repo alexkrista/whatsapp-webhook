@@ -165,7 +165,7 @@
 (function loadTaskCalendar(){
   if(document.querySelector('script[data-krista-task-calendar]'))return;
   const s=document.createElement('script');
-  s.src='/public/ui/kristine-task-calendar.js?v=20260901-visit-recording-v5';
+  s.src='/public/ui/kristine-task-calendar.js?v=20260901-visit-photos-v6';
   s.defer=true;
   s.setAttribute('data-krista-task-calendar','1');
   document.head.appendChild(s);

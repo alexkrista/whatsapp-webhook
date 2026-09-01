@@ -361,6 +361,29 @@ app.get("/kristine/api/tasks/:taskId/visit-recording/:recordingId", async (req, 
   const audioPath=path.join(visitRecordingRoot,taskId,`${recordingId}.webm`);if(!fs.existsSync(audioPath))return res.status(404).send("Aufnahme nicht gefunden");
   res.type("audio/webm").sendFile(audioPath);
 });
+const visitFileRoot = path.join(DATA_DIR, "_kristine", "visit-files");
+app.post("/kristine/api/tasks/:taskId/visit-file", express.raw({ type: ["image/*", "application/octet-stream"], limit: "25mb" }), async (req,res) => {
+  if (!requireAdmin(req,res)) return;
+  try {
+    const taskId=String(req.params.taskId||"").trim();if(!/^[A-Za-z0-9_-]+$/.test(taskId))return res.status(400).json({ok:false,error:"Ungültige Aufgaben-ID."});
+    const body=Buffer.isBuffer(req.body)?req.body:Buffer.from(req.body||"");if(!body.length)return res.status(400).json({ok:false,error:"Keine Bilddatei empfangen."});
+    const mimeType=String(req.headers["content-type"]||"application/octet-stream").split(";")[0],ext=mimeType==="image/png"?"png":mimeType==="image/heic"?"heic":mimeType==="image/webp"?"webp":"jpg";
+    const id=`photo-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,dir=path.join(visitFileRoot,taskId);await ensureDir(dir);await fsp.writeFile(path.join(dir,`${id}.${ext}`),body);
+    const originalName=decodeURIComponent(String(req.headers["x-file-name"]||`${id}.${ext}`)).slice(0,240),file={id,taskId,name:originalName,mimeType,size:body.length,createdAt:new Date().toISOString(),sha256:crypto.createHash("sha256").update(body).digest("hex"),url:`/kristine/api/tasks/${encodeURIComponent(taskId)}/visit-file/${id}`};
+    await fsp.writeFile(path.join(dir,`${id}.json`),JSON.stringify(file,null,2),"utf8");res.status(201).json({ok:true,file});
+  } catch(error){console.error("visit_file_error",error);res.status(500).json({ok:false,error:String(error?.message||error)})}
+});
+app.get("/kristine/api/tasks/:taskId/visit-file/:fileId", async(req,res)=>{
+  if(!requireAdmin(req,res))return;const taskId=String(req.params.taskId||""),fileId=String(req.params.fileId||"");if(!/^[A-Za-z0-9_-]+$/.test(taskId)||!/^photo-[A-Za-z0-9_-]+$/.test(fileId))return res.status(400).send("Ungültige ID");
+  const dir=path.join(visitFileRoot,taskId),names=await fsp.readdir(dir).catch(()=>[]),name=names.find(x=>x.startsWith(fileId+".")&&!x.endsWith(".json"));if(!name)return res.status(404).send("Foto nicht gefunden");res.sendFile(path.join(dir,name));
+});
+const visitWorkflowFile=path.join(DATA_DIR,"_kristine","visit-workflows.json");
+async function readVisitWorkflows(){try{return JSON.parse(await fsp.readFile(visitWorkflowFile,"utf8"))}catch{return []}}
+async function writeVisitWorkflows(rows){await ensureDir(path.dirname(visitWorkflowFile));await fsp.writeFile(visitWorkflowFile,JSON.stringify(rows,null,2),"utf8")}
+app.get("/kristool",(req,res)=>{if(!requireAdmin(req,res))return;res.sendFile(path.join(process.cwd(),"public","kristool-workflow.html"))});
+app.get("/kristool/api/workflows",async(req,res)=>{if(!requireAdmin(req,res))return;res.json({ok:true,workflows:await readVisitWorkflows()})});
+app.post("/kristool/api/workflows",async(req,res)=>{if(!requireAdmin(req,res))return;try{const body=req.body||{},taskId=String(body.taskId||"").slice(0,120),target=body.target==="order"?"order":"offer";if(!taskId)return res.status(400).json({ok:false,error:"Aufgabe fehlt."});const rows=await readVisitWorkflows(),now=new Date().toISOString(),key=`${taskId}:${target}`;let row=rows.find(x=>x.key===key);if(!row){row={id:`workflow-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,key,taskId,target,status:target==="order"?"order_ready_for_approval":"offer_protocol_open",createdAt:now,timeline:[]};rows.push(row)}Object.assign(row,{title:String(body.title||"Terminprotokoll").slice(0,240),customer:String(body.customer||"").slice(0,240),address:String(body.address||"").slice(0,500),appointment:body.appointment||null,protocol:body.protocol||{},updatedAt:now});if(!row.timeline.length){row.timeline=[{type:"call",label:"Anruf / Anfrage",at:body.createdAt||now},{type:"appointment",label:"Termin",at:body.appointment?.date||now},{type:"protocol",label:"Vor-Ort-Protokoll",at:now},{type:target,label:target==="order"?"Auftragsmappe vorbereitet":"Angebotsprotokoll offen",at:now}]}await writeVisitWorkflows(rows);res.status(201).json({ok:true,workflow:row})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
+app.put("/kristool/api/workflows/:id/status",async(req,res)=>{if(!requireAdmin(req,res))return;const rows=await readVisitWorkflows(),row=rows.find(x=>x.id===String(req.params.id));if(!row)return res.status(404).json({ok:false,error:"Workflow nicht gefunden"});const status=String(req.body?.status||"").slice(0,80),now=new Date().toISOString();row.status=status;row.updatedAt=now;row.timeline.push({type:status,label:status==="offer_draft"?"Angebot wird erstellt":status==="order_approved"?"Auftrag freigegeben":status,at:now});await writeVisitWorkflows(rows);res.json({ok:true,workflow:row})});
 
 // ===================== Folder structure (NEW + fallback) =====================
 function dayDirNew(jobId, dateStr) {
