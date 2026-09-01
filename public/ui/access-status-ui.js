@@ -157,16 +157,10 @@
     const gantner={...(d.gantner||{})};
     const doors={...(gantner.doors||{})};
     for(const [key,held] of doorHolds.entries()){
-      if(now>=held.until){
-        doorHolds.delete(key);
-        continue;
-      }
+      if(now>=held.until){doorHolds.delete(key);continue;}
       const cloudMode=String(doors[key]?.mode||"");
       const heldMode=String(held.door?.mode||"");
-      if(cloudMode&&cloudMode===heldMode){
-        doorHolds.delete(key);
-        continue;
-      }
+      if(cloudMode&&cloudMode===heldMode){doorHolds.delete(key);continue;}
       doors[key]={...(doors[key]||{}),...(held.door||{})};
     }
     gantner.doors=doors;
@@ -176,10 +170,7 @@
   function isDoorLocked(n){
     const key=String(n);
     const until=Number(doorLocks.get(key)||0);
-    if(!until||Date.now()>=until){
-      doorLocks.delete(key);
-      return false;
-    }
+    if(!until||Date.now()>=until){doorLocks.delete(key);return false;}
     return true;
   }
 
@@ -197,7 +188,6 @@
     if(!slot)return;
     const taskActive=location.pathname.toLowerCase().includes("/kristine")&&location.hash.toLowerCase()==="#tasks";
     let h=`<a class="krista-quick-task${taskActive?" active":""}" href="${taskUrl()}" title="Aufgaben öffnen"><span aria-hidden="true">📌</span><span>Aufgaben</span></a>`;
-    h+=`<button class="krista-system-lamp" data-system title="Systemstatus öffnen"><span class="krista-dot ${overall(d)}"></span><span>SYS</span></button>`;
     const gateLocked=Date.now()<gateLockedUntil;
     const gateLamp=gateLocked?"yellow":gateColor(d);
     h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":gateLamp==="green"?"Torsteuerung bereit · Klick: Tor-Impuls":"Torsteuerung nicht erreichbar"}"><span class="krista-dot ${gateLamp}"></span><span>TOR</span></button>`;
@@ -216,17 +206,13 @@
     h+=`<button class="krista-services-lamp" data-services title="${svcColor==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button>`;
 
     slot.innerHTML=h;
-    slot.querySelector("[data-system]")?.addEventListener("click",()=>location.href="/admin/systemstatus?token="+encodeURIComponent(token));
     slot.querySelector("[data-services]")?.addEventListener("click",openServices);
     slot.querySelector("[data-gate]")?.addEventListener("click",e=>pulseGate(e.currentTarget));
     slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
   }
 
   function openServices(){
-    if(typeof window.openKrisadminServices==="function"){
-      window.openKrisadminServices();
-      return;
-    }
+    if(typeof window.openKrisadminServices==="function"){window.openKrisadminServices();return;}
     let script=document.querySelector('script[data-krista-services-dialog]');
     if(!script){
       script=document.createElement("script");
@@ -239,11 +225,9 @@
     const timer=setInterval(()=>{
       tries++;
       if(typeof window.openKrisadminServices==="function"){
-        clearInterval(timer);
-        window.openKrisadminServices();
+        clearInterval(timer);window.openKrisadminServices();
       }else if(tries>30){
-        clearInterval(timer);
-        location.href="/public/baustellen.html?token="+encodeURIComponent(token);
+        clearInterval(timer);location.href="/public/baustellen.html?token="+encodeURIComponent(token);
       }
     },100);
   }
@@ -261,19 +245,14 @@
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),2200);
     try{
-      const headers={};
-      if(token)headers["X-Krista-Admin-Token"]=token;
+      const headers={};if(token)headers["X-Krista-Admin-Token"]=token;
       const r=await fetch(MANAGER+"/api/status",{headers,cache:"no-store",signal:controller.signal});
       if(!r.ok)throw new Error("HTTP "+r.status);
       const d=await r.json();
       const rows=Array.isArray(d.rows)?d.rows:[];
       servicesHealthy=Boolean(d.ok)&&!rows.some(x=>String(x?.level||"").toLowerCase()==="red");
-    }catch(_){
-      servicesHealthy=false;
-    }finally{
-      clearTimeout(timeout);
-      updateServicesLamp();
-    }
+    }catch(_){servicesHealthy=false;}
+    finally{clearTimeout(timeout);updateServicesLamp();}
   }
 
   async function pulseGate(btn){
@@ -281,61 +260,30 @@
     if(!token){alert("Admin-Token fehlt.");return;}
     btn.classList.add("pending");
     try{
-      const r=await fetch(`${BRAIN}/access-control/gate`,{
-        method:"POST",
-        headers:{"X-Krista-Token":token},
-        mode:"cors",
-        cache:"no-store"
-      });
+      const r=await fetch(`${BRAIN}/access-control/gate`,{method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"});
       if(!r.ok)throw new Error("HTTP "+r.status);
-      const d=await r.json();
-      if(!d.ok)throw new Error(d.error||"Tor-Impuls fehlgeschlagen");
-
-      gateLockedUntil=Date.now()+10000;
-      if(last)draw(last);
-      setTimeout(()=>{
-        gateLockedUntil=0;
-        if(last)draw(last);
-      },10200);
-    }catch(e){
-      gateLockedUntil=0;
-      alert("Torsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
-      if(last)draw(last);
-    }
+      const d=await r.json();if(!d.ok)throw new Error(d.error||"Tor-Impuls fehlgeschlagen");
+      gateLockedUntil=Date.now()+10000;if(last)draw(last);
+      setTimeout(()=>{gateLockedUntil=0;if(last)draw(last);},10200);
+    }catch(e){gateLockedUntil=0;alert("Torsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");if(last)draw(last);}
   }
+
   async function toggle(btn){
     const door=Number(btn.dataset.door);
     if(isDoorLocked(door))return;
     if(!token){alert("Admin-Token fehlt.");return;}
     btn.classList.add("pending");
-    const dot=btn.querySelector(".krista-dot");
-    if(dot)dot.className="krista-dot yellow";
-    const state=btn.querySelector(".krista-door-state");
-    if(state)state.textContent="…";
+    const dot=btn.querySelector(".krista-dot");if(dot)dot.className="krista-dot yellow";
+    const state=btn.querySelector(".krista-door-state");if(state)state.textContent="…";
     try{
-      const r=await fetch(`${BRAIN}/access-control/toggle/${door}`,{
-        method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"
-      });
+      const r=await fetch(`${BRAIN}/access-control/toggle/${door}`,{method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"});
       if(!r.ok)throw new Error("HTTP "+r.status);
-      const d=await r.json();
-      if(!d.ok)throw new Error(d.error||"Schalten fehlgeschlagen");
+      const d=await r.json();if(!d.ok)throw new Error(d.error||"Schalten fehlgeschlagen");
       const confirmed=d.status?.doors?.[String(door)];
-      if(confirmed){
-        doorHolds.set(String(door),{door:{...confirmed},until:Date.now()+8000});
-        doorLocks.set(String(door),Date.now()+6000);
-      }
-      if(last&&d.status?.doors){
-        last={...last,gantner:{...(last.gantner||{}),...d.status}};
-        draw(last);
-      }
-      setTimeout(load,2500);
-      setTimeout(load,6200);
-    }catch(e){
-      doorHolds.delete(String(door));
-      doorLocks.delete(String(door));
-      alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");
-      load();
-    }
+      if(confirmed){doorHolds.set(String(door),{door:{...confirmed},until:Date.now()+8000});doorLocks.set(String(door),Date.now()+6000);}
+      if(last&&d.status?.doors){last={...last,gantner:{...(last.gantner||{}),...d.status}};draw(last);}
+      setTimeout(load,2500);setTimeout(load,6200);
+    }catch(e){doorHolds.delete(String(door));doorLocks.delete(String(door));alert("Türsteuerung nicht erreichbar. Tailscale auf diesem Gerät prüfen.");load();}
   }
 
   async function load(){
@@ -343,18 +291,14 @@
       const r=await fetch("/kristine/api/access-status?token="+encodeURIComponent(token),{cache:"no-store"});
       if(!r.ok)throw new Error("HTTP "+r.status);
       draw(await r.json());
-    }catch(e){
-      draw({online:false,services:{},gantner:{doors:{}}});
-    }
+    }catch(e){draw({online:false,services:{},gantner:{doors:{}}});}
   }
 
   function start(){
     css();
     if(mount()){
-      load();
-      loadServicesStatus();
-      setInterval(load,5000);
-      setInterval(loadServicesStatus,5000);
+      load();loadServicesStatus();
+      setInterval(load,5000);setInterval(loadServicesStatus,5000);
       window.addEventListener("hashchange",()=>setTimeout(()=>{load();loadServicesStatus()},50));
     }else setTimeout(start,250);
   }
