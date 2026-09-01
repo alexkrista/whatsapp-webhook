@@ -367,6 +367,31 @@ class OutgoingStore:
             created_at TEXT NOT NULL,
             UNIQUE(invoice_id, revision_no)
         );
+        CREATE TABLE IF NOT EXISTS outgoing_debtor_meta (
+            invoice_id INTEGER PRIMARY KEY REFERENCES outgoing_invoices(id) ON DELETE CASCADE,
+            dunning_blocked INTEGER NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            ww_dunning_level INTEGER NOT NULL DEFAULT 0,
+            ww_last_dunning TEXT NOT NULL DEFAULT '',
+            ww_blocked_until TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS outgoing_dunnings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER NOT NULL REFERENCES outgoing_invoices(id) ON DELETE CASCADE,
+            level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 3),
+            dunning_date TEXT NOT NULL,
+            open_gross TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued')),
+            snapshot_json TEXT NOT NULL DEFAULT '{}',
+            pdf_path TEXT,
+            pdf_sha256 TEXT,
+            created_at TEXT NOT NULL,
+            issued_at TEXT,
+            UNIQUE(invoice_id, level)
+        );
+        CREATE INDEX IF NOT EXISTS idx_outgoing_dunnings_invoice
+            ON outgoing_dunnings(invoice_id, level);
         CREATE TABLE IF NOT EXISTS outgoing_audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             entity TEXT NOT NULL,
@@ -555,6 +580,24 @@ class OutgoingStore:
                     due = date.fromisoformat(inv["due_date"])
                     overdue_days = max(0, (today - due).days)
                     customer = str(run["customer_company"] or run["customer_name"] or "Ohne Kunde").strip()
+                    meta = con.execute(
+                        "SELECT * FROM outgoing_debtor_meta WHERE invoice_id=?",
+                        (int(inv["id"]),),
+                    ).fetchone()
+                    local_dunnings = [dict(row) for row in con.execute(
+                        "SELECT * FROM outgoing_dunnings WHERE invoice_id=? AND status='issued' ORDER BY level",
+                        (int(inv["id"]),),
+                    )]
+                    ww_level = max(0, min(3, int(meta["ww_dunning_level"] or 0))) if meta else 0
+                    local_level = max((int(row["level"]) for row in local_dunnings), default=0)
+                    dunning_level = max(ww_level, local_level)
+                    last_local = local_dunnings[-1] if local_dunnings else None
+                    last_dunning_date = str((last_local or {}).get("dunning_date") or "")
+                    if ww_level >= local_level and meta and meta["ww_last_dunning"]:
+                        last_dunning_date = str(meta["ww_last_dunning"])
+                    blocked_until = str(meta["ww_blocked_until"] or "") if meta else ""
+                    locally_blocked = bool(meta and meta["dunning_blocked"])
+                    ww_blocked = bool(blocked_until and blocked_until >= today.isoformat())
                     result.append({
                         "runId": int(run["id"]), "invoiceId": int(inv["id"]),
                         "source": inv["source"], "invoiceNumber": inv["invoice_number"], "kind": inv["kind"],
@@ -566,9 +609,129 @@ class OutgoingStore:
                         "projectIndex": run["project_index"], "projectNumber": run["project_number"],
                         "projectTitle": run["project_title"], "runLabel": run["label"],
                         "pdfAvailable": bool(inv["pdf_path"] and Path(inv["pdf_path"]).is_file()),
+                        "dunningLevel": dunning_level,
+                        "nextDunningLevel": dunning_level + 1 if dunning_level < 3 else None,
+                        "lastDunningDate": last_dunning_date,
+                        "dunningBlocked": locally_blocked or ww_blocked,
+                        "dunningBlockedLocal": locally_blocked,
+                        "wwDunningBlockedUntil": blocked_until,
+                        "opNote": str(meta["note"] or "") if meta else "",
+                        "dunningHistory": [{
+                            "id": int(row["id"]), "level": int(row["level"]),
+                            "date": row["dunning_date"],
+                            "pdfAvailable": bool(row["pdf_path"] and Path(row["pdf_path"]).is_file()),
+                        } for row in local_dunnings],
+                        "lastDunningId": int(last_local["id"]) if last_local else None,
+                        "lastDunningPdfAvailable": bool(
+                            last_local and last_local["pdf_path"] and Path(last_local["pdf_path"]).is_file()
+                        ),
                     })
         result.sort(key=lambda x: (x["dueDate"], str(x["customer"]).casefold(), x["invoiceNumber"] or ""))
         return result
+
+    def update_debtor_meta(self, invoice_id, data):
+        invoice_id = int(invoice_id)
+        with _LOCK, self.connect() as con:
+            invoice = con.execute("SELECT id FROM outgoing_invoices WHERE id=?", (invoice_id,)).fetchone()
+            if not invoice:
+                raise ValueError("Ausgangsrechnung nicht gefunden.")
+            current = con.execute(
+                "SELECT * FROM outgoing_debtor_meta WHERE invoice_id=?", (invoice_id,)
+            ).fetchone()
+            blocked = int(bool(data.get("dunningBlocked"))) if "dunningBlocked" in data else int(current["dunning_blocked"] if current else 0)
+            note = str(data.get("note") or "").strip()[:2000] if "note" in data else str(current["note"] if current else "")
+            now = _now()
+            con.execute("""
+                INSERT INTO outgoing_debtor_meta(invoice_id,dunning_blocked,note,updated_at)
+                VALUES(?,?,?,?)
+                ON CONFLICT(invoice_id) DO UPDATE SET
+                    dunning_blocked=excluded.dunning_blocked,
+                    note=excluded.note,
+                    updated_at=excluded.updated_at
+            """, (invoice_id, blocked, note, now))
+            self._audit(con, "invoice", invoice_id, "debtor_meta", {
+                "dunningBlocked": bool(blocked), "noteChanged": "note" in data,
+            })
+            con.commit()
+        return next(
+            (row for row in self.debtor_open_items() if row["invoiceId"] == invoice_id),
+            {"invoiceId": invoice_id, "dunningBlocked": bool(blocked), "opNote": note},
+        )
+
+    def dunning(self, dunning_id):
+        with self.connect() as con:
+            row = con.execute("SELECT * FROM outgoing_dunnings WHERE id=?", (int(dunning_id),)).fetchone()
+            if not row:
+                raise ValueError("Mahnung nicht gefunden.")
+            data = dict(row)
+            data["snapshot"] = json.loads(data.pop("snapshot_json") or "{}")
+            data["pdfAvailable"] = bool(data.get("pdf_path") and Path(data["pdf_path"]).is_file())
+            return data
+
+    def prepare_dunning(self, invoice_id, dunning_date=None):
+        invoice_id = int(invoice_id)
+        dunning_date = _iso_date(
+            dunning_date or date.today().isoformat(), required=True, label="Mahndatum"
+        )
+        item = next(
+            (row for row in self.debtor_open_items(dunning_date) if row["invoiceId"] == invoice_id),
+            None,
+        )
+        if not item:
+            raise ValueError("Die Rechnung ist nicht mehr offen.")
+        if not item["isOverdue"]:
+            raise ValueError("Eine Mahnung ist erst nach Fälligkeit möglich.")
+        if item["dunningBlocked"]:
+            raise ValueError("Für diese Rechnung ist eine Mahnsperre gesetzt.")
+        level = int(item.get("nextDunningLevel") or 0)
+        if level not in {1, 2, 3}:
+            raise ValueError("Die dritte Mahnung wurde bereits erstellt.")
+
+        with _LOCK, self.connect() as con:
+            existing = con.execute(
+                "SELECT id FROM outgoing_dunnings WHERE invoice_id=? AND level=?",
+                (invoice_id, level),
+            ).fetchone()
+            if existing:
+                return self.dunning(int(existing["id"]))
+            invoice = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (invoice_id,)).fetchone()
+            run = con.execute("SELECT * FROM outgoing_runs WHERE id=?", (invoice["run_id"],)).fetchone() if invoice else None
+            if not invoice or not run:
+                raise ValueError("Rechnung oder Rechnungslauf nicht gefunden.")
+            snapshot = {"openItem": item, "invoice": dict(invoice), "run": dict(run)}
+            now = _now()
+            cur = con.execute("""
+                INSERT INTO outgoing_dunnings(
+                    invoice_id,level,dunning_date,open_gross,status,snapshot_json,created_at
+                ) VALUES(?,?,?,?,'draft',?,?)
+            """, (invoice_id, level, dunning_date, str(_money(item["openGross"])), _json(snapshot), now))
+            dunning_id = int(cur.lastrowid)
+            self._audit(con, "dunning", dunning_id, "prepare", {
+                "invoiceId": invoice_id, "level": level, "openGross": item["openGross"],
+            })
+            con.commit()
+        return self.dunning(dunning_id)
+
+    def attach_dunning_pdf(self, dunning_id, pdf_path):
+        path = Path(pdf_path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        with _LOCK, self.connect() as con:
+            row = con.execute("SELECT * FROM outgoing_dunnings WHERE id=?", (int(dunning_id),)).fetchone()
+            if not row:
+                raise ValueError("Mahnung nicht gefunden.")
+            if row["status"] == "issued" and row["pdf_sha256"] and row["pdf_sha256"] != digest:
+                raise ValueError("Eine erstellte Mahnung darf nicht überschrieben werden.")
+            now = _now()
+            con.execute("""
+                UPDATE outgoing_dunnings
+                SET status='issued',pdf_path=?,pdf_sha256=?,issued_at=?
+                WHERE id=?
+            """, (str(path), digest, now, int(dunning_id)))
+            self._audit(con, "dunning", int(dunning_id), "issue", {
+                "invoiceId": int(row["invoice_id"]), "level": int(row["level"]), "sha256": digest,
+            })
+            con.commit()
+        return self.dunning(dunning_id)
 
     def last_ww_sync(self):
         with self.connect() as con:
@@ -849,14 +1012,35 @@ class OutgoingStore:
         imported = skipped = 0
         touched_runs = set()
         with _LOCK, self.connect() as con:
+            def sync_dunning_meta(invoice_id, item):
+                try:
+                    level = max(0, min(3, int(item.get("dunningLevel") or 0)))
+                except (TypeError, ValueError):
+                    level = 0
+                last = _iso_date(item.get("lastDunning"))
+                blocked_until = _iso_date(item.get("dunningBlockedUntil"))
+                con.execute("""
+                    INSERT INTO outgoing_debtor_meta(
+                        invoice_id,ww_dunning_level,ww_last_dunning,ww_blocked_until,updated_at
+                    ) VALUES(?,?,?,?,?)
+                    ON CONFLICT(invoice_id) DO UPDATE SET
+                        ww_dunning_level=excluded.ww_dunning_level,
+                        ww_last_dunning=excluded.ww_last_dunning,
+                        ww_blocked_until=excluded.ww_blocked_until,
+                        updated_at=excluded.updated_at
+                """, (int(invoice_id), level, last, blocked_until, _now()))
+
             for item in rows or []:
                 source_id = str(item.get("sourceId") or "").strip()
                 number = str(item.get("invoiceNumber") or "").strip()
                 if not source_id or not number:
                     continue
-                if con.execute(
-                    "SELECT 1 FROM outgoing_invoices WHERE source='WW' AND source_id=?", (source_id,)
-                ).fetchone():
+                existing = con.execute(
+                    "SELECT id,run_id FROM outgoing_invoices WHERE source='WW' AND source_id=?", (source_id,)
+                ).fetchone()
+                if existing:
+                    sync_dunning_meta(int(existing["id"]), item)
+                    touched_runs.add(int(existing["run_id"]))
                     skipped += 1
                     continue
                 project_index = item.get("projectIndex")
@@ -925,6 +1109,7 @@ class OutgoingStore:
                     INSERT INTO outgoing_lines(invoice_id,line_no,description,quantity,unit,unit_price,discount_percent,net)
                     VALUES(?,1,?,'1','PA',?,'0',?)
                 """, (invoice_id, f"Offener Posten aus WinWorker · Rechnung {number}", str(open_net), str(open_net)))
+                sync_dunning_meta(invoice_id, item)
                 self._audit(con, "invoice", invoice_id, "import_ww_open", {
                     "invoiceNumber": number, "openGross": str(open_gross), "sourceId": source_id,
                 })

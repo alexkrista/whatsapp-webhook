@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 
 def _d(value):
@@ -307,5 +308,142 @@ def render_invoice_pdf(invoice, settings, destination):
     if invoice.get("kind") not in {"ST", "GS"}:
         story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
 
+    doc.build(story)
+    return destination
+
+
+def render_dunning_pdf(dunning, settings, destination):
+    """Erstellt eine Mahnung im gleichen ruhigen WW-Briefbild wie die Rechnung."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_RIGHT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise RuntimeError("ReportLab fehlt für die Mahnungserstellung.") from exc
+
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    width, height = A4
+    regular_font, bold_font = "Helvetica", "Helvetica-Bold"
+    arial = Path(r"C:\Windows\Fonts\arial.ttf")
+    arial_bold = Path(r"C:\Windows\Fonts\arialbd.ttf")
+    if arial.exists() and arial_bold.exists():
+        try:
+            if "KristaArial" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("KristaArial", str(arial)))
+            if "KristaArialBold" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("KristaArialBold", str(arial_bold)))
+            regular_font, bold_font = "KristaArial", "KristaArialBold"
+        except Exception:
+            pass
+
+    snapshot = dunning.get("snapshot") or {}
+    item = snapshot.get("openItem") or {}
+    run = snapshot.get("run") or {}
+    invoice = snapshot.get("invoice") or {}
+    level = max(1, min(3, int(dunning.get("level") or 1)))
+    title_text = f"{level}. Mahnung"
+    dunning_date = str(dunning.get("dunning_date") or date.today().isoformat())[:10]
+    try:
+        requested_date = (date.fromisoformat(dunning_date) + timedelta(days=7)).isoformat()
+    except ValueError:
+        requested_date = dunning_date
+
+    styles = getSampleStyleSheet()
+    base = ParagraphStyle("Dunning", parent=styles["Normal"], fontName=regular_font, fontSize=10, leading=13)
+    small = ParagraphStyle("DunningSmall", parent=base, fontSize=7.8, leading=9.2)
+    heading = ParagraphStyle("DunningHeading", parent=base, fontName=bold_font, fontSize=12.8, leading=16)
+    right = ParagraphStyle("DunningRight", parent=base, alignment=TA_RIGHT)
+
+    def page(canvas, doc):
+        canvas.saveState()
+        logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
+        if logo.exists():
+            canvas.drawImage(str(logo), 235.5, height - 104.2, width=312.9, height=61.5, preserveAspectRatio=False, mask="auto")
+        recipient = [
+            run.get("customer_company") or "", run.get("customer_name") or "",
+            run.get("customer_street") or "",
+            " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
+            run.get("customer_country") or "",
+        ]
+        canvas.setFont(regular_font, 9.92)
+        y = height - 168
+        for line in (x for x in recipient if x):
+            canvas.drawString(56.6, y, str(line))
+            y -= 11.9
+        canvas.setFont(bold_font, 10.8)
+        canvas.drawString(350.0, height - 169, f"Projekt: {run.get('project_number') or ''}")
+        canvas.setFont(regular_font, 7.92)
+        canvas.drawString(
+            36.7, 48.0,
+            f"Sparkasse Feldkirch  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  {settings.get('company_uid','')}",
+        )
+        canvas.setFont(regular_font, 6.84)
+        canvas.drawString(36.5, 32.5, settings.get("company_name", ""))
+        canvas.drawString(168.6, 32.5, f"T {settings.get('company_phone','')}")
+        canvas.drawString(249.1, 32.5, settings.get("company_fn", ""))
+        canvas.drawString(36.5, 22.7, f"{settings.get('company_street','')}  |  {settings.get('company_postal_city','')}")
+        canvas.drawString(168.6, 22.7, settings.get("company_email", ""))
+        canvas.drawString(249.1, 22.7, settings.get("company_web", ""))
+        canvas.restoreState()
+
+    doc = BaseDocTemplate(
+        str(destination), pagesize=A4, leftMargin=17 * mm, rightMargin=18 * mm,
+        topMargin=100 * mm, bottomMargin=27 * mm,
+        title=f"{title_text} {item.get('invoiceNumber') or ''}",
+        author=settings.get("company_name", "KRISTINE"), creator="KRISTINE",
+    )
+    frame = Frame(17 * mm, 27 * mm, width - 35 * mm, height - 127 * mm, id="normal", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    doc.addPageTemplates(PageTemplate(id="ww-dunning", frames=[frame], onPage=page))
+
+    intro = {
+        1: "Bei Durchsicht unserer offenen Posten haben wir festgestellt, dass die unten angeführte Rechnung noch nicht ausgeglichen ist.",
+        2: "Trotz unserer ersten Mahnung ist die unten angeführte Rechnung weiterhin offen.",
+        3: "Trotz unserer bisherigen Mahnungen ist die unten angeführte Rechnung weiterhin offen. Wir ersuchen um unverzügliche Erledigung.",
+    }[level]
+    story = [
+        Table([[Paragraph(title_text, heading), Paragraph(de_date_long(dunning_date), right)]], colWidths=[90 * mm, 85 * mm], style=TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("LINEBELOW", (0, 0), (-1, 0), .65, colors.black),
+        ])),
+        Spacer(1, 9 * mm),
+        Paragraph(intro, base),
+        Spacer(1, 7 * mm),
+    ]
+    rows = [
+        ["Rechnungsnummer", "Rechnungsdatum", "Fällig seit", "Offener Betrag"],
+        [
+            escape(str(item.get("invoiceNumber") or invoice.get("invoice_number") or "")),
+            de_date(item.get("issueDate") or invoice.get("issue_date")),
+            de_date(item.get("dueDate") or invoice.get("due_date")),
+            money(dunning.get("open_gross") or item.get("openGross")) + " EUR",
+        ],
+    ]
+    table = Table(rows, colWidths=[49 * mm, 40 * mm, 40 * mm, 46 * mm])
+    table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), bold_font), ("FONTNAME", (0, 1), (-1, 1), regular_font),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.4), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("LINEABOVE", (0, 0), (-1, 0), .6, colors.black), ("LINEBELOW", (0, -1), (-1, -1), .6, colors.black),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
+    ]))
+    story.extend([
+        table,
+        Spacer(1, 9 * mm),
+        Paragraph(
+            f"Bitte überweisen Sie den offenen Betrag bis spätestens <b>{de_date(requested_date)}</b> auf unser unten angeführtes Konto. Geben Sie als Zahlungsreferenz die Rechnungsnummer <b>{escape(str(item.get('invoiceNumber') or ''))}</b> an.",
+            base,
+        ),
+        Spacer(1, 6 * mm),
+        Paragraph("Sollte Ihre Zahlung inzwischen erfolgt sein, betrachten Sie dieses Schreiben bitte als gegenstandslos.", base),
+        Spacer(1, 12 * mm),
+        Paragraph("Mit freundlichen Grüßen<br/>Farben Krista GmbH &amp; Co KG", base),
+    ])
     doc.build(story)
     return destination

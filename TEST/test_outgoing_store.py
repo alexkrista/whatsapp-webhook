@@ -81,6 +81,25 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(items[0]["openGross"], 5000.0)
         self.assertEqual(items[0]["overdueDays"], 6)
 
+    def test_dunning_levels_block_and_notes_are_persistent(self):
+        issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="5000"))["id"])
+        first = self.store.prepare_dunning(issued["id"], "2026-09-20")
+        self.assertEqual(first["level"], 1)
+        pdf = self.store.output_root / "Mahnung_1.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        self.store.attach_dunning_pdf(first["id"], pdf)
+        item = self.store.debtor_open_items("2026-09-21")[0]
+        self.assertEqual(item["dunningLevel"], 1)
+        self.assertEqual(item["nextDunningLevel"], 2)
+        self.store.update_debtor_meta(issued["id"], {
+            "dunningBlocked": True, "note": "Kunde prüft die Schlussaufstellung.",
+        })
+        item = self.store.debtor_open_items("2026-09-21")[0]
+        self.assertTrue(item["dunningBlocked"])
+        self.assertEqual(item["opNote"], "Kunde prüft die Schlussaufstellung.")
+        with self.assertRaisesRegex(ValueError, "Mahnsperre"):
+            self.store.prepare_dunning(issued["id"], "2026-09-21")
+
     def test_zero_vat_requires_uid_and_note(self):
         payload = self.payload()
         payload["taxMode"] = "RC19"
@@ -147,6 +166,7 @@ class OutgoingStoreTests(unittest.TestCase):
             "serviceFrom": "2026-08-01", "serviceTo": "2026-08-20", "vatRate": "20",
             "originalNet": "10000", "originalGross": "12000", "openGross": "3500",
             "isPartial": False, "isFinal": False,
+            "dunningLevel": 2, "lastDunning": "2026-08-30", "dunningBlockedUntil": "2026-09-30",
         }
         first = self.store.sync_ww_open_items([row])
         second = self.store.sync_ww_open_items([row])
@@ -155,6 +175,10 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertTrue(self.store.last_ww_sync()["at"])
         imported_run = self.store.run(first["runIds"][0])
         self.assertEqual(imported_run["currentOpen"], 3500.0)
+        item = self.store.debtor_open_items("2026-09-20")[0]
+        self.assertEqual(item["dunningLevel"], 2)
+        self.assertEqual(item["lastDunningDate"], "2026-08-30")
+        self.assertTrue(item["dunningBlocked"])
 
 
 if __name__ == "__main__":

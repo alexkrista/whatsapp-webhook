@@ -57,7 +57,7 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(run_response.status_code, 200, run_response.get_data(as_text=True))
         run_id = run_response.get_json()["run"]["id"]
         invoice_response = self.client.post("/api/outgoing/invoices", json={
-            "runId": run_id, "kind": "TR", "issueDate": "2026-08-31", "dueDate": "2026-09-20",
+            "runId": run_id, "kind": "TR", "issueDate": "2026-08-31", "dueDate": "2026-08-31",
             "serviceFrom": "2026-08-01", "serviceTo": "2026-08-31", "taxMode": "AT20",
             "recipientUid": "ATU12345678",
             "retentionPercent": 7, "discountPercent": 5, "cashDiscountPercent": 3,
@@ -76,6 +76,20 @@ class OutgoingApiTests(unittest.TestCase):
         open_items = self.client.get("/api/outgoing/open-items").get_json()
         self.assertEqual(len(open_items["items"]), 1)
         self.assertEqual(open_items["items"][0]["openGross"], 10602.0)
+        dunning = self.client.post(f"/api/outgoing/invoices/{invoice_id}/dunnings", json={
+            "dunningDate": "2026-09-01",
+        })
+        self.assertEqual(dunning.status_code, 200, dunning.get_data(as_text=True))
+        self.assertEqual(dunning.get_json()["dunning"]["level"], 1)
+        dunning_pdf = self.client.get(dunning.get_json()["pdfUrl"])
+        self.assertEqual(dunning_pdf.status_code, 200)
+        self.assertTrue(dunning_pdf.data.startswith(b"%PDF"))
+        dunning_pdf.close()
+        meta = self.client.put(f"/api/outgoing/invoices/{invoice_id}/debtor-meta", json={
+            "note": "Kunde hat Rückruf zugesagt.", "dunningBlocked": True,
+        })
+        self.assertEqual(meta.status_code, 200, meta.get_data(as_text=True))
+        self.assertTrue(meta.get_json()["item"]["dunningBlocked"])
         payment = self.client.post(f"/api/outgoing/runs/{run_id}/payments", json={
             "invoiceId": invoice_id, "paymentDate": "2026-09-01", "gross": 1000, "reference": "Bank",
         })

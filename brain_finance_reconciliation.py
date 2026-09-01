@@ -20,7 +20,7 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import date, datetime
 
 from brain_finance_source import FinanceStore, norm_method, norm_status
 
@@ -47,11 +47,11 @@ def _local(tag):
 
 
 def _children(node, name):
-    return [x for x in list(node or []) if _local(x.tag) == name]
+    return [x for x in (list(node) if node is not None else []) if _local(x.tag) == name]
 
 
 def _child(node, name):
-    for x in list(node or []):
+    for x in (list(node) if node is not None else []):
         if _local(x.tag) == name:
             return x
     return None
@@ -294,6 +294,7 @@ def install(ns):
         by_e2e = {}
         debit = []
         revolut = []
+        debtors = []
         try:
             items = store.items(True)
         except Exception:
@@ -307,9 +308,15 @@ def install(ns):
                 debit.append(item)
             if method == "revolut" and norm_status(item.get("paymentStatus")) != "paid":
                 revolut.append(item)
-        return by_e2e, debit, revolut
+        outgoing = app.extensions.get("kristine_outgoing_store")
+        if outgoing is not None:
+            try:
+                debtors = outgoing.debtor_open_items()
+            except Exception as exc:
+                print("⚠ Debitoren-OP für CAMT nicht verfügbar:", exc)
+        return by_e2e, debit, revolut, debtors
 
-    def suggest(movement, by_e2e, debit, revolut):
+    def suggest(movement, by_e2e, debit, revolut, debtors):
         e2e = str(movement.get("endToEndId") or "").strip()
         amount = round(float(movement.get("amount") or 0), 2)
         currency = str(movement.get("currency") or "EUR")
@@ -319,6 +326,41 @@ def install(ns):
             movement.get("reference") or "",
             movement.get("rawText") or "",
         ])).lower()
+        compact_text = re.sub(r"[^a-z0-9]", "", text)
+        if direction == "in":
+            numbered = []
+            for item in debtors:
+                if str(item.get("currency") or "EUR").upper() != currency.upper():
+                    continue
+                number = re.sub(r"[^a-z0-9]", "", str(item.get("invoiceNumber") or "").lower())
+                if len(number) < 4 or number not in compact_text:
+                    continue
+                if amount - round(float(item.get("openGross") or 0), 2) > 0.02:
+                    continue
+                numbered.append(item)
+            if len(numbered) == 1:
+                item = numbered[0]
+                exact_amount = abs(round(float(item.get("openGross") or 0), 2) - amount) <= 0.02
+                reason = "Rechnungsnummer + Betrag eindeutig" if exact_amount else "Rechnungsnummer eindeutig · Teilzahlung"
+                return "customer_receipt", "OUTGOING", str(item.get("invoiceId") or ""), reason, True
+
+            amount_matches = []
+            for item in debtors:
+                if str(item.get("currency") or "EUR").upper() != currency.upper():
+                    continue
+                if abs(round(float(item.get("openGross") or 0), 2) - amount) > 0.02:
+                    continue
+                customer = _normal(" ".join([
+                    item.get("customer") or "", item.get("customerName") or "",
+                    item.get("customerCompany") or "",
+                ])).lower()
+                tokens = [token for token in re.findall(r"[a-z0-9äöüß]+", customer) if len(token) >= 5]
+                if tokens and any(token in text for token in tokens):
+                    amount_matches.append(item)
+            if len(amount_matches) == 1:
+                item = amount_matches[0]
+                return "customer_receipt", "OUTGOING", str(item.get("invoiceId") or ""), "Kunde + Betrag eindeutig", False
+
         if direction == "out" and e2e and e2e in by_e2e:
             item = by_e2e[e2e]
             expected = round(float(item.get("paymentAmount") if item.get("paymentAmount") is not None else item.get("amount") or 0), 2)
@@ -366,13 +408,51 @@ def install(ns):
         c.execute("UPDATE brain_statement_movements SET status=? WHERE id=?", (status, int(movement_id)))
         return dict(amount=amount, allocated=allocated, remaining=rest, status=status)
 
-    def finish_target(category, target_source, target_id):
-        if category not in {"supplier_payment", "direct_debit"} or not target_source or not target_id:
+    def finish_target(category, target_source, target_id, movement=None, allocation=None):
+        if not target_source or not target_id:
             return
+        if category in {"supplier_payment", "direct_debit"}:
+            try:
+                store.set_meta(target_source, target_id, status="paid")
+            except Exception as exc:
+                print("⚠ CAMT Zielstatus konnte nicht gesetzt werden:", target_source, target_id, exc)
+            return
+        if category != "customer_receipt" or target_source != "OUTGOING":
+            return
+        outgoing = app.extensions.get("kristine_outgoing_store")
+        if outgoing is None:
+            raise RuntimeError("Debitoren-OP ist nicht verfügbar.")
+        invoice_id = int(target_id)
+        open_item = next(
+            (item for item in outgoing.debtor_open_items() if int(item.get("invoiceId") or 0) == invoice_id),
+            None,
+        )
+        if not open_item:
+            raise ValueError("Der Debitorenposten ist nicht mehr offen.")
+        amount = round(float((allocation or {}).get("amount") or 0), 2)
+        if amount - round(float(open_item.get("openGross") or 0), 2) > 0.02:
+            raise ValueError("Die CAMT-Zahlung ist höher als der offene Rechnungsbetrag.")
+        reference = _normal(" ".join([
+            "CAMT", (movement or {}).get("reference") or "",
+            (movement or {}).get("raw_text") or "",
+        ]))[:500]
+        source_id = ":".join([
+            str((movement or {}).get("source") or "CAMT"),
+            str((movement or {}).get("external_id") or ""),
+            str((allocation or {}).get("lineNo") or 1), str(invoice_id),
+        ])
         try:
-            store.set_meta(target_source, target_id, status="paid")
+            outgoing.add_payment(open_item["runId"], {
+                "invoiceId": invoice_id,
+                "paymentDate": str((movement or {}).get("booking_date") or date.today().isoformat())[:10],
+                "gross": amount,
+                "reference": reference,
+                "source": "CAMT",
+                "sourceId": source_id,
+            })
         except Exception as exc:
-            print("⚠ CAMT Zielstatus konnte nicht gesetzt werden:", target_source, target_id, exc)
+            if "UNIQUE" not in str(exc).upper():
+                raise
 
     def allocate(c, movement_id, allocations):
         movement = c.execute("SELECT * FROM brain_statement_movements WHERE id=?", (int(movement_id),)).fetchone()
@@ -408,17 +488,20 @@ def install(ns):
                 VALUES(?,?,?,?,?,?,?,?)
             """, (int(movement_id), item["lineNo"], item["category"], item["amount"], item["targetSource"], item["targetId"], item["note"], now))
         state = refresh_status(c, movement_id)
-        c.commit()
         if state and state["status"] == "reconciled":
             for item in clean:
-                finish_target(item["category"], item["targetSource"], item["targetId"])
+                finish_target(
+                    item["category"], item["targetSource"], item["targetId"],
+                    dict(movement), item,
+                )
+        c.commit()
         return state
 
     def import_statements(data, source="CAMT"):
         source = str(source or "CAMT").upper()
         statements = parse_camt(data) if source == "CAMT" else []
         digest = hashlib.sha256(data).hexdigest()
-        by_e2e, debit, revolut = payment_candidates()
+        by_e2e, debit, revolut, debtors = payment_candidates()
         imported = []
         c = con()
         try:
@@ -443,7 +526,9 @@ def install(ns):
                 added = 0
                 if not duplicate:
                     for movement in statement["movements"]:
-                        category, target_source, target_id, reason, auto = suggest(movement, by_e2e, debit, revolut)
+                        category, target_source, target_id, reason, auto = suggest(
+                            movement, by_e2e, debit, revolut, debtors
+                        )
                         try:
                             cur = c.execute("""
                                 INSERT INTO brain_statement_movements
@@ -559,7 +644,7 @@ def install(ns):
             html = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KRISTINE · Bankabgleich</title><style>
 body{margin:0;background:#101316;color:#eef2f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}.shell{max-width:1500px;margin:auto;padding:18px}.head,.tools,.move-top,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.head{justify-content:space-between}.card,.statement,.move{border:1px solid #343c46;background:#171b20;border-radius:13px;padding:12px;margin:12px 0}.statement.complete{border-color:#3f7653}.statement.open{border-color:#7a5b2d}.move{background:#11151a}.move.reconciled{opacity:.68}.sub{color:#9da8b3;font-size:12px}.amount{font-size:18px;font-weight:900}.out .amount{color:#f0a0a0}.in .amount{color:#92d6a8}button,select,input{background:#252c34;color:#fff;border:1px solid #485461;border-radius:9px;padding:8px 10px}.primary{background:#3d7f55;font-weight:850}.warn{color:#e8bd68}.ok{color:#8ed2a2}.rest{font-weight:850}.quick{font-size:11px;padding:6px 8px}.split{display:grid;grid-template-columns:minmax(170px,1fr) 120px minmax(170px,1fr);gap:7px;margin-top:8px}.back{color:#fff;font-weight:850}@media(max-width:720px){.split{grid-template-columns:1fr}.head{align-items:flex-start}}
 </style></head><body><main class="shell"><div class="head"><div><h1>Bank / CAMT-Abgleich</h1><div class="sub">Ein Auszug ist erst fertig, wenn jede Bewegung Rest 0,00 hat.</div></div><a class="back" href="/incoming/payments">← OP</a></div><section class="card"><form id="upload"><div class="tools"><input id="file" name="file" type="file" accept=".xml,.camt,.053,text/xml,application/xml"><button class="primary">CAMT importieren</button><span id="msg" class="sub"></span></div></form></section><div id="summary" class="card">Wird geladen …</div><div id="rows"></div></main><script>
-(()=>{const CATS=__CATS__,rows=document.getElementById('rows'),summary=document.getElementById('summary'),msg=document.getElementById('msg');const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=(n,c='EUR')=>new Intl.NumberFormat('de-AT',{style:'currency',currency:c||'EUR'}).format(Number(n||0)),date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')};function opts(selected=''){return Object.entries(CATS).map(([k,v])=>`<option value="${esc(k)}" ${k===selected?'selected':''}>${esc(v)}</option>`).join('')}function moveHtml(x){const sug=x.suggestedCategory?`<div class="sub">Vorschlag: <strong>${esc(CATS[x.suggestedCategory]||x.suggestedCategory)}</strong>${x.suggestedReason?' · '+esc(x.suggestedReason):''}</div>`:'';return `<div class="move ${esc(x.status)} ${esc(x.direction)}" data-id="${x.id}"><div class="move-top"><div><strong>${esc(date(x.bookingDate))} · ${esc(x.counterpartyName||'Ohne Gegenpartei')}</strong><div class="sub">${esc(x.reference||x.endToEndId||'')}</div>${sug}</div><div style="margin-left:auto;text-align:right"><div class="amount">${x.direction==='out'?'−':'+'}${esc(money(x.amount,x.currency))}</div><div class="rest ${x.remaining<=.005?'ok':'warn'}">Rest ${esc(money(x.remaining,x.currency))}</div></div></div><div class="actions"><button class="quick" data-quick="alex_contribution">Einlage Alex</button><button class="quick" data-quick="alex_withdrawal">Privatentnahme Alex</button><button class="quick" data-quick="revolut_internal">Bank ↔ Revolut</button><button class="quick" data-quick="bank_fee">Gebühr</button>${x.suggestedCategory?'<button class="quick primary" data-suggestion>Vorschlag übernehmen</button>':''}</div><div class="split"><select data-cat>${opts(x.suggestedCategory||'other_expense')}</select><input data-amount type="number" step="0.01" min="0" value="${Number(x.remaining||x.amount).toFixed(2)}"><button data-book class="primary">Zuordnen / Rest buchen</button></div></div>`}function render(d){summary.innerHTML=`<strong>${d.openStatements||0} Auszug/Auszüge noch offen</strong> · Rest gesamt <strong>${esc(money(d.remaining||0))}</strong>`;rows.innerHTML=(d.statements||[]).map(s=>`<section class="statement ${esc(s.status)}"><div class="head"><div><strong>${esc(s.source)} · ${esc(s.accountIban||'')}</strong><div class="sub">${esc(date(s.periodStart))} – ${esc(date(s.periodEnd))} · ${s.movementCount} Bewegungen</div></div><div><strong class="${s.status==='complete'?'ok':'warn'}">${s.status==='complete'?'✓ komplett verbucht':'Rest '+esc(money(s.remaining,s.currency))}</strong></div></div>${(s.movements||[]).map(moveHtml).join('')}</section>`).join('')||'<div class="card sub">Noch kein CAMT importiert.</div>';wire()}async function load(){const r=await fetch('/incoming/reconciliation/statements',{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');render(d)}async function book(id,category,amount,targetSource='',targetId='',note=''){const r=await fetch('/incoming/reconciliation/movements/'+id+'/allocate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allocations:[{category,amount:Number(amount),targetSource,targetId,note}]})}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Buchen fehlgeschlagen');await load()}function wire(){rows.querySelectorAll('.move').forEach(el=>{const id=el.dataset.id,amount=el.querySelector('[data-amount]'),cat=el.querySelector('[data-cat]');el.querySelector('[data-book]').onclick=()=>book(id,cat.value,amount.value).catch(e=>alert(e.message));el.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>book(id,b.dataset.quick,amount.value).catch(e=>alert(e.message)));el.querySelector('[data-suggestion]')?.addEventListener('click',()=>{const option=cat.value;book(id,option,amount.value).catch(e=>alert(e.message))})})}document.getElementById('upload').onsubmit=async e=>{e.preventDefault();const f=document.getElementById('file').files?.[0];if(!f)return;msg.textContent='Import läuft …';const fd=new FormData();fd.append('file',f);try{const r=await fetch('/incoming/reconciliation/import-camt',{method:'POST',body:fd}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Import fehlgeschlagen');msg.textContent='✓ importiert';await load()}catch(err){msg.textContent=err.message}};load().catch(e=>summary.textContent=e.message)})();
+(()=>{const CATS=__CATS__,rows=document.getElementById('rows'),summary=document.getElementById('summary'),msg=document.getElementById('msg');const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=(n,c='EUR')=>new Intl.NumberFormat('de-AT',{style:'currency',currency:c||'EUR'}).format(Number(n||0)),date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')};function opts(selected=''){return Object.entries(CATS).map(([k,v])=>`<option value="${esc(k)}" ${k===selected?'selected':''}>${esc(v)}</option>`).join('')}function moveHtml(x){const sug=x.suggestedCategory?`<div class="sub">Vorschlag: <strong>${esc(CATS[x.suggestedCategory]||x.suggestedCategory)}</strong>${x.suggestedReason?' · '+esc(x.suggestedReason):''}</div>`:'';return `<div class="move ${esc(x.status)} ${esc(x.direction)}" data-id="${x.id}" data-suggested-source="${esc(x.suggestedTargetSource||'')}" data-suggested-id="${esc(x.suggestedTargetId||'')}" data-suggested-reason="${esc(x.suggestedReason||'')}"><div class="move-top"><div><strong>${esc(date(x.bookingDate))} · ${esc(x.counterpartyName||'Ohne Gegenpartei')}</strong><div class="sub">${esc(x.reference||x.endToEndId||'')}</div>${sug}</div><div style="margin-left:auto;text-align:right"><div class="amount">${x.direction==='out'?'−':'+'}${esc(money(x.amount,x.currency))}</div><div class="rest ${x.remaining<=.005?'ok':'warn'}">Rest ${esc(money(x.remaining,x.currency))}</div></div></div><div class="actions"><button class="quick" data-quick="alex_contribution">Einlage Alex</button><button class="quick" data-quick="alex_withdrawal">Privatentnahme Alex</button><button class="quick" data-quick="revolut_internal">Bank ↔ Revolut</button><button class="quick" data-quick="bank_fee">Gebühr</button>${x.suggestedCategory?'<button class="quick primary" data-suggestion>Vorschlag übernehmen</button>':''}</div><div class="split"><select data-cat>${opts(x.suggestedCategory||'other_expense')}</select><input data-amount type="number" step="0.01" min="0" value="${Number(x.remaining||x.amount).toFixed(2)}"><button data-book class="primary">Zuordnen / Rest buchen</button></div></div>`}function render(d){summary.innerHTML=`<strong>${d.openStatements||0} Auszug/Auszüge noch offen</strong> · Rest gesamt <strong>${esc(money(d.remaining||0))}</strong>`;rows.innerHTML=(d.statements||[]).map(s=>`<section class="statement ${esc(s.status)}"><div class="head"><div><strong>${esc(s.source)} · ${esc(s.accountIban||'')}</strong><div class="sub">${esc(date(s.periodStart))} – ${esc(date(s.periodEnd))} · ${s.movementCount} Bewegungen</div></div><div><strong class="${s.status==='complete'?'ok':'warn'}">${s.status==='complete'?'✓ komplett verbucht':'Rest '+esc(money(s.remaining,s.currency))}</strong></div></div>${(s.movements||[]).map(moveHtml).join('')}</section>`).join('')||'<div class="card sub">Noch kein CAMT importiert.</div>';wire()}async function load(){const r=await fetch('/incoming/reconciliation/statements',{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');render(d)}async function book(id,category,amount,targetSource='',targetId='',note=''){const r=await fetch('/incoming/reconciliation/movements/'+id+'/allocate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allocations:[{category,amount:Number(amount),targetSource,targetId,note}]})}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Buchen fehlgeschlagen');await load()}function wire(){rows.querySelectorAll('.move').forEach(el=>{const id=el.dataset.id,amount=el.querySelector('[data-amount]'),cat=el.querySelector('[data-cat]');el.querySelector('[data-book]').onclick=()=>book(id,cat.value,amount.value).catch(e=>alert(e.message));el.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>book(id,b.dataset.quick,amount.value).catch(e=>alert(e.message)));el.querySelector('[data-suggestion]')?.addEventListener('click',()=>{const option=cat.value;book(id,option,amount.value,el.dataset.suggestedSource||'',el.dataset.suggestedId||'',el.dataset.suggestedReason||'').catch(e=>alert(e.message))})})}document.getElementById('upload').onsubmit=async e=>{e.preventDefault();const f=document.getElementById('file').files?.[0];if(!f)return;msg.textContent='Import läuft …';const fd=new FormData();fd.append('file',f);try{const r=await fetch('/incoming/reconciliation/import-camt',{method:'POST',body:fd}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Import fehlgeschlagen');msg.textContent='✓ importiert';await load()}catch(err){msg.textContent=err.message}};load().catch(e=>summary.textContent=e.message)})();
 </script></body></html>'''.replace("__CATS__", categories)
             return Response(html, mimetype="text/html")
 

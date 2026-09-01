@@ -163,6 +163,10 @@ def kristine_api_request(path, method="GET", payload=None):
 
 
 DB = Path(r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
+DOKMAN_ROOT = Path(os.environ.get(
+    "KRISTINE_WW_DOKMAN_ROOT",
+    r"\\srv-db01\WWDaten\Dokman\{FF8BE8FE-F2DA-409B-B71B-8737C40B510F}",
+))
 SQL_SERVER = r"SRV-DB01\WINWORKER"
 SQL_DATABASE = "WinWorker_Projekte_Standard"
 SQL_USER = "kristine_reader"
@@ -2083,7 +2087,91 @@ def acknowledge_watch_alert(address_id, alert_key, decision="known"):
 
 
 
-def _pdf_paths_by_docids(doc_ids, include_text=False):
+def _ww_dokman_paths(doc_id, invoice_date=""):
+    """Findet ein frisches WW-PDF direkt, noch bevor der Nachtindex gelaufen ist."""
+    doc_id = str(doc_id or "").strip()
+    if not re.fullmatch(r"\d+", doc_id):
+        return {}
+
+    date_match = re.match(r"^(20\d{2})-(0[1-9]|1[0-2])", str(invoice_date or ""))
+    year_months = []
+    if date_match:
+        year_months.append((date_match.group(1), date_match.group(2)))
+    else:
+        prefix = str(CAPTURE_PREFIX or "").strip()
+        if prefix and doc_id.startswith(prefix) and len(doc_id) >= len(prefix) + 2:
+            yy = doc_id[len(prefix):len(prefix) + 2]
+            if yy.isdigit():
+                year_months.extend((f"20{yy}", f"{month:02d}") for month in range(1, 13))
+
+    for year, month in year_months:
+        folder = DOKMAN_ROOT / year / month
+        processed = folder / f"{doc_id}.pdf"
+        original = folder / f"{doc_id}_Original.pdf"
+        processed_path = str(processed) if processed.is_file() else ""
+        original_path = str(original) if original.is_file() else ""
+        if processed_path or original_path:
+            return {
+                "pdfPath": processed_path,
+                "originalPath": original_path,
+                "pdfText": "",
+                "originalText": "",
+                "ocrTexts": [],
+            }
+    return {}
+
+
+def _index_live_ww_pdf(doc_id, found, invoice_date=""):
+    """Nimmt genau den über WW referenzierten Beleg sofort in den PDF-Index auf."""
+    pdf_path = str(found.get("pdfPath") or "")
+    original_path = str(found.get("originalPath") or "")
+    primary = Path(pdf_path or original_path)
+    if not primary.is_file():
+        return False
+
+    date_match = re.match(r"^(20\d{2})-(0[1-9]|1[0-2])", str(invoice_date or ""))
+    doc_year = int(date_match.group(1)) if date_match else None
+    doc_month = int(date_match.group(2)) if date_match else None
+    stat = primary.stat()
+    indexed_at = datetime.now().isoformat(timespec="seconds")
+
+    con = sqlite3.connect(DB, timeout=15)
+    try:
+        con.execute("PRAGMA busy_timeout=15000")
+        row = con.execute(
+            "SELECT rowid FROM pdf_index WHERE path=? OR filename=? ORDER BY path=? DESC LIMIT 1",
+            (str(primary), primary.name, str(primary)),
+        ).fetchone()
+        values = (
+            primary.name, str(primary), "Eingangsrechnung", float(stat.st_mtime),
+            int(stat.st_size), "EINGANG", doc_year, doc_month, str(doc_id),
+            original_path or None, int(stat.st_size), indexed_at,
+        )
+        if row:
+            con.execute("""
+                UPDATE pdf_index
+                SET filename=?, path=?, dokumenttyp=?, modified=?, size=?, source=?,
+                    doc_year=?, doc_month=?, logical_id=?, original_path=?,
+                    file_size=?, indexed_at=?
+                WHERE rowid=?
+            """, values + (int(row[0]),))
+        else:
+            con.execute("""
+                INSERT INTO pdf_index
+                (filename, path, dokumenttyp, modified, size, source, doc_year,
+                 doc_month, logical_id, original_path, file_size, indexed_at, text)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?, '')
+            """, values)
+        con.commit()
+        return True
+    except Exception as exc:
+        print(f"WW-PDF konnte nicht sofort indexiert werden ({doc_id}): {exc}")
+        return False
+    finally:
+        con.close()
+
+
+def _pdf_paths_by_docids(doc_ids, include_text=False, invoice_dates=None):
     """
     Exakte WW-Verknüpfung:
     DokumentenManagement.sDocID == PDF-Dateiname ohne .pdf/_Original.pdf.
@@ -2156,9 +2244,19 @@ def _pdf_paths_by_docids(doc_ids, include_text=False):
                 seen_texts.add(fingerprint)
                 texts.append(value)
             bucket["ocrTexts"] = texts
-        return result
     finally:
         con.close()
+
+    # WW-Belege sind sofort in der Datenbank sichtbar. Der große PDF-Index läuft
+    # dagegen nachts. Darum fehlende, aber eindeutig benannte Dokumente direkt
+    # im WW-Dokumentenspeicher nachschlagen.
+    dates = invoice_dates or {}
+    for doc_id in wanted.difference(result):
+        invoice_date = dates.get(doc_id, "")
+        found = _ww_dokman_paths(doc_id, invoice_date)
+        if found and _index_live_ww_pdf(doc_id, found, invoice_date):
+            result[doc_id] = found
+    return result
 
 
 _MATERIAL_END_MARKERS = (
@@ -2559,6 +2657,13 @@ def incoming_for_address(address_id, text_query="", return_context=False):
     paths = _pdf_paths_by_docids(
         [x.get("docId") for x in ww_rows],
         include_text=search_active,
+        invoice_dates={
+            str(x.get("docId") or "").strip(): str(
+                x.get("recordedAt") or x.get("invoiceDate") or ""
+            )
+            for x in ww_rows
+            if str(x.get("docId") or "").strip()
+        },
     )
 
     all_result = []
