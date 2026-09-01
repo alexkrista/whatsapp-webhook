@@ -14,7 +14,7 @@ function clean(value, max = 2000) { return String(value ?? "").replace(/\0/g, ""
 function uniq(values) { return [...new Set(values.filter(Boolean))]; }
 function normalized(value) {
   return clean(value, 500).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    .replace(/\b(gmbh|ag|kg|ltd|limited|sarl|co)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+    .replace(/[^a-z0-9]+/g, " ").replace(/\b(?:gesellschaft\s+m\s+b\s+h|g\s*m\s*b\s*h|ag|kg|ltd|limited|sarl|co)\b/g, " ").replace(/\s+/g," ").trim();
 }
 function codes(text, prefix) {
   const pattern = prefix === "EUH" ? /\bEUH\s?\d{3}[A-Z]?\b/gi : new RegExp(`\\b${prefix}\\s?\\d{3}[A-Z]?(?:\\+${prefix}?\\d{3})*\\b`, "gi");
