@@ -36,6 +36,7 @@ on:
       - 'tools/innovatint-kristine-bridge.ps1'
       - 'tools/innovatint-history-sync.ps1'
       - 'tools/find-innovatint-history.ps1'
+      - 'tools/find-innovatint-db-config.ps1'
 
 jobs:
   syntax:
@@ -78,7 +79,8 @@ jobs:
           $files = @(
             "tools/innovatint-kristine-bridge.ps1",
             "tools/innovatint-history-sync.ps1",
-            "tools/find-innovatint-history.ps1"
+            "tools/find-innovatint-history.ps1",
+            "tools/find-innovatint-db-config.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -99,7 +101,8 @@ jobs:
         shell: powershell
         run: |
           $files = @(
-            "tools/find-innovatint-history.ps1"
+            "tools/find-innovatint-history.ps1",
+            "tools/find-innovatint-db-config.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
