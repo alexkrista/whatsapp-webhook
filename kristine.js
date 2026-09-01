@@ -2494,6 +2494,8 @@ const open = taskId
           contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
           dueDate: String(t.dueDate || "").slice(0, 10),
           reminder: String(t.reminder || "").trim().slice(0, 500),
+          appointment: t.appointment && typeof t.appointment === "object" ? t.appointment : null,
+          visitProtocol: t.visitProtocol && typeof t.visitProtocol === "object" ? t.visitProtocol : null,
           status: t.status === "done" ? "done" : "open",
           createdAt: t.createdAt || new Date().toISOString(),
           completedAt: t.completedAt || null,
