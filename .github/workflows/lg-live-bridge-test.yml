@@ -90,3 +90,24 @@ jobs:
               exit 1
             }
           }
+
+  powershell51-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $files = @(
+            "tools/find-innovatint-history.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Host "Syntaxfehler in $file"
+              $errors | Format-List
+              exit 1
+            }
+          }
