@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-01-appointment-workflow-v3";
+  const VERSION="2026-09-01-visit-protocol-v4";
   let currentTask=null;
   let currentRequestId="";
 
@@ -45,6 +45,8 @@
       .ktc-all-day{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid #ddd;border-radius:10px;background:#faf9f6}.ktc-all-day input{width:auto}
       .ktc-hint{margin-top:10px;padding:10px;border-radius:10px;background:#f4f2ed;color:#626862;font-size:12px}.ktc-hint.warn{background:#fff4d9;color:#765400}.ktc-hint.ok{background:#e5f5e9;color:#155c2a}.ktc-hint.bad{background:#fde8e7;color:#8b241c}
       .ktc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.ktc-actions button{font-weight:800}.ktc-google{background:#27713d!important;border-color:#27713d!important}.ktc-ics{background:#fff!important;color:#222!important}
+      .kvp-bg{position:fixed;inset:0;z-index:80100;display:none;place-items:start center;padding:12px;background:rgba(0,0,0,.62);overflow:auto}.kvp-bg.open{display:grid}.kvp{width:min(760px,100%);background:#f6f4ef;border-radius:18px;padding:16px;box-shadow:0 24px 80px rgba(0,0,0,.4)}
+      .kvp-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.kvp-head h2{margin:0 0 4px;font-size:22px}.kvp-card{background:#fff;border:1px solid #ddd8cf;border-radius:13px;padding:13px;margin-top:11px}.kvp-card h3{margin:0 0 9px;font-size:15px}.kvp-meta{display:grid;grid-template-columns:auto 1fr;gap:5px 11px;font-size:13px}.kvp-meta span{color:#777}.kvp-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}.kvp-actions a{display:flex;justify-content:center;align-items:center;text-decoration:none;border-radius:11px;padding:12px;font-weight:850;background:#27713d;color:#fff}.kvp-actions a.call{background:#315d91}.kvp label{display:block;font-size:12px;font-weight:750;color:#555;margin:9px 0 4px}.kvp textarea,.kvp input{width:100%}.kvp textarea{min-height:90px}.kvp-files{display:grid;gap:8px}.kvp-file{display:flex;gap:9px;align-items:center;padding:8px;border:1px solid #e3dfd7;border-radius:9px;text-decoration:none;color:#222}.kvp-file img{width:76px;height:58px;object-fit:cover;border-radius:7px}.kvp-save{width:100%;margin-top:12px;padding:13px;font-weight:900}.kvp-status{min-height:18px;margin-top:8px;font-size:12px;color:#27713d}
       @media(max-width:620px){.ktc-bg{padding:8px}.ktc-grid{grid-template-columns:1fr}.ktc-grid .full{grid-column:auto}.ktc-actions button{width:100%}}
     `;document.head.appendChild(s);
   }
@@ -139,6 +141,38 @@
     }catch(e){if(microsoftWindow&&!microsoftWindow.closed)microsoftWindow.close();setStatus(e.message,"bad")}finally{button.disabled=false}
   }
 
+  function mapsHref(address){return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address||"")}`}
+
+  function ensureVisitProtocol(){
+    let bg=document.getElementById("kristaVisitProtocol");if(bg)return bg;
+    bg=document.createElement("div");bg.id="kristaVisitProtocol";bg.className="kvp-bg";
+    bg.innerHTML=`<section class="kvp" role="dialog" aria-modal="true"><div class="kvp-head"><div><h2 id="kvpTitle">Termin</h2><div id="kvpWhen" class="small"></div></div><button type="button" class="secondary" data-kvp-close>Schließen</button></div><div id="kvpMeta" class="kvp-card"></div><div id="kvpQuick" class="kvp-actions"></div><div class="kvp-card"><h3>Was ist zu tun?</h3><div id="kvpTodo"></div></div><div class="kvp-card"><h3>Fotos & Anlagen</h3><div id="kvpFiles" class="kvp-files"><span class="small">Wird geladen …</span></div></div><div class="kvp-card"><h3>Besprechung vor Ort</h3><label for="kvpDiscussion">Besprochen / Kundenwunsch</label><textarea id="kvpDiscussion" placeholder="Was wurde mit dem Kunden besprochen?"></textarea><label for="kvpWork">Vereinbarte Arbeiten</label><textarea id="kvpWork" placeholder="Welche Arbeiten sollen ausgeführt werden?"></textarea><label for="kvpEstimate">Preisschätzung</label><input id="kvpEstimate" placeholder="z. B. ca. 1.500–2.000 € netto"><label for="kvpNext">Nächste Schritte</label><textarea id="kvpNext" placeholder="Angebot, Material, Rückmeldung, Ausführung …"></textarea><button id="kvpSave" type="button" class="green kvp-save">Protokoll speichern</button><div class="kvp-actions"><button id="kvpOffer" type="button" class="secondary">Als Angebot vorbereiten</button><button id="kvpOrder" type="button" class="secondary">Direkt als Auftrag übernehmen</button></div><div id="kvpStatus" class="kvp-status"></div></div></section>`;
+    document.body.appendChild(bg);bg.addEventListener("click",e=>{if(e.target===bg||e.target.closest("[data-kvp-close]"))bg.classList.remove("open")});
+    bg.querySelector("#kvpSave").addEventListener("click",saveVisitProtocol);bg.querySelector("#kvpOffer").addEventListener("click",()=>stageVisitProtocol("offer"));bg.querySelector("#kvpOrder").addEventListener("click",()=>stageVisitProtocol("order"));return bg;
+  }
+
+  async function visitFiles(taskId){
+    const host=document.getElementById("kvpFiles");
+    try{const r=await fetch(`/kristine/api/inbox/task/${encodeURIComponent(taskId)}`,{credentials:"same-origin"});const j=await r.json();if(!r.ok)throw new Error(j.error||"Anlagen nicht verfügbar");const items=Array.isArray(j.items)?j.items:[];host.innerHTML=items.length?items.map(item=>{const href=`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`,mime=String(item.mimeType||"");return `<a class="kvp-file" href="${href}" target="_blank" rel="noopener">${mime.startsWith("image/")?`<img src="${href}" alt="Foto">`:"📎"}<strong>${esc(item.name||"Anlage")}</strong></a>`}).join(""):"<span class=\"small\">Keine Fotos oder Anlagen verknüpft.</span>"}catch(e){host.innerHTML=`<span class="small">Anlagen konnten nicht geladen werden: ${esc(e.message)}</span>`}
+  }
+
+  function openVisitProtocol(taskId){
+    const task=taskById(taskId);if(!task)return;currentTask=task;installStyle();const bg=ensureVisitProtocol(),a=task.appointment||{},saved=task.visitProtocol||{};
+    document.getElementById("kvpTitle").textContent=task.title||"Termin";document.getElementById("kvpWhen").textContent=[a.date,a.from&&a.to?`${a.from}–${a.to}`:""].filter(Boolean).join(" · ");
+    const address=task.address||task.jobName||"",contact=[task.contactName,task.contactPhone].filter(Boolean).join(" · ");document.getElementById("kvpMeta").innerHTML=`<h3>Terminübersicht</h3><div class="kvp-meta">${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:""}${contact?`<span>Kontakt</span><strong>${esc(contact)}</strong>`:""}<span>Status</span><strong>${task.status==="done"?"Erledigt":"Termin vereinbart"}</strong></div>`;
+    document.getElementById("kvpQuick").innerHTML=`${address?`<a href="${mapsHref(address)}" target="_blank" rel="noopener">🧭 Navigation</a>`:""}${task.contactPhone?`<a class="call" href="tel:${esc(task.contactPhone)}">📞 Anrufen</a>`:""}`;
+    document.getElementById("kvpTodo").textContent=task.reminder||task.details||"Noch keine Arbeitsbeschreibung hinterlegt.";document.getElementById("kvpDiscussion").value=saved.discussion||"";document.getElementById("kvpWork").value=saved.work||"";document.getElementById("kvpEstimate").value=saved.estimate||"";document.getElementById("kvpNext").value=saved.nextSteps||"";document.getElementById("kvpStatus").textContent=saved.conversionTarget?`✓ Für ${saved.conversionTarget==="order"?"Auftrag":"Angebot"} vorbereitet`:saved.savedAt?"Zuletzt gespeichert: "+new Date(saved.savedAt).toLocaleString("de-AT"):"";bg.classList.add("open");visitFiles(taskId);
+  }
+
+  async function saveVisitProtocol(){
+    if(!currentTask)return;const b=document.getElementById("kvpSave");b.disabled=true;b.textContent="Speichert …";currentTask.visitProtocol={...(currentTask.visitProtocol||{}),discussion:document.getElementById("kvpDiscussion").value.trim(),work:document.getElementById("kvpWork").value.trim(),estimate:document.getElementById("kvpEstimate").value.trim(),nextSteps:document.getElementById("kvpNext").value.trim(),savedAt:new Date().toISOString()};
+    try{await persistTasks();document.getElementById("kvpStatus").textContent="✓ Besprechungsprotokoll gespeichert"}catch(e){document.getElementById("kvpStatus").textContent="Speichern fehlgeschlagen: "+e.message}finally{b.disabled=false;b.textContent="Protokoll speichern"}
+  }
+
+  async function stageVisitProtocol(target){
+    await saveVisitProtocol();if(!currentTask)return;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),conversionTarget:target,conversionStatus:"prepared",conversionPreparedAt:new Date().toISOString(),sourceTaskId:String(currentTask.id||"")};try{await persistTasks();document.getElementById("kvpStatus").textContent=`✓ Daten vollständig für ${target==="order"?"einen Auftrag":"ein Angebot"} vorbereitet`;}catch(e){document.getElementById("kvpStatus").textContent="Vorbereitung fehlgeschlagen: "+e.message}
+  }
+
   async function saveAppointment(){
     let v;try{v=values()}catch(e){alert(e.message);return}
     const button=document.getElementById("ktcSave");button.disabled=true;button.textContent="Wird gespeichert …";document.getElementById("ktcRetry").hidden=true;
@@ -204,10 +238,10 @@
   function boot(){
     if(!location.pathname.toLowerCase().includes("/kristine"))return;installStyle();ensureModal();hook();
     setTimeout(hook,200);setTimeout(hook,900);setInterval(hook,1800);
-    const linkedTask=new URLSearchParams(location.search).get("task");if(linkedTask)setTimeout(()=>{if(typeof showTab==="function")showTab("tasks");if(typeof openTaskListModal==="function")openTaskListModal(linkedTask)},900);
+    const linkedTask=new URLSearchParams(location.search).get("task");if(linkedTask)setTimeout(()=>openVisitProtocol(linkedTask),900);
     console.info("KRISTINE Aufgabe → Termin",VERSION);
   }
 
-  window.KristineTaskCalendar={open,close,version:VERSION};
+  window.KristineTaskCalendar={open,close,openVisitProtocol,version:VERSION};
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot,{once:true});else boot();
 })();
