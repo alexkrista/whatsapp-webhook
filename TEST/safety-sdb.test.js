@@ -1,0 +1,7 @@
+"use strict";
+const assert=require("assert"); const {extractMetadata,classify,STATUS,diffSafety}=require("../safety-sdb");
+const text=`SICHERHEITSDATENBLATT\nProduktname: Kalkfarbe Pro\nHersteller: Muster Farben GmbH\nProduktcode: KF-10\nÜberarbeitet am: 14.07.2026\nVersion: 3.0\nABSCHNITT 2. Gefahren\nGHS05 GHS07 Gefahr H314 H318 H335 P280 EUH208\nABSCHNITT 3. Zusammensetzung\nABSCHNITT 4. Erste-Hilfe-Maßnahmen\nAugen: sofort spülen. Arzt rufen.\nABSCHNITT 5. Brandbekämpfung\nABSCHNITT 8. Expositionsbegrenzung und persönliche Schutzausrüstung\nSchutzbrille und chemikalienbeständige Handschuhe.\nABSCHNITT 9. Eigenschaften`;
+const meta=extractMetadata(text,"Kalkfarbe.pdf"); assert.equal(meta.product,"Kalkfarbe Pro"); assert.equal(meta.manufacturer,"Muster Farben GmbH"); assert.equal(meta.sdbDate,"2026-07-14"); assert.deepEqual(meta.ghs,["GHS05","GHS07"]); assert(meta.hStatements.includes("H314")); assert(meta.derivedHazards.includes("aetzend"));
+let result=classify("a".repeat(64),meta,[]); assert.equal(result.status,STATUS.NEW);
+const old={...meta,sdbDate:"2025-01-01",version:"2.0",hStatements:["H318"]}; result=classify("b".repeat(64),meta,[{sha256:"c".repeat(64),metadata:old}]); assert.equal(result.status,STATUS.NEWER); assert(result.changes.some(x=>x.field==="hStatements"&&x.added.includes("H314")));
+assert(diffSafety(meta,meta).length===0); console.log("safety-sdb tests passed");

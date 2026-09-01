@@ -51,6 +51,7 @@ const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
+const { registerSafetySdb } = require("./safety-sdb");
 const { registerRegieAssistant } = require("./regie-assistant");
 const { registerDayClose } = require("./day-close");
 const { registerArchiveSearch } = require("./archive-search");
@@ -3553,6 +3554,7 @@ registerMaterialMaster(app, {
   requireAdmin,
   publicDir: path.join(process.cwd(), "public"),
 });
+registerSafetySdb(app, { dataDir: DATA_DIR, requireAdmin });
 
 registerRegieAssistant(app, {
   dataDir: DATA_DIR,

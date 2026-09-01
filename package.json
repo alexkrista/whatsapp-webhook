@@ -3,15 +3,17 @@
   "version": "2.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node -r ./order-calculation-v2-preload.js -r ./order-calculation-preload.js -r ./paint-stock-base-migration.js -r ./paint-lab-preload.js -r ./paint-live-browser-fix-preload.js -r ./paint-inventory-save-preload.js -r ./paint-consumption-docs-preload.js -r ./paint-ral-classic-names-preload.js -r ./worktime-model-presets.js -r ./kgo-office-core.js -r ./worktime-model-v2-migration.js -r ./employee-document-persistence.js -r ./kristine-voicemail-preload.js -r ./kristine-inbox-bootstrap.js -r ./task-digest-bootstrap.js -r ./vehicle-tracking-preload.js -r ./krisdrive-live-preload.js -r ./kgo-office-whatsapp.js -r ./access-status-people-fix.js -r ./access-bridge-cloud.js -r ./access-learn-multi.js -r ./access-events-cloud.js -r ./access-admin-cloud.js server.js"
+    "start": "node -r ./order-calculation-v2-preload.js -r ./order-calculation-preload.js -r ./paint-stock-base-migration.js -r ./paint-lab-preload.js -r ./paint-live-browser-fix-preload.js -r ./paint-inventory-save-preload.js -r ./paint-consumption-docs-preload.js -r ./paint-ral-classic-names-preload.js -r ./worktime-model-presets.js -r ./kgo-office-core.js -r ./worktime-model-v2-migration.js -r ./employee-document-persistence.js -r ./kristine-voicemail-preload.js -r ./kristine-inbox-bootstrap.js -r ./task-digest-bootstrap.js -r ./vehicle-tracking-preload.js -r ./krisdrive-live-preload.js -r ./kgo-office-whatsapp.js -r ./access-status-people-fix.js -r ./access-bridge-cloud.js -r ./access-learn-multi.js -r ./access-events-cloud.js -r ./access-admin-cloud.js server.js",
+    "test": "node TEST/safety-sdb.test.js"
   },
   "dependencies": {
     "@kenjiuno/msgreader": "^1.28.0",
     "express": "^4.19.2",
+    "node-cron": "^3.0.2",
     "nodemailer": "^6.9.14",
     "pdf-lib": "^1.17.1",
+    "pdf-parse": "^2.4.5",
     "sharp": "^0.33.4",
-    "node-cron": "^3.0.2",
     "xlsx": "^0.18.5"
   },
   "engines": {
