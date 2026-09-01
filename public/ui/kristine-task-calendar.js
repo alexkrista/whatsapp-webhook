@@ -73,12 +73,13 @@
   function open(taskId){
     const task=taskById(taskId);if(!task)return;
     currentTask=task;installStyle();const bg=ensureModal();
+    const saveButton=document.getElementById("ktcSave");saveButton.disabled=false;saveButton.textContent="Termin speichern + Outlook";
     currentRequestId=(globalThis.crypto?.randomUUID?.()||`request-${Date.now()}-${Math.random()}`);
-    const text=taskText(task),date=parseExplicitDate(text),time=parseExplicitTime(text);
+    const text=taskText(task),date=task.appointment?.date||parseExplicitDate(text),time=task.appointment?.from||parseExplicitTime(text);
     document.getElementById("ktcEventTitle").value=String(task.title||"Termin").replace(/^Rückruf\s+/i,"").trim()||"Termin";
     document.getElementById("ktcDate").value=date;
     document.getElementById("ktcFrom").value=time;
-    document.getElementById("ktcTo").value=time?plusHour(time):"";
+    document.getElementById("ktcTo").value=task.appointment?.to||(time?plusHour(time):"");
     document.getElementById("ktcAllDay").checked=false;
     document.getElementById("ktcLocation").value=task.address||task.jobName||"";
     document.getElementById("ktcDetails").value=[task.reminder,task.contactName||task.contactPhone||task.contactEmail?`Kontakt: ${[task.contactName,task.contactPhone,task.contactEmail].filter(Boolean).join(" · ")}`:"",task.jobName?`Baustelle: ${task.jobName}`:""].filter(Boolean).join("\n\n");
@@ -87,7 +88,13 @@
     else if(date){hint.className="ktc-hint warn";hint.textContent="Datum erkannt, aber keine eindeutige Uhrzeit. Bitte Von/Bis wählen oder ganztägig markieren."}
     else{hint.className="ktc-hint warn";hint.textContent=`Kein eindeutiges Termindatum im Aufgabentext. Bitte Datum wählen.${task.dueDate?` Aufgaben-Fälligkeit ist ${task.dueDate} – sie wird bewusst nicht automatisch als Termin verwendet.`:""}`}
     document.getElementById("ktcRetry").hidden=true;
-    syncAllDay();bg.classList.add("open");loadOutlookStatus();
+    syncAllDay();bg.classList.add("open");
+    if(task.appointment?.id&&task.appointment?.outlook?.status!=="synced"){
+      const retry=document.getElementById("ktcRetry");retry.hidden=false;retry.onclick=()=>retryOutlook(task.appointment.id);
+      setStatus("Outlook noch nicht synchronisiert","warn");
+    }else if(task.appointment?.outlook?.status==="synced"){
+      setStatus("Outlook-Termin erstellt ✅","ok");document.getElementById("ktcSave").textContent="Gespeichert ✓";
+    }else loadOutlookStatus();
   }
 
   function close(){document.getElementById("kristaTaskCalendarBg")?.classList.remove("open")}
@@ -137,9 +144,9 @@
     try{
       const result=await api("/kristine/api/appointments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...v,taskId:String(currentTask?.id||""),requestId:currentRequestId})});
       const appointment=result.appointment;
-      if(result.outlookSynced){setStatus("Termin in KRISTINE gespeichert und in Alex' Outlook angelegt.","ok");button.textContent="Gespeichert ✓"}
+      if(result.outlookSynced){setStatus("Outlook-Termin erstellt ✅","ok");button.textContent="Gespeichert ✓"}
       else{
-        setStatus(`Termin ist in KRISTINE gespeichert. Outlook konnte noch nicht schreiben: ${appointment?.outlook?.error||"unbekannter Fehler"}`,"warn");button.textContent="In KRISTINE gespeichert ✓";
+        setStatus(`Outlook noch nicht synchronisiert: ${appointment?.outlook?.error||"unbekannter Fehler"}`,"warn");button.textContent="In KRISTINE gespeichert ✓";
         const retry=document.getElementById("ktcRetry");retry.hidden=false;retry.onclick=()=>retryOutlook(appointment.id);
       }
     }catch(e){setStatus(`Termin konnte nicht gespeichert werden: ${e.message}`,"bad");button.disabled=false;button.textContent="Termin speichern + Outlook"}
