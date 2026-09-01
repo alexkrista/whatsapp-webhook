@@ -165,7 +165,7 @@
 (function loadTaskCalendar(){
   if(document.querySelector('script[data-krista-task-calendar]'))return;
   const s=document.createElement('script');
-  s.src='/public/ui/kristine-task-calendar.js?v=20260901-outlook-auth-v2';
+  s.src='/public/ui/kristine-task-calendar.js?v=20260901-appointment-workflow-v3';
   s.defer=true;
   s.setAttribute('data-krista-task-calendar','1');
   document.head.appendChild(s);

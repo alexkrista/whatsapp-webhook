@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "public", "kristine.html"), "utf8");
+const calendar = fs.readFileSync(path.join(__dirname, "..", "public", "ui", "kristine-task-calendar.js"), "utf8");
 
 assert.match(html, /id="tDueDateField"><label>Fällig<\/label>/, "ordinary due-date field must remain");
 assert.match(html, /id="tAppointmentDate"[^>]*type="date"/, "appointment date is missing");
@@ -18,5 +19,6 @@ assert.match(html, /requestId:'new-task-'\+newTask\.id/, "Outlook creation must 
 assert.match(html, /newTask\.appointment\.outlook=outlookResult\.appointment\.outlook/, "Outlook Event-ID/status must be stored on the KRISTINE task");
 assert.match(html, /Outlook-Termin erstellt ✅/, "success status is missing");
 assert.match(html, /Outlook noch nicht synchronisiert/, "retry status is missing");
+assert.match(calendar, /Termin ausgemacht/, "saved appointments must show information instead of opening a second appointment form");
 
 console.log("OK: Termin fields and additive Outlook save are wired into Neue Aufgabe");

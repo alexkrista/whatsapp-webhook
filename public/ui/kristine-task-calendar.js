@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-01-outlook-auth-v2";
+  const VERSION="2026-09-01-appointment-workflow-v3";
   let currentTask=null;
   let currentRequestId="";
 
@@ -185,7 +185,14 @@
   function inject(taskId){
     const list=document.getElementById("taskModalList");if(!list||!taskId)return;
     const item=list.querySelector(".task-modal-item");const actions=item?.querySelector(".actions");if(!actions||actions.querySelector("[data-krista-calendar-task]"))return;
-    const b=document.createElement("button");b.type="button";b.className="krista-calendar-task";b.dataset.kristaCalendarTask=String(taskId);b.textContent="📅 Termin anlegen";b.onclick=()=>open(taskId);actions.insertBefore(b,actions.firstChild);
+    const task=taskById(taskId),appointment=task?.appointment;
+    const b=document.createElement("button");b.type="button";b.className="krista-calendar-task";b.dataset.kristaCalendarTask=String(taskId);
+    if(appointment?.date){
+      const date=String(appointment.date).split("-").reverse().join(".");
+      const time=appointment.from&&appointment.to?` · ${appointment.from}–${appointment.to}`:"";
+      b.textContent=`✓ Termin ausgemacht · ${date}${time}`;b.disabled=true;b.title=appointment.outlook?.status==="synced"?"In KRISTINE und Outlook gespeichert":"In KRISTINE gespeichert; Outlook noch nicht synchronisiert";
+    }else{b.textContent="📅 Termin anlegen";b.onclick=()=>open(taskId)}
+    actions.insertBefore(b,actions.firstChild);
   }
 
   function hook(){
