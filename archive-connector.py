@@ -55,7 +55,7 @@ def protect_remote_archive_access():
 
     # KRISTINE ACCESS CONTROL V3 AUTH
     # Physisch nur am Tailscale-Listener; zusätzlich KRISTINE Admin-Token.
-    if request.path.startswith("/access-control/"):
+    if request.path.startswith("/access-control/") or request.path == "/tower/live-summary":
         if request.method == "OPTIONS":
             return None
         supplied = str(request.headers.get("X-Krista-Token") or "")
@@ -7704,6 +7704,32 @@ def tower_planning_api():
     try:
         data = company_planning_year(request.args.get("year", 2026))
         return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/tower/live-summary")
+def tower_live_summary_api():
+    """Nur die für den Tower nötigen Summen ausgeben, keine OP-Einzelposten."""
+    try:
+        with app.test_client() as client:
+            debtors = client.get("/api/outgoing/open-items").get_json(silent=True) or {}
+            creditors = client.get("/incoming/payment-open-items").get_json(silent=True) or {}
+        if debtors.get("ok") is False or creditors.get("ok") is False:
+            raise RuntimeError(debtors.get("error") or creditors.get("error") or "OP-Summen nicht verfügbar")
+        planning = company_planning_year(request.args.get("year", 2026))
+        return jsonify({
+            "ok": True,
+            "planning": planning,
+            "customers": {
+                "total": float(debtors.get("totalOpen") or 0),
+                "count": len(debtors.get("items") or []),
+            },
+            "suppliers": {
+                "total": float(creditors.get("total") or 0),
+                "count": int(creditors.get("count") or 0),
+            },
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
