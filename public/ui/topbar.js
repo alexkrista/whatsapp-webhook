@@ -6,6 +6,7 @@
 
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
+    { key: "workflow", label: "WORKFLOW", icon: "📥", href: "/kristool-workflow", subtitle: "Angebote und Auftragsfreigaben" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
     { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
