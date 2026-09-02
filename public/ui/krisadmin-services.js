@@ -15,14 +15,9 @@
   }
 
   function preferSingleServicesLamp() {
-    if (document.getElementById("kristaSingleServicesLampFix")) return;
-    const style = document.createElement("style");
-    style.id = "kristaSingleServicesLampFix";
-    // Der Access-Status und der Dienstemanager hatten beide eine eigene
-    // "Dienste"-Lampe im selben Slot. Sichtbar bleibt nur die Lampe des
-    // Dienstemanagers; sie öffnet direkt die Detail-/Neustart-Ansicht.
-    style.textContent = "#kristaAccessSlot .krista-services-lamp{display:none!important}";
-    document.head.appendChild(style);
+    // Die Statusleiste besitzt genau eine Dienste-Lampe. Sie bleibt sichtbar
+    // und öffnet diesen Dienstemanager auch auf KRISTINE.
+    document.getElementById("kristaSingleServicesLampFix")?.remove();
   }
 
   // Zuerst den Firmen-PC/Tailscale-Transport installieren. Der bestehende Core

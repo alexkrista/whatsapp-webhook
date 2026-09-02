@@ -144,7 +144,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
   <button onclick="showTab('control')">🧾 Leitstand</button>
   <button onclick="showTab('planning')">📅 Planung</button>
-  <button onclick="location.href=withToken('/kristine/baustellen')">🏗 Baustellen</button>
+  <button onclick="location.href='/kristine/baustellen'+location.search">🏗 Baustellen</button>
   <button onclick="showTab('tasks')">📌 Aufgaben</button>
   <button onclick="showTab('schedules')">⏰ Zeitmodelle, Urlaub, Feiertage</button>
   <button class="secondary krista-refresh" onclick="loadAll()">↻ Aktualisieren</button>

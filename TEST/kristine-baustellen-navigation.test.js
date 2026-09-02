@@ -12,7 +12,7 @@ const hub = fs.readFileSync(path.join(root, "public", "ui", "baustellen-knowledg
 
 assert.match(kristine, /\/kristine\/baustellen/);
 assert.match(kristine, /baustellen\.html/);
-assert.match(page, /withToken\('\/kristine\/baustellen'\)/);
+assert.match(page, /location\.href='\/kristine\/baustellen'\+location\.search/);
 assert.match(topbar, /Leitstand, Planung und Baustellen/);
 assert.match(topbar, /key: "krisadmin"[^\n]+href: "\/admin\/ui"/);
 assert.match(hub, /KRISTINE · Baustellen-Wissensdrehscheibe/);
