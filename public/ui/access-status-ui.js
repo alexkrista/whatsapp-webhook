@@ -189,6 +189,7 @@
   function draw(d){
     d=applyDoorHolds(d);
     last=d;
+    servicesHealthy=overall(d)!=="red";
     const slot=mount();
     if(!slot)return;
     const taskActive=location.pathname.toLowerCase().includes("/kristine")&&location.hash.toLowerCase()==="#tasks";
@@ -248,17 +249,10 @@
   }
 
   async function loadServicesStatus(){
-    const controller=new AbortController();
-    const timeout=setTimeout(()=>controller.abort(),2200);
-    try{
-      const headers={};if(token)headers["X-Krista-Admin-Token"]=token;
-      const r=await fetch(MANAGER+"/api/status",{headers,cache:"no-store",signal:controller.signal});
-      if(!r.ok)throw new Error("HTTP "+r.status);
-      const d=await r.json();
-      const rows=Array.isArray(d.rows)?d.rows:[];
-      servicesHealthy=Boolean(d.ok)&&!rows.some(x=>String(x?.level||"").toLowerCase()==="red");
-    }catch(_){servicesHealthy=false;}
-    finally{clearTimeout(timeout);updateServicesLamp();}
+    // Die Kopfleiste verwendet dieselbe Cloud-Gesamtprüfung wie Türen und Tor.
+    // Detailabfragen des lokalen Managers dürfen die grüne Lampe nicht flackern lassen.
+    if(last)servicesHealthy=overall(last)!=="red";
+    updateServicesLamp();
   }
 
   async function pulseGate(btn){

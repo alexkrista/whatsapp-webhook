@@ -2467,6 +2467,18 @@ const open = taskId
     }
   });
 
+  app.delete("/kristine/api/states/:employeeId/unknown-assignment", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId=String(req.params.employeeId||""),states=await readJson(STATES,{}),state=states[employeeId];
+      if(!state)return res.status(404).json({ok:false,error:"Mitarbeiterstatus nicht gefunden."});
+      const wanted=req.body||{},timeline=Array.isArray(state.timeline)?state.timeline:[],index=timeline.findIndex(row=>row?.type==="assignment_deviation"&&String(row.at||"")===String(wanted.at||"")&&String(row.jobId||"")===String(wanted.jobId||"")&&String(row.jobName||row.siteName||row.site||"")===String(wanted.jobName||""));
+      if(index<0)return res.status(404).json({ok:false,error:"Unbekannte Zuordnung nicht mehr gefunden."});
+      const [removed]=timeline.splice(index,1);state.timeline=timeline;states[employeeId]=state;await writeJson(STATES,states);
+      res.json({ok:true,removed});
+    }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}
+  });
+
   app.put("/kristine/api/tasks", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {

@@ -13,7 +13,7 @@
       #controlAlerts .krista-unknown-trigger{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;font-weight:800}
       #kristaUnknownJobs{margin-top:10px;display:grid;gap:6px}
       #kristaUnknownJobs[hidden]{display:none!important}
-      .krista-unknown-row{background:#fff;border:1px solid #dbe6d9;border-radius:10px;padding:9px 10px;display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,2fr) auto;gap:8px;align-items:center}
+      .krista-unknown-row{background:#fff;border:1px solid #dbe6d9;border-radius:10px;padding:9px 10px;display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,2fr) auto auto;gap:8px;align-items:center}
       .krista-unknown-row small{color:#707070}.krista-unknown-row button{padding:6px 8px}
       #taskList .krista-task-row{cursor:pointer;transition:box-shadow .12s ease,transform .12s ease}
       #taskList .krista-task-row:hover{box-shadow:0 3px 13px rgba(0,0,0,.08);transform:translateY(-1px)}
@@ -66,9 +66,10 @@
     const target=[...box.querySelectorAll("span")].find(el=>/unbekannte Baustelle/i.test(el.textContent||""));if(!target)return;
     target.classList.add("krista-unknown-trigger");target.title="Anklicken und Baustellen anzeigen";
     let list=document.getElementById("kristaUnknownJobs");if(!list){list=document.createElement("div");list.id="kristaUnknownJobs";list.hidden=true;box.appendChild(list)}
-    list.innerHTML=items.map((item,i)=>{const st=item.state||{},x=item.x||{};const employee=st.employeeName||st.name||st.employeeId||"Mitarbeiter";const date=x.date||x.at||x.time||"";return `<div class="krista-unknown-row"><div><strong>${esc(employee)}</strong><br><small>${esc(date)}</small></div><div><strong>${esc(unknownLabel(item))}</strong><br><small>${esc(x.note||x.reason||"Zuordnung prüfen")}</small></div><button type="button" class="secondary" data-unknown-open="${i}">Mitarbeiter öffnen</button></div>`}).join("");
+    list.innerHTML=items.map((item,i)=>{const st=item.state||{},x=item.x||{};const employee=st.employeeName||st.name||st.employeeId||"Mitarbeiter";const date=x.date||x.at||x.time||"";return `<div class="krista-unknown-row"><div><strong>${esc(employee)}</strong><br><small>${esc(date)}</small></div><div><strong>${esc(unknownLabel(item))}</strong><br><small>${esc(x.note||x.reason||"Zuordnung prüfen")}</small></div><button type="button" class="secondary" data-unknown-open="${i}">Mitarbeiter öffnen</button><button type="button" class="danger" data-unknown-delete="${i}">Löschen</button></div>`}).join("");
     target.onclick=()=>{list.hidden=!list.hidden};
     list.querySelectorAll("[data-unknown-open]").forEach(btn=>btn.onclick=()=>{const item=items[Number(btn.dataset.unknownOpen)];const id=item?.state?.employeeId;if(id&&typeof window.openEmployeeActionModal==="function")window.openEmployeeActionModal(String(id))});
+    list.querySelectorAll("[data-unknown-delete]").forEach(btn=>btn.onclick=async()=>{const item=items[Number(btn.dataset.unknownDelete)],x=item?.x||{},employeeId=String(item?.state?.employeeId||"");if(!employeeId||!confirm(`Leere Zuordnung „${unknownLabel(item)}“ wirklich löschen?`))return;btn.disabled=true;try{await api(`/kristine/api/states/${encodeURIComponent(employeeId)}/unknown-assignment`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({at:x.at||"",jobId:x.jobId||"",jobName:x.jobName||x.siteName||x.site||""})});item.state.timeline=(item.state.timeline||[]).filter(row=>row!==x);renderControl()}catch(e){alert("Löschen fehlgeschlagen: "+e.message);btn.disabled=false}});
   }
   function taskIdFromRow(row){const b=row.querySelector('button[onclick*="openTaskListModal"]');const m=String(b?.getAttribute("onclick")||"").match(/openTaskListModal\('([^']+)'\)/);return m?.[1]||""}
   function enhanceTaskRows(){

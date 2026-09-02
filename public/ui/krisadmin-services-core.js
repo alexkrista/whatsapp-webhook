@@ -47,31 +47,15 @@
   }
 
   function applyLamp(){
-    const button=document.getElementById("kristaServicesTopLamp");
+    const button=document.querySelector("#kristaAccessSlot [data-services]");
     if(!button)return;
-    button.classList.toggle("green",lampLevel==="green");
-    button.classList.toggle("red",lampLevel!=="green");
+    const dot=button.querySelector(".krista-dot");if(dot)dot.className="krista-dot "+(lampLevel==="green"?"green":"red");
     button.title=lampLevel==="green"?"Dienste okay · klicken für Details":"Dienstefehler · klicken für Details";
   }
 
   function mountTopLamp(){
-    const slot=document.getElementById("kristaAccessSlot");
-    if(!slot)return null;
-    let button=document.getElementById("kristaServicesTopLamp");
-    if(!button){
-      button=document.createElement("button");
-      button.id="kristaServicesTopLamp";
-      button.type="button";
-      button.className="ksvc-top-lamp red";
-      button.innerHTML='<span class="ksvc-lamp-dot" aria-hidden="true"></span><span>Dienste</span>';
-      button.onclick=open;
-      slot.appendChild(button);
-    }
-    applyLamp();
-    if(!lampObserver){
-      lampObserver=new MutationObserver(()=>queueMicrotask(()=>{if(!document.getElementById("kristaServicesTopLamp"))mountTopLamp()}));
-      lampObserver.observe(slot,{childList:true});
-    }
+    const button=document.querySelector("#kristaAccessSlot [data-services]");
+    if(button)button.onclick=open;
     return button;
   }
 
@@ -89,9 +73,6 @@
 
   function startLamp(){
     mountTopLamp();
-    refreshLamp();
-    if(lampTimer)return;
-    lampTimer=setInterval(refreshLamp,10000);
   }
 
   function ensureModal(){
@@ -144,7 +125,6 @@
   }
 
   function renderOffline(error){
-    lampLevel="red";applyLamp();
     const content=document.getElementById("kristaServicesContent");if(!content)return;
     content.className="ksvc-empty";
     content.innerHTML=`<strong>🔴 Lokaler KRISTA Dienstemanager ist nicht erreichbar.</strong><br><br>Am Firmen-PC im Projektordner einmal <strong>KRISTA_START.cmd</strong> doppelklicken. Danach hier auf „Aktualisieren“.<br><br><span class="ksvc-detail">${esc(error?.message||error||'')}</span>`;
