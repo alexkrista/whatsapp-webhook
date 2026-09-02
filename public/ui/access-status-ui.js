@@ -50,6 +50,8 @@
         display:flex!important;align-items:center!important;justify-content:flex-end!important;
         gap:5px!important;min-width:0!important;white-space:nowrap!important;
       }
+      .krista-door-stack{display:flex!important;flex-direction:column!important;gap:3px!important;align-items:stretch!important;min-width:0!important}
+      .krista-door-row{display:flex!important;align-items:center!important;gap:5px!important;min-width:0!important}
       .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp,.krista-services-lamp{
         min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;
         border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;
@@ -58,6 +60,8 @@
         font:800 10.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif!important;
         cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important;
       }
+      .krista-services-lamp{height:20px!important;min-height:20px!important;padding:2px 7px!important;font-size:9.5px!important;width:100%!important;border-radius:7px!important}
+      .krista-services-lamp .krista-dot{width:7px!important;height:7px!important}
       .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover,.krista-services-lamp:hover{background:rgba(255,255,255,.14)!important}
       .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
       .krista-system-lamp,.krista-services-lamp{padding-inline:7px!important}
@@ -72,6 +76,7 @@
         .krista-shell-main.krista-access-v4 .krista-brand-copy small{display:none!important}
         .krista-shell-main.krista-access-v4 .krista-world-link{padding-inline:7px!important;font-size:10.5px!important}
         .krista-access-slot{gap:4px!important}
+        .krista-door-row{gap:4px!important}
         .krista-door-state{display:none!important}
       }
       @media(max-width:1120px){
@@ -194,16 +199,17 @@
 
     const doors=d?.gantner?.doors||{};
     const labels={1:"Eingang",2:"Lager",3:"Büro"};
+    let doorHtml='';
     for(const n of[1,2,3]){
       const x=doors[String(n)]||{};
       const v=doorVisual(d,x);
       const locked=isDoorLocked(n);
       const action=locked?"Schaltung bestätigt · bitte kurz warten":v.state==="OFFEN"?"Klick: auf ZU stellen":v.state==="ZU"?"Klick: generell öffnen":"Status unbekannt";
       const reason=String(x.reason||"").replace(/"/g,"&quot;");
-      h+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
+      doorHtml+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
     const svcColor=servicesColor();
-    h+=`<button class="krista-services-lamp" data-services title="${svcColor==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button>`;
+    h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-services-lamp" data-services title="${svcColor==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
 
     slot.innerHTML=h;
     slot.querySelector("[data-services]")?.addEventListener("click",openServices);
