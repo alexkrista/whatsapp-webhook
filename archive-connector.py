@@ -63,6 +63,17 @@ def protect_remote_archive_access():
             return None
         return jsonify({"ok": False, "error": "Zutritt nicht freigegeben"}), 403
 
+    # KRISTINE darf die freigegebene WW-Suche im Browser direkt verwenden.
+    # Der Schlüssel wird von der bestehenden KRISTINE-Navigation bereits als
+    # krista_token an den Brain-Rechner weitergegeben.
+    supplied_query_token = str(request.args.get("krista_token") or "")
+    if (
+        request.path in {"/project/address-search", "/project/address-projects"}
+        and KRISTINE_ADMIN_TOKEN
+        and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
+    ):
+        return None
+
     # Über Tailscale nur die minimale Handy-API freigeben.
     if request.path not in MOBILE_ALLOWED_PATHS and not request.path.startswith("/incoming/capture/"):
         return jsonify({"ok": False, "error": "Nicht verfügbar"}), 404
@@ -107,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/"):
+    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
