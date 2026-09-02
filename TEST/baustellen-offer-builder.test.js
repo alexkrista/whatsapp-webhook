@@ -22,6 +22,7 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
 assert.ok(ui.includes('groupName:p.groupName||""'),"Geänderte Raumnamen werden vollständig in die Positionsgruppen übernommen");
+assert.ok(ui.includes("normalizeLoadedGroups"),"Bereits gespeicherte Regie- und Materialpositionen werden wieder zu einem Raumblock zusammengeführt");
 for(const text of ["groupName","groupDiscounts"])assert.ok(server.includes(text)||ui.includes(text),`Gruppendaten enthalten ${text}`);
 for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(text),`Vorkasseansicht enthält ${text}`);
 for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
