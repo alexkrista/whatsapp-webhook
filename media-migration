@@ -212,6 +212,7 @@ async function listJobMedia({ dataDir, jobId }) {
   }
 
   const items = [];
+  const listedFiles = new Set();
   const dayDirs = await listJobDayDirectories(dataDir, safeId);
   for (const row of dayDirs) {
     const logs = await readJsonLines(path.join(row.dir, "log.jsonl"));
@@ -242,7 +243,40 @@ async function listJobMedia({ dataDir, jobId }) {
         source: review?.source || "Baustellenprotokoll",
         url: `/admin/api/job/${encodeURIComponent(safeId)}/media-file?file=${encodeURIComponent(relative)}`,
       });
+      listedFiles.add(relative);
     }
+  }
+
+  // KGO-Medien liegen zentral unter _kristine/media und werden ueber den
+  // Eintrag in day-review-entries.json einer Baustelle zugeordnet. Sie sind
+  // deshalb nicht in den Tagesordnern der Baustelle zu finden.
+  for (const review of reviews) {
+    if (String(review?.jobId || "").trim() !== safeId) continue;
+    const relative = String(review?.file || "").replace(/\\/g, "/");
+    const kind = mediaKind(path.basename(relative));
+    if (!relative || !kind || listedFiles.has(relative)) continue;
+
+    const full = path.resolve(dataDir, relative);
+    const mediaRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
+    if (!full.startsWith(mediaRoot) || !fs.existsSync(full)) continue;
+
+    const filename = path.basename(relative);
+    const timestamp = timestampFromFilename(filename);
+    items.push({
+      id: review.id || `${review.date || "media"}_${filename}`,
+      jobId: safeId,
+      date: String(review.date || ""),
+      at: review.at || review.capturedAt || hmFromTimestampSeconds(timestamp),
+      kind,
+      filename,
+      file: relative,
+      employeeId: review.employeeId || "",
+      employeeName: review.employeeName || "",
+      content: String(review.content || "").trim(),
+      source: review.source || "KGO",
+      url: `/admin/api/job/${encodeURIComponent(safeId)}/media-file?file=${encodeURIComponent(relative)}`,
+    });
+    listedFiles.add(relative);
   }
 
   return items.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")) || a.filename.localeCompare(b.filename, "de"));
@@ -282,12 +316,24 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
     try {
       const jobId = String(req.params.jobId || "").trim();
       const relative = String(req.query.file || "").replace(/\\/g, "/");
-      if (!/^[A-Za-z0-9_-]+$/.test(jobId) || !relative || relative.includes("..") || !relative.startsWith(`${jobId}/`)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(jobId) || !relative || relative.includes("..")) {
         return res.status(400).send("Ungültige Mediendatei");
       }
       const full = path.resolve(dataDir, relative);
-      const root = path.resolve(dataDir, jobId) + path.sep;
-      if (!full.startsWith(root) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) return res.status(404).send("Datei nicht gefunden");
+      const jobRoot = path.resolve(dataDir, jobId) + path.sep;
+      const kgoRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
+      const inJobFolder = full.startsWith(jobRoot);
+      let assignedKgoMedia = false;
+      if (full.startsWith(kgoRoot)) {
+        const reviews = await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
+        assignedKgoMedia = reviews.some((entry) =>
+          String(entry?.jobId || "").trim() === jobId &&
+          String(entry?.file || "").replace(/\\/g, "/") === relative
+        );
+      }
+      if ((!inJobFolder && !assignedKgoMedia) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
+        return res.status(404).send("Datei nicht gefunden");
+      }
       res.setHeader("Cache-Control", "private, max-age=3600");
       return res.sendFile(full);
     } catch (error) {
