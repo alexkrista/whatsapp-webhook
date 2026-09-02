@@ -1,0 +1,10 @@
+"use strict";
+const assert=require("assert"),fs=require("fs"),path=require("path");
+const root=path.join(__dirname,"..");
+const workflow=fs.readFileSync(path.join(root,"public","kristool-workflow.html"),"utf8");
+const tower=fs.readFileSync(path.join(root,"public","ui","tower-baustellen-signals.js"),"utf8");
+assert.match(workflow,/Angebot in Bearbeitung setzen/);
+assert.match(workflow,/Mappe bleibt hier sichtbar/);
+assert.doesNotMatch(workflow,/closed=\['offer_draft'/);
+assert.doesNotMatch(tower,/\['offer_draft','order_approved'/);
+console.log("OK: Angebotsmappen verschwinden beim Bearbeitungsstart nicht mehr.");
