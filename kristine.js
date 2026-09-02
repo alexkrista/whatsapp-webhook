@@ -2498,6 +2498,12 @@ const open = taskId
           contactName: String(t.contactName || jobMeta.contactName || "").trim().slice(0, 140),
           contactPhone: String(t.contactPhone || jobMeta.contactPhone || "").trim().slice(0, 60),
           contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
+          customerMaster: t.customerMaster && typeof t.customerMaster === "object" ? {
+            status: ["linked","provisional","unchecked"].includes(String(t.customerMaster.status || "")) ? String(t.customerMaster.status) : "unchecked",
+            wwAddressId: String(t.customerMaster.wwAddressId || "").slice(0, 80), wwCustomerNumber: String(t.customerMaster.wwCustomerNumber || "").slice(0, 80), wwKey: String(t.customerMaster.wwKey || "").slice(0, 140),
+            role: ["customer","architect","site_manager","supplier","other"].includes(String(t.customerMaster.role || "")) ? String(t.customerMaster.role) : "customer",
+            name: String(t.customerMaster.name || t.contactName || "").trim().slice(0, 180), phone: String(t.customerMaster.phone || t.contactPhone || "").trim().slice(0, 80), email: String(t.customerMaster.email || t.contactEmail || "").trim().slice(0, 180), address: String(t.customerMaster.address || t.address || "").trim().slice(0, 300),
+          } : null,
           dueDate: String(t.dueDate || "").slice(0, 10),
           reminder: String(t.reminder || "").trim().slice(0, 500),
           appointment: t.appointment && typeof t.appointment === "object" ? t.appointment : null,

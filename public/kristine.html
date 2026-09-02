@@ -287,12 +287,15 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
             <div><label>Kontaktperson</label><input id="tContactName" placeholder="Name"></div>
             <div><label>Rückrufnummer</label><input id="tContactPhone" type="tel" placeholder="+43 …"></div>
             <div class="full"><label>E-Mail-Adresse</label><input id="tContactEmail" type="email" placeholder="name@firma.at"></div>
+            <div><label>Rolle</label><select id="tContactRole"><option value="customer">Kunde / Bauherr</option><option value="architect">Architekt</option><option value="site_manager">Bauleiter</option><option value="supplier">Lieferant</option><option value="other">Sonstiger Kontakt</option></select></div>
+            <div><label>WW-Kundenstamm</label><button id="tWwSearch" type="button" class="secondary">🔎 Im WW suchen</button></div>
+            <div class="full"><div id="tWwResults" class="auto-box small">Noch keine WW-Prüfung durchgeführt.</div></div>
           </div>
         </div>
         <div class="full"><label>Hinweise</label><textarea id="tReminder" rows="2" placeholder="Zusätzliche Informationen oder Kontext"></textarea></div>
         <div class="full"><label>Zusammenfassung</label><div id="taskSelectionInfo" class="auto-box small">Noch keine Zuordnung ausgewählt.</div></div>
       </div>
-      <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden">
+      <input id="tAssigneeId" type="hidden"><input id="tAssigneeName" type="hidden"><input id="tJobId" type="hidden"><input id="tJobName" type="hidden"><input id="tWwAddressId" type="hidden"><input id="tWwCustomerNumber" type="hidden"><input id="tWwCustomerKey" type="hidden"><input id="tCustomerMasterStatus" type="hidden">
       <div class="actions" style="margin-top:14px"><button class="green" onclick="addTask()">+ Aufgabe anlegen</button></div>
       <div id="taskSaveNotice" class="task-save-notice"></div>
     </div>
@@ -1391,6 +1394,7 @@ async function addTask(){
     creatorId:'admin',creatorName:(tCreatorName.value||'Chef / Büro').trim(),
     address:tAddress.value.trim(),contactName:tContactName.value.trim(),
     contactPhone:tContactPhone.value.trim(),contactEmail:tContactEmail.value.trim(),
+    customerMaster:{status:tCustomerMasterStatus.value||'unchecked',wwAddressId:tWwAddressId.value.trim(),wwCustomerNumber:tWwCustomerNumber.value.trim(),wwKey:tWwCustomerKey.value.trim(),role:tContactRole.value||'customer',name:tContactName.value.trim(),phone:tContactPhone.value.trim(),email:tContactEmail.value.trim(),address:tAddress.value.trim()},
     status:'open',createdAt:new Date().toISOString(),completedAt:null
   };
   data.tasks.push(newTask);renderTasks();renderControl();
@@ -1409,7 +1413,7 @@ async function addTask(){
     tTitle.value='';tReminder.value='';tAssigneeSelect.value='';tJobSelect.value='';tDueDate.value='';
     document.getElementById('tAppointmentDate').value='';document.getElementById('tAppointmentFrom').value='09:00';document.getElementById('tAppointmentTo').value='10:00';
     tAssigneeId.value='';tAssigneeName.value='';tJobId.value='';tJobName.value='';
-    tAddress.value='';tContactName.value='';tContactPhone.value='';tContactEmail.value='';
+    tAddress.value='';tContactName.value='';tContactPhone.value='';tContactEmail.value='';tWwAddressId.value='';tWwCustomerNumber.value='';tWwCustomerKey.value='';tCustomerMasterStatus.value='';tContactRole.value='customer';if(window.resetWwCustomerSearch)window.resetWwCustomerSearch();
     document.querySelector('input[name="taskType"][value="Rückruf"]').checked=true;
     document.querySelector('input[name="taskPriority"][value="normal"]').checked=true;
     updateTaskTypeFields();updateTaskSelectionInfo();

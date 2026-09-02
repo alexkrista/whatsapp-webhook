@@ -149,6 +149,10 @@
     if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260824-1208", "data-krista-inbox-v2");
   }
 
+  function loadKristineCustomerMaster() {
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-customer-master.js?v=20260902-master1", "data-krista-customer-master");
+  }
+
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
@@ -275,6 +279,7 @@
     loadKristineTaskCreateModal();
     loadKristineFinanceApproval();
     loadKristineInbox();
+    loadKristineCustomerMaster();
     loadBaustellenKnowledgeStack();
     loadTowerSignals();
     loadKrisadminHome();
