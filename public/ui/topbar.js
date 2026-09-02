@@ -167,7 +167,7 @@
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260826-kalk1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-parser-fix.js?v=20260826-flatpos1", "data-krista-kalkulation-parser-fix");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260826-grid2", "data-krista-kalkulation-grid-v2");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260902-offer3", "data-krista-angebot-v3");
+    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260902-offer4", "data-krista-angebot-v4");
   }
 
   function loadTowerSignals() {

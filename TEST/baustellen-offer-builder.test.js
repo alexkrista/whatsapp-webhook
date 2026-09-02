@@ -8,6 +8,9 @@ for(const text of ["Räume und Aufmaß","Jeder Raum bildet eine eigene Gruppe","
 assert.ok(ui.includes("Beschreibung der Leistung"),"Jeder Raum besitzt eine Leistungsbeschreibung");
 for(const text of ["mountFreePositionUi","+ Position","Freie Position","Position auswählen","data-custom-position-text"])
   assert.ok(ui.includes(text),`Freie oder gespeicherte Position je Raum enthält ${text}`);
+for(const text of ["data-remove-custom-position","Freie Position löschen","scrollIntoView"])
+  assert.ok(ui.includes(text),`Freie Position ist sofort sichtbar und löschbar: ${text}`);
+assert.ok(server.includes('groupId:String(body.positions?.[i]?.groupId||"")'),"Raumzuordnung freier Positionen wird dauerhaft gespeichert");
 assert.ok(ui.includes("data-copy-room"),"Räume und Bauteile können vollständig kopiert werden");
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
