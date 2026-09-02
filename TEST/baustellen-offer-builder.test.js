@@ -11,6 +11,9 @@ for(const text of ["mountFreePositionUi","+ Position","Freie Position","Position
 for(const text of ["data-remove-custom-position","Freie Position löschen","scrollIntoView"])
   assert.ok(ui.includes(text),`Freie Position ist sofort sichtbar und löschbar: ${text}`);
 assert.ok(server.includes('groupId:String(body.positions?.[i]?.groupId||"")'),"Raumzuordnung freier Positionen wird dauerhaft gespeichert");
+for(const text of ["Alternative Position","data-alternative-position","isAlternative!==true"])
+  assert.ok(ui.includes(text),`Alternative Position wird angezeigt, aber nicht summiert: ${text}`);
+assert.ok(server.includes("isAlternative:body.positions?.[i]?.isAlternative===true"),"Alternative Position wird gespeichert");
 assert.ok(ui.includes("data-copy-room"),"Räume und Bauteile können vollständig kopiert werden");
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
