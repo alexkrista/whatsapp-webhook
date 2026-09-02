@@ -24,4 +24,7 @@ assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume
 for(const text of ["groupName","groupDiscounts"])assert.ok(server.includes(text)||ui.includes(text),`Gruppendaten enthalten ${text}`);
 for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(text),`Vorkasseansicht enthält ${text}`);
 for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
+for(const text of ["Drucken / PDF","printOffer","printDocumentHtml","window.open","popup.print","offerDocumentMeta"])assert.ok(ui.includes(text),`Angebotsdruck enthält ${text}`);
+for(const text of ["offerNumberPrefix","nextOfferNumber","offer-number-counter.json","offer-draft/finalize","offerRevision"])assert.ok(server.includes(text),`Angebotsnummernkreis enthält ${text}`);
+for(const text of ['hourlyRate:Number(job?.billingRate||job?.calculation?.billingRate||75)','materialMarkupPct:Number(job?.materialPercent||job?.calculation?.materialPercent||80)','regieMaterialMode:"percent"','regieMaterialRate:20'])assert.ok(ui.includes(text),`Standard-Faktbox liefert ${text}`);
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
