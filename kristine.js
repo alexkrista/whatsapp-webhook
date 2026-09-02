@@ -1137,6 +1137,12 @@ const open = taskId
     res.sendFile(path.join(publicDir, "kristine.html"));
   });
 
+  // Dieselbe Baustellen-Oberfläche und Datenlogik, jetzt unter KRISTINE.
+  app.get(["/kristine/baustellen", "/kristine/baustellen/"], (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.sendFile(path.join(publicDir, "baustellen.html"));
+  });
+
   app.get("/kontrollzentrum", (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kontrollzentrum.html"));

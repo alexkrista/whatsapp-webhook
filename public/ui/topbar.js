@@ -9,10 +9,22 @@
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
     { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
-    { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Planung und Leitstand" },
-    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/public/baustellen.html", subtitle: "Baustellen, Mitarbeiter, Fahrzeuge und Stammdaten" },
+    { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Leitstand, Planung und Baustellen" },
+    { key: "krisadmin", label: "KRISADMIN", icon: "⚙", href: "/admin/ui", subtitle: "Mitarbeiter, Fahrzeuge, Stammdaten und Systemeinstellungen" },
     { key: "tasks", label: "AUFGABEN", icon: "📌", href: "/kristine#tasks", subtitle: "Offene Aufgaben und Erinnerungen" }
   ];
+
+  function isKristineMainPath() {
+    return window.location.pathname.toLowerCase().replace(/\/+$/, "") === "/kristine";
+  }
+
+  function isKristineBaustellenPath() {
+    return window.location.pathname.toLowerCase().replace(/\/+$/, "") === "/kristine/baustellen";
+  }
+
+  function isBaustellenPath() {
+    return isKristineBaustellenPath() || window.location.pathname.toLowerCase().includes("baustellen.html");
+  }
 
   function tokenized(href, external = false) {
     const url = new URL(href, window.location.origin);
@@ -30,6 +42,7 @@
     const hash = window.location.hash.toLowerCase();
     if (hash === "#tasks") return "tasks";
     if (hash === "#schedules") return "kriszeit";
+    if (isKristineBaustellenPath()) return "kristine";
     if (pathname.includes("baustellen.html")) return "krisadmin";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
@@ -43,7 +56,7 @@
     const raw = String(value || "").toLowerCase();
     if (raw === "kristool") return "kriszeit";
     if (raw === "krisplan") return "kristine";
-    if (raw === "baustellen") return "krisadmin";
+    if (raw === "baustellen") return isKristineBaustellenPath() ? "kristine" : "krisadmin";
     return raw;
   }
 
@@ -56,7 +69,7 @@
 
   function activateKristineHash() {
     const pathname = window.location.pathname.toLowerCase();
-    if (!pathname.includes("/kristine") || typeof window.showTab !== "function") return;
+    if (!isKristineMainPath() || typeof window.showTab !== "function") return;
     const hash = window.location.hash.replace("#", "").toLowerCase();
     const allowed = ["planning", "control", "sites", "tasks", "schedules", "kristool"];
     if (hash && allowed.includes(hash)) {
@@ -68,12 +81,12 @@
 
   function cleanKristineModuleNav() {
     const pathname = window.location.pathname.toLowerCase();
-    if (!pathname.includes("/kristine")) return;
+    if (!isKristineMainPath()) return;
     const nav = document.querySelector(".krista-module-nav");
     if (!nav) return;
     nav.querySelectorAll("button").forEach((button) => {
       const text = String(button.textContent || "").toLowerCase();
-      const remove = text.includes("kristool") || text.includes("aufgaben") || text.includes("zeitmodelle") || text.includes("urlaub") || text.includes("feiertage") || text.includes("baustellen");
+      const remove = text.includes("kristool") || text.includes("aufgaben") || text.includes("zeitmodelle") || text.includes("urlaub") || text.includes("feiertage");
       if (remove) button.remove();
     });
   }
@@ -109,35 +122,35 @@
   }
 
   function loadKristineEmployeeSort() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-employee-sort.js", "data-krista-employee-sort");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-employee-sort.js", "data-krista-employee-sort");
   }
 
   function loadKristinePlanningSidebarFix() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-planning-sidebar-fix.js", "data-krista-planning-sidebar-fix");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-planning-sidebar-fix.js", "data-krista-planning-sidebar-fix");
   }
 
   function loadKristineControlHistoryFix() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-control-history-fix.js?v=20260824-1555", "data-krista-control-history-fix");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-control-history-fix.js?v=20260824-1555", "data-krista-control-history-fix");
   }
 
   function loadKristineTaskList() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260822-msgreader", "data-krista-task-list");
   }
 
   function loadKristineTaskCreateModal() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-task-create-modal.js?v=20260824-1202", "data-krista-task-create-modal");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-task-create-modal.js?v=20260824-1202", "data-krista-task-create-modal");
   }
 
   function loadKristineFinanceApproval() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
   }
 
   function loadKristineInbox() {
-    if (window.location.pathname.toLowerCase().includes("/kristine")) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260824-1208", "data-krista-inbox-v2");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260824-1208", "data-krista-inbox-v2");
   }
 
   function loadBaustellenKnowledgeStack() {
-    if (!window.location.pathname.toLowerCase().includes("baustellen.html")) return;
+    if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
     loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260902-all-knowledge", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260902-intake", "data-krista-baustellen-cockpit");
@@ -188,7 +201,7 @@
   function loadCurrentBeulen() {
     const path = window.location.pathname.toLowerCase();
     if (path.includes("/admin")) loadScriptOnce("/public/ui/admin-employee-beulen.js", "data-krista-admin-employee-beulen");
-    if (path.includes("/kristine")) loadScriptOnce("/public/ui/kristine-beulen.js", "data-krista-kristine-beulen");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-beulen.js", "data-krista-kristine-beulen");
     if (path.includes("kristool-preview")) loadScriptOnce("/public/ui/kriszeit-beulen.js", "data-krista-kriszeit-beulen");
   }
 

@@ -233,7 +233,7 @@
       if(typeof window.openKrisadminServices==="function"){
         clearInterval(timer);window.openKrisadminServices();
       }else if(tries>30){
-        clearInterval(timer);location.href="/public/baustellen.html?token="+encodeURIComponent(token);
+        clearInterval(timer);location.href="/admin/ui?token="+encodeURIComponent(token);
       }
     },100);
   }

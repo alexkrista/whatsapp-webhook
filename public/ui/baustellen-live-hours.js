@@ -143,7 +143,7 @@
   }
 
   function install(){
-    if(!location.pathname.toLowerCase().includes("baustellen.html"))return;
+    if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen"))return;
     const list=document.getElementById("jobList"),detail=document.getElementById("detail");
     if(list)new MutationObserver(queuePatch).observe(list,{subtree:true,childList:true});
     if(detail)new MutationObserver(queuePatch).observe(detail,{subtree:true,childList:true});

@@ -78,7 +78,7 @@
   }
 
   function install(){
-    if(!location.pathname.toLowerCase().includes("baustellen.html"))return;
+    if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen"))return;
     loadFotoGallery();
     normalizeRows();
 

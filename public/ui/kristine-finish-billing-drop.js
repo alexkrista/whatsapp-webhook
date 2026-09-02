@@ -111,7 +111,7 @@
     activeSummary=s;const j=s.job,progress=s.target>0?s.actual/s.target*100:0;
     document.getElementById("kfTitle").textContent=`#${j.jobId} · ${j.name||"Baustelle"}`;
     document.getElementById("kfSubtitle").textContent=`Status: ${j.status||"–"} · Abschlussprüfung vor „Fertig – nicht abgerechnet“`;
-    document.getElementById("kfOpenJob").href=tokenUrl(`/public/baustellen.html#${encodeURIComponent(j.jobId)}`);
+    document.getElementById("kfOpenJob").href=tokenUrl(`/kristine/baustellen#${encodeURIComponent(j.jobId)}`);
     const warnings=[];
     if(s.future.length)warnings.push(`${s.future.length} zukünftige Einteilung(en) · ${hours(s.futureHours)}`);
     if(s.openTasks.length)warnings.push(`${s.openTasks.length} offene Aufgabe(n)`);

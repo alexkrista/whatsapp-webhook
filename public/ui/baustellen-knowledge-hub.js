@@ -39,7 +39,10 @@
   function installKrisadminSubnav(){
     const main=document.querySelector("body>main");if(!main||document.getElementById("bkSubnav"))return;
     const nav=document.createElement("div");nav.id="bkSubnav";nav.className="bk-subnav";
-    nav.innerHTML=`<a class="active" href="${tokenUrl('/public/baustellen.html')}">🏗 Baustellen</a><a href="${tokenUrl('/admin/ui')}">👷 Mitarbeiter / Fahrzeuge / Betrieb</a><button id="sdbOpen" type="button">🛡️ Arbeitssicherheit</button><span class="push">KRISADMIN · Baustellen-Wissensdrehscheibe</span>`;
+    const inKristine=location.pathname.toLowerCase().replace(/\/+$/,"")==="/kristine/baustellen";
+    nav.innerHTML=inKristine
+      ? `<a href="${tokenUrl('/kristine#control')}">🧾 Leitstand</a><a href="${tokenUrl('/kristine#planning')}">📅 Planung</a><a class="active" href="${tokenUrl('/kristine/baustellen')}">🏗 Baustellen</a><button id="sdbOpen" type="button">🛡️ Arbeitssicherheit</button><span class="push">KRISTINE · Baustellen-Wissensdrehscheibe</span>`
+      : `<a class="active" href="${tokenUrl('/kristine/baustellen')}">🏗 Baustellen jetzt in KRISTINE</a><a href="${tokenUrl('/admin/ui')}">👷 Mitarbeiter / Fahrzeuge / Betrieb</a><button id="sdbOpen" type="button">🛡️ Arbeitssicherheit</button><span class="push">Alter Einstieg · bleibt vorerst erreichbar</span>`;
     main.insertBefore(nav,main.firstChild);
   }
 
