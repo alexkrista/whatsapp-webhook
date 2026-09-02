@@ -50,7 +50,7 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
-const { registerMediaMigration } = require("./media-migration");
+const { registerMediaMigration, listJobMedia } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
 const { registerSafetySdb } = require("./safety-sdb");
 const { registerRegieAssistant } = require("./regie-assistant");
@@ -2890,15 +2890,21 @@ app.get("/admin/api/job/:jobId/days", async (req, res) => {
 
   try {
     const jobId = String(req.params.jobId);
-    const days = await listDaysForJob(jobId);
+    const jobMedia = await listJobMedia({ dataDir: DATA_DIR, jobId });
+    const mediaDates = jobMedia.map((item) => String(item.date || "")).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+    const days = [...new Set([...(await listDaysForJob(jobId)), ...mediaDates])].sort().reverse();
     const detailed = [];
     for (const day of days) {
       const dayDir = resolveExistingDayDir(jobId, day);
       const stats = fs.existsSync(dayDir) ? await readLogStats(dayDir) : { items: 0, images: 0, audio: 0, pdfs: 0 };
+      // Einschließlich zentraler KGO-Medien; listJobMedia enthält zugleich die
+      // klassischen Dateien im Baustellenordner und vermeidet Doppelzählungen.
+      stats.images = jobMedia.filter((item) => item.date === day && item.kind === "photo").length;
+      stats.videos = jobMedia.filter((item) => item.date === day && item.kind === "video").length;
       const pdfPath = path.join(dayDir, `Baustellenprotokoll_${jobId}_${day}.pdf`);
       const pdfExists = fs.existsSync(pdfPath);
       const sizeBytes = pdfExists ? (await fsp.stat(pdfPath).catch(() => ({ size: 0 }))).size : 0;
-      detailed.push({ day, stats, pdfExists, sizeBytes, viewUrl: `/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}`, downloadUrl: `/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}` });
+      detailed.push({ day, stats, pdfExists, sizeBytes, viewUrl: pdfExists ? `/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}` : null, downloadUrl: pdfExists ? `/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(day)}` : null });
     }
     res.json({ ok: true, jobId, days, detailed });
   } catch (e) {
