@@ -705,6 +705,41 @@ app.get("/api/regie/materials", async (req, res) => {
     res.json({ ok: true, material: decorate(material) });
   });
 
+  app.post("/admin/api/materials/auto", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const product = clean(req.body?.name || req.body?.product, 180);
+      if (!product) return res.status(400).json({ ok: false, error: "Materialname fehlt" });
+      const rows = await readJson(MATERIALS_FILE, []);
+      const normalizedName = product.toLocaleLowerCase("de");
+      const existing = rows.find(item =>
+        clean(item.product, 180).toLocaleLowerCase("de") === normalizedName ||
+        clean(item.materialId, 120).toLocaleLowerCase("de") === normalizedName
+      );
+      if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
+      const material = normalizeMaterial({
+        group: "Angebotskalkulation",
+        product,
+        unit: req.body?.unit,
+        purchasePrice: req.body?.unitPrice,
+        priceCheckedAt: new Date().toISOString().slice(0, 10),
+        active: true,
+        regieItem: true,
+        note: "Automatisch aus einer Angebotskalkulation übernommen",
+        sourceSheet: "KRISTINE Angebot",
+      }, { index: rows.length + 1 });
+      while (rows.some(item => String(item.materialId) === String(material.materialId))) {
+        material.materialId = createMaterialId(material, rows.length + Math.floor(Math.random() * 10000));
+        material.id = material.materialId;
+      }
+      rows.push(material);
+      await writeJson(MATERIALS_FILE, rows);
+      res.json({ ok: true, created: true, material: decorate(material) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.put("/admin/api/materials/:materialId", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {

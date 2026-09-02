@@ -8,5 +8,6 @@ for(const text of ["Räume und Aufmaß","Jeder Raum bildet eine eigene Gruppe","
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
 for(const text of ["Preisstand:","Preise aktualisieren / neu kalkulieren","priceSnapshotAt"])assert.ok(ui.includes(text)||server.includes(text),`Preisstand enthält ${text}`);
+for(const text of ["ensureOfferMaterials","/admin/api/materials/auto","m.product||m.name"])assert.ok(ui.includes(text),`Automatische Materialübernahme enthält ${text}`);
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
