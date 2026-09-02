@@ -31,6 +31,7 @@
       .bk-intake-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.bk-intake-field{padding:10px;border:1px solid #e2ded5;border-radius:10px;background:#fbfaf6}.bk-intake-field strong{display:block;margin-bottom:4px;font-size:10px;text-transform:uppercase;color:#707670}.bk-intake-field div{white-space:pre-wrap;font-size:12px;line-height:1.45}.bk-intake-records{display:grid;gap:9px;margin-top:12px}.bk-intake-record{padding:11px;border-radius:11px;background:#f6f4ef;border:1px solid #e2ded5}.bk-intake-record audio{display:block;width:100%;margin:8px 0}.bk-intake-record p{white-space:pre-wrap;margin:7px 0 0;font-size:12px;line-height:1.5}.bk-intake-files{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.bk-intake-file{width:150px;padding:8px;border:1px solid #ddd9cf;border-radius:10px;background:#fff;color:#252925;text-decoration:none;font-size:11px;font-weight:750}.bk-intake-file img{display:block;width:100%;height:95px;object-fit:cover;border-radius:7px;margin-bottom:6px}
       .bk-people{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}.bk-person{border:1px solid #e0dcd3;border-radius:12px;background:#fbfaf6;padding:11px}.bk-person strong{display:block}.bk-person .big{font-size:20px;font-weight:950;margin:5px 0}.bk-person small{color:#707670}
       .bk-materials{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px}.bk-material{border:1px solid #e0dcd3;border-radius:12px;padding:11px;background:#fbfaf6}.bk-material strong{display:block}.bk-material span{font-size:12px;color:#707670}.bk-source{display:inline-flex;align-items:center;gap:6px;background:#eef5ef;color:#295f39;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:850}.bk-source.missing{background:#fff5de;color:#7b5923}.bk-divider{height:1px;background:#e8e4dc;margin:12px 0}.bk-progress{height:10px;background:#e7e4dc;border-radius:999px;overflow:hidden;margin-top:7px}.bk-progress span{display:block;height:100%;background:#2f7d4a;border-radius:999px}.bk-section-title{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px}.bk-section-title h3{margin:0}.bk-statline{display:flex;gap:12px;flex-wrap:wrap;color:#707670;font-size:11px}
+      .bk-master{display:grid;grid-template-columns:180px minmax(0,1fr);gap:0}.bk-master dt,.bk-master dd{margin:0;padding:10px 0;border-bottom:1px solid #ece9e2}.bk-master dt{color:#707670;font-size:11px;font-weight:800}.bk-master dd{font-size:13px;font-weight:750;overflow-wrap:anywhere}.bk-master dt:last-of-type,.bk-master dd:last-of-type{border-bottom:0}
       @media(max-width:1050px){.bk-grid{grid-template-columns:1fr 1fr}.bk-flow{grid-template-columns:1fr 1fr}.bk-flow .bk-step::after{display:none}.bk-half,.bk-third{grid-column:span 1}}
       @media(max-width:700px){.bk-subnav .push{display:none}.bk-grid{grid-template-columns:1fr}.bk-half,.bk-third{grid-column:auto}.bk-flow{grid-template-columns:1fr}.bk-day{grid-template-columns:1fr}.bk-actions{justify-content:flex-start}.bk-pdf-preview iframe{height:480px}.bk-table{font-size:11px}.bk-table th,.bk-table td{padding:7px 5px}}
     `;document.head.appendChild(s);
@@ -53,6 +54,7 @@
     hub.innerHTML=`
       <div class="bk-tabs" role="tablist">
         <button class="active" data-bk-tab="overview">Übersicht</button>
+        <button data-bk-tab="master">Stammdaten</button>
         <button data-bk-tab="economy">Wirtschaft</button>
         <button data-bk-tab="hours">Stunden & Team</button>
         <button data-bk-tab="planning">Planung</button>
@@ -62,6 +64,7 @@
         <button data-bk-tab="invoices">Rechnungen</button>
       </div>
       <section class="bk-panel active" data-bk-panel="overview"><div id="bkOverviewHost"></div></section>
+      <section class="bk-panel" data-bk-panel="master"><div id="bkMasterData" class="bk-loading">Stammdaten werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="economy"><div id="bkEconomy" class="bk-loading">Wirtschaft wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="hours"><div id="bkHours" class="bk-loading">Stunden und Mitarbeiter werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="planning"><div id="bkPlanning" class="bk-loading">Planung wird geladen …</div></section>
@@ -101,13 +104,14 @@
   async function loadJob(id){
     const serial=++loadSerial;currentJobId=String(id||"");if(!currentJobId)return;
     installHub();selectTab("overview");
-    ["bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const e=document.getElementById(x);if(e){e.className="bk-loading";e.textContent="Daten werden gesammelt und der Baustelle zugeordnet …"}});
+    ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const e=document.getElementById(x);if(e){e.className="bk-loading";e.textContent="Daten werden gesammelt und der Baustelle zugeordnet …"}});
     try{
       await baseData(true);if(serial!==loadSerial)return;
       const j=jobById(currentJobId);if(!j)throw new Error("Baustelle nicht gefunden");
       const [days,knowledge]=await Promise.all([api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/knowledge`).catch(()=>({}))]);if(serial!==loadSerial)return;
       const details=days.detailed||[];
       const regieRows=await mapLimit(details,6,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return {day:d.day,regie:r.regie||r}});if(serial!==loadSerial)return;
+      renderMasterData(j);
       renderEconomy(j,regieRows);
       renderHours(j,regieRows);
       renderPlanning(j);
@@ -116,8 +120,22 @@
       renderMaterial(j,regieRows,knowledge);
       renderInvoices(j);
     }catch(e){
-      ["bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
+      ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
     }
+  }
+
+  function renderMasterData(j){
+    const m=j.customerMaster||{},wwId=j.wwAddressId||m.wwAddressId||"",wwNumber=j.wwCustomerNumber||m.wwCustomerNumber||"";
+    const address=[j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")||"–";
+    const role=({customer:"Kunde / Bauherr",architect:"Architekt",site_manager:"Bauleiter",supplier:"Lieferant",other:"Weiterer Kontakt"})[m.role]||"Kunde / Kontakt";
+    const masterStatus=wwId?`<span class="bk-source">Mit WW-Stamm verknüpft</span>`:(j.customerMasterStatus==="pending_ww_create"||m.status==="provisional")?`<span class="bk-source missing">Neuer WW-Stamm vorgemerkt</span>`:`<span class="bk-source missing">Noch ohne WW-Verknüpfung</span>`;
+    const contactName=m.name||j.contactName||"–",contactPhone=m.phone||j.contactPhone||"",contactEmail=m.email||j.contactEmail||"";
+    const editUrl=tokenUrl(`/admin/ui#job-${encodeURIComponent(j.jobId)}`);
+    const el=document.getElementById("bkMasterData");el.className="";el.innerHTML=`<div class="bk-grid">
+      <div class="bk-card bk-half"><div class="bk-section-title"><h3>Baustellen-Stammdaten</h3>${masterStatus}</div><dl class="bk-master"><dt>Baustellennummer</dt><dd>${esc(j.jobId||'–')}</dd><dt>Bezeichnung</dt><dd>${esc(j.name||'–')}</dd><dt>Status</dt><dd>${esc(j.status||'–')}</dd><dt>Baustellenadresse</dt><dd>${esc(address)}</dd><dt>Adresszusatz / Zufahrt</dt><dd>${esc(j.addressExtra||'–')}</dd></dl></div>
+      <div class="bk-card bk-half"><div class="bk-section-title"><h3>Kunde & Kontakt</h3><span class="bk-badge blue">${esc(role)}</span></div><dl class="bk-master"><dt>Name</dt><dd>${esc(contactName)}</dd><dt>Telefon</dt><dd>${contactPhone?`<a href="tel:${esc(contactPhone.replace(/[^+\d]/g,''))}">${esc(contactPhone)}</a>`:'–'}</dd><dt>E-Mail</dt><dd>${contactEmail?`<a href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a>`:'–'}</dd><dt>WW-Kundennummer</dt><dd>${esc(wwNumber||'–')}</dd><dt>WW-Stammindex</dt><dd>${esc(wwId||'–')}</dd></dl></div>
+      <div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Stammdaten pflegen</h3><div class="bk-note">Änderungen gelten für diese Baustelle. Die WW-Verknüpfung bleibt dabei erhalten.</div></div><div class="bk-actions"><a class="primary" href="${esc(editUrl)}">Stammdaten bearbeiten</a></div></div></div>
+    </div>`;
   }
 
   function renderEconomy(j,regies){
