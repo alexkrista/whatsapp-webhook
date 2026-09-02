@@ -149,7 +149,7 @@
 
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260901-workflow-grid", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260902-job-folder-links", "data-krista-tower-signals");
     }
   }
 
