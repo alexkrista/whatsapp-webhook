@@ -19,6 +19,7 @@ assert.ok(server.includes("includeFloor:r?.includeFloor===true"),"Bodenauswahl j
 assert.ok(ui.includes("p.quantity=area.walls+area.ceiling+area.floor"),"Alle m²-Positionen eines Raums verwenden dieselbe Leistungsfläche");
 for(const text of ["mountRoomQuantityOverrides","autoQuantityOverridden!==true"])assert.ok(ui.includes(text),`Automatische m²-Menge bleibt je Position überschreibbar: ${text}`);
 assert.ok(server.includes("autoQuantityOverridden:body.positions?.[i]?.autoQuantityOverridden===true"),"Überschriebene Positionsmenge bleibt gespeichert");
+for(const text of ["preservePositionDetails","openPositionDetails","details.open=true"])assert.ok(ui.includes(text),`Geöffnete Positionskalkulation bleibt beim Bearbeiten offen: ${text}`);
 assert.ok(ui.includes("data-copy-room"),"Räume und Bauteile können vollständig kopiert werden");
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
