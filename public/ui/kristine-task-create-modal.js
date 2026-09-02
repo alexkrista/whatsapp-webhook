@@ -165,7 +165,7 @@
 (function loadTaskCalendar(){
   if(document.querySelector('script[data-krista-task-calendar]'))return;
   const s=document.createElement('script');
-  s.src='/public/ui/kristine-task-calendar.js?v=20260902-protocol-state-v8';
+  s.src='/public/ui/kristine-task-calendar.js?v=20260902-job-workflow-v9';
   s.defer=true;
   s.setAttribute('data-krista-task-calendar','1');
   document.head.appendChild(s);

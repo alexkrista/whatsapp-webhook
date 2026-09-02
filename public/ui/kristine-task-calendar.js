@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-02-protocol-state-v8";
+  const VERSION="2026-09-02-job-workflow-v9";
   let currentTask=null;
   let currentRequestId="";
   let visitRecorder=null,visitStream=null,visitChunks=[],visitConsentAt="",discardVisitRecording=false,visitOwnMemo=false;
@@ -231,7 +231,7 @@
   }
 
   async function stageVisitProtocol(target){
-    await saveVisitProtocol();refreshCurrentTask();if(!currentTask)return;const taskId=currentTask.id;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),conversionTarget:target,conversionStatus:"prepared",conversionPreparedAt:new Date().toISOString(),sourceTaskId:String(currentTask.id||"")};try{await persistTasks();currentTask=taskById(taskId)||currentTask;const r=await fetch(authenticatedUrl("/kristool/api/workflows"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:currentTask.id,target,title:currentTask.title,customer:currentTask.contactName,address:currentTask.address,createdAt:currentTask.createdAt,appointment:currentTask.appointment,protocol:currentTask.visitProtocol})});const j=await r.json();if(!r.ok)throw new Error(j.error||"KRISTOOL-Übergabe fehlgeschlagen");document.getElementById("kvpStatus").innerHTML=`✓ In KRISTOOL für ${target==="order"?"Auftragsfreigabe":"Angebotserstellung"} bereit · <a href="${authenticatedUrl("/kristool-workflow")}" target="_blank">Arbeitskorb öffnen</a>`;}catch(e){document.getElementById("kvpStatus").textContent="Vorbereitung fehlgeschlagen: "+e.message}
+    await saveVisitProtocol();refreshCurrentTask();if(!currentTask)return;const taskId=currentTask.id;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),conversionTarget:target,conversionStatus:"prepared",conversionPreparedAt:new Date().toISOString(),sourceTaskId:String(currentTask.id||"")};try{await persistTasks();currentTask=taskById(taskId)||currentTask;const r=await fetch(authenticatedUrl("/kristool/api/workflows"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:currentTask.id,target,title:currentTask.title,customer:currentTask.contactName,contactPhone:currentTask.contactPhone,contactEmail:currentTask.contactEmail,address:currentTask.address,createdAt:currentTask.createdAt,appointment:currentTask.appointment,protocol:currentTask.visitProtocol})});const j=await r.json();if(!r.ok)throw new Error(j.error||"KRISTOOL-Übergabe fehlgeschlagen");document.getElementById("kvpStatus").innerHTML=`✓ In KRISTOOL für ${target==="order"?"Auftragsfreigabe":"Angebotserstellung"} bereit · <a href="${authenticatedUrl("/kristool-workflow")}" target="_blank">Arbeitskorb öffnen</a>`;}catch(e){document.getElementById("kvpStatus").textContent="Vorbereitung fehlgeschlagen: "+e.message}
   }
 
   async function saveAppointment(){
