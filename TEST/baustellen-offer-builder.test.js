@@ -15,7 +15,13 @@ for(const text of ["Regie zu diesem Raum","Regiestunden","Zusätzliches Aufmaß 
 assert.ok(ui.includes("Material und Maschinen für Regiearbeiten, Abrechnung laut Aufstellung."),"Kundenposition zeigt keinen internen Materialprozentsatz");
 for(const text of ["ensureOfferMaterials","/admin/api/materials/auto","m.product||m.name"])assert.ok(ui.includes(text),`Automatische Materialübernahme enthält ${text}`);
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
-for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutto","MwSt. %","Rabatt %","Skonto anbieten","Skontofrist Tage","Zahlbetrag mit Skonto","enhanceFinancialPreview"])assert.ok(ui.includes(text),`Angebotskonditionen enthalten ${text}`);
+for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutto","MwSt. %","Gesamtrabatt %","Skonto anbieten","Skontofrist Tage","Zahlbetrag mit Skonto","enhanceFinancialPreview"])assert.ok(ui.includes(text),`Angebotskonditionen enthalten ${text}`);
 for(const text of ["financials","priceMode","vatRate","discountPercent","skontoEnabled","skontoPercent","skontoDays"])assert.ok(server.includes(text),`Gespeicherte Angebotskonditionen enthalten ${text}`);
 for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
+for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-recipient","koffer-paper-project","Projekt:"])assert.ok(ui.includes(text),`Angebotsbriefkopf enthält ${text}`);
+for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
+assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
+for(const text of ["groupName","groupDiscounts"])assert.ok(server.includes(text)||ui.includes(text),`Gruppendaten enthalten ${text}`);
+for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(text),`Vorkasseansicht enthält ${text}`);
+for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
