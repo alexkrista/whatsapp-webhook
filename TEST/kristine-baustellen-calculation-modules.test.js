@@ -1,0 +1,11 @@
+"use strict";
+const assert=require("assert"),fs=require("fs"),path=require("path");
+const source=fs.readFileSync(path.join(__dirname,"..","public","ui","topbar.js"),"utf8");
+const start=source.indexOf("function loadBaustellenKnowledgeStack");
+const end=source.indexOf("function loadTowerSignals",start);
+const block=source.slice(start,end);
+assert.match(block,/isBaustellenPath\(\)/);
+assert.match(block,/baustellen-calculation-v2\.js/);
+assert.match(block,/baustellen-calculation-parser-fix\.js/);
+assert.match(block,/baustellen-calculation-grid-v2\.js/);
+console.log("OK: PDF-Import, Auftrag und Zusatzerfassung laden auch unter KRISTINE/Baustellen.");
