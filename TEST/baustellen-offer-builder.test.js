@@ -14,6 +14,11 @@ assert.ok(server.includes('groupId:String(body.positions?.[i]?.groupId||"")'),"R
 for(const text of ["Alternative Position","data-alternative-position","isAlternative!==true"])
   assert.ok(ui.includes(text),`Alternative Position wird angezeigt, aber nicht summiert: ${text}`);
 assert.ok(server.includes("isAlternative:body.positions?.[i]?.isAlternative===true"),"Alternative Position wird gespeichert");
+for(const text of ["mountRoomFloorCheckbox","data-room-floor",'PARTS=["Wände","Decken","Boden"'])assert.ok(ui.includes(text),`Boden kann je Raum ausgewählt werden: ${text}`);
+assert.ok(server.includes("includeFloor:r?.includeFloor===true"),"Bodenauswahl je Raum wird gespeichert");
+assert.ok(ui.includes("p.quantity=area.walls+area.ceiling+area.floor"),"Alle m²-Positionen eines Raums verwenden dieselbe Leistungsfläche");
+for(const text of ["mountRoomQuantityOverrides","autoQuantityOverridden!==true"])assert.ok(ui.includes(text),`Automatische m²-Menge bleibt je Position überschreibbar: ${text}`);
+assert.ok(server.includes("autoQuantityOverridden:body.positions?.[i]?.autoQuantityOverridden===true"),"Überschriebene Positionsmenge bleibt gespeichert");
 assert.ok(ui.includes("data-copy-room"),"Räume und Bauteile können vollständig kopiert werden");
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
