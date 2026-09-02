@@ -139,8 +139,8 @@
   function loadBaustellenKnowledgeStack() {
     if (!window.location.pathname.toLowerCase().includes("baustellen.html")) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260823-knowledge", "data-krista-baustellen-knowledge");
-    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260823-cockpit", "data-krista-baustellen-cockpit");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260902-intake", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260902-intake", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260823-chronik", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260823-intelligence", "data-krista-baustellen-intelligence");
     loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260823-livehours1", "data-krista-baustellen-live-hours");

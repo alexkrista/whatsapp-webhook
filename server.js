@@ -397,7 +397,7 @@ app.post("/kristool/api/workflows/:id/create-job",async(req,res)=>{
     const taskRows=await fsp.readFile(path.join(DATA_DIR,"_kristine","tasks.json"),"utf8").then(JSON.parse).catch(()=>[]),task=taskRows.find(t=>String(t.id)===String(row.taskId))||{},address=String(row.address||task.address||"").trim(),parts=address.split(",").map(x=>x.trim()).filter(Boolean),streetLine=parts[0]||"",streetMatch=streetLine.match(/^(.*?)(?:\s+(\d+[A-Za-z]?))?$/),cityLine=parts.slice(1).join(" "),cityMatch=cityLine.match(/^(\d{4,6})\s+(.+)$/);
     const yy=String(new Date().getFullYear()).slice(-2),entries=await fsp.readdir(DATA_DIR).catch(()=>[]),nums=entries.filter(id=>new RegExp(`^${yy}\\d{3}$`).test(String(id))).map(Number),jobId=String(nums.length?Math.max(...nums)+1:Number(`${yy}001`)).padStart(5,"0"),protocol=row.protocol||{},contractAmount=Math.max(0,Number(body.contractAmount||0)),transcripts=(protocol.recordings||[]).map(r=>r.transcript).filter(Boolean).join("\n\n"),notes=[protocol.discussion,protocol.work,protocol.nextSteps,transcripts].filter(Boolean).join("\n\n");
     await ensureDir(path.join(DATA_DIR,jobId));
-    await writeJobMeta(jobId,{name:String(row.title||"Neuer Auftrag").slice(0,120),status:"Auftrag",street:String(streetMatch?.[1]||streetLine).trim(),houseNumber:String(streetMatch?.[2]||"").trim(),postalCode:String(cityMatch?.[1]||"").trim(),city:String(cityMatch?.[2]||cityLine).trim(),addressExtra:address,contactName:String(row.customer||task.contactName||""),contactPhone:String(row.contactPhone||task.contactPhone||""),contactEmail:String(row.contactEmail||task.contactEmail||""),contractAmount,startDate,notes:notes.slice(0,1000),intakeProtocol:protocol,sourceWorkflowId:row.id,sourceTaskId:row.taskId,createdAt:new Date().toISOString()});
+    await writeJobMeta(jobId,{name:String(row.title||"Neuer Auftrag").slice(0,120),status:"Auftrag",street:String(streetMatch?.[1]||streetLine).trim(),houseNumber:String(streetMatch?.[2]||"").trim(),postalCode:String(cityMatch?.[1]||"").trim(),city:String(cityMatch?.[2]||cityLine).trim(),addressExtra:address,contactName:String(row.customer||task.contactName||""),contactPhone:String(row.contactPhone||task.contactPhone||""),contactEmail:String(row.contactEmail||task.contactEmail||""),contractAmount,startDate,notes:notes.slice(0,1000),intakeProtocol:protocol,intakeAppointment:row.appointment||task.appointment||null,intakeTimeline:Array.isArray(row.timeline)?row.timeline:[],sourceWorkflowId:row.id,sourceTaskId:row.taskId,createdAt:new Date().toISOString()});
     if(startDate&&employeeId){const assignmentPath=path.join(DATA_DIR,"_kristine","assignments.json"),assignments=await fsp.readFile(assignmentPath,"utf8").then(JSON.parse).catch(()=>[]);assignments.push({id:`a_${Date.now()}_workflow`,date:startDate,cardType:"arbeit",jobId,jobName:row.title||"Neuer Auftrag",city:String(cityMatch?.[2]||cityLine).trim(),address,contactName:row.customer||task.contactName||"",contactPhone:row.contactPhone||task.contactPhone||"",employeeId,employeeName,from:"07:00",to:"",note:"Baustellenstart · aus Auftragsmappe"});await fsp.writeFile(assignmentPath,JSON.stringify(assignments,null,2),"utf8")}
     const now=new Date().toISOString();Object.assign(row,{jobId,status:"order_job_created",contractAmount,startDate,startEmployeeId:employeeId,startEmployeeName:employeeName,updatedAt:now});row.timeline.push({type:"job_created",label:`Baustellenmappe #${jobId} angelegt`,at:now});if(startDate)row.timeline.push({type:"start_planned",label:`Start ${startDate}${employeeName?` · ${employeeName}`:""}`,at:now});await writeVisitWorkflows(rows);res.status(201).json({ok:true,jobId,workflow:row,needsStartAppointment:!startDate});
   }catch(e){console.error("Create job from workflow failed",e);res.status(500).json({ok:false,error:String(e?.message||e)})}
@@ -2298,6 +2298,14 @@ async function readJobMeta(jobId) {
       addressExtra: String(meta.addressExtra || "").trim(),
       contactName: String(meta.contactName || "").trim(),
       contactPhone: String(meta.contactPhone || "").trim(),
+      contactEmail: String(meta.contactEmail || "").trim(),
+      startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.startDate || "")) ? String(meta.startDate) : "",
+      createdAt: meta.createdAt || null,
+      intakeProtocol: meta.intakeProtocol && typeof meta.intakeProtocol === "object" ? meta.intakeProtocol : {},
+      intakeAppointment: meta.intakeAppointment && typeof meta.intakeAppointment === "object" ? meta.intakeAppointment : null,
+      intakeTimeline: Array.isArray(meta.intakeTimeline) ? meta.intakeTimeline : [],
+      sourceWorkflowId: String(meta.sourceWorkflowId || ""),
+      sourceTaskId: String(meta.sourceTaskId || ""),
       billingRate: Math.max(0, Number(meta.billingRate || 0)),
       contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
@@ -2352,6 +2360,14 @@ async function writeJobMeta(jobId, patch) {
     addressExtra: String(patch.addressExtra ?? existing.addressExtra ?? "").trim().slice(0, 300),
     contactName: String(patch.contactName ?? existing.contactName ?? "").trim().slice(0, 120),
     contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
+    contactEmail: String(patch.contactEmail ?? existing.contactEmail ?? "").trim().slice(0, 180),
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.startDate ?? existing.startDate ?? "")) ? String(patch.startDate ?? existing.startDate) : "",
+    createdAt: patch.createdAt ?? existing.createdAt ?? null,
+    intakeProtocol: patch.intakeProtocol && typeof patch.intakeProtocol === "object" ? patch.intakeProtocol : (existing.intakeProtocol || {}),
+    intakeAppointment: patch.intakeAppointment && typeof patch.intakeAppointment === "object" ? patch.intakeAppointment : (existing.intakeAppointment || null),
+    intakeTimeline: Array.isArray(patch.intakeTimeline) ? patch.intakeTimeline : (existing.intakeTimeline || []),
+    sourceWorkflowId: String(patch.sourceWorkflowId ?? existing.sourceWorkflowId ?? ""),
+    sourceTaskId: String(patch.sourceTaskId ?? existing.sourceTaskId ?? ""),
     billingRate: Math.max(0, Number(patch.billingRate ?? existing.billingRate ?? 0)),
     contractAmount: Math.max(0, Number(patch.contractAmount ?? existing.contractAmount ?? 0)),
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
