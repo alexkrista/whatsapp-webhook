@@ -23,6 +23,8 @@ for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{
 for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-recipient","koffer-paper-project","Projekt:"])assert.ok(ui.includes(text),`Angebotsbriefkopf enthält ${text}`);
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
   assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);
+for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Übertrag","koffer-paper-net","companyPrintFooter","NEUE BANKVERBINDUNG","AT82 5800 0104 9932 3013","Firmenbuchgericht Feldkirch"])
+  assert.ok(ui.includes(text),`Mehrseitiger Firmendruck enthält ${text}`);
 for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
 assert.ok(ui.includes('groupName:p.groupName||""'),"Geänderte Raumnamen werden vollständig in die Positionsgruppen übernommen");
