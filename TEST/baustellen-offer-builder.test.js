@@ -21,6 +21,8 @@ for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutt
 for(const text of ["financials","priceMode","vatRate","discountPercent","skontoEnabled","skontoPercent","skontoDays"])assert.ok(server.includes(text),`Gespeicherte Angebotskonditionen enthalten ${text}`);
 for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
 for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-recipient","koffer-paper-project","Projekt:"])assert.ok(ui.includes(text),`Angebotsbriefkopf enthält ${text}`);
+for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
+  assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);
 for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
 assert.ok(ui.includes('groupName:p.groupName||""'),"Geänderte Raumnamen werden vollständig in die Positionsgruppen übernommen");
