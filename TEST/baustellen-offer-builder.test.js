@@ -29,7 +29,7 @@ for(const text of ["koffer-paper-group-number","${groupNumber}.0","${groupNumber
   assert.ok(ui.includes(text),`Hierarchische Drucknummerierung enthält ${text}`);
 for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Übertrag","koffer-paper-net","companyPrintFooter","NEUE BANKVERBINDUNG","AT82 5800 0104 9932 3013","Firmenbuchgericht Feldkirch"])
   assert.ok(ui.includes(text),`Mehrseitiger Firmendruck enthält ${text}`);
-for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","min-height:22mm","font-size:8px"])
+for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","Übertrag von Seite 2:","counter(page) ' / 3'","offerPageModeCss"])
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
 for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
