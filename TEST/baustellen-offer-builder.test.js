@@ -6,6 +6,8 @@ for(const text of ["Kalkulation / Angebot","Regie + Material","Innenmalerei","Ab
 for(const text of ["offer-draft","coverSteps","bathroomSteps","bathroomCompactSteps","limeSteps","wdvsSteps","bathroomCalc","measurement","scopeDescription","showQuantities","laborHoursPerUnit","materialMarkupPct","adjustmentPct","workSteps","materials","hourlyRateOverridden"])assert.ok(server.includes(text),`Server enthält ${text}`);
 for(const text of ["Räume und Aufmaß","Jeder Raum bildet eine eigene Gruppe","Näherung × 3,5","Exakt L/B/H","Leistungsfläche"])assert.ok(ui.includes(text),`Raumaufmaß enthält ${text}`);
 assert.ok(ui.includes("Beschreibung der Leistung"),"Jeder Raum besitzt eine Leistungsbeschreibung");
+for(const text of ["mountFreePositionUi","+ Position","Freie Position","Position auswählen","data-custom-position-text"])
+  assert.ok(ui.includes(text),`Freie oder gespeicherte Position je Raum enthält ${text}`);
 assert.ok(ui.includes("data-copy-room"),"Räume und Bauteile können vollständig kopiert werden");
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
@@ -29,8 +31,9 @@ for(const text of ["koffer-paper-group-number","${groupNumber}.0","${groupNumber
   assert.ok(ui.includes(text),`Hierarchische Drucknummerierung enthält ${text}`);
 for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Übertrag","koffer-paper-net","companyPrintFooter","NEUE BANKVERBINDUNG","AT82 5800 0104 9932 3013","Firmenbuchgericht Feldkirch"])
   assert.ok(ui.includes(text),`Mehrseitiger Firmendruck enthält ${text}`);
-for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","Übertrag von Seite 2:","counter(page) ' / 3'","offerPageModeCss"])
+for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","counter(page) ' / 3'","offerPageModeCss"])
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
+assert.ok(!ui.includes("Übertrag von Seite 2:"),"Nach der Angebotssumme wird auf der Abschlussseite kein Übertrag mehr gedruckt");
 for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
 assert.ok(ui.includes('groupName:p.groupName||""'),"Geänderte Raumnamen werden vollständig in die Positionsgruppen übernommen");
