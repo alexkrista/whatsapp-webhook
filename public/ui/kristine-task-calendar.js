@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-01-auth-files-v7";
+  const VERSION="2026-09-02-protocol-state-v8";
   let currentTask=null;
   let currentRequestId="";
   let visitRecorder=null,visitStream=null,visitChunks=[],visitConsentAt="",discardVisitRecording=false,visitOwnMemo=false;
@@ -17,6 +17,12 @@
 
   function taskById(id){
     try{return (typeof data!=="undefined"&&Array.isArray(data.tasks)?data.tasks:[]).find(t=>String(t.id)===String(id))||null}catch{return null}
+  }
+
+  function refreshCurrentTask(){
+    const id=currentTask?.id,live=id?taskById(id):null;
+    if(live)currentTask=live;
+    return currentTask;
   }
 
   function parseExplicitDate(text){
@@ -167,8 +173,8 @@
   }
 
   async function uploadVisitPhotos(fileList){
-    const files=[...(fileList||[])];if(!currentTask||!files.length)return;const status=document.getElementById("kvpStatus");status.textContent=`${files.length} Foto${files.length===1?"":"s"} werden übernommen …`;
-    try{const added=[];for(const file of files){const r=await fetch(authenticatedUrl(`/kristine/api/tasks/${encodeURIComponent(currentTask.id)}/visit-file`),{method:"POST",credentials:"same-origin",headers:{"Content-Type":file.type||"application/octet-stream","X-File-Name":encodeURIComponent(file.name||"Foto.jpg")},body:file});const j=await r.json();if(!r.ok)throw new Error(j.error||"Foto konnte nicht gespeichert werden");added.push(j.file)}currentTask.visitProtocol={...(currentTask.visitProtocol||{}),files:[...(currentTask.visitProtocol?.files||[]),...added]};await persistTasks();await visitFiles(currentTask.id);status.textContent=`✓ ${added.length} Foto${added.length===1?"":"s"} übernommen`;}catch(e){status.textContent="Foto-Übernahme fehlgeschlagen: "+e.message}
+    const files=[...(fileList||[])];refreshCurrentTask();if(!currentTask||!files.length)return;const status=document.getElementById("kvpStatus");status.textContent=`${files.length} Foto${files.length===1?"":"s"} werden übernommen …`;
+    try{const added=[];for(const file of files){const r=await fetch(authenticatedUrl(`/kristine/api/tasks/${encodeURIComponent(currentTask.id)}/visit-file`),{method:"POST",credentials:"same-origin",headers:{"Content-Type":file.type||"application/octet-stream","X-File-Name":encodeURIComponent(file.name||"Foto.jpg")},body:file});const j=await r.json();if(!r.ok)throw new Error(j.error||"Foto konnte nicht gespeichert werden");added.push(j.file)}const taskId=currentTask.id;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),files:[...(currentTask.visitProtocol?.files||[]),...added]};await persistTasks();currentTask=taskById(taskId)||currentTask;await visitFiles(taskId);status.textContent=`✓ ${added.length} Foto${added.length===1?"":"s"} übernommen`;}catch(e){status.textContent="Foto-Übernahme fehlgeschlagen: "+e.message}
   }
 
   function renderVisitRecordings(){
@@ -188,13 +194,14 @@
   function stopVisitRecording(){if(visitRecorder?.state==="recording")visitRecorder.stop()}
 
   async function finishVisitRecording(){
+    refreshCurrentTask();
     visitStream?.getTracks().forEach(t=>t.stop());document.getElementById("kvpRecStart").disabled=false;document.getElementById("kvpOwnMemo").disabled=false;document.getElementById("kvpRecStop").hidden=true;
     const blob=new Blob(visitChunks,{type:visitRecorder?.mimeType||"audio/webm"});visitChunks=[];
     if(!visitOwnMemo&&!confirm("Ist am Anfang der Aufnahme ein klares Ja des Kunden enthalten?\n\nOK = speichern und transkribieren\nAbbrechen = Aufnahme endgültig verwerfen")){document.getElementById("kvpRecStatus").textContent="Aufnahme verworfen. Du kannst jetzt eine eigene interne Notiz aufnehmen.";return}
     visitConsentAt=new Date().toISOString();document.getElementById("kvpRecStatus").textContent="Wird sicher gespeichert und transkribiert …";
     try{
       const response=await fetch(authenticatedUrl(`/kristine/api/tasks/${encodeURIComponent(currentTask.id)}/visit-recording`),{method:"POST",credentials:"same-origin",headers:{"Content-Type":blob.type||"audio/webm","X-Consent-At":visitOwnMemo?`own-memo:${visitConsentAt}`:visitConsentAt,"X-Recording-Kind":visitOwnMemo?"own_memo":"customer_conversation"},body:blob});const json=await response.json();if(!response.ok)throw new Error(json.error||"Aufnahme konnte nicht gespeichert werden");
-      const recording={...json.recording,kind:visitOwnMemo?"own_memo":"customer_conversation"};currentTask.visitProtocol={...(currentTask.visitProtocol||{}),recordings:[...(currentTask.visitProtocol?.recordings||[]),recording]};await persistTasks();renderVisitRecordings();document.getElementById("kvpRecStatus").textContent=recording.transcript?"✓ Aufnahme und Transkript gespeichert":"✓ Aufnahme gespeichert; Transkript konnte nicht erstellt werden";
+      const recording={...json.recording,kind:visitOwnMemo?"own_memo":"customer_conversation"},taskId=currentTask.id;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),recordings:[...(currentTask.visitProtocol?.recordings||[]),recording]};await persistTasks();currentTask=taskById(taskId)||currentTask;renderVisitRecordings();document.getElementById("kvpRecStatus").textContent=recording.transcript?"✓ Aufnahme und Transkript gespeichert":"✓ Aufnahme gespeichert; Transkript konnte nicht erstellt werden";
     }catch(e){document.getElementById("kvpRecStatus").textContent="Fehler: "+e.message}
   }
 
@@ -203,16 +210,28 @@
     document.getElementById("kvpTitle").textContent=task.title||"Termin";document.getElementById("kvpWhen").textContent=[a.date,a.from&&a.to?`${a.from}–${a.to}`:""].filter(Boolean).join(" · ");
     const address=task.address||task.jobName||"",contact=[task.contactName,task.contactPhone].filter(Boolean).join(" · ");document.getElementById("kvpMeta").innerHTML=`<h3>Terminübersicht</h3><div class="kvp-meta">${address?`<span>Adresse</span><strong>${esc(address)}</strong>`:""}${contact?`<span>Kontakt</span><strong>${esc(contact)}</strong>`:""}<span>Status</span><strong>${task.status==="done"?"Erledigt":"Termin vereinbart"}</strong></div>`;
     document.getElementById("kvpQuick").innerHTML=`${address?`<a href="${mapsHref(address)}" target="_blank" rel="noopener">🧭 Navigation</a>`:""}${task.contactPhone?`<a class="call" href="tel:${esc(task.contactPhone)}">📞 Anrufen</a>`:""}`;
-    document.getElementById("kvpTodo").textContent=task.reminder||task.details||"Noch keine Arbeitsbeschreibung hinterlegt.";document.getElementById("kvpDiscussion").value=saved.discussion||"";document.getElementById("kvpWork").value=saved.work||"";document.getElementById("kvpEstimate").value=saved.estimate||"";document.getElementById("kvpNext").value=saved.nextSteps||"";document.getElementById("kvpStatus").textContent=saved.conversionTarget?`✓ Für ${saved.conversionTarget==="order"?"Auftrag":"Angebot"} vorbereitet`:saved.savedAt?"Zuletzt gespeichert: "+new Date(saved.savedAt).toLocaleString("de-AT"):"";bg.classList.add("open");renderVisitRecordings();visitFiles(taskId);
+    document.getElementById("kvpTodo").textContent=task.reminder||task.details||"Noch keine Arbeitsbeschreibung hinterlegt.";document.getElementById("kvpDiscussion").value=saved.discussion||"";document.getElementById("kvpWork").value=saved.work||"";document.getElementById("kvpEstimate").value=saved.estimate||"";document.getElementById("kvpNext").value=saved.nextSteps||"";document.getElementById("kvpStatus").textContent=saved.conversionTarget?`✓ Für ${saved.conversionTarget==="order"?"Auftrag":"Angebot"} vorbereitet`:saved.savedAt?"Zuletzt gespeichert: "+new Date(saved.savedAt).toLocaleString("de-AT"):"";bg.classList.add("open");renderVisitRecordings();visitFiles(taskId);recoverVisitProtocol(taskId);
+  }
+
+  async function recoverVisitProtocol(taskId){
+    try{
+      const task=taskById(taskId);if(!task)return;const local=task.visitProtocol||{};
+      if(local.discussion||local.work||local.estimate||local.nextSteps)return;
+      const response=await fetch(authenticatedUrl("/kristool/api/workflows"),{credentials:"same-origin"}),json=await response.json();if(!response.ok)return;
+      const row=(json.workflows||[]).filter(x=>String(x.taskId)===String(taskId)).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")))[0],saved=row?.protocol||{};
+      if(!saved.discussion&&!saved.work&&!saved.estimate&&!saved.nextSteps)return;
+      task.visitProtocol={...saved,...local,discussion:local.discussion||saved.discussion||"",work:local.work||saved.work||"",estimate:local.estimate||saved.estimate||"",nextSteps:local.nextSteps||saved.nextSteps||""};
+      currentTask=task;document.getElementById("kvpDiscussion").value=task.visitProtocol.discussion;document.getElementById("kvpWork").value=task.visitProtocol.work;document.getElementById("kvpEstimate").value=task.visitProtocol.estimate;document.getElementById("kvpNext").value=task.visitProtocol.nextSteps;await persistTasks();currentTask=taskById(taskId)||task;document.getElementById("kvpStatus").textContent="✓ Frühere Protokolldaten wiederhergestellt";
+    }catch{}
   }
 
   async function saveVisitProtocol(){
-    if(!currentTask)return;const b=document.getElementById("kvpSave");b.disabled=true;b.textContent="Speichert …";currentTask.visitProtocol={...(currentTask.visitProtocol||{}),discussion:document.getElementById("kvpDiscussion").value.trim(),work:document.getElementById("kvpWork").value.trim(),estimate:document.getElementById("kvpEstimate").value.trim(),nextSteps:document.getElementById("kvpNext").value.trim(),savedAt:new Date().toISOString()};
-    try{await persistTasks();document.getElementById("kvpStatus").textContent="✓ Besprechungsprotokoll gespeichert"}catch(e){document.getElementById("kvpStatus").textContent="Speichern fehlgeschlagen: "+e.message}finally{b.disabled=false;b.textContent="Protokoll speichern"}
+    refreshCurrentTask();if(!currentTask)return;const taskId=currentTask.id,b=document.getElementById("kvpSave");b.disabled=true;b.textContent="Speichert …";currentTask.visitProtocol={...(currentTask.visitProtocol||{}),discussion:document.getElementById("kvpDiscussion").value.trim(),work:document.getElementById("kvpWork").value.trim(),estimate:document.getElementById("kvpEstimate").value.trim(),nextSteps:document.getElementById("kvpNext").value.trim(),savedAt:new Date().toISOString()};
+    try{await persistTasks();currentTask=taskById(taskId)||currentTask;document.getElementById("kvpStatus").textContent="✓ Protokoll sicher gespeichert";b.textContent="✓ Gespeichert";setTimeout(()=>{if(b.textContent==="✓ Gespeichert")b.textContent="Protokoll speichern"},3000)}catch(e){document.getElementById("kvpStatus").textContent="Speichern fehlgeschlagen: "+e.message;b.textContent="Nochmals speichern"}finally{b.disabled=false}
   }
 
   async function stageVisitProtocol(target){
-    await saveVisitProtocol();if(!currentTask)return;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),conversionTarget:target,conversionStatus:"prepared",conversionPreparedAt:new Date().toISOString(),sourceTaskId:String(currentTask.id||"")};try{await persistTasks();const r=await fetch(authenticatedUrl("/kristool/api/workflows"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:currentTask.id,target,title:currentTask.title,customer:currentTask.contactName,address:currentTask.address,createdAt:currentTask.createdAt,appointment:currentTask.appointment,protocol:currentTask.visitProtocol})});const j=await r.json();if(!r.ok)throw new Error(j.error||"KRISTOOL-Übergabe fehlgeschlagen");document.getElementById("kvpStatus").innerHTML=`✓ In KRISTOOL für ${target==="order"?"Auftragsfreigabe":"Angebotserstellung"} bereit · <a href="${authenticatedUrl("/kristool-workflow")}" target="_blank">Arbeitskorb öffnen</a>`;}catch(e){document.getElementById("kvpStatus").textContent="Vorbereitung fehlgeschlagen: "+e.message}
+    await saveVisitProtocol();refreshCurrentTask();if(!currentTask)return;const taskId=currentTask.id;currentTask.visitProtocol={...(currentTask.visitProtocol||{}),conversionTarget:target,conversionStatus:"prepared",conversionPreparedAt:new Date().toISOString(),sourceTaskId:String(currentTask.id||"")};try{await persistTasks();currentTask=taskById(taskId)||currentTask;const r=await fetch(authenticatedUrl("/kristool/api/workflows"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:currentTask.id,target,title:currentTask.title,customer:currentTask.contactName,address:currentTask.address,createdAt:currentTask.createdAt,appointment:currentTask.appointment,protocol:currentTask.visitProtocol})});const j=await r.json();if(!r.ok)throw new Error(j.error||"KRISTOOL-Übergabe fehlgeschlagen");document.getElementById("kvpStatus").innerHTML=`✓ In KRISTOOL für ${target==="order"?"Auftragsfreigabe":"Angebotserstellung"} bereit · <a href="${authenticatedUrl("/kristool-workflow")}" target="_blank">Arbeitskorb öffnen</a>`;}catch(e){document.getElementById("kvpStatus").textContent="Vorbereitung fehlgeschlagen: "+e.message}
   }
 
   async function saveAppointment(){
