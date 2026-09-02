@@ -478,6 +478,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin in DEFAULT_ORIGINS:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Credentials", "true")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type,X-Krista-Admin-Token")
         self.send_header("Access-Control-Allow-Private-Network", "true")
