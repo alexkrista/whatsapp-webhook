@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-02-intake-1";
+  const VERSION="2026-09-02-bautage-2";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
   let loadSerial=0;
@@ -170,9 +170,11 @@
 
   function renderProtocols(j,days){
     const totals=days.reduce((a,d)=>{a.images+=num(d.stats?.images);a.pdfs+=num(d.stats?.pdfs);a.audio+=num(d.stats?.audio);a.items+=num(d.stats?.items);return a},{images:0,pdfs:0,audio:0,items:0});
+    const workDays=new Set();
+    for(const e of eventRows(j.jobId)){const day=String(e.date||"").slice(0,10);if(/^\d{4}-\d{2}-\d{2}$/.test(day))workDays.add(day)}
     const rows=days.length?days.map(d=>{const photos=num(d.stats?.images),action=d.pdfExists&&d.viewUrl?`<button type="button" class="primary" data-bk-preview="${esc(d.viewUrl)}" data-bk-label="${esc('Bautag '+fmtDate(d.day))}">Protokoll ansehen</button><a href="${tokenUrl(d.downloadUrl)}">PDF</a>`:photos>0?`<button type="button" class="primary" data-bk-gallery-day="${esc(d.day)}">Fotos ansehen</button>`:'';return `<div class="bk-day"><strong>${fmtDate(d.day)}</strong><div class="bk-day-meta">🖼 ${photos} Fotos · 📄 ${num(d.stats?.pdfs)} PDFs · 🎤 ${num(d.stats?.audio)} Audio · ${num(d.stats?.items)} Einträge</div><div class="bk-actions">${action}</div></div>`}).join(''):'<div class="bk-placeholder">Noch keine Bautage dokumentiert.</div>';
     const intake=intakeSection(j),intakeRecordings=Array.isArray(j.intakeProtocol?.recordings)?j.intakeProtocol.recordings.length:0,intakeFiles=Array.isArray(j.intakeProtocol?.files)?j.intakeProtocol.files:[],intakePhotos=intakeFiles.filter(f=>String(f.mimeType||"").startsWith("image/")).length;
-    const el=document.getElementById("bkProtocols");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Bautage</div><div class="bk-value">${days.length}</div></div><div class="bk-card"><div class="bk-label">Fotos</div><div class="bk-value">${totals.images+intakePhotos}</div></div><div class="bk-card"><div class="bk-label">Dokumente/PDF</div><div class="bk-value">${totals.pdfs+intakeFiles.filter(f=>!String(f.mimeType||"").startsWith("image/")).length}</div></div><div class="bk-card"><div class="bk-label">Audio</div><div class="bk-value">${totals.audio+intakeRecordings}</div></div>${intake}<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Bautage · Fotos · Protokolle</h3><span class="bk-source">Baustellenakte</span></div><div class="bk-day-list">${rows}</div><div id="bkProtocolPreview"></div></div></div>`;
+    const el=document.getElementById("bkProtocols");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Bautage</div><div class="bk-value">${workDays.size}</div><div class="bk-note">unterschiedliche Tage mit Zeitbuchung</div></div><div class="bk-card"><div class="bk-label">Fotos</div><div class="bk-value">${totals.images+intakePhotos}</div></div><div class="bk-card"><div class="bk-label">Dokumente/PDF</div><div class="bk-value">${totals.pdfs+intakeFiles.filter(f=>!String(f.mimeType||"").startsWith("image/")).length}</div></div><div class="bk-card"><div class="bk-label">Audio</div><div class="bk-value">${totals.audio+intakeRecordings}</div></div>${intake}<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Bautage · Fotos · Protokolle</h3><span class="bk-source">Baustellenakte</span></div><div class="bk-day-list">${rows}</div><div id="bkProtocolPreview"></div></div></div>`;
     el.querySelectorAll('[data-bk-preview]').forEach(b=>b.addEventListener('click',()=>showProtocol(b.dataset.bkPreview,b.dataset.bkLabel)));
     el.querySelectorAll('[data-bk-gallery-day]').forEach(b=>b.addEventListener('click',()=>document.querySelector(`.bf-day[data-bf-day="${CSS.escape(b.dataset.bkGalleryDay)}"]`)?.scrollIntoView({behavior:'smooth',block:'start'})));
   }
