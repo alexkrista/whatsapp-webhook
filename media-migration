@@ -282,6 +282,104 @@ async function listJobMedia({ dataDir, jobId }) {
   return items.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")) || a.filename.localeCompare(b.filename, "de"));
 }
 
+async function listJobKnowledge({ dataDir, jobId }) {
+  const safeId = String(jobId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(safeId)) return null;
+  const root = path.join(dataDir, "_kristine");
+  const belongsToJob = (row) => String(row?.jobId || "").trim() === safeId;
+  const [reviews, materialRequests, tasks, assignments, timeEvents, events, workflows, appointments] = await Promise.all([
+    readJson(path.join(root, "day-review-entries.json"), []),
+    readJson(path.join(root, "material-requests.json"), []),
+    readJson(path.join(root, "tasks.json"), []),
+    readJson(path.join(root, "assignments.json"), []),
+    readJson(path.join(root, "time-events.json"), []),
+    readJsonLines(path.join(root, "events.jsonl")),
+    readJson(path.join(root, "visit-workflows.json"), []),
+    readJson(path.join(root, "appointments.json"), []),
+  ]);
+
+  const media = await listJobMedia({ dataDir, jobId: safeId });
+  const mediaByFile = new Map(media.map((item) => [String(item.file || "").replace(/\\/g, "/"), item]));
+  const linkedReviews = reviews.filter(belongsToJob).map((entry) => {
+    const relative = String(entry?.file || "").replace(/\\/g, "/");
+    const linkedMedia = mediaByFile.get(relative);
+    return {
+      ...entry,
+      file: relative,
+      kind: linkedMedia?.kind || mediaKind(path.basename(relative)) || String(entry?.category || entry?.source || "entry"),
+      url: linkedMedia?.url || "",
+    };
+  });
+
+  const linkedTasks = tasks.filter(belongsToJob);
+  const linkedTaskIds = new Set(linkedTasks.map((row) => String(row?.id || "")).filter(Boolean));
+  const linkedWorkflows = workflows.filter((row) =>
+    belongsToJob(row) || linkedTaskIds.has(String(row?.taskId || ""))
+  );
+  const linkedAppointments = appointments.filter((row) => linkedTaskIds.has(String(row?.taskId || "")));
+  const attachments = [];
+  for (const taskId of linkedTaskIds) {
+    const dir = path.join(root, "visit-files", taskId);
+    const names = (await fsp.readdir(dir).catch(() => [])).filter((name) => name.endsWith(".json"));
+    for (const name of names) {
+      const entry = await readJson(path.join(dir, name), null);
+      if (entry?.id) attachments.push({
+        ...entry,
+        taskId,
+        url: `/kristine/api/tasks/${encodeURIComponent(taskId)}/visit-file/${encodeURIComponent(entry.id)}`,
+      });
+    }
+  }
+  const protocolEntries = [];
+  for (const day of await listJobDayDirectories(dataDir, safeId)) {
+    const logs = await readJsonLines(path.join(day.dir, "log.jsonl"));
+    for (const row of logs) {
+      const text = String(
+        row?.transcript || row?.text || row?.raw?.image?.caption || row?.raw?.video?.caption || ""
+      ).trim();
+      if (!text && !["pdf", "audio_saved", "transcription_failed"].includes(String(row?.type || ""))) continue;
+      protocolEntries.push({
+        date: day.date,
+        at: row?.at || "",
+        type: String(row?.type || "entry"),
+        text,
+        file: String(row?.file || ""),
+        sender: String(row?.from || ""),
+        error: String(row?.error || ""),
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    jobId: safeId,
+    counts: {
+      media: media.length,
+      reviews: linkedReviews.length,
+      materialRequests: materialRequests.filter(belongsToJob).length,
+      messages: events.filter((row) => belongsToJob(row) && String(row?.type || "") === "employee_message").length,
+      tasks: tasks.filter(belongsToJob).length,
+      assignments: assignments.filter(belongsToJob).length,
+      timeEvents: timeEvents.filter(belongsToJob).length,
+      appointments: linkedAppointments.length,
+      workflows: linkedWorkflows.length,
+      attachments: attachments.length,
+      protocolEntries: protocolEntries.length,
+    },
+    media,
+    reviews: linkedReviews,
+    materialRequests: materialRequests.filter(belongsToJob),
+    events: events.filter(belongsToJob),
+    tasks: linkedTasks,
+    assignments: assignments.filter(belongsToJob),
+    timeEvents: timeEvents.filter(belongsToJob),
+    appointments: linkedAppointments,
+    workflows: linkedWorkflows,
+    attachments,
+    protocolEntries,
+  };
+}
+
 function registerMediaMigration(app, { dataDir, requireAdmin }) {
   app.post("/admin/api/media-migration/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -307,6 +405,18 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
       res.json({ ok: true, jobId, count: media.length, media });
     } catch (error) {
       console.error("Baustellen media list failed:", error);
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.get("/admin/api/job/:jobId/knowledge", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const knowledge = await listJobKnowledge({ dataDir, jobId: req.params.jobId });
+      if (!knowledge) return res.status(400).json({ ok: false, error: "Ungültige Baustelle" });
+      res.json(knowledge);
+    } catch (error) {
+      console.error("Baustellen knowledge list failed:", error);
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
   });
@@ -343,4 +453,4 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
   });
 }
 
-module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia };
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge };

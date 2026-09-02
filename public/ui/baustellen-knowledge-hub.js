@@ -102,7 +102,7 @@
     try{
       await baseData(true);if(serial!==loadSerial)return;
       const j=jobById(currentJobId);if(!j)throw new Error("Baustelle nicht gefunden");
-      const days=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]}));if(serial!==loadSerial)return;
+      const [days,knowledge]=await Promise.all([api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/knowledge`).catch(()=>({}))]);if(serial!==loadSerial)return;
       const details=days.detailed||[];
       const regieRows=await mapLimit(details,6,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return {day:d.day,regie:r.regie||r}});if(serial!==loadSerial)return;
       renderEconomy(j,regieRows);
@@ -110,7 +110,7 @@
       renderPlanning(j);
       renderProtocols(j,details);
       renderRegie(j,regieRows);
-      renderMaterial(j,regieRows);
+      renderMaterial(j,regieRows,knowledge);
       renderInvoices(j);
     }catch(e){
       ["bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
@@ -182,10 +182,11 @@
 
   function aggregateMaterials(rows){
     const map=new Map(),special=[];for(const row of rows){if(!row||row.__error)continue;const r=row.regie||{};for(const m of r.materials||[]){const name=String(m.name||'').trim();if(!name)continue;const unit=String(m.unit||'').trim();const key=(name+'|'+unit).toLowerCase();if(!map.has(key))map.set(key,{name,unit,numeric:0,raw:[],days:new Set()});const x=map.get(key),q=String(m.quantity||'').trim(),n=Number(String(q).replace(',','.'));if(Number.isFinite(n))x.numeric+=n;else if(q)x.raw.push(q);x.days.add(row.day)}if(String(r.specialMaterial||'').trim())special.push({day:row.day,text:String(r.specialMaterial).trim()})}return {items:[...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'de')),special}}
-  function renderMaterial(j,rows){
-    const a=aggregateMaterials(rows),html=a.items.length?a.items.map(m=>`<div class="bk-material"><strong>${esc(m.name)}</strong><span>${m.numeric?esc(new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(m.numeric)+' '+m.unit):esc(m.raw.join(' + ')+' '+m.unit)} · ${m.days.size} Tag(e)</span></div>`).join(''):'<div class="bk-placeholder">Noch kein Material auf Tageserfassungen dieser Baustelle gespeichert.</div>';
+  function renderMaterial(j,rows,knowledge={}){
+    const a=aggregateMaterials(rows),requests=Array.isArray(knowledge.materialRequests)?knowledge.materialRequests.slice().sort((x,y)=>String(y.createdAt||'').localeCompare(String(x.createdAt||''))):[],html=a.items.length?a.items.map(m=>`<div class="bk-material"><strong>${esc(m.name)}</strong><span>${m.numeric?esc(new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(m.numeric)+' '+m.unit):esc(m.raw.join(' + ')+' '+m.unit)} · ${m.days.size} Tag(e)</span></div>`).join(''):'<div class="bk-placeholder">Noch kein Material auf Tageserfassungen dieser Baustelle gespeichert.</div>';
     const special=a.special.length?`<div class="bk-card bk-wide"><h3>Sondermaterial / freie Notizen</h3>${a.special.map(x=>`<div class="bk-day"><strong>${fmtDate(x.day)}</strong><div class="bk-day-meta">${esc(x.text)}</div><div></div></div>`).join('')}</div>`:'';
-    const el=document.getElementById("bkMaterial");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Materialpositionen</div><div class="bk-value">${a.items.length}</div></div><div class="bk-card"><div class="bk-label">Tage mit Sondermaterial</div><div class="bk-value">${a.special.length}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Gesammeltes Materialwissen</h3><span class="bk-source">aus Tageserfassung</span></div><div class="bk-materials">${html}</div></div>${special}</div>`;
+    const requestHtml=requests.length?`<div class="bk-card bk-wide"><div class="bk-section-title"><h3>KGO-Materialmeldungen</h3><span class="bk-source">${requests.length} der Baustelle zugeordnet</span></div><div class="bk-day-list">${requests.map(x=>{const status=({open:'Offen',stocked:'Lagernd',ordered:'Bestellt'})[x.status]||x.status||'Erfasst',when=x.createdDate||x.createdAt;return `<div class="bk-day"><strong>${fmtDate(when)}</strong><div><strong>${esc(x.materialText||'Material')}</strong><div class="bk-day-meta">${esc([x.employeeName,x.needLabel,x.note].filter(Boolean).join(' · '))}${x.responseNote?`<br>Antwort Büro: ${esc(x.responseNote)}`:''}</div></div><span class="bk-badge ${x.status==='open'?'orange':'green'}">${esc(status)}</span></div>`}).join('')}</div></div>`:'';
+    const el=document.getElementById("bkMaterial");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Materialpositionen</div><div class="bk-value">${a.items.length}</div></div><div class="bk-card"><div class="bk-label">KGO-Materialmeldungen</div><div class="bk-value">${requests.length}</div></div><div class="bk-card"><div class="bk-label">Tage mit Sondermaterial</div><div class="bk-value">${a.special.length}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Gesammeltes Materialwissen</h3><span class="bk-source">aus Tageserfassung</span></div><div class="bk-materials">${html}</div></div>${requestHtml}${special}</div>`;
   }
 
   function invoicedValue(j){for(const k of ['invoicedAmount','billedAmount','invoiceTotal','revenueInvoiced','invoicedNet']){const n=Number(j?.[k]??j?.calculation?.[k]);if(Number.isFinite(n))return n}return null}
