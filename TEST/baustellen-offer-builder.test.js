@@ -17,4 +17,5 @@ for(const text of ["ensureOfferMaterials","/admin/api/materials/auto","m.product
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
 for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutto","MwSt. %","Rabatt %","Skonto anbieten","Skontofrist Tage","Zahlbetrag mit Skonto","enhanceFinancialPreview"])assert.ok(ui.includes(text),`Angebotskonditionen enthalten ${text}`);
 for(const text of ["financials","priceMode","vatRate","discountPercent","skontoEnabled","skontoPercent","skontoDays"])assert.ok(server.includes(text),`Gespeicherte Angebotskonditionen enthalten ${text}`);
+for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
