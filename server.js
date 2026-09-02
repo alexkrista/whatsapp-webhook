@@ -2800,6 +2800,25 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
   }
 });
 
+function offerDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".offer-draft.json"); }
+app.get("/admin/api/job/:jobId/offer-draft", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
+  const draft=await fsp.readFile(offerDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null);
+  res.json({ok:true,jobId,draft});
+});
+app.put("/admin/api/job/:jobId/offer-draft", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try{
+    const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
+    const body=req.body||{},allowedParts=new Set(["Wände","Decken","Türen","Fenster","Heizkörper","Sockel"]),allowedSteps=new Set(["Abdecken","Grundieren","Mit Dispersion streichen","Acrylfugen","Regie","Material"]),allowedFacade=new Set(["Gerüst","Waschen","Abdecken","Grundieren","Fassadenfarbe streichen","Untersicht schleifen","Untersicht 2x streichen","Regie","Material"]);
+    const draft={version:1,intro:String(body.intro||"").trim().slice(0,1000),inspectionDate:/^\d{4}-\d{2}-\d{2}$/.test(String(body.inspectionDate||""))?String(body.inspectionDate):"",offerType:["interior","facade"].includes(body.offerType)?body.offerType:"regie_material",parts:(Array.isArray(body.parts)?body.parts:[]).map(String).filter(x=>allowedParts.has(x)),steps:(Array.isArray(body.steps)?body.steps:[]).map(String).filter(x=>allowedSteps.has(x)),facadeSteps:(Array.isArray(body.facadeSteps)?body.facadeSteps:[]).map(String).filter(x=>allowedFacade.has(x)),positions:(Array.isArray(body.positions)?body.positions:[]).slice(0,100).map((p,i)=>({number:i+1,text:String(p?.text||"").trim().slice(0,500),quantity:Math.max(0,Number(p?.quantity||0)),unit:String(p?.unit||"").trim().slice(0,20),unitPrice:Math.max(0,Number(p?.unitPrice||0))})),updatedAt:new Date().toISOString()};
+    await ensureDir(path.join(DATA_DIR,jobId));await fsp.writeFile(offerDraftPath(jobId),JSON.stringify(draft,null,2),"utf8");
+    await appendJobHistory(jobId,{type:"offer_draft_saved",title:"Angebotsentwurf gespeichert",detail:`${draft.positions.length} Position(en)`,source:"KRISTINE Angebot"});
+    res.json({ok:true,jobId,draft});
+  }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}
+});
+
 
 app.get("/admin/api/job/:jobId/history", async (req, res) => {
   if (!requireAdmin(req, res)) return;
