@@ -17,6 +17,8 @@ for(const text of ["if(!material){material=","draft.positions.splice(index+1,0,m
   assert.ok(ui.includes(text),`Regiematerial bleibt je Raum in Angebot und Druck erhalten: ${text}`);
 for(const text of ["ensureOfferMaterials","/admin/api/materials/auto","m.product||m.name"])assert.ok(ui.includes(text),`Automatische Materialübernahme enthält ${text}`);
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
+for(const text of ["sanitizeOfferCalculationNote","calculationNote:sanitizeOfferCalculationNote","extraCalculations","estimatedPrice","estimatedHours"])
+  assert.ok(server.includes(text),`Interne Schätzhilfe wird vollständig gespeichert: ${text}`);
 for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutto","MwSt. %","Gesamtrabatt %","Skonto anbieten","Skontofrist Tage","Zahlbetrag mit Skonto","enhanceFinancialPreview"])assert.ok(ui.includes(text),`Angebotskonditionen enthalten ${text}`);
 for(const text of ["financials","priceMode","vatRate","discountPercent","skontoEnabled","skontoPercent","skontoDays"])assert.ok(server.includes(text),`Gespeicherte Angebotskonditionen enthalten ${text}`);
 for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
