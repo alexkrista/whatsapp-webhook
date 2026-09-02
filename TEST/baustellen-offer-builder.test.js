@@ -7,5 +7,6 @@ for(const text of ["offer-draft","coverSteps","bathroomSteps","bathroomCompactSt
 for(const text of ["Räume und Aufmaß","Jeder Raum bildet eine eigene Gruppe","Näherung × 3,5","Exakt L/B/H","Leistungsfläche"])assert.ok(ui.includes(text),`Raumaufmaß enthält ${text}`);
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
 assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
+for(const text of ["Preisstand:","Preise aktualisieren / neu kalkulieren","priceSnapshotAt"])assert.ok(ui.includes(text)||server.includes(text),`Preisstand enthält ${text}`);
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
