@@ -6,5 +6,6 @@ for(const text of ["Kalkulation / Angebot","Regie + Material","Innenmalerei","Ab
 for(const text of ["offer-draft","coverSteps","bathroomSteps","bathroomCompactSteps","limeSteps","wdvsSteps","bathroomCalc","measurement","scopeDescription","showQuantities","laborHoursPerUnit","materialMarkupPct","adjustmentPct","workSteps","materials","hourlyRateOverridden"])assert.ok(server.includes(text),`Server enthält ${text}`);
 for(const text of ["Räume und Aufmaß","Jeder Raum bildet eine eigene Gruppe","Näherung × 3,5","Exakt L/B/H","Leistungsfläche"])assert.ok(ui.includes(text),`Raumaufmaß enthält ${text}`);
 assert.ok(ui.includes('"Wände + Decken"'),"Wand- und Deckenflächen werden gemeinsam angeboten");
+assert.ok(ui.includes("function coverPosition()"),"Abdeckauswahl wird zu einer Position zusammengefasst");
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");
