@@ -13,6 +13,8 @@ for(const text of ["Preisstand:","Preise aktualisieren / neu kalkulieren","price
 for(const text of ["Material aus Regiestunden berechnen","Betrag je Stunde","Prozent vom Arbeitslohn","regieMaterialRate","regieMaterialMode"])assert.ok(ui.includes(text)||server.includes(text),`Regiematerial enthält ${text}`);
 for(const text of ["Regie zu diesem Raum","Regiestunden","Zusätzliches Aufmaß / Bauteil","+ Aufmaßzeile","roomRegiePositions"])assert.ok(ui.includes(text),`Raumbezogene Regie enthält ${text}`);
 assert.ok(ui.includes("Material und Maschinen für Regiearbeiten, Abrechnung laut Aufstellung."),"Kundenposition zeigt keinen internen Materialprozentsatz");
+for(const text of ["if(!material){material=","draft.positions.splice(index+1,0,material)","renderOfferTotals();renderLivePreview()"])
+  assert.ok(ui.includes(text),`Regiematerial bleibt je Raum in Angebot und Druck erhalten: ${text}`);
 for(const text of ["ensureOfferMaterials","/admin/api/materials/auto","m.product||m.name"])assert.ok(ui.includes(text),`Automatische Materialübernahme enthält ${text}`);
 assert.ok(server.includes("draft.rooms="),"Raumaufmaße werden serverseitig gespeichert");
 for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutto","MwSt. %","Gesamtrabatt %","Skonto anbieten","Skontofrist Tage","Zahlbetrag mit Skonto","enhanceFinancialPreview"])assert.ok(ui.includes(text),`Angebotskonditionen enthalten ${text}`);
