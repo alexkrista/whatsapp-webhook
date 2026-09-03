@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-live-hours-4";
+  const VERSION="2026-09-03-live-hours-5";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -31,7 +31,8 @@
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
     for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
-    return {found:!!payload.found,totalHours:num(payload.totalHours),days,rows:[...grouped.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de"))};
+    const rows=[...grouped.values()].map(row=>({...row,hours:Math.max(0,row.hours-.25)})).sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")),netDays=new Map();for(const row of rows)netDays.set(row.date,num(netDays.get(row.date))+row.hours);
+    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:.25};
   }
 
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
@@ -206,6 +207,13 @@
   function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);if(current)renderHoursReconciliation(current)}}
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
+  function personDayHours(jobId){
+    const id=String(jobId||""),ww=wwByJob.get(id),kr=liveByJob.get(id),out=new Map();
+    for(const row of ww?.rows||[]){const key=`${row.date}|${nameKey(row.employeeName)}`;out.set(key,{date:row.date,name:row.employeeName,hours:num(row.hours),source:"WinWorker"})}
+    for(const [date,people] of kr?.dayPeople||[]){for(const person of people.values()){const key=`${date}|${nameKey(person.name)}`;if(!out.has(key))out.set(key,{date,name:person.name,hours:Math.max(0,num(person.hours)-.25),source:"KRISTINE"})}}
+    return [...out.values()];
+  }
+
   async function refresh(){
     try{const [j,b]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap")]);jobs=j.jobs||[];bootstrap=b||{};buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1));if(id){try{const ww=await loadWwHours(id);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll()}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
@@ -221,5 +229,5 @@
   }
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);else install();
-  window.BaustellenLiveHours={version:VERSION,refresh};
+  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours};
 })();
