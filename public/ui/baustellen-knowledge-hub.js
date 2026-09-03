@@ -1,7 +1,8 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-02-bautage-2";
+  const VERSION="2026-09-03-knowledge-2";
+  const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
   let loadSerial=0;
@@ -216,7 +217,8 @@
   function invoicedValue(j){for(const k of ['invoicedAmount','billedAmount','invoiceTotal','revenueInvoiced','invoicedNet']){const n=Number(j?.[k]??j?.calculation?.[k]);if(Number.isFinite(n))return n}return null}
   function renderInvoices(j){
     const c=calc(j),contract=num(c.contractAmount??j.contractAmount),invoiced=invoicedValue(j),open=invoiced===null?null:Math.max(0,contract-invoiced);
-    const el=document.getElementById("bkInvoices");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Auftragssumme</div><div class="bk-value">${money(contract)}</div></div><div class="bk-card"><div class="bk-label">Bereits abgerechnet</div><div class="bk-value">${invoiced===null?'–':money(invoiced)}</div><div class="bk-note">${invoiced===null?'<span class="bk-source missing">Rechnungsquelle noch nicht mit Baustelle verknüpft</span>':'<span class="bk-source">live aus Rechnungsdaten</span>'}</div></div><div class="bk-card"><div class="bk-label">Noch abzurechnen</div><div class="bk-value">${open===null?'–':money(open)}</div></div><div class="bk-card"><div class="bk-label">Abrechnungsgrad</div><div class="bk-value">${invoiced===null||!contract?'–':Math.min(100,invoiced/contract*100).toLocaleString('de-AT',{maximumFractionDigits:1})+' %'}</div></div><div class="bk-card bk-wide"><h3>Abrechnung gehört zur Baustelle</h3><div class="bk-note">Sobald Ausgangsrechnungen aus WinWorker / The Brain eindeutig über die Baustellennummer zugeordnet sind, werden hier automatisch Rechnung, Rechnungsdatum, Nettosumme, bezahlt/offen sowie <strong>bereits abgerechnet / noch abzurechnen</strong> geführt. Es wird bewusst keine zweite händische Schattenzahl angelegt.</div></div></div>`;
+    const brainUrl=LOCAL_BRAIN_INVOICES+'?project='+encodeURIComponent(j.jobId);
+    const el=document.getElementById("bkInvoices");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Auftragssumme</div><div class="bk-value">${money(contract)}</div></div><div class="bk-card"><div class="bk-label">Bereits abgerechnet</div><div class="bk-value">${invoiced===null?'–':money(invoiced)}</div><div class="bk-note">${invoiced===null?'<span class="bk-source missing">Vollständiger Stand wird lokal im Brain geöffnet</span>':'<span class="bk-source">live aus Rechnungsdaten</span>'}</div></div><div class="bk-card"><div class="bk-label">Noch abzurechnen</div><div class="bk-value">${open===null?'–':money(open)}</div></div><div class="bk-card"><div class="bk-label">Abrechnungsgrad</div><div class="bk-value">${invoiced===null||!contract?'–':Math.min(100,invoiced/contract*100).toLocaleString('de-AT',{maximumFractionDigits:1})+' %'}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Abrechnung gehört zur Baustelle</h3><div class="bk-actions"><a class="primary" href="${esc(brainUrl)}">Ausgangsrechnung schreiben</a></div></div><div class="bk-note">The Brain öffnet lokal direkt diese Baustelle, übernimmt die bisherigen WinWorker-Teilrechnungen samt Zahlungen und setzt die laufende Teilrechnungsnummer korrekt fort. Weitere unabhängige Rechnungsläufe bleiben möglich.</div></div></div>`;
   }
 
   function hookRows(){
