@@ -2285,10 +2285,52 @@ function isSafeDay(day) {
 function metaPathForJob(jobId) {
   return path.join(DATA_DIR, String(jobId), ".meta.json");
 }
+function cleanProjectContactExtras(rows) {
+  return (Array.isArray(rows) ? rows : []).slice(0, 20).map(row => ({
+    label: String(row?.label || "").trim().slice(0, 100),
+    value: String(row?.value || "").trim().slice(0, 240),
+  })).filter(row => row.label || row.value);
+}
+function sanitizeProjectContacts(value, fallback = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const owner = source.owner && typeof source.owner === "object" ? source.owner : {};
+  const legacyMaster = fallback.customerMaster && typeof fallback.customerMaster === "object" ? fallback.customerMaster : {};
+  const own = (object, key, defaultValue = "") => Object.prototype.hasOwnProperty.call(object, key) ? object[key] : defaultValue;
+  const text = (input, limit = 160) => String(input || "").trim().slice(0, limit);
+  const person = input => {
+    const row = input && typeof input === "object" ? input : {};
+    return {
+      company: text(row.company),
+      firstName: text(row.firstName, 100),
+      lastName: text(row.lastName, 120),
+      phone: text(row.phone, 80),
+      email: text(row.email, 180),
+      extraLines: cleanProjectContactExtras(row.extraLines),
+    };
+  };
+  const ownerRole = text(owner.ownerRole, 30);
+  return {
+    owner: {
+      customer: text(own(owner, "customer", legacyMaster.name || fallback.contactName || "")),
+      firstName: text(owner.firstName, 100),
+      ownerRole: ["Bauherrin", "Bauherr", "Bauherrschaft", "Familie", "Firma"].includes(ownerRole) ? ownerRole : "Bauherrschaft",
+      residentialStreet: text(owner.residentialStreet, 140),
+      residentialHouseNumber: text(owner.residentialHouseNumber, 40),
+      residentialPostalCode: text(owner.residentialPostalCode, 20),
+      residentialCity: text(owner.residentialCity, 100),
+      phoneOwnerWoman: text(owner.phoneOwnerWoman, 80),
+      phoneOwnerMan: text(own(owner, "phoneOwnerMan", legacyMaster.phone || fallback.contactPhone || ""), 80),
+      email: text(own(owner, "email", legacyMaster.email || fallback.contactEmail || ""), 180),
+      extraLines: cleanProjectContactExtras(owner.extraLines),
+    },
+    siteManager: person(source.siteManager),
+    architect: person(source.architect),
+  };
+}
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2313,6 +2355,7 @@ async function readJobMeta(jobId) {
       sourceWorkflowId: String(meta.sourceWorkflowId || ""),
       sourceTaskId: String(meta.sourceTaskId || ""),
       customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
+      projectContacts: sanitizeProjectContacts(meta.projectContacts, meta),
       wwAddressId: String(meta.wwAddressId || meta.customerMaster?.wwAddressId || ""),
       wwCustomerNumber: String(meta.wwCustomerNumber || meta.customerMaster?.wwCustomerNumber || ""),
       customerMasterStatus: String(meta.customerMasterStatus || ""),
@@ -2326,7 +2369,7 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2373,6 +2416,7 @@ async function writeJobMeta(jobId, patch) {
     contactName: String(patch.contactName ?? existing.contactName ?? "").trim().slice(0, 120),
     contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
     contactEmail: String(patch.contactEmail ?? existing.contactEmail ?? "").trim().slice(0, 180),
+    projectContacts: sanitizeProjectContacts(patch.projectContacts ?? existing.projectContacts, { ...existing, ...patch }),
     startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.startDate ?? existing.startDate ?? "")) ? String(patch.startDate ?? existing.startDate) : "",
     createdAt: patch.createdAt ?? existing.createdAt ?? null,
     intakeProtocol: patch.intakeProtocol && typeof patch.intakeProtocol === "object" ? patch.intakeProtocol : (existing.intakeProtocol || {}),
@@ -2712,6 +2756,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         contactName: meta.contactName || "",
         contactPhone: meta.contactPhone || "",
         contactEmail: meta.contactEmail || "",
+        projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
         startDate: meta.startDate || "",
         createdAt: meta.createdAt || null,
         updatedAt: meta.updatedAt || null,
@@ -2781,6 +2826,8 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       addressExtra: req.body?.addressExtra,
       contactName: req.body?.contactName,
       contactPhone: req.body?.contactPhone,
+      contactEmail: req.body?.contactEmail,
+      projectContacts: req.body?.projectContacts,
       billingRate: req.body?.billingRate,
       contractAmount: req.body?.contractAmount,
       externalServices: req.body?.externalServices,
@@ -2789,9 +2836,10 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
+    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
+    if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
     if (changed.length) {
       await appendJobHistory(jobId, {
         type: "job_meta_updated",
