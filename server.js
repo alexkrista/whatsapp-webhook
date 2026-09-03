@@ -2326,8 +2326,10 @@ function sanitizeProjectContacts(value, fallback = {}) {
       sharedLastName: text(own(owner, "sharedLastName", own(owner, "customer", legacyMaster.name || fallback.contactName || "")), 120),
       womanTitle: text(owner.womanTitle, 40),
       womanFirstName: text(own(owner, "womanFirstName", owner.firstName), 100),
+      womanLastName: text(own(owner, "womanLastName", own(owner, "sharedLastName", own(owner, "customer", legacyMaster.name || fallback.contactName || ""))), 120),
       manTitle: text(owner.manTitle, 40),
       manFirstName: text(owner.manFirstName, 100),
+      manLastName: text(own(owner, "manLastName", own(owner, "sharedLastName", own(owner, "customer", legacyMaster.name || fallback.contactName || ""))), 120),
       ownerRole: ["Bauherrin", "Bauherr", "Bauherrschaft", "Familie", "Firma"].includes(ownerRole) ? ownerRole : "Bauherrschaft",
       residentialStreet: text(owner.residentialStreet, 140),
       residentialHouseNumber: text(owner.residentialHouseNumber, 40),
@@ -2335,7 +2337,9 @@ function sanitizeProjectContacts(value, fallback = {}) {
       residentialCity: text(owner.residentialCity, 100),
       phoneOwnerWoman: text(owner.phoneOwnerWoman, 80),
       phoneOwnerMan: text(own(owner, "phoneOwnerMan", legacyMaster.phone || fallback.contactPhone || ""), 80),
-      email: text(own(owner, "email", legacyMaster.email || fallback.contactEmail || ""), 180),
+      womanEmail: text(own(owner, "womanEmail", own(owner, "email", legacyMaster.email || fallback.contactEmail || "")), 180),
+      manEmail: text(owner.manEmail, 180),
+      email: text(own(owner, "email", own(owner, "womanEmail", legacyMaster.email || fallback.contactEmail || "")), 180),
       extraLines: cleanProjectContactExtras(owner.extraLines),
     },
     siteManager: { ...person(source.siteManager), alsoArchitect: !!source.siteManager?.alsoArchitect },
@@ -2962,13 +2966,17 @@ app.put("/admin/api/job/:jobId/hours-overlap", async (req, res) => {
       hoursOverlapExcludedWwKeys: excludedWwKeys,
       hoursOverlapResolvedAt: new Date().toISOString(),
     });
-    await appendJobHistory(jobId, {
-      type: "hours_overlap_reviewed",
-      title: "WW/KRISTINE-Stunden geprüft",
-      detail: `${excludedWwKeys.length} Mitarbeiter/Tag-Zeile(n) als doppelt markiert`,
-      source: "admin",
-      data: { excludedWwKeys },
-    });
+    try {
+      await appendJobHistory(jobId, {
+        type: "hours_overlap_reviewed",
+        title: "WW/KRISTINE-Stunden geprüft",
+        detail: `${excludedWwKeys.length} Mitarbeiter/Tag-Zeile(n) als doppelt markiert`,
+        source: "admin",
+        data: { excludedWwKeys },
+      });
+    } catch (historyError) {
+      console.error("hours_overlap_history_error", { jobId, error: String(historyError?.message || historyError) });
+    }
     res.json({ ok: true, jobId, excludedWwKeys: meta.hoursOverlapExcludedWwKeys, resolvedAt: meta.hoursOverlapResolvedAt });
   } catch (error) {
     res.status(500).json({ ok: false, error: String(error?.message || error) });

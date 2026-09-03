@@ -37,7 +37,7 @@ for(const text of ["Angebotssumme und Konditionen","Preiseingabe","Netto","Brutt
 for(const text of ["financials","priceMode","vatRate","discountPercent","skontoEnabled","skontoPercent","skontoDays"])assert.ok(server.includes(text),`Gespeicherte Angebotskonditionen enthalten ${text}`);
 for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
 for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-recipient","koffer-paper-project","Projekt:"])assert.ok(ui.includes(text),`Angebotsbriefkopf enthält ${text}`);
-for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","manFirstName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
+for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
   assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);

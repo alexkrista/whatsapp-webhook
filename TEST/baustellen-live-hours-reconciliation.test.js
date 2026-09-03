@@ -17,10 +17,14 @@ assert.match(ui,/data-hr-key/);
 assert.match(ui,/als doppelt markieren/);
 assert.match(ui,/hours-overlap/);
 assert.match(ui,/hoursOverlapExcludedWwKeys/);
+assert.match(ui,/Auswahl geändert – bitte speichern/);
+assert.match(ui,/Der Server hat die Auswahl nicht vollständig übernommen/);
+assert.match(ui,/reconciliationDrafts\.get\(jobId\)\|\|selected/);
 assert.doesNotMatch(ui,/confirm\(`/);
 assert.doesNotMatch(ui,/prompt\(/);
 assert.match(server,/app\.put\("\/admin\/api\/job\/:jobId\/hours-overlap"/);
 assert.match(server,/cleanHoursOverlapKeys/);
+assert.match(server,/hours_overlap_history_error/);
 assert.match(brain,/"employeeName": str\(row\.get\("employeeName"\)/);
 assert.match(brain,/"rows": detail_rows/);
 
