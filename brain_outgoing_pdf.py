@@ -195,6 +195,10 @@ def render_invoice_pdf(invoice, settings, destination):
     line_rows = [["Pos", "Menge", "Einh.", "Leistung", "EP [EUR]", "GP [EUR]"]]
     group_rows = []
     subtotal_rows = []
+    report_net = Decimal("0")
+    material_raw = Decimal("0")
+    material_net = Decimal("0")
+    in_material = False
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
         quantity = _d(line.get("quantity") or 1)
@@ -202,12 +206,32 @@ def render_invoice_pdf(invoice, settings, destination):
         net = _d(line.get("net"))
         desc = str(line.get("description") or "")
         marker = str(line.get("unit") or "").upper()
-        if marker in {"TAG", "BAUTEIL", "SUMME"}:
+        if marker in {"TAG", "BAUTEIL", "ARBEIT", "MATERIAL", "SUMME"}:
+            if marker == "TAG":
+                report_net = Decimal("0")
+                material_raw = Decimal("0")
+                material_net = Decimal("0")
+                in_material = False
+            elif marker == "ARBEIT":
+                in_material = False
+            elif marker == "MATERIAL":
+                in_material = True
             row_index = len(line_rows)
-            line_rows.append(["", "", "", Paragraph(desc, heading if marker == "TAG" else base), "", ""])
+            if marker == "SUMME":
+                disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
+                if disc and material_raw > material_net:
+                    line_rows.append(["", "", "", Paragraph(f"Materialrabatt {percent(disc)}", base), "", money(-(material_raw - material_net))])
+                row_index = len(line_rows)
+                line_rows.append(["", "", "", Paragraph(desc, heading), "", money(report_net)])
+            else:
+                line_rows.append(["", "", "", Paragraph(desc, heading if marker in {"TAG", "ARBEIT", "MATERIAL"} else base), "", ""])
             (subtotal_rows if marker == "SUMME" else group_rows).append((row_index, marker))
             continue
         disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
+        report_net += net
+        if in_material:
+            material_raw += raw_total
+            material_net += net
         line_rows.append([
             str(line.get("line_no") or line.get("lineNo") or index),
             money(quantity), str(line.get("unit") or ""), Paragraph(desc, base),
@@ -231,7 +255,7 @@ def render_invoice_pdf(invoice, settings, destination):
         ("RIGHTPADDING", (4, 1), (4, -1), 5), ("LEFTPADDING", (5, 1), (5, -1), 3),
     ]
     for row_index, marker in group_rows:
-        line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("TOPPADDING", (0, row_index), (5, row_index), 8 if marker == "TAG" else 3), ("BOTTOMPADDING", (0, row_index), (5, row_index), 3), ("BACKGROUND", (0, row_index), (5, row_index), colors.HexColor("#e8eee6") if marker == "TAG" else colors.HexColor("#f4f3ef"))])
+        line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("TOPPADDING", (0, row_index), (5, row_index), 9 if marker == "TAG" else 5), ("BOTTOMPADDING", (0, row_index), (5, row_index), 4)])
     for row_index, _marker in subtotal_rows:
         line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("ALIGN", (0, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
     line_table.setStyle(TableStyle(line_style))
