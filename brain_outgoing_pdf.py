@@ -193,12 +193,20 @@ def render_invoice_pdf(invoice, settings, destination):
     story.append(Spacer(1, 38))
 
     line_rows = [["Pos", "Menge", "Einh.", "Leistung", "EP [EUR]", "GP [EUR]"]]
+    group_rows = []
+    subtotal_rows = []
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
         quantity = _d(line.get("quantity") or 1)
         raw_total = quantity * ep
         net = _d(line.get("net"))
         desc = str(line.get("description") or "")
+        marker = str(line.get("unit") or "").upper()
+        if marker in {"TAG", "BAUTEIL", "SUMME"}:
+            row_index = len(line_rows)
+            line_rows.append(["", "", "", Paragraph(desc, heading if marker == "TAG" else base), "", ""])
+            (subtotal_rows if marker == "SUMME" else group_rows).append((row_index, marker))
+            continue
         disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
         line_rows.append([
             str(line.get("line_no") or line.get("lineNo") or index),
@@ -212,7 +220,7 @@ def render_invoice_pdf(invoice, settings, destination):
                 money(-discount_amount), money(net),
             ])
     line_table = Table(line_rows, repeatRows=1, colWidths=[19.5 * mm, 12 * mm, 19 * mm, 82.5 * mm, 21 * mm, 21 * mm])
-    line_table.setStyle(TableStyle([
+    line_style = [
         ("FONTNAME", (0, 0), (-1, -1), regular_font),
         ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
         ("ALIGN", (1, 1), (1, -1), "RIGHT"), ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
@@ -221,7 +229,12 @@ def render_invoice_pdf(invoice, settings, destination):
         ("BOTTOMPADDING", (0, 0), (-1, 0), 20), ("BOTTOMPADDING", (0, 1), (-1, -1), 1),
         ("RIGHTPADDING", (1, 1), (1, -1), 4), ("LEFTPADDING", (2, 1), (2, -1), 3),
         ("RIGHTPADDING", (4, 1), (4, -1), 5), ("LEFTPADDING", (5, 1), (5, -1), 3),
-    ]))
+    ]
+    for row_index, marker in group_rows:
+        line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("TOPPADDING", (0, row_index), (5, row_index), 8 if marker == "TAG" else 3), ("BOTTOMPADDING", (0, row_index), (5, row_index), 3), ("BACKGROUND", (0, row_index), (5, row_index), colors.HexColor("#e8eee6") if marker == "TAG" else colors.HexColor("#f4f3ef"))])
+    for row_index, _marker in subtotal_rows:
+        line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("ALIGN", (0, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
+    line_table.setStyle(TableStyle(line_style))
     story.append(line_table)
     complex_summary = bool(
         invoice.get("previousInvoices") or invoice.get("payments")
