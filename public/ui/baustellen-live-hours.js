@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-live-hours-5";
+  const VERSION="2026-09-03-live-hours-6";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -19,6 +19,7 @@
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
   const dateLabel=v=>{const s=String(v||"").slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:(s||"–")};
   const nameKey=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const canonicalPersonName=v=>({"mandi-faes":"Manuel Faes","edi-mock":"Edmund Mock","cathrin-grabherr":"Anna Cathrin Grabherr"})[nameKey(v)]||String(v||"").trim();
   const finkNumber=(employee,row={})=>String(row?.finkzeitPersonnelNumber||row?.finkzeitPersonalNumber||row?.personalnummerFinkzeit||row?.personnelNumber||employee?.finkzeitPersonnelNumber||employee?.finkzeitPersonalNumber||employee?.personalnummerFinkzeit||employee?.personnelNumber||employee?.personalNumber||"").trim();
   const identity=(fink,name,fallback="")=>fink?`fink:${fink}`:nameKey(name)?`name:${nameKey(name)}`:`ma:${fallback||"unbekannt"}`;
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -209,8 +210,8 @@
 
   function personDayHours(jobId){
     const id=String(jobId||""),ww=wwByJob.get(id),kr=liveByJob.get(id),out=new Map();
-    for(const row of ww?.rows||[]){const key=`${row.date}|${nameKey(row.employeeName)}`;out.set(key,{date:row.date,name:row.employeeName,hours:num(row.hours),source:"WinWorker"})}
-    for(const [date,people] of kr?.dayPeople||[]){for(const person of people.values()){const key=`${date}|${nameKey(person.name)}`;if(!out.has(key))out.set(key,{date,name:person.name,hours:Math.max(0,num(person.hours)-.25),source:"KRISTINE"})}}
+    for(const row of ww?.rows||[]){const name=canonicalPersonName(row.employeeName),key=`${row.date}|${nameKey(name)}`;out.set(key,{date:row.date,name,hours:num(row.hours),source:"WinWorker"})}
+    for(const [date,people] of kr?.dayPeople||[]){for(const person of people.values()){const name=canonicalPersonName(person.name),key=`${date}|${nameKey(name)}`;if(!out.has(key))out.set(key,{date,name,hours:Math.max(0,num(person.hours)-.25),source:"KRISTINE"})}}
     return [...out.values()];
   }
 

@@ -20,6 +20,7 @@ assert.match(ui,/hoursOverlapExcludedWwKeys/);
 assert.match(ui,/Math\.max\(0,row\.hours-\.25\)/);
 assert.match(ui,/pauseDeductionHours:\.25/);
 assert.match(ui,/personDayHours/);
+for(const pair of [["mandi-faes","Manuel Faes"],["edi-mock","Edmund Mock"],["cathrin-grabherr","Anna Cathrin Grabherr"]])assert.ok(ui.includes(`"${pair[0]}":"${pair[1]}"`));
 assert.match(ui,/Math\.max\(0,num\(person\.hours\)-\.25\)/);
 assert.match(ui,/Auswahl geändert – bitte speichern/);
 assert.match(ui,/Der Server hat die Auswahl nicht vollständig übernommen/);
