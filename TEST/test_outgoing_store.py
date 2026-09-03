@@ -180,6 +180,37 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(item["lastDunningDate"], "2026-08-30")
         self.assertTrue(item["dunningBlocked"])
 
+    def test_paid_ww_partial_invoice_continues_as_second_partial_invoice(self):
+        row = {
+            "sourceId": "0034B49E-CE9F-4F58-88E0-60A4CA107A5C",
+            "invoiceNumber": "202607011", "projectIndex": 2601105, "projectNumber": "26082",
+            "customerIndex": 12026, "customerName": "Theresa Schwerzler",
+            "street": "Hirschgraben 25/ Top 1", "postalCode": "6800", "city": "Feldkirch",
+            "projectTitle": "Schwerzler-Halter", "issueDate": "2026-07-30",
+            "dueDate": "2026-08-13", "paymentDate": "2026-08-31",
+            "serviceFrom": "2026-07-01", "serviceTo": "2026-07-30", "vatRate": "20",
+            "originalNet": "4850", "originalGross": "5820", "openGross": "0",
+            "isPartial": True, "isFinal": False,
+        }
+        first = self.store.sync_ww_project_history([row])
+        second = self.store.sync_ww_project_history([row])
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(second["updated"], 1)
+        run = self.store.run(first["runId"])
+        self.assertEqual(run["currentGross"], 5820.0)
+        self.assertEqual(run["paidGross"], 5820.0)
+        self.assertEqual(run["currentOpen"], 0.0)
+        self.assertEqual(len(run["payments"]), 1)
+        self.assertEqual(run["invoices"][0]["source"], "WW")
+
+        next_payload = self.payload(amount="10000")
+        next_payload["runId"] = run["id"]
+        next_invoice = self.store.save_draft(next_payload)
+        self.assertEqual(len(next_invoice["previousInvoices"]), 1)
+        self.assertEqual(next_invoice["previousInvoices"][0]["invoiceNumber"], "202607011")
+        self.assertEqual(next_invoice["increment_net"], 5150.0)
+        self.assertEqual(next_invoice["open_after_discount"], 6180.0)
+
 
 if __name__ == "__main__":
     unittest.main()

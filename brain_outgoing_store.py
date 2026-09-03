@@ -68,6 +68,8 @@ DEFAULT_SETTINGS = {
     "default_due_days": "14",
 }
 
+WW_CONTINUATION_LABEL = "Hauptauftrag · aus WinWorker fortgeführt"
+
 
 def _d(value, default="0") -> Decimal:
     if value is None or value == "":
@@ -1006,6 +1008,235 @@ class OutgoingStore:
             con.commit()
             row = con.execute("SELECT * FROM outgoing_payments WHERE id=?", (payment_id,)).fetchone()
             return self._payment_public(row)
+
+    def sync_ww_project_history(self, rows):
+        """Import the complete WW invoice chain for one project and continue it in KRISTINE.
+
+        Unlike the debtor opening-balance import, this keeps the original invoice amount and
+        mirrors the already settled portion as one WW payment.  That makes a paid first partial
+        invoice visible to the cumulative calculation of the next partial invoice.
+        """
+        unique = {}
+        for raw in rows or []:
+            source_id = str(raw.get("sourceId") or "").strip()
+            number = str(raw.get("invoiceNumber") or "").strip()
+            if source_id and number:
+                unique[source_id] = dict(raw)
+        items = sorted(
+            unique.values(),
+            key=lambda x: (str(x.get("issueDate") or ""), str(x.get("invoiceNumber") or "")),
+        )
+        if not items:
+            return {"imported": 0, "updated": 0, "payments": 0, "runId": None}
+
+        imported = updated = payment_count = 0
+        project_index = int(items[0].get("projectIndex") or 0)
+        if not project_index:
+            raise ValueError("WW-Projektindex fehlt.")
+
+        with _LOCK, self.connect() as con:
+            source_ids = list(unique)
+            placeholders = ",".join("?" for _ in source_ids)
+            existing_ww = con.execute(
+                f"SELECT * FROM outgoing_invoices WHERE source='WW' AND source_id IN ({placeholders}) "
+                "ORDER BY issue_date,id",
+                source_ids,
+            ).fetchall()
+            run = None
+            if existing_ww:
+                run = con.execute(
+                    "SELECT * FROM outgoing_runs WHERE id=?", (int(existing_ww[0]["run_id"]),)
+                ).fetchone()
+            if not run:
+                run = con.execute(
+                    "SELECT * FROM outgoing_runs WHERE project_index=? AND label IN (?,?) ORDER BY id LIMIT 1",
+                    (project_index, WW_CONTINUATION_LABEL, "WW-Altbestand (automatisch)"),
+                ).fetchone()
+
+            first = items[0]
+            customer_name = str(first.get("customerName") or "").strip()
+            customer_company = str(first.get("customerCompany") or "").strip()
+            if not customer_name and not customer_company:
+                customer_name = str(first.get("customerRaw") or "WinWorker-Kunde").strip()
+            if not run:
+                cur = con.execute("""
+                    INSERT INTO outgoing_runs(
+                      project_index,project_number,customer_index,label,customer_name,customer_company,
+                      customer_street,customer_postal_code,customer_city,customer_country,customer_uid,
+                      project_title,status,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'open',?)
+                """, (
+                    project_index, str(first.get("projectNumber") or ""), first.get("customerIndex"),
+                    WW_CONTINUATION_LABEL, customer_name, customer_company,
+                    str(first.get("street") or "Adresse lt. WinWorker"),
+                    str(first.get("postalCode") or "-"), str(first.get("city") or "-"),
+                    str(first.get("country") or "Österreich"),
+                    str(first.get("customerUid") or "").strip().upper(),
+                    str(first.get("projectTitle") or "").strip(), _now(),
+                ))
+                run_id = int(cur.lastrowid)
+            else:
+                run_id = int(run["id"])
+                if str(run["label"]) == "WW-Altbestand (automatisch)":
+                    con.execute(
+                        "UPDATE outgoing_runs SET label=? WHERE id=?",
+                        (WW_CONTINUATION_LABEL, run_id),
+                    )
+
+            previous = []
+            cumulative_net = cumulative_vat = cumulative_gross = Decimal("0")
+            last_kind = ""
+            for item in items:
+                source_id = str(item.get("sourceId") or "").strip()
+                number = str(item.get("invoiceNumber") or "").strip()
+                rate = _rate(item.get("vatRate"))
+                tax_mode = "AT20" if rate == Decimal("20.000") else "CHLI81" if rate == Decimal("8.100") else "RC19"
+                original_net = _money(item.get("originalNet"))
+                original_gross = _money(item.get("originalGross"))
+                if not original_gross and original_net:
+                    original_gross = _money(original_net * (Decimal("1") + rate / Decimal("100")))
+                original_vat = _money(original_gross - original_net)
+                open_gross = max(Decimal("0"), min(original_gross, _money(item.get("openGross"))))
+                paid_gross = _money(original_gross - open_gross)
+                paid_net = _money(paid_gross / (Decimal("1") + rate / Decimal("100"))) if rate else paid_gross
+                paid_vat = _money(paid_gross - paid_net)
+                issue_date = _iso_date(item.get("issueDate"), required=True, label="WW-Rechnungsdatum")
+                due_date = _iso_date(item.get("dueDate") or issue_date, required=True, label="WW-Fälligkeit")
+                service_from = _iso_date(item.get("serviceFrom") or issue_date, required=True)
+                service_to = _iso_date(item.get("serviceTo") or issue_date, required=True)
+                payment_date = _iso_date(item.get("paymentDate") or due_date, required=True, label="WW-Zahlungsdatum")
+                kind = "SR" if item.get("isFinal") else "TR" if item.get("isPartial") else "RE"
+                last_kind = kind
+                prior_net, prior_vat, prior_gross = cumulative_net, cumulative_vat, cumulative_gross
+                cumulative_net = _money(cumulative_net + original_net)
+                cumulative_vat = _money(cumulative_vat + original_vat)
+                cumulative_gross = _money(cumulative_gross + original_gross)
+                now = _now()
+                existing = con.execute(
+                    "SELECT * FROM outgoing_invoices WHERE source='WW' AND source_id=?", (source_id,)
+                ).fetchone()
+                if existing and int(existing["run_id"]) != run_id:
+                    con.execute("UPDATE outgoing_invoices SET run_id=? WHERE id=?", (run_id, int(existing["id"])))
+                    con.execute("UPDATE outgoing_payments SET run_id=? WHERE invoice_id=?", (run_id, int(existing["id"])))
+
+                fields = (
+                    run_id, kind, number, issue_date, due_date, service_from, service_to,
+                    str(item.get("projectTitle") or "WinWorker-Ausgangsrechnung"),
+                    str(item.get("worker") or ""), str(item.get("customerUid") or ""), tax_mode, str(rate),
+                    str(original_net), str(original_net), str(cumulative_net), str(cumulative_vat), str(cumulative_gross),
+                    str(cumulative_gross), str(prior_net), str(prior_vat), str(prior_gross),
+                    str(original_net), str(original_vat), str(original_gross), str(open_gross), str(open_gross),
+                    _json(previous), TAX_MODES[tax_mode]["note"] if not rate else "",
+                    "Vollständige Rechnungshistorie aus WinWorker; wird in KRISTINE fortgeführt.", now, now,
+                )
+                if existing:
+                    invoice_id = int(existing["id"])
+                    con.execute("""
+                        UPDATE outgoing_invoices SET
+                          run_id=?,kind=?,status='issued',invoice_number=?,issue_date=?,due_date=?,service_from=?,service_to=?,
+                          subject=?,worker=?,recipient_uid=?,tax_mode=?,vat_rate=?,currency='EUR',line_subtotal_net=?,
+                          net_after_retention=?,cumulative_net=?,cumulative_vat=?,cumulative_gross=?,
+                          cumulative_gross_discounted=?,prior_net=?,prior_vat=?,prior_gross=?,increment_net=?,
+                          increment_vat=?,increment_gross=?,open_with_discount=?,open_after_discount=?,
+                          previous_snapshot_json=?,tax_note=?,notes=?,updated_at=?,issued_at=COALESCE(issued_at,?)
+                        WHERE id=?
+                    """, (*fields, invoice_id))
+                    updated += 1
+                else:
+                    conflict = con.execute(
+                        "SELECT id FROM outgoing_invoices WHERE invoice_number=?", (number,)
+                    ).fetchone()
+                    if conflict:
+                        raise ValueError(f"Rechnungsnummer {number} ist in KRISTINE bereits anderweitig vorhanden.")
+                    columns = [
+                        "run_id","kind","invoice_number","issue_date","due_date","service_from","service_to",
+                        "subject","worker","recipient_uid","tax_mode","vat_rate","line_subtotal_net","net_after_retention",
+                        "cumulative_net","cumulative_vat","cumulative_gross","cumulative_gross_discounted",
+                        "prior_net","prior_vat","prior_gross","increment_net","increment_vat","increment_gross",
+                        "open_with_discount","open_after_discount","previous_snapshot_json","tax_note","notes","created_at","updated_at",
+                    ]
+                    values = fields
+                    cur = con.execute(
+                        f"INSERT INTO outgoing_invoices(source,source_id,status,currency,issued_at,{','.join(columns)}) "
+                        f"VALUES('WW',?,'issued','EUR',?,{','.join('?' for _ in columns)})",
+                        (source_id, now, *values),
+                    )
+                    invoice_id = int(cur.lastrowid)
+                    imported += 1
+
+                line = con.execute(
+                    "SELECT id FROM outgoing_lines WHERE invoice_id=? AND line_no=1", (invoice_id,)
+                ).fetchone()
+                line_text = f"{len([x for x in previous if x.get('kind') == 'TR']) + 1}. Teilrechnung aus WinWorker · {number}" if kind == "TR" else f"{kind} aus WinWorker · {number}"
+                if line:
+                    con.execute(
+                        "UPDATE outgoing_lines SET description=?,quantity='1',unit='PA',unit_price=?,discount_percent='0',net=? WHERE id=?",
+                        (line_text, str(original_net), str(original_net), int(line["id"])),
+                    )
+                else:
+                    con.execute("""
+                        INSERT INTO outgoing_lines(invoice_id,line_no,description,quantity,unit,unit_price,discount_percent,net)
+                        VALUES(?,1,?,'1','PA',?,'0',?)
+                    """, (invoice_id, line_text, str(original_net), str(original_net)))
+
+                payment_source_id = f"HISTORY:{source_id}"
+                existing_payment = con.execute(
+                    "SELECT id FROM outgoing_payments WHERE source='WW' AND source_id=?", (payment_source_id,)
+                ).fetchone()
+                if paid_gross > 0:
+                    if existing_payment:
+                        con.execute("""
+                            UPDATE outgoing_payments SET run_id=?,invoice_id=?,payment_date=?,net=?,vat=?,gross=?,
+                              reference=?,reversed_at=NULL WHERE id=?
+                        """, (run_id, invoice_id, payment_date, str(paid_net), str(paid_vat), str(paid_gross),
+                              f"In WinWorker bereits verbucht · Rechnung {number}", int(existing_payment["id"])))
+                    else:
+                        con.execute("""
+                            INSERT INTO outgoing_payments(
+                              run_id,invoice_id,payment_date,net,vat,gross,reference,source,source_id,created_at
+                            ) VALUES(?,?,?,?,?,?,?,'WW',?,?)
+                        """, (run_id, invoice_id, payment_date, str(paid_net), str(paid_vat), str(paid_gross),
+                              f"In WinWorker bereits verbucht · Rechnung {number}", payment_source_id, now))
+                    payment_count += 1
+                elif existing_payment:
+                    con.execute("DELETE FROM outgoing_payments WHERE id=?", (int(existing_payment["id"]),))
+
+                try:
+                    level = max(0, min(3, int(item.get("dunningLevel") or 0)))
+                except (TypeError, ValueError):
+                    level = 0
+                con.execute("""
+                    INSERT INTO outgoing_debtor_meta(
+                      invoice_id,ww_dunning_level,ww_last_dunning,ww_blocked_until,updated_at
+                    ) VALUES(?,?,?,?,?)
+                    ON CONFLICT(invoice_id) DO UPDATE SET
+                      ww_dunning_level=excluded.ww_dunning_level,ww_last_dunning=excluded.ww_last_dunning,
+                      ww_blocked_until=excluded.ww_blocked_until,updated_at=excluded.updated_at
+                """, (invoice_id, level, _iso_date(item.get("lastDunning")),
+                      _iso_date(item.get("dunningBlockedUntil")), now))
+                self._audit(con, "invoice", invoice_id, "sync_ww_history", {
+                    "invoiceNumber": number, "originalGross": str(original_gross),
+                    "openGross": str(open_gross), "sourceId": source_id,
+                })
+                previous.append({
+                    "id": invoice_id, "invoiceNumber": number, "issueDate": issue_date, "kind": kind,
+                    "net": _num(original_net), "vat": _num(original_vat), "gross": _num(original_gross),
+                })
+
+            local_after_ww = con.execute(
+                "SELECT 1 FROM outgoing_invoices WHERE run_id=? AND source='KRISTINE' AND status<>'cancelled' LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            run_status = "closed" if last_kind == "SR" and not local_after_ww else "open"
+            con.execute("UPDATE outgoing_runs SET status=?,closed_at=? WHERE id=?", (
+                run_status, _now() if run_status == "closed" else None, run_id,
+            ))
+            self._audit(con, "sync", None, "ww_project_history", {
+                "projectIndex": project_index, "runId": run_id, "imported": imported,
+                "updated": updated, "payments": payment_count,
+            })
+            con.commit()
+        return {"imported": imported, "updated": updated, "payments": payment_count, "runId": run_id}
 
     def sync_ww_open_items(self, rows):
         """Import new WW open items once as opening balances; never writes to WW."""
