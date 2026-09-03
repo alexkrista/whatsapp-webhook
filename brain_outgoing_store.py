@@ -62,8 +62,8 @@ DEFAULT_SETTINGS = {
     "company_dg": "401425536",
     "bank_iban": "AT82 5800 0104 9932 3013",
     "bank_bic": "HYPVAT2B",
-    "number_template": "{yy}{month}{seq:03d}",
-    "number_warning": "Automatischer gemeinsamer Nummernkreis JJMM00x.",
+    "number_template": "{year}{month}{seq:03d}",
+    "number_warning": "Automatischer gemeinsamer Nummernkreis JJJJMM00x mit WinWorker-Abgleich.",
     "default_worker": "Ing. Alexander Krista",
     "default_due_days": "14",
 }
@@ -405,6 +405,14 @@ class OutgoingStore:
         """)
         for key, value in DEFAULT_SETTINGS.items():
             con.execute("INSERT OR IGNORE INTO outgoing_settings(key,value) VALUES(?,?)", (key, str(value)))
+        con.execute(
+            "UPDATE outgoing_settings SET value=? WHERE key='number_template' AND value=?",
+            (DEFAULT_SETTINGS["number_template"], "{yy}{month}{seq:03d}"),
+        )
+        con.execute(
+            "UPDATE outgoing_settings SET value=? WHERE key='number_warning' AND value=?",
+            (DEFAULT_SETTINGS["number_warning"], "Automatischer gemeinsamer Nummernkreis JJMM00x."),
+        )
         con.commit()
 
     def settings(self, con=None):
@@ -1368,23 +1376,54 @@ class OutgoingStore:
             result["reversedAt"] = stamp
             return result
 
-    def _next_number(self, con, issue_date):
+    def next_number_preview(self, issue_date, external_numbers=None):
+        """Return the next number without consuming it."""
+        with _LOCK, self.connect() as con:
+            return self._number_for(con, issue_date, external_numbers, consume=False)
+
+    def _number_for(self, con, issue_date, external_numbers=None, *, consume):
         stamp = date.fromisoformat(issue_date)
         period = stamp.strftime("%Y%m")
         row = con.execute("SELECT next_value FROM outgoing_sequences WHERE period=?", (period,)).fetchone()
         seq = int(row["next_value"]) if row else 1
-        if row:
-            con.execute("UPDATE outgoing_sequences SET next_value=? WHERE period=?", (seq + 1, period))
-        else:
-            con.execute("INSERT INTO outgoing_sequences(period,next_value) VALUES(?,?)", (period, 2))
         template = self.settings(con).get("number_template") or DEFAULT_SETTINGS["number_template"]
+        occupied = {
+            str(x or "").strip()
+            for x in (external_numbers or [])
+            if str(x or "").strip()
+        }
+        occupied.update(
+            str(x[0] or "").strip()
+            for x in con.execute(
+                "SELECT invoice_number FROM outgoing_invoices WHERE invoice_number IS NOT NULL"
+            ).fetchall()
+        )
+        external_sequences = [
+            int(number[len(period):])
+            for number in occupied
+            if number.startswith(period) and number[len(period):].isdigit()
+        ]
+        if external_sequences:
+            seq = max(seq, max(external_sequences) + 1)
         try:
-            number = template.format(year=stamp.strftime("%Y"), yy=stamp.strftime("%y"), month=stamp.strftime("%m"), seq=seq)
+            while True:
+                number = template.format(year=stamp.strftime("%Y"), yy=stamp.strftime("%y"), month=stamp.strftime("%m"), seq=seq)
+                if number not in occupied:
+                    break
+                seq += 1
         except Exception as exc:
             raise ValueError("Rechnungsnummern-Vorlage ist ungültig.") from exc
         if not number or len(number) > 40:
             raise ValueError("Erzeugte Rechnungsnummer ist ungültig.")
+        if consume:
+            if row:
+                con.execute("UPDATE outgoing_sequences SET next_value=? WHERE period=?", (seq + 1, period))
+            else:
+                con.execute("INSERT INTO outgoing_sequences(period,next_value) VALUES(?,?)", (period, seq + 1))
         return number
+
+    def _next_number(self, con, issue_date, external_numbers=None):
+        return self._number_for(con, issue_date, external_numbers, consume=True)
 
     def create_correction_draft(self, invoice_id, data):
         """Create a linked full cancellation (ST) or partial credit note (GS)."""
@@ -1496,7 +1535,7 @@ class OutgoingStore:
             con.commit()
         return self.invoice(invoice_id, live=True)
 
-    def prepare_issue(self, invoice_id):
+    def prepare_issue(self, invoice_id, external_numbers=None):
         """Freeze an invoice and allocate its number. PDF is attached separately."""
         with _LOCK, self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -1547,8 +1586,10 @@ class OutgoingStore:
             ):
                 raise ValueError("Bei einer B2B-Rechnung über 10.000 EUR ist die Kunden-UID Pflicht.")
             existing_number = str(row["invoice_number"] or "")
-            expected_prefix = date.fromisoformat(row["issue_date"]).strftime("%y%m")
-            invoice_number = existing_number if existing_number.startswith(expected_prefix) else self._next_number(con, row["issue_date"])
+            expected_prefix = date.fromisoformat(row["issue_date"]).strftime("%Y%m")
+            invoice_number = existing_number if existing_number.startswith(expected_prefix) else self._next_number(
+                con, row["issue_date"], external_numbers
+            )
             now = _now()
             con.execute("""
                 UPDATE outgoing_invoices SET status='issued',invoice_number=?,vat_rate=?,line_subtotal_net=?,retention_net=?,net_after_retention=?,

@@ -64,10 +64,19 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertNotEqual(self.run["id"], second["id"])
         self.assertEqual(len(self.store.runs(2602119)), 2)
 
-    def test_number_circle_is_yymm_sequence(self):
+    def test_number_circle_is_yyyymm_sequence(self):
         draft = self.store.save_draft(self.payload())
         issued = self.store.prepare_issue(draft["id"])
-        self.assertEqual(issued["invoice_number"], "2608001")
+        self.assertEqual(issued["invoice_number"], "202608001")
+
+    def test_number_circle_continues_after_highest_winworker_number(self):
+        self.assertEqual(
+            self.store.next_number_preview("2026-09-03", ["202609001", "202609004"]),
+            "202609005",
+        )
+        draft = self.store.save_draft(self.payload(issue_date="2026-09-03"))
+        issued = self.store.prepare_issue(draft["id"], ["202609001", "202609004"])
+        self.assertEqual(issued["invoice_number"], "202609005")
 
     def test_debtor_open_items_allocate_unassigned_payment_oldest_first(self):
         first = self.store.prepare_issue(self.store.save_draft(self.payload(amount="5000"))["id"])
@@ -130,7 +139,7 @@ class OutgoingStoreTests(unittest.TestCase):
         payload = self.payload(issue_date="2026-08-30")
         revised = self.store.save_draft(payload, issued["id"])
         issued_again = self.store.prepare_issue(revised["id"])
-        self.assertEqual(issued_again["invoice_number"], "2608001")
+        self.assertEqual(issued_again["invoice_number"], "202608001")
         self.assertEqual(issued_again["revisionNo"], 1)
 
     def test_date_change_to_new_month_uses_new_number(self):
@@ -141,7 +150,7 @@ class OutgoingStoreTests(unittest.TestCase):
         payload["dueDate"] = "2026-09-15"
         revised = self.store.save_draft(payload, revision["id"])
         issued_again = self.store.prepare_issue(revised["id"])
-        self.assertEqual(issued_again["invoice_number"], "2609001")
+        self.assertEqual(issued_again["invoice_number"], "202609001")
 
     def test_closed_month_allows_credit_but_not_storno(self):
         draft = self.store.save_draft(self.payload())
@@ -153,7 +162,7 @@ class OutgoingStoreTests(unittest.TestCase):
             "kind": "GS", "reason": "Kundenabzug", "gross": "120", "issueDate": "2026-09-01",
         })
         credit = self.store.prepare_issue(credit["id"])
-        self.assertEqual(credit["invoice_number"], "2609001")
+        self.assertEqual(credit["invoice_number"], "202609001")
         self.assertEqual(credit["increment_gross"], -120.0)
         self.assertEqual(self.store.debtor_open_items("2026-09-20")[0]["openGross"], 11880.0)
 

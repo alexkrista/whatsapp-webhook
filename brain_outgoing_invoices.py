@@ -191,6 +191,28 @@ def install(ns):
         finally:
             con.close()
 
+    def ww_invoice_numbers(issue_date):
+        """Read the shared monthly number range directly from WinWorker."""
+        if not callable(sql_connection):
+            if app.testing:
+                return []
+            raise RuntimeError("WinWorker-Verbindung ist für den Rechnungsnummern-Abgleich nicht verfügbar.")
+        prefix = date.fromisoformat(str(issue_date)[:10]).strftime("%Y%m")
+        con = sql_connection()
+        try:
+            cur = con.cursor()
+            cur.execute("""
+                SELECT DISTINCT LTRIM(RTRIM(COALESCE(b.sBuchNummer,'')))
+                FROM dbo.[Bücher] b
+                WHERE b.Buchart=7
+                  AND b.Storno=0
+                  AND b.ErsterAusdruck>CONVERT(datetime,'18000101',112)
+                  AND b.sBuchNummer LIKE ?
+            """, prefix + "%")
+            return [str(row[0] or "").strip() for row in cur.fetchall() if str(row[0] or "").strip()]
+        finally:
+            con.close()
+
     def sync_from_ww():
         return store.sync_ww_open_items(ww_open_items())
 
@@ -513,7 +535,9 @@ def install(ns):
     @app.post("/api/outgoing/invoices/<int:invoice_id>/issue")
     def outgoing_invoice_issue(invoice_id):
         try:
-            invoice = enrich_correction(store.prepare_issue(invoice_id))
+            draft = store.invoice(invoice_id, live=True)
+            existing_ww_numbers = ww_invoice_numbers(draft.get("issue_date"))
+            invoice = enrich_correction(store.prepare_issue(invoice_id, existing_ww_numbers))
             destination = pdf_path_for(invoice)
             if not destination.exists() or not invoice.get("pdf_sha256"):
                 render_invoice_pdf(invoice, store.settings(), destination)
@@ -521,6 +545,18 @@ def install(ns):
             return jsonify({"ok": True, "invoice": invoice, "pdfUrl": f"/api/outgoing/invoices/{invoice_id}/pdf"})
         except Exception as exc:
             return _json_error(jsonify, exc)
+
+    @app.get("/api/outgoing/invoices/<int:invoice_id>/number-preview")
+    def outgoing_invoice_number_preview(invoice_id):
+        try:
+            draft = store.invoice(invoice_id, live=True)
+            existing_ww_numbers = ww_invoice_numbers(draft.get("issue_date"))
+            return jsonify({
+                "ok": True,
+                "invoiceNumber": store.next_number_preview(draft.get("issue_date"), existing_ww_numbers),
+            })
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
 
     @app.post("/api/outgoing/invoices/<int:invoice_id>/revision")
     def outgoing_invoice_revision(invoice_id):
@@ -540,6 +576,45 @@ def install(ns):
         except Exception as exc:
             return _json_error(jsonify, exc)
 
+    def source_pdf_path(invoice):
+        own_path = Path(str(invoice.get("pdf_path") or ""))
+        if own_path.is_file() and own_path.suffix.lower() == ".pdf":
+            return own_path
+        if str(invoice.get("source") or "").upper() != "WW" or not callable(search_pdf):
+            raise ValueError("Rechnungs-PDF fehlt.")
+        invoice_number = str(invoice.get("invoice_number") or "").strip()
+        if not invoice_number:
+            raise ValueError("Rechnungsnummer fehlt.")
+        for candidate in search_pdf([invoice_number]):
+            path = Path(str(candidate.get("path") or ""))
+            if path.is_file() and path.suffix.lower() == ".pdf":
+                return path
+        raise ValueError("Original-PDF der WinWorker-Rechnung wurde nicht gefunden.")
+
+    @app.get("/api/outgoing/invoices/<int:invoice_id>/preview.png")
+    def outgoing_invoice_preview_image(invoice_id):
+        try:
+            import pymupdf
+
+            invoice = enrich_correction(store.invoice(invoice_id, live=True))
+            if str(invoice.get("status") or "") == "draft":
+                preview_root = output_root / "_Entwuerfe"
+                pdf_path = preview_root / f"Entwurf_{invoice_id}.pdf"
+                render_invoice_pdf(invoice, store.settings(), pdf_path)
+            else:
+                pdf_path = source_pdf_path(invoice)
+            with pymupdf.open(pdf_path) as document:
+                if document.page_count < 1:
+                    raise ValueError("Die Rechnungs-PDF enthält keine Seite.")
+                pixmap = document[0].get_pixmap(matrix=pymupdf.Matrix(1.8, 1.8), alpha=False)
+                payload = pixmap.tobytes("png")
+            response = make_response(payload)
+            response.headers["Content-Type"] = "image/png"
+            response.headers["Content-Disposition"] = f"inline; filename=Vorschau_{invoice_id}.png"
+            return response
+        except Exception as exc:
+            return _json_error(jsonify, exc, 404)
+
     @app.get("/api/outgoing/invoices/<int:invoice_id>/pdf")
     def outgoing_invoice_pdf(invoice_id):
         try:
@@ -555,20 +630,8 @@ def install(ns):
     def outgoing_invoice_source_pdf(invoice_id):
         try:
             invoice = store.invoice(invoice_id)
-            own_path = Path(str(invoice.get("pdf_path") or ""))
-            if own_path.is_file() and own_path.suffix.lower() == ".pdf":
-                return send_file(own_path, mimetype="application/pdf", as_attachment=False, download_name=own_path.name)
-            if str(invoice.get("source") or "").upper() != "WW" or not callable(search_pdf):
-                raise ValueError("Rechnungs-PDF fehlt.")
-            invoice_number = str(invoice.get("invoice_number") or "").strip()
-            if not invoice_number:
-                raise ValueError("Rechnungsnummer fehlt.")
-            candidates = search_pdf([invoice_number])
-            for candidate in candidates:
-                path = Path(str(candidate.get("path") or ""))
-                if path.is_file() and path.suffix.lower() == ".pdf":
-                    return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
-            raise ValueError("Original-PDF der WinWorker-Rechnung wurde nicht gefunden.")
+            path = source_pdf_path(invoice)
+            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
@@ -695,6 +758,8 @@ function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status
 function invoiceList(xs){let tr=0;return (xs||[]).map(x=>{const label=x.kind==='TR'?`${++tr}. Teilrechnung`:({SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind],ww=x.source==='WW';return `<div class="invoice"><div class="head"><div><strong>${esc(x.invoice_number||'Entwurf')} · ${esc(label)}</strong><div class="small muted">${esc(x.issue_date)} · ${money(x.increment_gross)}${x.revisionNo?' · Version '+(x.revisionNo+1):''}${ww?' · aus WinWorker':''}</div></div><span class="pill ${x.status==='draft'?'open':'closed'}">${x.status==='draft'?'Entwurf':'ausgestellt'}</span></div><div class="row"><button data-quick="${x.id}">Schnellansicht</button><button data-preview="${x.id}">Vorschau</button>${ww?'<span class="small muted">Originalbeleg aus WW</span>':`${['TR','SR','RE'].includes(x.kind)?`<button data-edit="${x.id}" data-issued="${x.status==='issued'?'1':'0'}">${x.status==='issued'?'Ändern':'Bearbeiten'}</button>`:''}${x.status==='draft'?`<button class="good" data-issue="${x.id}">Abschließen</button>`:`<button class="danger" data-correct="${x.id}">Storno / Gutschrift</button>`}`}</div></div>`}).join('')||'<div class="muted">Noch keine Rechnung.</div>'}
 function paymentList(xs){return (xs||[]).map((x,i)=>`<div class="payment head"><div><strong>${i+1}. Zahlung · ${esc(x.paymentDate)}</strong><div class="small muted">${esc(x.reference)}</div></div><strong>${money(x.gross)}</strong></div>`).join('')||'<div class="muted">Noch keine Zahlung gebucht.</div>'}
 function quickInvoice(id,showPdf=false){const x=(selectedRun.invoices||[]).find(row=>row.id===Number(id));if(!x)return;const payments=(selectedRun.payments||[]).filter(p=>Number(p.invoiceId)===Number(x.id)),paid=payments.reduce((s,p)=>s+Number(p.gross||0),0),openGross=Math.max(0,Number(x.increment_gross||0)-paid),trNo=x.kind==='TR'?(selectedRun.invoices||[]).filter(row=>row.kind==='TR'&&row.status!=='cancelled').findIndex(row=>row.id===x.id)+1:0,label=x.kind==='TR'?`${trNo}. Teilrechnung`:({SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind]||x.kind,pdfUrl=`/api/outgoing/invoices/${x.id}/${x.status==='draft'?'preview.pdf':'source-pdf'}`,lines=(x.lines||[]).map((line,i)=>`<tr><td>${i+1}</td><td>${esc(line.description)}</td><td>${esc(line.quantity)} ${esc(line.unit)}</td><td>${money(line.net)}</td></tr>`).join(''),paymentRows=payments.map(p=>`${esc(p.paymentDate)} · ${money(p.gross)} · ${esc(p.reference||p.source)}`).join('<br>');$('quickView').innerHTML=`<div class="quick-view card"><div class="head"><div><h3>${esc(x.invoice_number||'Entwurf')} · ${esc(label)}</h3><div class="small muted">${esc(x.issue_date)} · Leistung ${esc(x.service_from)} bis ${esc(x.service_to)} · ${esc(x.source==='WW'?'WinWorker':'KRISTINE')}</div></div><button id="quickClose">×</button></div><div class="summary"><div>Netto<strong>${money(x.increment_net)}</strong></div><div>USt<strong>${money(x.increment_vat)}</strong></div><div>Brutto<strong>${money(x.increment_gross)}</strong></div><div>Bezahlt / offen<strong>${money(paid)} / ${money(openGross)}</strong></div></div><table class="quick-lines"><thead><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Betrag netto</th></tr></thead><tbody>${lines||'<tr><td colspan="4" class="muted">Keine Positionen gespeichert.</td></tr>'}</tbody></table>${paymentRows?`<div class="section"><strong>Zahlungen</strong><div class="small muted">${paymentRows}</div></div>`:''}<div class="row section"><button id="quickPreview">Vorschau einblenden</button><a href="${pdfUrl}" target="_blank"><button>PDF separat öffnen</button></a></div>${showPdf?`<iframe class="invoice-preview" title="Vorschau ${esc(x.invoice_number||'Rechnung')}" src="${pdfUrl}"></iframe>`:''}</div>`;$('quickClose').onclick=()=>{$('quickView').innerHTML=''};$('quickPreview').onclick=()=>quickInvoice(id,true);$('quickView').scrollIntoView({behavior:'smooth',block:'nearest'})}
+async function loadEmbeddedPreview(){const frame=document.querySelector('.invoice-preview');if(!frame)return;const match=frame.src.match(/\/api\/outgoing\/invoices\/(\d+)\//);if(!match)return;const image=document.createElement('img');image.className='invoice-preview';image.alt='Rechnungsvorschau';image.style.height='auto';image.style.objectFit='contain';image.src='/api/outgoing/invoices/'+match[1]+'/preview.png?t='+Date.now();image.onerror=()=>image.replaceWith(Object.assign(document.createElement('div'),{className:'card muted',textContent:'Rechnungsvorschau konnte nicht geladen werden.'}));frame.replaceWith(image)}
+const quickInvoiceWithDirectPdf=quickInvoice;quickInvoice=function(id,showPdf=false){quickInvoiceWithDirectPdf(id,showPdf);if(showPdf)loadEmbeddedPreview()};
 function wireInvoices(){document.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.quick),false));document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.preview),true));document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{try{let x=selectedRun.invoices.find(x=>x.id===Number(b.dataset.edit));if(b.dataset.issued==='1'){if(!confirm('Ausgestellte Rechnung als neue Version öffnen? Die bisherige Version bleibt archiviert.'))return;const d=await api('/api/outgoing/invoices/'+x.id+'/revision',{method:'POST',body:'{}'});x=d.invoice;await loadRun(selectedRun.id)}editInvoice(x)}catch(e){msg(e.message,true)}});document.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>issueInvoice(Number(b.dataset.issue)));document.querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>{correctionTarget=Number(b.dataset.correct);$('correctionKind').value='GS';$('creditGrossLabel').classList.remove('hide');open('correctionModal')})}
 function dateControl(id,label,value){return `<label>${label}<div class="date-control"><button type="button" data-date-minus="${id}">−</button><input id="${id}" type="date" value="${esc(value||today())}"><button type="button" data-date-plus="${id}">+</button></div></label>`}
 function editInvoice(x=null){editing=x;const history=(selectedRun.invoices||[]).filter(i=>['TR','SR','RE'].includes(i.kind)&&i.status==='issued'&&i.id!==x?.id),nextTr=history.filter(i=>i.kind==='TR').length+1,titleFor=k=>k==='TR'?`${nextTr}. Teilrechnung`:k==='SR'?'Schlussrechnung':'Rechnung',priorNet=history.reduce((s,i)=>s+Number(i.increment_net||0),0),priorVat=history.reduce((s,i)=>s+Number(i.increment_vat||0),0),priorGross=history.reduce((s,i)=>s+Number(i.increment_gross||0),0),paidGross=Number(selectedRun.paidGross||0),due=new Date((x?.issue_date||today())+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=x?.lines?.length?x.lines:[{description:'Kumulativer Leistungsstand lt. Auftrag',quantity:1,unit:'PA',unit_price:priorNet,discount_percent:0}],historyRows=history.map((i,n)=>`${esc(i.invoice_number||'')}${i.kind==='TR'?' · '+(n+1)+'. Teilrechnung':' · '+esc(i.kind)} · netto ${money(i.increment_net)} · brutto ${money(i.increment_gross)}`).join('<br>');$('editor').innerHTML=`<div class="card section"><div class="head"><h2 id="editorTitle">${x?'Entwurf bearbeiten':'Neue '+titleFor('TR')}</h2><button id="editorClose">×</button></div><div class="grid3"><label>Art<select id="invKind"><option value="TR">Teilrechnung</option><option value="SR">Schlussrechnung</option><option value="RE">Rechnung</option></select></label>${dateControl('invDate','Rechnungsdatum',x?.issue_date||today())}${dateControl('dueDate','Fällig am',x?.due_date||due.toISOString().slice(0,10))}${dateControl('serviceFrom','Leistung von',x?.service_from||today())}${dateControl('serviceTo','Leistung bis',x?.service_to||today())}<label>USt-Art<select id="taxMode"><option value="AT20">20 % Österreich</option><option value="CHLI81">8,1 % Schweiz / Liechtenstein</option><option value="RC19">0 % · § 19 Übergang Steuerschuld</option><option value="EU0">0 % · EU-Auslandslieferung</option></select></label><label id="recipientUidLabel">Kunden-UID<input id="recipientUid" value="${esc(x?.recipient_uid||selectedRun.customer_uid||'')}"></label><label>Deckungsrücklass %<input id="retention" inputmode="decimal" value="${x?.retention_percent||0}"></label><label>Rabatt %<input id="discount" inputmode="decimal" value="${x?.discount_percent||0}"></label><label>Skonto %<input id="cashDiscount" inputmode="decimal" value="${x?.cash_discount_percent||0}"></label>${dateControl('cashUntil','Skonto bis',x?.cash_discount_until||'')}<label>Betreff<input id="subject" value="${esc(x?.subject||selectedRun.label)}"></label></div>${history.length?`<div class="section"><h3>Bisheriger Stand aus WW / KRISTINE</h3><div class="summary"><div>Abgerechnet netto<strong>${money(priorNet)}</strong></div><div>USt<strong>${money(priorVat)}</strong></div><div>Abgerechnet brutto<strong>${money(priorGross)}</strong></div><div>Erhaltene Zahlungen<strong>${money(paidGross)}</strong></div></div><div class="small muted">${historyRows}</div><div class="small" style="margin-top:9px;color:var(--amber)">Unten steht bereits der bisherige Netto-Leistungsstand. Für die ${nextTr}. Teilrechnung bitte auf den neuen kumulierten Gesamtstand erhöhen – nicht nur den Zusatzbetrag eingeben.</div></div>`:''}<div class="section"><h3>Leistungen / kumulierter Stand</h3><table class="lines"><thead><tr><th>Pos</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Gesamtstand netto</th><th>Rabatt %</th><th></th></tr></thead><tbody id="lineRows"></tbody></table><button id="addLine">+ Position</button></div><label class="section">Zusatztext<textarea id="notes">${esc(x?.notes||'')}</textarea></label><div class="row section"><button id="saveDraft" class="primary">Entwurf speichern</button><button id="savePreview">Speichern & PDF prüfen</button></div></div>`;$('invKind').value=x?.kind||'TR';$('invKind').onchange=()=>{if(!x)$('editorTitle').textContent='Neue '+titleFor($('invKind').value)};$('taxMode').value=x?.tax_mode||'AT20';let model=lines.map(l=>({description:l.description||'',quantity:l.quantity||1,unit:l.unit||'PA',unitPrice:l.unit_price??l.unitPrice??0,discountPercent:l.discount_percent??l.discountPercent??0}));function renderLines(){$('lineRows').innerHTML=model.map((l,i)=>`<tr><td>${i+1}</td><td><input class="desc" data-f="description" data-i="${i}" value="${esc(l.description)}"></td><td><input data-f="quantity" data-i="${i}" value="${esc(l.quantity)}"></td><td><input data-f="unit" data-i="${i}" value="${esc(l.unit)}"></td><td><input data-f="unitPrice" data-i="${i}" value="${esc(l.unitPrice)}"></td><td><input data-f="discountPercent" data-i="${i}" value="${esc(l.discountPercent)}"></td><td><button data-del="${i}">×</button></td></tr>`).join('');$('lineRows').querySelectorAll('input').forEach(e=>e.oninput=()=>model[Number(e.dataset.i)][e.dataset.f]=e.value);$('lineRows').querySelectorAll('[data-del]').forEach(e=>e.onclick=()=>{model.splice(Number(e.dataset.del),1);renderLines()})}renderLines();$('addLine').onclick=()=>{model.push({description:'',quantity:1,unit:'PA',unitPrice:0,discountPercent:0});renderLines()};$('editorClose').onclick=()=>{$('editor').innerHTML=''};document.querySelectorAll('[data-date-minus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.dateMinus,-1));document.querySelectorAll('[data-date-plus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.datePlus,1));$('taxMode').onchange=()=>$('recipientUidLabel').classList.toggle('hide',!['RC19','EU0'].includes($('taxMode').value));$('taxMode').onchange();async function save(preview){const payload={runId:selectedRun.id,kind:$('invKind').value,issueDate:$('invDate').value,dueDate:$('dueDate').value,serviceFrom:$('serviceFrom').value,serviceTo:$('serviceTo').value,taxMode:$('taxMode').value,recipientUid:$('recipientUid').value,retentionPercent:$('retention').value,discountPercent:$('discount').value,cashDiscountPercent:$('cashDiscount').value,cashDiscountUntil:$('cashUntil').value,subject:$('subject').value,notes:$('notes').value,lines:model};const d=await api(editing?'/api/outgoing/invoices/'+editing.id:'/api/outgoing/invoices',{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=d.invoice;msg('Entwurf gespeichert.');await loadRun(selectedRun.id);if(preview)window.open('/api/outgoing/invoices/'+editing.id+'/preview.pdf','_blank')} $('saveDraft').onclick=()=>save(false).catch(e=>msg(e.message,true));$('savePreview').onclick=()=>save(true).catch(e=>msg(e.message,true))}

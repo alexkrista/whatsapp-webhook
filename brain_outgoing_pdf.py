@@ -51,6 +51,25 @@ def _kind_title(invoice):
     return {"SR": "Schlussrechnung", "RE": "Rechnung", "ST": "Stornorechnung", "GS": "Gutschrift"}.get(kind, "Rechnung")
 
 
+def _draw_krista_wordmark(canvas, page_height):
+    """Draw only the KRISTA part of the established invoice logo."""
+    logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
+    if not logo.exists():
+        return
+    target_x, target_y, target_w, target_h = 350.0, page_height - 96.0, 198.0, 49.0
+    crop_left = 0.58
+    full_w = target_w / (1 - crop_left)
+    canvas.saveState()
+    clip = canvas.beginPath()
+    clip.rect(target_x, target_y, target_w, target_h)
+    canvas.clipPath(clip, stroke=0, fill=0)
+    canvas.drawImage(
+        str(logo), target_x - (crop_left * full_w), target_y,
+        width=full_w, height=target_h, preserveAspectRatio=False, mask="auto",
+    )
+    canvas.restoreState()
+
+
 def render_invoice_pdf(invoice, settings, destination):
     """Render one immutable invoice snapshot with ReportLab."""
     try:
@@ -100,9 +119,7 @@ def render_invoice_pdf(invoice, settings, destination):
 
     def ww_page(canvas, doc):
         canvas.saveState()
-        logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
-        if logo.exists():
-            canvas.drawImage(str(logo), 235.5, height - 104.2, width=312.9, height=61.5, preserveAspectRatio=False, mask="auto")
+        _draw_krista_wordmark(canvas, height)
 
         recipient = [
             run.get("customer_company") or "", run.get("customer_name") or "", run.get("customer_street") or "",
@@ -122,7 +139,7 @@ def render_invoice_pdf(invoice, settings, destination):
 
         canvas.setFont(regular_font, 7.92)
         bank = (
-            f"Sparkasse Feldkirch  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  "
+            f"Hypo Vorarlberg Bank AG  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  "
             f"{settings.get('company_uid','')}  |  EORI-Nr.  {settings.get('company_eori','')}  |  DG-Nr.  {settings.get('company_dg','')}"
         )
         canvas.drawString(36.7, 48.0, bank)
@@ -161,7 +178,9 @@ def render_invoice_pdf(invoice, settings, destination):
             f"zur Rechnung Nr. {original.get('invoiceNumber','')} vom {de_date(original.get('issueDate'))}", base
         ))
     story.append(Spacer(1, 7))
-    story.append(Paragraph(invoice.get("subject") or "", heading))
+    subject = str(invoice.get("subject") or "").strip()
+    if subject and "aus winworker fortgeführt" not in subject.casefold():
+        story.append(Paragraph(subject, heading))
     story.append(Paragraph(
         f"Die Leistung wird zwischen dem {de_date(invoice.get('service_from'))} und dem {de_date(invoice.get('service_to'))} erbracht.", base
     ))
@@ -170,16 +189,22 @@ def render_invoice_pdf(invoice, settings, destination):
     line_rows = [["Pos", "Menge", "Einh.", "Leistung", "EP [EUR]", "GP [EUR]"]]
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
+        quantity = _d(line.get("quantity") or 1)
+        raw_total = quantity * ep
         net = _d(line.get("net"))
         desc = str(line.get("description") or "")
         disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
-        if disc:
-            desc += f"<br/><font size=6.5>Positionsrabatt {percent(disc)}</font>"
         line_rows.append([
             str(line.get("line_no") or line.get("lineNo") or index),
-            money(line.get("quantity") or 1), str(line.get("unit") or ""), Paragraph(desc, base),
-            money(ep), money(net),
+            money(quantity), str(line.get("unit") or ""), Paragraph(desc, base),
+            money(ep), money(raw_total if disc else net),
         ])
+        if disc:
+            discount_amount = raw_total - net
+            line_rows.append([
+                "", "", "", Paragraph(f"{percent(disc)} Rabatt", small),
+                money(-discount_amount), money(net),
+            ])
     line_table = Table(line_rows, repeatRows=1, colWidths=[19.5 * mm, 12 * mm, 19 * mm, 82.5 * mm, 21 * mm, 21 * mm])
     line_table.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), regular_font),
@@ -198,30 +223,30 @@ def render_invoice_pdf(invoice, settings, destination):
     )
     story.append(Spacer(1, 0 if complex_summary else 115))
 
-    # Requested calculation summary: retention, discount, VAT, cash discount, then payments.
+    # The monetary result stays in the same right-hand column as the position total (GP).
     calc = []
     strong_rows = []
-    def calc_row(label, rate, net, vat="", gross="", strong=False):
+    def calc_row(label, rate, amount, strong=False):
         if strong:
             strong_rows.append(len(calc))
-        calc.append([Paragraph(label, heading if strong else base), rate, money(net) if net != "" else "",
-                     money(vat) if vat != "" else "", money(gross) if gross != "" else ""])
+        calc.append([
+            Paragraph(label, heading if strong else base), "", "", rate,
+            money(amount) if amount != "" else "",
+        ])
     calc_row("Rechnungszwischensumme Netto:", "", invoice.get("line_subtotal_net"), strong=True)
     if _d(invoice.get("retention_percent")):
         calc_row("Deckungsrücklass:", percent(invoice.get("retention_percent")), -_d(invoice.get("retention_net")))
-        calc_row("", "", invoice.get("net_after_retention"), strong=True)
     if _d(invoice.get("discount_percent")):
         calc_row("Rabatt:", percent(invoice.get("discount_percent")), -_d(invoice.get("discount_net")))
-        calc_row("", "", invoice.get("cumulative_net"), strong=True)
-    else:
+    if _d(invoice.get("retention_percent")) or _d(invoice.get("discount_percent")):
         calc_row("Nettosumme:", "", invoice.get("cumulative_net"), strong=True)
     if _d(invoice.get("vat_rate")):
-        calc_row("Mehrwertsteuer:", percent(invoice.get("vat_rate")), "", invoice.get("cumulative_vat"))
+        calc_row("Mehrwertsteuer:", percent(invoice.get("vat_rate")), invoice.get("cumulative_vat"))
     gross_row = len(calc)
-    calc_row("Bruttosumme:", "", "", "", invoice.get("cumulative_gross"), strong=True)
+    calc_row("Bruttosumme:", "", invoice.get("cumulative_gross"), strong=True)
     if _d(invoice.get("cash_discount_percent")):
-        calc_row("Skonto:", percent(invoice.get("cash_discount_percent")), "", "", -_d(invoice.get("cash_discount_gross")))
-        calc_row("Brutto mit Skonto:", "", "", "", invoice.get("cumulative_gross_discounted"), strong=True)
+        calc_row("Skonto:", percent(invoice.get("cash_discount_percent")), -_d(invoice.get("cash_discount_gross")))
+        calc_row("Brutto mit Skonto:", "", invoice.get("cumulative_gross_discounted"), strong=True)
     calc_style = [
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), regular_font),
         ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
@@ -260,7 +285,7 @@ def render_invoice_pdf(invoice, settings, destination):
         rows = [[Paragraph("Bereits erhaltene Zahlungen Brutto:", heading), "", "", "", ""],
                 ["", "Datum", "Netto", "USt", "Brutto"]]
         for index, pay in enumerate(payments, 1):
-            label = pay.get("reference") or f"{index}. Zahlung"
+            label = "In WW verbucht" if str(pay.get("source") or "").upper() == "WW" else (pay.get("reference") or f"{index}. Zahlung")
             rows.append([label, de_date(pay.get("paymentDate")), money(pay.get("net")), money(pay.get("vat")), money(pay.get("gross"))])
         rows.append(["Summe Zahlungen:", "", money(invoice.get("paid_net_snapshot")), money(invoice.get("paid_vat_snapshot")), money(invoice.get("paid_gross_snapshot"))])
         t = Table(rows, colWidths=[60 * mm, 27 * mm, 29 * mm, 29 * mm, 30 * mm], repeatRows=2)
@@ -284,8 +309,13 @@ def render_invoice_pdf(invoice, settings, destination):
                 money(_d(invoice.get("open_with_discount")) - (_d(invoice.get("open_with_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100")))) if _d(invoice.get("vat_rate")) else money(0),
                 money(invoice.get("open_with_discount")),
             ])
+        due_label = (
+            f"Betrag nach der Skontofrist fällig am {de_date(invoice.get('due_date'))}"
+            if _d(invoice.get("cash_discount_percent"))
+            else f"Betrag fällig am {de_date(invoice.get('due_date'))}"
+        )
         due_rows.append([
-            f"Betrag nach der Skontofrist fällig bis {de_date(invoice.get('due_date'))}",
+            due_label,
             money(_d(invoice.get("open_after_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100"))) if _d(invoice.get("vat_rate")) else money(invoice.get("open_after_discount")),
             money(_d(invoice.get("open_after_discount")) - (_d(invoice.get("open_after_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100")))) if _d(invoice.get("vat_rate")) else money(0),
             money(invoice.get("open_after_discount")),
@@ -362,9 +392,7 @@ def render_dunning_pdf(dunning, settings, destination):
 
     def page(canvas, doc):
         canvas.saveState()
-        logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
-        if logo.exists():
-            canvas.drawImage(str(logo), 235.5, height - 104.2, width=312.9, height=61.5, preserveAspectRatio=False, mask="auto")
+        _draw_krista_wordmark(canvas, height)
         recipient = [
             run.get("customer_company") or "", run.get("customer_name") or "",
             run.get("customer_street") or "",
@@ -381,7 +409,7 @@ def render_dunning_pdf(dunning, settings, destination):
         canvas.setFont(regular_font, 7.92)
         canvas.drawString(
             36.7, 48.0,
-            f"Sparkasse Feldkirch  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  {settings.get('company_uid','')}",
+            f"Hypo Vorarlberg Bank AG  |  IBAN {settings.get('bank_iban','')}  |  BIC {settings.get('bank_bic','')}  |  {settings.get('company_uid','')}",
         )
         canvas.setFont(regular_font, 6.84)
         canvas.drawString(36.5, 32.5, settings.get("company_name", ""))
