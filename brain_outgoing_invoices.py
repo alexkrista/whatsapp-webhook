@@ -804,6 +804,12 @@ def install(ns):
         name = f"{invoice.get('invoice_number')}_{invoice.get('kind')}{suffix}.pdf"
         return folder / name
 
+    def public_pdf_name(invoice):
+        clean = lambda value: re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip()).strip("_")
+        number = clean(invoice.get("invoice_number")) or f"Rechnung_{invoice.get('id') or ''}"
+        project = clean((invoice.get("run") or {}).get("project_number"))
+        return f"{number}_{project}.pdf" if project else f"{number}.pdf"
+
     def enrich_correction(invoice):
         original_id = invoice.get("corrects_invoice_id")
         if not original_id:
@@ -904,7 +910,7 @@ def install(ns):
             path = Path(str(invoice.get("pdf_path") or ""))
             if not path.is_file():
                 raise ValueError("Rechnungs-PDF fehlt.")
-            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
+            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=public_pdf_name(invoice))
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
@@ -913,7 +919,7 @@ def install(ns):
         try:
             invoice = store.invoice(invoice_id)
             path = source_pdf_path(invoice)
-            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
+            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=public_pdf_name(invoice))
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
@@ -947,7 +953,7 @@ def install(ns):
             logo_path = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
             if logo_path.is_file():
                 mail.get_payload()[-1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid="<krista-logo>", filename="krista-logo.png")
-            mail.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
+            mail.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=public_pdf_name(invoice))
             with smtplib.SMTP(host, port, timeout=30) as smtp:
                 smtp.starttls()
                 smtp.login(user, password)
@@ -988,7 +994,7 @@ def install(ns):
             logo_path = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
             if logo_path.is_file():
                 draft.get_payload()[-1].add_related(logo_path.read_bytes(), maintype="image", subtype="png", cid="<krista-logo>", filename="krista-logo.png")
-            draft.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
+            draft.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=public_pdf_name(invoice))
             draft_dir = output_root / "_Outlook-Entwuerfe"
             draft_dir.mkdir(parents=True, exist_ok=True)
             draft_path = draft_dir / f"Rechnung_{number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.eml"
