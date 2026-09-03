@@ -7,4 +7,5 @@ assert.match(ui,/mailDate/);assert.match(ui,/mailSender/);assert.match(ui,/<b>Vo
 for(const text of ["Bestehende Regieberichte hineinziehen","Kurzübersicht Regieberichte","Mitarbeiter","Std. gesamt","Material gesamt"])assert.ok(ui.includes(text),`Regie-Import fehlt: ${text}`);assert.match(server,/documentation\/regie-report/);assert.match(server,/regie_report_imported/);
 assert.match(server,/extractRegieReportsFromPdf/);assert.match(server,/Duplikat\(e\) übersprungen/);
 assert.match(ui,/Details anzeigen/);assert.match(ui,/employeeDetails/);assert.match(ui,/materials/);
+for(const text of ["Stundenabgleich pro Mitarbeiter und Tag","Std. laut Aufzeichnung","Regie laut PDF","Differenz = Regie laut PDF minus gestempelte Stunden","Abweichung(en)"])assert.ok(ui.includes(text),`Stundenabgleich fehlt: ${text}`);
 console.log("baustellen documentation mail import test: ok");
