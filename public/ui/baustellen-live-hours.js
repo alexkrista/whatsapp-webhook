@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-live-hours-6";
+  const VERSION="2026-09-03-live-hours-7";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -93,6 +93,11 @@
         dayPerson.hours+=duration;dayPeople.set(personIdentity,dayPerson);
       }
     }
+    for(const current of liveByJob.values()){
+      current.days=new Map();current.totalHours=0;
+      for(const [date,dayPeople] of current.dayPeople){let dayTotal=0;for(const person of dayPeople.values()){person.hours=Math.max(0,person.hours-.25);dayTotal+=person.hours}current.days.set(date,dayTotal);current.totalHours+=dayTotal}
+    }
+    for(const people of peopleByJob.values())for(const person of people.values())person.hours=Math.max(0,person.hours-.25*person.days.size);
   }
 
   function liveOrderHours(j){
@@ -104,7 +109,7 @@
   function matchingKristinePerson(krDayPeople,wwRow){
     if(!krDayPeople)return null;
     if(krDayPeople.has(wwRow.identity))return krDayPeople.get(wwRow.identity);
-    const wanted=nameKey(wwRow.employeeName);return [...krDayPeople.values()].find(person=>(wwRow.finkNumber&&person.finkNumber===wwRow.finkNumber)||(wanted&&nameKey(person.name)===wanted))||null;
+    const wanted=nameKey(canonicalPersonName(wwRow.employeeName));return [...krDayPeople.values()].find(person=>(wwRow.finkNumber&&person.finkNumber===wwRow.finkNumber)||(wanted&&nameKey(canonicalPersonName(person.name))===wanted))||null;
   }
   function suggestedExclusions(ww,kr){
     const selected=new Set();for(const row of ww?.rows||[]){if(matchingKristinePerson(kr?.dayPeople?.get(row.date),row))selected.add(row.key)}return selected;
@@ -209,9 +214,9 @@
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
-    const id=String(jobId||""),ww=wwByJob.get(id),kr=liveByJob.get(id),out=new Map();
-    for(const row of ww?.rows||[]){const name=canonicalPersonName(row.employeeName),key=`${row.date}|${nameKey(name)}`;out.set(key,{date:row.date,name,hours:num(row.hours),source:"WinWorker"})}
-    for(const [date,people] of kr?.dayPeople||[]){for(const person of people.values()){const name=canonicalPersonName(person.name),key=`${date}|${nameKey(name)}`;if(!out.has(key))out.set(key,{date,name,hours:Math.max(0,num(person.hours)-.25),source:"KRISTINE"})}}
+    const id=String(jobId||""),j=job(id),ww=wwByJob.get(id),kr=liveByJob.get(id),out=new Map(),legacyCutover=String(j?.hoursCutoverDate||""),excluded=selectedExclusions(j,ww,kr),rawKr=num(kr?.totalHours),kristineTotal=liveOrderHours(j),scale=rawKr>0?kristineTotal/rawKr:0,add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
+    for(const [date,people] of kr?.dayPeople||[])if(!legacyCutover||date>=legacyCutover)for(const person of people.values())add(date,person.name,person.hours*scale,"KRISTINE");
+    for(const row of ww?.rows||[])if(legacyCutover?row.date<legacyCutover:!excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
     return [...out.values()];
   }
 
