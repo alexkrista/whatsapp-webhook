@@ -56,16 +56,22 @@ def _draw_krista_wordmark(canvas, page_height):
     logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
     if not logo.exists():
         return
-    target_x, target_y, target_w, target_h = 350.0, page_height - 96.0, 198.0, 49.0
+    from reportlab.lib.utils import ImageReader
+
+    target_x, target_w = 350.0, 198.0
     crop_left = 0.58
+    image = ImageReader(str(logo))
+    image_w, image_h = image.getSize()
     full_w = target_w / (1 - crop_left)
+    full_h = full_w * image_h / image_w
+    target_y = page_height - 114.0
     canvas.saveState()
     clip = canvas.beginPath()
-    clip.rect(target_x, target_y, target_w, target_h)
+    clip.rect(target_x, target_y, target_w, full_h)
     canvas.clipPath(clip, stroke=0, fill=0)
     canvas.drawImage(
-        str(logo), target_x - (crop_left * full_w), target_y,
-        width=full_w, height=target_h, preserveAspectRatio=False, mask="auto",
+        image, target_x - (crop_left * full_w), target_y,
+        width=full_w, height=full_h, preserveAspectRatio=True, mask="auto",
     )
     canvas.restoreState()
 
@@ -197,7 +203,7 @@ def render_invoice_pdf(invoice, settings, destination):
         line_rows.append([
             str(line.get("line_no") or line.get("lineNo") or index),
             money(quantity), str(line.get("unit") or ""), Paragraph(desc, base),
-            money(ep), money(raw_total if disc else net),
+            money(ep), "" if disc else money(net),
         ])
         if disc:
             discount_amount = raw_total - net
@@ -251,6 +257,7 @@ def render_invoice_pdf(invoice, settings, destination):
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), regular_font),
         ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
         ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("RIGHTPADDING", (4, 0), (4, -1), 0),
         ("LINEABOVE", (0, 0), (-1, 0), .75, colors.black),
         ("LINEABOVE", (0, gross_row), (-1, gross_row), .75, colors.black),
     ]
@@ -273,7 +280,9 @@ def render_invoice_pdf(invoice, settings, destination):
             ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), bold_font),
             ("FONTNAME", (0, 2), (-1, -1), regular_font),
             ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
-            ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black), ("LINEABOVE", (0, -2), (-1, -2), .4, colors.black),
+            ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black),
+            ("LINEABOVE", (0, -3), (-1, -3), .4, colors.black),
+            ("LINEABOVE", (0, -2), (-1, -2), .4, colors.black),
             ("FONTNAME", (0, -2), (-1, -1), bold_font), ("TOPPADDING", (0, 0), (-1, -1), 1.2),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
         ]))
