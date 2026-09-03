@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import hmac
 import html
@@ -20,6 +21,48 @@ from brain_outgoing_store import OutgoingStore, TAX_MODES
 
 _INSTALLED = False
 _SYNC_THREAD_STARTED = False
+
+
+def _lg_price_key(value):
+    value = html.unescape(str(value or "")).lower().replace(",", ".")
+    value = re.sub(r"\b(emulsion)\b", " ", value)
+    return re.sub(r"[^a-z0-9.]+", "", value)
+
+
+def _lg_size_key(unit, container_size=None):
+    raw = str(unit or "").strip().lower().replace(",", ".").replace("liter", "l").replace(" ", "")
+    if re.fullmatch(r"[a-z]+", raw) and container_size not in (None, ""):
+        raw = f"{container_size}{raw}"
+    match = re.fullmatch(r"([0-9.]+)ml", raw)
+    if match:
+        return f"{float(match.group(1)) / 1000:g}l"
+    match = re.fullmatch(r"([0-9.]+)l", raw)
+    return f"{float(match.group(1)):g}l" if match else raw
+
+
+def _lg_retail_net_price(product, unit, container_size=None):
+    """Return the maintained LG retail gross price as invoice net price."""
+    price_file = Path(__file__).with_name("public") / "lg-retail-preisliste-2025.html"
+    try:
+        source = price_file.read_text(encoding="utf-8")
+    except OSError:
+        return 0.0
+    wanted_product = _lg_price_key(product)
+    wanted_size = _lg_size_key(unit, container_size)
+    for raw_product, raw_size, raw_price in re.findall(
+        r"<tr><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td></tr>", source, flags=re.I | re.S
+    ):
+        listed_product = _lg_price_key(re.sub(r"<[^>]+>", "", raw_product))
+        if not (listed_product == wanted_product or listed_product.startswith(wanted_product) or wanted_product.startswith(listed_product)):
+            continue
+        if _lg_size_key(re.sub(r"<[^>]+>", "", raw_size)) != wanted_size:
+            continue
+        value = re.sub(r"[^0-9,.]", "", re.sub(r"<[^>]+>", "", raw_price)).replace(".", "").replace(",", ".")
+        try:
+            return round(float(value) / 1.2, 2)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _json_error(jsonify, exc, status=400):
@@ -47,6 +90,28 @@ def install(ns):
     terms_fn = ns.get("_terms")
     sql_connection = ns.get("sql_connection")
     ww_hours_source = ns.get("ww_hours_fusion_source")
+
+    def project_recorded_hours_net(project_number):
+        """WinWorker project hours minus 15 minutes per employee and workday."""
+        project_number = str(project_number or "").strip()
+        if not project_number.isdigit() or not callable(search_projects) or not callable(ww_hours_source):
+            return 0.0
+        terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
+        matches = [
+            row for row in search_projects(terms, include_metrics=False, limit=20)
+            if str(row.get("projectNumber") or "").strip() == project_number
+        ]
+        if len(matches) != 1:
+            return 0.0
+        grouped = {}
+        for row in ww_hours_source([int(matches[0].get("projectIndex") or 0)]):
+            day = str(row.get("date") or "")[:10]
+            person = str(row.get("finkNumber") or row.get("maIndex") or row.get("employeeName") or "").strip()
+            if not day or not person:
+                continue
+            key = (day, person)
+            grouped[key] = grouped.get(key, 0.0) + float(row.get("netHours") or 0)
+        return round(sum(max(0.0, value - 0.25) for value in grouped.values()), 4)
     kristine_api_request = ns.get("kristine_api_request")
 
     def _mail_recipients_for_project(project_number):
@@ -323,8 +388,33 @@ def install(ns):
         try:
             employee_payload = kristine_api_request("/admin/api/employees") or {}
             material_payload = kristine_api_request("/admin/api/materials?mode=regie&activeOnly=1&limit=5000") or {}
+            material_markup = 80.0
+            billing_rate = float(employee_payload.get("currentBillingRate") or 75)
+            run_id = str(request.args.get("run") or "").strip()
+            if run_id.isdigit():
+                pricing_run = store.run(int(run_id))
+                material_markup = float(pricing_run.get("material_markup_percent") or material_markup)
+                billing_rate = float(pricing_run.get("billing_rate") or billing_rate)
+            project_number = str(request.args.get("project") or "").strip()
+            if not run_id.isdigit() and project_number.isdigit() and len(project_number) <= 12:
+                try:
+                    offer_payload = kristine_api_request(f"/admin/api/job/{project_number}/offer-draft") or {}
+                    measurement = ((offer_payload.get("draft") or {}).get("measurement") or {})
+                    if measurement.get("materialMarkupPct") is not None:
+                        material_markup = float(measurement.get("materialMarkupPct"))
+                except Exception:
+                    pass
+            try:
+                recorded_hours_net = project_recorded_hours_net(project_number)
+            except Exception:
+                recorded_hours_net = 0.0
             excluded_roles = ("büro", "buero", "verwaltung", "buchhaltung", "assistenz", "geschäftsleitung", "geschaeftsleitung")
             employees = []
+            employee_aliases = {
+                "Cathrin Grabherr": ["Cathrin Anna Grabherr", "Anna Cathrin Grabherr"],
+                "Manuel Faes": ["Mandi Faes"],
+                "Edmund Mock": ["Edi Mock"],
+            }
             for row in employee_payload.get("employees") or []:
                 if row.get("active") is False:
                     continue
@@ -334,7 +424,7 @@ def install(ns):
                 name = str(row.get("name") or row.get("employeeName") or "").strip()
                 if not name:
                     continue
-                employees.append({"name": name, "unit": "Std.", "unitPrice": float(employee_payload.get("currentBillingRate") or 0)})
+                employees.append({"name": name, "aliases": employee_aliases.get(name, []), "unit": "Std.", "unitPrice": billing_rate})
             materials = []
             for row in material_payload.get("materials") or []:
                 if row.get("active") is False or row.get("regieItem") is False:
@@ -344,18 +434,31 @@ def install(ns):
                     continue
                 details = [str(row.get(key) or "").strip() for key in ("manufacturer", "productLine", "colorNumber", "colorName")]
                 package = str(row.get("containerSize") or "").strip()
-                if package:
+                if package and package not in {"1", "1.0", "1,0"}:
                     details.append(f"{package} {str(row.get('unit') or '').strip()}".strip())
                 details = [value for value in details if value and value.casefold() not in name.casefold()]
                 label = " · ".join([name, *[value for value in details if value]])
+                manufacturer = str(row.get("manufacturer") or "").lower()
+                is_little_greene = "little greene" in manufacturer
+                retail_net = _lg_retail_net_price(name, row.get("unit"), row.get("containerSize")) if is_little_greene else 0
+                maintained_retail_gross = float(row.get("salePrice") or 0)
+                purchase_price = float(row.get("purchasePrice") or 0)
+                calculated_price = round(purchase_price * (1 + material_markup / 100), 2)
+                unit_price = retail_net or (round(maintained_retail_gross / 1.2, 2) if is_little_greene and maintained_retail_gross else calculated_price)
                 materials.append({
                     "name": label,
+                    "sourceName": name,
                     "unit": str(row.get("unit") or "Stk").strip() or "Stk",
-                    "unitPrice": float(row.get("salePrice") or 0),
+                    "unitPrice": float(unit_price),
+                    "purchasePrice": purchase_price,
                 })
             employees.sort(key=lambda item: item["name"].casefold())
             materials.sort(key=lambda item: item["name"].casefold())
-            return jsonify({"ok": True, "employees": employees, "materials": materials})
+            return jsonify({
+                "ok": True, "employees": employees, "materials": materials,
+                "materialMarkup": material_markup, "billingRate": billing_rate,
+                "recordedHoursNet": recorded_hours_net,
+            })
         except Exception as exc:
             return _json_error(jsonify, exc, 500)
 
@@ -363,6 +466,13 @@ def install(ns):
     def outgoing_settings_put():
         try:
             return jsonify({"ok": True, "settings": store.update_settings(request.get_json(silent=True) or {})})
+        except Exception as exc:
+            return _json_error(jsonify, exc)
+
+    @app.put("/api/outgoing/runs/<int:run_id>/pricing")
+    def outgoing_run_pricing_put(run_id):
+        try:
+            return jsonify({"ok": True, "run": store.update_run_pricing(run_id, request.get_json(silent=True) or {})})
         except Exception as exc:
             return _json_error(jsonify, exc)
 
@@ -385,9 +495,30 @@ def install(ns):
     def project_billing_summary(project):
         project_index = int(project.get("projectIndex") or 0)
         run_details = [store.run(row["id"]) for row in store.runs(project_index)]
+        material_catalog = []
+        try:
+            material_payload = kristine_api_request("/admin/api/materials?mode=regie&activeOnly=1&limit=5000") or {}
+            for item in material_payload.get("materials") or []:
+                name = str(item.get("name") or item.get("displayName") or "").strip()
+                if name:
+                    material_catalog.append((_lg_price_key(name), float(item.get("purchasePrice") or 0)))
+        except Exception:
+            material_catalog = []
+
+        def purchase_price_for(description):
+            key = _lg_price_key(description)
+            exact = next((price for name, price in material_catalog if name == key), None)
+            if exact is not None:
+                return exact
+            candidates = [(len(name), price) for name, price in material_catalog if name and (key.startswith(name) or name.startswith(key))]
+            return max(candidates, default=(0, 0))[1]
+
         invoices = []
         payments = []
         run_summaries = []
+        material_purchase = 0.0
+        material_revenue = 0.0
+        material_missing_prices = 0
         for run in run_details:
             run_payments = []
             for payment in run.get("payments") or []:
@@ -435,6 +566,36 @@ def install(ns):
                 }
                 run_invoices.append(row)
                 invoices.append(row)
+            latest_charge = next((invoice for invoice in reversed(run.get("invoices") or [])
+                                  if str(invoice.get("status") or "") == "issued"
+                                  and str(invoice.get("kind") or "").upper() in {"TR", "SR", "RE"}), None)
+            if latest_charge:
+                in_material = False
+                invoice_discount = max(0.0, min(100.0, float(latest_charge.get("discount_percent") or 0)))
+                for line in latest_charge.get("lines") or []:
+                    unit = str(line.get("unit") or "").strip().upper()
+                    description = str(line.get("description") or "").strip()
+                    if unit in {"TAG", "ARBEIT", "BAUTEIL"}:
+                        in_material = False
+                        continue
+                    if unit == "MATERIAL":
+                        in_material = True
+                        continue
+                    if unit == "SUMME":
+                        in_material = False
+                        continue
+                    if unit in {"STD", "STD.", "H", "H."}:
+                        continue
+                    if not in_material and "material" not in description.casefold():
+                        continue
+                    quantity = max(0.0, float(line.get("quantity") or 0))
+                    line_net = max(0.0, float(line.get("net") or 0))
+                    material_revenue += line_net * (1 - invoice_discount / 100)
+                    purchase_price = purchase_price_for(description)
+                    if purchase_price > 0:
+                        material_purchase += quantity * purchase_price
+                    elif quantity > 0:
+                        material_missing_prices += 1
             run_summaries.append({
                 "id": int(run.get("id") or 0),
                 "label": str(run.get("label") or "Rechnungslauf"),
@@ -446,16 +607,26 @@ def install(ns):
             })
         invoices.sort(key=lambda row: (row["issueDate"], row["id"]))
         payments.sort(key=lambda row: (row["paymentDate"], row["id"]))
+        billed_net = round(sum(row["net"] for row in invoices), 2)
+        recorded_hours_net = project_recorded_hours_net(project.get("projectNumber"))
+        material_purchase = round(material_purchase, 2)
+        material_revenue = round(material_revenue, 2)
         return {
             "found": True,
             "projectNumber": str(project.get("projectNumber") or ""),
             "projectIndex": project_index,
             "summary": {
                 "invoiceCount": len(invoices),
-                "billedNet": round(sum(row["net"] for row in invoices), 2),
+                "billedNet": billed_net,
                 "billedGross": round(sum(row["gross"] for row in invoices), 2),
                 "paidGross": round(sum(row["gross"] for row in payments), 2),
                 "openGross": round(sum(row["openGross"] for row in run_summaries), 2),
+                "recordedHoursNet": recorded_hours_net,
+                "materialPurchase": material_purchase,
+                "materialRevenueNet": material_revenue,
+                "materialProfit": round(material_revenue - material_purchase, 2),
+                "netPerRecordedHour": round(billed_net / recorded_hours_net, 2) if recorded_hours_net else 0,
+                "materialMissingPrices": material_missing_prices,
             },
             "invoices": invoices,
             "payments": payments,
@@ -945,6 +1116,8 @@ OUTGOING_PAGE = r'''<!doctype html>
 .lines tr.regie-report-head td{border-top:2px solid var(--blue);padding-top:14px}.lines tr.regie-report-head input{font-size:16px;font-weight:800;border-color:#3c67a0}.lines tr.regie-section-head input{font-weight:800;border:0;background:transparent;padding-left:0}.lines tr.regie-report-sum td{border-top:1px solid #617080;padding-top:9px;padding-bottom:14px}.lines tr.regie-report-sum input.desc{font-weight:800}.lines td.regie-hidden{display:none}.lines tr.regie-material-start td:nth-child(2){border-top:1px dashed #53616e;padding-top:12px}.lines tr.regie-material-start td:nth-child(2)::before{content:'Material';display:block;margin-bottom:6px;color:var(--green);font-weight:800;font-size:13px}
 .lines{table-layout:fixed}.lines th:nth-child(1),.lines td:nth-child(1){width:42px}.lines th:nth-child(3),.lines td:nth-child(3){width:90px}.lines th:nth-child(4),.lines td:nth-child(4){width:82px}.lines th:nth-child(5),.lines td:nth-child(5){width:120px}.lines th:nth-child(6),.lines td:nth-child(6){width:88px}.lines th.pos-total-head,.lines td.pos-total-cell{width:125px;text-align:right;font-variant-numeric:tabular-nums}.lines th:last-child,.lines td:last-child{width:48px}.lines td.pos-total-cell{padding-top:15px;font-weight:800;white-space:nowrap}
 .lines td:nth-child(2){position:relative}.insert-material-after{position:absolute;right:7px;top:50%;transform:translateY(-50%);min-height:27px;padding:3px 7px;font-size:11px;opacity:0;pointer-events:none}.lines tr:hover .insert-material-after,.insert-material-after:focus{opacity:1;pointer-events:auto}.lines tr:hover input.desc{padding-right:118px}
+.lines tr.regie-report-sum td:nth-child(2){display:flex;gap:12px;align-items:end}.lines tr.regie-report-sum td:nth-child(2)>input.desc{flex:1}.report-material-discount::before,.work-discount-control span{content:'Rabatt Material %';display:block;margin-bottom:3px;color:var(--muted);font-size:10px;font-weight:700;white-space:nowrap}.work-discount-control{display:block;width:112px;flex:0 0 112px}.work-discount-control input{min-width:0}.report-material-discount{width:112px!important}
+.pricing-factbox{grid-column:1/-1;display:grid;grid-template-columns:minmax(150px,220px) minmax(150px,220px) 1fr auto;gap:10px;align-items:end;padding:12px;border:1px solid #385c46;border-radius:11px;background:#111b16}.pricing-factbox .pricing-rule{align-self:center;color:var(--muted);font-size:12px;line-height:1.45}.pricing-factbox.locked input{opacity:.7}.pricing-factbox .pill{justify-self:start}@media(max-width:800px){.pricing-factbox{grid-template-columns:1fr 1fr}.pricing-factbox .pricing-rule{grid-column:1/-1}}
 </style></head><body>
 <header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1></div><div class="row"><a href="/outgoing/open-items"><button class="ghost">Debitoren-OP</button></a><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
 <main class="layout"><aside class="card side"><label>Projekt, Kunde oder Nummer suchen<div class="row"><input id="search" class="grow" placeholder="z. B. 26025 oder Kundenname"><button id="searchButton">Suchen</button></div></label><div id="projects"></div><div class="section"><h3>Rechnungsläufe</h3><div id="runs" class="muted">Projekt auswählen.</div></div></aside><section><div id="empty" class="card">Projekt auswählen und einen Rechnungslauf anlegen.</div><div id="workspace" class="hide"></div><div id="recent" class="card section"><h3>Zuletzt bearbeitet</h3><div id="recentGrid" class="recent-grid"><span class="muted">Wird geladen …</span></div></div></section></main>
@@ -970,7 +1143,7 @@ async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedR
 function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status==='draft'),nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status==='issued').length+1;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${draft?'Entwurf bearbeiten':nextTr+'. TR / Rechnung erstellen'}</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div><div id="quickView"></div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice(draft||null));$('newPayment').onclick=showPayment;wireInvoices()}
 function linkedRegiePreset(){const q=new URLSearchParams(location.search),hours=Number(q.get('regieHours')||0),labor=Number(q.get('laborTotal')||0),material=Number(q.get('materialTotal')||0);let detail={days:[]};try{const token=(q.get('regieDetail')||'').replace(/-/g,'+').replace(/_/g,'/');detail=JSON.parse(decodeURIComponent(escape(atob(token+'==='.slice((token.length+3)%4)))))}catch{}return {hours,labor,material,days:Array.isArray(detail.days)?detail.days:[],available:hours>0||labor>0||material>0}}
 async function ensureRunForKind(kind){if(kind!=='RE'||!(selectedRun?.invoices||[]).some(x=>x.status==='issued'))return selectedRun;const source=selectedRun,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:source.project_index,projectNumber:source.project_number,customerIndex:source.customer_index,projectTitle:source.project_title,label:`${source.project_title||source.label} · Extra-Rechnung`,customerUid:source.customer_uid,company:source.customer_company,customerName:source.customer_name,street:source.customer_street,postalCode:source.customer_postal_code,city:source.customer_city,country:source.customer_country})});await loadRun(d.run.id);return selectedRun}
-async function createLinkedRegieDraft(kind){await ensureRunForKind(kind);const p=linkedRegiePreset(),due=new Date(today()+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=[];for(const [dayIndex,day] of p.days.entries()){const labor=(day.employees||[]).reduce((s,x)=>s+Number(x.cost||0),0),material=(day.materials||[]).reduce((s,x)=>s+Number(x.cost||0),0),label=new Intl.DateTimeFormat('de-AT').format(new Date(day.date+'T12:00:00')),reportNo=dayIndex+1;lines.push({description:`${reportNo}. Bericht - ${label}`,quantity:0,unit:'TAG',unitPrice:0,discountPercent:0},{description:'Arbeit',quantity:0,unit:'ARBEIT',unitPrice:0,discountPercent:0});for(const x of day.employees||[])lines.push({description:x.name||'Mitarbeiter',quantity:Number(x.hours||0),unit:'Std.',unitPrice:Number(x.hours||0)?Number(x.cost||0)/Number(x.hours):0,discountPercent:0});if((day.materials||[]).length)lines.push({description:'Material',quantity:0,unit:'MATERIAL',unitPrice:0,discountPercent:0});for(const x of day.materials||[])lines.push({description:x.name||'Material',quantity:Number(x.quantity||1),unit:x.unit||'PA',unitPrice:Number(x.unitPrice||0)||(Number(x.cost||0)/Number(x.quantity||1)),discountPercent:0});lines.push({description:`Summe Bericht ${reportNo}`,quantity:0,unit:'SUMME',unitPrice:0,discountPercent:0})}if(!lines.length){if(p.labor>0)lines.push({description:'Regiearbeit lt. Berichten',quantity:p.hours||1,unit:p.hours?'Std.':'PA',unitPrice:p.hours?p.labor/p.hours:p.labor,discountPercent:0});if(p.material>0)lines.push({description:'Material lt. Berichten',quantity:1,unit:'PA',unitPrice:p.material,discountPercent:20})}const dates=p.days.map(x=>x.date).filter(Boolean).sort(),runId=selectedRun.id,d=await api('/api/outgoing/invoices',{method:'POST',body:JSON.stringify({runId,kind,issueDate:today(),dueDate:due.toISOString().slice(0,10),serviceFrom:dates[0]||today(),serviceTo:dates[dates.length-1]||today(),taxMode:'AT20',retentionPercent:0,discountPercent:0,cashDiscountPercent:0,subject:'Regiearbeiten · '+selectedRun.label,notes:'',lines})});await loadRun(runId);editInvoice(d.invoice)}
+async function createLinkedRegieDraft(kind){await ensureRunForKind(kind);const p=linkedRegiePreset(),due=new Date(today()+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=[];for(const [dayIndex,day] of p.days.entries()){const labor=(day.employees||[]).reduce((s,x)=>s+Number(x.cost||0),0),material=(day.materials||[]).reduce((s,x)=>s+Number(x.cost||0),0),label=new Intl.DateTimeFormat('de-AT').format(new Date(day.date+'T12:00:00')),reportNo=dayIndex+1,work=String(day.component||'').trim(),hasWork=work&&!/^Raum\s*\/\s*Bauteil$/i.test(work);lines.push({description:`${reportNo}. Bericht - ${label}`,quantity:0,unit:'TAG',unitPrice:0,discountPercent:0},{description:'Arbeit',quantity:0,unit:'ARBEIT',unitPrice:0,discountPercent:0});if(hasWork)lines.push({description:work,quantity:0,unit:'BAUTEIL',unitPrice:0,discountPercent:0});for(const x of day.employees||[])lines.push({description:x.name||'Mitarbeiter',quantity:Number(x.hours||0),unit:'Std.',unitPrice:Number(x.hours||0)?Number(x.cost||0)/Number(x.hours):0,discountPercent:0});if((day.materials||[]).length)lines.push({description:'Material',quantity:0,unit:'MATERIAL',unitPrice:0,discountPercent:0});for(const x of day.materials||[])lines.push({description:x.name||'Material',quantity:Number(x.quantity||1),unit:x.unit||'PA',unitPrice:Number(x.unitPrice||0)||(Number(x.cost||0)/Number(x.quantity||1)),discountPercent:0});lines.push({description:`Summe Bericht ${reportNo}`,quantity:0,unit:'SUMME',unitPrice:0,discountPercent:0})}if(!lines.length){if(p.labor>0)lines.push({description:'Regiearbeit lt. Berichten',quantity:p.hours||1,unit:p.hours?'Std.':'PA',unitPrice:p.hours?p.labor/p.hours:p.labor,discountPercent:0});if(p.material>0)lines.push({description:'Material lt. Berichten',quantity:1,unit:'PA',unitPrice:p.material,discountPercent:20})}const dates=p.days.map(x=>x.date).filter(Boolean).sort(),runId=selectedRun.id,d=await api('/api/outgoing/invoices',{method:'POST',body:JSON.stringify({runId,kind,issueDate:today(),dueDate:due.toISOString().slice(0,10),serviceFrom:dates[0]||today(),serviceTo:dates[dates.length-1]||today(),taxMode:'AT20',retentionPercent:0,discountPercent:0,cashDiscountPercent:0,subject:'Regiearbeiten · '+selectedRun.label,notes:'',lines})});await loadRun(runId);editInvoice(d.invoice)}
 async function startInvoiceKind(kind){await ensureRunForKind(kind);editInvoice(null);const select=$('invKind');if(select){select.value=kind;select.onchange?.()}if(kind==='RE'){$('subject').value='Extra-Rechnung · Handwerker / Material';$('notes').value='Zusätzliche, der Baustelle zugeordnete Leistung.'}}
 function invoiceKindButtons(action){const issued=(selectedRun?.invoices||[]).filter(x=>x.status==='issued'),trCount=issued.filter(x=>x.kind==='TR').length,choices=trCount?[['TR',`${trCount+1}. TR`],['SR','SR'],['RE','Extra-Rechnung']]:[['TR','1. TR'],['RE','Rechnung']];return choices.map(([kind,label])=>{const b=document.createElement('button');b.className=kind==='TR'?'primary':kind==='SR'?'danger':'ghost';b.textContent=label;b.onclick=()=>Promise.resolve(action(kind)).catch(e=>msg(e.message,true));return b})}
 function showRegieKindChoice(){const box=$('invoiceKindChoices');box.innerHTML='';for(const b of invoiceKindButtons(async kind=>{close('invoiceKindModal');await createLinkedRegieDraft(kind)}))box.append(b);open('invoiceKindModal')}
@@ -993,14 +1166,16 @@ function dateControl(id,label,value){return `<label>${label}<div class="date-con
 function editInvoice(x=null){editing=x;const history=(selectedRun.invoices||[]).filter(i=>['TR','SR','RE'].includes(i.kind)&&i.status==='issued'&&i.id!==x?.id),nextTr=history.filter(i=>i.kind==='TR').length+1,titleFor=k=>k==='TR'?`${nextTr}. Teilrechnung`:k==='SR'?'Schlussrechnung':'Rechnung',priorNet=history.reduce((s,i)=>s+Number(i.increment_net||0),0),priorVat=history.reduce((s,i)=>s+Number(i.increment_vat||0),0),priorGross=history.reduce((s,i)=>s+Number(i.increment_gross||0),0),paidGross=Number(selectedRun.paidGross||0),due=new Date((x?.issue_date||today())+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=x?.lines?.length?x.lines:[{description:'Kumulativer Leistungsstand lt. Auftrag',quantity:1,unit:'PA',unit_price:priorNet,discount_percent:0}],historyRows=history.map((i,n)=>`${esc(i.invoice_number||'')}${i.kind==='TR'?' · '+(n+1)+'. Teilrechnung':' · '+esc(i.kind)} · netto ${money(i.increment_net)} · brutto ${money(i.increment_gross)}`).join('<br>');$('editor').innerHTML=`<div class="card section"><div class="head"><h2 id="editorTitle">${x?'Entwurf bearbeiten':'Neue '+titleFor('TR')}</h2><button id="editorClose">×</button></div><div class="grid3"><label>Art<select id="invKind"><option value="TR">Teilrechnung</option><option value="SR">Schlussrechnung</option><option value="RE">Rechnung</option></select></label>${dateControl('invDate','Rechnungsdatum',x?.issue_date||today())}${dateControl('dueDate','Fällig am',x?.due_date||due.toISOString().slice(0,10))}${dateControl('serviceFrom','Leistung von',x?.service_from||today())}${dateControl('serviceTo','Leistung bis',x?.service_to||today())}<label>USt-Art<select id="taxMode"><option value="AT20">20 % Österreich</option><option value="CHLI81">8,1 % Schweiz / Liechtenstein</option><option value="RC19">0 % · § 19 Übergang Steuerschuld</option><option value="EU0">0 % · EU-Auslandslieferung</option></select></label><label id="recipientUidLabel">Kunden-UID<input id="recipientUid" value="${esc(x?.recipient_uid||selectedRun.customer_uid||'')}"></label><label>Deckungsrücklass %<input id="retention" inputmode="decimal" value="${x?.retention_percent||0}"></label><label>Rabatt %<input id="discount" inputmode="decimal" value="${x?.discount_percent||0}"></label><label>Skonto %<input id="cashDiscount" inputmode="decimal" value="${x?.cash_discount_percent||0}"></label>${dateControl('cashUntil','Skonto bis',x?.cash_discount_until||'')}<label>Betreff<input id="subject" value="${esc(x?.subject||selectedRun.label)}"></label></div>${history.length?`<div class="section"><h3>Bisheriger Stand aus WW / KRISTINE</h3><div class="summary"><div>Abgerechnet netto<strong>${money(priorNet)}</strong></div><div>USt<strong>${money(priorVat)}</strong></div><div>Abgerechnet brutto<strong>${money(priorGross)}</strong></div><div>Erhaltene Zahlungen<strong>${money(paidGross)}</strong></div></div><div class="small muted">${historyRows}</div><div class="small" style="margin-top:9px;color:var(--amber)">Unten steht bereits der bisherige Netto-Leistungsstand. Für die ${nextTr}. Teilrechnung bitte auf den neuen kumulierten Gesamtstand erhöhen – nicht nur den Zusatzbetrag eingeben.</div></div>`:''}<div class="section"><h3>Leistungen / kumulierter Stand</h3><table class="lines"><thead><tr><th>Pos</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Gesamtstand netto</th><th>Rabatt %</th><th></th></tr></thead><tbody id="lineRows"></tbody></table><button id="addLine">+ Position</button></div><label class="section">Zusatztext<textarea id="notes">${esc(x?.notes||'')}</textarea></label><div class="row section"><button id="saveDraft" class="primary">Entwurf speichern</button><button id="savePreview">Speichern & PDF prüfen</button></div></div>`;$('invKind').value=x?.kind||'TR';$('invKind').onchange=()=>{if(!x)$('editorTitle').textContent='Neue '+titleFor($('invKind').value)};$('taxMode').value=x?.tax_mode||'AT20';let model=lines.map(l=>({description:l.description||'',quantity:l.quantity??1,unit:l.unit||'PA',unitPrice:l.unit_price??l.unitPrice??0,discountPercent:l.discount_percent??l.discountPercent??0}));function renderLines(){$('lineRows').innerHTML=model.map((l,i)=>`<tr><td>${i+1}</td><td><input class="desc" data-f="description" data-i="${i}" value="${esc(l.description)}"></td><td><input data-f="quantity" data-i="${i}" value="${esc(l.quantity)}"></td><td><input data-f="unit" data-i="${i}" value="${esc(l.unit)}"></td><td><input data-f="unitPrice" data-i="${i}" value="${esc(l.unitPrice)}"></td><td><input data-f="discountPercent" data-i="${i}" value="${esc(l.discountPercent)}" placeholder="${l.unit==='SUMME'?'Materialrabatt':''}"></td><td><button data-del="${i}">×</button></td></tr>`).join('');$('lineRows').querySelectorAll('input').forEach(e=>{e.oninput=()=>{const i=Number(e.dataset.i),f=e.dataset.f;model[i][f]=e.value;if(f==='discountPercent'&&model[i].unit==='SUMME'){for(let j=i-1;j>=0;j--){const unit=String(model[j].unit||'').toUpperCase();if(unit==='MATERIAL')break;if(['TAG','ARBEIT'].includes(unit))break;model[j].discountPercent=e.value}}};e.onchange=()=>{if(e.dataset.f==='discountPercent'&&model[Number(e.dataset.i)].unit==='SUMME')renderLines()}});$('lineRows').querySelectorAll('[data-del]').forEach(e=>e.onclick=()=>{model.splice(Number(e.dataset.del),1);renderLines()})}renderLines();$('addLine').onclick=()=>{model.push({description:'',quantity:1,unit:'PA',unitPrice:0,discountPercent:0});renderLines()};$('editorClose').onclick=()=>{$('editor').innerHTML=''};document.querySelectorAll('[data-date-minus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.dateMinus,-1));document.querySelectorAll('[data-date-plus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.datePlus,1));$('taxMode').onchange=()=>$('recipientUidLabel').classList.toggle('hide',!['RC19','EU0'].includes($('taxMode').value));$('taxMode').onchange();async function save(preview){const payload={runId:selectedRun.id,kind:$('invKind').value,issueDate:$('invDate').value,dueDate:$('dueDate').value,serviceFrom:$('serviceFrom').value,serviceTo:$('serviceTo').value,taxMode:$('taxMode').value,recipientUid:$('recipientUid').value,retentionPercent:$('retention').value,discountPercent:$('discount').value,cashDiscountPercent:$('cashDiscount').value,cashDiscountUntil:$('cashUntil').value,subject:$('subject').value,notes:$('notes').value,lines:model};const d=await api(editing?'/api/outgoing/invoices/'+editing.id:'/api/outgoing/invoices',{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=d.invoice;msg('Entwurf gespeichert.');await loadRun(selectedRun.id);if(preview)window.open('/api/outgoing/invoices/'+editing.id+'/preview.pdf','_blank')} $('saveDraft').onclick=()=>save(false).catch(e=>msg(e.message,true));$('savePreview').onclick=()=>save(true).catch(e=>msg(e.message,true))}
 function editorLineTotal(row){const inputs=[...row.querySelectorAll('input')],value=f=>Number(inputs.find(x=>x.dataset.f===f)?.value||0);return value('quantity')*value('unitPrice')*(1-value('discountPercent')/100)}
 function updateEditorPositionTotal(row){const cell=row.querySelector('.pos-total-cell');if(cell)cell.textContent=money(editorLineTotal(row))}
-function decorateRegieEditor(){const body=$('lineRows');if(!body)return;const head=body.closest('table')?.querySelector('thead tr');if(head&&!head.querySelector('.pos-total-head')){const th=document.createElement('th');th.className='pos-total-head';th.textContent='Positionssumme';head.insertBefore(th,head.lastElementChild)}let report=0,inMaterial=false,reportTotal=0;for(const row of [...body.rows]){if(!row.querySelector('.pos-total-cell')){const td=document.createElement('td');td.className='pos-total-cell';row.insertBefore(td,row.lastElementChild)}const cells=[...row.cells],inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unitInput=inputs.find(x=>x.dataset.f==='unit'),unit=String(unitInput?.value||'').toUpperCase();row.classList.remove('regie-report-head','regie-section-head','regie-report-sum','regie-material-start');cells.forEach(cell=>cell.classList.remove('regie-hidden'));if(cells[1])cells[1].colSpan=1;if(unit==='TAG'){report++;reportTotal=0;inMaterial=false;row.classList.add('regie-report-head');const date=(desc?.value||'').match(/\d{1,2}\.\d{1,2}\.\d{4}/)?.[0]||'';if(desc&&date&&!/^\d+\. Bericht/.test(desc.value)){desc.value=`${report}. Bericht - ${date}`;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(cells[0])cells[0].textContent=String(report);if(cells[1])cells[1].colSpan=6;[2,3,4,5,6].forEach(i=>cells[i]?.classList.add('regie-hidden'));continue}if(unit==='BAUTEIL'||unit==='ARBEIT'||unit==='MATERIAL'){if(unit==='MATERIAL')inMaterial=true;if(desc&&unit!=='MATERIAL'&&desc.value!=='Arbeit'){desc.value='Arbeit';desc.dispatchEvent(new Event('input',{bubbles:true}))}row.classList.add('regie-section-head');if(cells[0])cells[0].textContent='';if(cells[1])cells[1].colSpan=6;[2,3,4,5,6].forEach(i=>cells[i]?.classList.add('regie-hidden'));continue}if(unit==='SUMME'){row.classList.add('regie-report-sum');if(desc&&desc.value!==`Summe ${report}`){desc.value=`Summe ${report}`;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(cells[0])cells[0].textContent='';if(cells[1])cells[1].colSpan=4;[2,3,4].forEach(i=>cells[i]?.classList.add('regie-hidden'));if(cells[6])cells[6].textContent=money(reportTotal);continue}const labor=['STD','STD.','H','H.'].includes(unit);if(!labor&&!inMaterial){row.classList.add('regie-material-start');inMaterial=true}updateEditorPositionTotal(row);reportTotal+=editorLineTotal(row);if(!row.dataset.totalWired){row.dataset.totalWired='1';row.addEventListener('input',()=>updateEditorPositionTotal(row))}}}
+function decorateRegieEditor(){const body=$('lineRows');if(!body)return;const head=body.closest('table')?.querySelector('thead tr');if(head&&!head.querySelector('.pos-total-head')){const th=document.createElement('th');th.className='pos-total-head';th.textContent='Positionssumme';head.insertBefore(th,head.lastElementChild)}let report=0,inMaterial=false,reportTotal=0;for(const row of [...body.rows]){if(!row.querySelector('.pos-total-cell')){const td=document.createElement('td');td.className='pos-total-cell';row.insertBefore(td,row.lastElementChild)}const cells=[...row.cells],inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unitInput=inputs.find(x=>x.dataset.f==='unit'),unit=String(unitInput?.value||'').toUpperCase();row.classList.remove('regie-report-head','regie-section-head','regie-report-sum','regie-material-start');cells.forEach(cell=>cell.classList.remove('regie-hidden'));if(cells[1])cells[1].colSpan=1;if(unit==='TAG'){report++;reportTotal=0;inMaterial=false;row.classList.add('regie-report-head');const date=(desc?.value||'').match(/\d{1,2}\.\d{1,2}\.\d{4}/)?.[0]||'';if(desc&&date&&!/^\d+\. Bericht/.test(desc.value)){desc.value=`${report}. Bericht - ${date}`;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(cells[0])cells[0].textContent=String(report);if(cells[1])cells[1].colSpan=6;[2,3,4,5,6].forEach(i=>cells[i]?.classList.add('regie-hidden'));continue}if(unit==='BAUTEIL'){row.classList.add('regie-section-head');if(cells[0])cells[0].textContent='';if(cells[1])cells[1].colSpan=6;[2,3,4,5,6].forEach(i=>cells[i]?.classList.add('regie-hidden'));continue}if(unit==='ARBEIT'||unit==='MATERIAL'){if(unit==='MATERIAL')inMaterial=true;if(desc&&unit==='ARBEIT'&&desc.value!=='Arbeit'){desc.value='Arbeit';desc.dispatchEvent(new Event('input',{bubbles:true}))}row.classList.add('regie-section-head');if(cells[0])cells[0].textContent='';if(cells[1])cells[1].colSpan=6;[2,3,4,5,6].forEach(i=>cells[i]?.classList.add('regie-hidden'));continue}if(unit==='SUMME'){row.classList.add('regie-report-sum');if(desc&&desc.value!==`Summe ${report}`){desc.value=`Summe ${report}`;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(cells[0])cells[0].textContent='';if(cells[1])cells[1].colSpan=4;[2,3,4].forEach(i=>cells[i]?.classList.add('regie-hidden'));if(cells[6])cells[6].textContent=money(reportTotal);continue}const labor=['STD','STD.','H','H.'].includes(unit);if(!labor&&!inMaterial){row.classList.add('regie-material-start');inMaterial=true}updateEditorPositionTotal(row);reportTotal+=editorLineTotal(row);if(!row.dataset.totalWired){row.dataset.totalWired='1';row.addEventListener('input',()=>updateEditorPositionTotal(row))}}}
 function addEditorInsertButtons(){if(!editing||editing.status!=='draft')return;for(const row of [...($('lineRows')?.rows||[])]){const unit=[...row.querySelectorAll('input')].find(x=>x.dataset.f==='unit'),desc=[...row.querySelectorAll('input')].find(x=>x.dataset.f==='description'),marker=String(unit?.value||'').toUpperCase();if(!desc)continue;if(marker==='SUMME'&&!row.querySelector('.insert-material-here')){const button=document.createElement('button');button.type='button';button.className='good insert-material-here';button.style.margin='6px 0 0 8px';button.textContent='+ Material hier';button.onclick=()=>insertMaterialAtSummary(editing.id,Number(desc.dataset.i)).catch(e=>msg(e.message,true));desc.parentElement.append(button)}else if(!['TAG','BAUTEIL','ARBEIT','MATERIAL','SUMME'].includes(marker)&&!row.querySelector('.insert-material-after')){const button=document.createElement('button');button.type='button';button.className='ghost insert-material-after';button.textContent='+ Material danach';button.onclick=()=>insertMaterialAtSummary(editing.id,Number(desc.dataset.i)+1).catch(e=>msg(e.message,true));desc.parentElement.append(button)}}}
-let lineCatalog=null,lineCatalogPromise=null;
-function ensureLineCatalog(){if(lineCatalog)return Promise.resolve(lineCatalog);if(!lineCatalogPromise)lineCatalogPromise=api('/api/outgoing/line-catalog').then(d=>lineCatalog={employees:d.employees||[],materials:d.materials||[]}).catch(e=>{console.warn('Auswahllisten konnten nicht geladen werden',e);return lineCatalog={employees:[],materials:[]}});return lineCatalogPromise}
-function catalogDatalist(id,items){let list=$(id);if(!list){list=document.createElement('datalist');list.id=id;document.body.append(list)}list.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.name;option.label=[item.unit,item.unitPrice?money(item.unitPrice):''].filter(Boolean).join(' · ');return option}));return list}
-function applyCatalogChoice(row,items){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=inputs.find(x=>x.dataset.f==='unit'),price=inputs.find(x=>x.dataset.f==='unitPrice');const choice=items.find(item=>item.name.localeCompare(desc?.value||'','de',{sensitivity:'base'})===0);if(!choice)return;if(unit&&choice.unit){unit.value=choice.unit;unit.dispatchEvent(new Event('input',{bubbles:true}))}if(price&&Number(choice.unitPrice)>0){price.value=Number(choice.unitPrice).toFixed(2);price.dispatchEvent(new Event('input',{bubbles:true}))}decorateRegieEditor()}
-function wireEditorCatalogs(){if(!editing||editing.status!=='draft')return;ensureLineCatalog().then(catalog=>{catalogDatalist('outgoingEmployeeChoices',catalog.employees);catalogDatalist('outgoingMaterialChoices',catalog.materials);let inMaterial=false;for(const row of [...($('lineRows')?.rows||[])]){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=String(inputs.find(x=>x.dataset.f==='unit')?.value||'').trim().toUpperCase();if(unit==='TAG'){inMaterial=false;continue}if(unit==='MATERIAL'){inMaterial=true;continue}if(['BAUTEIL','ARBEIT','SUMME'].includes(unit)){if(unit==='SUMME')inMaterial=false;continue}const labor=['STD','STD.','H','H.'].includes(unit);if(!labor&&!inMaterial)inMaterial=true;const items=labor?catalog.employees:(inMaterial?catalog.materials:[]),listId=labor?'outgoingEmployeeChoices':(inMaterial?'outgoingMaterialChoices':'');if(!desc||!listId)continue;desc.setAttribute('list',listId);desc.setAttribute('autocomplete','off');if(!desc.dataset.catalogWired){desc.dataset.catalogWired='1';desc.addEventListener('change',()=>applyCatalogChoice(row,items))}}})}
-function enhanceRegieEditor(){decorateRegieEditor();addEditorInsertButtons();wireEditorCatalogs()}
+function addReportDiscountControls(){let reportRows=[];for(const row of [...($('lineRows')?.rows||[])]){const inputs=[...row.querySelectorAll('input')],unit=String(inputs.find(x=>x.dataset.f==='unit')?.value||'').toUpperCase();if(unit==='TAG'){reportRows=[];continue}if(unit!=='SUMME'){reportRows.push(row);continue}const materialDiscount=inputs.find(x=>x.dataset.f==='discountPercent');materialDiscount?.parentElement?.classList.add('report-material-discount');if(row.querySelector('.work-discount-control'))continue;const laborRows=reportRows.filter(item=>{const value=[...item.querySelectorAll('input')].find(x=>x.dataset.f==='unit')?.value||'';return ['STD','STD.','H','H.'].includes(String(value).toUpperCase())}),discounts=laborRows.map(item=>[...item.querySelectorAll('input')].find(x=>x.dataset.f==='discountPercent')).filter(Boolean),values=[...new Set(discounts.map(input=>String(input.value||'0')))];const label=document.createElement('label');label.className='work-discount-control';const caption=document.createElement('span');caption.textContent='Rabatt Arbeit %';const field=document.createElement('input');field.type='number';field.min='0';field.max='100';field.step='0.1';field.value=values.length===1?values[0]:'';field.placeholder='0';field.addEventListener('input',()=>{for(const input of discounts){input.value=field.value;input.dispatchEvent(new Event('input',{bubbles:true}))}decorateRegieEditor()});label.append(caption,field);row.cells[1]?.append(label)}}
+let lineCatalog=null,lineCatalogPromise=null,lineCatalogProject='';
+function ensureLineCatalog(){const project=[selectedRun?.id,selectedRun?.billing_rate,selectedRun?.material_markup_percent].join(':');if(lineCatalog&&lineCatalogProject===project)return Promise.resolve(lineCatalog);if(lineCatalogProject!==project){lineCatalog=null;lineCatalogPromise=null;lineCatalogProject=project}if(!lineCatalogPromise)lineCatalogPromise=api('/api/outgoing/line-catalog?run='+encodeURIComponent(selectedRun?.id||'')+'&project='+encodeURIComponent(selectedRun?.project_number||'')).then(d=>lineCatalog={employees:d.employees||[],materials:d.materials||[],materialMarkup:Number(d.materialMarkup||80),billingRate:Number(d.billingRate||75)}).catch(e=>{console.warn('Auswahllisten konnten nicht geladen werden',e);return lineCatalog={employees:[],materials:[],materialMarkup:80,billingRate:75}});return lineCatalogPromise}
+function catalogDatalist(id,items){let list=$(id);if(!list){list=document.createElement('datalist');list.id=id;document.body.append(list)}const choices=items.flatMap(item=>[item.name,...(item.aliases||[])].map(name=>({name,item})));list.replaceChildren(...choices.map(choice=>{const item=choice.item,option=document.createElement('option');option.value=choice.name;option.label=[item.unit,item.unitPrice?money(item.unitPrice):''].filter(Boolean).join(' · ');return option}));return list}
+function applyCatalogChoice(row,items){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=inputs.find(x=>x.dataset.f==='unit'),price=inputs.find(x=>x.dataset.f==='unitPrice'),value=desc?.value||'';const choice=items.find(item=>[item.name,...(item.aliases||[])].some(name=>name.localeCompare(value,'de',{sensitivity:'base'})===0));if(!choice)return;if(desc&&desc.value!==choice.name){desc.value=choice.name;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(unit&&choice.unit){unit.value=choice.unit;unit.dispatchEvent(new Event('input',{bubbles:true}))}if(price&&Number(choice.unitPrice)>0){price.value=Number(choice.unitPrice).toFixed(2);price.dispatchEvent(new Event('input',{bubbles:true}))}decorateRegieEditor()}
+function wireEditorCatalogs(){if(!editing||editing.status!=='draft')return;ensureLineCatalog().then(catalog=>{catalogDatalist('outgoingEmployeeChoices',catalog.employees);catalogDatalist('outgoingMaterialChoices',catalog.materials);let inMaterial=false;for(const row of [...($('lineRows')?.rows||[])]){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=String(inputs.find(x=>x.dataset.f==='unit')?.value||'').trim().toUpperCase();if(unit==='TAG'){inMaterial=false;continue}if(unit==='MATERIAL'){inMaterial=true;continue}if(['BAUTEIL','ARBEIT','SUMME'].includes(unit)){if(unit==='SUMME')inMaterial=false;continue}const labor=['STD','STD.','H','H.'].includes(unit);if(!labor&&!inMaterial)inMaterial=true;const items=labor?catalog.employees:(inMaterial?catalog.materials:[]),listId=labor?'outgoingEmployeeChoices':(inMaterial?'outgoingMaterialChoices':'');if(!desc||!listId)continue;desc.setAttribute('list',listId);desc.setAttribute('autocomplete','off');if(!desc.dataset.catalogWired){desc.dataset.catalogWired='1';desc.addEventListener('change',()=>applyCatalogChoice(row,items))}if(labor)applyCatalogChoice(row,items)}})}
+function mountPricingFactbox(){const grid=$('editor')?.querySelector('.grid3');if(!grid||grid.querySelector('.pricing-factbox'))return;const locked=Boolean(selectedRun?.pricing_locked_at),box=document.createElement('div');box.className='pricing-factbox'+(locked?' locked':'');box.innerHTML=`<label>Regiestundensatz netto<input id="runBillingRate" type="number" min="0.01" step="0.01" value="${Number(selectedRun?.billing_rate||75).toFixed(2)}" ${locked?'disabled':''}></label><label>Materialaufschlag %<input id="runMaterialMarkup" type="number" min="0" step="0.1" value="${Number(selectedRun?.material_markup_percent||80)}" ${locked?'disabled':''}></label><div class="pricing-rule"><strong>Preisbasis</strong><br>Little Greene: VK brutto ÷ 1,20 · übriges Material: EK + Aufschlag</div>${locked?'<span class="pill closed">Seit der 1. Rechnung fixiert</span>':'<button id="saveRunPricing" type="button" class="good">Preisbasis speichern</button>'}`;grid.append(box);if(locked)return;$('saveRunPricing').onclick=async()=>{try{const rate=Number($('runBillingRate').value||0),markup=Number($('runMaterialMarkup').value||0),d=await api('/api/outgoing/runs/'+selectedRun.id+'/pricing',{method:'PUT',body:JSON.stringify({billingRate:rate,materialMarkupPercent:markup})});Object.assign(selectedRun,d.run);lineCatalog=null;lineCatalogPromise=null;lineCatalogProject='';for(const row of [...($('lineRows')?.rows||[])]){const inputs=[...row.querySelectorAll('input')],unit=String(inputs.find(x=>x.dataset.f==='unit')?.value||'').toUpperCase(),price=inputs.find(x=>x.dataset.f==='unitPrice');if(price&&['STD','STD.','H','H.'].includes(unit)){price.value=rate.toFixed(2);price.dispatchEvent(new Event('input',{bubbles:true}))}}decorateRegieEditor();wireEditorCatalogs();msg('Preisbasis für diesen Rechnungslauf gespeichert.')}catch(e){msg(e.message,true)}}}
+function enhanceRegieEditor(){decorateRegieEditor();addEditorInsertButtons();addReportDiscountControls();mountPricingFactbox();wireEditorCatalogs()}
 const editInvoiceBaseStyled=editInvoice;editInvoice=function(x=null){editInvoiceBaseStyled(x);enhanceRegieEditor();const body=$('lineRows');if(body)new MutationObserver(()=>enhanceRegieEditor()).observe(body,{childList:true})};
 function shiftDate(id,days){const e=$(id),d=new Date((e.value||today())+'T12:00:00');d.setDate(d.getDate()+days);e.value=d.toISOString().slice(0,10)}
 async function issueInvoice(id){if(!confirm('Rechnung jetzt nummerieren und abschließen?'))return;try{const d=await api('/api/outgoing/invoices/'+id+'/issue',{method:'POST',body:'{}'});msg('Rechnung '+d.invoice.invoice_number+' erstellt.');await loadRun(selectedRun.id);window.open(d.pdfUrl,'_blank')}catch(e){msg(e.message,true)}}

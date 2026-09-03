@@ -403,6 +403,31 @@ class OutgoingStore:
             created_at TEXT NOT NULL
         );
         """)
+        run_columns = {row[1] for row in con.execute("PRAGMA table_info(outgoing_runs)")}
+        for column, definition in (
+            ("billing_rate", "TEXT NOT NULL DEFAULT '75'"),
+            ("material_markup_percent", "TEXT NOT NULL DEFAULT '80'"),
+            ("pricing_locked_at", "TEXT"),
+        ):
+            if column not in run_columns:
+                con.execute(f"ALTER TABLE outgoing_runs ADD COLUMN {column} {definition}")
+        con.execute("""
+            UPDATE outgoing_runs
+            SET pricing_locked_at=(
+                SELECT MIN(issued_at) FROM outgoing_invoices
+                WHERE outgoing_invoices.run_id=outgoing_runs.id
+                  AND outgoing_invoices.status='issued'
+                  AND outgoing_invoices.source='KRISTINE'
+                  AND outgoing_invoices.kind IN ('TR','SR','RE')
+            )
+            WHERE pricing_locked_at IS NULL AND EXISTS(
+                SELECT 1 FROM outgoing_invoices
+                WHERE outgoing_invoices.run_id=outgoing_runs.id
+                  AND outgoing_invoices.status='issued'
+                  AND outgoing_invoices.source='KRISTINE'
+                  AND outgoing_invoices.kind IN ('TR','SR','RE')
+            )
+        """)
         for key, value in DEFAULT_SETTINGS.items():
             con.execute("INSERT OR IGNORE INTO outgoing_settings(key,value) VALUES(?,?)", (key, str(value)))
         con.execute(
@@ -474,6 +499,33 @@ class OutgoingStore:
             ))
             run_id = cur.lastrowid
             self._audit(con, "run", run_id, "create", {"label": label, "projectNumber": data.get("projectNumber")})
+            con.commit()
+        return self.run(run_id)
+
+    def update_run_pricing(self, run_id, data):
+        run_id = int(run_id)
+        try:
+            billing_rate = _money(data.get("billingRate"))
+            material_markup = Decimal(str(data.get("materialMarkupPercent") or "0").replace(",", "."))
+        except Exception as exc:
+            raise ValueError("Preisbasis ist ungültig.") from exc
+        if billing_rate <= 0 or billing_rate > Decimal("10000"):
+            raise ValueError("Der Regiestundensatz muss größer als null sein.")
+        if material_markup < 0 or material_markup > Decimal("10000"):
+            raise ValueError("Der Materialaufschlag ist ungültig.")
+        with _LOCK, self.connect() as con:
+            row = con.execute("SELECT * FROM outgoing_runs WHERE id=?", (run_id,)).fetchone()
+            if not row:
+                raise ValueError("Rechnungslauf nicht gefunden.")
+            if row["pricing_locked_at"]:
+                raise ValueError("Die Preisbasis ist seit der ersten Rechnung festgeschrieben.")
+            con.execute(
+                "UPDATE outgoing_runs SET billing_rate=?,material_markup_percent=? WHERE id=?",
+                (str(billing_rate), str(material_markup), run_id),
+            )
+            self._audit(con, "run", run_id, "update_pricing", {
+                "billingRate": str(billing_rate), "materialMarkupPercent": str(material_markup),
+            })
             con.commit()
         return self.run(run_id)
 
@@ -1627,6 +1679,11 @@ class OutgoingStore:
                 str(totals["paidGross"]), str(totals["openWithDiscount"]), str(totals["openAfterDiscount"]),
                 _json([self._invoice_snapshot(x) for x in previous]), _json([self._payment_public(x) for x in payments]), now, now, int(invoice_id),
             ))
+            if row["kind"] in {"TR", "SR", "RE"}:
+                con.execute(
+                    "UPDATE outgoing_runs SET pricing_locked_at=COALESCE(pricing_locked_at,?) WHERE id=?",
+                    (now, row["run_id"]),
+                )
             if row["kind"] in {"SR", "RE"}:
                 con.execute("UPDATE outgoing_runs SET status='closed',closed_at=? WHERE id=?", (now, row["run_id"]))
             self._audit(con, "invoice", int(invoice_id), "issue", {"invoiceNumber": invoice_number})

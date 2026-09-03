@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-documentation-3";
+  const VERSION="2026-09-03-economy-4";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const token=new URLSearchParams(location.search).get("token")||"";
@@ -12,6 +12,7 @@
   const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
+  const money2=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",minimumFractionDigits:2,maximumFractionDigits:2}).format(num(v));
   const hour=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:2}).format(num(v))+" h";
   const fmtDate=v=>{if(!v)return "–";try{return new Date(String(v).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT")}catch{return String(v)}};
   const mailDate=v=>{const d=new Date(String(v||""));return Number.isFinite(d.getTime())?d.toLocaleString("de-AT",{dateStyle:"short",timeStyle:"short"}):""};
@@ -129,7 +130,7 @@
       const regieRows=await mapLimit(details,6,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return {day:d.day,regie:r.regie||r}});if(serial!==loadSerial)return;
       const billingResult=await billingApi(currentJobId).catch(e=>({ok:false,error:e.message}));if(serial!==loadSerial)return;
       renderMasterData(j);
-      renderEconomy(j,regieRows);
+      renderEconomy(j,regieRows,billingResult?.billing||{});
       renderHours(j,regieRows);
       renderPlanning(j);
       renderProtocols(j,details,documentation.items||[]);
@@ -190,8 +191,9 @@
     document.getElementById("bkSaveMaster").onclick=async()=>{const button=document.getElementById("bkSaveMaster"),status=document.getElementById("bkMasterSaveStatus"),projectContacts={owner:{customer:val("bkOwnerCustomer"),ownerRole:val("bkOwnerRole"),womanTitle:val("bkOwnerWomanTitle"),womanFirstName:val("bkOwnerWomanFirstName"),womanLastName:val("bkOwnerWomanLastName"),womanEmail:val("bkOwnerWomanEmail"),manTitle:val("bkOwnerManTitle"),manFirstName:val("bkOwnerManFirstName"),manLastName:val("bkOwnerManLastName"),manEmail:val("bkOwnerManEmail"),residentialStreet:val("bkHomeStreet"),residentialHouseNumber:val("bkHomeHouse"),residentialPostalCode:val("bkHomePostal"),residentialCity:val("bkHomeCity"),phoneOwnerWoman:val("bkOwnerWomanPhone"),phoneOwnerMan:val("bkOwnerManPhone"),email:val("bkOwnerWomanEmail"),extraLines:cleanExtras("owner")},siteManager:{company:val("bkSiteManagerCompany"),firstName:val("bkSiteManagerFirstName"),lastName:val("bkSiteManagerLastName"),phone:val("bkSiteManagerPhone"),email:val("bkSiteManagerEmail"),alsoArchitect:!!document.getElementById("bkSiteManagerAlsoArchitect")?.checked,extraLines:cleanExtras("siteManager")},architect:{company:val("bkArchitectCompany"),firstName:val("bkArchitectFirstName"),lastName:val("bkArchitectLastName"),phone:val("bkArchitectPhone"),email:val("bkArchitectEmail"),extraLines:cleanExtras("architect")}};button.disabled=true;status.textContent="Stammdaten werden gespeichert …";try{const ownerName=[[projectContacts.owner.womanFirstName,projectContacts.owner.womanLastName].filter(Boolean).join(" "),[projectContacts.owner.manFirstName,projectContacts.owner.manLastName].filter(Boolean).join(" ")].filter(Boolean).join(" + ")||projectContacts.owner.customer,payload={name:val("bkJobName"),street:val("bkSiteStreet"),houseNumber:val("bkSiteHouse"),postalCode:val("bkSitePostal"),city:val("bkSiteCity"),addressExtra:val("bkSiteExtra"),contactName:ownerName,contactPhone:projectContacts.owner.phoneOwnerWoman||projectContacts.owner.phoneOwnerMan,contactEmail:projectContacts.owner.womanEmail||projectContacts.owner.manEmail,projectContacts},result=await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/meta`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});Object.assign(j,result.meta||{});const cached=jobById(j.jobId);if(cached&&cached!==j)Object.assign(cached,result.meta||{});renderMasterData(j)}catch(error){button.disabled=false;status.textContent="Speichern nicht möglich: "+error.message}};
   }
 
-  function renderEconomy(j,regies){
+  function renderEconomy(j,regies,billing={}){
     const c=calc(j),contract=num(c.contractAmount??j.contractAmount),external=num(c.externalServices??j.externalServices),krista=num(c.kristaAmount),material=num(c.materialAmount),labor=num(c.laborAmount),rate=num(c.billingRate??j.billingRate),target=num(c.calculatedHours),actual=num(c.orderHours??c.actualHours),regie=num(c.actualRegieHours),planned=plannedFor(j.jobId),remaining=Math.max(0,target-actual),progress=target?actual/target*100:0;
+    const bs=billing?.summary||{},hasBilling=!!billing?.found,recorded=num(bs.recordedHoursNet),materialEk=num(bs.materialPurchase),materialRevenue=num(bs.materialRevenueNet),materialProfit=num(bs.materialProfit),perHour=num(bs.netPerRecordedHour),missing=num(bs.materialMissingPrices);
     const source=j.orderDocument||j.orderPdf||j.contractDocument||j.contractSource||"";
     const el=document.getElementById("bkEconomy");el.className="";el.innerHTML=`
       <div class="bk-grid">
@@ -199,6 +201,10 @@
         <div class="bk-card"><div class="bk-label">Kalkulierte Sollstunden</div><div class="bk-value">${hour(target)}</div><div class="bk-note">Lohnanteil ÷ ${money(rate)} / h</div></div>
         <div class="bk-card"><div class="bk-label">Iststunden Auftrag</div><div class="bk-value ${actual>target&&target?'bk-bad':''}">${hour(actual)}</div><div class="bk-note">Regie ${hour(regie)} getrennt</div></div>
         <div class="bk-card"><div class="bk-label">Noch offene Stunden</div><div class="bk-value">${hour(remaining)}</div><div class="bk-note">Planung aktuell ${hour(planned)}</div></div>
+        <div class="bk-card"><div class="bk-label">Material-EK</div><div class="bk-value">${hasBilling?money2(materialEk):'–'}</div><div class="bk-note">aus den abgerechneten Materialpositionen${missing?` · ${missing} EK fehlt`:''}</div></div>
+        <div class="bk-card"><div class="bk-label">Materialertrag</div><div class="bk-value ${materialProfit<0?'bk-bad':'bk-good'}">${hasBilling?money2(materialProfit):'–'}</div><div class="bk-note">Material-VK ${hasBilling?money2(materialRevenue):'–'} minus EK</div></div>
+        <div class="bk-card"><div class="bk-label">Ertrag je produktiver Stunde</div><div class="bk-value">${hasBilling&&recorded?money2(perHour):'–'}</div><div class="bk-note">abgerechnet netto ÷ Stempelstunden nach Pause</div></div>
+        <div class="bk-card"><div class="bk-label">Produktive Stempelstunden</div><div class="bk-value">${hasBilling?hour(recorded):'–'}</div><div class="bk-note">je Mitarbeiter/Tag minus 0,25 h Pause</div></div>
         <div class="bk-card bk-wide"><div class="bk-section-title"><h3>Vom Auftrag zu den Stunden</h3><span class="bk-source">live aus Baustellenkalkulation</span></div><div class="bk-flow">
           <div class="bk-step"><small>Auftrag brutto/netto lt. Datensatz</small><strong>${money(contract)}</strong></div>
           <div class="bk-step"><small>abzgl. Fremdleistung</small><strong>${money(external)}</strong></div>
