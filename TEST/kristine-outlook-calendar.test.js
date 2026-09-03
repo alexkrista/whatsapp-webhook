@@ -57,7 +57,7 @@ function jwt(account) {
     let graphPayload = null;
     global.fetch = async (url, options = {}) => {
       if (String(url).endsWith("/devicecode")) return new Response(JSON.stringify({ device_code:"device", user_code:"ABCD-EFGH", verification_uri:"https://login.microsoft.com/device", expires_in:900, interval:1 }), { status:200, headers:{ "Content-Type":"application/json" } });
-      if (String(url).endsWith("/token")) return new Response(JSON.stringify({ access_token:"access", refresh_token:"refresh", id_token:jwt("alexander.krista@krista.at"), expires_in:3600 }), { status:200, headers:{ "Content-Type":"application/json" } });
+      if (String(url).endsWith("/token")) return new Response(JSON.stringify({ access_token:"access", refresh_token:"refresh", id_token:jwt("alexander.krista@krista.at"), expires_in:3600, scope:"Calendars.ReadWrite Mail.Read" }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).includes("graph.microsoft.com")) {
         graphPayload = JSON.parse(options.body);
         return new Response(JSON.stringify({ id:"outlook-event-123", webLink:"https://outlook.example/event/123" }), { status:201, headers:{ "Content-Type":"application/json" } });
