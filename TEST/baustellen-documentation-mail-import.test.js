@@ -5,4 +5,6 @@ for(const text of ["Dokumentation","Protokolle & Fotos","Pläne","E-Mails","Alte
 assert.match(ui,/data-mail-queue/);assert.match(ui,/ondrop/);assert.match(server,/documentation\/mail/);assert.match(server,/parseMsg/);assert.match(server,/emlAttachments/);assert.match(server,/mail_imported/);
 assert.match(ui,/mailDate/);assert.match(ui,/mailSender/);assert.match(ui,/<b>Von:<\/b>/);assert.match(ui,/<b>Datum:<\/b>/);assert.match(server,/fromName/);assert.match(server,/fromEmail/);
 for(const text of ["Bestehende Regieberichte hineinziehen","Kurzübersicht Regieberichte","Mitarbeiter","Std. gesamt","Material gesamt"])assert.ok(ui.includes(text),`Regie-Import fehlt: ${text}`);assert.match(server,/documentation\/regie-report/);assert.match(server,/regie_report_imported/);
+assert.match(server,/extractRegieReportsFromPdf/);assert.match(server,/Duplikat\(e\) übersprungen/);
+assert.match(ui,/Details anzeigen/);assert.match(ui,/employeeDetails/);assert.match(ui,/materials/);
 console.log("baustellen documentation mail import test: ok");
