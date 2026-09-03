@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-live-hours-8";
+  const VERSION="2026-09-03-live-hours-9";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -102,9 +102,7 @@
 
   function liveOrderHours(j){
     if(!j)return 0;
-    const live=num(liveByJob.get(String(j.jobId))?.totalHours);
-    const regie=num(calc(j).actualRegieHours);
-    return Math.max(oldOrderHours(j),Math.max(0,live-regie));
+    return num(liveByJob.get(String(j.jobId))?.totalHours);
   }
   function matchingKristinePerson(krDayPeople,wwRow){
     if(!krDayPeople)return null;
