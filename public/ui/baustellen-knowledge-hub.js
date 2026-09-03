@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-owner-name-lines-3";
+  const VERSION="2026-09-03-documentation-1";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const token=new URLSearchParams(location.search).get("token")||"";
@@ -65,7 +65,7 @@
         <button data-bk-tab="economy">Wirtschaft</button>
         <button data-bk-tab="hours">Stunden & Team</button>
         <button data-bk-tab="planning">Planung</button>
-        <button data-bk-tab="protocols">Protokolle & Fotos</button>
+        <button data-bk-tab="protocols">Dokumentation</button>
         <button data-bk-tab="regie">Regie</button>
         <button data-bk-tab="material">Material</button>
         <button data-bk-tab="invoices">Rechnungen</button>
@@ -75,7 +75,7 @@
       <section class="bk-panel" data-bk-panel="economy"><div id="bkEconomy" class="bk-loading">Wirtschaft wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="hours"><div id="bkHours" class="bk-loading">Stunden und Mitarbeiter werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="planning"><div id="bkPlanning" class="bk-loading">Planung wird geladen …</div></section>
-      <section class="bk-panel" data-bk-panel="protocols"><div id="bkProtocols" class="bk-loading">Bautage, Fotos und Protokolle werden geladen …</div></section>
+      <section class="bk-panel" data-bk-panel="protocols"><div id="bkProtocols" class="bk-loading">Protokolle, Fotos, Pläne und E-Mails werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="regie"><div id="bkRegie" class="bk-loading">Regieberichte werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="material"><div id="bkMaterial" class="bk-loading">Materialwissen wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="invoices"><div id="bkInvoices" class="bk-loading">Rechnungsstand wird geladen …</div></section>`;
@@ -122,7 +122,7 @@
     try{
       await baseData(true);if(serial!==loadSerial)return;
       const j=jobById(currentJobId);if(!j)throw new Error("Baustelle nicht gefunden");
-      const [days,knowledge]=await Promise.all([api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/knowledge`).catch(()=>({}))]);if(serial!==loadSerial)return;
+      const [days,knowledge,documentation]=await Promise.all([api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/knowledge`).catch(()=>({})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/documentation`).catch(()=>({items:[]}))]);if(serial!==loadSerial)return;
       const details=days.detailed||[];
       const regieRows=await mapLimit(details,6,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return {day:d.day,regie:r.regie||r}});if(serial!==loadSerial)return;
       const billingResult=await billingApi(currentJobId).catch(e=>({ok:false,error:e.message}));if(serial!==loadSerial)return;
@@ -130,7 +130,7 @@
       renderEconomy(j,regieRows);
       renderHours(j,regieRows);
       renderPlanning(j);
-      renderProtocols(j,details);
+      renderProtocols(j,details,documentation.items||[]);
       renderRegie(j,regieRows);
       renderMaterial(j,regieRows,knowledge);
       renderInvoices(j,billingResult?.billing||{found:false,error:billingResult?.error||""});
@@ -236,13 +236,15 @@
     return `<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Vor-Ort-Termin · übernommenes Wissen</h3><span class="bk-source">automatisch aus KRISTINE</span></div>${fieldHtml?`<div class="bk-intake-fields">${fieldHtml}</div>`:""}${recordingHtml?`<div class="bk-intake-records">${recordingHtml}</div>`:""}${fileHtml?`<div class="bk-intake-files">${fileHtml}</div>`:""}</div>`;
   }
 
-  function renderProtocols(j,days){
+  function renderProtocols(j,days,documents=[]){
     const totals=days.reduce((a,d)=>{a.images+=num(d.stats?.images);a.pdfs+=num(d.stats?.pdfs);a.audio+=num(d.stats?.audio);a.items+=num(d.stats?.items);return a},{images:0,pdfs:0,audio:0,items:0});
     const workDays=new Set();
     for(const e of eventRows(j.jobId)){const day=String(e.date||"").slice(0,10);if(/^\d{4}-\d{2}-\d{2}$/.test(day))workDays.add(day)}
     const rows=days.length?days.map(d=>{const photos=num(d.stats?.images),action=d.pdfExists&&d.viewUrl?`<button type="button" class="primary" data-bk-preview="${esc(d.viewUrl)}" data-bk-label="${esc('Bautag '+fmtDate(d.day))}">Protokoll ansehen</button><a href="${tokenUrl(d.downloadUrl)}">PDF</a>`:photos>0?`<button type="button" class="primary" data-bk-gallery-day="${esc(d.day)}">Fotos ansehen</button>`:'';return `<div class="bk-day"><strong>${fmtDate(d.day)}</strong><div class="bk-day-meta">🖼 ${photos} Fotos · 📄 ${num(d.stats?.pdfs)} PDFs · 🎤 ${num(d.stats?.audio)} Audio · ${num(d.stats?.items)} Einträge</div><div class="bk-actions">${action}</div></div>`}).join(''):'<div class="bk-placeholder">Noch keine Bautage dokumentiert.</div>';
     const intake=intakeSection(j),intakeRecordings=Array.isArray(j.intakeProtocol?.recordings)?j.intakeProtocol.recordings.length:0,intakeFiles=Array.isArray(j.intakeProtocol?.files)?j.intakeProtocol.files:[],intakePhotos=intakeFiles.filter(f=>String(f.mimeType||"").startsWith("image/")).length;
-    const el=document.getElementById("bkProtocols");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Bautage</div><div class="bk-value">${workDays.size}</div><div class="bk-note">unterschiedliche Tage mit Zeitbuchung</div></div><div class="bk-card"><div class="bk-label">Fotos</div><div class="bk-value">${totals.images+intakePhotos}</div></div><div class="bk-card"><div class="bk-label">Dokumente/PDF</div><div class="bk-value">${totals.pdfs+intakeFiles.filter(f=>!String(f.mimeType||"").startsWith("image/")).length}</div></div><div class="bk-card"><div class="bk-label">Audio</div><div class="bk-value">${totals.audio+intakeRecordings}</div></div>${intake}<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Bautage · Fotos · Protokolle</h3><span class="bk-source">Baustellenakte</span></div><div class="bk-day-list">${rows}</div><div id="bkProtocolPreview"></div></div></div>`;
+    const mails=documents.filter(x=>x.type==="mail"),plans=mails.flatMap(x=>(x.attachments||[]).filter(a=>a.kind==="plan").map(a=>({...a,mail:x}))),mailRows=mails.length?mails.map(x=>`<div class="bk-day"><strong>${esc(x.subject||x.name)}</strong><div class="bk-day-meta">${esc([x.from,x.sentAt?fmtDate(x.sentAt):"",`${(x.attachments||[]).length} Anlage(n)`].filter(Boolean).join(" · "))}</div><div class="bk-actions"><a href="${esc(tokenUrl(x.url))}" target="_blank">Original öffnen</a></div></div>`).join(""):'<div class="bk-placeholder">Noch keine E-Mails in dieser Baustelle.</div>',planRows=plans.length?plans.map(x=>`<div class="bk-day"><strong>${esc(x.name)}</strong><div class="bk-day-meta">aus Mail: ${esc(x.mail.subject||x.mail.name)}</div><div class="bk-actions"><a class="primary" href="${esc(tokenUrl(x.url))}" target="_blank">Plan öffnen</a></div></div>`).join(""):'<div class="bk-placeholder">Noch keine Pläne aus Mailanhängen.</div>';
+    const el=document.getElementById("bkProtocols");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Protokolle/Bautage</div><div class="bk-value">${workDays.size}</div></div><div class="bk-card"><div class="bk-label">Fotos</div><div class="bk-value">${totals.images+intakePhotos}</div></div><div class="bk-card"><div class="bk-label">Pläne</div><div class="bk-value">${plans.length}</div></div><div class="bk-card"><div class="bk-label">E-Mails</div><div class="bk-value">${mails.length}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Alte E-Mails hineinziehen</h3><div class="bk-note">.msg oder .eml · erst mit Häkchen auswählen, dann übernehmen</div></div><div class="bk-actions"><button type="button" class="primary" id="bkImportMails">Markierte übernehmen</button></div></div><label id="bkMailDrop" class="bk-placeholder" style="display:block;cursor:pointer"><input id="bkMailFiles" type="file" accept=".msg,.eml" multiple hidden>📨 Mails hier ablegen oder zum Auswählen klicken</label><div id="bkMailQueue" class="bk-day-list" style="margin-top:9px"></div><div id="bkMailStatus" class="bk-note"></div></div>${intake}<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Protokolle & Fotos</h3><span class="bk-source">Baustellenakte</span></div><div class="bk-day-list">${rows}</div><div id="bkProtocolPreview"></div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Pläne</h3><span class="bk-source">mit Ursprungs-Mail verknüpft</span></div><div class="bk-day-list">${planRows}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>E-Mails</h3><span class="bk-source">importierte Kommunikation</span></div><div class="bk-day-list">${mailRows}</div></div></div>`;
+    let queue=[];const queueHost=el.querySelector("#bkMailQueue"),status=el.querySelector("#bkMailStatus"),drawQueue=()=>{queueHost.innerHTML=queue.map((f,i)=>`<div class="bk-day"><label><input type="checkbox" data-mail-queue="${i}" checked> <strong>${esc(f.name)}</strong></label><div class="bk-day-meta">${Math.ceil(f.size/1024)} KB</div><span class="bk-badge">bereit</span></div>`).join("")},addFiles=list=>{for(const f of list)if(/\.(msg|eml)$/i.test(f.name)&&!queue.some(x=>x.name===f.name&&x.size===f.size))queue.push(f);drawQueue()};const picker=el.querySelector("#bkMailFiles"),drop=el.querySelector("#bkMailDrop");picker.onchange=()=>addFiles(picker.files);drop.ondragover=e=>{e.preventDefault();drop.style.borderColor="#2f7d4a"};drop.ondragleave=()=>drop.style.borderColor="";drop.ondrop=e=>{e.preventDefault();drop.style.borderColor="";addFiles(e.dataTransfer.files)};el.querySelector("#bkImportMails").onclick=async event=>{const selected=[...queueHost.querySelectorAll("[data-mail-queue]:checked")].map(x=>queue[Number(x.dataset.mailQueue)]).filter(Boolean);if(!selected.length){status.textContent="Bitte mindestens eine Mail anhaken.";return}event.currentTarget.disabled=true;for(let i=0;i<selected.length;i++){const f=selected[i];status.textContent=`Importiere ${i+1}/${selected.length}: ${f.name}`;try{await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/documentation/mail`,{method:"POST",headers:{"Content-Type":f.name.toLowerCase().endsWith(".msg")?"application/vnd.ms-outlook":"message/rfc822","X-File-Name":encodeURIComponent(f.name)},body:f})}catch(e){status.textContent=`${f.name}: ${e.message}`;event.currentTarget.disabled=false;return}}status.textContent="✓ Mails und Pläne wurden übernommen.";setTimeout(()=>loadJob(j.jobId),500)};
     el.querySelectorAll('[data-bk-preview]').forEach(b=>b.addEventListener('click',()=>showProtocol(b.dataset.bkPreview,b.dataset.bkLabel)));
     el.querySelectorAll('[data-bk-gallery-day]').forEach(b=>b.addEventListener('click',()=>document.querySelector(`.bf-day[data-bf-day="${CSS.escape(b.dataset.bkGalleryDay)}"]`)?.scrollIntoView({behavior:'smooth',block:'start'})));
   }
