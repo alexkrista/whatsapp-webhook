@@ -37,8 +37,8 @@ class OutgoingApiTests(unittest.TestCase):
                 "title": "Musterprojekt",
             }],
             "ww_hours_fusion_source": lambda project_indices: [
-                {"projectIndex": 1, "date": "2026-07-30", "netHours": 7.75},
-                {"projectIndex": 1, "date": "2026-07-31", "netHours": 6.25},
+                {"projectIndex": 1, "date": "2026-07-30", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 7.75},
+                {"projectIndex": 1, "date": "2026-07-31", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 6.25},
             ],
         })
         cls.app = app
@@ -136,6 +136,8 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(ww_hours.status_code, 200, ww_hours.get_data(as_text=True))
         self.assertEqual(ww_hours.get_json()["hours"]["totalHours"], 14.0)
         self.assertEqual(len(ww_hours.get_json()["hours"]["days"]), 2)
+        self.assertEqual(ww_hours.get_json()["hours"]["rows"][0]["employeeName"], "Max Muster")
+        self.assertEqual(ww_hours.get_json()["hours"]["rows"][0]["finkNumber"], "101")
 
 
 if __name__ == "__main__":

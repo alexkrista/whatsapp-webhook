@@ -2291,6 +2291,9 @@ function cleanProjectContactExtras(rows) {
     value: String(row?.value || "").trim().slice(0, 240),
   })).filter(row => row.label || row.value);
 }
+function cleanHoursOverlapKeys(rows) {
+  return [...new Set((Array.isArray(rows) ? rows : []).map(row => String(row || "").trim()).filter(row => /^\d{4}-\d{2}-\d{2}\|(?:fink|ma|name):[^|]{1,120}$/.test(row)).slice(0, 500))];
+}
 function sanitizeProjectContacts(value, fallback = {}) {
   const source = value && typeof value === "object" ? value : {};
   const owner = source.owner && typeof source.owner === "object" ? source.owner : {};
@@ -2301,6 +2304,7 @@ function sanitizeProjectContacts(value, fallback = {}) {
     const row = input && typeof input === "object" ? input : {};
     return {
       company: text(row.company),
+      title: text(row.title, 40),
       firstName: text(row.firstName, 100),
       lastName: text(row.lastName, 120),
       phone: text(row.phone, 80),
@@ -2309,10 +2313,21 @@ function sanitizeProjectContacts(value, fallback = {}) {
     };
   };
   const ownerRole = text(owner.ownerRole, 30);
+  const deliverySource = source.deliveryRecipients && typeof source.deliveryRecipients === "object" ? source.deliveryRecipients : {};
+  const deliveryRecipients = {};
+  for (const documentType of ["offer", "order", "regie", "invoice"]) {
+    const row = deliverySource[documentType] && typeof deliverySource[documentType] === "object" ? deliverySource[documentType] : {};
+    deliveryRecipients[documentType] = { owner: row.owner === undefined ? true : !!row.owner, siteManager: !!row.siteManager, architect: !!row.architect };
+  }
   return {
     owner: {
       customer: text(own(owner, "customer", legacyMaster.name || fallback.contactName || "")),
       firstName: text(owner.firstName, 100),
+      sharedLastName: text(own(owner, "sharedLastName", own(owner, "customer", legacyMaster.name || fallback.contactName || "")), 120),
+      womanTitle: text(owner.womanTitle, 40),
+      womanFirstName: text(own(owner, "womanFirstName", owner.firstName), 100),
+      manTitle: text(owner.manTitle, 40),
+      manFirstName: text(owner.manFirstName, 100),
       ownerRole: ["Bauherrin", "Bauherr", "Bauherrschaft", "Familie", "Firma"].includes(ownerRole) ? ownerRole : "Bauherrschaft",
       residentialStreet: text(owner.residentialStreet, 140),
       residentialHouseNumber: text(owner.residentialHouseNumber, 40),
@@ -2323,14 +2338,15 @@ function sanitizeProjectContacts(value, fallback = {}) {
       email: text(own(owner, "email", legacyMaster.email || fallback.contactEmail || ""), 180),
       extraLines: cleanProjectContactExtras(owner.extraLines),
     },
-    siteManager: person(source.siteManager),
+    siteManager: { ...person(source.siteManager), alsoArchitect: !!source.siteManager?.alsoArchitect },
     architect: person(source.architect),
+    deliveryRecipients,
   };
 }
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2365,11 +2381,12 @@ async function readJobMeta(jobId) {
       materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
       hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.hoursCutoverDate || "")) ? String(meta.hoursCutoverDate) : "",
+      hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(meta.hoursOverlapExcludedWwKeys),
       hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2430,6 +2447,7 @@ async function writeJobMeta(jobId, patch) {
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
     hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.hoursCutoverDate ?? existing.hoursCutoverDate ?? "")) ? String(patch.hoursCutoverDate ?? existing.hoursCutoverDate) : "",
+    hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
     hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
     updatedAt: new Date().toISOString(),
   };
@@ -2771,6 +2789,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         materialPercent: Number(meta.materialPercent || 0),
         plannedRegieHours: Number(meta.plannedRegieHours || 0),
         hoursCutoverDate: meta.hoursCutoverDate || "",
+        hoursOverlapExcludedWwKeys: meta.hoursOverlapExcludedWwKeys || [],
         hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
         calculation,
         sizeBytes,
@@ -2927,6 +2946,30 @@ app.put("/admin/api/job/:jobId/hours-cutover", async (req, res) => {
       data: { cutoverDate },
     });
     res.json({ ok: true, jobId, hoursCutoverDate: meta.hoursCutoverDate });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.put("/admin/api/job/:jobId/hours-overlap", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId || "");
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const excludedWwKeys = cleanHoursOverlapKeys(req.body?.excludedWwKeys);
+    const meta = await writeJobMeta(jobId, {
+      hoursCutoverDate: "",
+      hoursOverlapExcludedWwKeys: excludedWwKeys,
+      hoursOverlapResolvedAt: new Date().toISOString(),
+    });
+    await appendJobHistory(jobId, {
+      type: "hours_overlap_reviewed",
+      title: "WW/KRISTINE-Stunden geprüft",
+      detail: `${excludedWwKeys.length} Mitarbeiter/Tag-Zeile(n) als doppelt markiert`,
+      source: "admin",
+      data: { excludedWwKeys },
+    });
+    res.json({ ok: true, jobId, excludedWwKeys: meta.hoursOverlapExcludedWwKeys, resolvedAt: meta.hoursOverlapResolvedAt });
   } catch (error) {
     res.status(500).json({ ok: false, error: String(error?.message || error) });
   }

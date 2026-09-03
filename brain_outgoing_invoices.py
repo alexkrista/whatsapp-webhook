@@ -457,24 +457,35 @@ def install(ns):
             if not matches:
                 return billing_response({"ok": True, "hours": {
                     "found": False, "projectNumber": project_number, "projectIndex": 0,
-                    "totalHours": 0, "days": [],
+                    "totalHours": 0, "days": [], "rows": [],
                 }})
             if len(matches) > 1:
                 return billing_response({"ok": False, "error": "Baustellennummer ist in WinWorker nicht eindeutig."}, 409)
             project = matches[0]
             project_index = int(project.get("projectIndex") or 0)
             by_day = {}
+            detail_rows = []
             for row in ww_hours_source([project_index]):
                 day = str(row.get("date") or "")[:10]
                 if day:
-                    by_day[day] = by_day.get(day, 0) + float(row.get("netHours") or 0)
+                    net_hours = float(row.get("netHours") or 0)
+                    by_day[day] = by_day.get(day, 0) + net_hours
+                    detail_rows.append({
+                        "date": day,
+                        "maIndex": int(row.get("maIndex")) if row.get("maIndex") is not None else None,
+                        "finkNumber": str(row.get("finkNumber") or "").strip()[:40],
+                        "employeeName": str(row.get("employeeName") or "").strip()[:160],
+                        "hours": round(net_hours, 4),
+                    })
             days = [{"date": day, "hours": round(hours, 4)} for day, hours in sorted(by_day.items())]
+            detail_rows.sort(key=lambda row: (row["date"], row["employeeName"], row["maIndex"] or 0))
             return billing_response({"ok": True, "hours": {
                 "found": True,
                 "projectNumber": project_number,
                 "projectIndex": project_index,
                 "totalHours": round(sum(row["hours"] for row in days), 4),
                 "days": days,
+                "rows": detail_rows,
             }})
         except Exception as exc:
             return billing_response({"ok": False, "error": str(exc)}, 500)
@@ -746,12 +757,13 @@ OUTGOING_PAGE = r'''<!doctype html>
 <div id="periodModal" class="modal hide"><div class="card"><div class="head"><h2>Monatsabschluss</h2><button data-close="periodModal">×</button></div><p class="muted">Nach dem Abschluss sind Rechnungen dieses Monats gesperrt. Korrekturen erfolgen nur noch über Gutschriften.</p><label>Monat<input id="periodValue" type="month"></label><div class="row section"><button id="periodClose" class="danger">Monat endgültig abschließen</button><button data-close="periodModal">Abbrechen</button></div><div id="closedPeriods" class="section small muted"></div></div></div>
 <script>
 (()=>{const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0)),today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);let selectedProject=null,selectedRun=null,editing=null,correctionTarget=null,settings={};
-function msg(t,error=false){const e=$('message');e.textContent=t;e.className='message'+(error?' error':'');setTimeout(()=>e.classList.add('hide'),4500)}async function api(url,opt={}){const r=await fetch(url,{cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');return d}function open(id){$(id).classList.remove('hide')}function close(id){$(id).classList.add('hide')}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>close(b.dataset.close));
+function msg(t,error=false){const e=$('message');e.textContent=t;e.className='message'+(error?' error':'');setTimeout(()=>e.classList.add('hide'),4500)}async function api(url,opt={}){if(url==='/api/outgoing/runs'&&opt.method==='POST'&&opt.body&&selectedProject){const body=JSON.parse(opt.body),designation=projectDesignation(selectedProject);body.projectTitle=designation;body.label=designation;opt={...opt,body:JSON.stringify(body)}}const r=await fetch(url,{cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');return d}function open(id){$(id).classList.remove('hide')}function close(id){$(id).classList.add('hide')}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>close(b.dataset.close));
 async function init(){const d=await api('/api/outgoing/settings');settings=d.settings;$('payDate').value=today();$('correctionDate').value=today();$('periodValue').value=today().slice(0,7);const project=new URLSearchParams(location.search).get('project');if(project){$('search').value=project;await search(true)}}
 async function search(autoSelect=false){const q=$('search').value.trim();if(q.length<2)return;const d=await api('/api/outgoing/project-search?q='+encodeURIComponent(q));$('projects').innerHTML=d.projects.map((p,i)=>`<div class="project" data-p="${i}"><strong>${esc(p.projectNumber)} · ${esc(p.company||p.customer)}</strong><div class="small muted">${esc(p.title||p.site)}<br>${esc(p.address)}</div></div>`).join('')||'<div class="muted">Kein Projekt gefunden.</div>';const elements=[...$('projects').children];elements.forEach((e,i)=>e.onclick=()=>selectProject(d.projects[i],e));if(autoSelect&&d.projects.length){const i=Math.max(0,d.projects.findIndex(p=>String(p.projectNumber)===q));await selectProject(d.projects[i],elements[i])}}
 async function selectProject(p,e){selectedProject=p;selectedRun=null;document.querySelectorAll('.project').forEach(x=>x.classList.remove('active'));e?.classList.add('active');let synced=null;try{synced=await api('/api/outgoing/projects/'+encodeURIComponent(p.projectIndex)+'/sync-history',{method:'POST',body:'{}'})}catch(err){msg('WW-Rechnungshistorie konnte nicht geladen werden: '+err.message,true)}$('empty').classList.remove('hide');$('workspace').classList.add('hide');$('empty').innerHTML=`<div class="head"><div><h2>${esc(p.projectNumber)} · ${esc(p.title)}</h2><div class="muted">${esc(p.company||p.customer)} · ${esc(p.address)}</div></div><button id="newRun" class="primary">Neuer Rechnungslauf</button></div>`;$('newRun').onclick=showRun;await loadRuns();if(synced?.runId){await loadRun(synced.runId);if(synced.imported)msg(`${synced.imported} WW-Vorgängerrechnung(en) übernommen. Die nächste Teilrechnung wird korrekt fortgeführt.`)}}
 async function loadRuns(){if(!selectedProject)return;const d=await api('/api/outgoing/runs?projectIndex='+encodeURIComponent(selectedProject.projectIndex));$('runs').innerHTML=d.runs.map(x=>`<div class="run ${selectedRun?.id===x.id?'active':''}" data-id="${x.id}"><div class="head"><strong>${esc(x.label)}</strong><span class="pill ${x.status}">${x.status==='open'?'offen':'abgeschlossen'}</span></div><div class="small muted">${x.invoiceCount} Beleg(e) · offen ${money(x.currentOpen)}</div></div>`).join('')||'<div class="muted">Noch kein Lauf.</div>';document.querySelectorAll('.run').forEach(e=>e.onclick=()=>loadRun(Number(e.dataset.id)))}
-function showRun(){const p=selectedProject;$('runLabel').value=p.title||'Auftrag';$('runUid').value='';$('runCompany').value=p.company||'';$('runName').value=p.customer||[p.firstName,p.lastName].filter(Boolean).join(' ');$('runStreet').value=p.street||'';$('runPostal').value=p.postalCode||'';$('runCity').value=p.city||'';$('runCountry').value='Österreich';open('runModal')}
+function projectDesignation(p){return [p.title||'Auftrag',p.address||[p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
+function showRun(){const p=selectedProject;$('runLabel').value=projectDesignation(p);$('runUid').value='';$('runCompany').value=p.company||'';$('runName').value=p.customer||[p.firstName,p.lastName].filter(Boolean).join(' ');$('runStreet').value=p.street||'';$('runPostal').value=p.postalCode||'';$('runCity').value=p.city||'';$('runCountry').value='Österreich';open('runModal')}
 async function saveRun(){const p=selectedProject,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:p.projectIndex,projectNumber:p.projectNumber,customerIndex:p.customerIndex,projectTitle:p.title,label:$('runLabel').value,customerUid:$('runUid').value,company:$('runCompany').value,customerName:$('runName').value,street:$('runStreet').value,postalCode:$('runPostal').value,city:$('runCity').value,country:$('runCountry').value})});close('runModal');await loadRuns();await loadRun(d.run.id)}
 async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedRun=d.run;editing=editing?(selectedRun.invoices||[]).find(x=>x.id===editing.id)||null:null;$('empty').classList.add('hide');$('workspace').classList.remove('hide');renderRun();await loadRuns()}
 function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status==='draft'),nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status==='issued').length+1;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${draft?'Entwurf bearbeiten':nextTr+'. TR / Rechnung erstellen'}</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div><div id="quickView"></div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice(draft||null));$('newPayment').onclick=showPayment;wireInvoices()}
