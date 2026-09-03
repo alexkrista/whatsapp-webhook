@@ -12,6 +12,8 @@ const server=fs.readFileSync(path.join(root,"server.js"),"utf8");
 assert.match(hub,/data-bk-tab="master">Stammdaten</,"Baustellenansicht braucht einen sichtbaren Stammdaten-Reiter");
 assert.match(hub,/function renderMasterData\(j\)/,"Stammdaten müssen aus dem aktuellen Baustellendatensatz gerendert werden");
 assert.match(hub,/function renderMasterDataEditor\(j\)/,"Stammdaten müssen direkt in der Baustelle bearbeitet werden");
+assert.match(hub,/function wireMasterLinks\(\)/,"Auch die bestehenden Stammdaten-Links müssen im Baustellen-Reiter bleiben");
+assert.match(hub,/Nur mit diesem Projekt verknüpft/);
 assert.match(hub,/Bauherrschaft/);
 assert.match(hub,/Wohnstraße/);
 assert.match(hub,/Telefon Bauherrin/);

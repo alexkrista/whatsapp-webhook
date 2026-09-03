@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-master-contacts-1";
+  const VERSION="2026-09-03-master-contacts-2";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const token=new URLSearchParams(location.search).get("token")||"";
@@ -89,6 +89,13 @@
     document.querySelectorAll("[data-bk-panel]").forEach(p=>p.classList.toggle("active",p.dataset.bkPanel===name));
   }
 
+  function openMasterTab(event){
+    event?.preventDefault();selectTab("master");document.querySelector('[data-bk-tab="master"]')?.scrollIntoView({behavior:"smooth",block:"nearest"});
+  }
+  function wireMasterLinks(){
+    for(const id of ["detailAdmin","linkAdmin"]){const link=document.getElementById(id);if(!link)continue;link.href="#"+encodeURIComponent(currentJobId||decodeURIComponent(location.hash.slice(1))||"");link.title="Stammdaten dieser Baustelle öffnen";if(link.dataset.bkMasterLink!=="1"){link.dataset.bkMasterLink="1";link.addEventListener("click",openMasterTab)}}
+  }
+
   async function baseData(force=false){
     if(force||!cache.jobs){const r=await api("/admin/api/jobs");cache.jobs=r.jobs||[]}
     if(force||!cache.bootstrap){try{cache.bootstrap=await api("/kristine/api/bootstrap")}catch{cache.bootstrap={}}}
@@ -110,7 +117,7 @@
 
   async function loadJob(id){
     const serial=++loadSerial;currentJobId=String(id||"");if(!currentJobId)return;
-    installHub();selectTab("overview");
+    installHub();wireMasterLinks();selectTab("overview");
     ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const e=document.getElementById(x);if(e){e.className="bk-loading";e.textContent="Daten werden gesammelt und der Baustelle zugeordnet …"}});
     try{
       await baseData(true);if(serial!==loadSerial)return;
@@ -161,8 +168,8 @@
     const el=document.getElementById("bkMasterData");el.className="";el.innerHTML=`<div class="bk-master-form">
       <div class="bk-card"><div class="bk-section-title"><div><h3>Baustelle</h3><div class="bk-note">Die Baustellenadresse ist unabhängig von der Wohnadresse der Bauherrschaft.</div></div><span class="bk-badge">#${esc(j.jobId)}</span></div><div class="bk-form-grid">${field("Bezeichnung","bkJobName",j.name,true)}${field("Straße","bkSiteStreet",j.street,true)}${field("Hausnummer","bkSiteHouse",j.houseNumber)}${field("PLZ","bkSitePostal",j.postalCode)}${field("Ort","bkSiteCity",j.city,true)}${field("Adresszusatz / Zufahrt","bkSiteExtra",j.addressExtra,true)}</div></div>
       <div class="bk-card"><div class="bk-section-title"><h3>Bauherrschaft</h3><span class="bk-badge blue">Kunde</span></div><div class="bk-form-grid"><label>Bauherr / Bauherrin<select id="bkOwnerRole">${["Bauherrschaft","Bauherrin","Bauherr","Familie","Firma"].map(x=>`<option value="${x}" ${x===(owner.ownerRole||"Bauherrschaft")?'selected':''}>${x}</option>`).join('')}</select></label>${field("Kunde / Nachname / Firma","bkOwnerCustomer",owner.customer,true)}${field("Vorname","bkOwnerFirstName",owner.firstName)}${field("Wohnstraße","bkHomeStreet",owner.residentialStreet,true)}${field("Hausnummer","bkHomeHouse",owner.residentialHouseNumber)}${field("PLZ","bkHomePostal",owner.residentialPostalCode)}${field("Wohnort","bkHomeCity",owner.residentialCity,true)}${field("Telefon Bauherrin","bkOwnerWomanPhone",owner.phoneOwnerWoman)}${field("Telefon Bauherr","bkOwnerManPhone",owner.phoneOwnerMan)}${field("E-Mail Bauherrschaft","bkOwnerEmail",owner.email,true,"email")}</div><div id="bkOwnerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddOwnerExtra">+ freie Kontaktzeile</button></div></div>
-      <div class="bk-card"><div class="bk-section-title"><h3>Bauleitung</h3><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkSiteManager",siteManager)}</div><div id="bkSiteManagerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddSiteManagerExtra">+ freie Kontaktzeile</button></div></div>
-      <div class="bk-card"><div class="bk-section-title"><h3>Architekt</h3><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkArchitect",architect)}</div><div id="bkArchitectExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddArchitectExtra">+ freie Kontaktzeile</button></div></div>
+      <div class="bk-card"><div class="bk-section-title"><div><h3>Bauleitung</h3><div class="bk-note">Nur mit diesem Projekt verknüpft – nicht fest mit der Bauherrschaft.</div></div><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkSiteManager",siteManager)}</div><div id="bkSiteManagerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddSiteManagerExtra">+ freie Kontaktzeile</button></div></div>
+      <div class="bk-card"><div class="bk-section-title"><div><h3>Architekt</h3><div class="bk-note">Nur mit diesem Projekt verknüpft – nicht fest mit der Bauherrschaft.</div></div><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkArchitect",architect)}</div><div id="bkArchitectExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddArchitectExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div id="bkMasterSaveStatus" class="bk-save-status">WW-Verknüpfung und Nummern bleiben erhalten.</div><div class="bk-actions"><button type="button" id="bkCancelMaster">Abbrechen</button><button type="button" class="primary" id="bkSaveMaster">Stammdaten speichern</button></div></div></div>
     </div>`;
     const groups={owner:{host:"bkOwnerExtras",add:"bkAddOwnerExtra"},siteManager:{host:"bkSiteManagerExtras",add:"bkAddSiteManagerExtra"},architect:{host:"bkArchitectExtras",add:"bkAddArchitectExtra"}};
@@ -264,7 +271,7 @@
     window.addEventListener("hashchange",()=>{const id=decodeURIComponent(location.hash.slice(1));if(id&&document.getElementById("detail")?.classList.contains("open"))loadJob(id)});
   }
 
-  function init(){installCss();installKrisadminSubnav();installHub();hookRows();const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
+  function init(){installCss();installKrisadminSubnav();installHub();wireMasterLinks();hookRows();const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
   window.BaustellenKnowledgeHub={version:VERSION,load:loadJob,tab:selectTab};
 })();
