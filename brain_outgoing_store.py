@@ -1097,7 +1097,11 @@ class OutgoingStore:
                     original_gross = _money(original_net * (Decimal("1") + rate / Decimal("100")))
                 original_vat = _money(original_gross - original_net)
                 open_gross = max(Decimal("0"), min(original_gross, _money(item.get("openGross"))))
-                paid_gross = _money(original_gross - open_gross)
+                calculated_paid_gross = _money(original_gross - open_gross)
+                if item.get("paidGrossAvailable"):
+                    paid_gross = max(Decimal("0"), min(original_gross, _money(item.get("paidGross"))))
+                else:
+                    paid_gross = calculated_paid_gross
                 paid_net = _money(paid_gross / (Decimal("1") + rate / Decimal("100"))) if rate else paid_gross
                 paid_vat = _money(paid_gross - paid_net)
                 issue_date = _iso_date(item.get("issueDate"), required=True, label="WW-Rechnungsdatum")

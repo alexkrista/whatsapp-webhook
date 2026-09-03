@@ -190,6 +190,7 @@ class OutgoingStoreTests(unittest.TestCase):
             "dueDate": "2026-08-13", "paymentDate": "2026-08-31",
             "serviceFrom": "2026-07-01", "serviceTo": "2026-07-30", "vatRate": "20",
             "originalNet": "4850", "originalGross": "5820", "openGross": "0",
+            "paidGross": "5820", "paidGrossAvailable": True,
             "isPartial": True, "isFinal": False,
         }
         first = self.store.sync_ww_project_history([row])
@@ -210,6 +211,24 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(next_invoice["previousInvoices"][0]["invoiceNumber"], "202607011")
         self.assertEqual(next_invoice["increment_net"], 5150.0)
         self.assertEqual(next_invoice["open_after_discount"], 6180.0)
+
+    def test_ww_history_uses_booked_payment_instead_of_open_difference(self):
+        row = {
+            "sourceId": "PAYMENT-SOURCE-1", "invoiceNumber": "202607012",
+            "projectIndex": 2601106, "projectNumber": "26083", "customerIndex": 12027,
+            "customerName": "Beispiel Kunde", "street": "Testweg 1", "postalCode": "6800",
+            "city": "Feldkirch", "projectTitle": "Zahlungsprüfung", "issueDate": "2026-07-31",
+            "dueDate": "2026-08-14", "paymentDate": "2026-08-10",
+            "serviceFrom": "2026-07-01", "serviceTo": "2026-07-31", "vatRate": "20",
+            "originalNet": "10000", "originalGross": "12000", "openGross": "1000",
+            "paidGross": "10500", "paidGrossAvailable": True,
+            "isPartial": True, "isFinal": False,
+        }
+        result = self.store.sync_ww_project_history([row])
+        run = self.store.run(result["runId"])
+        self.assertEqual(run["paidGross"], 10500.0)
+        self.assertEqual(run["currentOpen"], 1500.0)
+        self.assertEqual(run["payments"][0]["paymentDate"], "2026-08-10")
 
 
 if __name__ == "__main__":

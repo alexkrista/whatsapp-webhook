@@ -135,7 +135,8 @@ def install(ns):
                         r.cUmsatzNetto AS originalNet,
                         COALESCE(r.cForderungBrutto,r.cOffenerPostenBrutto,0) AS originalGross,
                         COALESCE(r.cOffenerPostenBrutto,0) AS openGross,
-                        COALESCE(r.cSummeZahlungen,0) AS paidGross,
+                        r.cSummeZahlungen AS paidGross,
+                        CASE WHEN r.cSummeZahlungen IS NULL THEN 0 ELSE 1 END AS paidGrossAvailable,
                         COALESCE(
                           NULLIF(r.dzBeglichen,CONVERT(datetime,'18000101',112)),
                           NULLIF(r.dzValutaLetzteZahlung,CONVERT(datetime,'18000101',112)),
