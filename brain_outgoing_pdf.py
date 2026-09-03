@@ -199,6 +199,7 @@ def render_invoice_pdf(invoice, settings, destination):
     material_raw = Decimal("0")
     material_net = Decimal("0")
     in_material = False
+    visible_position = 0
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
         quantity = _d(line.get("quantity") or 1)
@@ -232,8 +233,9 @@ def render_invoice_pdf(invoice, settings, destination):
         if in_material:
             material_raw += raw_total
             material_net += net
+        visible_position += 1
         line_rows.append([
-            str(line.get("line_no") or line.get("lineNo") or index),
+            str(visible_position),
             money(quantity), str(line.get("unit") or ""), Paragraph(desc, base),
             money(ep), "" if disc else money(net),
         ])
@@ -257,7 +259,7 @@ def render_invoice_pdf(invoice, settings, destination):
     for row_index, marker in group_rows:
         line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("TOPPADDING", (0, row_index), (5, row_index), 9 if marker == "TAG" else 5), ("BOTTOMPADDING", (0, row_index), (5, row_index), 4)])
     for row_index, _marker in subtotal_rows:
-        line_style.extend([("SPAN", (0, row_index), (5, row_index)), ("ALIGN", (0, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
+        line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
     line_table.setStyle(TableStyle(line_style))
     story.append(line_table)
     complex_summary = bool(
@@ -379,8 +381,11 @@ def render_invoice_pdf(invoice, settings, destination):
         story.append(Spacer(1, 2 * mm))
     if invoice.get("recipient_uid"):
         story.append(Paragraph(f"Ihre UStIDNr.: {invoice.get('recipient_uid')}", base))
-    if invoice.get("notes"):
-        story.append(Paragraph(str(invoice.get("notes")).replace("\n", "<br/>"), note))
+    notes = str(invoice.get("notes") or "").strip()
+    if notes.casefold() == "nach tagen sowie räumen/bauteilen gegliedert; alle werte sind bearbeitbar.":
+        notes = ""
+    if notes:
+        story.append(Paragraph(notes.replace("\n", "<br/>"), note))
     if invoice.get("kind") not in {"ST", "GS"}:
         story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
 
