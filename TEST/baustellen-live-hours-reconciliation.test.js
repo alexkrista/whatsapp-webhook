@@ -20,7 +20,7 @@ assert.match(ui,/hoursOverlapExcludedWwKeys/);
 assert.match(ui,/Math\.max\(0,row\.hours-\.25\)/);
 assert.match(ui,/pauseDeductionHours:\.25/);
 assert.match(ui,/personDayHours/);
-for(const pair of [["mandi-faes","Manuel Faes"],["edi-mock","Edmund Mock"],["cathrin-grabherr","Anna Cathrin Grabherr"],["cathrin-anna-grabherr","Anna Cathrin Grabherr"]])assert.ok(ui.includes(`"${pair[0]}":"${pair[1]}"`));
+for(const pair of [["mandi-faes","Manuel Faes"],["edi-mock","Edmund Mock"],["cathrin-grabherr","Cathrin Anna Grabherr"],["anna-cathrin-grabherr","Cathrin Anna Grabherr"],["cathrin-anna-grabherr","Cathrin Anna Grabherr"]])assert.ok(ui.includes(`"${pair[0]}":"${pair[1]}"`));
 assert.match(ui,/person\.hours=Math\.max\(0,person\.hours-\.25\)/);
 assert.match(ui,/return num\(liveByJob\.get\(String\(j\.jobId\)\)\?\.totalHours\)/);
 assert.doesNotMatch(ui,/return Math\.max\(oldOrderHours\(j\)/);
