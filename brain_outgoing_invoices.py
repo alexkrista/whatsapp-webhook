@@ -40,6 +40,25 @@ def _lg_size_key(unit, container_size=None):
     return f"{float(match.group(1)):g}l" if match else raw
 
 
+def _ten_l_fallback_price(five_l_price):
+    return round(float(five_l_price or 0) * 2 * 0.97, 2)
+
+
+def _project_owner_names(meta):
+    contacts = meta.get("projectContacts") if isinstance(meta, dict) else {}
+    contacts = contacts if isinstance(contacts, dict) else {}
+    owner = contacts.get("owner") if isinstance(contacts.get("owner"), dict) else {}
+    names = []
+    for prefix in ("woman", "man"):
+        name = " ".join(
+            str(owner.get(f"{prefix}{field}") or "").strip()
+            for field in ("Title", "FirstName", "LastName")
+        ).strip()
+        if name and name.casefold() not in {item.casefold() for item in names}:
+            names.append(name)
+    return names
+
+
 def _lg_retail_net_price(product, unit, container_size=None):
     """Return the maintained LG retail gross price as invoice net price."""
     price_file = Path(__file__).with_name("public") / "lg-retail-preisliste-2025.html"
@@ -49,19 +68,24 @@ def _lg_retail_net_price(product, unit, container_size=None):
         return 0.0
     wanted_product = _lg_price_key(product)
     wanted_size = _lg_size_key(unit, container_size)
+    matching_gross_prices = {}
     for raw_product, raw_size, raw_price in re.findall(
         r"<tr><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td></tr>", source, flags=re.I | re.S
     ):
         listed_product = _lg_price_key(re.sub(r"<[^>]+>", "", raw_product))
         if not (listed_product == wanted_product or listed_product.startswith(wanted_product) or wanted_product.startswith(listed_product)):
             continue
-        if _lg_size_key(re.sub(r"<[^>]+>", "", raw_size)) != wanted_size:
-            continue
+        listed_size = _lg_size_key(re.sub(r"<[^>]+>", "", raw_size))
         value = re.sub(r"[^0-9,.]", "", re.sub(r"<[^>]+>", "", raw_price)).replace(".", "").replace(",", ".")
         try:
-            return round(float(value) / 1.2, 2)
+            matching_gross_prices[listed_size] = float(value)
         except ValueError:
-            return 0.0
+            continue
+    gross_price = matching_gross_prices.get(wanted_size, 0.0)
+    if not gross_price and wanted_size == "10l" and matching_gross_prices.get("5l"):
+        gross_price = _ten_l_fallback_price(matching_gross_prices["5l"])
+    if gross_price:
+        return round(gross_price / 1.2, 2)
     return 0.0
 
 
@@ -151,6 +175,23 @@ def install(ns):
         if not primary and copies:
             primary, copies = copies[:1], copies[1:]
         return {"to": primary, "cc": copies}
+
+    def enrich_billing_recipient(invoice):
+        run = dict(invoice.get("run") or {})
+        project_number = str(run.get("project_number") or "").strip()
+        if not callable(kristine_api_request) or not project_number.isdigit() or len(project_number) > 12:
+            return invoice
+        try:
+            payload = kristine_api_request(f"/admin/api/job/{project_number}/meta") or {}
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else payload
+            names = _project_owner_names(meta)
+            if names:
+                run["customer_name_lines"] = names
+                run["customer_name"] = " und ".join(names)
+                invoice["run"] = run
+        except Exception:
+            pass
+        return invoice
 
     def ww_open_items():
         if not callable(sql_connection):
@@ -455,7 +496,19 @@ def install(ns):
                     "unit": str(row.get("unit") or "Stk").strip() or "Stk",
                     "unitPrice": float(unit_price),
                     "purchasePrice": purchase_price,
+                    "sizeKey": _lg_size_key(row.get("unit"), row.get("containerSize")),
                 })
+            five_l_prices = {
+                _lg_price_key(item["sourceName"]): float(item["unitPrice"])
+                for item in materials
+                if item.get("sizeKey") == "5l" and float(item.get("unitPrice") or 0) > 0
+            }
+            for item in materials:
+                if item.get("sizeKey") == "10l" and float(item.get("unitPrice") or 0) <= 0:
+                    five_l_price = five_l_prices.get(_lg_price_key(item["sourceName"]), 0.0)
+                    if five_l_price:
+                        item["unitPrice"] = _ten_l_fallback_price(five_l_price)
+                item.pop("sizeKey", None)
             employees.sort(key=lambda item: item["name"].casefold())
             materials.sort(key=lambda item: item["name"].casefold())
             return jsonify({
@@ -811,6 +864,7 @@ def install(ns):
         return f"{number}_{project}.pdf" if project else f"{number}.pdf"
 
     def enrich_correction(invoice):
+        invoice = enrich_billing_recipient(invoice)
         original_id = invoice.get("corrects_invoice_id")
         if not original_id:
             return invoice

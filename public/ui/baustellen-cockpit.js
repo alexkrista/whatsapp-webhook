@@ -12,7 +12,7 @@
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
-  const fmtDate=v=>{if(!v)return"–";try{return new Date(String(v).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT",{day:"2-digit",month:"2-digit",year:"numeric"})}catch{return String(v)}};
+  const fmtDate=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);if(!m||year<1900||year>2099)return"–";const d=new Date(s+"T12:00:00");return Number.isNaN(d.getTime())||d.getFullYear()!==year||d.getMonth()+1!==Number(m[2])||d.getDate()!==Number(m[3])?"–":d.toLocaleDateString("de-AT",{day:"2-digit",month:"2-digit",year:"numeric"})};
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
   async function api(p,o={}){const r=await fetch(tokenUrl(p),o);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
 

@@ -14,7 +14,7 @@
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
   const money2=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",minimumFractionDigits:2,maximumFractionDigits:2}).format(num(v));
   const hour=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:2}).format(num(v))+" h";
-  const fmtDate=v=>{if(!v)return "–";try{return new Date(String(v).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT")}catch{return String(v)}};
+  const fmtDate=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);if(!m||year<1900||year>2099)return"–";const d=new Date(s+"T12:00:00");return Number.isNaN(d.getTime())||d.getFullYear()!==year||d.getMonth()+1!==Number(m[2])||d.getDate()!==Number(m[3])?"–":d.toLocaleDateString("de-AT")};
   const mailDate=v=>{const d=new Date(String(v||""));return Number.isFinite(d.getTime())?d.toLocaleString("de-AT",{dateStyle:"short",timeStyle:"short"}):""};
   const mailSender=x=>{const name=String(x?.fromName||"").trim(),email=String(x?.fromEmail||x?.from||"").trim();if(name&&email&&!/^\/o=/i.test(email))return `${name} <${email}>`;if(name)return name;if(!/^\/o=/i.test(email))return email;const cn=email.match(/\/cn=([^/]+)$/i)?.[1]||"";return cn.replace(/^[0-9a-f]+-/i,"").replace(/[._-]+/g," ").trim()||"Exchange-Absender"};
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};

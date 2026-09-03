@@ -127,8 +127,9 @@ def render_invoice_pdf(invoice, settings, destination):
         canvas.saveState()
         _draw_krista_wordmark(canvas, height)
 
+        customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
         recipient = [
-            run.get("customer_company") or "", run.get("customer_name") or "", run.get("customer_street") or "",
+            run.get("customer_company") or "", *customer_names, run.get("customer_street") or "",
             " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
             run.get("customer_country") or "",
         ]
@@ -485,8 +486,9 @@ def render_dunning_pdf(dunning, settings, destination):
     def page(canvas, doc):
         canvas.saveState()
         _draw_krista_wordmark(canvas, height)
+        customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
         recipient = [
-            run.get("customer_company") or "", run.get("customer_name") or "",
+            run.get("customer_company") or "", *customer_names,
             run.get("customer_street") or "",
             " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
             run.get("customer_country") or "",

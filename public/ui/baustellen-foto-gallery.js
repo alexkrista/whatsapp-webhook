@@ -10,7 +10,7 @@
 
   const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
-  const fmtDate=v=>{if(!v)return"–";try{return new Date(String(v).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"})}catch{return String(v)}};
+  const fmtDate=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);if(!m||year<1900||year>2099)return"–";const d=new Date(s+"T12:00:00");return Number.isNaN(d.getTime())||d.getFullYear()!==year||d.getMonth()+1!==Number(m[2])||d.getDate()!==Number(m[3])?"–":d.toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"})};
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
 
   function installCss(){

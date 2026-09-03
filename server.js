@@ -2350,6 +2350,17 @@ function sanitizeProjectContacts(value, fallback = {}) {
     deliveryRecipients,
   };
 }
+function cleanOperationalDate(value) {
+  const day = String(value || "").trim().slice(0, 10);
+  const match = day.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  if (year < 1900 || year > 2099) return "";
+  const date = new Date(`${day}T12:00:00`);
+  if (Number.isNaN(date.getTime()) || date.getFullYear() !== year || date.getMonth() + 1 !== Number(match[2]) || date.getDate() !== Number(match[3])) return "";
+  return day;
+}
+
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
@@ -2360,8 +2371,8 @@ async function readJobMeta(jobId) {
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
       status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
-      offerFollowUpAt: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.offerFollowUpAt || "")) ? String(meta.offerFollowUpAt) : "",
-      offerRejectedAt: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.offerRejectedAt || "")) ? String(meta.offerRejectedAt) : "",
+      offerFollowUpAt: cleanOperationalDate(meta.offerFollowUpAt),
+      offerRejectedAt: cleanOperationalDate(meta.offerRejectedAt),
       street: String(meta.street || "").trim(),
       houseNumber: String(meta.houseNumber || "").trim(),
       postalCode: String(meta.postalCode || "").trim(),
@@ -2370,7 +2381,7 @@ async function readJobMeta(jobId) {
       contactName: String(meta.contactName || "").trim(),
       contactPhone: String(meta.contactPhone || "").trim(),
       contactEmail: String(meta.contactEmail || "").trim(),
-      startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.startDate || "")) ? String(meta.startDate) : "",
+      startDate: cleanOperationalDate(meta.startDate),
       createdAt: meta.createdAt || null,
       intakeProtocol: meta.intakeProtocol && typeof meta.intakeProtocol === "object" ? meta.intakeProtocol : {},
       intakeAppointment: meta.intakeAppointment && typeof meta.intakeAppointment === "object" ? meta.intakeAppointment : null,
@@ -2387,7 +2398,7 @@ async function readJobMeta(jobId) {
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
       materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
-      hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.hoursCutoverDate || "")) ? String(meta.hoursCutoverDate) : "",
+      hoursCutoverDate: cleanOperationalDate(meta.hoursCutoverDate),
       hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(meta.hoursOverlapExcludedWwKeys),
       hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
       updatedAt: meta.updatedAt || null,
@@ -2430,8 +2441,8 @@ async function writeJobMeta(jobId, patch) {
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
     status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
-    offerFollowUpAt: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.offerFollowUpAt ?? existing.offerFollowUpAt ?? "")) ? String(patch.offerFollowUpAt ?? existing.offerFollowUpAt) : "",
-    offerRejectedAt: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.offerRejectedAt ?? existing.offerRejectedAt ?? "")) ? String(patch.offerRejectedAt ?? existing.offerRejectedAt) : "",
+    offerFollowUpAt: cleanOperationalDate(patch.offerFollowUpAt ?? existing.offerFollowUpAt),
+    offerRejectedAt: cleanOperationalDate(patch.offerRejectedAt ?? existing.offerRejectedAt),
     street: String(patch.street ?? existing.street ?? "").trim().slice(0, 140),
     houseNumber: String(patch.houseNumber ?? existing.houseNumber ?? "").trim().slice(0, 40),
     postalCode: String(patch.postalCode ?? existing.postalCode ?? "").trim().slice(0, 20),
@@ -2441,7 +2452,7 @@ async function writeJobMeta(jobId, patch) {
     contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
     contactEmail: String(patch.contactEmail ?? existing.contactEmail ?? "").trim().slice(0, 180),
     projectContacts: sanitizeProjectContacts(patch.projectContacts ?? existing.projectContacts, { ...existing, ...patch }),
-    startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.startDate ?? existing.startDate ?? "")) ? String(patch.startDate ?? existing.startDate) : "",
+    startDate: cleanOperationalDate(patch.startDate ?? existing.startDate),
     createdAt: patch.createdAt ?? existing.createdAt ?? null,
     intakeProtocol: patch.intakeProtocol && typeof patch.intakeProtocol === "object" ? patch.intakeProtocol : (existing.intakeProtocol || {}),
     intakeAppointment: patch.intakeAppointment && typeof patch.intakeAppointment === "object" ? patch.intakeAppointment : (existing.intakeAppointment || null),
@@ -2453,7 +2464,7 @@ async function writeJobMeta(jobId, patch) {
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
-    hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.hoursCutoverDate ?? existing.hoursCutoverDate ?? "")) ? String(patch.hoursCutoverDate ?? existing.hoursCutoverDate) : "",
+    hoursCutoverDate: cleanOperationalDate(patch.hoursCutoverDate ?? existing.hoursCutoverDate),
     hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
     hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
     updatedAt: new Date().toISOString(),
@@ -2604,14 +2615,16 @@ async function listDaysForJob(jobId) {
       const ds = await fsp.readdir(mPath).catch(() => []);
       for (const d of ds) {
         if (!/^\d{2}$/.test(d)) continue;
-        days.add(`${y}-${m}-${d}`);
+        const day = cleanOperationalDate(`${y}-${m}-${d}`);
+        if (day) days.add(day);
       }
     }
   }
 
   // OLD: YYYY-MM-DD directly under /job
   for (const x of entries) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) days.add(x);
+    const day = cleanOperationalDate(x);
+    if (day) days.add(day);
   }
 
   return Array.from(days).sort().reverse();

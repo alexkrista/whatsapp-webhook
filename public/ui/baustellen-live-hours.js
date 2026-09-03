@@ -17,7 +17,7 @@
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
-  const dateLabel=v=>{const s=String(v||"").slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:(s||"–")};
+  const dateLabel=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);return m&&year>=1900&&year<=2099?`${m[3]}.${m[2]}.${m[1]}`:"–"};
   const nameKey=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
   const canonicalPersonName=v=>({"mandi-faes":"Manuel Faes","edi-mock":"Edmund Mock","cathrin-grabherr":"Cathrin Anna Grabherr","anna-cathrin-grabherr":"Cathrin Anna Grabherr","cathrin-anna-grabherr":"Cathrin Anna Grabherr"})[nameKey(v)]||String(v||"").trim();
   const finkNumber=(employee,row={})=>String(row?.finkzeitPersonnelNumber||row?.finkzeitPersonalNumber||row?.personalnummerFinkzeit||row?.personnelNumber||employee?.finkzeitPersonnelNumber||employee?.finkzeitPersonalNumber||employee?.personalnummerFinkzeit||employee?.personnelNumber||employee?.personalNumber||"").trim();
