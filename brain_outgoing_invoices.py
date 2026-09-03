@@ -6,8 +6,10 @@ from __future__ import annotations
 import os
 import threading
 import hmac
+import html
 import json
 import smtplib
+import subprocess
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -45,6 +47,45 @@ def install(ns):
     terms_fn = ns.get("_terms")
     sql_connection = ns.get("sql_connection")
     ww_hours_source = ns.get("ww_hours_fusion_source")
+    kristine_api_request = ns.get("kristine_api_request")
+
+    def _mail_recipients_for_project(project_number):
+        if not callable(kristine_api_request):
+            raise RuntimeError("KRISTINE-Stammdaten sind nicht verfügbar.")
+        project_number = str(project_number or "").strip()
+        if not project_number or not project_number.isdigit() or len(project_number) > 12:
+            raise ValueError("Ungültige Baustellennummer.")
+        payload = kristine_api_request(f"/admin/api/job/{project_number}/meta") or {}
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else payload
+        contacts = meta.get("projectContacts") if isinstance(meta, dict) else {}
+        contacts = contacts if isinstance(contacts, dict) else {}
+        owner = contacts.get("owner") if isinstance(contacts.get("owner"), dict) else {}
+        site_manager = contacts.get("siteManager") if isinstance(contacts.get("siteManager"), dict) else {}
+        architect = contacts.get("architect") if isinstance(contacts.get("architect"), dict) else {}
+        delivery = contacts.get("deliveryRecipients") if isinstance(contacts.get("deliveryRecipients"), dict) else {}
+        selected = delivery.get("invoice") if isinstance(delivery.get("invoice"), dict) else {"owner": True}
+
+        def emails(*values):
+            result = []
+            for value in values:
+                address = str(value or "").strip()
+                if address and "@" in address and address.lower() not in {x.lower() for x in result}:
+                    result.append(address)
+            return result
+
+        owner_emails = emails(owner.get("womanEmail"), owner.get("manEmail"), owner.get("email"))
+        if not owner_emails and isinstance(meta, dict):
+            owner_emails = emails(meta.get("contactEmail"))
+        primary = owner_emails if selected.get("owner", True) else []
+        copies = []
+        if selected.get("siteManager"):
+            copies.extend(emails(site_manager.get("email")))
+        if selected.get("architect"):
+            copies.extend(emails(architect.get("email")))
+        copies = emails(*copies)
+        if not primary and copies:
+            primary, copies = copies[:1], copies[1:]
+        return {"to": primary, "cc": copies}
 
     def ww_open_items():
         if not callable(sql_connection):
@@ -514,6 +555,14 @@ def install(ns):
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
+    @app.get("/api/outgoing/project-mail-recipients")
+    def outgoing_project_mail_recipients():
+        try:
+            recipients = _mail_recipients_for_project(request.args.get("projectNumber"))
+            return jsonify({"ok": True, **recipients})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 404)
+
     @app.post("/api/outgoing/invoices")
     def outgoing_invoice_post():
         try:
@@ -692,6 +741,41 @@ def install(ns):
         except Exception as exc:
             return _json_error(jsonify, exc, 500)
 
+    @app.post("/api/outgoing/invoices/<int:invoice_id>/open-outlook")
+    def outgoing_invoice_open_outlook(invoice_id):
+        try:
+            invoice = store.invoice(invoice_id)
+            if str(invoice.get("status") or "") != "issued":
+                raise ValueError("Nur ausgestellte Rechnungen können in Outlook geöffnet werden.")
+            data = request.get_json(silent=True) or {}
+            recipients = [x.strip() for x in str(data.get("to") or "").replace(";", ",").split(",") if x.strip()]
+            cc = [x.strip() for x in str(data.get("cc") or "").replace(";", ",").split(",") if x.strip()]
+            if not recipients or any("@" not in x for x in recipients + cc):
+                raise ValueError("Bitte gültige E-Mail-Adressen eingeben.")
+            pdf_path = source_pdf_path(invoice)
+            number = str(invoice.get("invoice_number") or invoice_id)
+            subject = str(data.get("subject") or f"Rechnung {number}").strip()
+            message = str(data.get("message") or "Guten Tag,\n\nim Anhang erhalten Sie unsere Rechnung.").strip()
+            body_html = "<div style='font-family:Calibri,Arial,sans-serif;font-size:11pt'>" + html.escape(message).replace("\n", "<br>") + "<br><br></div>"
+            script = (
+                "$outlook=New-Object -ComObject Outlook.Application;"
+                "$mail=$outlook.CreateItem(0);"
+                "$mail.To=$args[0];$mail.CC=$args[1];$mail.Subject=$args[2];"
+                "$null=$mail.Attachments.Add($args[4]);"
+                "$mail.Display();Start-Sleep -Milliseconds 350;"
+                "$mail.HTMLBody=$args[3]+$mail.HTMLBody;"
+                "$mail.Display()"
+            )
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-STA", "-Command", script,
+                 "; ".join(recipients), "; ".join(cc), subject, body_html, str(pdf_path)],
+                cwd=str(pdf_path.parent),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return jsonify({"ok": True, "opened": True, "invoiceNumber": number})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
+
     @app.put("/api/outgoing/invoices/<int:invoice_id>/debtor-meta")
     def outgoing_debtor_meta_put(invoice_id):
         try:
@@ -801,7 +885,7 @@ OUTGOING_PAGE = r'''<!doctype html>
 <div id="runModal" class="modal hide"><div class="card"><div class="head"><h2>Neuer Rechnungslauf</h2><button data-close="runModal">×</button></div><div class="grid"><label>Bezeichnung<input id="runLabel" placeholder="z. B. Fassade / Zusatzauftrag"></label><label>Kunden-UID<input id="runUid"></label><label>Firma<input id="runCompany"></label><label>Name<input id="runName"></label><label>Straße<input id="runStreet"></label><label>PLZ<input id="runPostal"></label><label>Ort<input id="runCity"></label><label>Land<input id="runCountry" value="Österreich"></label></div><div class="row section"><button id="runSave" class="primary">Rechnungslauf anlegen</button><button data-close="runModal">Abbrechen</button></div></div></div>
 <div id="paymentModal" class="modal hide"><div class="card"><div class="head"><h2>Zahlung buchen</h2><button data-close="paymentModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Zu Rechnung<select id="payInvoice"></select></label><label>Datum<input id="payDate" type="date"></label><label>Brutto<input id="payGross" inputmode="decimal"></label><label>Netto (optional)<input id="payNet" inputmode="decimal"></label><label>USt (optional)<input id="payVat" inputmode="decimal"></label><label style="grid-column:1/-1">Text / Referenz<input id="payRef"></label></div><div class="row section"><button id="paySave" class="good">Zahlung buchen</button><button data-close="paymentModal">Abbrechen</button></div></div></div>
 <div id="correctionModal" class="modal hide"><div class="card"><div class="head"><h2>Korrekturbeleg</h2><button data-close="correctionModal">×</button></div><div class="grid"><label>Art<select id="correctionKind"><option value="GS">Gutschrift</option><option value="ST">Stornorechnung (nur offener Monat)</option></select></label><label>Datum<input id="correctionDate" type="date"></label><label id="creditGrossLabel">Gutschrift Brutto<input id="creditGross" inputmode="decimal"></label><label style="grid-column:1/-1">Begründung<input id="correctionReason"></label></div><div class="row section"><button id="correctionSave" class="danger">Korrekturentwurf anlegen</button><button data-close="correctionModal">Abbrechen</button></div></div></div>
-<div id="mailModal" class="modal hide"><div class="card"><div class="head"><h2>Rechnung per E-Mail senden</h2><button data-close="mailModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Empfänger<input id="mailTo" type="email" placeholder="bauherr@example.at"></label><label style="grid-column:1/-1">CC – Bauleitung / Architekt<input id="mailCc" placeholder="weitere Adressen mit Komma trennen"></label><label style="grid-column:1/-1">Betreff<input id="mailSubject"></label><label style="grid-column:1/-1">Nachricht<textarea id="mailText"></textarea></label></div><p class="small muted">Die Rechnung wird als PDF angehängt. Darunter steht automatisch die normale Alexander-Krista-Signatur.</p><div class="row section"><button id="mailSend" class="good">Jetzt senden</button><button data-close="mailModal">Abbrechen</button></div></div></div>
+<div id="mailModal" class="modal hide"><div class="card"><div class="head"><h2>Rechnung per E-Mail senden</h2><button data-close="mailModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Empfänger<input id="mailTo" type="email" placeholder="wird aus den Stammdaten übernommen"></label><label style="grid-column:1/-1">CC – Bauleitung / Architekt<input id="mailCc" placeholder="wird aus den Stammdaten übernommen"></label><label style="grid-column:1/-1">Betreff<input id="mailSubject"></label><label style="grid-column:1/-1">Nachricht<textarea id="mailText"></textarea></label></div><p class="small muted">„In Outlook öffnen“ erstellt die Original-Mail mit PDF-Anhang und deiner normalen Outlook-Signatur. Vor dem Senden kannst du alles prüfen und ändern.</p><div class="row section"><button id="mailOutlook" class="good">In Outlook öffnen</button><button id="mailSend">Direkt senden</button><button data-close="mailModal">Abbrechen</button></div></div></div>
 <div id="periodModal" class="modal hide"><div class="card"><div class="head"><h2>Monatsabschluss</h2><button data-close="periodModal">×</button></div><p class="muted">Nach dem Abschluss sind Rechnungen dieses Monats gesperrt. Korrekturen erfolgen nur noch über Gutschriften.</p><label>Monat<input id="periodValue" type="month"></label><div class="row section"><button id="periodClose" class="danger">Monat endgültig abschließen</button><button data-close="periodModal">Abbrechen</button></div><div id="closedPeriods" class="section small muted"></div></div></div>
 <script>
 (()=>{const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0)),today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);let selectedProject=null,selectedRun=null,editing=null,correctionTarget=null,settings={};
@@ -828,8 +912,9 @@ async function loadEmbeddedPreview(){const frame=document.querySelector('.invoic
 function decorateLineDiscounts(id){const invoice=(selectedRun?.invoices||[]).find(row=>row.id===Number(id)),rows=document.querySelectorAll('.quick-lines tbody tr');(invoice?.lines||[]).forEach((line,index)=>{const discount=Number(line.discount_percent||0),cell=rows[index]?.lastElementChild;if(!cell||discount<=0)return;const before=Number(line.quantity||0)*Number(line.unit_price||0),percent=new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(discount);cell.innerHTML=`<span class="small muted">${money(before)} · − ${percent} %</span><br><strong>${money(line.net)}</strong>`})}
 const quickInvoiceWithDirectPdf=quickInvoice;quickInvoice=function(id,showPdf=false){quickInvoiceWithDirectPdf(id,showPdf);decorateLineDiscounts(id);if(showPdf)loadEmbeddedPreview()};
 function wireInvoices(){document.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.quick),false));document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.preview),true));document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{try{let x=selectedRun.invoices.find(x=>x.id===Number(b.dataset.edit));if(b.dataset.issued==='1'){if(!confirm('Ausgestellte Rechnung als neue Version öffnen? Die bisherige Version bleibt archiviert.'))return;const d=await api('/api/outgoing/invoices/'+x.id+'/revision',{method:'POST',body:'{}'});x=d.invoice;await loadRun(selectedRun.id)}editInvoice(x)}catch(e){msg(e.message,true)}});document.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>issueInvoice(Number(b.dataset.issue)));document.querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>{correctionTarget=Number(b.dataset.correct);$('correctionKind').value='GS';$('creditGrossLabel').classList.remove('hide');open('correctionModal')})}
-let mailInvoiceId=null;function showInvoiceMail(id){const x=(selectedRun?.invoices||[]).find(row=>row.id===Number(id));if(!x)return;mailInvoiceId=x.id;$('mailTo').value='';$('mailCc').value='';$('mailSubject').value=`${x.kind==='TR'?'Teilrechnung':'Rechnung'} ${x.invoice_number||''} · ${selectedRun.label}`;$('mailText').value=x.kind==='TR'?`Guten Tag,\n\nim Anhang erhalten Sie unsere Teilrechnung ${x.invoice_number||''} für die bisher erbrachten Leistungen beim Projekt ${selectedRun.label}.\n\nSollte etwas unklar oder noch offen sein, melden Sie sich bitte jederzeit bei uns. Wir kümmern uns gerne darum.`:`Guten Tag,\n\nvielen Dank, dass wir für Sie arbeiten durften.\n\nIm Anhang erhalten Sie unsere Rechnung ${x.invoice_number||''} zum Projekt ${selectedRun.label}. Sollte etwas unklar oder noch offen sein, melden Sie sich bitte jederzeit bei uns. Wir kümmern uns gerne darum.`;open('mailModal')}
+let mailInvoiceId=null;async function showInvoiceMail(id){const x=(selectedRun?.invoices||[]).find(row=>row.id===Number(id));if(!x)return;mailInvoiceId=x.id;$('mailTo').value='';$('mailCc').value='';$('mailSubject').value=`${x.kind==='TR'?'Teilrechnung':'Rechnung'} ${x.invoice_number||''} · ${selectedRun.label}`;$('mailText').value=x.kind==='TR'?`Guten Tag,\n\nim Anhang erhalten Sie unsere Teilrechnung ${x.invoice_number||''} für die bisher erbrachten Leistungen beim Projekt ${selectedRun.label}.\n\nSollte etwas unklar oder noch offen sein, melden Sie sich bitte jederzeit bei uns. Wir kümmern uns gerne darum.`:`Guten Tag,\n\nvielen Dank, dass wir für Sie arbeiten durften.\n\nIm Anhang erhalten Sie unsere Rechnung ${x.invoice_number||''} zum Projekt ${selectedRun.label}. Sollte etwas unklar oder noch offen sein, melden Sie sich bitte jederzeit bei uns. Wir kümmern uns gerne darum.`;open('mailModal');try{const d=await api('/api/outgoing/project-mail-recipients?projectNumber='+encodeURIComponent(selectedRun.project_number));$('mailTo').value=(d.to||[]).join(', ');$('mailCc').value=(d.cc||[]).join(', ');if(!(d.to||[]).length)msg('Für die angekreuzten Empfänger ist keine E-Mail-Adresse gespeichert.',true)}catch(e){msg('E-Mail-Adressen aus den Stammdaten konnten nicht geladen werden: '+e.message,true)}}
 async function sendInvoiceMail(){const button=$('mailSend');button.disabled=true;try{const d=await api('/api/outgoing/invoices/'+mailInvoiceId+'/send-email',{method:'POST',body:JSON.stringify({to:$('mailTo').value,cc:$('mailCc').value,subject:$('mailSubject').value,message:$('mailText').value})});close('mailModal');msg(`Rechnung ${d.invoiceNumber} wurde versendet.`)}catch(e){msg(e.message,true)}finally{button.disabled=false}}
+async function openInvoiceInOutlook(){const button=$('mailOutlook');button.disabled=true;try{const d=await api('/api/outgoing/invoices/'+mailInvoiceId+'/open-outlook',{method:'POST',body:JSON.stringify({to:$('mailTo').value,cc:$('mailCc').value,subject:$('mailSubject').value,message:$('mailText').value})});close('mailModal');msg(`Rechnung ${d.invoiceNumber} wurde in Outlook vorbereitet.`)}catch(e){msg(e.message,true)}finally{button.disabled=false}}
 const wireInvoicesBase=wireInvoices;wireInvoices=function(){wireInvoicesBase();document.querySelectorAll('.invoice').forEach((card,index)=>{const invoice=(selectedRun?.invoices||[])[index],row=card.querySelector('.row');if(!invoice||invoice.status!=='issued'||!row)return;const button=document.createElement('button');button.className='good';button.textContent='Per E-Mail senden';button.onclick=()=>showInvoiceMail(invoice.id);row.append(button)})};
 function dateControl(id,label,value){return `<label>${label}<div class="date-control"><button type="button" data-date-minus="${id}">−</button><input id="${id}" type="date" value="${esc(value||today())}"><button type="button" data-date-plus="${id}">+</button></div></label>`}
 function editInvoice(x=null){editing=x;const history=(selectedRun.invoices||[]).filter(i=>['TR','SR','RE'].includes(i.kind)&&i.status==='issued'&&i.id!==x?.id),nextTr=history.filter(i=>i.kind==='TR').length+1,titleFor=k=>k==='TR'?`${nextTr}. Teilrechnung`:k==='SR'?'Schlussrechnung':'Rechnung',priorNet=history.reduce((s,i)=>s+Number(i.increment_net||0),0),priorVat=history.reduce((s,i)=>s+Number(i.increment_vat||0),0),priorGross=history.reduce((s,i)=>s+Number(i.increment_gross||0),0),paidGross=Number(selectedRun.paidGross||0),due=new Date((x?.issue_date||today())+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=x?.lines?.length?x.lines:[{description:'Kumulativer Leistungsstand lt. Auftrag',quantity:1,unit:'PA',unit_price:priorNet,discount_percent:0}],historyRows=history.map((i,n)=>`${esc(i.invoice_number||'')}${i.kind==='TR'?' · '+(n+1)+'. Teilrechnung':' · '+esc(i.kind)} · netto ${money(i.increment_net)} · brutto ${money(i.increment_gross)}`).join('<br>');$('editor').innerHTML=`<div class="card section"><div class="head"><h2 id="editorTitle">${x?'Entwurf bearbeiten':'Neue '+titleFor('TR')}</h2><button id="editorClose">×</button></div><div class="grid3"><label>Art<select id="invKind"><option value="TR">Teilrechnung</option><option value="SR">Schlussrechnung</option><option value="RE">Rechnung</option></select></label>${dateControl('invDate','Rechnungsdatum',x?.issue_date||today())}${dateControl('dueDate','Fällig am',x?.due_date||due.toISOString().slice(0,10))}${dateControl('serviceFrom','Leistung von',x?.service_from||today())}${dateControl('serviceTo','Leistung bis',x?.service_to||today())}<label>USt-Art<select id="taxMode"><option value="AT20">20 % Österreich</option><option value="CHLI81">8,1 % Schweiz / Liechtenstein</option><option value="RC19">0 % · § 19 Übergang Steuerschuld</option><option value="EU0">0 % · EU-Auslandslieferung</option></select></label><label id="recipientUidLabel">Kunden-UID<input id="recipientUid" value="${esc(x?.recipient_uid||selectedRun.customer_uid||'')}"></label><label>Deckungsrücklass %<input id="retention" inputmode="decimal" value="${x?.retention_percent||0}"></label><label>Rabatt %<input id="discount" inputmode="decimal" value="${x?.discount_percent||0}"></label><label>Skonto %<input id="cashDiscount" inputmode="decimal" value="${x?.cash_discount_percent||0}"></label>${dateControl('cashUntil','Skonto bis',x?.cash_discount_until||'')}<label>Betreff<input id="subject" value="${esc(x?.subject||selectedRun.label)}"></label></div>${history.length?`<div class="section"><h3>Bisheriger Stand aus WW / KRISTINE</h3><div class="summary"><div>Abgerechnet netto<strong>${money(priorNet)}</strong></div><div>USt<strong>${money(priorVat)}</strong></div><div>Abgerechnet brutto<strong>${money(priorGross)}</strong></div><div>Erhaltene Zahlungen<strong>${money(paidGross)}</strong></div></div><div class="small muted">${historyRows}</div><div class="small" style="margin-top:9px;color:var(--amber)">Unten steht bereits der bisherige Netto-Leistungsstand. Für die ${nextTr}. Teilrechnung bitte auf den neuen kumulierten Gesamtstand erhöhen – nicht nur den Zusatzbetrag eingeben.</div></div>`:''}<div class="section"><h3>Leistungen / kumulierter Stand</h3><table class="lines"><thead><tr><th>Pos</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Gesamtstand netto</th><th>Rabatt %</th><th></th></tr></thead><tbody id="lineRows"></tbody></table><button id="addLine">+ Position</button></div><label class="section">Zusatztext<textarea id="notes">${esc(x?.notes||'')}</textarea></label><div class="row section"><button id="saveDraft" class="primary">Entwurf speichern</button><button id="savePreview">Speichern & PDF prüfen</button></div></div>`;$('invKind').value=x?.kind||'TR';$('invKind').onchange=()=>{if(!x)$('editorTitle').textContent='Neue '+titleFor($('invKind').value)};$('taxMode').value=x?.tax_mode||'AT20';let model=lines.map(l=>({description:l.description||'',quantity:l.quantity||1,unit:l.unit||'PA',unitPrice:l.unit_price??l.unitPrice??0,discountPercent:l.discount_percent??l.discountPercent??0}));function renderLines(){$('lineRows').innerHTML=model.map((l,i)=>`<tr><td>${i+1}</td><td><input class="desc" data-f="description" data-i="${i}" value="${esc(l.description)}"></td><td><input data-f="quantity" data-i="${i}" value="${esc(l.quantity)}"></td><td><input data-f="unit" data-i="${i}" value="${esc(l.unit)}"></td><td><input data-f="unitPrice" data-i="${i}" value="${esc(l.unitPrice)}"></td><td><input data-f="discountPercent" data-i="${i}" value="${esc(l.discountPercent)}"></td><td><button data-del="${i}">×</button></td></tr>`).join('');$('lineRows').querySelectorAll('input').forEach(e=>e.oninput=()=>model[Number(e.dataset.i)][e.dataset.f]=e.value);$('lineRows').querySelectorAll('[data-del]').forEach(e=>e.onclick=()=>{model.splice(Number(e.dataset.del),1);renderLines()})}renderLines();$('addLine').onclick=()=>{model.push({description:'',quantity:1,unit:'PA',unitPrice:0,discountPercent:0});renderLines()};$('editorClose').onclick=()=>{$('editor').innerHTML=''};document.querySelectorAll('[data-date-minus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.dateMinus,-1));document.querySelectorAll('[data-date-plus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.datePlus,1));$('taxMode').onchange=()=>$('recipientUidLabel').classList.toggle('hide',!['RC19','EU0'].includes($('taxMode').value));$('taxMode').onchange();async function save(preview){const payload={runId:selectedRun.id,kind:$('invKind').value,issueDate:$('invDate').value,dueDate:$('dueDate').value,serviceFrom:$('serviceFrom').value,serviceTo:$('serviceTo').value,taxMode:$('taxMode').value,recipientUid:$('recipientUid').value,retentionPercent:$('retention').value,discountPercent:$('discount').value,cashDiscountPercent:$('cashDiscount').value,cashDiscountUntil:$('cashUntil').value,subject:$('subject').value,notes:$('notes').value,lines:model};const d=await api(editing?'/api/outgoing/invoices/'+editing.id:'/api/outgoing/invoices',{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=d.invoice;msg('Entwurf gespeichert.');await loadRun(selectedRun.id);if(preview)window.open('/api/outgoing/invoices/'+editing.id+'/preview.pdf','_blank')} $('saveDraft').onclick=()=>save(false).catch(e=>msg(e.message,true));$('savePreview').onclick=()=>save(true).catch(e=>msg(e.message,true))}
@@ -839,7 +924,7 @@ function showPayment(){$('payInvoice').innerHTML='<option value="">Allgemein zum
 async function savePayment(){try{await api('/api/outgoing/runs/'+selectedRun.id+'/payments',{method:'POST',body:JSON.stringify({invoiceId:$('payInvoice').value?Number($('payInvoice').value):null,paymentDate:$('payDate').value,gross:$('payGross').value,net:$('payNet').value||null,vat:$('payVat').value||null,reference:$('payRef').value})});close('paymentModal');msg('Zahlung gebucht.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
 async function saveCorrection(){try{const d=await api('/api/outgoing/invoices/'+correctionTarget+'/corrections',{method:'POST',body:JSON.stringify({kind:$('correctionKind').value,issueDate:$('correctionDate').value,gross:$('creditGross').value,reason:$('correctionReason').value})});close('correctionModal');msg('Korrekturentwurf angelegt.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
 async function showPeriods(){const d=await api('/api/outgoing/periods');$('closedPeriods').innerHTML='<strong>Abgeschlossene Monate</strong><br>'+(d.periods.map(x=>esc(x.period.slice(0,4)+'-'+x.period.slice(4))+' · '+esc(x.closed_at)).join('<br>')||'Noch keiner.');open('periodModal')}async function closePeriod(){const p=$('periodValue').value.replace('-','');if(!confirm('Monat '+$('periodValue').value+' endgültig abschließen?'))return;try{await api('/api/outgoing/periods/close',{method:'POST',body:JSON.stringify({period:p})});msg('Monat abgeschlossen.');showPeriods()}catch(e){msg(e.message,true)}}
-$('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('mailSend').onclick=sendInvoiceMail;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=showPeriods;$('periodClose').onclick=closePeriod;$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');init().catch(e=>msg(e.message,true));})();
+$('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('mailOutlook').onclick=openInvoiceInOutlook;$('mailSend').onclick=sendInvoiceMail;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=showPeriods;$('periodClose').onclick=closePeriod;$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');init().catch(e=>msg(e.message,true));})();
 </script></body></html>'''
 
 

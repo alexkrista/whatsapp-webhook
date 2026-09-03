@@ -40,6 +40,18 @@ class OutgoingApiTests(unittest.TestCase):
                 {"projectIndex": 1, "date": "2026-07-30", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 7.75},
                 {"projectIndex": 1, "date": "2026-07-31", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 6.25},
             ],
+            "kristine_api_request": lambda path, method="GET", payload=None: {
+                "ok": True,
+                "meta": {
+                    "contactEmail": "fallback@example.at",
+                    "projectContacts": {
+                        "owner": {"womanEmail": "bauherrin@example.at", "manEmail": "bauherr@example.at"},
+                        "siteManager": {"email": "bauleitung@example.at"},
+                        "architect": {"email": "architekt@example.at"},
+                        "deliveryRecipients": {"invoice": {"owner": True, "siteManager": True, "architect": False}},
+                    },
+                },
+            },
         })
         cls.app = app
         cls.client = app.test_client()
@@ -138,6 +150,13 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(len(ww_hours.get_json()["hours"]["days"]), 2)
         self.assertEqual(ww_hours.get_json()["hours"]["rows"][0]["employeeName"], "Max Muster")
         self.assertEqual(ww_hours.get_json()["hours"]["rows"][0]["finkNumber"], "101")
+
+    def test_invoice_mail_recipients_come_from_selected_master_data(self):
+        response = self.client.get("/api/outgoing/project-mail-recipients?projectNumber=26001")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertEqual(payload["to"], ["bauherrin@example.at", "bauherr@example.at"])
+        self.assertEqual(payload["cc"], ["bauleitung@example.at"])
 
 
 if __name__ == "__main__":
