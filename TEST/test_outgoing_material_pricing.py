@@ -1,6 +1,11 @@
 import unittest
 
-from brain_outgoing_invoices import _lg_retail_net_price, _project_owner_names, _ten_l_fallback_price
+from brain_outgoing_invoices import (
+    _is_project_closing_invoice,
+    _lg_retail_net_price,
+    _project_owner_names,
+    _ten_l_fallback_price,
+)
 
 
 class OutgoingMaterialPricingTests(unittest.TestCase):
@@ -20,6 +25,16 @@ class OutgoingMaterialPricingTests(unittest.TestCase):
             "manFirstName": "Martin", "manLastName": "Schwerzler",
         }}}
         self.assertEqual(_project_owner_names(meta), ["Theresa Schwerzler", "Martin Schwerzler"])
+
+    def test_only_final_invoice_closes_project(self):
+        self.assertFalse(_is_project_closing_invoice({"kind": "TR", "run": {}}))
+        self.assertTrue(_is_project_closing_invoice({"kind": "SR", "run": {}}))
+        self.assertTrue(_is_project_closing_invoice({
+            "kind": "RE", "subject": "Rechnung · Malerarbeiten", "run": {"label": "Hauptauftrag"},
+        }))
+        self.assertFalse(_is_project_closing_invoice({
+            "kind": "RE", "subject": "Regiearbeiten", "run": {"label": "Hauptauftrag · Extra-Rechnung"},
+        }))
 
 
 if __name__ == "__main__":
