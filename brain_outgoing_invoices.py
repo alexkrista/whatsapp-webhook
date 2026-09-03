@@ -9,7 +9,6 @@ import hmac
 import html
 import json
 import smtplib
-import subprocess
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -756,22 +755,22 @@ def install(ns):
             number = str(invoice.get("invoice_number") or invoice_id)
             subject = str(data.get("subject") or f"Rechnung {number}").strip()
             message = str(data.get("message") or "Guten Tag,\n\nim Anhang erhalten Sie unsere Rechnung.").strip()
-            body_html = "<div style='font-family:Calibri,Arial,sans-serif;font-size:11pt'>" + html.escape(message).replace("\n", "<br>") + "<br><br></div>"
-            script = (
-                "$outlook=New-Object -ComObject Outlook.Application;"
-                "$mail=$outlook.CreateItem(0);"
-                "$mail.To=$args[0];$mail.CC=$args[1];$mail.Subject=$args[2];"
-                "$null=$mail.Attachments.Add($args[4]);"
-                "$mail.Display();Start-Sleep -Milliseconds 350;"
-                "$mail.HTMLBody=$args[3]+$mail.HTMLBody;"
-                "$mail.Display()"
-            )
-            subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-STA", "-Command", script,
-                 "; ".join(recipients), "; ".join(cc), subject, body_html, str(pdf_path)],
-                cwd=str(pdf_path.parent),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            signature_text = "Mit farbenfrohen Grüßen aus Frastanz\n\nMMSt. Ing. Alexander Krista\nMaler- & Baumeister | Geschäftsleitung\nM +43 664 3203577\n\nFarben Krista GmbH & Co KG\nFeldkircherstr. 45, 6820 Frastanz\nT +43 (0)5522 53940 | www.krista.at"
+            signature_html = "<p>Mit farbenfrohen Grüßen aus Frastanz</p><p><strong style='font-size:18px'>MMSt. Ing. Alexander Krista</strong><br>Maler- &amp; Baumeister<br>Geschäftsleitung<br>M +43 664 3203577</p><p><strong>Farben Krista GmbH &amp; Co KG</strong><br>Feldkircherstr. 45, 6820 Frastanz<br>T +43 (0)5522 53940 · <a href='https://www.krista.at'>www.krista.at</a></p>"
+            draft = EmailMessage()
+            draft["X-Unsent"] = "1"
+            draft["To"] = ", ".join(recipients)
+            if cc:
+                draft["Cc"] = ", ".join(cc)
+            draft["Subject"] = subject
+            draft.set_content(message + "\n\n" + signature_text)
+            draft.add_alternative("<div style='font:15px/1.5 Calibri,Arial,sans-serif;color:#222'>" + html.escape(message).replace("\n", "<br>") + "<br><br>" + signature_html + "</div>", subtype="html")
+            draft.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
+            draft_dir = output_root / "_Outlook-Entwuerfe"
+            draft_dir.mkdir(parents=True, exist_ok=True)
+            draft_path = draft_dir / f"Rechnung_{number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.eml"
+            draft_path.write_bytes(draft.as_bytes())
+            os.startfile(str(draft_path))
             return jsonify({"ok": True, "opened": True, "invoiceNumber": number})
         except Exception as exc:
             return _json_error(jsonify, exc, 500)
