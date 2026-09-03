@@ -436,10 +436,14 @@ def install(ns):
                 package = str(row.get("containerSize") or "").strip()
                 if package and package not in {"1", "1.0", "1,0"}:
                     details.append(f"{package} {str(row.get('unit') or '').strip()}".strip())
-                details = [value for value in details if value and value.casefold() not in name.casefold()]
-                label = " · ".join([name, *[value for value in details if value]])
                 manufacturer = str(row.get("manufacturer") or "").lower()
                 is_little_greene = "little greene" in manufacturer
+                if is_little_greene:
+                    unit_label = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", str(row.get("unit") or "").strip()).replace(".", ",")
+                    if unit_label:
+                        details.append(unit_label)
+                details = [value for value in details if value and value.casefold() not in name.casefold()]
+                label = " · ".join([name, *[value for value in details if value]])
                 retail_net = _lg_retail_net_price(name, row.get("unit"), row.get("containerSize")) if is_little_greene else 0
                 maintained_retail_gross = float(row.get("salePrice") or 0)
                 purchase_price = float(row.get("purchasePrice") or 0)
