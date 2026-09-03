@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import threading
+import hmac
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -26,7 +27,7 @@ def install(ns):
     if app is None or _INSTALLED or getattr(app, "_krista_outgoing", False):
         return
 
-    from flask import jsonify, request, send_file
+    from flask import jsonify, make_response, request, send_file
 
     base_db = Path(ns.get("DB") or r"N:\OneDrive\Dokumente\Kristine\Daten\kristine_pdf_index_v2.db")
     db_path = Path(os.environ.get("KRISTINE_OUTGOING_DB", str(base_db.parent / "kristine_outgoing_invoices.db")))
@@ -37,8 +38,10 @@ def install(ns):
     app.extensions["kristine_outgoing_store"] = store
 
     search_projects = ns.get("search_projects")
+    search_pdf = ns.get("search_pdf")
     terms_fn = ns.get("_terms")
     sql_connection = ns.get("sql_connection")
+    ww_hours_source = ns.get("ww_hours_fusion_source")
 
     def ww_open_items():
         if not callable(sql_connection):
@@ -269,6 +272,191 @@ def install(ns):
         except Exception as exc:
             return _json_error(jsonify, exc, 500)
 
+    def project_billing_summary(project):
+        project_index = int(project.get("projectIndex") or 0)
+        run_details = [store.run(row["id"]) for row in store.runs(project_index)]
+        invoices = []
+        payments = []
+        run_summaries = []
+        for run in run_details:
+            run_payments = []
+            for payment in run.get("payments") or []:
+                row = {
+                    "id": int(payment.get("id") or 0),
+                    "invoiceId": int(payment["invoiceId"]) if payment.get("invoiceId") is not None else None,
+                    "paymentDate": str(payment.get("paymentDate") or "")[:10],
+                    "net": round(float(payment.get("net") or 0), 2),
+                    "vat": round(float(payment.get("vat") or 0), 2),
+                    "gross": round(float(payment.get("gross") or 0), 2),
+                    "source": "WW" if str(payment.get("source") or "").upper() == "WW" else "KRISTINE",
+                }
+                run_payments.append(row)
+                payments.append(row)
+            paid_by_invoice = {}
+            for payment in run_payments:
+                invoice_id = payment.get("invoiceId")
+                if invoice_id is not None:
+                    paid_by_invoice[invoice_id] = round(
+                        paid_by_invoice.get(invoice_id, 0) + payment["gross"], 2
+                    )
+            run_invoices = []
+            for invoice in run.get("invoices") or []:
+                if str(invoice.get("status") or "") != "issued":
+                    continue
+                invoice_id = int(invoice.get("id") or 0)
+                gross = round(float(invoice.get("increment_gross") or 0), 2)
+                paid_gross = round(paid_by_invoice.get(invoice_id, 0), 2)
+                kind = str(invoice.get("kind") or "RE").upper()
+                if kind not in {"TR", "SR", "RE", "GS", "ST"}:
+                    kind = "RE"
+                row = {
+                    "id": invoice_id,
+                    "runId": int(run.get("id") or 0),
+                    "invoiceNumber": str(invoice.get("invoice_number") or ""),
+                    "kind": kind,
+                    "issueDate": str(invoice.get("issue_date") or "")[:10],
+                    "dueDate": str(invoice.get("due_date") or "")[:10],
+                    "net": round(float(invoice.get("increment_net") or 0), 2),
+                    "vat": round(float(invoice.get("increment_vat") or 0), 2),
+                    "gross": gross,
+                    "paidGross": paid_gross,
+                    "openGross": round(max(0, gross - paid_gross), 2),
+                    "source": "WW" if str(invoice.get("source") or "").upper() == "WW" else "KRISTINE",
+                }
+                run_invoices.append(row)
+                invoices.append(row)
+            run_summaries.append({
+                "id": int(run.get("id") or 0),
+                "label": str(run.get("label") or "Rechnungslauf"),
+                "status": "closed" if str(run.get("status") or "") == "closed" else "open",
+                "billedNet": round(sum(row["net"] for row in run_invoices), 2),
+                "billedGross": round(sum(row["gross"] for row in run_invoices), 2),
+                "paidGross": round(sum(row["gross"] for row in run_payments), 2),
+                "openGross": round(max(0, float(run.get("currentOpen") or 0)), 2),
+            })
+        invoices.sort(key=lambda row: (row["issueDate"], row["id"]))
+        payments.sort(key=lambda row: (row["paymentDate"], row["id"]))
+        return {
+            "found": True,
+            "projectNumber": str(project.get("projectNumber") or ""),
+            "projectIndex": project_index,
+            "summary": {
+                "invoiceCount": len(invoices),
+                "billedNet": round(sum(row["net"] for row in invoices), 2),
+                "billedGross": round(sum(row["gross"] for row in invoices), 2),
+                "paidGross": round(sum(row["gross"] for row in payments), 2),
+                "openGross": round(sum(row["openGross"] for row in run_summaries), 2),
+            },
+            "invoices": invoices,
+            "payments": payments,
+            "runs": run_summaries,
+        }
+
+    def billing_response(payload, status=200):
+        response = make_response(jsonify(payload), status)
+        origin = str(request.headers.get("Origin") or "")
+        if origin == "https://protokoll.krista.at":
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, Content-Type"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Access-Control-Max-Age"] = "600"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.route("/api/outgoing/project-billing", methods=["POST", "OPTIONS"])
+    def outgoing_project_billing():
+        if request.method == "OPTIONS":
+            return billing_response({}, 204)
+        try:
+            origin = str(request.headers.get("Origin") or "")
+            if origin:
+                if origin != "https://protokoll.krista.at":
+                    return billing_response({"ok": False, "error": "Herkunft nicht freigegeben."}, 403)
+                expected = str(os.environ.get("KRISTINE_ADMIN_TOKEN") or "")
+                supplied = str(request.headers.get("X-Krista-Token") or "")
+                if not expected:
+                    return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
+                if not hmac.compare_digest(supplied, expected):
+                    return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
+            data = request.get_json(silent=True) or {}
+            project_number = str(data.get("projectNumber") or "").strip()
+            if not project_number or not project_number.isdigit() or len(project_number) > 12:
+                return billing_response({"ok": False, "error": "Ungültige Baustellennummer."}, 400)
+            if not callable(search_projects):
+                raise RuntimeError("WinWorker-Projektsuche ist nicht verfügbar.")
+            terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
+            matches = [
+                row for row in search_projects(terms, include_metrics=False, limit=20)
+                if str(row.get("projectNumber") or "").strip() == project_number
+            ]
+            if not matches:
+                return billing_response({"ok": True, "billing": {
+                    "found": False, "projectNumber": project_number, "projectIndex": 0,
+                    "summary": {"invoiceCount": 0, "billedNet": 0, "billedGross": 0, "paidGross": 0, "openGross": 0},
+                    "invoices": [], "payments": [], "runs": [],
+                }})
+            if len(matches) > 1:
+                return billing_response({"ok": False, "error": "Baustellennummer ist in WinWorker nicht eindeutig."}, 409)
+            project = matches[0]
+            if callable(sql_connection):
+                store.sync_ww_project_history(ww_project_history(int(project.get("projectIndex") or 0)))
+            return billing_response({"ok": True, "billing": project_billing_summary(project)})
+        except Exception as exc:
+            return billing_response({"ok": False, "error": str(exc)}, 500)
+
+    @app.route("/api/outgoing/project-hours", methods=["POST", "OPTIONS"])
+    def outgoing_project_hours():
+        if request.method == "OPTIONS":
+            return billing_response({}, 204)
+        try:
+            origin = str(request.headers.get("Origin") or "")
+            if origin:
+                if origin != "https://protokoll.krista.at":
+                    return billing_response({"ok": False, "error": "Herkunft nicht freigegeben."}, 403)
+                expected = str(os.environ.get("KRISTINE_ADMIN_TOKEN") or "")
+                supplied = str(request.headers.get("X-Krista-Token") or "")
+                if not expected:
+                    return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
+                if not hmac.compare_digest(supplied, expected):
+                    return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
+            data = request.get_json(silent=True) or {}
+            project_number = str(data.get("projectNumber") or "").strip()
+            if not project_number or not project_number.isdigit() or len(project_number) > 12:
+                return billing_response({"ok": False, "error": "Ungültige Baustellennummer."}, 400)
+            if not callable(search_projects) or not callable(ww_hours_source):
+                raise RuntimeError("WinWorker-Stundenquelle ist nicht verfügbar.")
+            terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
+            matches = [
+                row for row in search_projects(terms, include_metrics=False, limit=20)
+                if str(row.get("projectNumber") or "").strip() == project_number
+            ]
+            if not matches:
+                return billing_response({"ok": True, "hours": {
+                    "found": False, "projectNumber": project_number, "projectIndex": 0,
+                    "totalHours": 0, "days": [],
+                }})
+            if len(matches) > 1:
+                return billing_response({"ok": False, "error": "Baustellennummer ist in WinWorker nicht eindeutig."}, 409)
+            project = matches[0]
+            project_index = int(project.get("projectIndex") or 0)
+            by_day = {}
+            for row in ww_hours_source([project_index]):
+                day = str(row.get("date") or "")[:10]
+                if day:
+                    by_day[day] = by_day.get(day, 0) + float(row.get("netHours") or 0)
+            days = [{"date": day, "hours": round(hours, 4)} for day, hours in sorted(by_day.items())]
+            return billing_response({"ok": True, "hours": {
+                "found": True,
+                "projectNumber": project_number,
+                "projectIndex": project_index,
+                "totalHours": round(sum(row["hours"] for row in days), 4),
+                "days": days,
+            }})
+        except Exception as exc:
+            return billing_response({"ok": False, "error": str(exc)}, 500)
+
     @app.get("/api/outgoing/runs")
     def outgoing_runs_get():
         try:
@@ -360,6 +548,27 @@ def install(ns):
             if not path.is_file():
                 raise ValueError("Rechnungs-PDF fehlt.")
             return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
+        except Exception as exc:
+            return _json_error(jsonify, exc, 404)
+
+    @app.get("/api/outgoing/invoices/<int:invoice_id>/source-pdf")
+    def outgoing_invoice_source_pdf(invoice_id):
+        try:
+            invoice = store.invoice(invoice_id)
+            own_path = Path(str(invoice.get("pdf_path") or ""))
+            if own_path.is_file() and own_path.suffix.lower() == ".pdf":
+                return send_file(own_path, mimetype="application/pdf", as_attachment=False, download_name=own_path.name)
+            if str(invoice.get("source") or "").upper() != "WW" or not callable(search_pdf):
+                raise ValueError("Rechnungs-PDF fehlt.")
+            invoice_number = str(invoice.get("invoice_number") or "").strip()
+            if not invoice_number:
+                raise ValueError("Rechnungsnummer fehlt.")
+            candidates = search_pdf([invoice_number])
+            for candidate in candidates:
+                path = Path(str(candidate.get("path") or ""))
+                if path.is_file() and path.suffix.lower() == ".pdf":
+                    return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=path.name)
+            raise ValueError("Original-PDF der WinWorker-Rechnung wurde nicht gefunden.")
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
@@ -463,7 +672,7 @@ OUTGOING_PAGE = r'''<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KRISTINE · Ausgangsrechnungen</title>
 <style>
-:root{--bg:#0b0e12;--card:#12171d;--card2:#171e26;--line:#2a3440;--text:#eef3f7;--muted:#9aabb9;--blue:#70a8ff;--green:#7bd99b;--red:#ff8c8c;--amber:#f5ca68}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 18px;background:#0d1217ee;border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}.top h1{font-size:18px;margin:0}.top a{color:var(--text);text-decoration:none}.layout{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:14px;padding:14px;max-width:1600px;margin:auto}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.side{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 84px);overflow:auto}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}.grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}label{display:grid;gap:4px;color:var(--muted);font-size:12px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:9px 10px;min-height:40px}textarea{min-height:70px;resize:vertical}button{border:1px solid var(--line);border-radius:9px;background:#202a34;color:var(--text);padding:9px 12px;min-height:40px;font-weight:700}button.primary{background:#276bd2;border-color:#397ee9}button.good{background:#17643d;border-color:#248656}button.danger{background:#63252a;border-color:#8b383e}button.ghost{background:transparent}.muted{color:var(--muted)}.small{font-size:12px}.money{font-variant-numeric:tabular-nums;text-align:right}.run,.project,.invoice,.payment{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:var(--card2)}.run.active,.project.active{border-color:var(--blue)}.head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#26323e;color:#cbd8e3;font-size:11px}.pill.open{background:#173c29;color:#8de6ac}.pill.closed{background:#3e2d18;color:#f5ce87}.summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin:10px 0}.summary>div{padding:10px;background:#0e1318;border:1px solid var(--line);border-radius:9px}.summary strong{display:block;font-size:17px}.section{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.section h2,.section h3{margin:0 0 10px}.lines{width:100%;border-collapse:collapse}.lines th,.lines td{padding:5px;vertical-align:top}.lines th{font-size:11px;color:var(--muted);text-align:left}.lines input{min-width:70px}.lines .desc{min-width:250px}.date-control{display:grid;grid-template-columns:40px 1fr 40px;gap:4px}.date-control button{padding:0}.message{position:fixed;right:14px;bottom:14px;max-width:420px;padding:12px 14px;border-radius:10px;background:#15202a;border:1px solid var(--line);box-shadow:0 8px 30px #0008;z-index:20}.message.error{background:#441f24;border-color:#8b383e}.hide{display:none!important}.modal{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.modal>.card{width:min(700px,100%);max-height:90vh;overflow:auto}@media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.grid,.grid3,.summary{grid-template-columns:1fr 1fr}}@media(max-width:560px){.grid,.grid3,.summary{grid-template-columns:1fr}.top{align-items:flex-start}.lines{display:block;overflow:auto}}
+:root{--bg:#0b0e12;--card:#12171d;--card2:#171e26;--line:#2a3440;--text:#eef3f7;--muted:#9aabb9;--blue:#70a8ff;--green:#7bd99b;--red:#ff8c8c;--amber:#f5ca68}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 18px;background:#0d1217ee;border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}.top h1{font-size:18px;margin:0}.top a{color:var(--text);text-decoration:none}.layout{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:14px;padding:14px;max-width:1600px;margin:auto}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.side{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 84px);overflow:auto}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}.grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}label{display:grid;gap:4px;color:var(--muted);font-size:12px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#0e1318;color:var(--text);padding:9px 10px;min-height:40px}textarea{min-height:70px;resize:vertical}button{border:1px solid var(--line);border-radius:9px;background:#202a34;color:var(--text);padding:9px 12px;min-height:40px;font-weight:700}button.primary{background:#276bd2;border-color:#397ee9}button.good{background:#17643d;border-color:#248656}button.danger{background:#63252a;border-color:#8b383e}button.ghost{background:transparent}.muted{color:var(--muted)}.small{font-size:12px}.money{font-variant-numeric:tabular-nums;text-align:right}.run,.project,.invoice,.payment{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:var(--card2)}.run.active,.project.active{border-color:var(--blue)}.head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#26323e;color:#cbd8e3;font-size:11px}.pill.open{background:#173c29;color:#8de6ac}.pill.closed{background:#3e2d18;color:#f5ce87}.summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin:10px 0}.summary>div{padding:10px;background:#0e1318;border:1px solid var(--line);border-radius:9px}.summary strong{display:block;font-size:17px}.section{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.section h2,.section h3{margin:0 0 10px}.lines{width:100%;border-collapse:collapse}.lines th,.lines td{padding:5px;vertical-align:top}.lines th{font-size:11px;color:var(--muted);text-align:left}.lines input{min-width:70px}.lines .desc{min-width:250px}.date-control{display:grid;grid-template-columns:40px 1fr 40px;gap:4px}.date-control button{padding:0}.quick-view{margin-top:14px}.quick-lines{width:100%;border-collapse:collapse}.quick-lines th,.quick-lines td{padding:8px;border-bottom:1px solid var(--line);text-align:left}.quick-lines th{font-size:11px;color:var(--muted)}.quick-lines td:last-child,.quick-lines th:last-child{text-align:right}.invoice-preview{display:block;width:100%;height:720px;margin-top:12px;border:1px solid var(--line);border-radius:10px;background:#fff}.message{position:fixed;right:14px;bottom:14px;max-width:420px;padding:12px 14px;border-radius:10px;background:#15202a;border:1px solid var(--line);box-shadow:0 8px 30px #0008;z-index:20}.message.error{background:#441f24;border-color:#8b383e}.hide{display:none!important}.modal{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.modal>.card{width:min(700px,100%);max-height:90vh;overflow:auto}@media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.grid,.grid3,.summary{grid-template-columns:1fr 1fr}.invoice-preview{height:580px}}@media(max-width:560px){.grid,.grid3,.summary{grid-template-columns:1fr}.top{align-items:flex-start}.lines{display:block;overflow:auto}.invoice-preview{height:460px}}
 </style></head><body>
 <header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1></div><div class="row"><a href="/outgoing/open-items"><button class="ghost">Debitoren-OP</button></a><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
 <main class="layout"><aside class="card side"><label>Projekt, Kunde oder Nummer suchen<div class="row"><input id="search" class="grow" placeholder="z. B. 26025 oder Kundenname"><button id="searchButton">Suchen</button></div></label><div id="projects"></div><div class="section"><h3>Rechnungsläufe</h3><div id="runs" class="muted">Projekt auswählen.</div></div></aside><section><div id="empty" class="card">Projekt auswählen und einen Rechnungslauf anlegen.</div><div id="workspace" class="hide"></div></section></main>
@@ -482,10 +691,11 @@ async function loadRuns(){if(!selectedProject)return;const d=await api('/api/out
 function showRun(){const p=selectedProject;$('runLabel').value=p.title||'Auftrag';$('runUid').value='';$('runCompany').value=p.company||'';$('runName').value=p.customer||[p.firstName,p.lastName].filter(Boolean).join(' ');$('runStreet').value=p.street||'';$('runPostal').value=p.postalCode||'';$('runCity').value=p.city||'';$('runCountry').value='Österreich';open('runModal')}
 async function saveRun(){const p=selectedProject,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:p.projectIndex,projectNumber:p.projectNumber,customerIndex:p.customerIndex,projectTitle:p.title,label:$('runLabel').value,customerUid:$('runUid').value,company:$('runCompany').value,customerName:$('runName').value,street:$('runStreet').value,postalCode:$('runPostal').value,city:$('runCity').value,country:$('runCountry').value})});close('runModal');await loadRuns();await loadRun(d.run.id)}
 async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedRun=d.run;editing=null;$('empty').classList.add('hide');$('workspace').classList.remove('hide');renderRun();await loadRuns()}
-function renderRun(){const r=selectedRun,nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status!=='cancelled').length+1;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${nextTr}. TR / Rechnung erstellen</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice());$('newPayment').onclick=showPayment;wireInvoices()}
-function invoiceList(xs){let tr=0;return (xs||[]).map(x=>{const label=x.kind==='TR'?`${++tr}. Teilrechnung`:({SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind],ww=x.source==='WW';return `<div class="invoice"><div class="head"><div><strong>${esc(x.invoice_number||'Entwurf')} · ${esc(label)}</strong><div class="small muted">${esc(x.issue_date)} · ${money(x.increment_gross)}${x.revisionNo?' · Version '+(x.revisionNo+1):''}${ww?' · aus WinWorker':''}</div></div><span class="pill ${x.status==='draft'?'open':'closed'}">${x.status==='draft'?'Entwurf':'ausgestellt'}</span></div><div class="row">${ww?'<span class="small muted">Vorgängerbeleg aus WW</span>':`${['TR','SR','RE'].includes(x.kind)?`<button data-edit="${x.id}" data-issued="${x.status==='issued'?'1':'0'}">${x.status==='issued'?'Ändern':'Bearbeiten'}</button>`:''}<a href="/api/outgoing/invoices/${x.id}/${x.status==='draft'?'preview.pdf':'pdf'}" target="_blank"><button>PDF</button></a>${x.status==='draft'?`<button class="good" data-issue="${x.id}">Abschließen</button>`:`<button class="danger" data-correct="${x.id}">Storno / Gutschrift</button>`}`}</div></div>`}).join('')||'<div class="muted">Noch keine Rechnung.</div>'}
+function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status==='draft'),nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status==='issued').length+1;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${draft?'Entwurf bearbeiten':nextTr+'. TR / Rechnung erstellen'}</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div><div id="quickView"></div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice(draft||null));$('newPayment').onclick=showPayment;wireInvoices()}
+function invoiceList(xs){let tr=0;return (xs||[]).map(x=>{const label=x.kind==='TR'?`${++tr}. Teilrechnung`:({SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind],ww=x.source==='WW';return `<div class="invoice"><div class="head"><div><strong>${esc(x.invoice_number||'Entwurf')} · ${esc(label)}</strong><div class="small muted">${esc(x.issue_date)} · ${money(x.increment_gross)}${x.revisionNo?' · Version '+(x.revisionNo+1):''}${ww?' · aus WinWorker':''}</div></div><span class="pill ${x.status==='draft'?'open':'closed'}">${x.status==='draft'?'Entwurf':'ausgestellt'}</span></div><div class="row"><button data-quick="${x.id}">Schnellansicht</button><button data-preview="${x.id}">Vorschau</button>${ww?'<span class="small muted">Originalbeleg aus WW</span>':`${['TR','SR','RE'].includes(x.kind)?`<button data-edit="${x.id}" data-issued="${x.status==='issued'?'1':'0'}">${x.status==='issued'?'Ändern':'Bearbeiten'}</button>`:''}${x.status==='draft'?`<button class="good" data-issue="${x.id}">Abschließen</button>`:`<button class="danger" data-correct="${x.id}">Storno / Gutschrift</button>`}`}</div></div>`}).join('')||'<div class="muted">Noch keine Rechnung.</div>'}
 function paymentList(xs){return (xs||[]).map((x,i)=>`<div class="payment head"><div><strong>${i+1}. Zahlung · ${esc(x.paymentDate)}</strong><div class="small muted">${esc(x.reference)}</div></div><strong>${money(x.gross)}</strong></div>`).join('')||'<div class="muted">Noch keine Zahlung gebucht.</div>'}
-function wireInvoices(){document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{try{let x=selectedRun.invoices.find(x=>x.id===Number(b.dataset.edit));if(b.dataset.issued==='1'){if(!confirm('Ausgestellte Rechnung als neue Version öffnen? Die bisherige Version bleibt archiviert.'))return;const d=await api('/api/outgoing/invoices/'+x.id+'/revision',{method:'POST',body:'{}'});x=d.invoice;await loadRun(selectedRun.id)}editInvoice(x)}catch(e){msg(e.message,true)}});document.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>issueInvoice(Number(b.dataset.issue)));document.querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>{correctionTarget=Number(b.dataset.correct);$('correctionKind').value='GS';$('creditGrossLabel').classList.remove('hide');open('correctionModal')})}
+function quickInvoice(id,showPdf=false){const x=(selectedRun.invoices||[]).find(row=>row.id===Number(id));if(!x)return;const payments=(selectedRun.payments||[]).filter(p=>Number(p.invoiceId)===Number(x.id)),paid=payments.reduce((s,p)=>s+Number(p.gross||0),0),openGross=Math.max(0,Number(x.increment_gross||0)-paid),trNo=x.kind==='TR'?(selectedRun.invoices||[]).filter(row=>row.kind==='TR'&&row.status!=='cancelled').findIndex(row=>row.id===x.id)+1:0,label=x.kind==='TR'?`${trNo}. Teilrechnung`:({SR:'Schlussrechnung',RE:'Rechnung',ST:'Stornorechnung',GS:'Gutschrift'})[x.kind]||x.kind,pdfUrl=`/api/outgoing/invoices/${x.id}/${x.status==='draft'?'preview.pdf':'source-pdf'}`,lines=(x.lines||[]).map((line,i)=>`<tr><td>${i+1}</td><td>${esc(line.description)}</td><td>${esc(line.quantity)} ${esc(line.unit)}</td><td>${money(line.net)}</td></tr>`).join(''),paymentRows=payments.map(p=>`${esc(p.paymentDate)} · ${money(p.gross)} · ${esc(p.reference||p.source)}`).join('<br>');$('quickView').innerHTML=`<div class="quick-view card"><div class="head"><div><h3>${esc(x.invoice_number||'Entwurf')} · ${esc(label)}</h3><div class="small muted">${esc(x.issue_date)} · Leistung ${esc(x.service_from)} bis ${esc(x.service_to)} · ${esc(x.source==='WW'?'WinWorker':'KRISTINE')}</div></div><button id="quickClose">×</button></div><div class="summary"><div>Netto<strong>${money(x.increment_net)}</strong></div><div>USt<strong>${money(x.increment_vat)}</strong></div><div>Brutto<strong>${money(x.increment_gross)}</strong></div><div>Bezahlt / offen<strong>${money(paid)} / ${money(openGross)}</strong></div></div><table class="quick-lines"><thead><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Betrag netto</th></tr></thead><tbody>${lines||'<tr><td colspan="4" class="muted">Keine Positionen gespeichert.</td></tr>'}</tbody></table>${paymentRows?`<div class="section"><strong>Zahlungen</strong><div class="small muted">${paymentRows}</div></div>`:''}<div class="row section"><button id="quickPreview">Vorschau einblenden</button><a href="${pdfUrl}" target="_blank"><button>PDF separat öffnen</button></a></div>${showPdf?`<iframe class="invoice-preview" title="Vorschau ${esc(x.invoice_number||'Rechnung')}" src="${pdfUrl}"></iframe>`:''}</div>`;$('quickClose').onclick=()=>{$('quickView').innerHTML=''};$('quickPreview').onclick=()=>quickInvoice(id,true);$('quickView').scrollIntoView({behavior:'smooth',block:'nearest'})}
+function wireInvoices(){document.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.quick),false));document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>quickInvoice(Number(b.dataset.preview),true));document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{try{let x=selectedRun.invoices.find(x=>x.id===Number(b.dataset.edit));if(b.dataset.issued==='1'){if(!confirm('Ausgestellte Rechnung als neue Version öffnen? Die bisherige Version bleibt archiviert.'))return;const d=await api('/api/outgoing/invoices/'+x.id+'/revision',{method:'POST',body:'{}'});x=d.invoice;await loadRun(selectedRun.id)}editInvoice(x)}catch(e){msg(e.message,true)}});document.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>issueInvoice(Number(b.dataset.issue)));document.querySelectorAll('[data-correct]').forEach(b=>b.onclick=()=>{correctionTarget=Number(b.dataset.correct);$('correctionKind').value='GS';$('creditGrossLabel').classList.remove('hide');open('correctionModal')})}
 function dateControl(id,label,value){return `<label>${label}<div class="date-control"><button type="button" data-date-minus="${id}">−</button><input id="${id}" type="date" value="${esc(value||today())}"><button type="button" data-date-plus="${id}">+</button></div></label>`}
 function editInvoice(x=null){editing=x;const history=(selectedRun.invoices||[]).filter(i=>['TR','SR','RE'].includes(i.kind)&&i.status==='issued'&&i.id!==x?.id),nextTr=history.filter(i=>i.kind==='TR').length+1,titleFor=k=>k==='TR'?`${nextTr}. Teilrechnung`:k==='SR'?'Schlussrechnung':'Rechnung',priorNet=history.reduce((s,i)=>s+Number(i.increment_net||0),0),priorVat=history.reduce((s,i)=>s+Number(i.increment_vat||0),0),priorGross=history.reduce((s,i)=>s+Number(i.increment_gross||0),0),paidGross=Number(selectedRun.paidGross||0),due=new Date((x?.issue_date||today())+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=x?.lines?.length?x.lines:[{description:'Kumulativer Leistungsstand lt. Auftrag',quantity:1,unit:'PA',unit_price:priorNet,discount_percent:0}],historyRows=history.map((i,n)=>`${esc(i.invoice_number||'')}${i.kind==='TR'?' · '+(n+1)+'. Teilrechnung':' · '+esc(i.kind)} · netto ${money(i.increment_net)} · brutto ${money(i.increment_gross)}`).join('<br>');$('editor').innerHTML=`<div class="card section"><div class="head"><h2 id="editorTitle">${x?'Entwurf bearbeiten':'Neue '+titleFor('TR')}</h2><button id="editorClose">×</button></div><div class="grid3"><label>Art<select id="invKind"><option value="TR">Teilrechnung</option><option value="SR">Schlussrechnung</option><option value="RE">Rechnung</option></select></label>${dateControl('invDate','Rechnungsdatum',x?.issue_date||today())}${dateControl('dueDate','Fällig am',x?.due_date||due.toISOString().slice(0,10))}${dateControl('serviceFrom','Leistung von',x?.service_from||today())}${dateControl('serviceTo','Leistung bis',x?.service_to||today())}<label>USt-Art<select id="taxMode"><option value="AT20">20 % Österreich</option><option value="CHLI81">8,1 % Schweiz / Liechtenstein</option><option value="RC19">0 % · § 19 Übergang Steuerschuld</option><option value="EU0">0 % · EU-Auslandslieferung</option></select></label><label id="recipientUidLabel">Kunden-UID<input id="recipientUid" value="${esc(x?.recipient_uid||selectedRun.customer_uid||'')}"></label><label>Deckungsrücklass %<input id="retention" inputmode="decimal" value="${x?.retention_percent||0}"></label><label>Rabatt %<input id="discount" inputmode="decimal" value="${x?.discount_percent||0}"></label><label>Skonto %<input id="cashDiscount" inputmode="decimal" value="${x?.cash_discount_percent||0}"></label>${dateControl('cashUntil','Skonto bis',x?.cash_discount_until||'')}<label>Betreff<input id="subject" value="${esc(x?.subject||selectedRun.label)}"></label></div>${history.length?`<div class="section"><h3>Bisheriger Stand aus WW / KRISTINE</h3><div class="summary"><div>Abgerechnet netto<strong>${money(priorNet)}</strong></div><div>USt<strong>${money(priorVat)}</strong></div><div>Abgerechnet brutto<strong>${money(priorGross)}</strong></div><div>Erhaltene Zahlungen<strong>${money(paidGross)}</strong></div></div><div class="small muted">${historyRows}</div><div class="small" style="margin-top:9px;color:var(--amber)">Unten steht bereits der bisherige Netto-Leistungsstand. Für die ${nextTr}. Teilrechnung bitte auf den neuen kumulierten Gesamtstand erhöhen – nicht nur den Zusatzbetrag eingeben.</div></div>`:''}<div class="section"><h3>Leistungen / kumulierter Stand</h3><table class="lines"><thead><tr><th>Pos</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Gesamtstand netto</th><th>Rabatt %</th><th></th></tr></thead><tbody id="lineRows"></tbody></table><button id="addLine">+ Position</button></div><label class="section">Zusatztext<textarea id="notes">${esc(x?.notes||'')}</textarea></label><div class="row section"><button id="saveDraft" class="primary">Entwurf speichern</button><button id="savePreview">Speichern & PDF prüfen</button></div></div>`;$('invKind').value=x?.kind||'TR';$('invKind').onchange=()=>{if(!x)$('editorTitle').textContent='Neue '+titleFor($('invKind').value)};$('taxMode').value=x?.tax_mode||'AT20';let model=lines.map(l=>({description:l.description||'',quantity:l.quantity||1,unit:l.unit||'PA',unitPrice:l.unit_price??l.unitPrice??0,discountPercent:l.discount_percent??l.discountPercent??0}));function renderLines(){$('lineRows').innerHTML=model.map((l,i)=>`<tr><td>${i+1}</td><td><input class="desc" data-f="description" data-i="${i}" value="${esc(l.description)}"></td><td><input data-f="quantity" data-i="${i}" value="${esc(l.quantity)}"></td><td><input data-f="unit" data-i="${i}" value="${esc(l.unit)}"></td><td><input data-f="unitPrice" data-i="${i}" value="${esc(l.unitPrice)}"></td><td><input data-f="discountPercent" data-i="${i}" value="${esc(l.discountPercent)}"></td><td><button data-del="${i}">×</button></td></tr>`).join('');$('lineRows').querySelectorAll('input').forEach(e=>e.oninput=()=>model[Number(e.dataset.i)][e.dataset.f]=e.value);$('lineRows').querySelectorAll('[data-del]').forEach(e=>e.onclick=()=>{model.splice(Number(e.dataset.del),1);renderLines()})}renderLines();$('addLine').onclick=()=>{model.push({description:'',quantity:1,unit:'PA',unitPrice:0,discountPercent:0});renderLines()};$('editorClose').onclick=()=>{$('editor').innerHTML=''};document.querySelectorAll('[data-date-minus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.dateMinus,-1));document.querySelectorAll('[data-date-plus]').forEach(b=>b.onclick=()=>shiftDate(b.dataset.datePlus,1));$('taxMode').onchange=()=>$('recipientUidLabel').classList.toggle('hide',!['RC19','EU0'].includes($('taxMode').value));$('taxMode').onchange();async function save(preview){const payload={runId:selectedRun.id,kind:$('invKind').value,issueDate:$('invDate').value,dueDate:$('dueDate').value,serviceFrom:$('serviceFrom').value,serviceTo:$('serviceTo').value,taxMode:$('taxMode').value,recipientUid:$('recipientUid').value,retentionPercent:$('retention').value,discountPercent:$('discount').value,cashDiscountPercent:$('cashDiscount').value,cashDiscountUntil:$('cashUntil').value,subject:$('subject').value,notes:$('notes').value,lines:model};const d=await api(editing?'/api/outgoing/invoices/'+editing.id:'/api/outgoing/invoices',{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=d.invoice;msg('Entwurf gespeichert.');await loadRun(selectedRun.id);if(preview)window.open('/api/outgoing/invoices/'+editing.id+'/preview.pdf','_blank')} $('saveDraft').onclick=()=>save(false).catch(e=>msg(e.message,true));$('savePreview').onclick=()=>save(true).catch(e=>msg(e.message,true))}
 function shiftDate(id,days){const e=$(id),d=new Date((e.value||today())+'T12:00:00');d.setDate(d.getDate()+days);e.value=d.toISOString().slice(0,10)}

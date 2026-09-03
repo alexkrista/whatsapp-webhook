@@ -156,11 +156,11 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260902-all-knowledge", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260903-knowledge3", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260902-intake", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260902-all-knowledge", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260902-photo-count", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260823-livehours1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260903-livehours2", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260902-photo-count", "data-krista-baustellen-foto-gallery");
     // Diese vorhandenen Module waren früher indirekt an KRISADMIN gekoppelt.
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.

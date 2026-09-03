@@ -58,6 +58,7 @@ const { registerDayClose } = require("./day-close");
 const { registerArchiveSearch } = require("./archive-search");
 const { registerTowerPlanning } = require("./tower-planning");
 const { installOutlookCalendar } = require("./kristine-outlook-calendar");
+const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -2287,7 +2288,7 @@ function metaPathForJob(jobId) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2320,10 +2321,12 @@ async function readJobMeta(jobId) {
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
       materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
+      hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(meta.hoursCutoverDate || "")) ? String(meta.hoursCutoverDate) : "",
+      hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0 };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2382,6 +2385,8 @@ async function writeJobMeta(jobId, patch) {
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
+    hoursCutoverDate: /^\d{4}-\d{2}-\d{2}$/.test(String(patch.hoursCutoverDate ?? existing.hoursCutoverDate ?? "")) ? String(patch.hoursCutoverDate ?? existing.hoursCutoverDate) : "",
+    hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
     updatedAt: new Date().toISOString(),
   };
   await ensureDir(path.join(DATA_DIR, String(jobId)));
@@ -2720,6 +2725,8 @@ app.get("/admin/api/jobs", async (req, res) => {
         externalServices: Number(meta.externalServices || 0),
         materialPercent: Number(meta.materialPercent || 0),
         plannedRegieHours: Number(meta.plannedRegieHours || 0),
+        hoursCutoverDate: meta.hoursCutoverDate || "",
+        hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
         calculation,
         sizeBytes,
         totalStats,
@@ -2851,6 +2858,31 @@ app.put("/admin/api/job/:jobId/offer-draft", async (req, res) => {
 
 app.post("/admin/api/job/:jobId/offer-draft/finalize",async(req,res)=>{if(!requireAdmin(req,res))return;try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const file=offerDraftPath(jobId),draft=await fsp.readFile(file,"utf8").then(JSON.parse).catch(()=>null);if(!draft)return res.status(404).json({ok:false,error:"Angebotsentwurf fehlt."});if(!/^\d{7}$/.test(String(draft.offerNumber||""))){draft.offerNumber=await nextOfferNumber();draft.offerCreatedAt=new Date().toISOString();draft.offerRevision=1;await fsp.writeFile(file,JSON.stringify(draft,null,2),"utf8");await appendJobHistory(jobId,{type:"offer_finalized",title:`Angebot ${draft.offerNumber} erstellt`,detail:"Angebot für Druck/PDF verbindlich nummeriert",source:"KRISTINE Angebot"})}res.json({ok:true,jobId,draft,offerNumber:draft.offerNumber,offerRevision:Math.max(1,Number(draft.offerRevision||1))})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
 
+app.put("/admin/api/job/:jobId/hours-cutover", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId || "");
+    const cutoverDate = String(req.body?.cutoverDate || "").slice(0, 10);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate) || Number.isNaN(Date.parse(`${cutoverDate}T12:00:00`))) {
+      return res.status(400).json({ ok: false, error: "Ungültiger Stunden-Stichtag." });
+    }
+    const meta = await writeJobMeta(jobId, {
+      hoursCutoverDate: cutoverDate,
+      hoursOverlapResolvedAt: new Date().toISOString(),
+    });
+    await appendJobHistory(jobId, {
+      type: "hours_source_cutover",
+      title: "Stundenquellen abgegrenzt",
+      detail: `WinWorker bis ${cutoverDate}; KRISTINE ab ${cutoverDate}`,
+      source: "admin",
+      data: { cutoverDate },
+    });
+    res.json({ ok: true, jobId, hoursCutoverDate: meta.hoursCutoverDate });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
 
 app.get("/admin/api/job/:jobId/history", async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -3797,6 +3829,10 @@ app.get("/kristine/api/brain-hours-source", async (req, res) => {
 // ==================== KRISTINE Archivsuche ====================
 registerArchiveSearch(app);
 console.log("KRISTINE Archivsuche registriert");
+
+// ==================== KRISTINE Ausgangsrechnungen je Baustelle ====================
+registerOutgoingBillingBridge(app, { requireAdmin });
+console.log("KRISTINE Baustellen-Rechnungsstand registriert");
 
 // ===================== Tagesreport PDF + automatische Tageszusammenfassung =====================
 const dailyReport = registerDailyReport(app, {

@@ -22,6 +22,7 @@ class OutgoingApiTests(unittest.TestCase):
         root = Path(cls.tmp.name)
         os.environ["KRISTINE_OUTGOING_DB"] = str(root / "api.db")
         os.environ["KRISTINE_OUTGOING_DIR"] = str(root / "pdf")
+        os.environ["KRISTINE_ADMIN_TOKEN"] = "test-admin-token"
         brain_outgoing_invoices._INSTALLED = False
         app = Flask(__name__)
         app.config["TESTING"] = True
@@ -35,6 +36,10 @@ class OutgoingApiTests(unittest.TestCase):
                 "postalCode": "6820", "city": "Frastanz", "address": "Weg 1 6820 Frastanz",
                 "title": "Musterprojekt",
             }],
+            "ww_hours_fusion_source": lambda project_indices: [
+                {"projectIndex": 1, "date": "2026-07-30", "netHours": 7.75},
+                {"projectIndex": 1, "date": "2026-07-31", "netHours": 6.25},
+            ],
         })
         cls.app = app
         cls.client = app.test_client()
@@ -43,6 +48,7 @@ class OutgoingApiTests(unittest.TestCase):
     def tearDownClass(cls):
         os.environ.pop("KRISTINE_OUTGOING_DB", None)
         os.environ.pop("KRISTINE_OUTGOING_DIR", None)
+        os.environ.pop("KRISTINE_ADMIN_TOKEN", None)
         cls.tmp.cleanup()
 
     def test_full_invoice_flow_creates_pdf(self):
@@ -69,6 +75,10 @@ class OutgoingApiTests(unittest.TestCase):
         issue = self.client.post(f"/api/outgoing/invoices/{invoice_id}/issue", json={})
         self.assertEqual(issue.status_code, 200, issue.get_data(as_text=True))
         self.assertEqual(issue.get_json()["invoice"]["invoice_number"], "2608001")
+        source_pdf = self.client.get(f"/api/outgoing/invoices/{invoice_id}/source-pdf")
+        self.assertEqual(source_pdf.status_code, 200)
+        self.assertTrue(source_pdf.data.startswith(b"%PDF"))
+        source_pdf.close()
         pdf = self.client.get(f"/api/outgoing/invoices/{invoice_id}/pdf")
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b"%PDF"))
@@ -96,6 +106,32 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(payment.status_code, 200, payment.get_data(as_text=True))
         open_items = self.client.get("/api/outgoing/open-items").get_json()
         self.assertEqual(open_items["items"][0]["openGross"], 9602.0)
+        billing = self.client.post(
+            "/api/outgoing/project-billing",
+            json={"projectNumber": "26001"},
+            headers={
+                "Origin": "https://protokoll.krista.at",
+                "X-Krista-Token": "test-admin-token",
+            },
+        )
+        self.assertEqual(billing.status_code, 200, billing.get_data(as_text=True))
+        payload = billing.get_json()["billing"]
+        self.assertEqual(payload["summary"]["invoiceCount"], 1)
+        self.assertEqual(payload["summary"]["billedNet"], 8835.0)
+        self.assertEqual(payload["summary"]["paidGross"], 1000.0)
+        self.assertEqual(payload["summary"]["openGross"], 9602.0)
+        self.assertEqual(billing.headers["Access-Control-Allow-Origin"], "https://protokoll.krista.at")
+        ww_hours = self.client.post(
+            "/api/outgoing/project-hours",
+            json={"projectNumber": "26001"},
+            headers={
+                "Origin": "https://protokoll.krista.at",
+                "X-Krista-Token": "test-admin-token",
+            },
+        )
+        self.assertEqual(ww_hours.status_code, 200, ww_hours.get_data(as_text=True))
+        self.assertEqual(ww_hours.get_json()["hours"]["totalHours"], 14.0)
+        self.assertEqual(len(ww_hours.get_json()["hours"]["days"]), 2)
 
 
 if __name__ == "__main__":

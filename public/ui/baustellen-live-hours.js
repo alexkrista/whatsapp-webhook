@@ -1,12 +1,15 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-23-live-hours-1";
+  const VERSION="2026-09-03-live-hours-2";
+  const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
   let bootstrap={};
   let liveByJob=new Map();
   let peopleByJob=new Map();
+  let wwByJob=new Map();
+  const overlapAsked=new Set();
   let timer=null;
   let patchQueued=false;
 
@@ -15,6 +18,14 @@
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
+  async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
+  async function loadWwHours(jobId){
+    if(!token)return null;
+    const r=await fetch(LOCAL_BRAIN_HOURS,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","X-Krista-Token":token},body:JSON.stringify({projectNumber:String(jobId)})});
+    const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);
+    const hours=d.hours||{},days=new Map((hours.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)]));
+    return {found:!!hours.found,totalHours:num(hours.totalHours),days};
+  }
 
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
   function nowMinutes(){const d=new Date();return d.getHours()*60+d.getMinutes()+d.getSeconds()/60}
@@ -58,8 +69,8 @@
         const duration=(end-start)/60;
         if(duration<=0||duration>18)continue;
 
-        const current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Set()};
-        current.totalHours+=duration;current.segments++;current.days.add(date);liveByJob.set(jobId,current);
+        const current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Map()};
+        current.totalHours+=duration;current.segments++;current.days.set(date,num(current.days.get(date))+duration);liveByJob.set(jobId,current);
 
         if(!peopleByJob.has(jobId))peopleByJob.set(jobId,new Map());
         const people=peopleByJob.get(jobId);
@@ -77,6 +88,29 @@
     const regie=num(calc(j).actualRegieHours);
     return Math.max(oldOrderHours(j),Math.max(0,live-regie));
   }
+  function fusion(j){
+    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=liveByJob.get(jobId),kristineTotal=liveOrderHours(j);
+    if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,overlaps:[],source:"KRISTINE"};
+    const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
+    const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
+    const cutover=String(j?.hoursCutoverDate||"");
+    let wwHours=0,kristineHours=0;
+    if(cutover){for(const [day,value] of ww.days)if(day<cutover)wwHours+=num(value);for(const [day,value] of krDays)if(day>=cutover)kristineHours+=num(value)*scale}
+    else{for(const [day,value] of ww.days)if(!krDays.has(day))wwHours+=num(value);kristineHours=kristineTotal}
+    return {total:wwHours+kristineHours,ww:wwHours,kristine:kristineHours,overlaps,source:"WW + KRISTINE",cutover};
+  }
+  async function askOverlapOnce(j){
+    const result=fusion(j),jobId=String(j?.jobId||"");
+    if(!result.overlaps.length||j?.hoursCutoverDate||overlapAsked.has(jobId))return;
+    overlapAsked.add(jobId);
+    const first=result.overlaps[0],last=result.overlaps[result.overlaps.length-1];
+    if(!confirm(`Für Baustelle #${jobId} gibt es am ${first===last?first:first+" bis "+last} Stunden in WinWorker und KRISTINE.\n\nSoll ein einmaliger Stichtag festgelegt werden, damit nichts doppelt zählt?`))return;
+    const chosen=prompt("Ab welchem Tag soll KRISTINE zählen? WinWorker zählt davor.",first);
+    if(!chosen)return;
+    const cutover=String(chosen).trim().slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(cutover)){alert("Bitte das Datum als JJJJ-MM-TT eingeben.");overlapAsked.delete(jobId);return}
+    try{await apiWrite(`/admin/api/job/${encodeURIComponent(jobId)}/hours-cutover`,{cutoverDate:cutover});j.hoursCutoverDate=cutover;patchAll()}catch(e){alert("Stichtag konnte nicht gespeichert werden: "+e.message);overlapAsked.delete(jobId)}
+  }
   function openHours(j){
     const status=String(j?.status||"");
     const target=targetHours(j),actual=liveOrderHours(j);
@@ -88,7 +122,7 @@
   function patchRows(){
     document.querySelectorAll(".job-row[data-job]").forEach(row=>{
       const j=job(row.dataset.job);if(!j)return;
-      const actual=liveOrderHours(j),target=targetHours(j);
+      const actual=fusion(j).total,target=targetHours(j);
       const el=row.querySelector(".hours");
       if(el){el.textContent=`${hours(actual)} / ${hours(target)}`;el.classList.toggle("over",target>0&&actual>target)}
       const sub=row.querySelector(".job-sub");
@@ -107,10 +141,10 @@
 
   function patchBaseDetail(id){
     const j=job(id);if(!j)return;
-    const actual=liveOrderHours(j),target=targetHours(j),remaining=openHours(j),pct=target>0?actual/target*100:0;
+    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual),pct=target>0?actual/target*100:0;
     const dh=document.getElementById("detailHours"),dn=document.getElementById("detailHoursNote"),op=document.getElementById("detailOpen"),bar=document.getElementById("detailProgress"),note=document.getElementById("detailProgressNote");
     if(dh)dh.textContent=`${hours(actual)} / ${hours(target)}`;
-    if(dn)dn.textContent=target>0?`${Math.round(pct)} % verbraucht · live aus KRISTINE`:"live aus KRISTINE · keine Sollstunden hinterlegt";
+    if(dn)dn.textContent=target>0?`${Math.round(pct)} % verbraucht · ${fused.source}`:`${fused.source} · keine Sollstunden hinterlegt`;
     if(op)op.textContent=hours(remaining);
     if(bar){bar.style.width=Math.min(100,Math.max(0,pct))+"%";bar.style.background=pct>100?"var(--red)":"var(--green)"}
     if(note)note.textContent=target>0?`${hours(actual)} von ${hours(target)} · ${Math.round(pct)} % · live gebucht`:"Noch keine Stundenkalkulation hinterlegt.";
@@ -124,22 +158,22 @@
 
   function patchCockpit(id){
     const j=job(id),shell=document.getElementById("bcShell");if(!j||!shell)return;
-    const actual=liveOrderHours(j),target=targetHours(j),remaining=Math.max(0,target-actual);
-    const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % verbraucht · live`:"live aus KRISTINE"}
+    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
+    const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · ${fused.source}`:fused.source}
     const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
 
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));
     const host=card?.querySelector(".bc-people-row");
     const people=[...(peopleByJob.get(String(id))?.values()||[])].sort((a,b)=>b.hours-a.hours);
-    if(host&&people.length)host.innerHTML=people.slice(0,8).map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · live aus KRISTINE</small></div>`).join("");
+    if(host&&people.length)host.innerHTML=people.slice(0,8).map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · KRISTINE</small></div>`).join("");
   }
 
   function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){patchBaseDetail(id);patchCockpit(id)}}
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   async function refresh(){
-    try{const [j,b]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap")]);jobs=j.jobs||[];bootstrap=b||{};buildLiveMaps();patchAll()}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap")]);jobs=j.jobs||[];bootstrap=b||{};buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1));if(id){try{const ww=await loadWwHours(id);if(ww)wwByJob.set(String(id),ww)}catch(e){console.warn("WinWorker-Stunden",e)}}patchAll();if(id){const current=job(id);if(current)await askOverlapOnce(current)}}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
   function install(){

@@ -1,8 +1,9 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-03-knowledge-2";
+  const VERSION="2026-09-03-knowledge-3";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
+  const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
   let loadSerial=0;
@@ -15,6 +16,10 @@
   const fmtDate=v=>{if(!v)return "–";try{return new Date(String(v).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT")}catch{return String(v)}};
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
   async function api(p,o={}){const r=await fetch(tokenUrl(p),o);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
+  async function billingApi(jobId){
+    if(token){try{const r=await fetch(LOCAL_BRAIN_BILLING,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","X-Krista-Token":token},body:JSON.stringify({projectNumber:String(jobId)})});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);return d}catch{}}
+    return api(`/admin/api/job/${encodeURIComponent(jobId)}/outgoing-sync`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  }
 
   function installCss(){
     if(document.getElementById("baustellenKnowledgeCss"))return;
@@ -112,6 +117,7 @@
       const [days,knowledge]=await Promise.all([api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/knowledge`).catch(()=>({}))]);if(serial!==loadSerial)return;
       const details=days.detailed||[];
       const regieRows=await mapLimit(details,6,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return {day:d.day,regie:r.regie||r}});if(serial!==loadSerial)return;
+      const billingResult=await billingApi(currentJobId).catch(e=>({ok:false,error:e.message}));if(serial!==loadSerial)return;
       renderMasterData(j);
       renderEconomy(j,regieRows);
       renderHours(j,regieRows);
@@ -119,7 +125,7 @@
       renderProtocols(j,details);
       renderRegie(j,regieRows);
       renderMaterial(j,regieRows,knowledge);
-      renderInvoices(j);
+      renderInvoices(j,billingResult?.billing||{found:false,error:billingResult?.error||""});
     }catch(e){
       ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
     }
@@ -215,10 +221,14 @@
   }
 
   function invoicedValue(j){for(const k of ['invoicedAmount','billedAmount','invoiceTotal','revenueInvoiced','invoicedNet']){const n=Number(j?.[k]??j?.calculation?.[k]);if(Number.isFinite(n))return n}return null}
-  function renderInvoices(j){
-    const c=calc(j),contract=num(c.contractAmount??j.contractAmount),invoiced=invoicedValue(j),open=invoiced===null?null:Math.max(0,contract-invoiced);
+  function invoiceKind(kind){return ({TR:"Teilrechnung",SR:"Schlussrechnung",RE:"Rechnung",GS:"Gutschrift",ST:"Storno"})[kind]||kind||"Rechnung"}
+  function renderInvoices(j,billing){
+    const c=calc(j),contract=num(c.contractAmount??j.contractAmount),live=!!billing?.found,invoiced=live?num(billing.summary?.billedNet):invoicedValue(j),open=invoiced===null?null:Math.max(0,contract-invoiced);
     const brainUrl=LOCAL_BRAIN_INVOICES+'?project='+encodeURIComponent(j.jobId);
-    const el=document.getElementById("bkInvoices");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Auftragssumme</div><div class="bk-value">${money(contract)}</div></div><div class="bk-card"><div class="bk-label">Bereits abgerechnet</div><div class="bk-value">${invoiced===null?'–':money(invoiced)}</div><div class="bk-note">${invoiced===null?'<span class="bk-source missing">Vollständiger Stand wird lokal im Brain geöffnet</span>':'<span class="bk-source">live aus Rechnungsdaten</span>'}</div></div><div class="bk-card"><div class="bk-label">Noch abzurechnen</div><div class="bk-value">${open===null?'–':money(open)}</div></div><div class="bk-card"><div class="bk-label">Abrechnungsgrad</div><div class="bk-value">${invoiced===null||!contract?'–':Math.min(100,invoiced/contract*100).toLocaleString('de-AT',{maximumFractionDigits:1})+' %'}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Abrechnung gehört zur Baustelle</h3><div class="bk-actions"><a class="primary" href="${esc(brainUrl)}">Ausgangsrechnung schreiben</a></div></div><div class="bk-note">The Brain öffnet lokal direkt diese Baustelle, übernimmt die bisherigen WinWorker-Teilrechnungen samt Zahlungen und setzt die laufende Teilrechnungsnummer korrekt fort. Weitere unabhängige Rechnungsläufe bleiben möglich.</div></div></div>`;
+    const rows=(billing?.invoices||[]).map(inv=>{const paymentDates=(billing?.payments||[]).filter(p=>num(p.invoiceId)===num(inv.id)).map(p=>fmtDate(p.paymentDate)).join(', ');return `<tr><td>${fmtDate(inv.issueDate)}</td><td><strong>${esc(inv.invoiceNumber||'–')}</strong><br><span class="bk-badge ${inv.source==='WW'?'blue':'green'}">${esc(inv.source)}</span></td><td>${esc(invoiceKind(inv.kind))}</td><td class="num">${money(inv.net)}</td><td class="num">${money(inv.gross)}</td><td class="num">${money(inv.paidGross)}${paymentDates?`<br><span class="bk-note">${esc(paymentDates)}</span>`:''}</td><td class="num ${num(inv.openGross)>0?'bk-warn':'bk-good'}">${money(inv.openGross)}</td></tr>`}).join('');
+    const history=rows?`<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Rechnungen und Zahlungen</h3><span class="bk-source">live aus WW / KRISTINE</span></div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Datum</th><th>Rechnung</th><th>Art</th><th class="num">Netto</th><th class="num">Brutto</th><th class="num">Bezahlt</th><th class="num">Offen</th></tr></thead><tbody>${rows}</tbody></table></div><div class="bk-statline" style="margin-top:10px"><span>Zahlungen gesamt <strong>${money(billing.summary?.paidGross)}</strong></span><span>Offener Rechnungsbetrag <strong>${money(billing.summary?.openGross)}</strong></span></div></div>`:`<div class="bk-card bk-wide"><div class="bk-placeholder">Für diese Baustelle wurde noch keine Ausgangsrechnung in WinWorker oder KRISTINE gefunden.</div></div>`;
+    const sourceNote=live?'<span class="bk-source">live aus WW / KRISTINE</span>':billing?.error?`<span class="bk-source missing">${esc(billing.error)}</span>`:invoiced===null?'<span class="bk-source missing">Noch keine Rechnungsquelle verknüpft</span>':'<span class="bk-source">aus Baustellendaten</span>';
+    const el=document.getElementById("bkInvoices");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Auftragssumme</div><div class="bk-value">${money(contract)}</div></div><div class="bk-card"><div class="bk-label">Bereits abgerechnet netto</div><div class="bk-value">${invoiced===null?'–':money(invoiced)}</div><div class="bk-note">${sourceNote}</div></div><div class="bk-card"><div class="bk-label">Noch abzurechnen netto</div><div class="bk-value">${open===null?'–':money(open)}</div></div><div class="bk-card"><div class="bk-label">Abrechnungsgrad</div><div class="bk-value">${invoiced===null||!contract?'–':Math.min(100,invoiced/contract*100).toLocaleString('de-AT',{maximumFractionDigits:1})+' %'}</div></div>${history}<div class="bk-card bk-wide"><div class="bk-section-title"><h3>Abrechnung gehört zur Baustelle</h3><div class="bk-actions"><a class="primary" href="${esc(brainUrl)}">Nächste Rechnung schreiben</a></div></div><div class="bk-note">Beim Öffnen wird die vollständige WinWorker-Rechnungshistorie samt gebuchten Zahlungen live abgeglichen. Im Brain wird anschließend die nächste Teilrechnung korrekt fortgesetzt; zusätzliche unabhängige Rechnungsläufe bleiben möglich.</div></div></div>`;
   }
 
   function hookRows(){
