@@ -99,6 +99,11 @@ function installOutlookCalendar(app, deps = {}) {
     return String(claims.preferred_username || claims.email || token?.account || "").toLowerCase();
   }
 
+  function hasRequiredScopes(token) {
+    const granted = new Set(String(token?.scope || "").split(/\s+/).filter(Boolean).map(scope => scope.toLowerCase()));
+    return ["calendars.readwrite", "mail.read"].every(scope => granted.has(scope));
+  }
+
   async function tokenRequest(values) {
     const response = await fetch(`${LOGIN_ROOT}/token`, {
       method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:new URLSearchParams(values),
@@ -251,7 +256,7 @@ function installOutlookCalendar(app, deps = {}) {
     try {
       const token = await loadToken();
       const account = accountFromToken(token);
-      const connected = Boolean(token && token.refresh_token && account === EXPECTED_ACCOUNT);
+      const connected = Boolean(token && token.refresh_token && account === EXPECTED_ACCOUNT && hasRequiredScopes(token));
       res.json({ ok:true, configured:Boolean(encryptionSecret()), connected, account:account || "", expectedAccount:EXPECTED_ACCOUNT, scopes:SCOPES });
     }
     catch (error) { res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:false, account:"", expectedAccount:EXPECTED_ACCOUNT, error:String(error?.message || error) }); }

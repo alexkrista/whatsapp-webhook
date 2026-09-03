@@ -8,6 +8,7 @@ const path = require("path");
 const { installOutlookCalendar } = require("../kristine-outlook-calendar");
 const moduleSource = fs.readFileSync(path.join(__dirname, "..", "kristine-outlook-calendar.js"), "utf8");
 assert.match(moduleSource, /Calendars\.ReadWrite Mail\.Read/, "Outlook-Verbindung muss Kalender und reine Mail-Leserechte anfordern");
+assert.match(moduleSource, /hasRequiredScopes/);
 
 function appHarness() {
   const routes = new Map();
