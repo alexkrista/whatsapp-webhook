@@ -67,10 +67,10 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.4";
-const APP_BUILD = "0030.4-teleport-report";
-const APP_STATUS = "Teleport: Tageszusammenfassung und Planungserinnerungen repariert";
-const APP_BUILD_DATE = "2026-08-18";
+const APP_VERSION = "3.5.5";
+const APP_BUILD = "0030.5-regie-name-match";
+const APP_STATUS = "Regieabgleich: eindeutige Vornamen werden Mitarbeitern korrekt zugeordnet";
+const APP_BUILD_DATE = "2026-09-03";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
