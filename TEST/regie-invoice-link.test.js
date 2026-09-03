@@ -7,4 +7,7 @@ assert.match(outgoing,/Regiedaten übernehmen/);
 assert.match(outgoing,/Regiearbeit lt\. Berichten/);
 assert.match(outgoing,/Material lt\. Berichten/);
 assert.match(outgoing,/discountPercent:20/);
+for(const label of ["TR erstellen","Schlussrechnung","Extra-Rechnung"])assert.ok(outgoing.includes(label));
+assert.match(outgoing,/startInvoiceKind\('SR'\)/);
+assert.match(outgoing,/startInvoiceKind\('RE'\)/);
 console.log("regie invoice link test: ok");
