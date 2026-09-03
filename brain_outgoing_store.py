@@ -855,8 +855,29 @@ class OutgoingStore:
             prior = self._prior_sum(con, run_id, invoice_id)
             payment_rows = self._active_payments(con, run_id)
             paid = self._payment_sum(payment_rows)
+            lines = [dict(row) for row in (data.get("lines") or [])]
+            report_start = 0
+            for line_index, line in enumerate(lines):
+                marker = str(line.get("unit") or "").upper()
+                if marker == "TAG":
+                    report_start = line_index + 1
+                if marker != "SUMME":
+                    continue
+                material_discount = _bounded_percent(
+                    line.get("discountPercent") if "discountPercent" in line else line.get("discount_percent"),
+                    "Materialrabatt",
+                )
+                if not material_discount:
+                    continue
+                for report_line in lines[report_start:line_index]:
+                    unit = str(report_line.get("unit") or "").upper()
+                    if unit in {"STD", "STD.", "H", "H.", "TAG", "BAUTEIL", "ARBEIT", "MATERIAL"}:
+                        if unit in {"STD", "STD.", "H", "H."}:
+                            report_line["discountPercent"] = 0
+                        continue
+                    report_line["discountPercent"] = str(material_discount)
             totals = calculate_totals(
-                data.get("lines") or [], tax_mode=tax_mode,
+                lines, tax_mode=tax_mode,
                 retention_percent=data.get("retentionPercent"),
                 discount_percent=data.get("discountPercent"),
                 cash_discount_percent=cash_percent,

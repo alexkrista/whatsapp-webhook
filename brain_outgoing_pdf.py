@@ -195,13 +195,18 @@ def render_invoice_pdf(invoice, settings, destination):
     line_rows = [["Pos", "Menge", "Einh.", "Leistung", "EP [EUR]", "GP [EUR]"]]
     group_rows = []
     subtotal_rows = []
+    section_subtotal_rows = []
     report_net = Decimal("0")
+    labor_net = Decimal("0")
     material_raw = Decimal("0")
     material_net = Decimal("0")
     in_material = False
+    has_material = False
     visible_position = 0
     report_number = 0
     report_position = 0
+    saw_labor = False
+    has_section_markers = any(str(row.get("unit") or "").upper() == "MATERIAL" for row in (invoice.get("lines") or []))
     for index, line in enumerate(invoice.get("lines") or [], 1):
         ep = _d(line.get("unit_price" if "unit_price" in line else "unitPrice"))
         quantity = _d(line.get("quantity") or 1)
@@ -214,18 +219,33 @@ def render_invoice_pdf(invoice, settings, destination):
                 report_number += 1
                 report_position = 0
                 report_net = Decimal("0")
+                labor_net = Decimal("0")
                 material_raw = Decimal("0")
                 material_net = Decimal("0")
                 in_material = False
+                has_material = False
+                saw_labor = False
             elif marker == "ARBEIT":
                 in_material = False
             elif marker == "MATERIAL":
+                work_subtotal_row = len(line_rows)
+                line_rows.append(["", "", "", Paragraph("Zwischensumme Arbeit", base), "", money(labor_net)])
+                section_subtotal_rows.append(work_subtotal_row)
                 in_material = True
+                has_material = True
             row_index = len(line_rows)
             if marker == "SUMME":
                 disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
+                if not has_material:
+                    work_subtotal_row = len(line_rows)
+                    line_rows.append(["", "", "", Paragraph("Zwischensumme Arbeit", base), "", money(labor_net)])
+                    section_subtotal_rows.append(work_subtotal_row)
                 if disc and material_raw > material_net:
                     line_rows.append(["", "", "", Paragraph(f"Materialrabatt {percent(disc)}", base), "", money(-(material_raw - material_net))])
+                if has_material:
+                    material_subtotal_row = len(line_rows)
+                    line_rows.append(["", "", "", Paragraph("Zwischensumme Material", base), "", money(material_net)])
+                    section_subtotal_rows.append(material_subtotal_row)
                 row_index = len(line_rows)
                 line_rows.append(["", "", "", Paragraph(f"Summe {report_number}", heading), "", money(report_net)])
             else:
@@ -233,10 +253,24 @@ def render_invoice_pdf(invoice, settings, destination):
             (subtotal_rows if marker == "SUMME" else group_rows).append((row_index, marker))
             continue
         disc = _d(line.get("discount_percent" if "discount_percent" in line else "discountPercent"))
+        is_labor = marker in {"STD", "STD.", "H", "H."}
+        if not has_section_markers and saw_labor and not is_labor and not in_material:
+            work_subtotal_row = len(line_rows)
+            line_rows.append(["", "", "", Paragraph("Zwischensumme Arbeit", base), "", money(labor_net)])
+            section_subtotal_rows.append(work_subtotal_row)
+            material_heading_row = len(line_rows)
+            line_rows.append(["", "", "", Paragraph("Material", heading), "", ""])
+            group_rows.append((material_heading_row, "MATERIAL"))
+            in_material = True
+            has_material = True
+        if is_labor:
+            saw_labor = True
         report_net += net
         if in_material:
             material_raw += raw_total
             material_net += net
+        else:
+            labor_net += net
         visible_position += 1
         report_position += 1
         line_rows.append([
@@ -263,6 +297,8 @@ def render_invoice_pdf(invoice, settings, destination):
     ]
     for row_index, marker in group_rows:
         line_style.extend([("SPAN", (1, row_index), (2, row_index)), ("SPAN", (3, row_index), (5, row_index)), ("FONTNAME", (0, row_index), (5, row_index), bold_font), ("TOPPADDING", (0, row_index), (5, row_index), 9 if marker == "TAG" else 5), ("BOTTOMPADDING", (0, row_index), (5, row_index), 4)])
+    for row_index in section_subtotal_rows:
+        line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 3), ("BOTTOMPADDING", (0, row_index), (5, row_index), 4), ("LINEABOVE", (3, row_index), (5, row_index), 0.3, colors.HexColor("#b7b7b7"))])
     for row_index, _marker in subtotal_rows:
         line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
     line_table.setStyle(TableStyle(line_style))
