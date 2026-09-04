@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("assert"),fs=require("fs"),path=require("path"),root=path.resolve(__dirname,"..");
-const hub=fs.readFileSync(path.join(root,"public","ui","baustellen-knowledge-hub.js"),"utf8"),outgoing=fs.readFileSync(path.join(root,"brain_outgoing_invoices.py"),"utf8"),tower=fs.readFileSync(path.join(root,"public","kontrollzentrum.html"),"utf8");
+const hub=fs.readFileSync(path.join(root,"public","ui","baustellen-knowledge-hub.js"),"utf8"),outgoing=fs.readFileSync(path.join(root,"brain_outgoing_invoices.py"),"utf8"),tower=fs.readFileSync(path.join(root,"public","kontrollzentrum.html"),"utf8"),brain=fs.readFileSync(path.join(root,"archive-connector.py"),"utf8");
 assert.match(hub,/addImportedMaterials/);
 assert.match(hub,/regieHours=.*laborTotal=.*materialTotal=/);
 assert.match(outgoing,/Regiedaten übernehmen/);
@@ -32,4 +32,6 @@ assert.match(outgoing,/period-summary/);
 assert.match(outgoing,/WinWorker und KRISTINE/);
 assert.match(tower,/Umsatz 2026 aus WW \+ KRISTINE/);
 assert.match(tower,/davon KRISTINE/);
+assert.match(tower,/X-Krista-Token/);
+assert.match(brain,/request\.path in \{"\/tower\/live-summary"/);
 console.log("regie invoice link test: ok");

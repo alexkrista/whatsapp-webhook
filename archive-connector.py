@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin

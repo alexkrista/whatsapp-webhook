@@ -65,7 +65,7 @@ const COST_GROUPS=['Personal','Material','Fremdleistungen','Fahrzeuge','Büro / 
 let jobsData={},bootstrap={},towerPlanning={},towerOpenItems={},period='month',towerPlanData=window.kristaTowerPlanData||null;
 function withToken(path){const u=new URL(path,location.origin);if(token)u.searchParams.set('token',token);return u.pathname+u.search+u.hash}
 async function api(path){const r=await fetch(withToken(path));const text=await r.text();let data;try{data=JSON.parse(text)}catch{}if(!r.ok)throw new Error(data?.error||text||r.statusText);return data}
-async function brainApi(path){const r=await fetch(BRAIN_URL+path,{cache:'no-store'});const text=await r.text();let data;try{data=JSON.parse(text)}catch{}if(!r.ok||data?.ok===false)throw new Error(data?.error||text||r.statusText);return data}
+async function brainApi(path){const headers=token?{'X-Krista-Token':token}:{};const r=await fetch(BRAIN_URL+path,{cache:'no-store',headers});const text=await r.text();let data;try{data=JSON.parse(text)}catch{}if(!r.ok||data?.ok===false)throw new Error(data?.error||text||r.statusText);return data}
 function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
 function money(v){return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(num(v))}
 function hour(v){return new Intl.NumberFormat('de-AT',{maximumFractionDigits:1}).format(num(v))+' h'}
