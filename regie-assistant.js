@@ -349,6 +349,21 @@ function registerRegieAssistant(app, options) {
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
     catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
   });
+  app.delete("/kristine/api/regie-reports/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const id = safeId(req.params.id), reports = await readJson(REPORTS, []);
+      const index = reports.findIndex(row => row.id === id);
+      if (index < 0) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+      if (reports[index].status === "completed") return res.status(409).json({ ok: false, error: "Fertiggestellte Regieberichte bleiben geschützt und können nicht gelöscht werden." });
+      reports.splice(index, 1);
+      const confirmations = (await readJson(CONFIRMATIONS, [])).filter(row => row.reportId !== id);
+      await Promise.all([writeJson(REPORTS, reports), writeJson(CONFIRMATIONS, confirmations)]);
+      const attachmentDir = path.resolve(FILES, id), filesRoot = `${path.resolve(FILES)}${path.sep}`;
+      if (attachmentDir.startsWith(filesRoot)) await fsp.rm(attachmentDir, { recursive: true, force: true });
+      res.json({ ok: true, deleted: id });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
+  });
   app.get("/kristine/api/regie-reports/:id/file/:fileId", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const report = (await readJson(REPORTS, [])).find(row => row.id === safeId(req.params.id));

@@ -677,6 +677,27 @@ app.get("/api/regie/materials", async (req, res) => {
     });
   }
 });
+
+  // Statische Unterseiten müssen vor /:materialId stehen, sonst liest Express
+  // z. B. "export-excel" fälschlich als Material-ID.
+  app.get("/admin/api/materials/export-excel", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const buffer = await exportWorkbook();
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="KRISTINE_Materialstamm_${date}.xlsx"`);
+      res.send(buffer);
+    } catch (error) {
+      res.status(500).send(String(error?.message || error));
+    }
+  });
+
+  app.get("/admin/api/materials/imports", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json({ ok: true, imports: await readJson(IMPORTS_FILE, []) });
+  });
+
   app.get("/admin/api/materials/:materialId", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const rows = await readJson(MATERIALS_FILE, []);
@@ -782,24 +803,6 @@ app.get("/api/regie/materials", async (req, res) => {
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
-  });
-
-  app.get("/admin/api/materials/export-excel", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const buffer = await exportWorkbook();
-      const date = new Date().toISOString().slice(0, 10);
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="KRISTINE_Materialstamm_${date}.xlsx"`);
-      res.send(buffer);
-    } catch (error) {
-      res.status(500).send(String(error?.message || error));
-    }
-  });
-
-  app.get("/admin/api/materials/imports", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    res.json({ ok: true, imports: await readJson(IMPORTS_FILE, []) });
   });
 
   // ---------- Lernsystem / unbekannte Materialien ----------

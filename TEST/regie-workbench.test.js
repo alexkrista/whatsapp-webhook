@@ -12,6 +12,7 @@ const routes = new Map();
 const app = {
   get(route, handler) { routes.set(`GET ${route}`, handler); },
   post(route, handler) { routes.set(`POST ${route}`, handler); },
+  delete(route, handler) { routes.set(`DELETE ${route}`, handler); },
 };
 let documentation = [];
 let savedMeta = null;
@@ -77,6 +78,14 @@ function invoke(handler, req) {
   assert.equal(second.body.report.reportNumber, "26096002");
   assert.equal(second.body.report.reportSequence, 2);
   assert.equal(second.body.report.employees[0].hours, 5);
+
+  const remove = routes.get("DELETE /kristine/api/regie-reports/:id");
+  const removed = await invoke(remove, { params: { id: second.body.report.id } });
+  assert.equal(removed.statusCode, 200);
+  assert.equal(removed.body.deleted, second.body.report.id);
+  const protectedReport = await invoke(remove, { params: { id: first.body.report.id } });
+  assert.equal(protectedReport.statusCode, 409);
+  assert.match(protectedReport.body.error, /geschützt/);
 
   const individualRate = await invoke(save, { body: {
     finish: false,

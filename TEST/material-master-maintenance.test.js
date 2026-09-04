@@ -10,10 +10,11 @@ const { registerMaterialMaster } = require("../material-master");
 (async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "krista-material-test-"));
   try {
-    const routes = {};
+    const routes = {}, routeOrder = [];
     const app = {};
-    for (const method of ["get", "post", "put", "patch", "delete"]) app[method] = (route, handler) => { routes[`${method}:${route}`] = handler; };
+    for (const method of ["get", "post", "put", "patch", "delete"]) app[method] = (route, handler) => { routes[`${method}:${route}`] = handler; routeOrder.push(`${method}:${route}`); };
     const service = registerMaterialMaster(app, { dataDir: root, requireAdmin: () => true, publicDir: path.join(__dirname, "..", "public") });
+    assert(routeOrder.indexOf("get:/admin/api/materials/export-excel") < routeOrder.indexOf("get:/admin/api/materials/:materialId"), "Excel-Export steht vor der dynamischen Material-ID-Route");
     const materialDir = path.join(root, "_kristine", "materials");
     fs.mkdirSync(materialDir, { recursive: true });
     fs.writeFileSync(path.join(materialDir, "materials.json"), JSON.stringify([

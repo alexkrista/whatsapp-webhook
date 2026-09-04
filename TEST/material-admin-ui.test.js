@@ -14,4 +14,5 @@ for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteM
 assert(home.includes("/admin/material"), "KRISADMIN enthält den Material-Reiter");
 assert(regie.includes("hasSale=owns(item,['salePrice','vkNet'])"), "Gespeicherte Regiepreise bleiben als Snapshot erhalten");
 assert(regie.includes("hasPurchase=owns(item,['purchasePrice','unitPrice','ek'])"), "Gespeicherte Einkaufspreise werden nicht später aus dem Stamm ersetzt");
+assert(regie.includes("queue-delete"), "Offene Regieberichte können nach Rückfrage gelöscht werden");
 console.log("OK: KRISADMIN-Materialpflege und feste Regiebericht-Preise sind verdrahtet.");
