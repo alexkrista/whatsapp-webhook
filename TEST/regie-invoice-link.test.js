@@ -12,4 +12,7 @@ assert.match(outgoing,/\['SR','SR'\]/);
 assert.match(outgoing,/\['RE','Rechnung'\]/);
 assert.match(outgoing,/body\.label=body\.label\|\|designation/);
 assert.match(outgoing,/const isExtra=kind==='RE'/);
+assert.match(outgoing,/Nächste freie Rechnungsnummer/);
+assert.match(outgoing,/\/api\/outgoing\/next-number/);
+assert.match(outgoing,/loadNextNumber\(\)/);
 console.log("regie invoice link test: ok");
