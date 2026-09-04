@@ -75,6 +75,46 @@ def _is_project_closing_invoice(invoice):
     return not re.search(r"\bextra[\s-]*rechnung\b", text, flags=re.I)
 
 
+def _combined_revenue_summary(rows, year):
+    """Merge WW and KRISTINE invoices by invoice number and total them by month."""
+    year = int(year)
+    unique = {}
+    for raw in rows or []:
+        number = str(raw.get("invoiceNumber") or raw.get("invoice_number") or "").strip()
+        issue_date = str(raw.get("issueDate") or raw.get("issue_date") or "")[:10]
+        if not number or not issue_date.startswith(f"{year:04d}-"):
+            continue
+        source = "WW" if str(raw.get("source") or "").upper() == "WW" else "KRISTINE"
+        try:
+            month = int(issue_date[5:7])
+            net = float(raw.get("netRevenue", raw.get("increment_net", 0)) or 0)
+        except (TypeError, ValueError):
+            continue
+        if month < 1 or month > 12:
+            continue
+        candidate = {"invoiceNumber": number, "issueDate": issue_date, "month": month, "netRevenue": net, "source": source}
+        current = unique.get(number)
+        if current is None or source == "WW":
+            unique[number] = candidate
+    monthly = [{"month": month, "netRevenue": 0.0, "invoiceCount": 0, "wwInvoiceCount": 0, "kristineInvoiceCount": 0} for month in range(1, 13)]
+    for row in unique.values():
+        target = monthly[row["month"] - 1]
+        target["netRevenue"] += row["netRevenue"]
+        target["invoiceCount"] += 1
+        target["wwInvoiceCount" if row["source"] == "WW" else "kristineInvoiceCount"] += 1
+    for target in monthly:
+        target["netRevenue"] = round(target["netRevenue"], 2)
+    return {
+        "year": year,
+        "monthlyRevenue": monthly,
+        "netRevenue": round(sum(row["netRevenue"] for row in monthly), 2),
+        "invoiceCount": sum(row["invoiceCount"] for row in monthly),
+        "wwInvoiceCount": sum(row["wwInvoiceCount"] for row in monthly),
+        "kristineInvoiceCount": sum(row["kristineInvoiceCount"] for row in monthly),
+        "revenueSource": "WinWorker + KRISTINE Ausgangsrechnungen netto · doppelte Rechnungsnummern nur einmal",
+    }
+
+
 def _lg_retail_net_price(product, unit, container_size=None):
     """Return the maintained LG retail gross price as invoice net price."""
     price_file = Path(__file__).with_name("public") / "lg-retail-preisliste-2025.html"
@@ -399,6 +439,64 @@ def install(ns):
             return [str(row[0] or "").strip() for row in cur.fetchall() if str(row[0] or "").strip()]
         finally:
             con.close()
+
+    def ww_invoice_revenue_rows(year):
+        """Read every issued, non-cancelled WW invoice in the requested year."""
+        if not callable(sql_connection):
+            if app.testing:
+                return []
+            raise RuntimeError("WinWorker-Verbindung ist für den Umsatzabgleich nicht verfügbar.")
+        year = int(year)
+        con = sql_connection()
+        try:
+            cur = con.cursor()
+            cur.execute("""
+                WITH InvoiceRows AS (
+                    SELECT
+                        LTRIM(RTRIM(COALESCE(b.sBuchNummer,''))) AS invoiceNumber,
+                        r.cUmsatzNetto AS netRevenue,
+                        COALESCE(r.dzRechnungsdatum,b.dzDocDatum,b.Geändert,b.dzInhaltGeaendert,b.Aufgenommen) AS issueDate,
+                        COALESCE(b.Geändert,b.dzInhaltGeaendert,b.dzDocDatum,b.Aufgenommen) AS versionDate,
+                        b.gID
+                    FROM dbo.[Bücher] b
+                    INNER JOIN dbo.Rechnung r ON r.gBuchID=b.gID
+                    WHERE b.Storno=0
+                      AND b.ErsterAusdruck>CONVERT(datetime,'18000101',112)
+                      AND NULLIF(LTRIM(RTRIM(COALESCE(b.sBuchNummer,''))),'') IS NOT NULL
+                      AND r.cUmsatzNetto IS NOT NULL
+                ), LatestPerNumber AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY invoiceNumber ORDER BY versionDate DESC,gID DESC
+                    ) AS rowNo
+                    FROM InvoiceRows
+                )
+                SELECT invoiceNumber,netRevenue,issueDate
+                FROM LatestPerNumber
+                WHERE rowNo=1 AND YEAR(issueDate)=?
+                ORDER BY issueDate,invoiceNumber
+            """, year)
+            columns = [item[0] for item in cur.description]
+            result = []
+            for values in cur.fetchall():
+                row = dict(zip(columns, values))
+                issue_date = row.get("issueDate")
+                result.append({
+                    "invoiceNumber": str(row.get("invoiceNumber") or "").strip(),
+                    "issueDate": issue_date.date().isoformat() if hasattr(issue_date, "date") else str(issue_date or "")[:10],
+                    "netRevenue": float(row.get("netRevenue") or 0),
+                    "source": "WW",
+                })
+            return result
+        finally:
+            con.close()
+
+    def combined_company_revenue_year(year):
+        year = int(year)
+        return _combined_revenue_summary(
+            [*store.issued_revenue_rows(year), *ww_invoice_revenue_rows(year)], year
+        )
+
+    ns["combined_outgoing_revenue_year"] = combined_company_revenue_year
 
     def sync_from_ww():
         return store.sync_ww_open_items(ww_open_items())
@@ -1198,11 +1296,35 @@ def install(ns):
     def outgoing_periods_get():
         return jsonify({"ok": True, "periods": store.periods()})
 
+    def period_revenue_summary(period):
+        text = str(period or "").replace("-", "").strip()
+        if len(text) != 6 or not text.isdigit():
+            raise ValueError("Monat muss als JJJJMM angegeben werden.")
+        year, month = int(text[:4]), int(text[4:])
+        if year < 2000 or month < 1 or month > 12:
+            raise ValueError("Monat ist ungültig.")
+        annual = combined_company_revenue_year(year)
+        row = dict(annual["monthlyRevenue"][month - 1])
+        row.update({"period": text, "year": year})
+        return row
+
+    @app.get("/api/outgoing/period-summary")
+    def outgoing_period_summary():
+        try:
+            return jsonify({"ok": True, "summary": period_revenue_summary(request.args.get("period"))})
+        except Exception as exc:
+            return _json_error(jsonify, exc, 500)
+
     @app.post("/api/outgoing/periods/close")
     def outgoing_period_close():
         try:
             data = request.get_json(silent=True) or {}
-            return jsonify({"ok": True, **store.close_period(data.get("period"), data.get("closedBy"))})
+            summary = period_revenue_summary(data.get("period"))
+            return jsonify({
+                "ok": True,
+                **store.close_period(data.get("period"), data.get("closedBy")),
+                "summary": summary,
+            })
         except Exception as exc:
             return _json_error(jsonify, exc)
 
@@ -1241,29 +1363,35 @@ OUTGOING_PAGE = r'''<!doctype html>
 .lines tr.regie-report-sum td:nth-child(2){display:flex;gap:12px;align-items:end}.lines tr.regie-report-sum td:nth-child(2)>input.desc{flex:1}.report-material-discount::before,.work-discount-control span{content:'Rabatt Material %';display:block;margin-bottom:3px;color:var(--muted);font-size:10px;font-weight:700;white-space:nowrap}.work-discount-control{display:block;width:112px;flex:0 0 112px}.work-discount-control input{min-width:0}.report-material-discount{width:112px!important}
 .pricing-factbox{grid-column:1/-1;display:grid;grid-template-columns:minmax(150px,220px) minmax(150px,220px) 1fr auto;gap:10px;align-items:end;padding:12px;border:1px solid #385c46;border-radius:11px;background:#111b16}.pricing-factbox .pricing-rule{align-self:center;color:var(--muted);font-size:12px;line-height:1.45}.pricing-factbox.locked input{opacity:.7}.pricing-factbox .pill{justify-self:start}@media(max-width:800px){.pricing-factbox{grid-template-columns:1fr 1fr}.pricing-factbox .pricing-rule{grid-column:1/-1}}
 </style></head><body>
-<header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1><div class="next-number">Nächste freie Rechnungsnummer <strong id="nextInvoiceNumber">wird ermittelt …</strong></div></div><div class="row"><a href="/outgoing/open-items"><button class="ghost">Debitoren-OP</button></a><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
+<header class="top"><div><a href="/">← KRISTINE</a><h1>Ausgangsrechnungen</h1><div class="next-number">Nächste freie Rechnungsnummer <strong id="nextInvoiceNumber">wird ermittelt …</strong></div></div><div class="row"><button id="newStandaloneInvoice" class="primary">+ Neue Rechnung</button><a href="/outgoing/open-items"><button class="ghost">Debitoren-OP</button></a><button id="syncWw" class="ghost">WW abgleichen</button><button id="periodButton" class="ghost">Monatsabschluss</button><button id="settingsButton" class="ghost">Firmendaten</button></div></header>
 <main class="layout"><aside class="card side"><label>Projekt, Kunde oder Nummer suchen<div class="row"><input id="search" class="grow" placeholder="z. B. 26025 oder Kundenname"><button id="searchButton">Suchen</button></div></label><div id="projects"></div><div class="section"><h3>Rechnungsläufe</h3><div id="runs" class="muted">Projekt auswählen.</div></div></aside><section><div id="empty" class="card">Projekt auswählen und einen Rechnungslauf anlegen.</div><div id="workspace" class="hide"></div><div id="recent" class="card section"><h3>Zuletzt bearbeitet</h3><div id="recentGrid" class="recent-grid"><span class="muted">Wird geladen …</span></div></div></section></main>
 <div id="message" class="message hide"></div>
+<div id="newInvoiceModal" class="modal hide"><div class="card"><div class="head"><h2>Neue Rechnung</h2><button data-close="newInvoiceModal">×</button></div><p class="muted">Wo gehört die Rechnung hin?</p><div class="grid section"><button id="newProjectInvoice" class="primary">Baustelle</button><button id="newSaleInvoice" class="good">Verkauf ohne Projekt</button></div><p class="small muted">Baustelle: vorhandenes Projekt suchen. Verkauf: einfache Rechnung ohne Projektnummer; Nummerierung, Umsatz und Monatsabschluss laufen trotzdem gemeinsam weiter.</p></div></div>
+<div id="saleModal" class="modal hide"><div class="card"><div class="head"><h2>Neue Verkaufsrechnung</h2><button data-close="saleModal">×</button></div><div class="grid"><label>Firma (falls vorhanden)<input id="saleCustomer" autocomplete="organization"></label><label>Name<input id="saleName" autocomplete="name"></label><label>Straße<input id="saleStreet" autocomplete="street-address"></label><label>PLZ<input id="salePostal" autocomplete="postal-code"></label><label>Ort<input id="saleCity" autocomplete="address-level2"></label><label>Land<input id="saleCountry" value="Österreich" autocomplete="country-name"></label><label style="grid-column:1/-1">Betreff / Verkauf<input id="saleSubject" placeholder="z. B. Materialverkauf"></label></div><div class="row section"><button id="saleSave" class="primary">Rechnung erfassen</button><button data-close="saleModal">Abbrechen</button></div></div></div>
 <div id="runModal" class="modal hide"><div class="card"><div class="head"><h2>Neuer Rechnungslauf</h2><button data-close="runModal">×</button></div><div class="grid"><label>Bezeichnung<input id="runLabel" placeholder="z. B. Fassade / Zusatzauftrag"></label><label>Kunden-UID<input id="runUid"></label><label>Firma<input id="runCompany"></label><label>Name<input id="runName"></label><label>Straße<input id="runStreet"></label><label>PLZ<input id="runPostal"></label><label>Ort<input id="runCity"></label><label>Land<input id="runCountry" value="Österreich"></label></div><div class="row section"><button id="runSave" class="primary">Rechnungslauf anlegen</button><button data-close="runModal">Abbrechen</button></div></div></div>
 <div id="invoiceKindModal" class="modal hide"><div class="card"><div class="head"><h2>Was möchtest du erstellen?</h2><button data-close="invoiceKindModal">×</button></div><p class="muted">Eine normale Rechnung bleibt von der Teilrechnungs-Kette getrennt.</p><div id="invoiceKindChoices" class="row section"></div></div></div>
 <div id="paymentModal" class="modal hide"><div class="card"><div class="head"><h2>Zahlung buchen</h2><button data-close="paymentModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Zu Rechnung<select id="payInvoice"></select></label><label>Datum<input id="payDate" type="date"></label><label>Brutto<input id="payGross" inputmode="decimal"></label><label>Netto (optional)<input id="payNet" inputmode="decimal"></label><label>USt (optional)<input id="payVat" inputmode="decimal"></label><label style="grid-column:1/-1">Text / Referenz<input id="payRef"></label></div><div class="row section"><button id="paySave" class="good">Zahlung buchen</button><button data-close="paymentModal">Abbrechen</button></div></div></div>
 <div id="correctionModal" class="modal hide"><div class="card"><div class="head"><h2>Korrekturbeleg</h2><button data-close="correctionModal">×</button></div><div class="grid"><label>Art<select id="correctionKind"><option value="GS">Gutschrift</option><option value="ST">Stornorechnung (nur offener Monat)</option></select></label><label>Datum<input id="correctionDate" type="date"></label><label id="creditGrossLabel">Gutschrift Brutto<input id="creditGross" inputmode="decimal"></label><label style="grid-column:1/-1">Begründung<input id="correctionReason"></label></div><div class="row section"><button id="correctionSave" class="danger">Korrekturentwurf anlegen</button><button data-close="correctionModal">Abbrechen</button></div></div></div>
 <div id="mailModal" class="modal hide"><div class="card"><div class="head"><h2>Rechnung per E-Mail senden</h2><button data-close="mailModal">×</button></div><div class="grid"><label style="grid-column:1/-1">Empfänger<input id="mailTo" type="email" placeholder="wird aus den Stammdaten übernommen"></label><label style="grid-column:1/-1">CC – Bauleitung / Architekt<input id="mailCc" placeholder="wird aus den Stammdaten übernommen"></label><label style="grid-column:1/-1">Betreff<input id="mailSubject"></label><label style="grid-column:1/-1">Nachricht<textarea id="mailText"></textarea></label></div><p class="small muted">„In Outlook öffnen“ erstellt die Original-Mail mit PDF-Anhang und deiner normalen Outlook-Signatur. Vor dem Senden kannst du alles prüfen und ändern.</p><div class="row section"><button id="mailOutlook" class="good">In Outlook öffnen</button><button id="mailSend">Direkt senden</button><button data-close="mailModal">Abbrechen</button></div></div></div>
-<div id="periodModal" class="modal hide"><div class="card"><div class="head"><h2>Monatsabschluss</h2><button data-close="periodModal">×</button></div><p class="muted">Nach dem Abschluss sind Rechnungen dieses Monats gesperrt. Korrekturen erfolgen nur noch über Gutschriften.</p><label>Monat<input id="periodValue" type="month"></label><div class="row section"><button id="periodClose" class="danger">Monat endgültig abschließen</button><button data-close="periodModal">Abbrechen</button></div><div id="closedPeriods" class="section small muted"></div></div></div>
+<div id="periodModal" class="modal hide"><div class="card"><div class="head"><h2>Monatsabschluss</h2><button data-close="periodModal">×</button></div><p class="muted">Gemeinsamer Rechnungsstand aus WinWorker und KRISTINE. Doppelte Rechnungsnummern werden nur einmal gezählt. Der Abschluss sperrt danach den KRISTINE-Monat; WinWorker bleibt dort separat geführt.</p><label>Monat<input id="periodValue" type="month"></label><div id="periodSummary" class="summary"><div>Umsatz netto<strong>–</strong></div><div>Belege<strong>–</strong></div><div>WinWorker<strong>–</strong></div><div>KRISTINE<strong>–</strong></div></div><div class="row section"><button id="periodClose" class="danger">Monat endgültig abschließen</button><button data-close="periodModal">Abbrechen</button></div><div id="closedPeriods" class="section small muted"></div></div></div>
 <script>
 (()=>{const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0)),today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);let selectedProject=null,selectedRun=null,editing=null,correctionTarget=null,settings={};
 function msg(t,error=false){const e=$('message');e.textContent=t;e.className='message'+(error?' error':'');setTimeout(()=>e.classList.add('hide'),4500)}async function api(url,opt={}){if(url==='/api/outgoing/runs'&&opt.method==='POST'&&opt.body&&selectedProject){const body=JSON.parse(opt.body),designation=projectDesignation(selectedProject);body.projectTitle=body.projectTitle||designation;body.label=body.label||designation;opt={...opt,body:JSON.stringify(body)}}const r=await fetch(url,{cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Fehler');return d}function open(id){$(id).classList.remove('hide')}function close(id){$(id).classList.add('hide')}document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>close(b.dataset.close));
 async function loadNextNumber(){try{const d=await api('/api/outgoing/next-number?date='+encodeURIComponent(today()));$('nextInvoiceNumber').textContent=d.invoiceNumber||'–';$('nextInvoiceNumber').title='Stand für '+(d.issueDate||today())}catch(e){$('nextInvoiceNumber').textContent='nicht verfügbar';$('nextInvoiceNumber').title=e.message}}
 async function init(){const d=await api('/api/outgoing/settings');settings=d.settings;$('payDate').value=today();$('correctionDate').value=today();$('periodValue').value=today().slice(0,7);await Promise.all([loadRecent(),loadNextNumber()]);const project=new URLSearchParams(location.search).get('project');if(project){$('search').value=project;await search(true)}}
-async function loadRecent(){const d=await api('/api/outgoing/runs'),rows=[...d.runs].sort((a,b)=>Number(b.id)-Number(a.id)).slice(0,6);$('recentGrid').innerHTML=rows.map(x=>`<button class="recent-card" data-recent="${x.id}"><strong>${esc(x.project_number||'Projekt')} · ${esc(x.customer_company||x.customer_name)}</strong><span class="small muted">${esc(x.project_title||x.label)}</span><span class="amount">${x.invoiceCount} Beleg(e) · offen ${money(x.currentOpen)}</span></button>`).join('')||'<span class="muted">Noch keine Rechnungsläufe vorhanden.</span>';$('recentGrid').querySelectorAll('[data-recent]').forEach(button=>button.onclick=async()=>{const x=rows.find(row=>row.id===Number(button.dataset.recent));if(!x)return;selectedProject={projectIndex:x.project_index,projectNumber:x.project_number,title:x.project_title||x.label,company:x.customer_company,customer:x.customer_name,address:[x.customer_street,[x.customer_postal_code,x.customer_city].filter(Boolean).join(' ')].filter(Boolean).join(', ')};await loadRun(x.id)})}
+async function loadRecent(){const d=await api('/api/outgoing/runs'),rows=[...d.runs].sort((a,b)=>Number(b.id)-Number(a.id)).slice(0,6);$('recentGrid').innerHTML=rows.map(x=>`<button class="recent-card" data-recent="${x.id}"><strong>${esc(x.project_number||'Verkauf')} · ${esc(x.customer_company||x.customer_name)}</strong><span class="small muted">${esc(x.project_title||x.label)}</span><span class="amount">${x.invoiceCount} Beleg(e) · offen ${money(x.currentOpen)}</span></button>`).join('')||'<span class="muted">Noch keine Rechnungsläufe vorhanden.</span>';$('recentGrid').querySelectorAll('[data-recent]').forEach(button=>button.onclick=async()=>{const x=rows.find(row=>row.id===Number(button.dataset.recent));if(!x)return;selectedProject=x.project_index==null?null:{projectIndex:x.project_index,projectNumber:x.project_number,title:x.project_title||x.label,company:x.customer_company,customer:x.customer_name,address:[x.customer_street,[x.customer_postal_code,x.customer_city].filter(Boolean).join(' ')].filter(Boolean).join(', ')};await loadRun(x.id)})}
 async function search(autoSelect=false){const q=$('search').value.trim();if(q.length<2)return;const d=await api('/api/outgoing/project-search?q='+encodeURIComponent(q));$('projects').innerHTML=d.projects.map((p,i)=>`<div class="project" data-p="${i}"><strong>${esc(p.projectNumber)} · ${esc(p.company||p.customer)}</strong><div class="small muted">${esc(p.title||p.site)}<br>${esc(p.address)}</div></div>`).join('')||'<div class="muted">Kein Projekt gefunden.</div>';const elements=[...$('projects').children];elements.forEach((e,i)=>e.onclick=()=>selectProject(d.projects[i],e));if(autoSelect&&d.projects.length){const i=Math.max(0,d.projects.findIndex(p=>String(p.projectNumber)===q));await selectProject(d.projects[i],elements[i])}}
 async function selectProject(p,e){selectedProject=p;selectedRun=null;document.querySelectorAll('.project').forEach(x=>x.classList.remove('active'));e?.classList.add('active');let synced=null;try{synced=await api('/api/outgoing/projects/'+encodeURIComponent(p.projectIndex)+'/sync-history',{method:'POST',body:'{}'})}catch(err){msg('WW-Rechnungshistorie konnte nicht geladen werden: '+err.message,true)}$('empty').classList.remove('hide');$('workspace').classList.add('hide');$('empty').innerHTML=`<div class="head"><div><h2>${esc(p.projectNumber)} · ${esc(p.title)}</h2><div class="muted">${esc(p.company||p.customer)} · ${esc(p.address)}</div></div><button id="newRun" class="primary">Neuer Rechnungslauf</button></div>`;$('newRun').onclick=showRun;await loadRuns();if(synced?.runId){await loadRun(synced.runId);if(synced.imported)msg(`${synced.imported} WW-Vorgängerrechnung(en) übernommen. Die nächste Teilrechnung wird korrekt fortgeführt.`)}}
 async function loadRuns(){if(!selectedProject)return;const d=await api('/api/outgoing/runs?projectIndex='+encodeURIComponent(selectedProject.projectIndex));$('runs').innerHTML=d.runs.map(x=>`<div class="run ${selectedRun?.id===x.id?'active':''}" data-id="${x.id}"><div class="head"><strong>${esc(x.label)}</strong><span class="pill ${x.status}">${x.status==='open'?'offen':'abgeschlossen'}</span></div><div class="small muted">${x.invoiceCount} Beleg(e) · offen ${money(x.currentOpen)}</div></div>`).join('')||'<div class="muted">Noch kein Lauf.</div>';document.querySelectorAll('.run').forEach(e=>e.onclick=()=>loadRun(Number(e.dataset.id)))}
 function projectDesignation(p){return [p.title||'Auftrag',p.address||[p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
 function showRun(){const p=selectedProject;$('runLabel').value=projectDesignation(p);$('runUid').value='';$('runCompany').value=p.company||'';$('runName').value=p.customer||[p.firstName,p.lastName].filter(Boolean).join(' ');$('runStreet').value=p.street||'';$('runPostal').value=p.postalCode||'';$('runCity').value=p.city||'';$('runCountry').value='Österreich';open('runModal')}
 async function saveRun(){const p=selectedProject,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:p.projectIndex,projectNumber:p.projectNumber,customerIndex:p.customerIndex,projectTitle:p.title,label:$('runLabel').value,customerUid:$('runUid').value,company:$('runCompany').value,customerName:$('runName').value,street:$('runStreet').value,postalCode:$('runPostal').value,city:$('runCity').value,country:$('runCountry').value})});close('runModal');await loadRuns();await loadRun(d.run.id)}
-async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedRun=d.run;editing=editing?(selectedRun.invoices||[]).find(x=>x.id===editing.id)||null:null;$('empty').classList.add('hide');$('workspace').classList.remove('hide');renderRun();await loadRuns()}
-function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status==='draft'),nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status==='issued').length+1;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${draft?'Entwurf bearbeiten':nextTr+'. TR / Rechnung erstellen'}</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div><div id="quickView"></div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>editInvoice(draft||null));$('newPayment').onclick=showPayment;wireInvoices()}
+function showNewInvoiceChoice(){open('newInvoiceModal')}
+function chooseProjectInvoice(){close('newInvoiceModal');$('search').focus();$('search').scrollIntoView({behavior:'smooth',block:'center'});msg('Baustelle suchen und anschließend den Rechnungslauf öffnen.')}
+function showSaleInvoice(){close('newInvoiceModal');for(const id of ['saleCustomer','saleName','saleStreet','salePostal','saleCity','saleSubject'])$(id).value='';$('saleCountry').value='Österreich';open('saleModal');$('saleCustomer').focus()}
+async function saveSaleInvoice(){const subject=$('saleSubject').value.trim()||'Verkauf';selectedProject=null;const d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:null,projectNumber:'',customerIndex:null,projectTitle:'',label:subject,company:$('saleCustomer').value,customerName:$('saleName').value,street:$('saleStreet').value,postalCode:$('salePostal').value,city:$('saleCity').value,country:$('saleCountry').value})});close('saleModal');await loadRun(d.run.id);editInvoice(null);$('invKind').value='RE';$('invKind').dispatchEvent(new Event('change'));$('subject').value=subject;msg('Verkaufsrechnung angelegt – Positionen und Betrag ergänzen.')}
+async function loadRun(id){const d=await api('/api/outgoing/runs/'+id);selectedRun=d.run;if(selectedRun.project_index==null){selectedProject=null;document.querySelectorAll('.project').forEach(x=>x.classList.remove('active'));$('runs').innerHTML='<div class="muted">Einzelverkauf ohne Baustelle.</div>'}editing=editing?(selectedRun.invoices||[]).find(x=>x.id===editing.id)||null:null;$('empty').classList.add('hide');$('workspace').classList.remove('hide');renderRun();await loadRuns()}
+function renderRun(){const r=selectedRun,draft=(r.invoices||[]).find(x=>x.status==='draft'),nextTr=(r.invoices||[]).filter(x=>x.kind==='TR'&&x.status==='issued').length+1,isSale=r.project_index==null&&!r.project_number,meta=isSale?`Verkauf ohne Projekt · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}`:`Projekt ${esc(r.project_number)} · ${esc(r.customer_company||r.customer_name)} · ${esc(r.customer_street)}, ${esc(r.customer_postal_code)} ${esc(r.customer_city)}`;$('workspace').innerHTML=`<div class="card"><div class="head"><div><h2>${esc(r.label)}</h2><div class="muted">${meta}</div></div><span class="pill ${r.status}">${r.status==='open'?'offen':'abgeschlossen'}</span></div><div class="summary"><div>Rechnungsstand<strong>${money(r.currentGross)}</strong></div><div>Zahlungen<strong>${money(r.paidGross)}</strong></div><div>Offen<strong>${money(r.currentOpen)}</strong></div><div>Belege<strong>${r.invoiceCount}</strong></div></div><div class="row">${r.status==='open'&&!r.label.startsWith('WW-Altbestand')?`<button id="newInvoice" class="primary">${draft?'Entwurf bearbeiten':isSale?'Rechnung erstellen':nextTr+'. TR / Rechnung erstellen'}</button>`:''}<button id="newPayment" class="good">Zahlung buchen</button></div></div><div class="card section"><h3>Rechnungen</h3><div id="invoiceList">${invoiceList(r.invoices)}</div><div id="quickView"></div></div><div class="card section"><h3>Zahlungen</h3>${paymentList(r.payments)}</div><div id="editor"></div>`;$('newInvoice')?.addEventListener('click',()=>{editInvoice(draft||null);if(isSale&&!draft){$('invKind').value='RE';$('invKind').dispatchEvent(new Event('change'))}});$('newPayment').onclick=showPayment;wireInvoices()}
 function linkedRegiePreset(){const q=new URLSearchParams(location.search),hours=Number(q.get('regieHours')||0),labor=Number(q.get('laborTotal')||0),material=Number(q.get('materialTotal')||0);let detail={days:[]};try{const token=(q.get('regieDetail')||'').replace(/-/g,'+').replace(/_/g,'/');detail=JSON.parse(decodeURIComponent(escape(atob(token+'==='.slice((token.length+3)%4)))))}catch{}return {hours,labor,material,days:Array.isArray(detail.days)?detail.days:[],available:hours>0||labor>0||material>0}}
 async function ensureRunForKind(kind){if(kind!=='RE'||!(selectedRun?.invoices||[]).some(x=>x.status==='issued'))return selectedRun;const source=selectedRun,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:source.project_index,projectNumber:source.project_number,customerIndex:source.customer_index,projectTitle:source.project_title,label:`${source.project_title||source.label} · Extra-Rechnung`,customerUid:source.customer_uid,company:source.customer_company,customerName:source.customer_name,street:source.customer_street,postalCode:source.customer_postal_code,city:source.customer_city,country:source.customer_country})});await loadRun(d.run.id);return selectedRun}
 async function createLinkedRegieDraft(kind){const isExtra=kind==='RE'&&(selectedRun?.invoices||[]).some(x=>x.status==='issued');await ensureRunForKind(kind);const p=linkedRegiePreset(),due=new Date(today()+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=[];for(const [dayIndex,day] of p.days.entries()){const labor=(day.employees||[]).reduce((s,x)=>s+Number(x.cost||0),0),material=(day.materials||[]).reduce((s,x)=>s+Number(x.cost||0),0),label=new Intl.DateTimeFormat('de-AT').format(new Date(day.date+'T12:00:00')),reportNo=dayIndex+1,work=String(day.component||'').trim(),hasWork=work&&!/^Raum\s*\/\s*Bauteil$/i.test(work);lines.push({description:`${reportNo}. Bericht - ${label}`,quantity:0,unit:'TAG',unitPrice:0,discountPercent:0},{description:'Arbeit',quantity:0,unit:'ARBEIT',unitPrice:0,discountPercent:0});if(hasWork)lines.push({description:work,quantity:0,unit:'BAUTEIL',unitPrice:0,discountPercent:0});for(const x of day.employees||[])lines.push({description:x.name||'Mitarbeiter',quantity:Number(x.hours||0),unit:'Std.',unitPrice:Number(x.hours||0)?Number(x.cost||0)/Number(x.hours):0,discountPercent:0});if((day.materials||[]).length)lines.push({description:'Material',quantity:0,unit:'MATERIAL',unitPrice:0,discountPercent:0});for(const x of day.materials||[])lines.push({description:x.name||'Material',quantity:Number(x.quantity||1),unit:x.unit||'PA',unitPrice:Number(x.unitPrice||0)||(Number(x.cost||0)/Number(x.quantity||1)),discountPercent:0});lines.push({description:`Summe Bericht ${reportNo}`,quantity:0,unit:'SUMME',unitPrice:0,discountPercent:0})}if(!lines.length){if(p.labor>0)lines.push({description:'Regiearbeit lt. Berichten',quantity:p.hours||1,unit:p.hours?'Std.':'PA',unitPrice:p.hours?p.labor/p.hours:p.labor,discountPercent:0});if(p.material>0)lines.push({description:'Material lt. Berichten',quantity:1,unit:'PA',unitPrice:p.material,discountPercent:20})}const dates=p.days.map(x=>x.date).filter(Boolean).sort(),runId=selectedRun.id,subject=(isExtra?'Extra-Rechnung · ':'')+'Regiearbeiten · '+selectedRun.label,d=await api('/api/outgoing/invoices',{method:'POST',body:JSON.stringify({runId,kind,issueDate:today(),dueDate:due.toISOString().slice(0,10),serviceFrom:dates[0]||today(),serviceTo:dates[dates.length-1]||today(),taxMode:'AT20',retentionPercent:0,discountPercent:0,cashDiscountPercent:0,subject,notes:'',lines})});await loadRun(runId);editInvoice(d.invoice)}
@@ -1305,8 +1433,10 @@ async function issueInvoice(id){if(!confirm('Rechnung jetzt nummerieren und absc
 function showPayment(){$('payInvoice').innerHTML='<option value="">Allgemein zum Rechnungslauf</option>'+selectedRun.invoices.filter(x=>x.status==='issued'&&!['ST','GS'].includes(x.kind)).map(x=>`<option value="${x.id}">${esc(x.invoice_number)} · ${money(x.increment_gross)}</option>`).join('');open('paymentModal')}
 async function savePayment(){try{await api('/api/outgoing/runs/'+selectedRun.id+'/payments',{method:'POST',body:JSON.stringify({invoiceId:$('payInvoice').value?Number($('payInvoice').value):null,paymentDate:$('payDate').value,gross:$('payGross').value,net:$('payNet').value||null,vat:$('payVat').value||null,reference:$('payRef').value})});close('paymentModal');msg('Zahlung gebucht.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
 async function saveCorrection(){try{const d=await api('/api/outgoing/invoices/'+correctionTarget+'/corrections',{method:'POST',body:JSON.stringify({kind:$('correctionKind').value,issueDate:$('correctionDate').value,gross:$('creditGross').value,reason:$('correctionReason').value})});close('correctionModal');msg('Korrekturentwurf angelegt.');await loadRun(selectedRun.id)}catch(e){msg(e.message,true)}}
-async function showPeriods(){const d=await api('/api/outgoing/periods');$('closedPeriods').innerHTML='<strong>Abgeschlossene Monate</strong><br>'+(d.periods.map(x=>esc(x.period.slice(0,4)+'-'+x.period.slice(4))+' · '+esc(x.closed_at)).join('<br>')||'Noch keiner.');open('periodModal')}async function closePeriod(){const p=$('periodValue').value.replace('-','');if(!confirm('Monat '+$('periodValue').value+' endgültig abschließen?'))return;try{await api('/api/outgoing/periods/close',{method:'POST',body:JSON.stringify({period:p})});msg('Monat abgeschlossen.');showPeriods()}catch(e){msg(e.message,true)}}
-$('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('mailOutlook').onclick=openInvoiceInOutlook;$('mailSend').onclick=sendInvoiceMail;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=showPeriods;$('periodClose').onclick=closePeriod;$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);await loadNextNumber();if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadNextNumber()});init().catch(e=>msg(e.message,true));})();
+function renderPeriodSummary(s){const values=[money(s?.netRevenue),String(Number(s?.invoiceCount||0)),String(Number(s?.wwInvoiceCount||0)),String(Number(s?.kristineInvoiceCount||0))];[...$('periodSummary').querySelectorAll('strong')].forEach((el,i)=>el.textContent=values[i])}
+async function loadPeriodSummary(){const p=$('periodValue').value.replace('-','');if(!/^\d{6}$/.test(p))return;const d=await api('/api/outgoing/period-summary?period='+encodeURIComponent(p));renderPeriodSummary(d.summary)}
+async function showPeriods(){const d=await api('/api/outgoing/periods');$('closedPeriods').innerHTML='<strong>Abgeschlossene KRISTINE-Monate</strong><br>'+(d.periods.map(x=>esc(x.period.slice(0,4)+'-'+x.period.slice(4))+' · '+esc(x.closed_at)).join('<br>')||'Noch keiner.');open('periodModal');await loadPeriodSummary()}async function closePeriod(){const p=$('periodValue').value.replace('-','');if(!confirm('Monat '+$('periodValue').value+' mit WW + KRISTINE prüfen und für KRISTINE endgültig abschließen?'))return;try{const d=await api('/api/outgoing/periods/close',{method:'POST',body:JSON.stringify({period:p})});renderPeriodSummary(d.summary);msg(`Monat abgeschlossen · ${d.summary.invoiceCount} Belege · ${money(d.summary.netRevenue)} netto.`);await showPeriods()}catch(e){msg(e.message,true)}}
+$('newStandaloneInvoice').onclick=showNewInvoiceChoice;$('newProjectInvoice').onclick=chooseProjectInvoice;$('newSaleInvoice').onclick=showSaleInvoice;$('saleSave').onclick=()=>saveSaleInvoice().catch(e=>msg(e.message,true));$('searchButton').onclick=()=>search().catch(e=>msg(e.message,true));$('search').onkeydown=e=>{if(e.key==='Enter')search().catch(x=>msg(x.message,true))};$('runSave').onclick=()=>saveRun().catch(e=>msg(e.message,true));$('paySave').onclick=savePayment;$('correctionSave').onclick=saveCorrection;$('mailOutlook').onclick=openInvoiceInOutlook;$('mailSend').onclick=sendInvoiceMail;$('correctionKind').onchange=()=>$('creditGrossLabel').classList.toggle('hide',$('correctionKind').value==='ST');$('periodButton').onclick=()=>showPeriods().catch(e=>msg(e.message,true));$('periodClose').onclick=closePeriod;$('periodValue').onchange=()=>loadPeriodSummary().catch(e=>msg(e.message,true));$('syncWw').onclick=async()=>{try{const d=await api('/api/outgoing/sync-ww',{method:'POST',body:'{}'});msg(`${d.imported} neue WW-OP übernommen · ${d.skipped} bereits vorhanden`);await loadNextNumber();if(selectedProject)await loadRuns()}catch(e){msg(e.message,true)}};$('settingsButton').onclick=()=>msg('Firmendaten werden in der nächsten Ansicht bearbeitbar; die WW-Stammdaten sind bereits vorbelegt.');document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadNextNumber()});init().catch(e=>msg(e.message,true));})();
 </script></body></html>'''
 
 

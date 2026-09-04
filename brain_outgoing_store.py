@@ -569,6 +569,23 @@ class OutgoingStore:
         with self.connect() as con:
             return [dict(row) for row in con.execute("SELECT * FROM outgoing_periods ORDER BY period DESC")]
 
+    def issued_revenue_rows(self, year):
+        """Issued native KRISTINE invoices for combined company revenue reporting."""
+        year = int(year)
+        with self.connect() as con:
+            return [{
+                "invoiceNumber": str(row["invoice_number"] or "").strip(),
+                "issueDate": str(row["issue_date"] or "")[:10],
+                "netRevenue": float(row["increment_net"] or 0),
+                "source": "KRISTINE",
+            } for row in con.execute("""
+                SELECT invoice_number,issue_date,increment_net
+                FROM outgoing_invoices
+                WHERE status='issued' AND source='KRISTINE'
+                  AND invoice_number IS NOT NULL AND substr(issue_date,1,4)=?
+                ORDER BY issue_date,id
+            """, (f"{year:04d}",))]
+
     def runs(self, project_index=None):
         with self.connect() as con:
             sql = "SELECT * FROM outgoing_runs"

@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("assert"),fs=require("fs"),path=require("path"),root=path.resolve(__dirname,"..");
-const hub=fs.readFileSync(path.join(root,"public","ui","baustellen-knowledge-hub.js"),"utf8"),outgoing=fs.readFileSync(path.join(root,"brain_outgoing_invoices.py"),"utf8");
+const hub=fs.readFileSync(path.join(root,"public","ui","baustellen-knowledge-hub.js"),"utf8"),outgoing=fs.readFileSync(path.join(root,"brain_outgoing_invoices.py"),"utf8"),tower=fs.readFileSync(path.join(root,"public","kontrollzentrum.html"),"utf8");
 assert.match(hub,/addImportedMaterials/);
 assert.match(hub,/regieHours=.*laborTotal=.*materialTotal=/);
 assert.match(outgoing,/Regiedaten übernehmen/);
@@ -15,4 +15,10 @@ assert.match(outgoing,/const isExtra=kind==='RE'/);
 assert.match(outgoing,/Nächste freie Rechnungsnummer/);
 assert.match(outgoing,/\/api\/outgoing\/next-number/);
 assert.match(outgoing,/loadNextNumber\(\)/);
+assert.match(outgoing,/\+ Neue Rechnung/);
+assert.match(outgoing,/Verkauf ohne Projekt/);
+assert.match(outgoing,/period-summary/);
+assert.match(outgoing,/WinWorker und KRISTINE/);
+assert.match(tower,/Umsatz 2026 aus WW \+ KRISTINE/);
+assert.match(tower,/davon KRISTINE/);
 console.log("regie invoice link test: ok");

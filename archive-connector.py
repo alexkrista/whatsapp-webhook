@@ -4074,8 +4074,11 @@ def _customer_revenue_by_year(project_indices):
 
 
 def company_planning_year(year):
-    """Monatliche, deduplizierte WW-Rechnungsumsätze für den Tower."""
+    """Monatliche, deduplizierte Rechnungsumsätze aus WW und KRISTINE."""
     year = int(year)
+    combined = globals().get("combined_outgoing_revenue_year")
+    if callable(combined):
+        return combined(year)
     con = sql_connection("WinWorker_Projekte_Standard")
     cur = con.cursor()
     rows = cur.execute("""

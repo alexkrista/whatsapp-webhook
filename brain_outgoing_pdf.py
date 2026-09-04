@@ -140,7 +140,8 @@ def render_invoice_pdf(invoice, settings, destination):
             canvas.drawString(56.6, y, str(line))
             y -= 11.9
         canvas.setFont(bold_font, 10.8)
-        canvas.drawString(350.0, height - 169, f"Projekt: {project_number}")
+        if project_number:
+            canvas.drawString(350.0, height - 169, f"Projekt: {project_number}")
         canvas.setFont(regular_font, 9.96)
         canvas.drawString(350.0, height - 184, f"Unser Bearbeiter: {worker}")
 
@@ -499,7 +500,8 @@ def render_dunning_pdf(dunning, settings, destination):
             canvas.drawString(56.6, y, str(line))
             y -= 11.9
         canvas.setFont(bold_font, 10.8)
-        canvas.drawString(350.0, height - 169, f"Projekt: {run.get('project_number') or ''}")
+        if run.get("project_number"):
+            canvas.drawString(350.0, height - 169, f"Projekt: {run.get('project_number')}")
         canvas.setFont(regular_font, 7.92)
         canvas.drawString(
             36.7, 48.0,

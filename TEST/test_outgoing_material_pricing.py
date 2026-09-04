@@ -1,6 +1,7 @@
 import unittest
 
 from brain_outgoing_invoices import (
+    _combined_revenue_summary,
     _is_project_closing_invoice,
     _lg_retail_net_price,
     _project_owner_names,
@@ -9,6 +10,19 @@ from brain_outgoing_invoices import (
 
 
 class OutgoingMaterialPricingTests(unittest.TestCase):
+    def test_combined_revenue_prefers_ww_for_duplicate_invoice_number(self):
+        result = _combined_revenue_summary([
+            {"invoiceNumber": "202609001", "issueDate": "2026-09-01", "netRevenue": 1200, "source": "WW"},
+            {"invoiceNumber": "202609001", "issueDate": "2026-09-01", "netRevenue": 1100, "source": "KRISTINE"},
+            {"invoiceNumber": "202609002", "issueDate": "2026-09-02", "netRevenue": 500, "source": "KRISTINE"},
+            {"invoiceNumber": "202609003", "issueDate": "2026-09-03", "netRevenue": -100, "source": "KRISTINE"},
+        ], 2026)
+        september = result["monthlyRevenue"][8]
+        self.assertEqual(september["netRevenue"], 1600.0)
+        self.assertEqual(september["invoiceCount"], 3)
+        self.assertEqual(september["wwInvoiceCount"], 1)
+        self.assertEqual(september["kristineInvoiceCount"], 2)
+
     def test_little_greene_exact_five_litre_retail_net(self):
         self.assertEqual(_lg_retail_net_price("Absolute Matt", "5 L"), 155.83)
 

@@ -64,10 +64,26 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertNotEqual(self.run["id"], second["id"])
         self.assertEqual(len(self.store.runs(2602119)), 2)
 
+    def test_standalone_sale_run_needs_no_project_number(self):
+        sale = self.store.create_run({
+            "label": "Materialverkauf", "company": "Direktkunde GmbH",
+            "street": "Marktstraße 1", "postalCode": "6800", "city": "Feldkirch",
+        })
+        self.assertIsNone(sale["project_index"])
+        self.assertEqual(sale["project_number"], "")
+        self.assertEqual(sale["label"], "Materialverkauf")
+
     def test_number_circle_is_yyyymm_sequence(self):
         draft = self.store.save_draft(self.payload())
         issued = self.store.prepare_issue(draft["id"])
         self.assertEqual(issued["invoice_number"], "202608001")
+
+    def test_issued_native_invoice_is_available_for_revenue_summary(self):
+        issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="1234.56"))["id"])
+        self.assertEqual(self.store.issued_revenue_rows(2026), [{
+            "invoiceNumber": issued["invoice_number"], "issueDate": "2026-08-31",
+            "netRevenue": 1234.56, "source": "KRISTINE",
+        }])
 
     def test_number_circle_continues_after_highest_winworker_number(self):
         self.assertEqual(
