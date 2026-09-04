@@ -79,15 +79,23 @@ function cleanPlan(input = {}, employees = [], year = new Date().getFullYear()) 
   };
 }
 
-function calculatePlan(plan) {
+function calculatePlan(plan, revenueCarryIn = null) {
   const monthlyBasePerFte = plan.annualHoursPerFte / 12;
   const monthlyStaffFactor = Array.from({ length: 12 }, (_, month) =>
     plan.employees.reduce((sum, employee) => sum + number(employee.monthlyPercent[month], 0) / 100, 0)
   );
   const monthlyGrossHours = monthlyStaffFactor.map(factor => monthlyBasePerFte * factor);
   const monthlyPlanHours = monthlyGrossHours.map((hours, month) => hours * plan.productivityPercent[month] / 100);
-  const monthlyLaborRevenue = monthlyPlanHours.map(hours => hours * plan.billingRate);
-  const monthlyMaterialRevenue = monthlyLaborRevenue.map(value => value * plan.materialPercent / 100);
+  const monthlyWorkLaborRevenue = monthlyPlanHours.map(hours => hours * plan.billingRate);
+  const monthlyWorkMaterialRevenue = monthlyWorkLaborRevenue.map(value => value * plan.materialPercent / 100);
+  const monthlyWorkPlanRevenue = monthlyWorkLaborRevenue.map((value, month) => value + monthlyWorkMaterialRevenue[month]);
+  // Arbeitsleistung wird üblicherweise im Folgemonat verrechnet. Wenn noch kein
+  // Vorjahresplan existiert, dient der aktuelle Dezember als brauchbare Schätzung
+  // für den Jänner-Eingang, damit der Jahresplan nicht künstlich einbricht.
+  const carryLabor = number(revenueCarryIn?.labor, monthlyWorkLaborRevenue[11]);
+  const carryMaterial = number(revenueCarryIn?.material, monthlyWorkMaterialRevenue[11]);
+  const monthlyLaborRevenue = [carryLabor, ...monthlyWorkLaborRevenue.slice(0, 11)];
+  const monthlyMaterialRevenue = [carryMaterial, ...monthlyWorkMaterialRevenue.slice(0, 11)];
   const monthlyPlanRevenue = monthlyLaborRevenue.map((value, month) => value + monthlyMaterialRevenue[month]);
   const sum = values => Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100;
   const deductionDays = plan.holidayDays + plan.vacationDays + plan.sickDays + plan.otherDays;
@@ -100,11 +108,17 @@ function calculatePlan(plan) {
     monthlyLaborRevenue: monthlyLaborRevenue.map(value => Math.round(value * 100) / 100),
     monthlyMaterialRevenue: monthlyMaterialRevenue.map(value => Math.round(value * 100) / 100),
     monthlyPlanRevenue: monthlyPlanRevenue.map(value => Math.round(value * 100) / 100),
+    monthlyWorkLaborRevenue: monthlyWorkLaborRevenue.map(value => Math.round(value * 100) / 100),
+    monthlyWorkMaterialRevenue: monthlyWorkMaterialRevenue.map(value => Math.round(value * 100) / 100),
+    monthlyWorkPlanRevenue: monthlyWorkPlanRevenue.map(value => Math.round(value * 100) / 100),
     annualGrossHours: sum(monthlyGrossHours),
     annualPlanHours: sum(monthlyPlanHours),
     annualLaborRevenue: sum(monthlyLaborRevenue),
     annualMaterialRevenue: sum(monthlyMaterialRevenue),
     annualPlanRevenue: sum(monthlyPlanRevenue),
+    annualWorkPlanRevenue: sum(monthlyWorkPlanRevenue),
+    revenueCarryIn: Math.round((carryLabor + carryMaterial) * 100) / 100,
+    nextJanuaryPlanRevenue: Math.round(monthlyWorkPlanRevenue[11] * 100) / 100,
     productiveHoursPerFte: Math.round(productiveHoursPerFte * 100) / 100,
     targetProductivityPercent: Math.round(targetProductivityPercent * 100) / 100,
     monthlyProductivityAverage: Math.round(plan.productivityPercent.reduce((sumValue, value) => sumValue + value, 0) / 12 * 100) / 100,
@@ -167,11 +181,25 @@ function registerTowerPlanning(app, { dataDir, requireAdmin, readEmployees }) {
     const store = await readJson(plansFile, { plans: {} });
     const source = requestedPlan || store?.plans?.[String(year)] || {};
     const plan = cleanPlan(source, employees, year);
+    const previousSource = store?.plans?.[String(year - 1)] || null;
+    let revenueCarryIn = null;
+    let revenueCarrySource = "current-december-estimate";
+    if (previousSource) {
+      const previousPlan = cleanPlan(previousSource, employees, year - 1);
+      const previousCalculation = calculatePlan(previousPlan);
+      revenueCarryIn = {
+        labor: previousCalculation.monthlyWorkLaborRevenue[11],
+        material: previousCalculation.monthlyWorkMaterialRevenue[11],
+      };
+      revenueCarrySource = "previous-year-plan";
+    }
     const events = fs.existsSync(eventsFile) ? await readJson(eventsFile, []) : [];
+    const calculation = calculatePlan(plan, revenueCarryIn);
+    calculation.revenueCarrySource = revenueCarrySource;
     return {
       ok: true,
       plan,
-      calculation: calculatePlan(plan),
+      calculation,
       actual: {
         monthlyHours: calculateActualHours(events, year),
         monthlyRevenue: null,

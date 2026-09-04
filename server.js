@@ -68,7 +68,7 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.6";
-const APP_BUILD = "0031.7-tower-revenue-live";
+const APP_BUILD = "0031.8-revenue-one-month-later";
 const APP_STATUS = "Regierechnung: Tage, Räume/Bauteile, Mitarbeiter und Material übernehmen";
 const APP_BUILD_DATE = "2026-09-04";
 

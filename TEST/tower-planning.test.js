@@ -35,9 +35,10 @@ test("Tower-Planung bildet die Werte der Referenzplanung ab", () => {
 
   assert.equal(result.monthlyStaffFactor[0], 8);
   assert.equal(result.monthlyPlanHours[0], 784.16);
-  assert.equal(result.monthlyLaborRevenue[0], 57243.68);
-  assert.equal(result.monthlyMaterialRevenue[0], 10303.86);
-  assert.equal(result.monthlyPlanRevenue[0], 67547.54);
+  assert.equal(result.monthlyLaborRevenue[1], 57243.68);
+  assert.equal(result.monthlyMaterialRevenue[1], 10303.86);
+  assert.equal(result.monthlyPlanRevenue[1], 67547.54);
+  assert.equal(result.monthlyPlanRevenue[0], result.monthlyWorkPlanRevenue[11]);
   assert.equal(result.annualPlanHours, 13628.16);
   assert.equal(result.annualPlanRevenue, 1173929.7);
   assert.equal(result.productiveHoursPerFte, 1703.52);
@@ -53,6 +54,21 @@ test("Mitarbeiter-Prozente werden je Monat getrennt gerechnet", () => {
   assert.equal(result.monthlyStaffFactor[1], 1);
   assert.equal(result.monthlyGrossHours[0], 84.5);
   assert.equal(result.monthlyGrossHours[1], 169);
+});
+
+test("Umsatzplan verschiebt die Arbeitsleistung in den Folgemonat", () => {
+  const employees = [{ id: "1", name: "A", employmentPercent: 100, active: true }];
+  const plan = cleanPlan({
+    billingRate: 100,
+    materialPercent: 0,
+    productivityPercent: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50],
+  }, employees, 2026);
+  const result = calculatePlan(plan, { labor: 1234, material: 0 });
+
+  assert.equal(result.monthlyPlanRevenue[0], 1234);
+  assert.equal(result.monthlyPlanRevenue[1], result.monthlyWorkPlanRevenue[0]);
+  assert.equal(result.monthlyPlanRevenue[2], 0);
+  assert.equal(result.nextJanuaryPlanRevenue, result.monthlyWorkPlanRevenue[11]);
 });
 
 test("Stunden-Ist summiert abgeschlossene KRISZEIT-Arbeitsabschnitte", () => {

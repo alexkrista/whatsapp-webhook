@@ -41,18 +41,23 @@
     return new Intl.NumberFormat("de-AT", { maximumFractionDigits: 1 }).format(num(value)) + " %";
   }
 
-  function calculate(plan) {
+  function calculate(plan, revenueCarryIn = null) {
     const base = num(plan.annualHoursPerFte) / 12;
     const factors = MONTHS.map((_, month) => (plan.employees || []).reduce((sum, row) => sum + num(row.monthlyPercent?.[month]) / 100, 0));
     const gross = factors.map(value => value * base);
     const planHours = gross.map((value, month) => value * num(plan.productivityPercent?.[month]) / 100);
-    const labor = planHours.map(value => value * num(plan.billingRate));
-    const material = labor.map(value => value * num(plan.materialPercent) / 100);
+    const workLabor = planHours.map(value => value * num(plan.billingRate));
+    const workMaterial = workLabor.map(value => value * num(plan.materialPercent) / 100);
+    const workRevenue = workLabor.map((value, month) => value + workMaterial[month]);
+    const carryLabor = revenueCarryIn ? num(revenueCarryIn.labor) : workLabor[11];
+    const carryMaterial = revenueCarryIn ? num(revenueCarryIn.material) : workMaterial[11];
+    const labor = [carryLabor, ...workLabor.slice(0, 11)];
+    const material = [carryMaterial, ...workMaterial.slice(0, 11)];
     const revenue = labor.map((value, month) => value + material[month]);
     const sum = values => values.reduce((total, value) => total + value, 0);
     const productiveFte = Math.max(0, num(plan.annualHoursPerFte) - (num(plan.holidayDays) + num(plan.vacationDays) + num(plan.sickDays) + num(plan.otherDays)) * num(plan.hoursPerDay));
     return {
-      factors, gross, planHours, labor, material, revenue,
+      factors, gross, planHours, labor, material, revenue, workLabor, workMaterial, workRevenue,
       annualGrossHours: sum(gross), annualPlanHours: sum(planHours), annualLaborRevenue: sum(labor), annualMaterialRevenue: sum(material), annualPlanRevenue: sum(revenue),
       productiveHoursPerFte: productiveFte,
       targetProductivityPercent: num(plan.annualHoursPerFte) ? productiveFte / num(plan.annualHoursPerFte) * 100 : 0,
@@ -80,12 +85,19 @@
   function renderTable() {
     if (!data?.plan) return;
     const plan = data.plan;
-    const calc = calculate(plan);
+    const savedCalculation = data.calculation || {};
+    const carry = savedCalculation.revenueCarrySource === "previous-year-plan"
+      ? {
+          labor: num(savedCalculation.monthlyLaborRevenue?.[0]),
+          material: num(savedCalculation.monthlyMaterialRevenue?.[0]),
+        }
+      : null;
+    const calc = calculate(plan, carry);
     const table = document.getElementById("tpTable");
     table.innerHTML = `
       <thead><tr><th>Plan ${plan.year}</th>${MONTHS.map(month => `<th>${month}</th>`).join("")}<th>Jahr</th></tr></thead>
       <tbody>
-        ${outputRow("Umsatz Plan", calc.revenue, calc.annualPlanRevenue, money, "tp-main")}
+        ${outputRow("Umsatz Plan · Verrechnung +1 Monat", calc.revenue, calc.annualPlanRevenue, money, "tp-main")}
         ${outputRow("davon Material", calc.material, calc.annualMaterialRevenue, money)}
         ${outputRow("davon Lohn/Leistung", calc.labor, calc.annualLaborRevenue, money)}
         ${outputRow("Stunden Plan", calc.planHours, calc.annualPlanHours, hours, "tp-main")}
@@ -172,7 +184,7 @@
     dialog.className = "tp-dialog";
     dialog.innerHTML = `<div class="tp-shell">
       <div class="tp-head"><div><h2>Umsatz- und Stundenplanung</h2><p>Hintergrundplanung für die beiden Plan/Ist-Vergleiche im Tower.</p></div><div class="tp-actions"><span id="tpStatus" class="tp-status"></span><select id="tpYear" aria-label="Planungsjahr">${Array.from({ length: 5 }, (_, index) => currentYear - 1 + index).map(year => `<option value="${year}">${year}</option>`).join("")}</select><button id="tpSave" class="tp-save" type="button">Speichern</button><button id="tpClose" type="button">Schließen</button></div></div>
-      <div id="tpBody" class="tp-body"><div id="tpSettings" class="tp-settings"></div><div class="tp-table-wrap"><table id="tpTable" class="tp-table"></table></div><div id="tpSummary" class="tp-summary"></div><div class="tp-note">Stunden-Ist kommt automatisch aus KRISZEIT. Umsatz-Ist wird separat aus den Ausgangsrechnungen angebunden; in dieser Maske werden ausschließlich die Planzahlen gepflegt.</div></div>
+      <div id="tpBody" class="tp-body"><div id="tpSettings" class="tp-settings"></div><div class="tp-table-wrap"><table id="tpTable" class="tp-table"></table></div><div id="tpSummary" class="tp-summary"></div><div class="tp-note">Der Umsatzplan folgt der Arbeitsleistung mit einem Monat Versatz: Jänner-Arbeit wird im Februar als Umsatz geplant. Der Jänner übernimmt den Dezember des Vorjahres; fehlt dieser Plan, wird der aktuelle Dezember als Schätzung verwendet. Stunden-Ist kommt automatisch aus KRISZEIT, Umsatz-Ist aus den Ausgangsrechnungen.</div></div>
     </div>`;
     document.body.appendChild(dialog);
 
