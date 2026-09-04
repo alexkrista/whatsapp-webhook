@@ -66,6 +66,20 @@
     return tokenUrl(`/kristine/api/inbox/${encodeURIComponent(itemId)}/msg-attachment/${encodeURIComponent(index)}${suffix}`);
   }
 
+  function voicemailHtml(item) {
+    const voicemail = item?.voicemail;
+    const subject = String(item?.mail?.subject || item?.analysis?.subject || item?.name || "");
+    const hasAudio = (item?.mail?.attachments || []).some((attachment) => /\.(wav|mp3|m4a|ogg|oga|webm|aac|flac)$/i.test(String(attachment?.name || "")));
+    if (!voicemail && !/voicemail|nfon/i.test(subject) && !hasAudio) return "";
+    const transcript = String(voicemail?.transcript || "").trim();
+    const error = String(voicemail?.error || "").trim();
+    if (transcript) {
+      const caller = [voicemail.callerName, voicemail.callerPhone].filter(Boolean).join(" · ");
+      return `<section id="voicemailPanel" class="voicemail ok"><div class="voicemail-title">🎙️ Voicemail-Transkript${caller ? ` · ${esc(caller)}` : ""}</div><pre>${esc(transcript)}</pre><div class="voicemail-meta">Automatisch transkribiert${voicemail.transcribedAt ? ` · ${esc(mailDateLabel(voicemail.transcribedAt))}` : ""}</div></section>`;
+    }
+    return `<section id="voicemailPanel" class="voicemail error"><div class="voicemail-title">🎙️ Voicemail noch nicht transkribiert</div><div class="voicemail-error">${esc(error || "Die Transkription wurde noch nicht durchgeführt.")}</div><button type="button" id="retryVoicemail">Erneut transkribieren</button><div id="voicemailRetryStatus" class="voicemail-meta"></div></section>`;
+  }
+
   async function openMailPreview(itemId) {
     const preview = window.open("", "_blank");
     if (!preview) {
@@ -95,6 +109,7 @@
       const body = String(mail.body || analysis.excerpt || item.textPreview || analysis.summary || "").trim();
       const bodyHtml = String(mail.bodyHtml || "").trim();
       const innerAttachments = Array.isArray(mail.attachments) ? mail.attachments : [];
+      const voicemailBlock = voicemailHtml(item);
       const attachmentHtml = innerAttachments.length ? `<div class="attachments"><div class="attachments-title">📎 ${innerAttachments.length} Mail-Anlage${innerAttachments.length === 1 ? "" : "n"}</div><div class="attachment-list">${innerAttachments.map((att) => {
         const openHref = mailAttachmentHref(item.id, att.index, false);
         const downloadHref = mailAttachmentHref(item.id, att.index, true);
@@ -111,6 +126,7 @@
 <title>${esc(subject)}</title>
 <style>
 :root{font-family:Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif;color:#222;background:#f3f1ec}*{box-sizing:border-box}body{margin:0;background:#f3f1ec}.top{background:#111;color:#fff;padding:13px 20px;font-weight:800;letter-spacing:.02em}.wrap{max-width:1080px;margin:0 auto;padding:22px}.mail{background:#fff;border-radius:16px;box-shadow:0 2px 18px rgba(0,0,0,.08);overflow:hidden}.head{padding:22px 24px 18px;border-bottom:1px solid #ece9e2}.subject{font-size:23px;font-weight:800;line-height:1.25;margin-bottom:16px}.sender{display:flex;gap:12px;align-items:flex-start}.avatar{width:42px;height:42px;border-radius:50%;background:#27713d;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex:0 0 42px}.from{font-weight:750}.meta{font-size:13px;color:#666;line-height:1.55;margin-top:2px}.meta b{color:#333}.attachments{padding:14px 24px;border-bottom:1px solid #ece9e2;background:#faf9f6}.attachments-title{font-weight:800;font-size:13px;margin-bottom:9px}.attachment-list{display:grid;gap:7px}.attachment{background:#fff;border:1px solid #ddd8cf;border-radius:10px;padding:8px 10px;display:flex;justify-content:space-between;gap:12px;align-items:center}.attachment-copy{min-width:0}.attachment-copy strong{display:block;overflow-wrap:anywhere}.attachment-copy small{display:block;color:#777;margin-top:2px}.attachment-actions{display:flex;gap:6px;flex-wrap:wrap}.attachment-actions a,.footer a{display:inline-flex;text-decoration:none;border:1px solid #cfcac1;background:#fff;color:#222;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:750}.body{padding:24px;min-height:300px}.plain{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.55 Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif;margin:0}.html-frame{border:0;width:100%;min-height:560px;background:#fff}.footer{padding:12px 24px 18px;border-top:1px solid #ece9e2;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.footer .hint{color:#777;font-size:12px;margin-right:auto}@media(max-width:700px){.wrap{padding:10px}.head,.body,.attachments,.footer{padding-left:15px;padding-right:15px}.subject{font-size:19px}.attachment{align-items:flex-start;flex-direction:column}.html-frame{min-height:620px}}
+.voicemail{margin:18px 24px 0;padding:16px 18px;border:1px solid #bdd8c3;border-left:5px solid #27713d;border-radius:12px;background:#f3faf4}.voicemail.error{border-color:#e3c1bd;border-left-color:#a83228;background:#fff7f5}.voicemail-title{font-weight:850;margin-bottom:8px}.voicemail pre{white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.55 Segoe UI,system-ui,-apple-system,Roboto,Arial,sans-serif;margin:0}.voicemail-error{color:#8b1f1f;margin-bottom:10px;white-space:pre-wrap}.voicemail button{border:0;border-radius:8px;padding:9px 13px;background:#27713d;color:#fff;font-weight:800;cursor:pointer}.voicemail button:disabled{opacity:.55;cursor:wait}.voicemail-meta{font-size:12px;color:#687269;margin-top:8px}@media(max-width:700px){.voicemail{margin-left:15px;margin-right:15px}}
 </style>
 </head>
 <body>
@@ -121,11 +137,33 @@
 <div class="sender"><div class="avatar">${esc((senderName || senderEmail || "M").trim().charAt(0).toUpperCase() || "M")}</div><div><div class="from">${esc(sender)}</div><div class="meta">${to ? `<div><b>An:</b> ${esc(to)}</div>` : ""}${cc ? `<div><b>Cc:</b> ${esc(cc)}</div>` : ""}${sentAt ? `<div><b>Gesendet:</b> ${esc(sentAt)}</div>` : ""}</div></div></div>
 </header>
 ${attachmentHtml}
+${voicemailBlock}
 <section class="body">${bodyHtml ? '<iframe id="kristaMailHtml" class="html-frame" sandbox=""></iframe>' : `<pre class="plain">${esc(body || "Kein lesbarer Nachrichtentext vorhanden.")}</pre>`}</section>
 <footer class="footer"><span class="hint">Original bleibt unverändert in KRISTINE gespeichert.</span><a href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/file`)}" download="${esc(item.name || "mail.msg")}">Original .msg speichern</a></footer>
 </article></div>
 </body></html>`);
       preview.document.close();
+
+      const retryButton = preview.document.getElementById("retryVoicemail");
+      if (retryButton) {
+        retryButton.onclick = async () => {
+          const status = preview.document.getElementById("voicemailRetryStatus");
+          retryButton.disabled = true;
+          if (status) status.textContent = "Voicemail wird transkribiert …";
+          try {
+            const response = await fetch(tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/transcribe-voicemail`), { method: "POST" });
+            const text = await response.text();
+            let json = null;
+            try { json = text ? JSON.parse(text) : null; } catch {}
+            if (!response.ok) throw new Error(json?.error || text || response.statusText);
+            const panel = preview.document.getElementById("voicemailPanel");
+            if (panel) panel.outerHTML = voicemailHtml(json.item);
+          } catch (error) {
+            retryButton.disabled = false;
+            if (status) status.textContent = `Fehler: ${String(error?.message || error)}`;
+          }
+        };
+      }
 
       if (bodyHtml) {
         const frame = preview.document.getElementById("kristaMailHtml");

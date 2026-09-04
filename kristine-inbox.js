@@ -4,6 +4,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const { parseMsg, getMsgAttachment, available: msgReaderAvailable } = require("./kristine-msg-reader");
+const { enrichVoicemailItem } = require("./kristine-voicemail-preload");
 
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const OWN_DOMAINS = ["krista.at"];
@@ -377,6 +378,20 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
     if (!item) return res.status(404).json({ ok: false, error: "Eingang nicht gefunden" });
     item = await hydrateMsgItem(item);
     res.json({ ok: true, item });
+  });
+
+  app.post("/kristine/api/inbox/:id/transcribe-voicemail", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const item = await readItem(req.params.id);
+      if (!item) return res.status(404).json({ ok: false, error: "Eingang nicht gefunden" });
+      const updated = await enrichVoicemailItem(item);
+      if (!updated?.voicemail) return res.status(400).json({ ok: false, error: "Diese Mail enthält keine erkannte Voicemail." });
+      res.json({ ok: true, item: updated });
+    } catch (error) {
+      console.error("KRISTINE Voicemail erneut transkribieren:", error);
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
   });
 
   app.post("/kristine/api/inbox/:id/route", async (req, res) => {

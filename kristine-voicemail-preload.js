@@ -251,3 +251,5 @@ if (!express.application[PATCH_FLAG]) {
 }
 
 console.log("KRISTINE Voicemail-Import aktiv");
+
+module.exports = { enrichVoicemailItem };

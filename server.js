@@ -2734,6 +2734,11 @@ app.post("/admin/api/jobs", async (req, res) => {
       addressExtra: String(body.addressExtra || ""),
       contactName: String(body.contactName || ""),
       contactPhone: String(body.contactPhone || ""),
+      contactEmail: String(body.contactEmail || ""),
+      customerMaster: body.customerMaster && typeof body.customerMaster === "object" ? body.customerMaster : null,
+      wwAddressId: String(body.wwAddressId || body.customerMaster?.wwAddressId || ""),
+      wwCustomerNumber: String(body.wwCustomerNumber || body.customerMaster?.wwCustomerNumber || ""),
+      customerMasterStatus: String(body.customerMasterStatus || ""),
       notes: String(body.notes || ""),
       startDate: String(body.startDate || ""),
       createdAt: new Date().toISOString()
