@@ -106,20 +106,20 @@ def _payment_qr_drawing(payload, size):
     return drawing
 
 
-def _draw_krista_wordmark(canvas, page_height):
+def _draw_krista_wordmark(canvas, page_height, target_x=350.0, target_w=198.0, target_y=None):
     """Draw only the KRISTA part of the established invoice logo."""
     logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
     if not logo.exists():
         return
     from reportlab.lib.utils import ImageReader
 
-    target_x, target_w = 350.0, 198.0
     crop_left = 0.58
     image = ImageReader(str(logo))
     image_w, image_h = image.getSize()
     full_w = target_w / (1 - crop_left)
     full_h = full_w * image_h / image_w
-    target_y = page_height - 114.0
+    if target_y is None:
+        target_y = page_height - 114.0
     canvas.saveState()
     clip = canvas.beginPath()
     clip.rect(target_x, target_y, target_w, full_h)
@@ -141,6 +141,7 @@ def render_invoice_pdf(invoice, settings, destination):
         from reportlab.lib.units import mm
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen.canvas import Canvas
         from reportlab.platypus import (
             BaseDocTemplate, Frame, KeepTogether, PageTemplate, Paragraph, Spacer, Table, TableStyle,
         )
@@ -177,28 +178,35 @@ def render_invoice_pdf(invoice, settings, destination):
     document_title = _kind_title(invoice)
     project_number = run.get("project_number") or ""
     worker = invoice.get("worker") or settings.get("default_worker") or ""
+    carry_amount = _d(invoice.get("cumulative_gross"))
 
     def ww_page(canvas, doc):
         canvas.saveState()
-        _draw_krista_wordmark(canvas, height)
+        if doc.page == 1:
+            _draw_krista_wordmark(canvas, height)
 
-        customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
-        recipient = [
-            run.get("customer_company") or "", *customer_names, run.get("customer_street") or "",
-            " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
-            run.get("customer_country") or "",
-        ]
-        canvas.setFillColor(colors.black)
-        canvas.setFont(regular_font, 9.92)
-        y = height - 168
-        for line in (x for x in recipient if x):
-            canvas.drawString(56.6, y, str(line))
-            y -= 11.9
-        canvas.setFont(bold_font, 10.8)
-        if project_number:
-            canvas.drawString(350.0, height - 169, f"Projekt: {project_number}")
-        canvas.setFont(regular_font, 9.96)
-        canvas.drawString(350.0, height - 184, f"Unser Bearbeiter: {worker}")
+            customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
+            recipient = [
+                run.get("customer_company") or "", *customer_names, run.get("customer_street") or "",
+                " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
+                run.get("customer_country") or "",
+            ]
+            canvas.setFillColor(colors.black)
+            canvas.setFont(regular_font, 9.92)
+            y = height - 168
+            for line in (x for x in recipient if x):
+                canvas.drawString(56.6, y, str(line))
+                y -= 11.9
+            canvas.setFont(bold_font, 10.8)
+            if project_number:
+                canvas.drawString(350.0, height - 169, f"Projekt: {project_number}")
+            canvas.setFont(regular_font, 9.96)
+            canvas.drawString(350.0, height - 184, f"Unser Bearbeiter: {worker}")
+        else:
+            _draw_krista_wordmark(
+                canvas, height, target_x=470.0, target_w=78.0,
+                target_y=height - 20 * mm,
+            )
 
         canvas.setFont(regular_font, 7.92)
         bank = (
@@ -217,13 +225,50 @@ def render_invoice_pdf(invoice, settings, destination):
         canvas.drawString(334.1, 22.7, "Feldkircherstraße 45, 6820 Frastanz, FN 77707a, Firmenbuchgericht Feldkirch")
         canvas.restoreState()
 
+    class NumberedInvoiceCanvas(Canvas):
+        """Add total page numbers and a clean carry-forward on continuation pages."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            page_count = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self.saveState()
+                self.setFillColor(colors.black)
+                self.setFont(regular_font, 8.2)
+                self.drawString(left, height - 10 * mm, f"Seite {self._pageNumber}/{page_count}")
+                if self._pageNumber > 1:
+                    self.setFont(bold_font, 9.2)
+                    self.drawString(left, height - 25 * mm, f"Übertrag Rechnungssumme: EUR {money(carry_amount)}")
+                    self.setStrokeColor(colors.HexColor("#9aa397"))
+                    self.setLineWidth(0.5)
+                    self.line(left, height - 28 * mm, width - right, height - 28 * mm)
+                self.restoreState()
+                Canvas.showPage(self)
+            Canvas.save(self)
+
     doc = BaseDocTemplate(
         str(destination), pagesize=A4, leftMargin=left, rightMargin=right,
         topMargin=top, bottomMargin=bottom, title=f"{document_title} {number}",
         author=settings.get("company_name", "KRISTINE"), creator="KRISTINE",
     )
-    frame = Frame(left, bottom, width - left - right, height - top - bottom, id="normal", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-    doc.addPageTemplates(PageTemplate(id="ww", frames=[frame], onPage=ww_page))
+    first_frame = Frame(left, bottom, width - left - right, height - top - bottom, id="first", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    continuation_top = 32 * mm
+    continuation_frame = Frame(
+        left, bottom, width - left - right, height - continuation_top - bottom,
+        id="continuation", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
+    )
+    doc.addPageTemplates([
+        PageTemplate(id="ww-first", frames=[first_frame], onPage=ww_page, autoNextPageTemplate="ww-continuation"),
+        PageTemplate(id="ww-continuation", frames=[continuation_frame], onPage=ww_page),
+    ])
     story = []
     story.append(Table([
         [Paragraph(document_title, title), Paragraph(de_date_long(invoice.get("issue_date")), right_text)],
@@ -546,7 +591,7 @@ def render_invoice_pdf(invoice, settings, destination):
         else:
             story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=NumberedInvoiceCanvas)
     return destination
 
 
