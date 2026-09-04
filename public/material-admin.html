@@ -50,6 +50,9 @@ th{font-size:12px;text-transform:uppercase;color:var(--muted)}
 .request-empty{text-align:center;padding:34px}
 .section-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin:8px 0 12px}
 .section-head h2{margin:0}.count-badge{font-weight:900;color:var(--muted)}
+.ww-results{margin:12px 0 18px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px}
+.ww-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
+.ww-result:last-child{border-bottom:0}.ww-result-title{font-weight:900}.ww-result-meta{color:var(--muted);font-size:13px;margin-top:4px}
 dialog{border:0;border-radius:22px;padding:0;max-width:650px;width:calc(100% - 24px)}
 dialog::backdrop{background:rgba(0,0,0,.4)}
 .form{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -102,10 +105,11 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <select id="group"><option value="">Alle Gruppen</option></select>
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
-      <button class="btn" id="wwSyncButton" onclick="syncWinWorker(this)">WW jetzt einlesen</button>
+      <button class="btn" id="wwSearchButton" onclick="searchWinWorker(this)">In WW suchen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="exportExcel()">Excel exportieren</button>
     </div>
+    <div id="wwResults" class="ww-results hidden"></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>ID</th><th>Lieferant</th><th>Artikel</th><th>Einheit</th><th>EK netto</th><th>VK netto</th><th>VK brutto</th><th>Preisstand</th><th>Aktion</th></tr></thead>
@@ -162,7 +166,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   <label>EK netto €<input id="editEk" inputmode="decimal"></label>
   <label>VK netto €<input id="editVk" inputmode="decimal"></label>
   <div class="wide toolbar">
-    <button type="button" class="btn" onclick="materialDialog.close()">Abbrechen</button>
+    <button type="button" class="btn" onclick="closeMaterialDialog()">Abbrechen</button>
     <button class="btn primary">Speichern</button>
   </div>
 </form>
@@ -184,6 +188,8 @@ const api=(url,opt={})=>fetch(
 let inboxItems=[];
 let materialRequests=[];
 let materialItems=[];
+let wwSearchItems=[];
+let wwPendingMaterial=null;
 let requestFilter="open";
 
 function statusLabel(status){
@@ -314,6 +320,7 @@ function renderWarnings(){
 }
 
 function openMaterial(id=""){
+  wwPendingMaterial=null;
   const item=materialItems.find(m=>String(m.materialId)===String(id))||{};
   materialDialogTitle.textContent=id?"Material bearbeiten":"Neues Material";
   editId.value=id;editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
@@ -323,12 +330,16 @@ function openMaterial(id=""){
   materialDialog.showModal();
 }
 
+function closeMaterialDialog(){wwPendingMaterial=null;materialDialog.close()}
+
 async function saveMaterial(event){
   event.preventDefault();
   const body={product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
-  if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
+  if(wwPendingMaterial){
+    await api("/admin/api/materials/import-winworker",{method:"POST",body:JSON.stringify({material:{...wwPendingMaterial,...body}})});
+  }else if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
   else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify(body)});
-  materialDialog.close();await loadMaterials();
+  wwPendingMaterial=null;materialDialog.close();await loadMaterials();
 }
 
 async function deleteMaterial(id){
@@ -338,23 +349,43 @@ async function deleteMaterial(id){
   await loadMaterials();
 }
 
-async function syncWinWorker(button){
+async function searchWinWorker(button){
+  const query=search.value.trim();
+  if(query.length<2){alert("Bitte mindestens zwei Zeichen eingeben, z. B. A 01.");search.focus();return}
   const original=button.textContent;
-  button.disabled=true;button.textContent="WW wird gelesen …";
+  button.disabled=true;button.textContent="WW sucht …";
+  wwResults.classList.remove("hidden");
+  wwResults.innerHTML='<div class="muted">Suche direkt in WinWorker …</div>';
   try{
-    const url=new URL(WW_BRAIN_URL+"/ww-materials/sync");
-    url.searchParams.set("krista_token",token);
-    const response=await fetch(url,{method:"POST",cache:"no-store"});
+    const url=new URL(WW_BRAIN_URL+"/ww-materials/search");
+    url.searchParams.set("q",query);url.searchParams.set("limit","50");url.searchParams.set("krista_token",token);
+    const response=await fetch(url,{cache:"no-store"});
     const data=await response.json().catch(()=>({error:"Unbekannte Antwort vom WW-Rechner"}));
-    if(!response.ok||data.ok===false)throw new Error(data.error||"WW-Abgleich fehlgeschlagen");
-    const report=data.report||{};
-    alert(`${data.sourceCount||report.rowsRead||0} WW-Artikel gelesen.\n${report.added||0} neu · ${report.changed||0} aktualisiert · ${report.deactivated||0} stillgelegt.`);
-    await loadMaterials();
+    if(!response.ok||data.ok===false)throw new Error(data.error||"WW-Suche fehlgeschlagen");
+    wwSearchItems=Array.isArray(data.materials)?data.materials:[];
+    renderWinWorkerResults(data.count||wwSearchItems.length);
   }catch(error){
-    alert("WW konnte nicht eingelesen werden: "+error.message);
+    wwSearchItems=[];wwResults.innerHTML=`<strong>WW-Suche nicht möglich.</strong><div class="muted">${escapeHtml(error.message)}</div>`;
   }finally{
     button.disabled=false;button.textContent=original;
   }
+}
+
+function renderWinWorkerResults(total){
+  if(!wwSearchItems.length){wwResults.innerHTML='<strong>Kein passender WinWorker-Artikel gefunden.</strong>';return}
+  wwResults.innerHTML=`<div class="section-head"><div><strong>${wwSearchItems.length} Treffer${total>wwSearchItems.length?` von ${total}`:""}</strong><div class="muted">Direkt aus WinWorker – gewünschtes Material einzeln übernehmen.</div></div><button class="btn" onclick="wwResults.classList.add('hidden')">Schließen</button></div>`+
+    wwSearchItems.map((item,index)=>`<div class="ww-result"><div><div class="ww-result-title">${escapeHtml(item.product||"–")}</div><div class="ww-result-meta">Nr. ${escapeHtml(item.sourceId||"–")} · ${escapeHtml(item.supplierArticleNumber||item.orderNumber||"keine Lieferanten-Nr.")} · ${escapeHtml(item.supplier||"kein Lieferant")} · ${escapeHtml(item.unit||"–")} · EK ${money(item.purchasePrice)} · VK ${money(item.salePrice)} · Preisstand ${escapeHtml(item.priceCheckedAt||"–")}</div></div><button class="btn primary" onclick="prepareWinWorkerImport(${index})">Übernehmen</button></div>`).join("");
+}
+
+function prepareWinWorkerImport(index){
+  const item=wwSearchItems[index];if(!item)return;
+  wwPendingMaterial={...item};
+  materialDialogTitle.textContent="WW-Material übernehmen und ergänzen";
+  editId.value="";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
+  editSupplierArticle.value=item.supplierArticleNumber||item.orderNumber||"";editUnit.value=item.unit||"Stk";
+  editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
+  editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
+  materialDialog.showModal();
 }
 
 async function loadInbox(){
@@ -417,6 +448,7 @@ function js(v){return String(v??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
 
 let searchTimer;
 document.getElementById("search").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadMaterials,180)});
+document.getElementById("search").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchWinWorker(wwSearchButton)}});
 document.getElementById("group").addEventListener("change",loadMaterials);
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]);
 </script>

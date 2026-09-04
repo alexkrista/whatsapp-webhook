@@ -633,7 +633,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
   }
 
-  async function syncWinWorkerMaterials(rawRows = []) {
+  async function syncWinWorkerMaterials(rawRows = [], options = {}) {
     if (!Array.isArray(rawRows)) throw new Error("WW-Materialliste fehlt");
     if (!rawRows.length) throw new Error("WW-Materialliste ist leer; Abgleich abgebrochen");
     if (rawRows.length > 50000) throw new Error("WW-Materialliste ist unerwartet groß");
@@ -721,11 +721,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       }
     }
 
-    for (let index = 0; index < merged.length; index += 1) {
-      const item = merged[index];
-      if (String(item.sourceSystem || "").toLowerCase() !== "winworker" || !item.sourceId || seen.has(String(item.sourceId)) || item.active === false) continue;
-      merged[index] = normalizeMaterial({ ...item, active: false, createdAt: item.createdAt });
-      deactivated += 1;
+    if (options.deactivateMissing !== false) {
+      for (let index = 0; index < merged.length; index += 1) {
+        const item = merged[index];
+        if (String(item.sourceSystem || "").toLowerCase() !== "winworker" || !item.sourceId || seen.has(String(item.sourceId)) || item.active === false) continue;
+        merged[index] = normalizeMaterial({ ...item, active: false, createdAt: item.createdAt });
+        deactivated += 1;
+      }
     }
 
     await writeJson(MATERIALS_FILE, merged);
@@ -836,6 +838,16 @@ app.get("/api/regie/materials", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const report = await syncWinWorkerMaterials(req.body?.materials || []);
+      res.json({ ok: true, report });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/admin/api/materials/import-winworker", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const report = await syncWinWorkerMaterials([req.body?.material], { deactivateMissing: false });
       res.json({ ok: true, report });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });

@@ -80,6 +80,21 @@ const { registerMaterialMaster } = require("../material-master");
     assert.equal(wwRows.find(row => row.materialId === "880079").purchasePrice, 15.23);
     assert.equal(wwRows.find(row => row.materialId === "880080").salePrice, 25.974);
     assert(wwRows.find(row => row.materialId === "880079").searchTextCompact.includes("a01"), "A 01 ist auch ohne Leerzeichen suchbar");
+
+    const singleReport = await service.syncWinWorkerMaterials([{
+      sourceId: "880079",
+      product: "3M Abdeckfolie Masking Film AMF48 121",
+      unit: "Stk",
+      purchasePrice: 16,
+      salePrice: 28,
+      supplier: "DRACO HANDELS GMBH",
+      supplierArticleNumber: "D2-AMF48 A 01",
+      priceCheckedAt: "2026-09-04",
+    }], { deactivateMissing: false });
+    assert.equal(singleReport.changed, 1);
+    const afterSingleImport = await service.readMaterials();
+    assert.equal(afterSingleImport.find(row => row.materialId === "880079").purchasePrice, 16);
+    assert.notEqual(afterSingleImport.find(row => row.materialId === "880080").active, false, "Einzelübernahme legt andere WW-Artikel nicht still");
     console.log("OK: Materialpflege importiert B/N/L sicher, bewahrt Stammdaten und exportiert nur aktive Artikel.");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

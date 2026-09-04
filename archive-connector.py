@@ -68,7 +68,7 @@ def protect_remote_archive_access():
     # krista_token an den Brain-Rechner weitergegeben.
     supplied_query_token = str(request.args.get("krista_token") or "")
     if (
-        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync"}
+        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}
         and KRISTINE_ADMIN_TOKEN
         and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
     ):
@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync"}:
+    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -7601,7 +7601,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.13.5",
+        "version": "0.13.6",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -7724,6 +7724,12 @@ def ww_materials_preview():
         return jsonify({"ok": True, "count": len(materials), "materials": materials[:limit]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/ww-materials/search")
+def ww_materials_search():
+    """Geschützte WinWorker-Materialsuche für KRISADMIN."""
+    return ww_materials_preview()
 
 
 @app.get("/schema-index/status")
