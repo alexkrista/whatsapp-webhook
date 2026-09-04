@@ -78,6 +78,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   <div class="tabs">
     <button class="btn active" id="tabRequests" onclick="showTab('requests')">Materialbedarf</button>
     <button class="btn" id="tabMaterials" onclick="showTab('materials')">Materialstamm</button>
+    <button class="btn" id="tabWarnings" onclick="showTab('warnings')">Preiswarnungen</button>
     <button class="btn" id="tabInbox" onclick="showTab('inbox')">Neu gelernt / offen</button>
   </div>
 
@@ -97,18 +98,27 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
   <section id="materials" class="hidden">
     <div class="toolbar">
-      <input id="search" placeholder="Material, Farbnummer 154, Produkt …">
+      <input id="search" placeholder="Artikel, A01, Lieferant oder Lieferanten-Nr. …">
       <select id="group"><option value="">Alle Gruppen</option></select>
       <button class="btn" onclick="loadMaterials()">Suchen</button>
+      <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="exportExcel()">Excel exportieren</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Gruppe</th><th>Material</th><th>Farbton</th><th>EK / VK</th><th>Preisstand</th><th>Aktion</th></tr></thead>
+        <thead><tr><th>ID</th><th>Lieferant</th><th>Artikel</th><th>Einheit</th><th>EK netto</th><th>VK netto</th><th>VK brutto</th><th>Preisstand</th><th>Aktion</th></tr></thead>
         <tbody id="materialRows"></tbody>
       </table>
     </div>
+  </section>
+
+  <section id="warnings" class="hidden">
+    <div class="section-head">
+      <div><h2>Preiswarnungen</h2><div class="muted">Fehlender Preisstand oder länger als ein Jahr nicht geprüft.</div></div>
+      <div class="count-badge" id="warningCount">0 Einträge</div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>ID</th><th>Artikel</th><th>Lieferant</th><th>EK / VK</th><th>Preisstand</th><th>Warnung</th><th>Aktion</th></tr></thead><tbody id="warningRows"></tbody></table></div>
   </section>
 
   <section id="inbox" class="hidden">
@@ -139,6 +149,25 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 </form>
 </dialog>
 
+<dialog id="materialDialog">
+<form class="form" method="dialog" onsubmit="saveMaterial(event)">
+  <h2 id="materialDialogTitle">Material bearbeiten</h2>
+  <input type="hidden" id="editId">
+  <label class="wide">Artikel *<input id="editProduct" required></label>
+  <label>Lieferant<input id="editSupplier" list="supplierList"></label>
+  <label>Lieferanten-Artikelnummer<input id="editSupplierArticle"></label>
+  <label>Einheit<input id="editUnit" placeholder="z. B. Stk, kg, Rolle"></label>
+  <label>Preisstand<input id="editPriceDate" type="date"></label>
+  <label>EK netto €<input id="editEk" inputmode="decimal"></label>
+  <label>VK netto €<input id="editVk" inputmode="decimal"></label>
+  <div class="wide toolbar">
+    <button type="button" class="btn" onclick="materialDialog.close()">Abbrechen</button>
+    <button class="btn primary">Speichern</button>
+  </div>
+</form>
+</dialog>
+<datalist id="supplierList"></datalist>
+
 <script>
 const token=new URLSearchParams(location.search).get("token")||"";
 const api=(url,opt={})=>fetch(
@@ -152,6 +181,7 @@ const api=(url,opt={})=>fetch(
 
 let inboxItems=[];
 let materialRequests=[];
+let materialItems=[];
 let requestFilter="open";
 
 function statusLabel(status){
@@ -242,24 +272,68 @@ async function loadMaterials(){
   const groupValue=document.getElementById("group").value;
   const data=await api(`/admin/api/materials?q=${encodeURIComponent(q)}&group=${encodeURIComponent(groupValue)}&limit=2000`);
   const s=data.summary;
+  materialItems=data.materials||[];
+  supplierList.innerHTML=[...new Set(materialItems.map(item=>String(item.supplier||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"de")).map(value=>`<option value="${escapeHtml(value)}"></option>`).join("");
   count.textContent=s.activeCount;
   stale.textContent=s.stalePriceCount;
   inboxCount.textContent=s.inboxOpenCount;
-  groups.textContent=Object.keys(s.byGroup||{}).length;
   dataStatus.textContent=`Datenstand ${s.dataStatus||"noch offen"}`;
   const select=document.getElementById("group");
   const current=select.value;
   select.innerHTML='<option value="">Alle Gruppen</option>'+Object.keys(s.byGroup||{}).sort().map(g=>`<option>${escapeHtml(g)}</option>`).join("");
   select.value=current;
-  materialRows.innerHTML=data.materials.map(m=>`<tr>
+  renderMaterials();
+  renderWarnings();
+}
+
+function renderMaterials(){
+  materialRows.innerHTML=materialItems.map(m=>`<tr>
     <td><strong>${escapeHtml(m.materialId)}</strong></td>
-    <td>${escapeHtml(m.group)}<br><span class="muted">${escapeHtml(m.subgroup)}</span></td>
-    <td><strong>${escapeHtml([m.manufacturer,m.product].filter(Boolean).join(" · "))}</strong><br><span class="muted">${escapeHtml(m.unit||"")}</span></td>
-    <td>${m.colorNumber?`<strong>${escapeHtml(m.colorNumber)}</strong> · `:""}${escapeHtml(m.colorName||"")}</td>
-    <td>${money(m.purchasePrice)} / ${money(m.salePrice)}<br><span class="muted">Ertrag ${money(m.materialYield)}</span></td>
+    <td>${escapeHtml(m.supplier||"–")}<br><span class="muted">${escapeHtml(m.supplierArticleNumber||"")}</span></td>
+    <td><strong>${escapeHtml(m.product||"–")}</strong></td>
+    <td>${escapeHtml(m.unit||"–")}</td>
+    <td>${money(m.purchasePrice)}</td>
+    <td>${money(m.salePrice)}</td>
+    <td>${money(Number(m.salePrice||0)*1.2)}</td>
     <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span></td>
-    <td>${m.priceStale?`<button class="btn" onclick="checkPrice('${js(m.materialId)}')">Preis geprüft</button>`:"✓"}</td>
+    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
   </tr>`).join("");
+}
+
+function renderWarnings(){
+  const rows=materialItems.filter(m=>m.priceStale);
+  warningCount.textContent=`${rows.length} ${rows.length===1?"Eintrag":"Einträge"}`;
+  warningRows.innerHTML=rows.length?rows.map(m=>`<tr>
+    <td><strong>${escapeHtml(m.materialId)}</strong></td><td>${escapeHtml(m.product||"–")}</td><td>${escapeHtml(m.supplier||"–")}</td>
+    <td>${money(m.purchasePrice)} / ${money(m.salePrice)}</td><td>${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"fehlt")}</td>
+    <td><span class="pill ${m.priceStaleLevel==="red"?"red":"yellow"}">${m.priceAgeDays==null?"Kein Preisstand":`${m.priceAgeDays} Tage alt`}</span></td>
+    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Preis pflegen</button></td>
+  </tr>`).join(""):'<tr><td colspan="7">Alle Preise sind aktuell.</td></tr>';
+}
+
+function openMaterial(id=""){
+  const item=materialItems.find(m=>String(m.materialId)===String(id))||{};
+  materialDialogTitle.textContent=id?"Material bearbeiten":"Neues Material";
+  editId.value=id;editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
+  editSupplierArticle.value=item.supplierArticleNumber||"";editUnit.value=item.unit||"Stk";
+  editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
+  editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
+  materialDialog.showModal();
+}
+
+async function saveMaterial(event){
+  event.preventDefault();
+  const body={product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
+  if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
+  else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify(body)});
+  materialDialog.close();await loadMaterials();
+}
+
+async function deleteMaterial(id){
+  const item=materialItems.find(m=>String(m.materialId)===String(id));
+  if(!confirm(`Material „${item?.product||id}“ wirklich stilllegen?\n\nEs verschwindet aus Suche und nächstem Excel-Export. Alte Belege bleiben unverändert.`))return;
+  await api(`/admin/api/materials/${encodeURIComponent(id)}`,{method:"PUT",body:JSON.stringify({active:false})});
+  await loadMaterials();
 }
 
 async function loadInbox(){
@@ -300,16 +374,18 @@ async function importExcel(file){
   if(!file)return;
   const base64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(",")[1]);r.onerror=reject;r.readAsDataURL(file)});
   const data=await api("/admin/api/materials/import-excel",{method:"POST",body:JSON.stringify({filename:file.name,base64})});
-  const r=data.report;alert(`Import fertig\nNeu: ${r.added}\nGeändert: ${r.changed}\nUnverändert: ${r.unchanged}\nDubletten: ${r.duplicateCount}`);
+  const r=data.report;alert(`Import fertig\nNeu: ${r.added}\nGeändert: ${r.changed}\nStillgelegt: ${r.deactivated||0}\nUnverändert: ${r.unchanged}\nDubletten: ${r.duplicateCount}`);
   loadMaterials();
 }
 function exportExcel(){location.href="/admin/api/materials/export-excel?token="+encodeURIComponent(token)}
 function showTab(name){
   requests.classList.toggle("hidden",name!=="requests");
   materials.classList.toggle("hidden",name!=="materials");
+  document.getElementById("warnings").classList.toggle("hidden",name!=="warnings");
   inbox.classList.toggle("hidden",name!=="inbox");
   tabRequests.classList.toggle("active",name==="requests");
   tabMaterials.classList.toggle("active",name==="materials");
+  tabWarnings.classList.toggle("active",name==="warnings");
   tabInbox.classList.toggle("active",name==="inbox");
   if(name==="requests")loadRequests();
   if(name==="inbox")loadInbox();
@@ -318,6 +394,9 @@ function money(v){return Number(v||0).toLocaleString("de-DE",{style:"currency",c
 function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function js(v){return String(v??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
 
+let searchTimer;
+document.getElementById("search").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadMaterials,180)});
+document.getElementById("group").addEventListener("change",loadMaterials);
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]);
 </script>
 </body>

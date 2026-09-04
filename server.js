@@ -68,9 +68,9 @@ app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.5.6";
-const APP_BUILD = "0030.6-regie-invoice-days";
+const APP_BUILD = "0031.2-material-master";
 const APP_STATUS = "Regierechnung: Tage, Räume/Bauteile, Mitarbeiter und Material übernehmen";
-const APP_BUILD_DATE = "2026-09-03";
+const APP_BUILD_DATE = "2026-09-04";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));

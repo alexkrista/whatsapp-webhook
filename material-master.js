@@ -152,12 +152,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
   }
 
   const headerAliases = {
+    importAction: ["status b n l", "status", "aktion", "b n l"],
     materialId: ["material id", "artikelnummer", "artikel nr", "kurzel", "kürzel", "code"],
     group: ["gruppe", "materialgruppe"],
     subgroup: ["untergruppe", "materialuntergruppe"],
     manufacturer: ["hersteller", "hersteller handler", "hersteller händler", "marke"],
     articleNumber: ["artikel nummer", "artikelnummer", "artikel nr"],
-    product: ["produkt", "produktname", "material"],
+    product: ["produkt", "produktname", "material", "artikel", "artikelbezeichnung"],
     productLine: ["produktlinie", "linie", "variante basis", "variante"],
     colorNumber: ["farbnummer", "farb nr", "farbtonnummer", "nummer"],
     colorName: ["farbname", "farbton", "farbbezeichnung"],
@@ -168,7 +169,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     overhead: ["gemeinkosten"],
     salePrice: ["vk", "vk netto", "vk netto netto", "verkaufspreis", "verkaufspreis netto"],
     priceValidFrom: ["preis gultig ab", "preisstand", "datenstand", "preisdatum"],
-    priceCheckedAt: ["zuletzt gepruft", "preis gepruft am", "gepruft am"],
+    priceCheckedAt: ["zuletzt gepruft", "preis gepruft am", "gepruft am", "preisstand"],
     stock: ["lagerbestand", "aktueller bestand", "bestand"],
     minimumStock: ["mindestbestand", "minimum"],
     storageLocation: ["lagerplatz", "lagerort"],
@@ -196,6 +197,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (aliases.includes(key)) return value;
     }
     return "";
+  }
+
+  function hasField(row, field) {
+    const aliases = headerAliases[field] || [];
+    return Object.keys(row || {}).some(rawKey => aliases.includes(normalizeHeader(rawKey)));
   }
 
   function inferLocationMode({ group, subgroup, product, roomRequired, componentRequired, areaRequired }) {
@@ -298,6 +304,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       normalized.productLine,
       normalized.colorNumber,
       normalized.colorName,
+      normalized.supplier,
       normalized.supplierArticleNumber,
       normalized.manufacturerArticleNumber,
       normalized.articleNumber,
@@ -308,7 +315,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
   }
 
   function rowToMaterial(row, context) {
-    return normalizeMaterial({
+    const raw = {
       materialId: findValue(row, "materialId"),
       group: findValue(row, "group") || context.sheetName,
       subgroup: findValue(row, "subgroup"),
@@ -345,7 +352,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       active: findValue(row, "active"),
       note: findValue(row, "note"),
       sourceSheet: context.sheetName,
-    }, context);
+    };
+    const material = normalizeMaterial(raw, context);
+    material.importAction = clean(findValue(row, "importAction"), 1).toUpperCase();
+    material._importFields = Object.keys(raw).filter(field => field !== "sourceSheet" && hasField(row, field));
+    return material;
   }
 
   function hasUsableContent(material) {
@@ -418,7 +429,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const incoming = [];
     const skippedSheets = [];
     for (const sheetName of workbook.SheetNames) {
-      if (/hinweis|legende|kategorie|einstellung/i.test(sheetName)) {
+      if (/hinweis|warn|legende|kategorie|einstellung/i.test(sheetName)) {
         skippedSheets.push(sheetName);
         continue;
       }
@@ -445,6 +456,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     let added = 0;
     let changed = 0;
     let unchanged = 0;
+    let deactivated = 0;
     const duplicates = [];
     const seenIncoming = new Set();
     const merged = [...current];
@@ -467,9 +479,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         currentByKey.get(materialKey(material));
 
       if (!existing) {
-        merged.push(material);
-        currentById.set(material.materialId, material);
-        currentByKey.set(materialKey(material), material);
+        if (material.importAction === "L") continue;
+        const created = normalizeMaterial({ ...material, active: true }, { sheetName: material.sourceSheet, importedAt });
+        delete created.importAction;
+        delete created._importFields;
+        merged.push(created);
+        currentById.set(created.materialId, created);
+        currentByKey.set(materialKey(created), created);
         added += 1;
         continue;
       }
@@ -477,9 +493,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const index = merged.findIndex(item =>
         String(item.materialId || item.id) === String(existing.materialId || existing.id)
       );
+      const importedFields = new Set(material._importFields || []);
+      const importedValues = {};
+      for (const field of importedFields) importedValues[field] = material[field];
+      if (["B", "N", "L"].includes(material.importAction)) importedValues.active = material.importAction !== "L";
       const updated = normalizeMaterial({
         ...existing,
-        ...material,
+        ...importedValues,
         materialId: existing.materialId || material.materialId,
         id: existing.materialId || material.materialId,
         createdAt: existing.createdAt || material.createdAt,
@@ -505,6 +525,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         unchanged += 1;
       } else {
         merged[index] = updated;
+        if (existing.active !== false && updated.active === false) deactivated += 1;
         changed += 1;
       }
     }
@@ -523,6 +544,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       changed,
       unchanged,
       duplicateCount: duplicates.length,
+      deactivated,
       duplicates: duplicates.slice(0, 100),
       materialCountAfterImport: merged.length,
     };
@@ -537,75 +559,53 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       throw new Error('Excel-Export benötigt das Paket "xlsx". Bitte einmal "npm install xlsx" ausführen.');
     }
 
-    const materials = await readJson(MATERIALS_FILE, []);
-    const grouped = new Map();
-    for (const material of materials) {
-      const sheet = clean(material.sourceSheet || material.group || "Sonstiges", 31) || "Sonstiges";
-      if (!grouped.has(sheet)) grouped.set(sheet, []);
-      grouped.get(sheet).push(material);
-    }
+    const allMaterials = await readJson(MATERIALS_FILE, []);
+    const materials = allMaterials.filter(material => material.active !== false);
 
     const workbook = XLSX.utils.book_new();
     const headers = [
-      "Material-ID", "Gruppe", "Untergruppe", "Hersteller", "Produkt", "Produktlinie",
-      "Farbnummer", "Farbname", "Gebinde", "Einheit", "EK (€)", "VK (€)",
-      "Preis gültig ab", "Zuletzt geprüft", "Lagerbestand", "Mindestbestand",
-      "Lagerplatz", "Lieferant", "Lieferanten-Artikelnummer", "Hersteller-Artikelnummer",
-      "Regieartikel (Ja/Nein)", "Gestaltungsauftrag (Ja/Nein)", "Ort-Abfrage",
-      "Raum erforderlich (Ja/Nein)", "Bauteil erforderlich (Ja/Nein)",
-      "Bereich erforderlich (Ja/Nein)", "Foto Pflicht (Ja/Nein)", "Aktiv", "Bemerkung",
+      "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
+      "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Preisstand",
     ];
+    const data = materials
+      .sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""), "de") || String(a.product || "").localeCompare(String(b.product || ""), "de"))
+      .map(item => ({
+        "Status B/N/L": "B",
+        "Material-ID": item.materialId,
+        "Lieferant": item.supplier,
+        "Lieferanten-Artikelnummer": item.supplierArticleNumber,
+        "Artikel": item.product,
+        "Einheit": item.unit,
+        "EK netto (€)": item.purchasePrice || "",
+        "VK netto (€)": item.salePrice || "",
+        "VK brutto (€)": item.salePrice ? Math.round(item.salePrice * 120) / 100 : "",
+        "Preisstand": item.priceCheckedAt || item.priceValidFrom,
+      }));
+    for (let i = 0; i < 30; i += 1) data.push({ "Status B/N/L": "N" });
+    const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
+    worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+    worksheet["!autofilter"] = { ref: worksheet["!ref"] };
+    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 15].map(wch => ({ wch }));
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Materialpreisliste");
 
-    for (const [sheetName, rows] of grouped) {
-      const data = rows
-        .sort((a, b) =>
-          String(a.subgroup).localeCompare(String(b.subgroup), "de") ||
-          String(a.product).localeCompare(String(b.product), "de") ||
-          String(a.colorNumber).localeCompare(String(b.colorNumber), "de")
-        )
-        .map(item => ({
-          "Material-ID": item.materialId,
-          "Gruppe": item.group,
-          "Untergruppe": item.subgroup,
-          "Hersteller": item.manufacturer,
-          "Produkt": item.product,
-          "Produktlinie": item.productLine,
-          "Farbnummer": item.colorNumber,
-          "Farbname": item.colorName,
-          "Gebinde": item.containerSize || "",
-          "Einheit": item.unit,
-          "EK (€)": item.purchasePrice || "",
-          "VK (€)": item.salePrice || "",
-          "Preis gültig ab": item.priceValidFrom,
-          "Zuletzt geprüft": item.priceCheckedAt,
-          "Lagerbestand": item.stock || "",
-          "Mindestbestand": item.minimumStock || "",
-          "Lagerplatz": item.storageLocation,
-          "Lieferant": item.supplier,
-          "Lieferanten-Artikelnummer": item.supplierArticleNumber,
-          "Hersteller-Artikelnummer": item.manufacturerArticleNumber,
-          "Regieartikel (Ja/Nein)": item.regieItem ? "Ja" : "Nein",
-          "Gestaltungsauftrag (Ja/Nein)": item.designRelevant ? "Ja" : "Nein",
-          "Ort-Abfrage": item.locationMode,
-          "Raum erforderlich (Ja/Nein)": item.roomRequired ? "Ja" : "Nein",
-          "Bauteil erforderlich (Ja/Nein)": item.componentRequired ? "Ja" : "Nein",
-          "Bereich erforderlich (Ja/Nein)": item.areaRequired ? "Ja" : "Nein",
-          "Foto Pflicht (Ja/Nein)": item.photoRequired ? "Ja" : "Nein",
-          "Aktiv": item.active !== false ? "Ja" : "Nein",
-          "Bemerkung": item.note,
-        }));
-
-      const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
-      worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-      worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
-    }
+    const warningRows = materials.map(decorate).filter(item => item.priceStale).map(item => ({
+      "Material-ID": item.materialId,
+      "Artikel": item.product,
+      "Lieferant": item.supplier,
+      "Preisstand": item.priceCheckedAt || item.priceValidFrom || "fehlt",
+      "Warnung": item.priceAgeDays === null ? "Kein Preisstand" : `Preis ${item.priceAgeDays} Tage alt`,
+    }));
+    const warningSheet = XLSX.utils.json_to_sheet(warningRows.length ? warningRows : [{ Warnung: "Keine Preiswarnungen" }]);
+    warningSheet["!autofilter"] = { ref: warningSheet["!ref"] };
+    warningSheet["!cols"] = [22, 42, 22, 15, 24].map(wch => ({ wch }));
+    XLSX.utils.book_append_sheet(workbook, warningSheet, "Warnliste");
 
     const info = [
       ["KRISTINE Materialdatenbank"],
       ["Exportiert am", new Date().toISOString()],
-      ["Materialien", materials.length],
-      ["Hinweis", "Material-ID nie ändern. Diese ID verbindet Excel und KRISTINE."],
+      ["Aktive Materialien", materials.length],
+      ["Hinweis", "B = Bestand, N = neu, L = stilllegen. Material-ID bestehender Artikel nie ändern."],
+      ["Preise", "Preise in bereits gespeicherten Dokumenten bleiben unverändert; der Stamm wird nur beim Einfügen kopiert."],
     ];
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(info), "Hinweise");
 
@@ -640,7 +640,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (group) rows = rows.filter(item => item.group === group);
       if (subgroup) rows = rows.filter(item => item.subgroup === subgroup);
       if (query) {
-        rows = rows.filter(item => String(item.searchText || "").includes(query));
+        rows = rows.filter(item => [item.searchText, item.materialId, item.product, item.supplier, item.supplierArticleNumber]
+          .join(" ").toLowerCase().includes(query));
       }
       if (mode === "project") rows = rows.filter(item => item.designRelevant === true);
       // Regie zeigt bewusst den gesamten aktiven Materialstamm.
@@ -676,27 +677,6 @@ app.get("/api/regie/materials", async (req, res) => {
     });
   }
 });
-  // ---------- KRISTINE Regie: Materialstamm nur lesend ----------
-app.get("/api/regie/materials", async (req, res) => {
-  try {
-    const materials = await readJson(MATERIALS_FILE, []);
-
-    let rows = materials.filter((item) => item.active !== false);
-
-    rows = rows.map(decorate);
-
-    res.json({
-      ok: true,
-      materials: rows.slice(0, 5000),
-    });
-  } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: String(error?.message || error),
-    });
-  }
-});
-
   app.get("/admin/api/materials/:materialId", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const rows = await readJson(MATERIALS_FILE, []);
@@ -725,7 +705,9 @@ app.get("/api/regie/materials", async (req, res) => {
         markup: req.body?.markup,
         salePrice: req.body?.salePrice,
         supplier: req.body?.supplier,
-        priceCheckedAt: new Date().toISOString().slice(0, 10),
+        supplierArticleNumber: req.body?.supplierArticleNumber,
+        priceValidFrom: req.body?.priceValidFrom,
+        priceCheckedAt: req.body?.priceCheckedAt || new Date().toISOString().slice(0, 10),
         active: true,
         regieItem: true,
         note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
@@ -983,7 +965,8 @@ app.get("/api/regie/materials", async (req, res) => {
       const rows = materials
         .filter(item => item.active !== false)
         .filter(item => !group || item.group === group)
-        .filter(item => !query || String(item.searchText || "").includes(query))
+        .filter(item => !query || [item.searchText, item.materialId, item.product, item.supplier, item.supplierArticleNumber]
+          .join(" ").toLowerCase().includes(query))
         .map(decorate)
         .sort((a, b) => {
           const aExactColor = query && String(a.colorNumber).toLowerCase() === query ? 1 : 0;
