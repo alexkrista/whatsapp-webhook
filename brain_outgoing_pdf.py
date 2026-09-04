@@ -493,21 +493,24 @@ def render_invoice_pdf(invoice, settings, destination):
             qr_payload = _epc_payment_payload(invoice, settings, qr_amount)
             if not qr_payload:
                 continue
+            qr_copy = [
+                Paragraph(qr_title, heading),
+                Paragraph(f"Zahlbetrag<br/><b>EUR {money(qr_amount)}</b>", base),
+                Paragraph(f"{qr_deadline}<br/>Rechnung {number}", small),
+            ]
             card = Table([
-                [_payment_qr_drawing(qr_payload, 34 * mm)],
-                [Paragraph(qr_title, heading)],
-                [Paragraph(f"Zahlbetrag EUR {money(qr_amount)}", base)],
-                [Paragraph(f"{qr_deadline}<br/>Verwendungszweck: Rechnung {number}", small)],
-            ], colWidths=[82.5 * mm], hAlign="CENTER")
+                [_payment_qr_drawing(qr_payload, 28 * mm), qr_copy],
+            ], colWidths=[31 * mm, 51.5 * mm], hAlign="CENTER")
             card.setStyle(TableStyle([
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("ALIGN", (1, 0), (1, 0), "LEFT"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ("TOPPADDING", (0, 0), (-1, 0), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
-                ("TOPPADDING", (0, 1), (-1, -1), 1),
-                ("BOTTOMPADDING", (0, 1), (-1, -1), 1),
+                ("LEFTPADDING", (0, 0), (0, 0), 2),
+                ("RIGHTPADDING", (0, 0), (0, 0), 3),
+                ("LEFTPADDING", (1, 0), (1, 0), 3),
+                ("RIGHTPADDING", (1, 0), (1, 0), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]))
             payment_cards.append(card)
         if payment_cards:
