@@ -51,6 +51,11 @@ th{font-size:12px;text-transform:uppercase;color:var(--muted)}
 .section-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin:8px 0 12px}
 .section-head h2{margin:0}.count-badge{font-weight:900;color:var(--muted)}
 .ww-results{margin:12px 0 18px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px}
+.ww-supplier{border:1px solid var(--line);border-radius:15px;margin-top:10px;overflow:hidden;background:#fff}
+.ww-supplier summary{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;font-weight:900;background:var(--green-soft);list-style:none}
+.ww-supplier summary::-webkit-details-marker{display:none}.ww-supplier summary::after{content:'▸';margin-left:auto}.ww-supplier[open] summary::after{content:'▾'}
+.ww-supplier-count{color:var(--green);font-size:13px;white-space:nowrap;margin-left:auto}
+.ww-supplier-body{padding:0 12px}
 .ww-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
 .ww-result:last-child{border-bottom:0}.ww-result-title{font-weight:900}.ww-result-meta{color:var(--muted);font-size:13px;margin-top:4px}
 dialog{border:0;border-radius:22px;padding:0;max-width:650px;width:calc(100% - 24px)}
@@ -358,7 +363,7 @@ async function searchWinWorker(button){
   wwResults.innerHTML='<div class="muted">Suche direkt in WinWorker …</div>';
   try{
     const url=new URL(WW_BRAIN_URL+"/ww-materials/search");
-    url.searchParams.set("q",query);url.searchParams.set("limit","50");url.searchParams.set("krista_token",token);
+    url.searchParams.set("q",query);url.searchParams.set("limit","200");url.searchParams.set("krista_token",token);
     const response=await fetch(url,{cache:"no-store"});
     const data=await response.json().catch(()=>({error:"Unbekannte Antwort vom WW-Rechner"}));
     if(!response.ok||data.ok===false)throw new Error(data.error||"WW-Suche fehlgeschlagen");
@@ -373,8 +378,15 @@ async function searchWinWorker(button){
 
 function renderWinWorkerResults(total){
   if(!wwSearchItems.length){wwResults.innerHTML='<strong>Kein passender WinWorker-Artikel gefunden.</strong>';return}
+  const groups=new Map();
+  wwSearchItems.forEach((item,index)=>{
+    const supplier=String(item.supplier||"Ohne Lieferant").trim()||"Ohne Lieferant";
+    if(!groups.has(supplier))groups.set(supplier,[]);
+    groups.get(supplier).push({item,index});
+  });
+  const supplierGroups=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],"de"));
   wwResults.innerHTML=`<div class="section-head"><div><strong>${wwSearchItems.length} Treffer${total>wwSearchItems.length?` von ${total}`:""}</strong><div class="muted">Direkt aus WinWorker – gewünschtes Material einzeln übernehmen.</div></div><button class="btn" onclick="wwResults.classList.add('hidden')">Schließen</button></div>`+
-    wwSearchItems.map((item,index)=>`<div class="ww-result"><div><div class="ww-result-title">${escapeHtml(item.product||"–")}</div><div class="ww-result-meta">Nr. ${escapeHtml(item.sourceId||"–")} · ${escapeHtml(item.supplierArticleNumber||item.orderNumber||"keine Lieferanten-Nr.")} · ${escapeHtml(item.supplier||"kein Lieferant")} · ${escapeHtml(item.unit||"–")} · EK ${money(item.purchasePrice)} · VK ${money(item.salePrice)} · Preisstand ${escapeHtml(item.priceCheckedAt||"–")}</div></div><button class="btn primary" onclick="prepareWinWorkerImport(${index})">Übernehmen</button></div>`).join("");
+    supplierGroups.map(([supplier,rows])=>`<details class="ww-supplier"><summary><span>${escapeHtml(supplier)}</span><span class="ww-supplier-count">${rows.length} Treffer</span></summary><div class="ww-supplier-body">${rows.map(({item,index})=>`<div class="ww-result"><div><div class="ww-result-title">${escapeHtml(item.product||"–")}</div><div class="ww-result-meta">Nr. ${escapeHtml(item.sourceId||"–")} · ${escapeHtml(item.supplierArticleNumber||item.orderNumber||"keine Lieferanten-Nr.")} · ${escapeHtml(item.unit||"–")} · EK ${money(item.purchasePrice)} · VK ${money(item.salePrice)} · Preisstand ${escapeHtml(item.priceCheckedAt||"–")}</div></div><button class="btn primary" onclick="prepareWinWorkerImport(${index})">Übernehmen</button></div>`).join("")}</div></details>`).join("");
 }
 
 function prepareWinWorkerImport(index){
