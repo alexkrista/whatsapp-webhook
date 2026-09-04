@@ -502,6 +502,42 @@ class OutgoingStore:
             con.commit()
         return self.run(run_id)
 
+    def update_run_recipient(self, run_id, data):
+        """Correct the invoice recipient without changing project master data."""
+        run_id = int(run_id)
+        customer_name = str(data.get("customerName") or "").strip()
+        customer_company = str(data.get("company") or "").strip()
+        if not customer_name and not customer_company:
+            raise ValueError("Rechnungsempfänger fehlt.")
+        street = str(data.get("street") or "").strip()
+        postal = str(data.get("postalCode") or "").strip()
+        city = str(data.get("city") or "").strip()
+        if not street or not postal or not city:
+            raise ValueError("Vollständige Rechnungsadresse fehlt.")
+        with _LOCK, self.connect() as con:
+            current = con.execute("SELECT * FROM outgoing_runs WHERE id=?", (run_id,)).fetchone()
+            if not current:
+                raise ValueError("Rechnungslauf nicht gefunden.")
+            label = str(data.get("label") or current["label"] or "").strip()
+            if not label:
+                raise ValueError("Bezeichnung des Rechnungslaufs fehlt.")
+            con.execute("""
+                UPDATE outgoing_runs SET
+                    label=?,customer_name=?,customer_company=?,customer_street=?,
+                    customer_postal_code=?,customer_city=?,customer_country=?,customer_uid=?
+                WHERE id=?
+            """, (
+                label, customer_name, customer_company, street, postal, city,
+                str(data.get("country") or current["customer_country"] or "Österreich").strip(),
+                str(data.get("customerUid") or "").strip().upper(), run_id,
+            ))
+            self._audit(con, "run", run_id, "update_recipient", {
+                "label": label, "company": customer_company, "customerName": customer_name,
+                "street": street, "postalCode": postal, "city": city,
+            })
+            con.commit()
+        return self.run(run_id)
+
     def update_run_pricing(self, run_id, data):
         run_id = int(run_id)
         try:

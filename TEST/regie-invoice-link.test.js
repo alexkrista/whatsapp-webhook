@@ -24,6 +24,8 @@ assert.ok(outgoing.includes("text.replace(',','.')"));
 const decimalInput=eval('('+outgoing.match(/function decimalInput\(value\)\{[^}]+\}/)[0].replace('function decimalInput','function')+')');
 assert.strictEqual(decimalInput("23,40"),23.4);
 assert.strictEqual(decimalInput("1.234,56"),1234.56);
+assert.match(outgoing,/Adresse ändern/);
+assert.match(outgoing,/updateEditorPositionTotal\(row\)/);
 assert.match(outgoing,/period-summary/);
 assert.match(outgoing,/WinWorker und KRISTINE/);
 assert.match(tower,/Umsatz 2026 aus WW \+ KRISTINE/);

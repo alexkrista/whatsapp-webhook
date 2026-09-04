@@ -73,6 +73,16 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(sale["project_number"], "")
         self.assertEqual(sale["label"], "Materialverkauf")
 
+    def test_invoice_recipient_address_can_be_corrected_without_project_change(self):
+        updated = self.store.update_run_recipient(self.run["id"], {
+            "label": "Fassade · korrigierte Adresse", "company": "", "customerName": "Max Muster",
+            "street": "Neue Straße 2", "postalCode": "6800", "city": "Feldkirch",
+            "country": "Österreich", "customerUid": "atu12345678",
+        })
+        self.assertEqual(updated["project_number"], "26025")
+        self.assertEqual(updated["customer_street"], "Neue Straße 2")
+        self.assertEqual(updated["customer_uid"], "ATU12345678")
+
     def test_number_circle_is_yyyymm_sequence(self):
         draft = self.store.save_draft(self.payload())
         issued = self.store.prepare_issue(draft["id"])
