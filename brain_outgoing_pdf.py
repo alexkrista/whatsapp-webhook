@@ -51,6 +51,61 @@ def _kind_title(invoice):
     return {"SR": "Schlussrechnung", "RE": "Rechnung", "ST": "Stornorechnung", "GS": "Gutschrift"}.get(kind, "Rechnung")
 
 
+def _single_line(value, limit):
+    return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())[:limit]
+
+
+def _epc_payment_payload(invoice, settings, amount=None):
+    """Build an EPC069-12 v3.1 SEPA payment payload for an issued invoice."""
+    number = _single_line(invoice.get("invoice_number") or invoice.get("invoiceNumber"), 100)
+    iban = "".join(str(settings.get("bank_iban") or "").upper().split())
+    bic = "".join(str(settings.get("bank_bic") or "").upper().split())
+    beneficiary = _single_line(settings.get("company_name"), 70)
+    if not number or not beneficiary or not (15 <= len(iban) <= 34) or not iban.isalnum():
+        return ""
+    if bic and (len(bic) not in {8, 11} or not bic.isalnum()):
+        return ""
+    if amount is None:
+        has_cash_discount = _d(invoice.get("cash_discount_percent")) > 0
+        amount = invoice.get("open_with_discount") if has_cash_discount else invoice.get("open_after_discount")
+    amount = _d(amount).quantize(Decimal("0.01"))
+    if amount < Decimal("0.01") or amount > Decimal("999999999.99"):
+        return ""
+    remittance = _single_line(f"Rechnung {number}", 140)
+    return "\n".join([
+        "BCD", "002", "1", "SCT", bic, beneficiary, iban,
+        f"EUR{amount:.2f}", "", "", remittance,
+    ])
+
+
+def _payment_qr_drawing(payload, size):
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    from reportlab.lib import colors
+
+    qr = QrCodeWidget(payload, barLevel="M")
+    qr.barWidth = size
+    qr.barHeight = size
+    drawing = Drawing(size, size)
+    drawing.add(qr)
+    shield = size * 0.205
+    mark = size * 0.165
+    drawing.add(Rect(
+        (size - shield) / 2, (size - shield) / 2, shield, shield,
+        rx=size * 0.025, ry=size * 0.025, fillColor=colors.white, strokeColor=None,
+    ))
+    drawing.add(Rect(
+        (size - mark) / 2, (size - mark) / 2, mark, mark,
+        rx=size * 0.02, ry=size * 0.02,
+        fillColor=colors.HexColor("#d5bd73"), strokeColor=colors.HexColor("#b79d52"), strokeWidth=0.35,
+    ))
+    drawing.add(String(
+        size / 2, size * 0.445, "K", textAnchor="middle",
+        fontName="Helvetica-Bold", fontSize=size * 0.125, fillColor=colors.HexColor("#17211b"),
+    ))
+    return drawing
+
+
 def _draw_krista_wordmark(canvas, page_height):
     """Draw only the KRISTA part of the established invoice logo."""
     logo = Path(__file__).resolve().parent / "assets" / "krista_invoice_logo.png"
@@ -419,6 +474,56 @@ def render_invoice_pdf(invoice, settings, destination):
         ]))
         story.append(KeepTogether([due, Spacer(1, 1.5 * mm)]))
 
+        full_amount = _d(invoice.get("open_after_discount"))
+        has_cash_discount = _d(invoice.get("cash_discount_percent")) > 0
+        payment_options = []
+        if has_cash_discount:
+            payment_options.append((
+                f"Mit {percent(invoice.get('cash_discount_percent'))} Skonto",
+                _d(invoice.get("open_with_discount")),
+                f"zahlbar bis {de_date(invoice.get('cash_discount_until'))}",
+            ))
+        payment_options.append((
+            "Voller Betrag" if has_cash_discount else "Bezahlen per Banking-App",
+            full_amount,
+            f"fällig am {de_date(invoice.get('due_date'))}",
+        ))
+        payment_cards = []
+        for qr_title, qr_amount, qr_deadline in payment_options:
+            qr_payload = _epc_payment_payload(invoice, settings, qr_amount)
+            if not qr_payload:
+                continue
+            card = Table([
+                [_payment_qr_drawing(qr_payload, 34 * mm)],
+                [Paragraph(qr_title, heading)],
+                [Paragraph(f"Zahlbetrag EUR {money(qr_amount)}", base)],
+                [Paragraph(f"{qr_deadline}<br/>Verwendungszweck: Rechnung {number}", small)],
+            ], colWidths=[82.5 * mm], hAlign="CENTER")
+            card.setStyle(TableStyle([
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, 0), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
+                ("TOPPADDING", (0, 1), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 1),
+            ]))
+            payment_cards.append(card)
+        if payment_cards:
+            qr_block = Table([payment_cards], colWidths=[87.5 * mm] * len(payment_cards))
+            qr_block.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("BOX", (0, 0), (-1, -1), .45, colors.HexColor("#b8b8b8")),
+                ("INNERGRID", (0, 0), (-1, -1), .35, colors.HexColor("#d0d0d0")),
+            ]))
+            story.append(KeepTogether([qr_block, Spacer(1, 1.5 * mm)]))
+
     if invoice.get("tax_note"):
         story.append(Paragraph(invoice.get("tax_note"), heading))
         story.append(Spacer(1, 2 * mm))
@@ -430,7 +535,13 @@ def render_invoice_pdf(invoice, settings, destination):
     if notes:
         story.append(Paragraph(notes.replace("\n", "<br/>"), note))
     if invoice.get("kind") not in {"ST", "GS"}:
-        story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
+        if _d(invoice.get("cash_discount_percent")):
+            story.append(Paragraph(
+                f"Bei Zahlung bis zum {de_date(invoice.get('cash_discount_until'))} können Sie {percent(invoice.get('cash_discount_percent'))} Skonto abziehen. Danach ist der volle offene Betrag bis zum {de_date(invoice.get('due_date'))} fällig.",
+                base,
+            ))
+        else:
+            story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
 
     doc.build(story)
     return destination
