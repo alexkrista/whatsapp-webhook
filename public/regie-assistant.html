@@ -404,8 +404,12 @@ function saveMaterial(event) {
   chosen.push({
     materialId: current.materialId,
     product: current.product || current.materialId,
+    supplier: current.supplier || "",
     quantity,
     unit: current.unit || "Einheit",
+    purchasePrice: Number(current.purchasePrice || 0),
+    markup: Number(current.markupPercent ?? current.markup ?? 0),
+    salePrice: Number(current.salePrice || 0),
     room: val("room"),
     component: val("component"),
     area: val("area"),
