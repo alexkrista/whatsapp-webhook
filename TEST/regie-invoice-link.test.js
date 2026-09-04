@@ -25,6 +25,8 @@ const decimalInput=eval('('+outgoing.match(/function decimalInput\(value\)\{[^}]
 assert.strictEqual(decimalInput("23,40"),23.4);
 assert.strictEqual(decimalInput("1.234,56"),1234.56);
 assert.match(outgoing,/Adresse ändern/);
+assert.match(outgoing,/Adresse wurde geändert\. Auch in den Stammdaten dieser Baustelle ändern\?/);
+assert.match(outgoing,/billing-address/);
 assert.match(outgoing,/updateEditorPositionTotal\(row\)/);
 assert.match(outgoing,/period-summary/);
 assert.match(outgoing,/WinWorker und KRISTINE/);

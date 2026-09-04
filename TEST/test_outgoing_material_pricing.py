@@ -4,7 +4,9 @@ from brain_outgoing_invoices import (
     _combined_revenue_summary,
     _is_project_closing_invoice,
     _lg_retail_net_price,
+    _project_billing_address_payload,
     _project_owner_names,
+    _split_street_house,
     _ten_l_fallback_price,
 )
 
@@ -39,6 +41,27 @@ class OutgoingMaterialPricingTests(unittest.TestCase):
             "manFirstName": "Martin", "manLastName": "Schwerzler",
         }}}
         self.assertEqual(_project_owner_names(meta), ["Theresa Schwerzler", "Martin Schwerzler"])
+
+    def test_invoice_street_is_split_for_project_master_data(self):
+        self.assertEqual(_split_street_house("Amerdonastr. 20"), ("Amerdonastr.", "20"))
+        self.assertEqual(_split_street_house("Hirschgraben 25/ Top 1"), ("Hirschgraben", "25/ Top 1"))
+
+    def test_billing_address_patch_preserves_people_and_other_contacts(self):
+        meta = {"projectContacts": {
+            "owner": {"womanFirstName": "Belinda", "womanEmail": "b@example.at"},
+            "siteManager": {"firstName": "Max"},
+            "deliveryRecipients": {"invoice": {"owner": True, "siteManager": True}},
+        }}
+        payload = _project_billing_address_payload(meta, {
+            "street": "Amerdonastr. 20", "postalCode": "6820", "city": "Frastanz",
+        })
+        owner = payload["projectContacts"]["owner"]
+        self.assertEqual(owner["residentialStreet"], "Amerdonastr.")
+        self.assertEqual(owner["residentialHouseNumber"], "20")
+        self.assertEqual(owner["residentialPostalCode"], "6820")
+        self.assertEqual(owner["residentialCity"], "Frastanz")
+        self.assertEqual(owner["womanFirstName"], "Belinda")
+        self.assertEqual(payload["projectContacts"]["siteManager"]["firstName"], "Max")
 
     def test_only_final_invoice_closes_project(self):
         self.assertFalse(_is_project_closing_invoice({"kind": "TR", "run": {}}))
