@@ -2397,6 +2397,8 @@ async function readJobMeta(jobId) {
       contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
       materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
+      regieHourlyRate: Math.max(0, Number(meta.regieHourlyRate ?? 75)),
+      regieMaterialMarkup: Math.max(0, Number(meta.regieMaterialMarkup ?? 80)),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
       hoursCutoverDate: cleanOperationalDate(meta.hoursCutoverDate),
       hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(meta.hoursOverlapExcludedWwKeys),
@@ -2404,7 +2406,7 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2463,6 +2465,8 @@ async function writeJobMeta(jobId, patch) {
     contractAmount: Math.max(0, Number(patch.contractAmount ?? existing.contractAmount ?? 0)),
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
+    regieHourlyRate: Math.max(0, Number(patch.regieHourlyRate ?? existing.regieHourlyRate ?? 75)),
+    regieMaterialMarkup: Math.max(0, Number(patch.regieMaterialMarkup ?? existing.regieMaterialMarkup ?? 80)),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
     hoursCutoverDate: cleanOperationalDate(patch.hoursCutoverDate ?? existing.hoursCutoverDate),
     hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
@@ -2812,6 +2816,8 @@ app.get("/admin/api/jobs", async (req, res) => {
         contractAmount: Number(meta.contractAmount || 0),
         externalServices: Number(meta.externalServices || 0),
         materialPercent: Number(meta.materialPercent || 0),
+        regieHourlyRate: Number(meta.regieHourlyRate ?? 75),
+        regieMaterialMarkup: Number(meta.regieMaterialMarkup ?? 80),
         plannedRegieHours: Number(meta.plannedRegieHours || 0),
         hoursCutoverDate: meta.hoursCutoverDate || "",
         hoursOverlapExcludedWwKeys: meta.hoursOverlapExcludedWwKeys || [],
@@ -2876,11 +2882,13 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       contractAmount: req.body?.contractAmount,
       externalServices: req.body?.externalServices,
       materialPercent: req.body?.materialPercent,
+      regieHourlyRate: req.body?.regieHourlyRate,
+      regieMaterialMarkup: req.body?.regieMaterialMarkup,
       plannedRegieHours: req.body?.plannedRegieHours,
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","plannedRegieHours"]) {
+    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
     if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
@@ -3914,6 +3922,11 @@ registerRegieAssistant(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   publicDir: path.join(process.cwd(), "public"),
+  readJobMeta,
+  writeJobMeta,
+  appendJobHistory,
+  readDocumentation,
+  writeDocumentation,
 });
 console.log("âœ… KRISTINE Materialsystem registriert");
 

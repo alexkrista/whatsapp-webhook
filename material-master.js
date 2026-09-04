@@ -718,15 +718,18 @@ app.get("/api/regie/materials", async (req, res) => {
       );
       if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
       const material = normalizeMaterial({
-        group: "Angebotskalkulation",
+        group: req.body?.group || "Regie",
         product,
         unit: req.body?.unit,
-        purchasePrice: req.body?.unitPrice,
+        purchasePrice: req.body?.purchasePrice ?? req.body?.unitPrice,
+        markup: req.body?.markup,
+        salePrice: req.body?.salePrice,
+        supplier: req.body?.supplier,
         priceCheckedAt: new Date().toISOString().slice(0, 10),
         active: true,
         regieItem: true,
-        note: "Automatisch aus einer Angebotskalkulation übernommen",
-        sourceSheet: "KRISTINE Angebot",
+        note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
+        sourceSheet: req.body?.sourceSheet || "KRISTINE Regie",
       }, { index: rows.length + 1 });
       while (rows.some(item => String(item.materialId) === String(material.materialId))) {
         material.materialId = createMaterialId(material, rows.length + Math.floor(Math.random() * 10000));

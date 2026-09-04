@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-1208";
+  const VERSION="2026-09-04-regie-workbench";
   const PENDING_KEY="kristaInboxPendingTaskItems";
   const ROUTES={task:"Aufgabe",invoice:"Rechnung",filing:"Ablage",appointment:"Termin",order:"Bestellung"};
   let current=null;
@@ -51,9 +51,10 @@
     const top=document.querySelector(".krista-shell-main");if(!top)return;
     if(document.getElementById("kristaInboxButton"))return;
     const b=document.createElement("button");b.id="kristaInboxButton";b.type="button";b.className="krista-inbox-button";
-    b.innerHTML="📥 <span>EINGANG</span>";b.title="Mail, Foto, PDF oder Dokument in KRISTINE ziehen";
-    b.onclick=()=>document.getElementById("kristaInboxPicker")?.click();
+    b.innerHTML="📥 <span>EINGANG</span>";b.title="Postkorb und Regieberichte öffnen";
+    b.onclick=()=>{location.href=tokenUrl('/kristine/eingang')};
     top.insertBefore(b,top.querySelector(".krista-user")||null);
+    api('/kristine/api/regie-reports').then(data=>{const count=(data.reports||[]).filter(x=>['prepared','draft'].includes(String(x.status||''))).length;if(count)b.innerHTML=`📥 <span>EINGANG ${count}</span>`}).catch(()=>{});
   }
 
   function assigneeChoices(){
