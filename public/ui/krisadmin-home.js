@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-04-revenue-one-month-later-6";
+  const VERSION="2026-09-04-tower-average-guides-7";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
 
