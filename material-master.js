@@ -286,6 +286,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       alias: clean(raw.alias, 1000),
       active: bool(raw.active, true),
       note: clean(raw.note, 1000),
+      sourceSystem: clean(raw.sourceSystem, 40),
+      sourceId: clean(raw.sourceId, 120),
+      sourceUpdatedAt: raw.sourceUpdatedAt || "",
       sourceSheet: clean(raw.sourceSheet || context.sheetName, 100),
       status: clean(raw.status, 30) || "approved",
       createdAt: raw.createdAt || now,
@@ -310,8 +313,26 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       normalized.articleNumber,
       normalized.alias,
     ].join(" ").toLowerCase();
+    normalized.searchTextCompact = normalized.searchText.replace(/[^a-z0-9]/g, "");
 
     return normalized;
+  }
+
+  function matchesMaterialQuery(item, rawQuery) {
+    const query = clean(rawQuery, 200).toLowerCase();
+    if (!query) return true;
+    const haystack = [
+      item.searchText,
+      item.materialId,
+      item.articleNumber,
+      item.product,
+      item.supplier,
+      item.supplierArticleNumber,
+      item.alias,
+    ].join(" ").toLowerCase();
+    const compactQuery = query.replace(/[^a-z0-9]/g, "");
+    const compactHaystack = String(item.searchTextCompact || haystack.replace(/[^a-z0-9]/g, ""));
+    return haystack.includes(query) || Boolean(compactQuery && compactHaystack.includes(compactQuery));
   }
 
   function rowToMaterial(row, context) {
@@ -612,6 +633,120 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
   }
 
+  async function syncWinWorkerMaterials(rawRows = []) {
+    if (!Array.isArray(rawRows)) throw new Error("WW-Materialliste fehlt");
+    if (!rawRows.length) throw new Error("WW-Materialliste ist leer; Abgleich abgebrochen");
+    if (rawRows.length > 50000) throw new Error("WW-Materialliste ist unerwartet groß");
+
+    const importedAt = new Date().toISOString();
+    const current = await readJson(MATERIALS_FILE, []);
+    const merged = [...current];
+    const currentBySource = new Map();
+    const currentById = new Map();
+    for (const item of current) {
+      currentById.set(String(item.materialId || item.id), item);
+      if (String(item.sourceSystem || "").toLowerCase() === "winworker" && item.sourceId) {
+        currentBySource.set(String(item.sourceId), item);
+      }
+    }
+
+    let added = 0;
+    let changed = 0;
+    let unchanged = 0;
+    let deactivated = 0;
+    const seen = new Set();
+
+    for (const raw of rawRows) {
+      const sourceId = clean(raw?.sourceId || raw?.number || raw?.materialId, 120);
+      const product = clean(raw?.product || raw?.shortText || raw?.name, 180);
+      if (!sourceId || !product || seen.has(sourceId)) continue;
+      seen.add(sourceId);
+
+      const existing = currentBySource.get(sourceId) || currentById.get(sourceId);
+      const purchasePrice = number(raw?.purchasePrice ?? raw?.ek);
+      const salePrice = number(raw?.salePrice ?? raw?.vk);
+      const calculatedMarkup = purchasePrice > 0 && salePrice > 0
+        ? Math.round((((salePrice / purchasePrice) - 1) * 100 + Number.EPSILON) * 100) / 100
+        : number(existing?.markup);
+      const aliases = [...new Set([
+        raw?.matchCode,
+        raw?.orderNumber,
+        raw?.supplierArticleNumber,
+        raw?.directory,
+        String(existing?.sourceSystem || "").toLowerCase() === "winworker" ? "" : existing?.alias,
+      ].map(value => clean(value, 250)).filter(Boolean))].join(" ");
+
+      const updated = normalizeMaterial({
+        ...(existing || {}),
+        materialId: existing?.materialId || sourceId,
+        id: existing?.materialId || sourceId,
+        articleNumber: sourceId,
+        group: clean(raw?.group || raw?.directory, 100) || existing?.group || "WinWorker",
+        manufacturer: clean(raw?.manufacturer, 120) || existing?.manufacturer,
+        product,
+        unit: clean(raw?.unit, 30) || existing?.unit || "Stk",
+        purchasePrice,
+        salePrice,
+        markup: calculatedMarkup,
+        supplier: clean(raw?.supplier, 120),
+        supplierArticleNumber: clean(raw?.supplierArticleNumber || raw?.orderNumber, 100),
+        priceValidFrom: raw?.priceCheckedAt || raw?.priceValidFrom,
+        priceCheckedAt: raw?.priceCheckedAt || raw?.priceValidFrom,
+        alias: aliases,
+        active: raw?.active === false ? false : existing ? existing.active !== false : true,
+        regieItem: existing?.regieItem ?? true,
+        sourceSystem: "WinWorker",
+        sourceId,
+        sourceUpdatedAt: raw?.sourceUpdatedAt || raw?.priceCheckedAt || importedAt,
+        sourceSheet: "WinWorker",
+        status: "approved",
+        createdAt: existing?.createdAt || importedAt,
+      }, { sheetName: "WinWorker", importedAt });
+
+      if (!existing) {
+        merged.push(updated);
+        currentById.set(updated.materialId, updated);
+        currentBySource.set(sourceId, updated);
+        added += 1;
+        continue;
+      }
+
+      const index = merged.findIndex(item => String(item.materialId || item.id) === String(existing.materialId || existing.id));
+      const before = JSON.stringify({ ...existing, updatedAt: undefined, lastImportedAt: undefined, searchText: undefined, searchTextCompact: undefined });
+      const after = JSON.stringify({ ...updated, updatedAt: undefined, lastImportedAt: undefined, searchText: undefined, searchTextCompact: undefined });
+      if (before === after) unchanged += 1;
+      else {
+        merged[index] = updated;
+        changed += 1;
+      }
+    }
+
+    for (let index = 0; index < merged.length; index += 1) {
+      const item = merged[index];
+      if (String(item.sourceSystem || "").toLowerCase() !== "winworker" || !item.sourceId || seen.has(String(item.sourceId)) || item.active === false) continue;
+      merged[index] = normalizeMaterial({ ...item, active: false, createdAt: item.createdAt });
+      deactivated += 1;
+    }
+
+    await writeJson(MATERIALS_FILE, merged);
+    const report = {
+      id: `winworker_${Date.now()}`,
+      filename: "Direktabgleich WinWorker",
+      importedAt,
+      rowsRead: rawRows.length,
+      added,
+      changed,
+      unchanged,
+      deactivated,
+      materialCountAfterImport: merged.length,
+      source: "WinWorker_Stammdaten_Standard",
+    };
+    const imports = await readJson(IMPORTS_FILE, []);
+    imports.push(report);
+    await writeJson(IMPORTS_FILE, imports.slice(-100));
+    return report;
+  }
+
   // ---------- Oberfläche ----------
   app.get("/admin/material", (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -640,8 +775,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (group) rows = rows.filter(item => item.group === group);
       if (subgroup) rows = rows.filter(item => item.subgroup === subgroup);
       if (query) {
-        rows = rows.filter(item => [item.searchText, item.materialId, item.product, item.supplier, item.supplierArticleNumber]
-          .join(" ").toLowerCase().includes(query));
+        rows = rows.filter(item => matchesMaterialQuery(item, query));
       }
       if (mode === "project") rows = rows.filter(item => item.designRelevant === true);
       // Regie zeigt bewusst den gesamten aktiven Materialstamm.
@@ -696,6 +830,16 @@ app.get("/api/regie/materials", async (req, res) => {
   app.get("/admin/api/materials/imports", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.json({ ok: true, imports: await readJson(IMPORTS_FILE, []) });
+  });
+
+  app.post("/admin/api/materials/sync-winworker", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const report = await syncWinWorkerMaterials(req.body?.materials || []);
+      res.json({ ok: true, report });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
   });
 
   app.get("/admin/api/materials/:materialId", async (req, res) => {
@@ -968,8 +1112,7 @@ app.get("/api/regie/materials", async (req, res) => {
       const rows = materials
         .filter(item => item.active !== false)
         .filter(item => !group || item.group === group)
-        .filter(item => !query || [item.searchText, item.materialId, item.product, item.supplier, item.supplierArticleNumber]
-          .join(" ").toLowerCase().includes(query))
+        .filter(item => matchesMaterialQuery(item, query))
         .map(decorate)
         .sort((a, b) => {
           const aExactColor = query && String(a.colorNumber).toLowerCase() === query ? 1 : 0;
@@ -990,6 +1133,7 @@ app.get("/api/regie/materials", async (req, res) => {
     readMaterialInbox: () => readJson(INBOX_FILE, []),
     importWorkbook,
     exportWorkbook,
+    syncWinWorkerMaterials,
   };
 }
 

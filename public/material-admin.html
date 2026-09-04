@@ -102,6 +102,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <select id="group"><option value="">Alle Gruppen</option></select>
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
+      <button class="btn" id="wwSyncButton" onclick="syncWinWorker(this)">WW jetzt einlesen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="exportExcel()">Excel exportieren</button>
     </div>
@@ -170,6 +171,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
 <script>
 const token=new URLSearchParams(location.search).get("token")||"";
+const WW_BRAIN_URL="https://pc-alex02.tail610122.ts.net";
 const api=(url,opt={})=>fetch(
   url+(url.includes("?")?"&":"?")+"token="+encodeURIComponent(token),
   {headers:{"Content-Type":"application/json"},...opt}
@@ -334,6 +336,25 @@ async function deleteMaterial(id){
   if(!confirm(`Material „${item?.product||id}“ wirklich stilllegen?\n\nEs verschwindet aus Suche und nächstem Excel-Export. Alte Belege bleiben unverändert.`))return;
   await api(`/admin/api/materials/${encodeURIComponent(id)}`,{method:"PUT",body:JSON.stringify({active:false})});
   await loadMaterials();
+}
+
+async function syncWinWorker(button){
+  const original=button.textContent;
+  button.disabled=true;button.textContent="WW wird gelesen …";
+  try{
+    const url=new URL(WW_BRAIN_URL+"/ww-materials/sync");
+    url.searchParams.set("krista_token",token);
+    const response=await fetch(url,{method:"POST",cache:"no-store"});
+    const data=await response.json().catch(()=>({error:"Unbekannte Antwort vom WW-Rechner"}));
+    if(!response.ok||data.ok===false)throw new Error(data.error||"WW-Abgleich fehlgeschlagen");
+    const report=data.report||{};
+    alert(`${data.sourceCount||report.rowsRead||0} WW-Artikel gelesen.\n${report.added||0} neu · ${report.changed||0} aktualisiert · ${report.deactivated||0} stillgelegt.`);
+    await loadMaterials();
+  }catch(error){
+    alert("WW konnte nicht eingelesen werden: "+error.message);
+  }finally{
+    button.disabled=false;button.textContent=original;
+  }
 }
 
 async function loadInbox(){

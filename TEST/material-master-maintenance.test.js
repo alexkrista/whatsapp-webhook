@@ -50,6 +50,36 @@ const { registerMaterialMaster } = require("../material-master");
     const exportedRows = XLSX.utils.sheet_to_json(exported.Sheets.Materialpreisliste, { defval: "" });
     assert(!exportedRows.some(row => row["Material-ID"] === "M2"), "Stillgelegte Artikel fehlen im Folgeexport");
     assert(exportedRows.some(row => row["Material-ID"] === "M1"));
+
+    const wwReport = await service.syncWinWorkerMaterials([
+      {
+        sourceId: "880079",
+        product: "3M Abdeckfolie Masking Film AMF48 121",
+        unit: "Stk",
+        purchasePrice: 15.23,
+        salePrice: 27.414,
+        supplier: "DRACO HANDELS GMBH",
+        supplierArticleNumber: "D2-AMF48 A 01",
+        orderNumber: "D2-AMF48 A 01",
+        priceCheckedAt: "2023-08-17",
+      },
+      {
+        sourceId: "880080",
+        product: "3M Abdeckfolie Masking Film AMF99 251",
+        unit: "Stk",
+        purchasePrice: 14.43,
+        salePrice: 25.974,
+        supplier: "DRACO HANDELS GMBH",
+        supplierArticleNumber: "D2-AMF99 A 01",
+        orderNumber: "D2-AMF99 A 01",
+        priceCheckedAt: "2023-08-17",
+      },
+    ]);
+    assert.equal(wwReport.added, 2);
+    const wwRows = await service.readMaterials();
+    assert.equal(wwRows.find(row => row.materialId === "880079").purchasePrice, 15.23);
+    assert.equal(wwRows.find(row => row.materialId === "880080").salePrice, 25.974);
+    assert(wwRows.find(row => row.materialId === "880079").searchTextCompact.includes("a01"), "A 01 ist auch ohne Leerzeichen suchbar");
     console.log("OK: Materialpflege importiert B/N/L sicher, bewahrt Stammdaten und exportiert nur aktive Artikel.");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

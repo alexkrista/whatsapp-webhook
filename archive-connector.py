@@ -68,7 +68,7 @@ def protect_remote_archive_access():
     # krista_token an den Brain-Rechner weitergegeben.
     supplied_query_token = str(request.args.get("krista_token") or "")
     if (
-        request.path in {"/project/address-search", "/project/address-projects"}
+        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync"}
         and KRISTINE_ADMIN_TOKEN
         and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
     ):
@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects"}:
+    if request.path.startswith("/access-control/") or request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -3195,6 +3195,73 @@ def clean_date(value):
     if hasattr(value, "date"):
         return value.date().isoformat()
     return str(value)
+
+
+def ww_material_master_rows():
+    """Liest den aktiven WW-Materialstamm samt bevorzugtem Lieferanten und Preisen."""
+    con = sql_connection("WinWorker_Stammdaten_Standard")
+    try:
+        rows = con.cursor().execute("""
+            SELECT
+                m.StammIndex AS SourceId,
+                m.sKurztext AS Product,
+                m.sGruppe AS MaterialGroup,
+                m.sHersteller AS Manufacturer,
+                m.sEinheit AS UnitName,
+                COALESCE(NULLIF(li.EK, 0), NULLIF(m.gewEK, 0), NULLIF(m.EKFestpreis, 0), 0) AS PurchasePrice,
+                COALESCE(NULLIF(m.VK, 0), NULLIF(m.gewVK, 0), NULLIF(m.cCalcVK, 0), 0) AS SalePrice,
+                COALESCE(NULLIF(li.sFirma, ''), '') AS Supplier,
+                COALESCE(NULLIF(li.sDNArtikelNr, ''), NULLIF(li.sBestellNr, ''), '') AS SupplierArticleNumber,
+                COALESCE(NULLIF(li.sBestellNr, ''), '') AS OrderNumber,
+                COALESCE(NULLIF(m.sCalcDNMatchCode, ''), NULLIF(li.sDNMatchCode, ''), '') AS MatchCode,
+                COALESCE(NULLIF(v.sName, ''), '') AS DirectoryName,
+                COALESCE(li.dzPreisStand, li.dzLetztePreisaenderung, m.dzLetztePreisaenderung, m.[Geändert], m.Aufgenommen) AS PriceCheckedAt,
+                COALESCE(m.[Geändert], m.Aufgenommen) AS SourceUpdatedAt
+            FROM dbo.Material AS m
+            OUTER APPLY (
+                SELECT TOP (1) info.*
+                FROM dbo.MatLieferInfo_MIdx AS info
+                WHERE info.MaterialIndex = m.StammIndex
+                ORDER BY
+                    CASE WHEN info.nLieferant = m.Lieferant THEN 0 ELSE 1 END,
+                    COALESCE(info.dzPreisStand, info.dzLetztePreisaenderung, info.dzGeaendert, info.dzAufgenommen) DESC,
+                    info.nLieferant
+            ) AS li
+            LEFT JOIN dbo.Verzeichnisse AS v ON v.gID = m.gVerzeichnis
+            WHERE ISNULL(m.bIstMusterdatensatz, 0) = 0
+              AND (m.dzAuslaufArtikel IS NULL OR m.dzAuslaufArtikel > GETDATE())
+              AND NULLIF(LTRIM(RTRIM(m.sKurztext)), '') IS NOT NULL
+            ORDER BY m.StammIndex
+        """).fetchall()
+    finally:
+        con.close()
+
+    materials = []
+    for row in rows:
+        source_id = str(int(row.SourceId))
+        supplier_article = str(row.SupplierArticleNumber or "").strip()
+        order_number = str(row.OrderNumber or "").strip()
+        match_code = str(row.MatchCode or "").strip()
+        materials.append({
+            "sourceId": source_id,
+            "materialId": source_id,
+            "articleNumber": source_id,
+            "product": str(row.Product or "").strip(),
+            "group": str(row.MaterialGroup or "").strip(),
+            "manufacturer": str(row.Manufacturer or "").strip(),
+            "unit": str(row.UnitName or "").strip(),
+            "purchasePrice": float(row.PurchasePrice or 0),
+            "salePrice": float(row.SalePrice or 0),
+            "supplier": str(row.Supplier or "").strip(),
+            "supplierArticleNumber": supplier_article or order_number,
+            "orderNumber": order_number,
+            "matchCode": match_code,
+            "directory": str(row.DirectoryName or "").strip(),
+            "priceCheckedAt": clean_date(row.PriceCheckedAt),
+            "sourceUpdatedAt": clean_date(row.SourceUpdatedAt),
+            "active": True,
+        })
+    return materials
 
 
 
@@ -7619,6 +7686,46 @@ def schema_index_rebuild():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.post("/ww-materials/sync")
+def ww_materials_sync():
+    """Liest WW live und überträgt ausschließlich Materialstamm-Kopien an KRISTINE."""
+    try:
+        materials = ww_material_master_rows()
+        if not materials:
+            return jsonify({"ok": False, "error": "WinWorker lieferte keine Materialien; Abgleich abgebrochen."}), 409
+        result = kristine_api_request(
+            "/admin/api/materials/sync-winworker",
+            method="POST",
+            payload={"materials": materials},
+        )
+        return jsonify({
+            "ok": True,
+            "sourceCount": len(materials),
+            "report": result.get("report") or {},
+            "message": f"{len(materials)} WW-Artikel gelesen und an KRISTINE übertragen.",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/ww-materials/preview")
+def ww_materials_preview():
+    """Lokale Diagnoseansicht; wird über Tailscale absichtlich nicht freigegeben."""
+    try:
+        query = re.sub(r"[^a-z0-9]", "", str(request.args.get("q") or "").lower())
+        limit = max(1, min(200, int(request.args.get("limit") or 30)))
+        materials = ww_material_master_rows()
+        if query:
+            materials = [item for item in materials if query in re.sub(
+                r"[^a-z0-9]", "", " ".join(str(item.get(key) or "") for key in (
+                    "sourceId", "product", "supplier", "supplierArticleNumber", "orderNumber", "matchCode", "directory"
+                )).lower()
+            )]
+        return jsonify({"ok": True, "count": len(materials), "materials": materials[:limit]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/schema-index/status")
 def schema_index_status():
     data = load_winworker_schema_index()
@@ -8749,7 +8856,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.13.5 - Rechnungsprüfplatz PDF links, Daten rechts, Skonto und IBAN-Prüfung")
+    print("Version: 0.13.6 - WW-Materialstamm direkt nach KRISTINE synchronisieren")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
