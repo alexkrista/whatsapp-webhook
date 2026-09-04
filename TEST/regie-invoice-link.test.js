@@ -17,6 +17,8 @@ assert.match(outgoing,/\/api\/outgoing\/next-number/);
 assert.match(outgoing,/loadNextNumber\(\)/);
 assert.match(outgoing,/\+ Neue Rechnung/);
 assert.match(outgoing,/Verkauf ohne Projekt/);
+assert.match(outgoing,/Material suchen …/);
+assert.match(outgoing,/editing&&editing\.status!=='draft'/);
 assert.match(outgoing,/period-summary/);
 assert.match(outgoing,/WinWorker und KRISTINE/);
 assert.match(tower,/Umsatz 2026 aus WW \+ KRISTINE/);
