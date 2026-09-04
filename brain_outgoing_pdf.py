@@ -590,6 +590,8 @@ def render_invoice_pdf(invoice, settings, destination):
             ))
         else:
             story.append(Paragraph(f"Bitte zahlen Sie bis zum {de_date(invoice.get('due_date'))} ohne Abzug.", base))
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("Vielen Dank für Ihren Auftrag. Wir bedanken uns für Ihr Vertrauen.", base))
 
     doc.build(story, canvasmaker=NumberedInvoiceCanvas)
     return destination
