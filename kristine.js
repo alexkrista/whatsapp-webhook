@@ -359,9 +359,23 @@ function clampOfficialStart(actualTime) {
   return actualTime;
 }
 
+  async function officialStartForEmployee(employeeId, actualTime) {
+    const rules = await readJson(EMPLOYEE_WORK_RULES, {});
+    const activityMode = rules?.[String(employeeId)]?.activityMode || "productive";
+    return activityMode === "productive" ? clampOfficialStart(actualTime) : actualTime;
+  }
+
   async function appendTimeEvent(event) {
     const rows = await readJson(TIME_EVENTS, []);
-    rows.push(event);
+    const normalizedEvent = { ...event };
+    if (normalizedEvent.type === "start" && normalizedEvent.source !== "office") {
+      const actualAt = normalizedEvent.actualAt || normalizedEvent.at;
+      const bookedAt = await officialStartForEmployee(normalizedEvent.employeeId, normalizedEvent.at);
+      normalizedEvent.at = bookedAt;
+      normalizedEvent.actualAt = actualAt;
+      normalizedEvent.adjusted = bookedAt !== actualAt;
+    }
+    rows.push(normalizedEvent);
     // Genug Historie für Büroprüfung behalten, Datei aber begrenzen.
     await writeJson(TIME_EVENTS, rows.slice(-20000));
   }
@@ -847,7 +861,7 @@ const intent = rawText.startsWith("task_call:")
           state,
         };
       }
-      const bookedTime = clampOfficialStart(actualTime);
+      const bookedTime = await officialStartForEmployee(employeeId, actualTime);
       state.mode = "working";
       state.pending = null;
       state.activeAssignmentKey = assignmentKey(current);
