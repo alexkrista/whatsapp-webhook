@@ -39,7 +39,8 @@ class OutgoingApiTests(unittest.TestCase):
             }],
             "ww_address_search": lambda query, limit=25: [{
                 "addressId": "4711", "customerNumber": "10042", "name": "Böckle",
-                "person": "Anna Böckle", "street": "Musterstraße 7", "postalCode": "6800",
+                "person": "Anna Böckle", "firstName": "Anna", "lastName": "Böckle",
+                "street": "Musterstraße 7", "postalCode": "6800",
                 "city": "Feldkirch", "address": "Musterstraße 7, 6800 Feldkirch",
                 "vatId": "ATU12345678",
             }],
@@ -172,10 +173,14 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(customer["customerIndex"], "4711")
         self.assertEqual(customer["company"], "Böckle")
         self.assertEqual(customer["name"], "Anna Böckle")
+        self.assertEqual(customer["firstName"], "Anna")
+        self.assertEqual(customer["lastName"], "Böckle")
         self.assertEqual(customer["street"], "Musterstraße 7")
         self.assertEqual(customer["customerUid"], "ATU12345678")
         page = self.client.get("/outgoing/invoices")
         self.assertIn(b"saleSearchButton", page.data)
+        self.assertIn(b"saleFirstName", page.data)
+        self.assertIn(b"saleLastName", page.data)
         self.assertIn(b"/api/outgoing/customer-search", page.data)
 
     def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):

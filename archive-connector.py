@@ -1641,6 +1641,8 @@ def ww_address_search(query, limit=25):
             "customerNumber": str(r.lKundenNr or ""),
             "name": name,
             "person": person,
+            "firstName": str(r.sVorname or "").strip(),
+            "lastName": str(r.sName or "").strip(),
             "street": r.sStrasse or "",
             "postalCode": r.sPLZ or "",
             "city": r.sOrt or "",
