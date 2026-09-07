@@ -4419,6 +4419,9 @@ def _ww_project_book_types(con, book_ids):
         return result
 
     for table in candidates:
+        # Gemeinsame Summen-/Preis-Tabelle für alle Belegarten, kein eigener Belegtyp.
+        if str(table.TABLE_NAME).casefold() == "bücher kalkulation":
+            continue
         label = canonical_project_document_type(table.TABLE_NAME)
         if label in {"Sonstige Dokumente", "Weitere WW-Belege"}:
             continue
