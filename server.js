@@ -32,6 +32,12 @@
 // OPENAI_TRANSCRIBE_LANG=de
 // OPENAI_TEXT_MODEL=gpt-4o-mini
 //
+// NFON CTI API:
+// NFON_API_USERNAME=...       (nur als geschützte Render-Umgebungsvariable)
+// NFON_API_PASSWORD=...       (nur als geschützte Render-Umgebungsvariable)
+// NFON_K_ACCOUNT=K....
+// NFON_OFFICE_EXTENSIONS=Bettina:101,Dunja:102,Alex:103
+//
 // Logo optional:
 // LOGO_PATH=krista-logo.png   (oder assets/krista-logo.png)
 //
@@ -62,6 +68,7 @@ const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 const { parseMsg, getMsgAttachment } = require("./kristine-msg-reader");
 const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
 const { createRegieComparisonPdf } = require("./regie-comparison-pdf");
+const { registerNfonIntegration } = require("./nfon-integration");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -1719,6 +1726,11 @@ kristine = registerKristine(app, {
     await appendJobHistory(id, { type: "status_changed", title: "Status automatisch auf Laufend gesetzt", detail: source, source });
     return true;
   }
+});
+
+registerNfonIntegration(app, {
+  requireAdmin,
+  appVersion: APP_VERSION,
 });
 
 registerTowerPlanning(app, {
