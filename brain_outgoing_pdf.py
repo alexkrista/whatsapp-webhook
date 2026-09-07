@@ -495,23 +495,16 @@ def render_invoice_pdf(invoice, settings, destination):
         due_rows = []
         if _d(invoice.get("cash_discount_percent")):
             due_rows.append([
-                f"Offener Betrag mit Skonto bis {de_date(invoice.get('cash_discount_until'))}",
-                money(_d(invoice.get("open_with_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100"))) if _d(invoice.get("vat_rate")) else money(invoice.get("open_with_discount")),
-                money(_d(invoice.get("open_with_discount")) - (_d(invoice.get("open_with_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100")))) if _d(invoice.get("vat_rate")) else money(0),
+                f"Offener Bruttobetrag mit Skonto bis {de_date(invoice.get('cash_discount_until'))}",
                 money(invoice.get("open_with_discount")),
             ])
         due_label = (
-            f"Betrag nach der Skontofrist fällig am {de_date(invoice.get('due_date'))}"
+            f"Bruttobetrag nach der Skontofrist fällig am {de_date(invoice.get('due_date'))}"
             if _d(invoice.get("cash_discount_percent"))
-            else f"Betrag fällig am {de_date(invoice.get('due_date'))}"
+            else f"Bruttobetrag fällig am {de_date(invoice.get('due_date'))}"
         )
-        due_rows.append([
-            due_label,
-            money(_d(invoice.get("open_after_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100"))) if _d(invoice.get("vat_rate")) else money(invoice.get("open_after_discount")),
-            money(_d(invoice.get("open_after_discount")) - (_d(invoice.get("open_after_discount")) / (Decimal("1") + _d(invoice.get("vat_rate")) / Decimal("100")))) if _d(invoice.get("vat_rate")) else money(0),
-            money(invoice.get("open_after_discount")),
-        ])
-        due = Table(due_rows, colWidths=[87 * mm, 29 * mm, 29 * mm, 30 * mm])
+        due_rows.append([due_label, money(invoice.get("open_after_discount"))])
+        due = Table(due_rows, colWidths=[145 * mm, 30 * mm])
         due.setStyle(TableStyle([
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 0), (-1, -1), bold_font),
             ("FONTSIZE", (0, 0), (-1, -1), 8.1), ("LINEABOVE", (0, 0), (-1, 0), .75, colors.black),
@@ -571,6 +564,12 @@ def render_invoice_pdf(invoice, settings, destination):
                 ("INNERGRID", (0, 0), (-1, -1), .35, colors.HexColor("#d0d0d0")),
             ]))
             story.append(KeepTogether([qr_block, Spacer(1, 1.5 * mm)]))
+        elif not (invoice.get("invoice_number") or invoice.get("invoiceNumber")):
+            story.append(Paragraph(
+                "Der Zahlungs-QR wird beim Abschließen automatisch mit der endgültigen Rechnungsnummer erstellt.",
+                small,
+            ))
+            story.append(Spacer(1, 1.5 * mm))
 
     if invoice.get("tax_note"):
         story.append(Paragraph(invoice.get("tax_note"), heading))
