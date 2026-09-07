@@ -73,6 +73,17 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(sale["project_number"], "")
         self.assertEqual(sale["label"], "Materialverkauf")
 
+    def test_customer_email_is_remembered_for_later_runs(self):
+        updated = self.store.update_run_customer_email(self.run["id"], "kunde@example.at")
+        self.assertEqual(updated["customer_email"], "kunde@example.at")
+        later = self.store.create_run({
+            "projectIndex": 2602120, "projectNumber": "26026", "customerIndex": 1,
+            "label": "Weiterer Auftrag", "customerName": "Max Muster",
+            "street": "Musterweg 1", "postalCode": "6820", "city": "Frastanz",
+        })
+        self.assertEqual(later["customer_email"], "kunde@example.at")
+        self.assertEqual(self.store.customer_email(1), "kunde@example.at")
+
     def test_invoice_recipient_address_can_be_corrected_without_project_change(self):
         updated = self.store.update_run_recipient(self.run["id"], {
             "label": "Fassade · korrigierte Adresse", "company": "", "customerName": "Max Muster",

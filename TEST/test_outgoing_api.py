@@ -167,6 +167,16 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(payload["cc"], ["bauleitung@example.at"])
 
     def test_sale_customer_search_uses_winworker_customer_master(self):
+        run_response = self.client.post("/api/outgoing/runs", json={
+            "projectIndex": None, "projectNumber": "", "customerIndex": 4711,
+            "label": "Verkauf", "customerName": "Anna Böckle",
+            "street": "Musterstraße 7", "postalCode": "6800", "city": "Feldkirch",
+        })
+        run_id = run_response.get_json()["run"]["id"]
+        email_response = self.client.put(
+            f"/api/outgoing/runs/{run_id}/customer-email", json={"email": "anna@example.at"}
+        )
+        self.assertEqual(email_response.status_code, 200, email_response.get_data(as_text=True))
         response = self.client.get("/api/outgoing/customer-search?q=b%C3%B6ckle")
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         customer = response.get_json()["customers"][0]
@@ -177,11 +187,17 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(customer["lastName"], "Böckle")
         self.assertEqual(customer["street"], "Musterstraße 7")
         self.assertEqual(customer["customerUid"], "ATU12345678")
+        self.assertEqual(customer["email"], "anna@example.at")
         page = self.client.get("/outgoing/invoices")
         self.assertIn(b"saleSearchButton", page.data)
         self.assertIn(b"saleFirstName", page.data)
         self.assertIn(b"saleLastName", page.data)
         self.assertIn(b"/api/outgoing/customer-search", page.data)
+        self.assertIn(b"invoiceLiveTotals", page.data)
+        self.assertIn(b"updateInvoiceLiveTotals", page.data)
+        self.assertIn(b"line-footer", page.data)
+        self.assertIn(b"rememberMailRecipient", page.data)
+        self.assertIn(b"customer-email", page.data)
 
     def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):
         page = self.client.get("/outgoing/invoices")

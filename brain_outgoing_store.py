@@ -261,6 +261,7 @@ class OutgoingStore:
             customer_city TEXT NOT NULL,
             customer_country TEXT NOT NULL DEFAULT 'Österreich',
             customer_uid TEXT NOT NULL DEFAULT '',
+            customer_email TEXT NOT NULL DEFAULT '',
             project_title TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
             created_at TEXT NOT NULL,
@@ -408,6 +409,7 @@ class OutgoingStore:
             ("billing_rate", "TEXT NOT NULL DEFAULT '75'"),
             ("material_markup_percent", "TEXT NOT NULL DEFAULT '80'"),
             ("pricing_locked_at", "TEXT"),
+            ("customer_email", "TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in run_columns:
                 con.execute(f"ALTER TABLE outgoing_runs ADD COLUMN {column} {definition}")
@@ -485,22 +487,56 @@ class OutgoingStore:
         if not street or not postal or not city:
             raise ValueError("Vollständige Rechnungsadresse fehlt.")
         with _LOCK, self.connect() as con:
+            customer_email = str(data.get("customerEmail") or "").strip()
+            if not customer_email and data.get("customerIndex") not in (None, ""):
+                previous = con.execute(
+                    "SELECT customer_email FROM outgoing_runs WHERE customer_index=? AND customer_email<>'' ORDER BY id DESC LIMIT 1",
+                    (data.get("customerIndex"),),
+                ).fetchone()
+                customer_email = str(previous["customer_email"] or "").strip() if previous else ""
             cur = con.execute("""
                 INSERT INTO outgoing_runs(
                     project_index,project_number,customer_index,label,customer_name,customer_company,
                     customer_street,customer_postal_code,customer_city,customer_country,customer_uid,
-                    project_title,status,created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'open',?)
+                    customer_email,project_title,status,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)
             """, (
                 data.get("projectIndex"), str(data.get("projectNumber") or ""), data.get("customerIndex"), label,
                 customer_name, customer_company, street, postal, city,
                 str(data.get("country") or "Österreich").strip(), str(data.get("customerUid") or "").strip().upper(),
-                str(data.get("projectTitle") or data.get("title") or "").strip(), _now(),
+                customer_email, str(data.get("projectTitle") or data.get("title") or "").strip(), _now(),
             ))
             run_id = cur.lastrowid
             self._audit(con, "run", run_id, "create", {"label": label, "projectNumber": data.get("projectNumber")})
             con.commit()
         return self.run(run_id)
+
+    def update_run_customer_email(self, run_id, value):
+        """Remember a billing email for this run and later runs of the same customer."""
+        run_id = int(run_id)
+        email = str(value or "").strip()
+        addresses = [item.strip() for item in email.replace(";", ",").split(",") if item.strip()]
+        if not addresses or any("@" not in item for item in addresses):
+            raise ValueError("Bitte eine gültige E-Mail-Adresse eingeben.")
+        email = ", ".join(dict.fromkeys(addresses))
+        with _LOCK, self.connect() as con:
+            current = con.execute("SELECT id FROM outgoing_runs WHERE id=?", (run_id,)).fetchone()
+            if not current:
+                raise ValueError("Rechnungslauf nicht gefunden.")
+            con.execute("UPDATE outgoing_runs SET customer_email=? WHERE id=?", (email, run_id))
+            self._audit(con, "run", run_id, "update_customer_email", {"email": email})
+            con.commit()
+        return self.run(run_id)
+
+    def customer_email(self, customer_index):
+        if customer_index in (None, ""):
+            return ""
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT customer_email FROM outgoing_runs WHERE customer_index=? AND customer_email<>'' ORDER BY id DESC LIMIT 1",
+                (customer_index,),
+            ).fetchone()
+            return str(row["customer_email"] or "").strip() if row else ""
 
     def update_run_recipient(self, run_id, data):
         """Correct the invoice recipient without changing project master data."""
@@ -1083,6 +1119,7 @@ class OutgoingStore:
             "projectTitle": run.get("project_title"),
             "label": run.get("label"),
             "customerUid": run.get("customer_uid"),
+            "customerEmail": run.get("customer_email"),
             "company": run.get("customer_company"),
             "customerName": run.get("customer_name"),
             "street": run.get("customer_street"),
