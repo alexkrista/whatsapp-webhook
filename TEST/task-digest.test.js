@@ -3,21 +3,34 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { isTestRecipient } = require("../task-digest");
+const { employeeScheduledToWork } = require("../task-digest");
 
-test("Mock-Mitarbeiter werden nicht als echte WhatsApp-Empfänger behandelt", () => {
-  assert.equal(isTestRecipient(
-    { id: "edmund-mock-mreyk5vk-k27g", name: "Edmund Mock", phone: "0043 650 000000" },
-    "edmund-mock-mreyk5vk-k27g",
-    "Edmund Mock",
-  ), true);
-  assert.equal(isTestRecipient(
-    { id: "max-mustermann", name: "Max Mustermann", phone: "0043 650 123456" },
-    "max-mustermann",
-    "Max Mustermann",
-  ), false);
+test("08:30-Aufgabenliste beachtet freie Tage aus dem Zeitmodell", () => {
+  const employee = { id: "edmund-mock-mreyk5vk-k27g", name: "Edmund Mock", worktimeModelId: "edmund" };
+  const models = [{
+    id: "edmund",
+    seasons: [{
+      months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      weekdays: {
+        "1": { free: true, from: "", to: "", targetHours: 0 },
+        "2": { free: false, from: "07:00", to: "17:00", targetHours: 9.25 },
+      },
+    }],
+  }];
+
+  assert.equal(employeeScheduledToWork(employee, "2026-09-07", models), false, "Montag ist laut Modell frei");
+  assert.equal(employeeScheduledToWork(employee, "2026-09-08", models), true, "Dienstag ist Arbeitstag");
 });
 
-test("Explizit markierte Testdatensätze werden unterdrückt", () => {
-  assert.equal(isTestRecipient({ id: "probe", name: "Probe", isTest: true }, "probe", "Probe"), true);
+test("Zeitmodell Version 2 erkennt fehlende Planung am Montag als frei", () => {
+  const employee = { id: "edi", worktimeModelId: "edi-v2" };
+  const models = [{
+    id: "edi-v2",
+    configured: true,
+    timeModelVersion: 2,
+    blocks: { planning: { rows: [{ days: [2, 3, 4, 5], from: "07:00", to: "17:00" }] } },
+  }];
+
+  assert.equal(employeeScheduledToWork(employee, "2026-09-07", models), false);
+  assert.equal(employeeScheduledToWork(employee, "2026-09-08", models), true);
 });

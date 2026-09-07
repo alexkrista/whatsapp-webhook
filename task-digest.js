@@ -62,18 +62,46 @@ function isAlex(value) {
   return name === "alexander krista" || name === "alex krista" || name.startsWith("alexander krista ") || name.startsWith("alex krista ");
 }
 
-function isTestRecipient(employee, assigneeId, assigneeName) {
-  if (employee?.isTest === true || employee?.test === true || employee?.mock === true) return true;
-  const identity = [
-    assigneeId,
-    assigneeName,
-    employee?.id,
-    employee?.employeeId,
-    employee?.name,
-    employee?.employeeName,
-    employee?.email,
-  ].map(normalizeName).filter(Boolean).join(" ");
-  return /(^| )(mock|test|dummy)( |$)/.test(identity);
+function employeeScheduledToWork(employee, date, models) {
+  const value = new Date(`${String(date || "").slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(value.getTime())) return true;
+  const weekday = value.getDay();
+  if (weekday === 0 || weekday === 6) return false;
+
+  const rows = Array.isArray(models) ? models : [];
+  const modelId = String(employee?.worktimeModelId || "krista-standard");
+  const model = rows.find(item => String(item?.id || "") === modelId)
+    || rows.find(item => String(item?.id || "") === "krista-standard")
+    || rows[0]
+    || null;
+  if (!model) return true;
+
+  const planningRows = model?.blocks?.planning?.rows;
+  if (Array.isArray(planningRows) && (model?.configured === true || planningRows.length)) {
+    const modelWeekday = weekday === 0 ? 7 : weekday;
+    return planningRows.some(row =>
+      (Array.isArray(row?.days) ? row.days : []).map(Number).includes(modelWeekday)
+      && Boolean(String(row?.from || "").trim())
+      && Boolean(String(row?.to || "").trim())
+    );
+  }
+
+  if (Array.isArray(model?.seasons)) {
+    const month = value.getMonth() + 1;
+    const season = model.seasons.find(item =>
+      (Array.isArray(item?.months) ? item.months : []).map(Number).includes(month)
+    );
+    const rule = season?.weekdays?.[String(weekday)];
+    if (rule) return rule.free !== true && (Number(rule.targetHours) > 0 || Boolean(rule.from && rule.to));
+  }
+
+  if (Array.isArray(model?.days)) {
+    const dayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+    const rule = model.days.find(item => String(item?.dayName || "") === dayNames[weekday]);
+    if (rule) return rule.isWorkDay !== false && Number(rule.shouldHours ?? rule.targetHours ?? 0) > 0;
+  }
+
+  return true;
 }
 
 async function readJson(file, fallback) {
@@ -217,16 +245,18 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
     absences: path.join(kristineDir, "absences.json"),
     holidays: path.join(systemDir, "holidays.json"),
     companyVacations: path.join(systemDir, "company-vacations.json"),
+    worktimeModels: path.join(systemDir, "worktime-models.json"),
     state: path.join(kristineDir, "task-digest-state.json"),
   };
 
   async function run(date = localDateISO(), force = false) {
-    const [tasksRaw, employeesRaw, absencesRaw, holidaysRaw, vacationsRaw, stateRaw] = await Promise.all([
+    const [tasksRaw, employeesRaw, absencesRaw, holidaysRaw, vacationsRaw, modelsRaw, stateRaw] = await Promise.all([
       readJson(files.tasks, []),
       readEmployees(),
       readJson(files.absences, []),
       readJson(files.holidays, []),
       readJson(files.companyVacations, []),
+      readJson(files.worktimeModels, []),
       readJson(files.state, {}),
     ]);
 
@@ -238,6 +268,7 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
     const absences = unwrapArray(absencesRaw, ["absences"]);
     const holidays = unwrapArray(holidaysRaw, ["holidays"]);
     const vacations = unwrapArray(vacationsRaw, ["vacations"]);
+    const worktimeModels = unwrapArray(modelsRaw, ["models"]);
     const nonWork = globalNonWorkDay(date, holidays, vacations);
     const groups = groupByAssignee(tasks);
     const state = pruneState(stateRaw && typeof stateRaw === "object" ? stateRaw : {});
@@ -250,20 +281,13 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
     for (const [assigneeId, allRows] of groups) {
       const employee = employeeById.get(String(assigneeId)) || null;
       const assigneeName = String(employee?.name || employee?.employeeName || allRows[0]?.assigneeName || assigneeId);
-      const urgentOnly = nonWork || employeeAbsent(assigneeId, date, absences);
+      const modelFree = employee ? !employeeScheduledToWork(employee, date, worktimeModels) : false;
+      const urgentOnly = nonWork || modelFree || employeeAbsent(assigneeId, date, absences);
       const rows = urgentOnly ? allRows.filter(task => task.priority === "sofort") : allRows;
       if (!rows.length) { suppressed += allRows.length; continue; }
 
       const recipientKey = String(employee?.id || employee?.employeeId || assigneeId);
       const previous = state.days[date].recipients[recipientKey];
-      if (isTestRecipient(employee, assigneeId, assigneeName)) {
-        state.days[date].recipients[recipientKey] = { status: "suppressed", at: new Date().toISOString(), reason: "test_recipient" };
-        suppressed += rows.length;
-        if (previous?.reason !== "test_recipient") {
-          logger.log("KRISTINE 08:30 Testempfänger ausgelassen", { date, assigneeId: recipientKey, assigneeName, count: rows.length });
-        }
-        continue;
-      }
       if (!force && previous?.status === "sent") continue;
       if (!force && previous?.status === "failed" && previous?.at) {
         const age = Date.now() - Date.parse(previous.at);
@@ -319,4 +343,4 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
   return { run, files };
 }
 
-module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex, isTestRecipient };
+module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex, employeeScheduledToWork };
