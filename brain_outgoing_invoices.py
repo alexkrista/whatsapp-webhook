@@ -44,6 +44,75 @@ def _ten_l_fallback_price(five_l_price):
     return round(float(five_l_price or 0) * 2 * 0.97, 2)
 
 
+def _rtf_to_text(value):
+    """Convert the small WinWorker activity RTF subset to readable plain text."""
+    source = str(value or "")
+    if not source.lstrip().startswith("{\\rtf"):
+        return source.strip()
+    destinations = {"fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "generator", "txinfo"}
+    output = []
+    stack = [False]
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "{":
+            look = source[index + 1:index + 80].lstrip()
+            destination = bool(re.match(r"^\\\*", look))
+            word = re.match(r"^\\([A-Za-z]+)", look)
+            stack.append(stack[-1] or destination or bool(word and word.group(1).lower() in destinations))
+            index += 1
+            continue
+        if char == "}":
+            if len(stack) > 1:
+                stack.pop()
+            index += 1
+            continue
+        if char != "\\":
+            if not stack[-1] and char not in "\r\n":
+                output.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(source):
+            break
+        symbol = source[index + 1]
+        if symbol in "{}\\":
+            if not stack[-1]:
+                output.append(symbol)
+            index += 2
+            continue
+        if symbol == "'" and index + 3 < len(source):
+            if not stack[-1]:
+                try:
+                    output.append(bytes([int(source[index + 2:index + 4], 16)]).decode("cp1252"))
+                except (ValueError, UnicodeDecodeError):
+                    pass
+            index += 4
+            continue
+        match = re.match(r"\\([A-Za-z]+)(-?\d+)? ?", source[index:])
+        if not match:
+            index += 2
+            continue
+        word = match.group(1).lower()
+        parameter = match.group(2)
+        if not stack[-1]:
+            if word in {"par", "line"}:
+                output.append("\n")
+            elif word == "tab":
+                output.append("\t")
+            elif word == "u" and parameter is not None:
+                codepoint = int(parameter)
+                if codepoint < 0:
+                    codepoint += 65536
+                output.append(chr(codepoint))
+        index += len(match.group(0))
+    text = "".join(output).replace("\xa0", " ")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _project_owner_names(meta):
     contacts = meta.get("projectContacts") if isinstance(meta, dict) else {}
     contacts = contacts if isinstance(contacts, dict) else {}
@@ -199,7 +268,7 @@ def install(ns):
     ww_hours_source = ns.get("ww_hours_fusion_source")
 
     def project_recorded_hours_net(project_number):
-        """WinWorker project hours minus 15 minutes per employee and workday."""
+        """Sum WinWorker net hours; their recorded pause is already deducted."""
         project_number = str(project_number or "").strip()
         if not project_number.isdigit() or not callable(search_projects) or not callable(ww_hours_source):
             return 0.0
@@ -218,7 +287,8 @@ def install(ns):
                 continue
             key = (day, person)
             grouped[key] = grouped.get(key, 0.0) + float(row.get("netHours") or 0)
-        return round(sum(max(0.0, value - 0.25) for value in grouped.values()), 4)
+        # netHours is already reduced by the recorded pause; do not deduct it twice.
+        return round(sum(max(0.0, value) for value in grouped.values()), 4)
     kristine_api_request = ns.get("kristine_api_request")
 
     def close_finished_project_after_invoice(invoice):
@@ -892,6 +962,183 @@ def install(ns):
             "runs": run_summaries,
         }
 
+    def project_regie_reports(project):
+        """Read WinWorker Rapport + Rapport_Positionen without requiring PDF exports."""
+        if not callable(sql_connection):
+            raise RuntimeError("WinWorker-Rapportquelle ist nicht verfügbar.")
+        project_index = int(project.get("projectIndex") or 0)
+        connection = sql_connection("WinWorker_Projekte_Standard")
+        try:
+            cursor = connection.cursor()
+            rows = cursor.execute("""
+                SELECT
+                    CONVERT(varchar(36), r.gID) AS RapportId,
+                    r.sName AS RapportName,
+                    r.sBlattNr AS SheetNumber,
+                    r.dzDatum AS ReportDate,
+                    r.dzGeaendert AS ChangedAt,
+                    r.eStatus AS RapportStatus,
+                    r.sRtfTaetigkeit AS ActivityRtf,
+                    r.sBemerkung AS RapportNote,
+                    r.dMaterialpauschalevH AS MaterialFlatPercent,
+                    CONVERT(varchar(36), r.gAbgerechnetBuchID) AS BilledDocumentId,
+                    r.lAbgerechnetBuchart AS BilledDocumentType,
+                    CONVERT(varchar(36), rp.gID) AS PositionId,
+                    rp.eTyp AS PositionType,
+                    rp.sBezeichnung AS Description,
+                    rp.sEinheit AS UnitName,
+                    rp.dMenge AS Quantity,
+                    rp.cEP AS UnitPrice,
+                    rp.cGP AS LineTotal,
+                    rp.cSK AS PurchaseUnitPrice,
+                    rp.dZuschlagvH AS MarkupPercent,
+                    rp.lMaterialIndex AS MaterialIndex,
+                    rp.lMitarbeiterIndex AS EmployeeIndex,
+                    rp.dzStart AS StartsAt,
+                    rp.dzEnde AS EndsAt,
+                    rp.sBemerkung AS PositionNote,
+                    le.sVorname AS EmployeeFirstName,
+                    le.sName AS EmployeeLastName,
+                    le.sMANr AS EmployeeNumber
+                FROM dbo.Rapport AS r
+                LEFT JOIN dbo.Rapport_Positionen AS rp ON rp.gRapportID = r.gID
+                LEFT JOIN WinWorker_Personal_Standard.dbo.LohnEmpfaenger AS le
+                    ON le.StammIndex = rp.lMitarbeiterIndex
+                WHERE r.lProjektIndex = ?
+                ORDER BY r.dzDatum, r.sBlattNr, rp.dzAufgenommen, rp.gID
+            """, project_index).fetchall()
+            columns = [column[0] for column in cursor.description]
+        finally:
+            connection.close()
+
+        def as_number(value):
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def as_date(value):
+            if value is None:
+                return ""
+            if hasattr(value, "date"):
+                return value.date().isoformat()
+            return str(value)[:10]
+
+        def as_iso(value):
+            if value is None:
+                return ""
+            return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+        def as_time(value):
+            if value is None:
+                return ""
+            return value.strftime("%H:%M") if hasattr(value, "strftime") else str(value)[11:16]
+
+        reports = {}
+        for raw in rows:
+            row = dict(zip(columns, raw))
+            source_id = str(row.get("RapportId") or "").strip()
+            if not source_id:
+                continue
+            report = reports.get(source_id)
+            if report is None:
+                name = str(row.get("RapportName") or "").strip()
+                sheet = str(row.get("SheetNumber") or "").strip()
+                report = {
+                    "source": "WW",
+                    "sourceId": source_id,
+                    "projectNumber": str(project.get("projectNumber") or ""),
+                    "projectIndex": project_index,
+                    "reportNumber": name or (f"Rapport {sheet}" if sheet else source_id[:8]),
+                    "name": name,
+                    "sheetNumber": sheet,
+                    "reportDate": as_date(row.get("ReportDate")),
+                    "changedAt": as_iso(row.get("ChangedAt")),
+                    "statusCode": int(row.get("RapportStatus") or 0),
+                    "statusLabel": "Versendet" if int(row.get("RapportStatus") or 0) == 2 else "In WinWorker erfasst",
+                    "description": _rtf_to_text(row.get("ActivityRtf")),
+                    "note": str(row.get("RapportNote") or "").strip(),
+                    "materialFlatPercent": round(as_number(row.get("MaterialFlatPercent")), 3),
+                    "billedDocumentId": str(row.get("BilledDocumentId") or "").strip(),
+                    "billedDocumentType": int(row.get("BilledDocumentType") or 0),
+                    "employeeDetails": [],
+                    "materials": [],
+                    "totalHours": 0.0,
+                    "laborCost": 0.0,
+                    "materialCost": 0.0,
+                    "totalNet": 0.0,
+                    "_employees": {},
+                }
+                reports[source_id] = report
+            position_id = str(row.get("PositionId") or "").strip()
+            if not position_id:
+                continue
+            position_type = int(row.get("PositionType") or 0)
+            quantity = as_number(row.get("Quantity"))
+            unit_price = as_number(row.get("UnitPrice"))
+            line_total = as_number(row.get("LineTotal"))
+            if position_type == 1:
+                employee_index = str(row.get("EmployeeIndex") or "").strip()
+                first = str(row.get("EmployeeFirstName") or "").strip()
+                last = str(row.get("EmployeeLastName") or "").strip()
+                employee_name = " ".join(part for part in (first, last) if part).strip() or f"Mitarbeiter {employee_index or '?'}"
+                employee = report["_employees"].get(employee_index)
+                if employee is None:
+                    employee = {
+                        "employeeIndex": int(row.get("EmployeeIndex") or 0),
+                        "employeeNumber": str(row.get("EmployeeNumber") or "").strip(),
+                        "name": employee_name,
+                        "hours": 0.0,
+                        "cost": 0.0,
+                        "unitPrice": 0.0,
+                        "from": "",
+                        "to": "",
+                    }
+                    report["_employees"][employee_index] = employee
+                employee["hours"] += quantity
+                employee["cost"] += line_total
+                employee["unitPrice"] = max(employee["unitPrice"], unit_price)
+                start = as_time(row.get("StartsAt"))
+                end = as_time(row.get("EndsAt"))
+                if start and (not employee["from"] or start < employee["from"]):
+                    employee["from"] = start
+                if end and end > employee["to"]:
+                    employee["to"] = end
+                report["totalHours"] += quantity
+                report["laborCost"] += line_total
+            elif position_type == 2:
+                purchase_unit = as_number(row.get("PurchaseUnitPrice"))
+                report["materials"].append({
+                    "sourceId": position_id,
+                    "materialIndex": int(row.get("MaterialIndex") or 0),
+                    "name": str(row.get("Description") or "Material").strip() or "Material",
+                    "quantity": round(quantity, 3),
+                    "unit": str(row.get("UnitName") or "").strip(),
+                    "unitPrice": round(unit_price, 3),
+                    "cost": round(line_total, 3),
+                    "purchaseUnitPrice": round(purchase_unit, 3),
+                    "purchaseCost": round(quantity * purchase_unit, 3),
+                    "markupPercent": round(as_number(row.get("MarkupPercent")), 3),
+                    "note": str(row.get("PositionNote") or "").strip(),
+                })
+                report["materialCost"] += line_total
+
+        result = []
+        for report in reports.values():
+            report["employeeDetails"] = list(report.pop("_employees").values())
+            for employee in report["employeeDetails"]:
+                employee["hours"] = round(employee["hours"], 3)
+                employee["cost"] = round(employee["cost"], 3)
+                employee["unitPrice"] = round(employee["unitPrice"], 3)
+            report["employees"] = ", ".join(employee["name"] for employee in report["employeeDetails"])
+            report["totalHours"] = round(report["totalHours"], 3)
+            report["laborCost"] = round(report["laborCost"], 3)
+            report["materialCost"] = round(report["materialCost"], 3)
+            report["materialTotal"] = report["materialCost"]
+            report["totalNet"] = round(report["laborCost"] + report["materialCost"], 3)
+            result.append(report)
+        return result
+
     def billing_response(payload, status=200):
         response = make_response(jsonify(payload), status)
         origin = str(request.headers.get("Origin") or "")
@@ -1005,6 +1252,47 @@ def install(ns):
                 "days": days,
                 "rows": detail_rows,
             }})
+        except Exception as exc:
+            return billing_response({"ok": False, "error": str(exc)}, 500)
+
+    @app.route("/api/outgoing/project-regie-reports", methods=["POST", "OPTIONS"])
+    def outgoing_project_regie_reports():
+        if request.method == "OPTIONS":
+            return billing_response({}, 204)
+        try:
+            origin = str(request.headers.get("Origin") or "")
+            if origin:
+                if origin != "https://protokoll.krista.at":
+                    return billing_response({"ok": False, "error": "Herkunft nicht freigegeben."}, 403)
+                expected = str(os.environ.get("KRISTINE_ADMIN_TOKEN") or "")
+                supplied = str(request.headers.get("X-Krista-Token") or "")
+                if not expected:
+                    return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
+                if not hmac.compare_digest(supplied, expected):
+                    return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
+            data = request.get_json(silent=True) or {}
+            project_number = str(data.get("projectNumber") or "").strip()
+            if not project_number or not project_number.isdigit() or len(project_number) > 12:
+                return billing_response({"ok": False, "error": "Ungültige Baustellennummer."}, 400)
+            if not callable(search_projects):
+                raise RuntimeError("WinWorker-Projektsuche ist nicht verfügbar.")
+            terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
+            matches = [
+                row for row in search_projects(terms, include_metrics=False, limit=20)
+                if str(row.get("projectNumber") or "").strip() == project_number
+            ]
+            if not matches:
+                return billing_response({"ok": True, "projectNumber": project_number, "reports": [], "count": 0})
+            if len(matches) > 1:
+                return billing_response({"ok": False, "error": "Baustellennummer ist in WinWorker nicht eindeutig."}, 409)
+            reports = project_regie_reports(matches[0])
+            return billing_response({
+                "ok": True,
+                "projectNumber": project_number,
+                "projectIndex": int(matches[0].get("projectIndex") or 0),
+                "reports": reports,
+                "count": len(reports),
+            })
         except Exception as exc:
             return billing_response({"ok": False, "error": str(exc)}, 500)
 
