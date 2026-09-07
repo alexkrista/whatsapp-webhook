@@ -77,6 +77,43 @@ def _offer_order_positions(offer_payload):
     return order_positions, order_number
 
 
+def _winworker_order_positions(calculation_payload, line_payload=None):
+    """Return accepted WinWorker order rows, enriched with parsed quantity and price data."""
+    calculation = (calculation_payload or {}).get("calculation") or {}
+    line_rows = (line_payload or {}).get("rows") or []
+    order_positions = []
+    for index, position in enumerate(calculation.get("positions") or []):
+        kind = str(position.get("kind") or "auftrag").strip().lower()
+        if kind not in {"auftrag", "nachtrag_auftrag"}:
+            continue
+        details = line_rows[index] if index < len(line_rows) and isinstance(line_rows[index], dict) else {}
+        if details.get("calcIncluded") is False:
+            continue
+        description = str(
+            position.get("shortText") or position.get("title") or position.get("description") or ""
+        ).strip()
+        if not description:
+            continue
+        quantity = float(details.get("quantity") or 0)
+        unit = str(details.get("unit") or "").strip()
+        unit_price = float(details.get("unitPrice") or 0)
+        amount = float(position.get("amount") or 0)
+        if quantity <= 0 or unit_price <= 0:
+            quantity = 1.0
+            unit = "PA"
+            unit_price = amount
+        order_positions.append({
+            "number": str(position.get("number") or index + 1),
+            "description": description,
+            "quantity": quantity,
+            "unit": unit or "PA",
+            "unitPrice": unit_price,
+            "discountPercent": 0.0,
+            "groupName": "Nachtrag Auftrag" if kind == "nachtrag_auftrag" else "Auftrag",
+        })
+    return order_positions, str(calculation.get("orderNo") or "").strip()
+
+
 def _rtf_to_text(value):
     """Convert the small WinWorker activity RTF subset to readable plain text."""
     source = str(value or "")
@@ -754,6 +791,19 @@ def install(ns):
                     order_positions, order_number = _offer_order_positions(offer_payload)
                 except Exception:
                     pass
+                if not order_positions:
+                    try:
+                        calculation_payload = kristine_api_request(
+                            f"/admin/api/job/{project_number}/order-calculation"
+                        ) or {}
+                        line_payload = kristine_api_request(
+                            f"/admin/api/job/{project_number}/order-lines-v2"
+                        ) or {}
+                        order_positions, order_number = _winworker_order_positions(
+                            calculation_payload, line_payload
+                        )
+                    except Exception:
+                        pass
             try:
                 recorded_hours_net = project_recorded_hours_net(project_number)
             except Exception:
@@ -1873,7 +1923,7 @@ let lineCatalog=null,lineCatalogPromise=null,lineCatalogProject='';
 function ensureLineCatalog(){const project=[selectedRun?.id,selectedRun?.billing_rate,selectedRun?.material_markup_percent].join(':');if(lineCatalog&&lineCatalogProject===project)return Promise.resolve(lineCatalog);if(lineCatalogProject!==project){lineCatalog=null;lineCatalogPromise=null;lineCatalogProject=project}if(!lineCatalogPromise)lineCatalogPromise=api('/api/outgoing/line-catalog?run='+encodeURIComponent(selectedRun?.id||'')+'&project='+encodeURIComponent(selectedRun?.project_number||'')).then(d=>lineCatalog={employees:d.employees||[],materials:d.materials||[],orderPositions:d.orderPositions||[],orderNumber:d.orderNumber||'',materialMarkup:Number(d.materialMarkup||80),billingRate:Number(d.billingRate||75)}).catch(e=>{console.warn('Auswahllisten konnten nicht geladen werden',e);return lineCatalog={employees:[],materials:[],orderPositions:[],orderNumber:'',materialMarkup:80,billingRate:75}});return lineCatalogPromise}
 function editorRowsAsLines(){return [...($('lineRows')?.rows||[])].map(row=>{const inputs=[...row.querySelectorAll('input')],value=field=>inputs.find(x=>x.dataset.f===field)?.value??'';return {description:value('description'),quantity:value('quantity'),unit:value('unit'),unitPrice:value('unitPrice'),discountPercent:value('discountPercent')}})}
 function appendEditorLine(line){$('addLine')?.click();const row=$('lineRows')?.rows?.[$('lineRows').rows.length-1];if(!row)return;for(const [field,value] of Object.entries(line)){const input=row.querySelector(`[data-f="${field}"]`);if(input){input.value=value??'';input.dispatchEvent(new Event('input',{bubbles:true}))}}}
-function mountOrderPositionPicker(){const section=$('lineRows')?.closest('.section');if(!section||section.querySelector('#orderPositionPicker')||!selectedRun?.project_number)return;const picker=document.createElement('details');picker.id='orderPositionPicker';picker.className='order-picker';picker.open=true;picker.innerHTML='<summary>Auftragspositionen auswählen</summary><div class="small muted" style="margin-top:8px">Auftragspositionen werden geladen …</div>';section.insertBefore(picker,section.querySelector('table'));ensureLineCatalog().then(catalog=>{const positions=catalog.orderPositions||[];if(!positions.length){picker.innerHTML='<summary>Auftragspositionen</summary><div class="small muted" style="margin-top:8px">Für diese Baustelle sind noch keine Positionen im KRISTINE-Angebot/Auftrag gespeichert.</div>';picker.open=false;return}const rows=positions.map((p,i)=>`<tr><td><input type="checkbox" data-order-position="${i}"></td><td>${esc(p.number||i+1)}</td><td>${p.groupName?`<span class="small muted">${esc(p.groupName)}</span><br>`:''}${esc(p.description)}</td><td>${esc(p.quantity)}</td><td>${esc(p.unit)}</td><td class="money">${money(p.unitPrice)}</td><td class="money">${money(Number(p.quantity||0)*Number(p.unitPrice||0)*(1-Number(p.discountPercent||0)/100))}</td></tr>`).join('');picker.innerHTML=`<summary>Auftragspositionen${catalog.orderNumber?' · '+esc(catalog.orderNumber):''} (${positions.length})</summary><div class="small muted" style="margin:8px 0">Nur angehakte Positionen werden oberhalb der Regie übernommen. Danach sind sie normal änderbar oder mit × löschbar.</div><table class="order-picker-table"><thead><tr><th>✓</th><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th class="money">EP netto</th><th class="money">Summe</th></tr></thead><tbody>${rows}</tbody></table><div class="row"><button type="button" id="orderSelectAll">Alle</button><button type="button" id="orderSelectNone">Keine</button><button type="button" class="good" id="orderAddSelected">Ausgewählte oberhalb der Regie übernehmen</button></div>`;const checks=()=>[...picker.querySelectorAll('[data-order-position]')];picker.querySelector('#orderSelectAll').onclick=()=>checks().forEach(x=>x.checked=true);picker.querySelector('#orderSelectNone').onclick=()=>checks().forEach(x=>x.checked=false);picker.querySelector('#orderAddSelected').onclick=()=>{const selected=checks().filter(x=>x.checked&&!x.disabled);if(!selected.length){msg('Bitte mindestens eine Auftragsposition anhaken.',true);return}const existing=editorRowsAsLines();while($('lineRows')?.rows?.length)$('lineRows').rows[$('lineRows').rows.length-1].querySelector('[data-del]')?.click();for(const checkbox of selected){const p=positions[Number(checkbox.dataset.orderPosition)];appendEditorLine({description:p.description,quantity:p.quantity,unit:p.unit,unitPrice:p.unitPrice,discountPercent:p.discountPercent||0});checkbox.disabled=true;checkbox.checked=false}for(const line of existing){if(existing.length===1&&line.description==='Kumulativer Leistungsstand lt. Auftrag'&&!Number(line.unitPrice||0))continue;appendEditorLine(line)}decorateRegieEditor();mountInvoiceLiveTotals();updateInvoiceLiveTotals();msg(`${selected.length} Auftragsposition(en) oberhalb der Regie übernommen.`)}}).catch(error=>{picker.innerHTML=`<summary>Auftragspositionen</summary><div class="small muted" style="margin-top:8px">Nicht verfügbar: ${esc(error.message)}</div>`})}
+function mountOrderPositionPicker(){const section=$('lineRows')?.closest('.section');if(!section||section.querySelector('#orderPositionPicker')||!selectedRun?.project_number)return;const picker=document.createElement('details');picker.id='orderPositionPicker';picker.className='order-picker';picker.open=true;picker.innerHTML='<summary>Auftragspositionen auswählen</summary><div class="small muted" style="margin-top:8px">Auftragspositionen werden geladen …</div>';section.insertBefore(picker,section.querySelector('table'));ensureLineCatalog().then(catalog=>{const positions=catalog.orderPositions||[];if(!positions.length){picker.innerHTML='<summary>Auftragspositionen</summary><div class="small muted" style="margin-top:8px">Für diese Baustelle sind noch keine Auftragspositionen aus WinWorker oder KRISTINE verfügbar.</div>';picker.open=false;return}const rows=positions.map((p,i)=>`<tr><td><input type="checkbox" data-order-position="${i}"></td><td>${esc(p.number||i+1)}</td><td>${p.groupName?`<span class="small muted">${esc(p.groupName)}</span><br>`:''}${esc(p.description)}</td><td>${esc(p.quantity)}</td><td>${esc(p.unit)}</td><td class="money">${money(p.unitPrice)}</td><td class="money">${money(Number(p.quantity||0)*Number(p.unitPrice||0)*(1-Number(p.discountPercent||0)/100))}</td></tr>`).join('');picker.innerHTML=`<summary>Auftragspositionen${catalog.orderNumber?' · '+esc(catalog.orderNumber):''} (${positions.length})</summary><div class="small muted" style="margin:8px 0">Nur angehakte Positionen werden oberhalb der Regie übernommen. Danach sind sie normal änderbar oder mit × löschbar.</div><table class="order-picker-table"><thead><tr><th>✓</th><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th class="money">EP netto</th><th class="money">Summe</th></tr></thead><tbody>${rows}</tbody></table><div class="row"><button type="button" id="orderSelectAll">Alle</button><button type="button" id="orderSelectNone">Keine</button><button type="button" class="good" id="orderAddSelected">Ausgewählte oberhalb der Regie übernehmen</button></div>`;const checks=()=>[...picker.querySelectorAll('[data-order-position]')];picker.querySelector('#orderSelectAll').onclick=()=>checks().forEach(x=>x.checked=true);picker.querySelector('#orderSelectNone').onclick=()=>checks().forEach(x=>x.checked=false);picker.querySelector('#orderAddSelected').onclick=()=>{const selected=checks().filter(x=>x.checked&&!x.disabled);if(!selected.length){msg('Bitte mindestens eine Auftragsposition anhaken.',true);return}const existing=editorRowsAsLines();while($('lineRows')?.rows?.length)$('lineRows').rows[$('lineRows').rows.length-1].querySelector('[data-del]')?.click();for(const checkbox of selected){const p=positions[Number(checkbox.dataset.orderPosition)];appendEditorLine({description:p.description,quantity:p.quantity,unit:p.unit,unitPrice:p.unitPrice,discountPercent:p.discountPercent||0});checkbox.disabled=true;checkbox.checked=false}for(const line of existing){if(existing.length===1&&line.description==='Kumulativer Leistungsstand lt. Auftrag'&&!Number(line.unitPrice||0))continue;appendEditorLine(line)}decorateRegieEditor();mountInvoiceLiveTotals();updateInvoiceLiveTotals();msg(`${selected.length} Auftragsposition(en) oberhalb der Regie übernommen.`)}}).catch(error=>{picker.innerHTML=`<summary>Auftragspositionen</summary><div class="small muted" style="margin-top:8px">Nicht verfügbar: ${esc(error.message)}</div>`})}
 function catalogDatalist(id,items){let list=$(id);if(!list){list=document.createElement('datalist');list.id=id;document.body.append(list)}const choices=items.flatMap(item=>[item.name,...(item.aliases||[])].map(name=>({name,item})));list.replaceChildren(...choices.map(choice=>{const item=choice.item,option=document.createElement('option');option.value=choice.name;option.label=[item.unit,item.unitPrice?money(item.unitPrice):''].filter(Boolean).join(' · ');return option}));return list}
 function applyCatalogChoice(row,items){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=inputs.find(x=>x.dataset.f==='unit'),price=inputs.find(x=>x.dataset.f==='unitPrice'),value=desc?.value||'';const choice=items.find(item=>[item.name,...(item.aliases||[])].some(name=>name.localeCompare(value,'de',{sensitivity:'base'})===0));if(!choice)return;if(desc&&desc.value!==choice.name){desc.value=choice.name;desc.dispatchEvent(new Event('input',{bubbles:true}))}if(unit&&choice.unit){unit.value=choice.unit;unit.dispatchEvent(new Event('input',{bubbles:true}))}if(price&&Number(choice.unitPrice)>0){price.value=Number(choice.unitPrice).toFixed(2);price.dispatchEvent(new Event('input',{bubbles:true}))}decorateRegieEditor()}
 function wireEditorCatalogs(){if(!selectedRun||(editing&&editing.status!=='draft'))return;ensureLineCatalog().then(catalog=>{catalogDatalist('outgoingEmployeeChoices',catalog.employees);catalogDatalist('outgoingMaterialChoices',catalog.materials);const rows=[...($('lineRows')?.rows||[])];let inMaterial=false,beforeReports=rows.some(row=>[...row.querySelectorAll('input')].some(input=>input.dataset.f==='unit'&&String(input.value||'').toUpperCase()==='TAG'));for(const row of rows){const inputs=[...row.querySelectorAll('input')],desc=inputs.find(x=>x.dataset.f==='description'),unit=String(inputs.find(x=>x.dataset.f==='unit')?.value||'').trim().toUpperCase(),price=inputs.find(x=>x.dataset.f==='unitPrice');if(unit==='TAG'){beforeReports=false;inMaterial=false;continue}if(beforeReports)continue;if(unit==='MATERIAL'){inMaterial=true;continue}if(['BAUTEIL','ARBEIT','SUMME'].includes(unit)){if(unit==='SUMME')inMaterial=false;continue}const labor=['STD','STD.','H','H.'].includes(unit);if(!labor&&!inMaterial)inMaterial=true;const items=labor?catalog.employees:(inMaterial?catalog.materials:[]),listId=labor?'outgoingEmployeeChoices':(inMaterial?'outgoingMaterialChoices':'');if(!desc||!listId)continue;desc.setAttribute('list',listId);desc.setAttribute('autocomplete','off');if(inMaterial&&!selectedRun.project_number&&!desc.placeholder)desc.placeholder='Material suchen …';if(!desc.dataset.catalogWired){desc.dataset.catalogWired='1';desc.addEventListener('change',()=>applyCatalogChoice(row,items))}if(labor||(inMaterial&&Number(price?.value||0)<=0))applyCatalogChoice(row,items)}})}

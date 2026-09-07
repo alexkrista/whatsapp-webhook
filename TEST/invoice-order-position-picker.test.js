@@ -11,12 +11,15 @@ for (const script of [...page[1].matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
 
 for (const text of [
   'offer-draft',
+  'order-calculation',
+  'order-lines-v2',
   'orderPositions',
   'position.get("isAlternative") is True',
   'offer_draft.get("groupDiscounts")',
   'Auftragspositionen auswählen',
   'Nur angehakte Positionen werden oberhalb der Regie übernommen',
   'Ausgewählte oberhalb der Regie übernehmen',
+  'WinWorker oder KRISTINE',
   'mountOrderPositionPicker();mountInvoiceLiveTotals()',
 ]) {
   assert.ok(source.includes(text), `Rechnungseditor enthält ${text}`);
