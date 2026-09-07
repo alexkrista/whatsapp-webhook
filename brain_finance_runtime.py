@@ -6,6 +6,8 @@ from datetime import datetime
 from urllib.parse import quote, unquote
 from brain_finance_source import FinanceStore,norm_method,norm_status,METHODS,STATUSES,payment_id
 from brain_finance_ui import payments_page,revolut_page
+from brain_finance_sepa import build_sepa_xml
+from brain_outgoing_store import DEFAULT_SETTINGS
 
 FINANCE_MARKER="[FINANCE_APPROVAL]"
 FINAL_APPROVALS={"approved","reduced"}
@@ -62,7 +64,7 @@ def install(ns):
     page=str(ns.get("MOBILE_PAGE") or ""); app=ns.get("app")
     if not page or app is None:return
     allowed=ns.get("MOBILE_ALLOWED_PATHS")
-    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
+    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
     if isinstance(allowed,set):
         for p in paths:allowed.add(p)
     store=FinanceStore(ns)
@@ -169,6 +171,31 @@ def install(ns):
         if reason:base+=f": {reason}"
         return base[:140]
 
+    def sepa_payload(items):
+        debtor_name=str(os.environ.get("KRISTINE_SEPA_DEBTOR_NAME") or DEFAULT_SETTINGS["company_name"])
+        debtor_iban=str(os.environ.get("KRISTINE_SEPA_DEBTOR_IBAN") or DEFAULT_SETTINGS["bank_iban"])
+        debtor_bic=str(os.environ.get("KRISTINE_SEPA_DEBTOR_BIC") or DEFAULT_SETTINGS["bank_bic"])
+        xml,filename=build_sepa_xml(items,debtor_name,debtor_iban,debtor_bic)
+        return {"xml":xml.decode("utf-8"),"filename":filename}
+
+    def requested_live_items(req, allow_submitted=False):
+        if not isinstance(req,list) or not req:raise ValueError("Keine Rechnungen ausgewählt.")
+        _boot,tasks=finance_tasks();idx=approval_index(tasks);live={(x["source"],x["id"]):apply_approval(x,idx) for x in store.items(False)};out=[];total=0.0
+        for r in req:
+            key=(str((r or {}).get("source") or ""),str((r or {}).get("id") or ""));x=live.get(key)
+            if not x:raise ValueError(f"Rechnung nicht mehr offen: {key[1]}")
+            if norm_method(x.get("paymentMethod"))!="transfer":raise ValueError(f"Nicht als Überweisung markiert: {x.get('supplier') or key[1]}")
+            submitted=norm_status(x.get("paymentStatus"))=="sepa_submitted"
+            if submitted and not allow_submitted:raise ValueError(f"Bereits an SEPA übergeben: {x.get('supplier') or key[1]}")
+            if not submitted and allow_submitted:raise ValueError(f"Noch nicht an SEPA übergeben: {x.get('supplier') or key[1]}")
+            if key[0]=="KRISTINE" and x.get("approvalStatus") not in FINAL_APPROVALS:
+                label="gesperrt" if x.get("approvalStatus")=="blocked" else "noch nicht freigegeben"
+                raise ValueError(f"Rechnung {label}: {x.get('supplier') or key[1]}")
+            pay=float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0)
+            if pay<=0:raise ValueError(f"Freigabebetrag ist 0,00 EUR: {x.get('supplier') or key[1]}")
+            y=dict(x);y["paymentAmount"]=round(pay,2);y["remittanceText"]=remittance_for(x);out.append(y);total+=pay
+        return out,round(total,2)
+
     if "brain_incoming_open_items" not in app.view_functions:
         from flask import request,jsonify,Response
         @app.get("/incoming/open-items")
@@ -222,20 +249,17 @@ def install(ns):
         def brain_incoming_payment_batch_prepare():
             try:
                 b=request.get_json(silent=True) or {}; req=b.get("items") or []
-                if not isinstance(req,list) or not req:raise ValueError("Keine Rechnungen ausgewählt.")
-                _boot,tasks=finance_tasks();idx=approval_index(tasks);live={(x["source"],x["id"]):apply_approval(x,idx) for x in store.items(False)};out=[];total=0.0
-                for r in req:
-                    key=(str((r or {}).get("source") or ""),str((r or {}).get("id") or "")); x=live.get(key)
-                    if not x:raise ValueError(f"Rechnung nicht mehr offen: {key[1]}")
-                    if norm_method(x.get("paymentMethod"))!="transfer":raise ValueError(f"Nicht als Überweisung markiert: {x.get('supplier') or key[1]}")
-                    if norm_status(x.get("paymentStatus"))=="sepa_submitted":raise ValueError(f"Bereits an SEPA übergeben: {x.get('supplier') or key[1]}")
-                    if key[0]=="KRISTINE" and x.get("approvalStatus") not in FINAL_APPROVALS:
-                        label="gesperrt" if x.get("approvalStatus")=="blocked" else "noch nicht freigegeben"
-                        raise ValueError(f"Rechnung {label}: {x.get('supplier') or key[1]}")
-                    pay=float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0)
-                    if pay<=0:raise ValueError(f"Freigabebetrag ist 0,00 EUR: {x.get('supplier') or key[1]}")
-                    remittance=remittance_for(x);saved=store.set_meta(key[0],key[1],method="transfer",status="sepa_submitted",note=remittance);y=dict(x);y.update(saved);y["paymentAmount"]=round(pay,2);y["remittanceText"]=remittance;out.append(y);total+=pay
-                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=round(total,2),items=out,message="SEPA übergeben vorgemerkt; bezahlt erst nach Bankabgleich.")
+                out,total=requested_live_items(req);download=sepa_payload(out)
+                for y in out:
+                    saved=store.set_meta(y["source"],y["id"],method="transfer",status="sepa_submitted",note=y["remittanceText"]);y.update(saved)
+                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,message="SEPA-Datei erstellt; bezahlt erst nach Bankabgleich.",**download)
+            except ValueError as e:return jsonify(ok=False,error=str(e)),400
+            except Exception as e:return jsonify(ok=False,error=str(e)),500
+        @app.post("/incoming/payment-batch/xml")
+        def brain_incoming_payment_batch_xml():
+            try:
+                b=request.get_json(silent=True) or {};out,total=requested_live_items(b.get("items") or [],allow_submitted=True);download=sepa_payload(out)
+                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,message="SEPA-Datei erneut erstellt.",**download)
             except ValueError as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/revolut/items")

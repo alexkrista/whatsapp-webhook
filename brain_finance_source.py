@@ -63,7 +63,7 @@ class FinanceStore:
         sql=self.ns.get("sql_connection"); pay=self.ns.get("_payment_state"); iso=self.ns.get("_iso_date"); lookup=self.ns.get("_pdf_paths_by_docids")
         if not callable(sql) or not callable(pay): return []
         legacy=self.legacy(); meta=self.meta(); c=sql("WinWorker_Projekte_Standard")
-        try: rows=c.cursor().execute("SELECT e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,e.lVonAdrIndex,e.sZahlungsStatus,dm.sDocID,k.sFirma,k.sName,k.sVorname FROM dbo.Eingangsbelege e LEFT JOIN dbo.DokumentenManagement dm ON dm.gID=e.gDMID LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden k ON k.StammIndex=e.lVonAdrIndex ORDER BY e.dzBelegdatum,e.cID").fetchall()
+        try: rows=c.cursor().execute("SELECT e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,e.lVonAdrIndex,e.sZahlungsStatus,e.sIban,e.sSwift,e.sBankkontoInhaber,dm.sDocID,k.sFirma,k.sName,k.sVorname FROM dbo.Eingangsbelege e LEFT JOIN dbo.DokumentenManagement dm ON dm.gID=e.gDMID LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden k ON k.StammIndex=e.lVonAdrIndex ORDER BY e.dzBelegdatum,e.cID").fetchall()
         finally:c.close()
         keep=[]; docs=[]
         for r in rows:
@@ -78,7 +78,7 @@ class FinanceStore:
         out=[]
         for r,sid,doc,lg,ex,is_paid in keep:
             company=str(r.sFirma or "").strip(); person=" ".join(x for x in [str(r.sVorname or "").strip(),str(r.sName or "").strip()] if x); found=paths.get(doc,{}) if doc else {}; m=norm_method(ex.get("paymentMethod")); st="paid" if is_paid else norm_status(ex.get("paymentStatus")); dt=iso(r.dzBelegdatum) if callable(iso) else str(r.dzBelegdatum or "")[:10]
-            out.append(dict(id=sid,docId=doc,supplier=company or person or f"WW-Adresse {r.lVonAdrIndex or ''}".strip(),invoiceNumber=str(r.sBelegnummer or "").strip(),invoiceDate=dt or "",dueDate=dt or "",amount=float(r.dblBruttoBetrag or 0),currency="EUR",paymentState=st,paymentStatus=st,paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("WinWorker",sid) if m=="transfer" else "")),workflowStatus="WinWorker",path=str(found.get("pdfPath") or found.get("originalPath") or ""),source="WinWorker",brainOverride="paid" if is_paid else ""))
+            out.append(dict(id=sid,docId=doc,supplier=company or person or f"WW-Adresse {r.lVonAdrIndex or ''}".strip(),invoiceNumber=str(r.sBelegnummer or "").strip(),invoiceDate=dt or "",dueDate=dt or "",amount=float(r.dblBruttoBetrag or 0),currency="EUR",iban=str(r.sIban or "").strip(),bic=str(r.sSwift or "").strip(),accountHolder=str(r.sBankkontoInhaber or "").strip(),paymentState=st,paymentStatus=st,paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("WinWorker",sid) if m=="transfer" else "")),workflowStatus="WinWorker",path=str(found.get("pdfPath") or found.get("originalPath") or ""),source="WinWorker",brainOverride="paid" if is_paid else ""))
         return out
     def kristine(self,include_resolved=False):
         f=self.ns.get("_capture_connection"); db=self.ns.get("CAPTURE_DB")
@@ -86,13 +86,13 @@ class FinanceStore:
         meta=self.meta(); c=f(db)
         try:
             where="" if include_resolved else "WHERE LOWER(COALESCE(payment_state,'open')) NOT IN ('paid','bezahlt','closed','geschlossen')"
-            rows=c.execute(f"SELECT id,doc_id,supplier_name,supplier_invoice_number,invoice_date,COALESCE(NULLIF(net_due_date,''),NULLIF(due_date,''),invoice_date) due_date_effective,gross_amount,currency,payment_state,workflow_status,pdf_path FROM incoming_invoices {where} ORDER BY due_date_effective,supplier_name COLLATE NOCASE,gross_amount").fetchall()
+            rows=c.execute(f"SELECT id,doc_id,supplier_name,supplier_invoice_number,invoice_date,COALESCE(NULLIF(net_due_date,''),NULLIF(due_date,''),invoice_date) due_date_effective,gross_amount,currency,iban,swift,account_holder,payment_state,workflow_status,pdf_path FROM incoming_invoices {where} ORDER BY due_date_effective,supplier_name COLLATE NOCASE,gross_amount").fetchall()
         finally:c.close()
         out=[]
         for r in rows:
             sid=f"kristine:{int(r['id'])}"; ex=meta.get(("KRISTINE",sid),{}); m=norm_method(ex.get("paymentMethod")); src=norm_status(r["payment_state"]); st="paid" if src=="paid" else norm_status(ex.get("paymentStatus"))
             if st=="paid" and not include_resolved: continue
-            out.append(dict(id=sid,docId=str(r["doc_id"] or ""),supplier=str(r["supplier_name"] or ""),invoiceNumber=str(r["supplier_invoice_number"] or ""),invoiceDate=str(r["invoice_date"] or ""),dueDate=str(r["due_date_effective"] or ""),amount=float(r["gross_amount"] or 0),currency=str(r["currency"] or "EUR"),paymentState=st,paymentStatus=st,paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("KRISTINE",sid) if m=="transfer" else "")),workflowStatus=str(r["workflow_status"] or ""),path=str(r["pdf_path"] or ""),source="KRISTINE",brainOverride=""))
+            out.append(dict(id=sid,docId=str(r["doc_id"] or ""),supplier=str(r["supplier_name"] or ""),invoiceNumber=str(r["supplier_invoice_number"] or ""),invoiceDate=str(r["invoice_date"] or ""),dueDate=str(r["due_date_effective"] or ""),amount=float(r["gross_amount"] or 0),currency=str(r["currency"] or "EUR"),iban=str(r["iban"] or ""),bic=str(r["swift"] or ""),accountHolder=str(r["account_holder"] or ""),paymentState=st,paymentStatus=st,paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("KRISTINE",sid) if m=="transfer" else "")),workflowStatus=str(r["workflow_status"] or ""),path=str(r["pdf_path"] or ""),source="KRISTINE",brainOverride=""))
         return out
     def items(self,include_resolved=False):
         ww=self.ww(include_resolved); local=self.kristine(include_resolved); docs={str(x.get("docId") or "").strip() for x in local if str(x.get("docId") or "").strip()}; rows=[x for x in ww if str(x.get("docId") or "").strip() not in docs]+local
