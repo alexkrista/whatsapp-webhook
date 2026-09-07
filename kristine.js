@@ -2395,11 +2395,16 @@ const open = taskId
       }
 
       const state = { ...(states[employeeId] || {}), employeeId, employeeName, timeline: Array.isArray(states[employeeId]?.timeline) ? states[employeeId].timeline : [] };
-      if (!segments.length) state.mode = "idle";
-      else if (last?.to) state.mode = "finished_day";
-      else state.mode = last.type === "pause" ? "pause" : last.type === "lunch" ? "lunch" : "working";
-      const active = [...segments].reverse().find((segment) => segment.type === "work");
-      if (active) state.activeAssignmentKey = `${date}|${employeeId}|${active.from}|${active.jobId}`;
+      // Eine Korrektur an einem alten Tag darf den heutigen Live-Status des
+      // Mitarbeiters nicht auf "Feierabend" oder "Arbeitet" umstellen.
+      if (date === localDateISO()) {
+        if (!segments.length) state.mode = "idle";
+        else if (last?.to) state.mode = "finished_day";
+        else state.mode = last.type === "pause" ? "pause" : last.type === "lunch" ? "lunch" : "working";
+        const active = [...segments].reverse().find((segment) => segment.type === "work");
+        if (active) state.activeAssignmentKey = `${date}|${employeeId}|${active.from}|${active.jobId}`;
+        else delete state.activeAssignmentKey;
+      }
       state.timeline.push({ at: createdAt, time: localTimeHM(), type: copiedFrom?.employeeId ? "day_segments_copied" : "day_segments_edited", detail: copiedFrom?.employeeId ? `${segments.length} Tagesabschnitt(e) wie ${copiedFrom.employeeName || copiedFrom.employeeId} übernommen` : `${segments.length} Tagesabschnitt(e) durch Büro gespeichert`, source: "office", manual: true, movedLinkedEntries: moved, copiedFrom });
       state.timeline = state.timeline.slice(-200);
       states[employeeId] = state;
