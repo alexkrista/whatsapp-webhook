@@ -68,6 +68,35 @@ class OfferOrderPositionTests(unittest.TestCase):
         self.assertEqual(positions[1]["unitPrice"], 75)
         self.assertEqual(positions[1]["groupName"], "Nachtrag Auftrag")
 
+    def test_winworker_order_confirmation_pdf_lines_are_read_and_regie_is_skipped(self):
+        text = """Auftragsbestätigung
+Nr. : 202608002 / Angebot Nr. : 202605001
+Menge EP [EUR] GP [EUR]Pos Einh. Leistung
+Titel 1 Innen
+1.01 220,00 m² Fußbodenfläche(n) und Laufwege
+mit Maler-Abdeckvlies abdecken.
+3,50 770,00
+1.02 710,00 m² Anstrich mit emissionsarmer Dispersionsfarbe
+Brillux Superlux ELF 3000, stumpfmatt
+9,20 6.532,00
+1.06 10,00 Std Regiearbeiten ausgeführt von Facharbeitern
+75,00 750,00
+1.07 300,00 VE Material und Maschinen für Regiearbeiten.
+1,00 300,00
+Titelzusammenstellung :
+"""
+        positions, order_number = brain_outgoing_invoices._winworker_order_pdf_positions(text)
+        self.assertEqual(order_number, "202608002")
+        self.assertEqual([row["number"] for row in positions], ["1.01", "1.02"])
+        self.assertEqual(positions[0]["quantity"], 220)
+        self.assertEqual(positions[0]["unit"], "m²")
+        self.assertEqual(positions[0]["unitPrice"], 3.5)
+        self.assertEqual(positions[1]["unitPrice"], 9.2)
+        self.assertEqual(
+            positions[1]["description"],
+            "Anstrich mit emissionsarmer Dispersionsfarbe Brillux Superlux ELF 3000, stumpfmatt",
+        )
+
 
 @unittest.skipUnless(HAS_FLASK, "Flask ist in der gebündelten Test-Python-Laufzeit nicht installiert")
 class OutgoingOrderPositionTests(unittest.TestCase):

@@ -21,6 +21,8 @@ from brain_outgoing_store import OutgoingStore, TAX_MODES
 
 _INSTALLED = False
 _SYNC_THREAD_STARTED = False
+_WW_PDF_POSITION_CACHE = {}
+_WW_PDF_POSITION_CACHE_LOCK = threading.Lock()
 
 
 def _lg_price_key(value):
@@ -142,6 +144,150 @@ def _winworker_order_positions(calculation_payload, line_payload=None):
             "groupName": "Nachtrag Auftrag" if kind == "nachtrag_auftrag" else "Auftrag",
         })
     return order_positions, str(calculation.get("orderNo") or "").strip()
+
+
+def _german_number(value):
+    raw = str(value or "").strip().replace(" ", "")
+    if not raw:
+        return 0.0
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def _normalize_ww_pdf_unit(value):
+    raw = str(value or "").strip().rstrip(".")
+    folded = raw.casefold().replace("â²", "2").replace("â³", "3").replace("�", "2")
+    return {
+        "m2": "m²", "m²": "m²", "m3": "m³", "m³": "m³",
+        "stk": "Stk", "stück": "Stk", "stueck": "Stk",
+        "std": "Std.", "stunden": "Std.", "ve": "VE", "lfm": "lfm",
+        "psch": "PA", "pausch": "PA", "pauschal": "PA", "pa": "PA",
+    }.get(folded, raw)
+
+
+def _winworker_order_pdf_positions(pdf_text):
+    """Extract selectable fixed-price lines from a WinWorker order-confirmation PDF."""
+    text = str(pdf_text or "").replace("\r", "")
+    if not re.search(r"Auftragsbest(?:ä|a|�|\u00c3\u00a4)tigung", text, re.IGNORECASE):
+        return [], ""
+    number_match = re.search(
+        r"Auftragsbest(?:ä|a|�|\u00c3\u00a4)tigung[\s\S]{0,180}?Nr\.\s*:\s*([0-9]{6,})",
+        text,
+        re.IGNORECASE,
+    )
+    order_number = number_match.group(1) if number_match else ""
+    position_pattern = re.compile(
+        r"(?m)^\s*(\d+(?:\.\d+)+)\s+"
+        r"(\d{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:[.,]\d+)?)\s+"
+        r"([^\s]+)\s+(.+?)\s*$"
+    )
+    matches = list(position_pattern.finditer(text))
+    positions = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[match.start():end]
+        block = re.split(
+            r"(?im)^\s*(?:Titelzusammenstellung\s*:|Nettosumme\s*=|Summe\s+[^\n]*)",
+            block,
+            maxsplit=1,
+        )[0]
+        money_tokens = re.findall(r"(?<![\d.])\d{1,3}(?:\.\d{3})*,\d{2}(?!\d)", block)
+        if len(money_tokens) < 3:
+            continue
+        quantity = _german_number(match.group(2))
+        unit = _normalize_ww_pdf_unit(match.group(3))
+        unit_price = _german_number(money_tokens[-2])
+        line_total = _german_number(money_tokens[-1])
+        if quantity <= 0 or unit_price <= 0 or line_total <= 0:
+            continue
+        description_block = block
+        last_price = description_block.rfind(money_tokens[-1])
+        if last_price >= 0:
+            description_block = description_block[:last_price]
+        unit_price_at = description_block.rfind(money_tokens[-2])
+        if unit_price_at >= 0:
+            description_block = description_block[:unit_price_at]
+        description_block = description_block[match.end(3) - match.start():]
+        description_lines = []
+        for raw_line in description_block.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line or re.fullmatch(r"-\s*\d+\s*-", line):
+                continue
+            if re.match(r"^(?:Menge\s+)?EP\s*\[EUR\]", line, re.IGNORECASE):
+                continue
+            description_lines.append(line)
+        description = " ".join(description_lines).strip(" -")
+        if not description:
+            continue
+        if re.search(r"\bRegiearbeiten\b|Material\s+und\s+Maschinen\s+f(?:ü|u|�)r\s+Regie", description, re.IGNORECASE):
+            continue
+        positions.append({
+            "number": match.group(1),
+            "description": description,
+            "quantity": quantity,
+            "unit": unit or "PA",
+            "unitPrice": unit_price,
+            "discountPercent": 0.0,
+            "groupName": f"Auftrag {order_number}".strip(),
+        })
+    return positions, order_number
+
+
+def _extract_pdf_text(path):
+    import pymupdf
+    with pymupdf.open(str(path)) as document:
+        return "\n".join(page.get_text("text") or "" for page in document)
+
+
+def _winworker_project_pdf_positions(project_catalog):
+    """Use the newest real WinWorker order-confirmation PDF as final fallback."""
+    catalog = project_catalog or {}
+    project = catalog.get("project") or {}
+    project_index = str(project.get("projectIndex") or "").strip()
+    documents = [
+        row for row in (catalog.get("documents") or [])
+        if row.get("pdfFound") and str(row.get("path") or "").strip()
+    ]
+    signature = tuple(sorted(
+        (
+            str(row.get("path") or ""),
+            str(row.get("modified") or row.get("printDateTime") or row.get("documentDate") or ""),
+        )
+        for row in documents
+    ))
+    cache_key = project_index or repr(signature)
+    with _WW_PDF_POSITION_CACHE_LOCK:
+        cached = _WW_PDF_POSITION_CACHE.get(cache_key)
+        if cached and cached.get("signature") == signature:
+            return cached["positions"], cached["orderNumber"]
+
+    def document_date(row):
+        return str(row.get("printDateTime") or row.get("documentDate") or row.get("printDate") or "")
+
+    documents.sort(key=document_date, reverse=True)
+    best_positions, best_number = [], ""
+    for row in documents:
+        try:
+            pdf_text = _extract_pdf_text(row.get("path"))
+            positions, order_number = _winworker_order_pdf_positions(pdf_text)
+        except Exception:
+            continue
+        if positions:
+            best_positions, best_number = positions, order_number or str(row.get("bookNumber") or "")
+            break
+    with _WW_PDF_POSITION_CACHE_LOCK:
+        _WW_PDF_POSITION_CACHE[cache_key] = {
+            "signature": signature,
+            "positions": best_positions,
+            "orderNumber": best_number,
+        }
+        if len(_WW_PDF_POSITION_CACHE) > 80:
+            _WW_PDF_POSITION_CACHE.pop(next(iter(_WW_PDF_POSITION_CACHE)))
+    return best_positions, best_number
 
 
 def _rtf_to_text(value):
@@ -363,6 +509,7 @@ def install(ns):
     search_projects = ns.get("search_projects")
     search_customers = ns.get("ww_address_search")
     search_pdf = ns.get("search_pdf")
+    project_document_catalog = ns.get("project_document_catalog")
     terms_fn = ns.get("_terms")
     sql_connection = ns.get("sql_connection")
     ww_hours_source = ns.get("ww_hours_fusion_source")
@@ -804,6 +951,7 @@ def install(ns):
             material_markup = 80.0
             billing_rate = float(employee_payload.get("currentBillingRate") or 75)
             run_id = str(request.args.get("run") or "").strip()
+            pricing_run = {}
             if run_id.isdigit():
                 pricing_run = store.run(int(run_id))
                 material_markup = float(pricing_run.get("material_markup_percent") or material_markup)
@@ -832,6 +980,23 @@ def install(ns):
                         order_positions, order_number = _winworker_order_positions(
                             calculation_payload, line_payload
                         )
+                    except Exception:
+                        pass
+                if not order_positions and callable(project_document_catalog):
+                    try:
+                        project_index = int(pricing_run.get("project_index") or 0)
+                        if not project_index and callable(search_projects):
+                            terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
+                            exact = [
+                                row for row in search_projects(terms, include_metrics=False, limit=20)
+                                if str(row.get("projectNumber") or "").strip() == project_number
+                            ]
+                            if len(exact) == 1:
+                                project_index = int(exact[0].get("projectIndex") or 0)
+                        if project_index:
+                            order_positions, order_number = _winworker_project_pdf_positions(
+                                project_document_catalog(project_index)
+                            )
                     except Exception:
                         pass
             try:
