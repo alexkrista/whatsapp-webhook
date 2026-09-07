@@ -209,6 +209,7 @@ class OutgoingStoreTests(unittest.TestCase):
             self.store.save_draft(payload)
         payload["recipientUid"] = "ATU12345678"
         self.assertEqual(self.store.save_draft(payload)["recipient_uid"], "ATU12345678")
+        self.assertEqual(self.store.run(business["id"])["customer_uid"], "ATU12345678")
 
     def test_issued_invoice_can_be_revised_before_month_close(self):
         draft = self.store.save_draft(self.payload())

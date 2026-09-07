@@ -198,6 +198,11 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertIn(b"line-footer", page.data)
         self.assertIn(b"rememberMailRecipient", page.data)
         self.assertIn(b"customer-email", page.data)
+        self.assertIn(b"addressUidSearch", page.data)
+        self.assertIn(b"runUidSearch", page.data)
+        self.assertIn(b"findCustomerUid", page.data)
+        self.assertIn("Über 10.000 € brutto".encode(), page.data)
+        self.assertIn(b"taxation_customs/vies", page.data)
 
     def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):
         page = self.client.get("/outgoing/invoices")

@@ -1031,6 +1031,12 @@ class OutgoingStore:
                 and not recipient_uid
             ):
                 raise ValueError("Bei einer B2B-Rechnung über 10.000 EUR ist die Kunden-UID Pflicht.")
+            if recipient_uid and not str(run["customer_uid"] or "").strip():
+                con.execute(
+                    "UPDATE outgoing_runs SET customer_uid=? WHERE id=? AND customer_uid=''",
+                    (recipient_uid, run_id),
+                )
+                self._audit(con, "run", run_id, "remember_customer_uid", {"customerUid": recipient_uid})
             now = _now()
             fields = (
                 kind, issue_date, due_date, service_from, service_to, str(data.get("subject") or "").strip(),
