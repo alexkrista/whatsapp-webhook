@@ -62,6 +62,20 @@ function isAlex(value) {
   return name === "alexander krista" || name === "alex krista" || name.startsWith("alexander krista ") || name.startsWith("alex krista ");
 }
 
+function isTestRecipient(employee, assigneeId, assigneeName) {
+  if (employee?.isTest === true || employee?.test === true || employee?.mock === true) return true;
+  const identity = [
+    assigneeId,
+    assigneeName,
+    employee?.id,
+    employee?.employeeId,
+    employee?.name,
+    employee?.employeeName,
+    employee?.email,
+  ].map(normalizeName).filter(Boolean).join(" ");
+  return /(^| )(mock|test|dummy)( |$)/.test(identity);
+}
+
 async function readJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, "utf8")); }
   catch { return fallback; }
@@ -242,6 +256,14 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
 
       const recipientKey = String(employee?.id || employee?.employeeId || assigneeId);
       const previous = state.days[date].recipients[recipientKey];
+      if (isTestRecipient(employee, assigneeId, assigneeName)) {
+        state.days[date].recipients[recipientKey] = { status: "suppressed", at: new Date().toISOString(), reason: "test_recipient" };
+        suppressed += rows.length;
+        if (previous?.reason !== "test_recipient") {
+          logger.log("KRISTINE 08:30 Testempfänger ausgelassen", { date, assigneeId: recipientKey, assigneeName, count: rows.length });
+        }
+        continue;
+      }
       if (!force && previous?.status === "sent") continue;
       if (!force && previous?.status === "failed" && previous?.at) {
         const age = Date.now() - Date.parse(previous.at);
@@ -297,4 +319,4 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
   return { run, files };
 }
 
-module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex };
+module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex, isTestRecipient };
