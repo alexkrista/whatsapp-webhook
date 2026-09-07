@@ -290,6 +290,25 @@ def _winworker_project_pdf_positions(project_catalog):
     return best_positions, best_number
 
 
+def _cached_order_pdf_positions(order_pdf_root, project_number):
+    project_number = str(project_number or "").strip()
+    if not project_number.isdigit():
+        return [], ""
+    directory = Path(order_pdf_root) / project_number
+    try:
+        candidates = sorted(directory.glob("*.pdf"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return [], ""
+    for path in candidates:
+        try:
+            positions, order_number = _winworker_order_pdf_positions(_extract_pdf_text(path))
+        except Exception:
+            continue
+        if positions:
+            return positions, order_number or path.stem
+    return [], ""
+
+
 def _rtf_to_text(value):
     """Convert the small WinWorker activity RTF subset to readable plain text."""
     source = str(value or "")
@@ -502,6 +521,9 @@ def install(ns):
     db_path = Path(os.environ.get("KRISTINE_OUTGOING_DB", str(base_db.parent / "kristine_outgoing_invoices.db")))
     output_root = Path(os.environ.get(
         "KRISTINE_OUTGOING_DIR", r"N:\OneDrive\Dokumente\Kristine\Ausgangsrechnungen"
+    ))
+    order_pdf_root = Path(os.environ.get(
+        "KRISTINE_WW_ORDER_PDF_DIR", str(base_db.parent / "kristine_order_confirmations")
     ))
     store = OutgoingStore(db_path, output_root)
     app.extensions["kristine_outgoing_store"] = store
@@ -982,6 +1004,10 @@ def install(ns):
                         )
                     except Exception:
                         pass
+                if not order_positions:
+                    order_positions, order_number = _cached_order_pdf_positions(
+                        order_pdf_root, project_number
+                    )
                 if not order_positions and callable(project_document_catalog):
                     try:
                         project_index = int(pricing_run.get("project_index") or 0)

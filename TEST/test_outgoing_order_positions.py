@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from flask import Flask
@@ -96,6 +97,22 @@ Titelzusammenstellung :
             positions[1]["description"],
             "Anstrich mit emissionsarmer Dispersionsfarbe Brillux Superlux ELF 3000, stumpfmatt",
         )
+
+    def test_cached_order_confirmation_is_available_when_ww_archive_pdf_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "26080"
+            directory.mkdir()
+            pdf_path = directory / "202608002.pdf"
+            pdf_path.write_bytes(b"%PDF-placeholder")
+            with patch.object(
+                brain_outgoing_invoices,
+                "_extract_pdf_text",
+                return_value="""Auftragsbestätigung\nNr. : 202608002\n1.01 2,00 Stk Arbeit\n5,00 10,00""",
+            ):
+                positions, order_number = brain_outgoing_invoices._cached_order_pdf_positions(tmp, "26080")
+        self.assertEqual(order_number, "202608002")
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]["unitPrice"], 5)
 
 
 @unittest.skipUnless(HAS_FLASK, "Flask ist in der gebündelten Test-Python-Laufzeit nicht installiert")

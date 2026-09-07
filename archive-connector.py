@@ -4715,6 +4715,8 @@ def _merged_project_document_type(book, pdf=None):
     generic = {"Sonstige Dokumente", "Weitere WW-Belege"}
     if pdf_type in generic:
         return book_type
+    if book_type not in generic and pdf_type not in generic and book_type != pdf_type:
+        return book_type
     if book_type in {"Teilrechnung", "Schlussrechnung", "Gutschrift / Storno"} and pdf_type == "Rechnung":
         return book_type
     return pdf_type
@@ -4919,6 +4921,17 @@ def project_document_catalog(project_index):
         for book_index, book in enumerate(books):
             number_norm = _normalize_project_identifier(book.get("bookNumber"))
             if len(number_norm) < 3:
+                continue
+            book_type = str(book.get("documentType") or "")
+            pdf_type = canonical_project_document_type(
+                pdf.get("dokumenttyp"), pdf.get("filename"), pdf.get("path")
+            )
+            generic_types = {"Sonstige Dokumente", "Weitere WW-Belege"}
+            if (
+                book_type not in generic_types
+                and pdf_type not in generic_types
+                and book_type != pdf_type
+            ):
                 continue
             score = 0
             if number_norm in filename_norm:
