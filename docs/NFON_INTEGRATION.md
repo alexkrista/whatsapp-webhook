@@ -136,3 +136,13 @@ Sind Username, Password und K-Account gesetzt, kann der geschützte Endpunkt
 `GET /kristine/api/nfon/extensions` die vorhandenen Nebenstellen zur sicheren
 Zuordnung anzeigen. Anrufe bleiben gesperrt, bis `NFON_OFFICE_EXTENSIONS`
 explizit gesetzt ist.
+
+## Lokale TAPI-Direktwahl
+
+Auf Windows-Büroarbeitsplätzen kann Kristine bevorzugt den lokalen
+`xtelsio TAPI for snom`-Treiber verwenden. Dadurch wählt das dem PC zugeordnete
+Snom-Telefon direkt, ohne den Rückrufablauf der NFON CTI API.
+
+Der Connector und seine Installationsanleitung liegen unter `windows-tapi/`.
+Ist er nicht erreichbar, verwendet Kristine weiterhin die konfigurierte NFON
+CTI API. Auf Rechnern ohne beide Wege bleiben normale `tel:`-Links erhalten.

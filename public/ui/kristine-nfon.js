@@ -2,7 +2,9 @@
 
 (function installKristineNfon(){
   const token = new URLSearchParams(location.search).get("token") || "";
+  const tapiBaseUrl = "http://127.0.0.1:17834";
   let status = null;
+  let tapiStatus = null;
   let pendingPhone = "";
 
   function endpoint(path) {
@@ -18,6 +20,26 @@
   }
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>\"]/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" })[char]);
+  }
+  async function tapiRequest(path, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    try {
+      const response = await fetch(tapiBaseUrl + path, {
+        ...options,
+        mode: "cors",
+        cache: "no-store",
+        signal: controller.signal,
+        headers: { "X-Kristine-TAPI": "1", ...(options.headers || {}) },
+      });
+      const text = await response.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch {}
+      if (!response.ok) throw new Error(body?.error || text || `HTTP ${response.status}`);
+      return body;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
   function ensureDialog() {
     let dialog = document.getElementById("kristineNfonDialog");
@@ -48,10 +70,39 @@
       buttons.forEach(button => button.disabled = false);
     }
   }
+  async function callViaTapi(phone) {
+    const dialog = ensureDialog();
+    pendingPhone = String(phone || "").trim();
+    dialog.querySelector("h3").textContent = "Direkt über das Bürotelefon";
+    dialog.querySelector("#kristineNfonNumber").textContent = pendingPhone;
+    dialog.querySelector("#kristineNfonChoices").innerHTML = "";
+    dialog.querySelector("#kristineNfonMessage").textContent = `Wähle über ${tapiStatus?.lineName || "TAPI"} …`;
+    dialog.showModal();
+    try {
+      const result = await tapiRequest("/dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: pendingPhone }),
+      });
+      dialog.querySelector("#kristineNfonMessage").textContent = `✓ ${result.lineName || "Das Telefon"} wählt direkt.`;
+    } catch (error) {
+      tapiStatus = null;
+      document.documentElement.dataset.tapiReady = "0";
+      dialog.querySelector("#kristineNfonMessage").textContent = `Direktwahl nicht erreichbar: ${error.message}`;
+      if (status?.ready) {
+        const fallback = document.createElement("button");
+        fallback.type = "button";
+        fallback.textContent = "Stattdessen über NFON anrufen";
+        fallback.onclick = () => openDialer(pendingPhone);
+        dialog.querySelector("#kristineNfonChoices").replaceChildren(fallback);
+      }
+    }
+  }
   function openDialer(phone) {
     if (!status?.ready) return;
     pendingPhone = String(phone || "").trim();
     const dialog = ensureDialog();
+    dialog.querySelector("h3").textContent = "Über NFON anrufen";
     dialog.querySelector("#kristineNfonNumber").textContent = pendingPhone;
     dialog.querySelector("#kristineNfonMessage").textContent = "";
     dialog.querySelector("#kristineNfonChoices").innerHTML = status.officeExtensions.map(row =>
@@ -71,11 +122,24 @@
       document.documentElement.dataset.nfonReady = "0";
     }
   }
+  async function loadTapiStatus() {
+    try {
+      tapiStatus = await tapiRequest("/status");
+      document.documentElement.dataset.tapiReady = tapiStatus?.ready ? "1" : "0";
+    } catch {
+      tapiStatus = null;
+      document.documentElement.dataset.tapiReady = "0";
+    }
+  }
   document.addEventListener("click", event => {
     const link = event.target.closest?.('a[href^="tel:"]');
-    if (!link || !status?.ready) return;
+    if (!link || (!tapiStatus?.ready && !status?.ready)) return;
     event.preventDefault();
-    openDialer(decodeURIComponent(link.getAttribute("href").slice(4)));
+    const phone = decodeURIComponent(link.getAttribute("href").slice(4));
+    if (tapiStatus?.ready) callViaTapi(phone);
+    else openDialer(phone);
   });
   loadStatus();
+  loadTapiStatus();
+  setInterval(loadTapiStatus, 15000);
 })();
