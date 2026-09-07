@@ -7,6 +7,7 @@
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
+    { key: "krisdrive", label: "KRISDRIVE", icon: "🚐", href: "/public/krisdrive.html", subtitle: "Live-Fahrzeuge, Fahrer, Positionen und Fahrten" },
     { key: "brain", label: "THE BRAIN", icon: "🧠", href: BRAIN_URL, external: true, subtitle: "Firmenwissen, Projekte, Dokumente und Rechnungen" },
     { key: "farben", label: "LG", icon: "🎨", href: "/admin/paint?scan=1", subtitle: "Little Greene · Farbsuche, Mischrezepte, Lager und Bestellung" },
     { key: "kristine", label: "KRISTINE", icon: "✦", href: "/kristine#planning", subtitle: "Leitstand, Planung und Baustellen" },
@@ -44,6 +45,7 @@
     if (hash === "#schedules") return "kriszeit";
     if (isKristineBaustellenPath()) return "kristine";
     if (pathname.includes("baustellen.html")) return "krisadmin";
+    if (pathname.includes("krisdrive")) return "krisdrive";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
     if (pathname.includes("/admin/paint")) return "farben";

@@ -15,6 +15,8 @@ assert.match(kristine, /baustellen\.html/);
 assert.match(page, /location\.href='\/kristine\/baustellen'\+location\.search/);
 assert.match(topbar, /Leitstand, Planung und Baustellen/);
 assert.match(topbar, /key: "krisadmin"[^\n]+href: "\/admin\/ui"/);
+assert.match(topbar, /key: "krisdrive"[^\n]+href: "\/public\/krisdrive\.html"/);
+assert.match(topbar, /pathname\.includes\("krisdrive"\).*return "krisdrive"/);
 assert.match(hub, /KRISTINE · Baustellen-Wissensdrehscheibe/);
 assert.match(hub, /Alter Einstieg · bleibt vorerst erreichbar/);
 
