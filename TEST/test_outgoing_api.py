@@ -37,6 +37,12 @@ class OutgoingApiTests(unittest.TestCase):
                 "postalCode": "6820", "city": "Frastanz", "address": "Weg 1 6820 Frastanz",
                 "title": "Musterprojekt",
             }],
+            "ww_address_search": lambda query, limit=25: [{
+                "addressId": "4711", "customerNumber": "10042", "name": "Böckle",
+                "person": "Anna Böckle", "street": "Musterstraße 7", "postalCode": "6800",
+                "city": "Feldkirch", "address": "Musterstraße 7, 6800 Feldkirch",
+                "vatId": "ATU12345678",
+            }],
             "ww_hours_fusion_source": lambda project_indices: [
                 {"projectIndex": 1, "date": "2026-07-30", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 7.75},
                 {"projectIndex": 1, "date": "2026-07-31", "maIndex": 11, "finkNumber": "101", "employeeName": "Max Muster", "netHours": 6.25},
@@ -158,6 +164,19 @@ class OutgoingApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["to"], ["bauherrin@example.at", "bauherr@example.at"])
         self.assertEqual(payload["cc"], ["bauleitung@example.at"])
+
+    def test_sale_customer_search_uses_winworker_customer_master(self):
+        response = self.client.get("/api/outgoing/customer-search?q=b%C3%B6ckle")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        customer = response.get_json()["customers"][0]
+        self.assertEqual(customer["customerIndex"], "4711")
+        self.assertEqual(customer["company"], "Böckle")
+        self.assertEqual(customer["name"], "Anna Böckle")
+        self.assertEqual(customer["street"], "Musterstraße 7")
+        self.assertEqual(customer["customerUid"], "ATU12345678")
+        page = self.client.get("/outgoing/invoices")
+        self.assertIn(b"saleSearchButton", page.data)
+        self.assertIn(b"/api/outgoing/customer-search", page.data)
 
     def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):
         page = self.client.get("/outgoing/invoices")
