@@ -77,6 +77,31 @@ def _offer_order_positions(offer_payload):
     return order_positions, order_number
 
 
+def _position_quantity_unit(description):
+    match = re.match(
+        r"^\s*(\d{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:[.,]\d+)?)\s*"
+        r"(m²|m2|m³|m3|lfm|Stk\.?|Stück|Stueck|Std\.?|VE|Psch\.?|Pausch\.?|pauschal|"
+        r"Liter|Rolle|Dose|Eimer|kg|PA|L|m)(?=\s|$)",
+        str(description or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return 0.0, ""
+    raw_quantity = match.group(1)
+    if "," in raw_quantity:
+        quantity = float(raw_quantity.replace(".", "").replace(",", "."))
+    elif raw_quantity.count(".") == 1 and len(raw_quantity.rsplit(".", 1)[1]) != 3:
+        quantity = float(raw_quantity)
+    else:
+        quantity = float(raw_quantity.replace(".", ""))
+    raw_unit = match.group(2).rstrip(".")
+    normalized = {
+        "m2": "m²", "m3": "m³", "stück": "Stk", "stueck": "Stk",
+        "psch": "PA", "pausch": "PA", "pauschal": "PA",
+    }.get(raw_unit.casefold(), raw_unit)
+    return quantity, normalized
+
+
 def _winworker_order_positions(calculation_payload, line_payload=None):
     """Return accepted WinWorker order rows, enriched with parsed quantity and price data."""
     calculation = (calculation_payload or {}).get("calculation") or {}
@@ -98,6 +123,11 @@ def _winworker_order_positions(calculation_payload, line_payload=None):
         unit = str(details.get("unit") or "").strip()
         unit_price = float(details.get("unitPrice") or 0)
         amount = float(position.get("amount") or 0)
+        text_quantity, text_unit = _position_quantity_unit(description)
+        if text_quantity > 0:
+            quantity = text_quantity
+        if text_unit:
+            unit = text_unit
         if quantity <= 0 or unit_price <= 0:
             quantity = 1.0
             unit = "PA"

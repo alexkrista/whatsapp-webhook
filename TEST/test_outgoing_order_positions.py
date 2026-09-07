@@ -15,6 +15,10 @@ import brain_outgoing_invoices
 
 
 class OfferOrderPositionTests(unittest.TestCase):
+    def test_position_text_normalizes_german_quantity_and_area_unit(self):
+        self.assertEqual(brain_outgoing_invoices._position_quantity_unit("320,00 m² Gerüst"), (320.0, "m²"))
+        self.assertEqual(brain_outgoing_invoices._position_quantity_unit("12.5 m2 Wand"), (12.5, "m²"))
+
     def test_prices_discounts_and_alternatives_are_normalized(self):
         positions, order_number = brain_outgoing_invoices._offer_order_positions({"draft": {
             "offerNumber": "2608001",
@@ -40,7 +44,7 @@ class OfferOrderPositionTests(unittest.TestCase):
             {"calculation": {
                 "orderNo": "AB-26080",
                 "positions": [
-                    {"number": "1.1", "shortText": "Wände beschichten", "amount": 250,
+                    {"number": "1.1", "shortText": "12,50 m² Wände beschichten", "amount": 250,
                      "kind": "auftrag"},
                     {"number": "2.1", "shortText": "Regiearbeiten", "amount": 500,
                      "kind": "regie"},
@@ -49,13 +53,13 @@ class OfferOrderPositionTests(unittest.TestCase):
                 ],
             }},
             {"rows": [
-                {"quantity": 12.5, "unit": "m²", "unitPrice": 20, "calcIncluded": True},
+                {"quantity": 12.5, "unit": "m", "unitPrice": 20, "calcIncluded": True},
                 {"quantity": 5, "unit": "Std", "unitPrice": 75, "calcIncluded": True},
                 {"quantity": 0, "unit": "", "unitPrice": 0, "calcIncluded": True},
             ]},
         )
         self.assertEqual(order_number, "AB-26080")
-        self.assertEqual([row["description"] for row in positions], ["Wände beschichten", "Zusatz Sockel"])
+        self.assertEqual([row["description"] for row in positions], ["12,50 m² Wände beschichten", "Zusatz Sockel"])
         self.assertEqual(positions[0]["quantity"], 12.5)
         self.assertEqual(positions[0]["unit"], "m²")
         self.assertEqual(positions[0]["unitPrice"], 20)
