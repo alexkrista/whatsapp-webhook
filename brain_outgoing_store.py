@@ -13,7 +13,7 @@ import hashlib
 import json
 import sqlite3
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
@@ -1045,6 +1045,97 @@ class OutgoingStore:
             self._audit(con, "invoice", target_id, "save_draft", {"kind": kind, "runId": run_id})
             con.commit()
         return self.invoice(target_id, live=True)
+
+    def copy_invoice_as_new_draft(self, invoice_id, issue_date=None):
+        """Copy an issued invoice into a fresh, independent invoice run."""
+        source = self.invoice(invoice_id, live=False)
+        if source.get("status") != "issued" or source.get("kind") != "RE":
+            raise ValueError("Nur eine ausgestellte normale oder Extra-Rechnung kann kopiert werden.")
+        run = source.get("run") or {}
+        issue = date.fromisoformat(_iso_date(
+            issue_date or date.today().isoformat(), required=True, label="Rechnungsdatum"
+        ))
+        settings = self.settings()
+        try:
+            due_days = max(0, min(365, int(settings.get("default_due_days") or 14)))
+        except (TypeError, ValueError):
+            due_days = 14
+        due = issue + timedelta(days=due_days)
+
+        cash_percent = _d(source.get("cash_discount_percent"))
+        cash_until = ""
+        if cash_percent:
+            cash_days = min(7, due_days)
+            try:
+                original_issue = date.fromisoformat(str(source.get("issue_date") or "")[:10])
+                original_cash_until = date.fromisoformat(str(source.get("cash_discount_until") or "")[:10])
+                original_span = (original_cash_until - original_issue).days
+                if 0 <= original_span <= 365:
+                    cash_days = original_span
+            except ValueError:
+                pass
+            cash_until = (issue + timedelta(days=cash_days)).isoformat()
+
+        new_run = self.create_run({
+            "projectIndex": run.get("project_index"),
+            "projectNumber": run.get("project_number"),
+            "customerIndex": run.get("customer_index"),
+            "projectTitle": run.get("project_title"),
+            "label": run.get("label"),
+            "customerUid": run.get("customer_uid"),
+            "company": run.get("customer_company"),
+            "customerName": run.get("customer_name"),
+            "street": run.get("customer_street"),
+            "postalCode": run.get("customer_postal_code"),
+            "city": run.get("customer_city"),
+            "country": run.get("customer_country"),
+        })
+        try:
+            self.update_run_pricing(new_run["id"], {
+                "billingRate": run.get("billing_rate") or "75",
+                "materialMarkupPercent": run.get("material_markup_percent") or "80",
+            })
+            copied = self.save_draft({
+                "runId": new_run["id"],
+                "kind": "RE",
+                "issueDate": issue.isoformat(),
+                "dueDate": due.isoformat(),
+                "serviceFrom": issue.isoformat(),
+                "serviceTo": issue.isoformat(),
+                "subject": source.get("subject") or run.get("label") or "",
+                "worker": source.get("worker") or "",
+                "recipientUid": source.get("recipient_uid") or run.get("customer_uid") or "",
+                "taxMode": source.get("tax_mode") or "AT20",
+                "retentionPercent": source.get("retention_percent") or 0,
+                "discountPercent": source.get("discount_percent") or 0,
+                "cashDiscountPercent": source.get("cash_discount_percent") or 0,
+                "cashDiscountUntil": cash_until,
+                "currency": source.get("currency") or "EUR",
+                "notes": source.get("notes") or "",
+                "lines": [{
+                    "description": line.get("description") or "",
+                    "quantity": line.get("quantity"),
+                    "unit": line.get("unit") or "PA",
+                    "unitPrice": line.get("unit_price"),
+                    "discountPercent": line.get("discount_percent") or 0,
+                } for line in (source.get("lines") or [])],
+            })
+        except Exception:
+            with _LOCK, self.connect() as con:
+                has_content = con.execute(
+                    "SELECT 1 FROM outgoing_invoices WHERE run_id=? LIMIT 1", (int(new_run["id"]),)
+                ).fetchone()
+                if not has_content:
+                    con.execute("DELETE FROM outgoing_runs WHERE id=?", (int(new_run["id"]),))
+                    con.commit()
+            raise
+        with _LOCK, self.connect() as con:
+            self._audit(con, "invoice", int(copied["id"]), "copy_as_new_draft", {
+                "sourceInvoiceId": int(invoice_id), "sourceInvoiceNumber": source.get("invoice_number"),
+                "sourceRunId": int(source.get("run_id") or 0), "newRunId": int(new_run["id"]),
+            })
+            con.commit()
+        return {"run": self.run(new_run["id"]), "invoice": self.invoice(copied["id"], live=True)}
 
     def invoice(self, invoice_id, live=False):
         with self.connect() as con:

@@ -95,6 +95,48 @@ class OutgoingStoreTests(unittest.TestCase):
             "netRevenue": 1234.56, "source": "KRISTINE",
         }])
 
+    def test_issued_invoice_can_be_copied_to_fresh_independent_draft(self):
+        self.store.update_run_pricing(self.run["id"], {
+            "billingRate": "82.50", "materialMarkupPercent": "75",
+        })
+        payload = self.payload(amount="1234.56", kind="RE")
+        payload.update({"subject": "Materialverkauf", "notes": "Bitte prüfen."})
+        source = self.store.prepare_issue(self.store.save_draft(payload)["id"])
+
+        copied = self.store.copy_invoice_as_new_draft(source["id"], "2026-09-07")
+        new_run = copied["run"]
+        draft = copied["invoice"]
+
+        self.assertNotEqual(new_run["id"], self.run["id"])
+        self.assertEqual(self.store.run(self.run["id"])["status"], "closed")
+        self.assertEqual(new_run["status"], "open")
+        self.assertEqual(new_run["project_number"], "26025")
+        self.assertEqual(new_run["customer_name"], "Max Muster")
+        self.assertEqual(new_run["billing_rate"], "82.50")
+        self.assertEqual(new_run["material_markup_percent"], "75")
+        self.assertEqual(draft["status"], "draft")
+        self.assertIsNone(draft["invoice_number"])
+        self.assertEqual(draft["kind"], "RE")
+        self.assertEqual(draft["issue_date"], "2026-09-07")
+        self.assertEqual(draft["due_date"], "2026-09-21")
+        self.assertEqual(draft["service_from"], "2026-09-07")
+        self.assertEqual(draft["service_to"], "2026-09-07")
+        self.assertEqual(draft["subject"], "Materialverkauf")
+        self.assertEqual(draft["notes"], "Bitte prüfen.")
+        self.assertEqual(draft["lines"][0]["description"], "Arbeiten")
+        self.assertEqual(draft["lines"][0]["unit_price"], "1234.56")
+        self.assertEqual(source["status"], "issued")
+
+    def test_partial_and_final_invoices_cannot_be_copied(self):
+        partial = self.store.prepare_issue(self.store.save_draft(self.payload(kind="TR"))["id"])
+        with self.assertRaisesRegex(ValueError, "normale oder Extra-Rechnung"):
+            self.store.copy_invoice_as_new_draft(partial["id"], "2026-09-07")
+        final = self.store.prepare_issue(
+            self.store.save_draft(self.payload(amount="12000", kind="SR"))["id"]
+        )
+        with self.assertRaisesRegex(ValueError, "normale oder Extra-Rechnung"):
+            self.store.copy_invoice_as_new_draft(final["id"], "2026-09-07")
+
     def test_number_circle_continues_after_highest_winworker_number(self):
         self.assertEqual(
             self.store.next_number_preview("2026-09-03", ["202609001", "202609004"]),

@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 try:
@@ -157,6 +158,40 @@ class OutgoingApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["to"], ["bauherrin@example.at", "bauherr@example.at"])
         self.assertEqual(payload["cc"], ["bauleitung@example.at"])
+
+    def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):
+        page = self.client.get("/outgoing/invoices")
+        self.assertIn(b"data-copy", page.data)
+        self.assertIn("Als neue Rechnung kopieren".encode(), page.data)
+        run_response = self.client.post("/api/outgoing/runs", json={
+            "projectIndex": 17, "projectNumber": "26017", "customerIndex": 23,
+            "label": "Wiederholungsauftrag", "customerName": "Belinda Muster",
+            "street": "Musterweg 17", "postalCode": "6820", "city": "Frastanz",
+        })
+        run_id = run_response.get_json()["run"]["id"]
+        draft_response = self.client.post("/api/outgoing/invoices", json={
+            "runId": run_id, "kind": "RE", "issueDate": "2026-09-01", "dueDate": "2026-09-15",
+            "serviceFrom": "2026-09-01", "serviceTo": "2026-09-01", "taxMode": "AT20",
+            "subject": "Materialverkauf", "notes": "Wie vereinbart.",
+            "lines": [{"description": "Panellack", "quantity": 5, "unit": "Stk", "unitPrice": 23.4}],
+        })
+        source_id = draft_response.get_json()["invoice"]["id"]
+        issue_response = self.client.post(f"/api/outgoing/invoices/{source_id}/issue", json={})
+        self.assertEqual(issue_response.status_code, 200, issue_response.get_data(as_text=True))
+
+        copy_response = self.client.post(f"/api/outgoing/invoices/{source_id}/copy", json={})
+        self.assertEqual(copy_response.status_code, 200, copy_response.get_data(as_text=True))
+        copied = copy_response.get_json()
+        self.assertNotEqual(copied["run"]["id"], run_id)
+        self.assertEqual(copied["run"]["status"], "open")
+        self.assertEqual(copied["invoice"]["status"], "draft")
+        self.assertIsNone(copied["invoice"]["invoice_number"])
+        self.assertEqual(copied["invoice"]["issue_date"], date.today().isoformat())
+        self.assertEqual(copied["invoice"]["subject"], "Materialverkauf")
+        self.assertEqual(copied["invoice"]["lines"][0]["description"], "Panellack")
+        original = self.client.get(f"/api/outgoing/runs/{run_id}").get_json()["run"]
+        self.assertEqual(original["status"], "closed")
+        self.assertEqual(original["invoices"][0]["status"], "issued")
 
 
 if __name__ == "__main__":
