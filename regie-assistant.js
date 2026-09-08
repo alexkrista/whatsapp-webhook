@@ -239,15 +239,14 @@ function registerRegieAssistant(app, options) {
     const file = path.join(directory, "regie.json");
     await fsp.mkdir(directory, { recursive: true });
     const existing = await readJson(file, {}), reportIds = Array.isArray(existing.reportIds) ? existing.reportIds : [];
-    if (reportIds.includes(report.id)) return;
-    const materialRows = (Array.isArray(existing.materials) ? existing.materials : []).concat(report.materials.map(row => ({
+    const materialRows = (Array.isArray(existing.materials) ? existing.materials : []).filter(row => row.reportId !== report.id).concat(report.materials.map(row => ({
       name: row.product,
       quantity: String(row.quantity),
       unit: row.unit,
       source: "Regie",
       reportId: report.id,
     })));
-    const employeeRows = (Array.isArray(existing.employees) ? existing.employees : []).concat(report.employees.map(row => ({
+    const employeeRows = (Array.isArray(existing.employees) ? existing.employees : []).filter(row => row.reportId !== report.id).concat(report.employees.map(row => ({
       employeeId: row.id,
       name: row.name,
       from: row.from,
@@ -258,20 +257,24 @@ function registerRegieAssistant(app, options) {
       regieDescription: report.description,
       reportId: report.id,
     })));
-    const customerText = [clean(existing.customerText, 12000), report.description].filter(Boolean).join("\n\n").slice(0, 12000);
+    const previousDescription = clean(existing.regieDescriptions?.[report.id], 4000);
+    let customerText = clean(existing.customerText, 12000);
+    if (previousDescription && customerText.includes(previousDescription)) customerText = customerText.replace(previousDescription, report.description);
+    else if (!reportIds.includes(report.id)) customerText = [customerText, report.description].filter(Boolean).join("\n\n").slice(0, 12000);
     await writeJson(file, {
       ...existing,
       version: existing.version || "3.2.0",
       jobId: report.jobId,
       day: report.date,
-      status: "Ausgestellt",
+      status: report.processingStatus === "draft" ? "Entwurf" : "Ausgestellt",
       employees: employeeRows,
       customerText,
       internalNote: clean(existing.internalNote, 12000),
       materials: materialRows,
       specialMaterial: clean(existing.specialMaterial, 4000),
       materialTomorrow: existing.materialTomorrow || { needed: false, text: "" },
-      reportIds: [...reportIds, report.id],
+      reportIds: [...new Set([...reportIds, report.id])],
+      regieDescriptions: { ...(existing.regieDescriptions || {}), [report.id]: report.description },
       createdAt: existing.createdAt || report.createdAt,
       updatedAt: new Date().toISOString(),
     });
@@ -445,6 +448,19 @@ function registerRegieAssistant(app, options) {
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
 
+  app.get("/kristine/api/regie/drafts", async (req, res) => {
+    try {
+      const employeeId = clean(req.query.employeeId, 100), jobId = safeId(req.query.jobId), date = clean(req.query.date, 10);
+      const drafts = (await readJson(REPORTS, []))
+        .filter(report => report.status === "draft")
+        .filter(report => !employeeId || String(report.createdBy?.id) === employeeId || (report.people || []).some(person => String(person.id) === employeeId))
+        .filter(report => !jobId || String(report.jobId) === jobId)
+        .filter(report => !date || String(report.date) === date)
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      res.json({ ok: true, drafts });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
+  });
+
   app.get("/kristine/api/regie-reports", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []);
@@ -596,23 +612,29 @@ function registerRegieAssistant(app, options) {
 
   app.post("/kristine/api/regie", async (req, res) => {
     try {
-      const body = req.body || {}, segment = body.segment || {};
+      const body = req.body || {}, segment = body.segment || {}, draft = body.draft === true;
       if (!Array.isArray(body.people) || !body.people.length) return res.status(400).json({ ok: false, error: "Mindestens eine Person auswählen" });
       if (!clean(body.description)) return res.status(400).json({ ok: false, error: "Beschreibung fehlt" });
       const reports = await readJson(REPORTS, []), confirmations = await readJson(CONFIRMATIONS, []), now = new Date().toISOString();
       const jobId = safeId(segment.jobId);
       if (!jobId) return res.status(400).json({ ok: false, error: "Baustelle fehlt" });
+      const requestedId = safeId(body.id);
+      const existingIndex = reports.findIndex(report => report.status === "draft" && (
+        (requestedId && report.id === requestedId) ||
+        (!requestedId && String(report.jobId) === jobId && String(report.date) === String(body.date) && String(report.createdBy?.id) === String(body.createdBy?.id))
+      ));
+      const existing = existingIndex >= 0 ? reports[existingIndex] : null;
       const incomingEmployees = Array.isArray(body.employees) && body.employees.length
         ? body.employees
         : body.people.map(person => ({ ...person, from: body.from, to: body.to }));
       const employees = incomingEmployees.map(normalizeIssuedEmployee).filter(row => row.name && row.hours > 0);
       if (!employees.length) return res.status(400).json({ ok: false, error: "Mindestens ein Mitarbeiter mit Regiestunden fehlt" });
       const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
-      const reportSequence = await nextReportSequence(jobId, reports);
+      const reportSequence = reportSequenceOf(existing, jobId) || await nextReportSequence(jobId, reports);
       const report = {
-        id: `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
-        status: "prepared",
-        processingStatus: "issued",
+        id: existing?.id || `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+        status: draft ? "draft" : "prepared",
+        processingStatus: draft ? "draft" : "issued",
         billingStatus: "open",
         source: "kgo",
         reportSequence,
@@ -632,15 +654,15 @@ function registerRegieAssistant(app, options) {
         materials: (body.materials || []).map(material => ({ ...normalizeMaterial(material, meta.regieMaterialMarkup ?? 80), labelPhotoName: clean(material.labelPhotoName) })),
         hourlyRate: round(Math.max(0, num(meta.regieHourlyRate ?? 75))),
         materialMarkup: round(Math.max(0, num(meta.regieMaterialMarkup ?? 80))),
-        createdAt: now,
+        createdAt: existing?.createdAt || now,
         updatedAt: now,
       };
-      report.attachments = await saveAttachments(report.id, body.uploads, []);
+      report.attachments = await saveAttachments(report.id, body.uploads, existing?.attachments || []);
       report.photos = report.attachments.filter(file => String(file.type || "").startsWith("image/"));
       report.totals = calculateTotals(report);
-      reports.push(report);
-      for (const person of report.people) {
-        if (String(person.id) === String(report.createdBy?.id)) continue;
+      if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
+      if (!draft) for (const person of report.people) {
+        if (String(person.id) === String(report.createdBy?.id) || confirmations.some(item => item.reportId === report.id && String(item.employeeId) === String(person.id))) continue;
         confirmations.push({ id: `confirm_${report.id}_${person.id}`, reportId: report.id, employeeId: person.id, employeeName: person.name, status: "open", createdAt: now });
       }
       await Promise.all([
@@ -651,13 +673,13 @@ function registerRegieAssistant(app, options) {
         storeInJobFile(report),
       ]);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
-        type: "regie_report_issued",
-        title: `Regiebericht ${report.reportNumber} ausgestellt`,
+        type: draft ? "regie_report_draft_saved" : "regie_report_issued",
+        title: draft ? `Regiebericht ${report.reportNumber} als Entwurf gespeichert` : `Regiebericht ${report.reportNumber} ausgestellt`,
         detail: `${report.totals.laborHours} h · ${report.materials.length} Materialposition(en) · ${report.photos.length} Foto(s)`,
         source: "KGO",
-        data: { reportId: report.id, processingStatus: "issued", billingStatus: "open" },
+        data: { reportId: report.id, processingStatus: report.processingStatus, billingStatus: "open" },
       }).catch(() => {});
-      res.json({ ok: true, report, message: "Regiebericht ist ausgestellt und liegt bei Alex zur Prüfung." });
+      res.json({ ok: true, report, message: draft ? "Regiebericht ist gespeichert und kann später fertig gemacht werden." : "Regiebericht ist ausgestellt und liegt bei Alex zur Prüfung." });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
   app.get("/kristine/api/regie/confirmations", async (req, res) => { const employeeId = clean(req.query.employeeId, 100); const rows = await readJson(CONFIRMATIONS, []); res.json({ ok: true, items: rows.filter(row => row.employeeId === employeeId && row.status === "open") }); });

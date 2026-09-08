@@ -113,6 +113,35 @@ function invoke(handler, req) {
   assert.match(duplicate.body.error, /bereits vergeben/);
 
   const issue = routes.get("POST /kristine/api/regie");
+  const mobileDraftBody = {
+    draft: true,
+    date: "2026-09-03",
+    segment: { jobId: "26098", jobName: "Express", from: "07:00", to: "12:00" },
+    hoursMode: "day",
+    teamMode: "all",
+    people: [{ id: "ma-1", name: "Max Muster" }],
+    employees: [{ id: "ma-1", name: "Max Muster", from: "07:00", to: "12:00", netMinutes: 300 }],
+    createdBy: { id: "ma-1", name: "Max Muster" },
+    description: "Regie begonnen",
+    materials: [{ materialId: "A02", product: "Spachtel", quantity: 2, unit: "kg", salePrice: 9 }],
+    uploads: [{ name: "entwurf.jpg", data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }],
+  };
+  const mobileDraft = await invoke(issue, { body: mobileDraftBody });
+  assert.equal(mobileDraft.statusCode, 200);
+  assert.equal(mobileDraft.body.report.status, "draft");
+  assert.equal(mobileDraft.body.report.processingStatus, "draft");
+  const draftList = await invoke(routes.get("GET /kristine/api/regie/drafts"), { query: { employeeId: "ma-1", jobId: "26098", date: "2026-09-03" } });
+  assert.equal(draftList.body.drafts[0].id, mobileDraft.body.report.id);
+  const draftDay = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26098", "2026", "09", "03", "regie.json"), "utf8"));
+  assert.equal(draftDay.status, "Entwurf");
+  assert.equal(draftDay.materials[0].name, "Spachtel");
+  const completedDraft = await invoke(issue, { body: { ...mobileDraftBody, id: mobileDraft.body.report.id, draft: false, description: "Regie fertig" } });
+  assert.equal(completedDraft.body.report.id, mobileDraft.body.report.id);
+  assert.equal(completedDraft.body.report.processingStatus, "issued");
+  const completedDay = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26098", "2026", "09", "03", "regie.json"), "utf8"));
+  assert.equal(completedDay.status, "Ausgestellt");
+  assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 1);
+
   const issued = await invoke(issue, { body: {
     date: "2026-09-03",
     segment: { jobId: "26097", jobName: "Handybaustelle", from: "07:00", to: "16:00" },
@@ -138,8 +167,9 @@ function invoke(handler, req) {
   assert.equal(dayRegie.status, "Ausgestellt");
   assert.equal(dayRegie.materials[0].name, "Innenfarbe");
   const reviews = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "_kristine", "day-review-entries.json"), "utf8"));
-  assert.equal(reviews[0].tag, "Regie");
-  assert.equal(reviews[0].jobId, "26097");
+  const issuedReview = reviews.find(row => row.reportId === issued.body.report.id);
+  assert.equal(issuedReview.tag, "Regie");
+  assert.equal(issuedReview.jobId, "26097");
 
   const changeStatus = routes.get("POST /kristine/api/regie-reports/:id/status");
   const approved = await invoke(changeStatus, { params: { id: issued.body.report.id }, body: { processingStatus: "approved", billingStatus: "open" } });

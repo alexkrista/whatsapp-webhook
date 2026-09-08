@@ -18,6 +18,7 @@ function registerDayClose(app, {
   const timeEventsFile = path.join(root, "time-events.json");
   const statesFile = path.join(root, "states.json");
   const tasksFile = path.join(root, "tasks.json");
+  const regieReportsFile = path.join(root, "regie-reports.json");
 
   async function readJson(file, fallback) {
     try {
@@ -503,6 +504,20 @@ function registerDayClose(app, {
         return res.status(400).json({
           ok: false,
           error: "employeeId fehlt",
+        });
+      }
+
+      const openRegie = (await readJson(regieReportsFile, [])).find(report =>
+        report.status === "draft" &&
+        String(report.date) === date &&
+        (String(report.createdBy?.id) === employeeId || (report.people || []).some(person => String(person.id) === employeeId))
+      );
+      if (openRegie) {
+        return res.status(409).json({
+          ok: false,
+          error: "Regiebericht noch offen – bitte zuerst fertig machen und an Alex senden.",
+          reportId: openRegie.id,
+          jobId: openRegie.jobId,
         });
       }
 

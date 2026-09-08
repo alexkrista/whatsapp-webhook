@@ -647,7 +647,10 @@ if (contactPhone) {
   }
 
   function assistantDefinitions(kind) {
-    const a = state.currentAssignment;
+    // Bei einer spontanen Baustellenwahl/-umstellung ist activeJobOverride die
+    // tatsächlich laufende Baustelle. Regie darf dann nicht mit der ursprünglich
+    // geplanten Tageszuordnung geöffnet werden.
+    const a = state.employeeState?.activeJobOverride || state.currentAssignment;
     return {
       photo: {
         title:"Foto",

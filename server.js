@@ -74,8 +74,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.7";
-const APP_BUILD = "0031.12-kgo-regie-mobile";
+const APP_VERSION = "3.5.8";
+const APP_BUILD = "0031.13-kgo-regie-draft";
 const APP_STATUS = "KGO-Regie: mobil ausstellen, prüfen, versenden und abrechnen";
 const APP_BUILD_DATE = "2026-09-08";
 

@@ -131,7 +131,7 @@ function buildDay(events){
 function setStatus(kind,done,text,bad=false){const cap=kind.charAt(0).toUpperCase()+kind.slice(1),status=document.getElementById("status"+cap),copy=document.getElementById("text"+cap);status.textContent=done?"✓":"!";status.className=`status ${done?"ok":bad?"bad":"open"}`;if(copy)copy.textContent=text}
 function setPhotoChip(id,state,label){const el=document.getElementById(id);el.className=`photo-chip ${state}`;el.querySelector("b").textContent=label}
 
-let employee=null,assignment=null,employeeState=null,day=null;
+let employee=null,assignment=null,employeeState=null,day=null,openRegieDraft=null;
 let checks={time:false,photos:false,material:false,regie:false,order:false};
 
 function renderTimeline(){
@@ -161,7 +161,7 @@ async function init(){
   employee=(data.employees||[]).find(e=>String(e.id||e.employeeId)===String(employeeId))||null;
   employeeState=data.states?.[employeeId]||null;
   const todayAssignments=(data.assignments||[]).filter(a=>String(a.employeeId)===String(employeeId)&&String(a.date)===String(today)).sort((a,b)=>String(a.from||"").localeCompare(String(b.from||"")));
-  assignment=todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
+  assignment=employeeState?.activeJobOverride||todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
   day=buildDay(data.timeEvents||[]);
   if(!assignment&&day.rows.length){const latestWork=[...day.rows].reverse().find(e=>["start","weiter"].includes(String(e.type||"").toLowerCase())&&(e.jobId||e.jobName));if(latestWork)assignment={jobId:latestWork.jobId||"",jobName:latestWork.jobName||"",city:latestWork.city||"",address:latestWork.address||""}}
   document.getElementById("title").textContent=`${employeeName(employee)}, Tagesabschluss ${today.split("-").reverse().join(".")}`;
@@ -177,7 +177,9 @@ async function init(){
   setStatus("time",checks.time,checks.time?`${duration(day.workMinutes)} Arbeit · ${duration(day.pauseMinutes)} Pause`:"noch keine Arbeitszeit");
   const photo=photoReviewState(assignment);checks.photos=photo.done;setStatus("photo",photo.done,photo.text,!photo.done);
   const material=review("material");checks.material=Boolean(material);setStatus("material",checks.material,material?.summary||"noch nicht geprüft");
-  checks.regie=true;setStatus("regie",true,"bei Bedarf direkt bearbeiten");
+  const draftData=await api(`/kristine/api/regie/drafts?employeeId=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(today)}`);openRegieDraft=draftData.drafts?.[0]||null;
+  checks.regie=!openRegieDraft;setStatus("regie",checks.regie,openRegieDraft?"Regiebericht offen – jetzt fertig machen":"kein offener Regiebericht",Boolean(openRegieDraft));
+  if(openRegieDraft){const row=document.querySelector('[data-kind="regie"]');row.querySelector('.action-chip').textContent='Jetzt fertig';document.getElementById('openWarning').textContent='Regiebericht noch offen: Bitte jetzt fertig machen und an Alex senden. Erst danach kannst du den Tagesabschluss bestätigen.'}
   const order=review("order");checks.order=Boolean(order);setStatus("order",checks.order,order?.summary||"noch nicht beantwortet");
   updateProgress();
   const noteKey=`kg-finish-note:${today}:${employeeId}`,note=document.getElementById("note");note.value=localStorage.getItem(noteKey)||"";note.addEventListener("input",event=>localStorage.setItem(noteKey,event.target.value));
@@ -185,10 +187,10 @@ async function init(){
  }catch(error){document.getElementById("loading").textContent=`Tagesabschluss konnte nicht geladen werden: ${error.message}`}
 }
 
-document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
+document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:openRegieDraft?.jobId||assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
 
 const confirm=document.getElementById("confirm"),finish=document.getElementById("finish");
-confirm.addEventListener("change",()=>{finish.disabled=!confirm.checked;finish.classList.toggle("ready",confirm.checked)});
+confirm.addEventListener("change",()=>{finish.disabled=!confirm.checked||!checks.regie;finish.classList.toggle("ready",confirm.checked&&checks.regie);if(confirm.checked&&!checks.regie)toast("Regiebericht noch offen – bitte zuerst fertig machen.")});
 finish.addEventListener("click",async()=>{
  finish.disabled=true;finish.textContent="Wird gespeichert …";
  try{
