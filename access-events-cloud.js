@@ -68,7 +68,7 @@ async function buildEvent(body) {
 }
 let writeChain = Promise.resolve();
 function recordAccessEvent(body) {
-  writeChain = writeChain.then(async () => {
+  writeChain = writeChain.catch(() => {}).then(async () => {
     const event = await buildEvent(body);
     if (!event) return null;
     const store = await readJson(EVENTS_FILE, { events:[] });
@@ -106,8 +106,9 @@ function wrappedExpress(...args) {
       handlers = handlers.map(handler => {
         if (typeof handler !== "function") return handler;
         return async function accessEventWrappedHandler(req, res, next) {
+          if (!requireAdmin(req, res)) return;
           try { await recordAccessEvent(req.body || {}); }
-          catch (e) { console.warn("KRISADMIN Zutrittsprotokoll:", e?.message || e); }
+          catch (e) { return res.status(503).json({ok:false,error:"Zutrittsprotokoll konnte nicht gespeichert werden; Bridge wiederholt."}); }
           return handler(req, res, next);
         };
       });
