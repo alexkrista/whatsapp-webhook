@@ -1,10 +1,15 @@
 param(
   [switch]$ListLines,
-  [string]$Dial
+  [string]$Dial,
+  [string]$IncomingPhone,
+  [string]$IncomingState = "RING",
+  [string]$IncomingCallId,
+  [string]$IncomingExtension,
+  [string]$RedirectingPhone
 )
 
 $ErrorActionPreference = "Stop"
-$ConnectorVersion = "1.0.0"
+$ConnectorVersion = "1.1.0"
 $ListenPort = 17834
 $AllowedOrigins = @("https://protokoll.krista.at")
 $InstallDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -14,21 +19,33 @@ $script:Tapi = $null
 $script:TapiAddress = $null
 $script:SelectedLineName = ""
 $script:ActiveCalls = [System.Collections.ArrayList]::new()
+$script:IncomingEvents = [System.Collections.ArrayList]::new()
+$script:NextEventId = 1
 
 function Write-ConnectorLog([string]$Message) {
   $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
   Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 }
 
-function Get-ConfiguredLineName {
-  if (-not (Test-Path -LiteralPath $ConfigPath)) { return "snom Line 1" }
+function Get-ConnectorConfig {
+  if (-not (Test-Path -LiteralPath $ConfigPath)) { return $null }
   try {
-    $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($config.lineName) { return [string]$config.lineName }
+    return Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     Write-ConnectorLog "Konfiguration konnte nicht gelesen werden: $($_.Exception.Message)"
   }
-  return "snom Line 1"
+  return $null
+}
+
+function Get-ConfiguredLineName {
+  $config = Get-ConnectorConfig
+  if ($config.lineName) { return [string]$config.lineName }
+  return "CTI Client TAPI-Connector"
+}
+
+function Get-LocalSecret {
+  $config = Get-ConnectorConfig
+  return [string]$config.localSecret
 }
 
 function Get-TapiAddresses {
@@ -66,6 +83,46 @@ function Normalize-PhoneNumber([string]$Phone) {
     throw "Ungueltige Telefonnummer."
   }
   return $normalized
+}
+
+function Publish-IncomingEvent {
+  param(
+    [string]$Phone,
+    [string]$State,
+    [string]$CallId,
+    [string]$Extension,
+    [string]$Redirecting
+  )
+  $secret = Get-LocalSecret
+  if (-not $secret) { throw "Lokaler Sicherheitsschlüssel fehlt. Connector bitte neu installieren." }
+  $payload = @{
+    phone = Normalize-PhoneNumber $Phone
+    state = ([string]$State).Trim().ToUpperInvariant()
+    callId = ([string]$CallId).Trim().Substring(0, [Math]::Min(([string]$CallId).Trim().Length, 120))
+    extension = ([string]$Extension).Trim().Substring(0, [Math]::Min(([string]$Extension).Trim().Length, 40))
+    redirectingPhone = ([string]$Redirecting).Trim().Substring(0, [Math]::Min(([string]$Redirecting).Trim().Length, 80))
+  }
+  Invoke-RestMethod -Uri "http://127.0.0.1:$ListenPort/event" -Method Post -Headers @{ "X-Kristine-Local-Key" = $secret } -ContentType "application/json; charset=utf-8" -Body ($payload | ConvertTo-Json -Compress) | Out-Null
+}
+
+function Add-IncomingEvent($Payload) {
+  $phone = Normalize-PhoneNumber ([string]$Payload.phone)
+  $state = ([string]$Payload.state).Trim().ToUpperInvariant()
+  if ($state -notin @("DIAL", "RING", "CONN", "BUSY", "DISC", "IDLE")) { $state = "RING" }
+  $event = [ordered]@{
+    id = $script:NextEventId
+    receivedAt = (Get-Date).ToUniversalTime().ToString("o")
+    phone = $phone
+    state = $state
+    callId = ([string]$Payload.callId).Trim().Substring(0, [Math]::Min(([string]$Payload.callId).Trim().Length, 120))
+    extension = ([string]$Payload.extension).Trim().Substring(0, [Math]::Min(([string]$Payload.extension).Trim().Length, 40))
+    redirectingPhone = ([string]$Payload.redirectingPhone).Trim().Substring(0, [Math]::Min(([string]$Payload.redirectingPhone).Trim().Length, 80))
+  }
+  $script:NextEventId += 1
+  [void]$script:IncomingEvents.Add($event)
+  while ($script:IncomingEvents.Count -gt 100) { $script:IncomingEvents.RemoveAt(0) }
+  Write-ConnectorLog "Eingehender Anruf ($state) fuer Nebenstelle '$($event.extension)' empfangen."
+  return $event
 }
 
 function Invoke-TapiDial([string]$Phone) {
@@ -143,7 +200,8 @@ function Read-HttpRequest([System.Net.Sockets.NetworkStream]$Stream) {
     }
     $body = -join $buffer[0..($read - 1)]
   }
-  return @{ Method = $parts[0].ToUpperInvariant(); Path = $parts[1].Split("?")[0]; Headers = $headers; Body = $body }
+  $target = $parts[1]
+  return @{ Method = $parts[0].ToUpperInvariant(); Path = $target.Split("?")[0]; Query = $(if ($target.Contains("?")) { $target.Substring($target.IndexOf("?") + 1) } else { "" }); Headers = $headers; Body = $body }
 }
 
 function Handle-Client([System.Net.Sockets.TcpClient]$Client) {
@@ -151,8 +209,16 @@ function Handle-Client([System.Net.Sockets.TcpClient]$Client) {
   try {
     $request = Read-HttpRequest $stream
     $origin = [string]$request.Headers["origin"]
-    if (-not ($AllowedOrigins -contains $origin)) {
+    $localSecret = Get-LocalSecret
+    $isLocalEvent = $localSecret -and $request.Method -eq "POST" -and $request.Path -eq "/event" -and [string]$request.Headers["x-kristine-local-key"] -eq $localSecret
+    if (-not $isLocalEvent -and -not ($AllowedOrigins -contains $origin)) {
       Send-HttpResponse $stream 403 "Forbidden" @{ error = "Ursprung nicht erlaubt." }
+      return
+    }
+    if ($isLocalEvent) {
+      $payload = $request.Body | ConvertFrom-Json
+      $event = Add-IncomingEvent $payload
+      Send-HttpResponse $stream 200 "OK" @{ ok = $true; event = $event }
       return
     }
     if ($request.Method -eq "OPTIONS") {
@@ -162,6 +228,13 @@ function Handle-Client([System.Net.Sockets.TcpClient]$Client) {
     if ($request.Method -eq "GET" -and $request.Path -eq "/status") {
       if (-not $script:TapiAddress) { $null = Select-TapiAddress }
       Send-HttpResponse $stream 200 "OK" @{ ready = $true; lineName = $script:SelectedLineName; version = $ConnectorVersion } $origin
+      return
+    }
+    if ($request.Method -eq "GET" -and $request.Path -eq "/events") {
+      $after = 0
+      if ([string]$request.Query -match "(?:^|&)after=(\d+)") { $after = [int64]$Matches[1] }
+      $events = @($script:IncomingEvents | Where-Object { [int64]$_.id -gt $after })
+      Send-HttpResponse $stream 200 "OK" @{ ok = $true; events = $events; latestId = $script:NextEventId - 1 } $origin
       return
     }
     if ($request.Method -eq "POST" -and $request.Path -eq "/dial") {
@@ -182,6 +255,16 @@ function Handle-Client([System.Net.Sockets.TcpClient]$Client) {
     $stream.Dispose()
     $Client.Dispose()
   }
+}
+
+if ($IncomingPhone) {
+  try {
+    Publish-IncomingEvent -Phone $IncomingPhone -State $IncomingState -CallId $IncomingCallId -Extension $IncomingExtension -Redirecting $RedirectingPhone
+  } catch {
+    Write-ConnectorLog "Eingehender Anruf konnte nicht gemeldet werden: $($_.Exception.Message)"
+    throw
+  }
+  exit 0
 }
 
 if ($ListLines) {

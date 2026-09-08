@@ -1,7 +1,10 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { parseOfficeExtensions, registerNfonIntegration } = require("../nfon-integration");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { parseOfficeExtensions, registerNfonIntegration, phonesMatch } = require("../nfon-integration");
 
 assert.deepEqual(parseOfficeExtensions("Bettina:101, Dunja:102, Alex:103"), [
   { name: "Bettina", extension: "101" },
@@ -9,6 +12,9 @@ assert.deepEqual(parseOfficeExtensions("Bettina:101, Dunja:102, Alex:103"), [
   { name: "Alex", extension: "103" },
 ]);
 assert.deepEqual(parseOfficeExtensions("falsch,Ohne Nummer:x, Alex:103"), [{ name: "Alex", extension: "103" }]);
+assert.equal(phonesMatch("+43 664 123 45 67", "0664/1234567"), true);
+assert.equal(phonesMatch("0043 5522 12345", "05522 12345"), true);
+assert.equal(phonesMatch("+43 664 1234567", "+43 664 7654321"), false);
 
 function responseDouble() {
   return {
@@ -54,7 +60,38 @@ async function testProtectedClickToDialRoute() {
   assert.match(rejected.body.error, /nicht freigegeben/);
 }
 
-testProtectedClickToDialRoute().then(() => {
+async function testProtectedPhoneLookupRoute() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "kristine-nfon-"));
+  try {
+    await fs.mkdir(path.join(root, "4711"));
+    await fs.mkdir(path.join(root, "_kristine"));
+    await fs.writeFile(path.join(root, "_kristine", "tasks.json"), JSON.stringify([{
+      id: "task-1", title: "Material klären", contactName: "Farben Huber", contactPhone: "0664 1234567",
+      customerMaster: { role: "supplier", phone: "0664 1234567", name: "Farben Huber" },
+    }]));
+    const routes = {};
+    const app = {
+      get(route, handler) { routes[`GET ${route}`] = handler; },
+      post() {}, delete() {},
+    };
+    registerNfonIntegration(app, {
+      client: { configured: () => false }, requireAdmin: () => true, dataDir: root,
+      readJobMeta: async jobId => ({
+        name: `Baustelle ${jobId}`, contactName: "Erika Beispiel", contactPhone: "+43 664 1234567",
+        street: "Testweg", houseNumber: "1", postalCode: "6800", city: "Feldkirch", projectContacts: {},
+      }),
+    });
+    const response = responseDouble();
+    await routes["GET /kristine/api/nfon/lookup"]({ query: { phone: "0664/123 45 67" } }, response);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.matches.some(row => row.kind === "job" && row.jobId === "4711"), true);
+    assert.equal(response.body.matches.some(row => row.kind === "task" && row.role === "Lieferant"), true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+Promise.all([testProtectedClickToDialRoute(), testProtectedPhoneLookupRoute()]).then(() => {
   console.log("NFON integration tests passed");
 }).catch(error => {
   console.error(error);
