@@ -67,6 +67,15 @@ const { registerMaterialMaster } = require("../material-master");
     const exportedRows = XLSX.utils.sheet_to_json(exported.Sheets.Materialpreisliste, { defval: "" });
     assert(!exportedRows.some(row => row["Material-ID"] === "M2"), "Stillgelegte Artikel fehlen im Folgeexport");
     assert(exportedRows.some(row => row["Material-ID"] === "M1"));
+    const supplierExport = XLSX.read(await service.exportWorkbook({ supplier: "Muster" }), { type: "buffer" });
+    const supplierRows = XLSX.utils.sheet_to_json(supplierExport.Sheets.Materialpreisliste, { defval: "" });
+    assert(supplierRows.some(row => row["Material-ID"] === "M1"), "Gewählter Lieferant wird exportiert");
+    assert(!supplierRows.some(row => row["Material-ID"] === "M2"), "Andere Lieferanten fehlen im Lieferantenexport");
+    assert(supplierRows.filter(row => row["Status B/N/L"] === "N").every(row => row.Lieferant === "Muster"), "Neue Zeilen sind mit dem gewählten Lieferanten vorbelegt");
+    const supplierList = await invoke(routes["get:/admin/api/materials"], { query: { supplier: "Muster", limit: "5000" } });
+    assert.equal(supplierList.statusCode, 200);
+    assert(supplierList.body.materials.every(row => row.supplier === "Muster"), "Lieferantenfilter zeigt ausschließlich den gewählten Lieferanten");
+    assert.equal(supplierList.body.summary.bySupplier.Muster, 1, "Lieferantenauswahl enthält die Trefferzahl");
 
     const wwReport = await service.syncWinWorkerMaterials([
       {

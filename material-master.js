@@ -416,8 +416,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const active = materials.filter(item => item.active !== false);
     const stale = active.filter(item => decorate(item).priceStale);
     const byGroup = {};
+    const bySupplier = {};
     for (const item of active) {
       byGroup[item.group || "Sonstiges"] = (byGroup[item.group || "Sonstiges"] || 0) + 1;
+      const supplier = clean(item.supplier, 120) || "Ohne Lieferant";
+      bySupplier[supplier] = (bySupplier[supplier] || 0) + 1;
     }
     return {
       count: materials.length,
@@ -427,6 +430,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       unknownPriceCount: active.filter(item => priceAgeDays(item) === null).length,
       inboxOpenCount: inbox.filter(item => item.status === "open").length,
       byGroup,
+      bySupplier,
       dataStatus: active
         .map(item => item.priceCheckedAt || item.priceValidFrom)
         .filter(Boolean)
@@ -575,13 +579,20 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return report;
   }
 
-  async function exportWorkbook() {
+  async function exportWorkbook(filters = {}) {
     if (!XLSX) {
       throw new Error('Excel-Export benötigt das Paket "xlsx". Bitte einmal "npm install xlsx" ausführen.');
     }
 
     const allMaterials = await readJson(MATERIALS_FILE, []);
-    const materials = allMaterials.filter(material => material.active !== false);
+    const query = clean(filters.q, 200).toLowerCase();
+    const group = clean(filters.group, 100);
+    const supplier = clean(filters.supplier, 120);
+    const materials = allMaterials
+      .filter(material => material.active !== false)
+      .filter(material => !group || material.group === group)
+      .filter(material => !supplier || (clean(material.supplier, 120) || "Ohne Lieferant") === supplier)
+      .filter(material => !query || matchesMaterialQuery(material, query));
 
     const workbook = XLSX.utils.book_new();
     const headers = [
@@ -602,7 +613,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "VK brutto (€)": item.salePrice ? Math.round(item.salePrice * 120) / 100 : "",
         "Preisstand": item.priceCheckedAt || item.priceValidFrom,
       }));
-    for (let i = 0; i < 30; i += 1) data.push({ "Status B/N/L": "N" });
+    for (let i = 0; i < 30; i += 1) data.push({ "Status B/N/L": "N", "Lieferant": supplier === "Ohne Lieferant" ? "" : supplier });
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
     worksheet["!autofilter"] = { ref: worksheet["!ref"] };
@@ -625,6 +636,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       ["KRISTINE Materialdatenbank"],
       ["Exportiert am", new Date().toISOString()],
       ["Aktive Materialien", materials.length],
+      ["Lieferant", supplier || "Alle Lieferanten"],
+      ["Gruppe", group || "Alle Gruppen"],
+      ["Suche", query || "Keine"],
       ["Hinweis", "B = Bestand, N = neu, L = stilllegen. Material-ID bestehender Artikel nie ändern."],
       ["Preise", "Preise in bereits gespeicherten Dokumenten bleiben unverändert; der Stamm wird nur beim Einfügen kopiert."],
     ];
@@ -769,6 +783,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const query = clean(req.query.q, 200).toLowerCase();
       const group = clean(req.query.group, 100);
       const subgroup = clean(req.query.subgroup, 100);
+      const supplier = clean(req.query.supplier, 120);
       const activeOnly = String(req.query.activeOnly || "1") !== "0";
       const staleOnly = String(req.query.staleOnly || "0") === "1";
       const mode = clean(req.query.mode, 30);
@@ -777,6 +792,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (activeOnly) rows = rows.filter(item => item.active !== false);
       if (group) rows = rows.filter(item => item.group === group);
       if (subgroup) rows = rows.filter(item => item.subgroup === subgroup);
+      if (supplier) rows = rows.filter(item => (clean(item.supplier, 120) || "Ohne Lieferant") === supplier);
       if (query) {
         rows = rows.filter(item => matchesMaterialQuery(item, query));
       }
@@ -820,10 +836,16 @@ app.get("/api/regie/materials", async (req, res) => {
   app.get("/admin/api/materials/export-excel", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const buffer = await exportWorkbook();
+      const supplier = clean(req.query.supplier, 120);
+      const buffer = await exportWorkbook({
+        q: req.query.q,
+        group: req.query.group,
+        supplier,
+      });
       const date = new Date().toISOString().slice(0, 10);
+      const suffix = supplier ? `_${slug(supplier) || "ohne-lieferant"}` : "";
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="KRISTINE_Materialstamm_${date}.xlsx"`);
+      res.setHeader("Content-Disposition", `attachment; filename="KRISTINE_Materialstamm${suffix}_${date}.xlsx"`);
       res.send(buffer);
     } catch (error) {
       res.status(500).send(String(error?.message || error));

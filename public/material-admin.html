@@ -108,10 +108,12 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     <div class="toolbar">
       <input id="search" placeholder="Artikel, A01, Lieferant oder Lieferanten-Nr. …">
       <select id="group"><option value="">Alle Gruppen</option></select>
+      <select id="supplier"><option value="">Alle Lieferanten</option></select>
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
       <button class="btn" id="wwSearchButton" onclick="searchWinWorker(this)">In WW suchen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
+      <button class="btn" onclick="printMaterials()">Drucken</button>
       <button class="btn" onclick="exportExcel()">Excel exportieren</button>
     </div>
     <div id="wwResults" class="ww-results hidden"></div>
@@ -285,10 +287,11 @@ async function setMaterialStatus(id,status){
 async function loadMaterials(){
   const q=document.getElementById("search").value;
   const groupValue=document.getElementById("group").value;
-  const data=await api(`/admin/api/materials?q=${encodeURIComponent(q)}&group=${encodeURIComponent(groupValue)}&limit=2000`);
+  const supplierValue=document.getElementById("supplier").value;
+  const data=await api(`/admin/api/materials?q=${encodeURIComponent(q)}&group=${encodeURIComponent(groupValue)}&supplier=${encodeURIComponent(supplierValue)}&limit=5000`);
   const s=data.summary;
   materialItems=data.materials||[];
-  supplierList.innerHTML=[...new Set(materialItems.map(item=>String(item.supplier||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"de")).map(value=>`<option value="${escapeHtml(value)}"></option>`).join("");
+  supplierList.innerHTML=Object.keys(s.bySupplier||{}).filter(value=>value!=="Ohne Lieferant").sort((a,b)=>a.localeCompare(b,"de")).map(value=>`<option value="${escapeHtml(value)}"></option>`).join("");
   count.textContent=s.activeCount;
   stale.textContent=s.stalePriceCount;
   inboxCount.textContent=s.inboxOpenCount;
@@ -297,6 +300,10 @@ async function loadMaterials(){
   const current=select.value;
   select.innerHTML='<option value="">Alle Gruppen</option>'+Object.keys(s.byGroup||{}).sort().map(g=>`<option>${escapeHtml(g)}</option>`).join("");
   select.value=current;
+  const supplierSelect=document.getElementById("supplier");
+  const currentSupplier=supplierSelect.value;
+  supplierSelect.innerHTML='<option value="">Alle Lieferanten</option>'+Object.entries(s.bySupplier||{}).sort((a,b)=>a[0].localeCompare(b[0],"de")).map(([name,total])=>`<option value="${escapeHtml(name)}">${escapeHtml(name)} (${total})</option>`).join("");
+  supplierSelect.value=currentSupplier;
   renderMaterials();
   renderWarnings();
 }
@@ -445,7 +452,28 @@ async function importExcel(file){
   const r=data.report;alert(`Import fertig\nNeu: ${r.added}\nGeändert: ${r.changed}\nStillgelegt: ${r.deactivated||0}\nUnverändert: ${r.unchanged}\nDubletten: ${r.duplicateCount}`);
   loadMaterials();
 }
-function exportExcel(){location.href="/admin/api/materials/export-excel?token="+encodeURIComponent(token)}
+function activeMaterialFilters(){return{q:search.value.trim(),group:group.value,supplier:supplier.value}}
+function exportExcel(){
+  const filters=activeMaterialFilters(),params=new URLSearchParams({token,...filters});
+  location.href="/admin/api/materials/export-excel?"+params.toString();
+}
+function printMaterials(){
+  if(!materialItems.length){alert("Für diese Auswahl wurden keine Materialien gefunden.");return}
+  const selectedSupplier=supplier.value||"Alle Lieferanten";
+  const selectedGroup=group.value||"Alle Gruppen";
+  const rows=[...materialItems].sort((a,b)=>String(a.supplier||"").localeCompare(String(b.supplier||""),"de")||String(a.product||"").localeCompare(String(b.product||""),"de"));
+  let lastSupplier="";
+  const body=rows.map(m=>{
+    const supplierName=String(m.supplier||"Ohne Lieferant");
+    const heading=supplierName!==lastSupplier?`<tr class="supplier"><th colspan="8">${escapeHtml(supplierName)}</th></tr>`:"";
+    lastSupplier=supplierName;
+    return heading+`<tr><td>${escapeHtml(m.materialId)}</td><td><strong>${escapeHtml(m.product||"–")}</strong></td><td>${escapeHtml(m.supplierArticleNumber||"")}</td><td>${escapeHtml(m.unit||"–")}</td><td class="number">${money(m.purchasePrice)}</td><td class="number">${money(m.salePrice)}</td><td class="number">${money(Number(m.salePrice||0)*1.2)}</td><td>${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"–")}</td></tr>`;
+  }).join("");
+  const popup=window.open("","_blank");
+  if(!popup){alert("Das Druckfenster wurde blockiert. Bitte Pop-ups für diese Seite erlauben.");return}
+  popup.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Materialstamm · ${escapeHtml(selectedSupplier)}</title><style>@page{size:A4 landscape;margin:14mm}body{font:11px Arial,sans-serif;color:#17211c}h1{font-size:22px;margin:0 0 4px}.meta{color:#69746e;margin-bottom:16px}table{width:100%;border-collapse:collapse}th,td{padding:6px 7px;border-bottom:1px solid #dce4df;text-align:left;vertical-align:top}.head th{font-size:9px;text-transform:uppercase;color:#69746e}.supplier th{font-size:14px;background:#e8f3ed;padding-top:9px}.number{text-align:right;white-space:nowrap}</style></head><body><h1>KRISTINE Materialstamm</h1><div class="meta">${escapeHtml(selectedSupplier)} · ${escapeHtml(selectedGroup)} · ${rows.length} Artikel · ${new Date().toLocaleDateString("de-AT")}</div><table><thead><tr class="head"><th>ID</th><th>Artikel</th><th>Lieferanten-Nr.</th><th>Einheit</th><th>EK netto</th><th>VK netto</th><th>VK brutto</th><th>Preisstand</th></tr></thead><tbody>${body}</tbody></table><script>window.addEventListener('load',()=>window.print())<\/script></body></html>`);
+  popup.document.close();
+}
 function showTab(name){
   requests.classList.toggle("hidden",name!=="requests");
   materials.classList.toggle("hidden",name!=="materials");
@@ -470,6 +498,7 @@ let searchTimer;
 document.getElementById("search").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadMaterials,180)});
 document.getElementById("search").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchWinWorker(wwSearchButton)}});
 document.getElementById("group").addEventListener("change",loadMaterials);
+document.getElementById("supplier").addEventListener("change",loadMaterials);
 editVk.addEventListener("input",updateGrossFromNet);
 editGross.addEventListener("input",updateNetFromGross);
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]);

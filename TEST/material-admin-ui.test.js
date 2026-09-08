@@ -9,8 +9,11 @@ const ui = fs.readFileSync(path.join(__dirname, "..", "public", "material-admin.
 const home = fs.readFileSync(path.join(__dirname, "..", "public", "ui", "krisadmin-home.js"), "utf8");
 const regie = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
 const brain = fs.readFileSync(path.join(__dirname, "..", "archive-connector.py"), "utf8");
+const inlineScript = ui.match(/<script>([\s\S]*?)<\/script>/);
+assert(inlineScript, "Materialverwaltung enthält ihr Seitenskript");
+new vm.Script(inlineScript[1], { filename: "material-admin.inline.js" });
 
-for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
+for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
   assert(ui.includes(text), `Materialverwaltung enthält ${text}`);
 }
 assert(!ui.includes("WW jetzt einlesen"), "WW-Materialien werden nur einzeln ausgewählt übernommen");
