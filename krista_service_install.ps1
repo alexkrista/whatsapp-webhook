@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $TaskName = 'KRISTA Dienstemanager'
+$BrainTaskName = 'Kristine The Brain Dienst'
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Runner = Join-Path $RepoRoot 'krista_service_manager_bg.py'
 $Port = 8765
@@ -59,7 +60,26 @@ $RegisterArgs = @{
     Force = $true
 }
 Register-ScheduledTask @RegisterArgs | Out-Null
+
+# Der bestehende Brain-Task behaelt bewusst seine Aktion, Benutzerkennung und
+# Zugangsdaten. Wir ergaenzen nur den fehlenden Start-beim-Hochfahren-Ausloeser.
+$BrainTask = Get-ScheduledTask -TaskName $BrainTaskName -ErrorAction SilentlyContinue
+if ($BrainTask) {
+    $HasStartupTrigger = @($BrainTask.Triggers | Where-Object {
+        $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger'
+    }).Count -gt 0
+    if (-not $HasStartupTrigger) {
+        $BrainTriggers = @($BrainTask.Triggers) + @(New-ScheduledTaskTrigger -AtStartup)
+        Set-ScheduledTask -TaskName $BrainTaskName -Trigger $BrainTriggers | Out-Null
+    }
+} else {
+    Write-Warning "Brain-Windows-Task '$BrainTaskName' fehlt. Bitte einmal ueber KRISADMIN -> Dienste einrichten."
+}
+
 Start-ScheduledTask -TaskName $TaskName
+if ($BrainTask) {
+    Start-ScheduledTask -TaskName $BrainTaskName -ErrorAction SilentlyContinue
+}
 
 $Ready = $false
 for ($i = 0; $i -lt 30; $i++) {
@@ -81,6 +101,9 @@ if (-not $Ready) {
 Write-Host ''
 Write-Host 'OK - KRISTA Dienstemanager laeuft jetzt als SYSTEM im Hintergrund.' -ForegroundColor Green
 Write-Host 'Autostart bei Windows-Start ist eingerichtet.' -ForegroundColor Green
+if ($BrainTask) {
+    Write-Host 'Brain Connector startet ebenfalls automatisch und wird ueberwacht.' -ForegroundColor Green
+}
 Write-Host 'Jetzt KRISADMIN -> Dienste -> Aktualisieren.' -ForegroundColor White
 Write-Host ''
 Start-Sleep -Seconds 4

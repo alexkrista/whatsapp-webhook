@@ -16,7 +16,7 @@ from pathlib import Path
 
 import krista_service_manager as base
 
-WRAPPER_VERSION = "1.3.0"
+WRAPPER_VERSION = "1.4.0"
 REPO_ROOT = Path(__file__).resolve().parent
 WRAPPER_PATH = Path(__file__).resolve()
 PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
@@ -185,6 +185,19 @@ def _restart_manager_later() -> None:
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _brain_watchdog() -> None:
+    """Startet den Brain-Task nach Windows-Neustarts und bei spaeterem Ausfall."""
+    time.sleep(8)
+    while True:
+        if not _brain_http_ok():
+            try:
+                _start_brain()
+                base._set_manager_error("")
+            except Exception as exc:
+                base._set_manager_error(f"Brain-Autostart: {exc}")
+        time.sleep(45)
+
+
 def _status_snapshot() -> dict:
     data = _original_status_snapshot()
     data["managerVersion"] = WRAPPER_VERSION
@@ -251,4 +264,5 @@ if __name__ == "__main__":
     # Alte Fehlermeldungen (z. B. frueherer PermissionDenied) beim sauberen
     # Dienststart nicht weiter anzeigen.
     base._set_manager_error("")
+    threading.Thread(target=_brain_watchdog, name="krista-brain-watchdog", daemon=True).start()
     base.main()
