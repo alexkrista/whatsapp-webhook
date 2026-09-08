@@ -47,6 +47,7 @@ th{font-size:12px;text-transform:uppercase;color:var(--muted)}
 .status-open{background:var(--warn);color:var(--warn-ink)}
 .status-stocked{background:var(--green-soft);color:var(--green)}
 .status-ordered{background:var(--ordered);color:var(--ordered-ink)}
+.status-completed{background:#eef0ef;color:#53605a}
 .request-empty{text-align:center;padding:34px}
 .section-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin:8px 0 12px}
 .section-head h2{margin:0}.count-badge{font-weight:900;color:var(--muted)}
@@ -100,6 +101,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <button class="btn active request-filter" data-status="open" onclick="setRequestFilter('open',this)">Offen</button>
       <button class="btn request-filter" data-status="stocked" onclick="setRequestFilter('stocked',this)">Lagernd</button>
       <button class="btn request-filter" data-status="ordered" onclick="setRequestFilter('ordered',this)">Bestellt</button>
+      <button class="btn request-filter" data-status="completed" onclick="setRequestFilter('completed',this)">Erledigt</button>
       <button class="btn" onclick="loadRequests()">Aktualisieren</button>
     </div>
     <div class="section-head">
@@ -221,13 +223,13 @@ let supplierLinkTarget=null;
 let requestFilter="open";
 
 function statusLabel(status){
-  return status==="stocked"?"Lagernd":status==="ordered"?"Bestellt":"Offen";
+  return status==="stocked"?"Lagernd":status==="ordered"?"Bestellt":status==="completed"?"Erledigt":"Offen";
 }
 function needLabel(value){
   return value==="urgent_today"?"Heute dringend":value==="tomorrow"?"Für morgen":"Dokumentation";
 }
 function statusClass(status){
-  return status==="stocked"?"status-stocked":status==="ordered"?"status-ordered":"status-open";
+  return status==="stocked"?"status-stocked":status==="ordered"?"status-ordered":status==="completed"?"status-completed":"status-open";
 }
 function formatDateTime(value){
   if(!value)return"";
@@ -253,7 +255,7 @@ function setRequestFilter(status,button){
 }
 
 function renderRequests(){
-  const titles={open:"Offene Materialanforderungen",stocked:"Lagernd",ordered:"Bestellt"};
+  const titles={open:"Offene Materialanforderungen",stocked:"Lagernd",ordered:"Bestellt",completed:"Erledigt"};
   requestHeading.textContent=titles[requestFilter]||"Materialanforderungen";
 
   const rows=materialRequests
@@ -288,18 +290,26 @@ function renderRequests(){
         ${x.status!=="open"?`<button class="btn" onclick="setMaterialStatus('${js(x.id)}','open')">Offen</button>`:""}
         ${x.status!=="stocked"?`<button class="btn primary" onclick="setMaterialStatus('${js(x.id)}','stocked')">Lagernd</button>`:""}
         ${x.status!=="ordered"?`<button class="btn navy" onclick="setMaterialStatus('${js(x.id)}','ordered')">Bestellt</button>`:""}
+        ${x.status!=="completed"?`<button class="btn" onclick="setMaterialStatus('${js(x.id)}','completed')">Erledigt</button>`:""}
+        <button class="btn" onclick="deleteMaterialRequest('${js(x.id)}')">Löschen</button>
       </div>
     </article>
   `).join("");
 }
 
 async function setMaterialStatus(id,status){
-  const labels={open:"Offen",stocked:"Lagernd",ordered:"Bestellt"};
+  const labels={open:"Offen",stocked:"Lagernd",ordered:"Bestellt",completed:"Erledigt"};
   if(!confirm(`Status auf „${labels[status]}“ setzen?`))return;
   await api(`/kristine/api/material-requests/${encodeURIComponent(id)}`,{
     method:"PATCH",
     body:JSON.stringify({status})
   });
+  await loadRequests();
+}
+
+async function deleteMaterialRequest(id){
+  if(!confirm("Diesen Materialeintrag wirklich endgültig löschen?"))return;
+  await api(`/kristine/api/material-requests/${encodeURIComponent(id)}`,{method:"DELETE"});
   await loadRequests();
 }
 

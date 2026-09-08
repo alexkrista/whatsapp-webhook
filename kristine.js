@@ -1379,7 +1379,7 @@ const open = taskId
       if (!row) return res.status(404).json({ ok: false, error: "Materialaufgabe nicht gefunden." });
 
       const status = String(req.body?.status || "");
-      if (!["open", "stocked", "ordered"].includes(status)) {
+      if (!["open", "stocked", "ordered", "completed"].includes(status)) {
         return res.status(400).json({ ok: false, error: "Ungültiger Status." });
       }
 
@@ -1409,6 +1409,28 @@ const open = taskId
       });
 
       res.json({ ok: true, request: row, notification });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.delete("/kristine/api/material-requests/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIAL_REQUESTS, []);
+      const index = rows.findIndex(item => String(item.id) === String(req.params.id));
+      if (index < 0) return res.status(404).json({ ok: false, error: "Materialaufgabe nicht gefunden." });
+
+      const [removed] = rows.splice(index, 1);
+      await writeJson(MATERIAL_REQUESTS, rows);
+      await appendEvent({
+        type: "material_request_deleted",
+        employeeId: removed.employeeId,
+        employeeName: removed.employeeName,
+        jobId: removed.jobId,
+        detail: removed.materialText,
+      });
+      res.json({ ok: true, deletedId: removed.id });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
