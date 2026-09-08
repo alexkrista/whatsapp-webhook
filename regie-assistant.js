@@ -182,6 +182,30 @@ function registerRegieAssistant(app, options) {
     return (serials.length ? Math.max(...serials) : 0) + 1;
   }
 
+  function normalizeLegacyExpressNumbers(reports) {
+    let changed = false;
+    const months = [...new Set((reports || []).filter(row => isExpressJob(row.jobId)).map(row => expressMonth(row.date)))];
+    for (const month of months) {
+      const rows = reports.filter(row => isExpressJob(row.jobId) && expressMonth(row.date) === month)
+        .sort((a, b) => String(a.createdAt || a.id).localeCompare(String(b.createdAt || b.id)));
+      const used = new Set(rows.map(row => String(row.reportNumber || "").match(new RegExp(`^Express ${month}(\\d{3})$`))?.[1]).filter(Boolean).map(Number));
+      for (const row of rows) {
+        if (new RegExp(`^Express ${month}\\d{3}$`).test(String(row.reportNumber || ""))) continue;
+        let sequence = reportSequenceOf(row, row.jobId);
+        if (!Number.isInteger(sequence) || sequence < 1 || sequence > 999 || used.has(sequence)) {
+          sequence = 1;
+          while (used.has(sequence) && sequence <= 999) sequence += 1;
+        }
+        if (sequence > 999) continue;
+        used.add(sequence);
+        row.reportSequence = sequence;
+        row.reportNumber = fullReportNumber(row.jobId, sequence, row.date);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   async function saveAttachments(reportId, uploads, existing = []) {
     const directory = path.join(FILES, safeId(reportId));
     await fsp.mkdir(directory, { recursive: true });
@@ -477,6 +501,7 @@ function registerRegieAssistant(app, options) {
   app.get("/kristine/api/regie-reports", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []);
+    if (normalizeLegacyExpressNumbers(reports)) await writeJson(REPORTS, reports);
     res.json({ ok: true, reports: reports.slice().sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))) });
   });
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {

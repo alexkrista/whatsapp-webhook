@@ -146,6 +146,12 @@ function invoke(handler, req) {
   const expressTwo = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, createdBy: { id: "ma-2", name: "Erika Beispiel" }, people: [{ id: "ma-2", name: "Erika Beispiel" }], employees: [{ id: "ma-2", name: "Erika Beispiel", from: "07:00", to: "12:00", netMinutes: 300 }], segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma2_2" } } });
   assert.equal(expressOne.body.report.reportNumber, "Express 202609001");
   assert.equal(expressTwo.body.report.reportNumber, "Express 202609002");
+  const reportFile = path.join(temporaryRoot, "_kristine", "regie-reports.json");
+  const legacyReports = JSON.parse(fs.readFileSync(reportFile, "utf8"));
+  legacyReports.find(row => row.id === expressOne.body.report.id).reportNumber = "express_20260908_ma1_1001";
+  fs.writeFileSync(reportFile, JSON.stringify(legacyReports));
+  const migratedReports = await invoke(routes.get("GET /kristine/api/regie-reports"), {});
+  assert.equal(migratedReports.body.reports.find(row => row.id === expressOne.body.report.id).reportNumber, "Express 202609001");
 
   const issued = await invoke(issue, { body: {
     date: "2026-09-03",
