@@ -10,7 +10,8 @@ const ROOT = path.join(DATA_DIR, "_kristine");
 const CONFIG_FILE = path.join(ROOT, "access-admin.json");
 const STATUS_FILE = path.join(ROOT, "access-local-status.json");
 const LEARN_FILE = path.join(ROOT, "access-chip-learn.json");
-const LEARN_SECONDS = 120;
+const LEARN_SECONDS = 300;
+const READ_JOB_FILE = path.join(ROOT, "access-manual-read.json");
 
 function secureEqual(a, b) {
   const aa = Buffer.from(String(a || ""));
@@ -88,9 +89,9 @@ async function ensureChip(event) {
 }
 async function captureEvent(event) {
   const session = await readJson(LEARN_FILE, null);
-  if (!session || session.state !== "waiting") return { matched:false, reason:"no_waiting_session" };
+  if (!session || !["waiting", "reading"].includes(session.state)) return { matched:false, reason:"no_waiting_session" };
   const expires = Date.parse(session.expiresAt || "");
-  if (!Number.isFinite(expires) || Date.now() > expires) {
+  if (!Number.isFinite(expires) || Date.now() > expires + 180000) {
     session.state = (session.results || []).length ? "done" : "expired";
     session.finishedAt = nowIso();
     await writeJson(LEARN_FILE, session);
@@ -99,6 +100,7 @@ async function captureEvent(event) {
   const eventAt = Date.parse(event.at || "");
   const startedAt = Date.parse(session.startedAt || "");
   if (Number.isFinite(eventAt) && Number.isFinite(startedAt) && eventAt + 1000 < startedAt) return { matched:false, reason:"old_event" };
+  if (Number.isFinite(eventAt) && eventAt > expires + 1000) return { matched:false, reason:"after_window" };
   if (session.terminalId && event.terminalId && String(session.terminalId) !== String(event.terminalId)) return { matched:false, reason:"wrong_terminal" };
 
   session.results = Array.isArray(session.results) ? session.results : [];
@@ -143,16 +145,28 @@ async function captureFromStatus(session) {
 function installRoutes(app) {
   if (!app || app.__kristaAccessLearnMultiInstalled) return;
   app.__kristaAccessLearnMultiInstalled = true;
+  let operations = Promise.resolve();
+  function route(method, path, handler) {
+    app[method](path, (req, res) => {
+      const result = operations.then(() => handler(req, res));
+      operations = result.catch(() => {});
+      return result;
+    });
+  }
 
-  app.post("/admin/api/access/learn/start", async (req, res) => {
+  route("post", "/admin/api/access/learn/start", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      const active = await readJson(LEARN_FILE, null);
+      if (active && ["waiting", "reading"].includes(active.state) && Date.now() < Date.parse(active.expiresAt) + 180000)
+        return res.status(409).json({ok:false,error:"Einlesevorgang laeuft bereits"});
       const session = {
+        localState:"queued",
         id:`learn_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
         state:"waiting",
         startedAt:nowIso(),
         expiresAt:new Date(Date.now() + LEARN_SECONDS * 1000).toISOString(),
-        terminalId:String(req.body?.terminalId || "3"),
+        terminalId:"3",
         results:[],
         eventKeys:[],
       };
@@ -161,34 +175,89 @@ function installRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 
-  app.get("/admin/api/access/learn/:id", async (req, res) => {
+  route("get", "/admin/api/access/learn/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       let session = await readJson(LEARN_FILE, null);
       if (!session || String(session.id) !== String(req.params.id)) return res.status(404).json({ ok:false, error:"Einlesevorgang nicht gefunden" });
-      if (session.state === "waiting") session = await captureFromStatus(session);
+      // Records arrive through the durable bridge queue, never from a stale status snapshot.
       if (session.state === "waiting" && Date.now() > Date.parse(session.expiresAt || "")) {
-        session.state = (session.results || []).length ? "done" : "expired";
-        session.finishedAt = nowIso();
+        session.state = "reading";
         await writeJson(LEARN_FILE, session);
       }
       res.json({ ok:true, session, multi:true });
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 
-  app.post("/admin/api/access/learn/finish", async (req, res) => {
+  route("post", "/admin/api/access/learn/finish", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const session = await readJson(LEARN_FILE, null);
       if (!session || (req.body?.id && String(req.body.id) !== String(session.id))) return res.status(404).json({ ok:false, error:"Einlesevorgang nicht gefunden" });
-      session.state = "done";
-      session.finishedAt = nowIso();
+      if (session.state === "waiting") session.state = "reading";
+      session.expiresAt = new Date(Math.min(Date.now(), Date.parse(session.expiresAt))).toISOString();
       await writeJson(LEARN_FILE, session);
       res.json({ ok:true, session, multi:true });
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 
-  app.post("/admin/api/access/chip-read", async (req, res) => {
+  // This endpoint is polled in the cloud only. It never polls GAT hardware.
+  route("get", "/admin/api/access/local-job", async (req, res) => {
+    if (!requireAdmin(req,res)) return;
+    try {
+      const session = await readJson(LEARN_FILE, null);
+      if (session && ["waiting", "reading"].includes(session.state)) {
+        if (Date.now() > Date.parse(session.expiresAt) + 180000) {
+          session.state="error"; session.error="Lokaler Abschluss nicht bestaetigt";
+          await writeJson(LEARN_FILE,session);
+        } else {
+          const finishing=session.state==="reading" || Date.now() >= Date.parse(session.expiresAt);
+          if (finishing || session.localState==="queued")
+            return res.json({ok:true,job:{id:session.id+(finishing?":finish":":start"),sessionId:session.id,
+              type:finishing?"learn-finish":"learn-start",expiresAt:session.expiresAt}});
+        }
+      }
+      const read = await readJson(READ_JOB_FILE,null);
+      res.json({ok:true,job:read?.state==="queued" ? read : null});
+    } catch(e) {res.status(500).json({ok:false,error:String(e.message||e)});}
+  });
+  route("post", "/admin/api/access/bookings/read", async (req,res)=>{
+    if (!requireAdmin(req,res)) return;
+    try {
+      const existing=await readJson(READ_JOB_FILE,null);
+      if(existing?.state==="queued")return res.json({ok:true,job:existing});
+      const job={id:"read_"+crypto.randomBytes(12).toString("hex"),type:"bookings-read",state:"queued",at:nowIso()};
+      await writeJson(READ_JOB_FILE,job);res.json({ok:true,job});
+    }catch(e){res.status(500).json({ok:false,error:String(e.message||e)});}
+  });
+  route("get", "/admin/api/access/bookings/read", async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    res.json({ok:true,job:await readJson(READ_JOB_FILE,null)});
+  });
+  route("post", "/admin/api/access/local-job/ack",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const job=req.body||{};
+      if(job.type==="bookings-read"){
+        const read=await readJson(READ_JOB_FILE,null);
+        if(read?.id!==job.id)return res.status(409).json({ok:false,error:"Auftrag stimmt nicht ueberein"});
+        Object.assign(read,{state:job.ok?"done":"error",result:job.result,error:job.error,finishedAt:nowIso()});
+        await writeJson(READ_JOB_FILE,read);
+      }else{
+        const session=await readJson(LEARN_FILE,null);
+        if(session?.id!==job.sessionId)return res.status(409).json({ok:false,error:"Einlesevorgang stimmt nicht ueberein"});
+        if(!job.ok){session.state="error";session.error=job.error||"Lokaler Vorgang fehlgeschlagen";}
+        else if(job.type==="learn-start"){session.localState="waiting";}
+        else if(job.type==="learn-finish"){
+          session.localState="complete";session.state="done";session.finishedAt=nowIso();session.read=job.result;
+        }else return res.status(400).json({ok:false,error:"Unbekannte Aktion"});
+        await writeJson(LEARN_FILE,session);
+      }
+      res.json({ok:true});
+    }catch(e){res.status(500).json({ok:false,error:String(e.message||e)});}
+  });
+
+  route("post", "/admin/api/access/chip-read", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       const event = eventFromObject(req.body || {});
@@ -198,7 +267,7 @@ function installRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 
-  console.log("KRISADMIN Chip-Sammeleinlesen aktiv · 120 Sekunden · mehrere Chips");
+  console.log("KRISADMIN Chip-Sammeleinlesen aktiv · 300 Sekunden · mehrere Chips");
 }
 
 const expressPath = require.resolve("express"), originalExpress = require(expressPath);
