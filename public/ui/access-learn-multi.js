@@ -61,11 +61,11 @@
     const state = document.getElementById("learnState");
     const count = document.getElementById("learnFoundCount");
     const countdown = document.getElementById("learnCountdown");
-    if (state) state.innerHTML = "Bitte Chips jetzt <strong>nacheinander</strong> an die Bürotüre halten.";
+    if (state) state.textContent = session.state === "reading" ? "Bürotür kehrt in den normalen Betrieb zurück. Chips werden einmalig ausgelesen …" : session.localState === "queued" ? "Warte auf Bestätigung vom Büro-PC …" : "Bürotür zum Einlesen geöffnet. Chips nacheinander an den Leser halten.";
     if (count) count.textContent = `${results.length} Chip${results.length === 1 ? "" : "s"} erkannt`;
     if (countdown) {
       const left = Math.max(0, Math.ceil((Date.parse(session.expiresAt || "") - Date.now()) / 1000));
-      countdown.textContent = left + " s";
+      countdown.textContent = session.state === "reading" ? "Wird ausgelesen …" : left + " s";
     }
   }
 
@@ -114,6 +114,9 @@
       session = d.session;
       updateUi();
       if (session.state === "done") await finalizeSession(session);
+      else if (session.state === "error") {
+        hideLearn(); const message=session.error||"Einlesen nicht bestätigt"; session=null; alert(message);
+      }
       else if (session.state === "expired") {
         hideLearn();
         session = null;
@@ -132,7 +135,9 @@
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ id:session.id })
       });
-      await finalizeSession(d.session || session);
+      session = d.session || session;
+      updateUi();
+      if (session.state === "done") await finalizeSession(session);
     } catch (e) {
       alert("Einlesen beenden: " + e.message);
     }
@@ -211,11 +216,34 @@
       return;
     }
     ensureUi();
+    const toolbar = document.querySelector(".toolbar");
+    if (toolbar && !document.getElementById("manualBookingRead")) {
+      const button=document.createElement("button");button.id="manualBookingRead";button.textContent="Türprotokoll jetzt auslesen";
+      button.onclick=async()=>{
+        button.disabled=true;
+        try{
+          await api("/admin/api/access/bookings/read",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+          button.textContent="Auslesen angefordert …";
+          const end=Date.now()+180000;
+          const check=async()=>{
+            try{
+              const d=await api("/admin/api/access/bookings/read");
+              if(d.job?.state==="done"||d.job?.state==="error"){
+                button.disabled=false;button.textContent="Türprotokoll jetzt auslesen";
+                alert(d.job.state==="error"?d.job.error:((d.job.result?.count||0)+" Buchungen ausgelesen."+(d.job.result?.limitedTerminals?.length?" Leselimit erreicht; weitere Buchungen können noch vorhanden sein.":"")));return;
+              }
+            }catch{}
+            if(Date.now()<end)setTimeout(check,2000);
+            else{button.disabled=false;button.textContent="Status unbestätigt – später prüfen";}
+          };check();
+        }catch(e){button.disabled=false;button.textContent="Türprotokoll jetzt auslesen";alert(e.message);}
+      };toolbar.appendChild(button);
+    }
     installEditorQueue();
     window.startLearn = startMultiLearn;
     window.finishMultiLearn = finishMultiLearn;
     window.cancelLearn = finishMultiLearn;
-    console.log("KRISADMIN Sammeleinlesen: 2 Minuten · mehrere Chips · Einlesen beenden");
+    console.log("KRISADMIN Sammeleinlesen: 5 Minuten · mehrere Chips · Einlesen beenden");
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once:true });
