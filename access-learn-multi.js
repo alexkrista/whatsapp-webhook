@@ -35,6 +35,19 @@ async function writeJson(file, value) {
 }
 function nowIso(){ return new Date().toISOString(); }
 function clean(value){ return String(value || "").trim(); }
+function parseAccessEventTime(value) {
+  const raw = clean(value);
+  if (!raw) return NaN;
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw)) return Date.parse(raw);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/);
+  if (!match) return Date.parse(raw);
+  const utcGuess = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]), Number(`0.${match[7] || "0"}`) * 1000);
+  const offsetName = new Intl.DateTimeFormat("en", { timeZone:"Europe/Vienna", timeZoneName:"longOffset" })
+    .formatToParts(new Date(utcGuess)).find(part => part.type === "timeZoneName")?.value || "GMT+00:00";
+  const offset = offsetName.match(/GMT([+-])(\d{2}):(\d{2})/);
+  const offsetMinutes = offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3])) : 0;
+  return utcGuess - offsetMinutes * 60000;
+}
 function eventFromObject(obj) {
   if (!obj || typeof obj !== "object") return null;
   const hardwareId = clean(obj.hardwareId ?? obj.uid ?? obj.badgeId ?? obj.cardId ?? obj.ident ?? obj.transponder);
@@ -97,7 +110,7 @@ async function captureEvent(event) {
     await writeJson(LEARN_FILE, session);
     return { matched:false, reason:"expired", session };
   }
-  const eventAt = Date.parse(event.at || "");
+  const eventAt = parseAccessEventTime(event.at);
   const startedAt = Date.parse(session.startedAt || "");
   if (Number.isFinite(eventAt) && Number.isFinite(startedAt) && eventAt + 1000 < startedAt) return { matched:false, reason:"old_event" };
   if (Number.isFinite(eventAt) && eventAt > expires + 1000) return { matched:false, reason:"after_window" };
@@ -285,4 +298,4 @@ wrappedExpress.application = originalExpress.application;
 wrappedExpress.request = originalExpress.request;
 wrappedExpress.response = originalExpress.response;
 require.cache[expressPath].exports = wrappedExpress;
-module.exports = { installRoutes };
+module.exports = { installRoutes, parseAccessEventTime };
