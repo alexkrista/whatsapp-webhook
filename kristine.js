@@ -5,6 +5,7 @@ const { upFromJobId } = require("./up-reasons");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
 
 function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
@@ -2132,6 +2133,25 @@ const open = taskId
       });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/monthly-report.pdf", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const people = Array.isArray(req.body?.people) ? req.body.people : [];
+      if (!people.length) return res.status(400).json({ ok:false, error:"Mindestens einen Mitarbeiter auswählen." });
+      const pdf = await createKriszeitMonthlyPdf({
+        company: "Farben Krista GmbH & Co KG, 6820 Frastanz",
+        from: String(req.body?.from || "").slice(0, 10),
+        to: String(req.body?.to || "").slice(0, 10),
+        people,
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline; filename=Kriszeit_Monatsuebersicht.pdf");
+      res.send(pdf);
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
     }
   });
 

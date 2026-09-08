@@ -47,6 +47,7 @@
         <input type="date" id="dateSelect">
       </label>
       <div class="export-actions" style="display:flex;gap:8px;align-items:center">
+        <button class="btn primary" id="openKriszeitPdf" type="button">▤ PDF-Auswahl</button>
         <button class="btn primary" id="openFinkzeitExport" type="button">⬇ Finkzeit CSV</button>
         <button class="btn primary" id="openDietReport" type="button">▤ Diäten PDF</button>
         <button class="btn secondary" id="openEmployeeLogic" type="button">👷 Arbeitslogik</button>
@@ -272,6 +273,24 @@
   </div>
 
   <script src="finkzeit-export.js"></script>
+
+  <div class="logic-modal" id="monthlyReportModal" hidden>
+    <div class="logic-dialog monthly-report-dialog" role="dialog" aria-modal="true" aria-labelledby="monthlyReportTitle">
+      <div class="logic-head">
+        <div><p class="eyebrow">KRISZEIT · MONATSÜBERSICHT</p><h2 id="monthlyReportTitle">PDF-Auswahl</h2></div>
+        <button class="logic-close" id="closeMonthlyReport" type="button">×</button>
+      </div>
+      <div class="monthly-report-controls">
+        <div class="fink-dates"><label>Von<input type="date" id="monthlyFrom"></label><label>Bis<input type="date" id="monthlyTo"></label></div>
+        <div class="monthly-people-head"><strong>Mitarbeiter</strong><div><button class="btn secondary" id="monthlySelectAll" type="button">Alle</button><button class="btn secondary" id="monthlySelectNone" type="button">Keine</button></div></div>
+        <div id="monthlyPeople" class="monthly-people"></div>
+      </div>
+      <div id="monthlySummary" class="monthly-summary"><div class="fink-preview">Zeitraum und Mitarbeiter auswählen.</div></div>
+      <div class="logic-actions"><span id="monthlyReportStatus">Bildschirm kompakt · Ausdruck im Fink-Layout</span><button class="btn primary" id="createMonthlyReport" type="button">PDF öffnen</button></div>
+    </div>
+  </div>
+
+  <script src="monthly-report.js"></script>
 
   <div class="logic-modal" id="employeeLogicModal" hidden>
     <div class="logic-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeLogicTitle">
