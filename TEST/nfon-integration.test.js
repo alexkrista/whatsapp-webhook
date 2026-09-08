@@ -91,7 +91,27 @@ async function testProtectedPhoneLookupRoute() {
   }
 }
 
-Promise.all([testProtectedClickToDialRoute(), testProtectedPhoneLookupRoute()]).then(() => {
+async function testLookupUsesDefaultDataDirectory() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "kristine-nfon-default-"));
+  const previous = process.env.DATA_DIR;
+  try {
+    process.env.DATA_DIR = root;
+    await fs.mkdir(path.join(root, "815"));
+    await fs.mkdir(path.join(root, "_kristine"));
+    await fs.writeFile(path.join(root, "815", ".meta.json"), JSON.stringify({ name:"Testbaustelle", contactName:"Max Muster", contactPhone:"05522 12345" }));
+    const routes = {};
+    const app = { get(route, handler) { routes[`GET ${route}`] = handler; }, post() {}, delete() {} };
+    registerNfonIntegration(app, { client:{ configured:()=>false }, requireAdmin:()=>true });
+    const response = responseDouble();
+    await routes["GET /kristine/api/nfon/lookup"]({ query:{ phone:"+43 5522 12345" } }, response);
+    assert.equal(response.body.matches.some(row => row.jobId === "815" && row.name === "Max Muster"), true);
+  } finally {
+    if (previous === undefined) delete process.env.DATA_DIR; else process.env.DATA_DIR = previous;
+    await fs.rm(root, { recursive:true, force:true });
+  }
+}
+
+Promise.all([testProtectedClickToDialRoute(), testProtectedPhoneLookupRoute(), testLookupUsesDefaultDataDirectory()]).then(() => {
   console.log("NFON integration tests passed");
 }).catch(error => {
   console.error(error);

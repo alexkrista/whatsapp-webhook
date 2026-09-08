@@ -74,8 +74,11 @@ function phoneContactsFromJob(jobId, meta) {
 
 async function lookupPhone(options, phone) {
   if (!phoneKeys(phone).length) return [];
-  const dataDir = options.dataDir;
-  const readJobMeta = options.readJobMeta;
+  const dataDir = options.dataDir || process.env.DATA_DIR || "/var/data";
+  const readJobMeta = options.readJobMeta || (async jobId => {
+    const file = path.join(dataDir, jobId, ".meta.json");
+    return JSON.parse(await fs.readFile(file, "utf8"));
+  });
   const matches = [];
   if (dataDir && typeof readJobMeta === "function") {
     const entries = await fs.readdir(dataDir, { withFileTypes: true }).catch(() => []);
