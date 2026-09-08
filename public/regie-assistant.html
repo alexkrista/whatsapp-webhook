@@ -1,539 +1,68 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>KRISTINE · Regie</title><style>
-:root{--g:#1f7a4d;--gd:#155b3a;--s:#e7f3ec;--b:#f4f6f5;--i:#17211c;--m:#6b756f;--l:#dce5df}*{box-sizing:border-box}body{margin:0;background:var(--b);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--i)}.app{max-width:460px;margin:auto;min-height:100vh;padding:env(safe-area-inset-top) 17px calc(105px + env(safe-area-inset-bottom))}header{display:flex;justify-content:space-between;align-items:center;padding:18px 2px}.brand{font-weight:900}.step{font-size:12px;background:var(--s);color:var(--gd);padding:8px 10px;border-radius:999px;font-weight:900}.screen{display:none}.screen.on{display:block}h1{font-size:32px;line-height:1.08;margin:8px 0 10px;letter-spacing:-.03em}p{color:var(--m);font-size:17px;line-height:1.45}.card{background:#fff;border:1px solid var(--l);border-radius:23px;padding:17px;margin:13px 0}.row{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--l);align-items:center}.row:last-child{border:0}.actions{display:grid;gap:10px;margin-top:16px}button,input,textarea,select{font:inherit}.btn{border:0;border-radius:17px;min-height:57px;padding:13px 16px;font-weight:900}.primary{background:var(--g);color:#fff}.secondary{background:#fff;border:1px solid var(--l);color:var(--i)}input,textarea,select{width:100%;padding:13px;border:1px solid var(--l);border-radius:14px;background:#fff}textarea{min-height:120px}.choice{display:flex;gap:12px;align-items:center;text-align:left}.choice input{width:24px;height:24px}.group{margin:15px 0}.chips{display:flex;gap:8px;overflow:auto;padding:2px}.chip{white-space:nowrap;border:1px solid var(--l);background:#fff;padding:10px 12px;border-radius:999px;font-weight:800}.chip.on{background:var(--s);color:var(--gd);border-color:var(--g)}.material{background:#fff;border:1px solid var(--l);padding:14px;border-radius:18px;margin:9px 0}.material:hover{border-color:var(--g)}.material-count{font-size:13px;color:var(--m);margin:12px 2px 6px}.empty-state{background:#fff;border:1px solid var(--l);border-radius:18px;padding:18px;margin-top:12px}.empty-state b{display:block;margin-bottom:5px}.summary b{display:block;margin-bottom:3px}.photo{border:2px dashed #9fb2a7;border-radius:20px;padding:22px;text-align:center;background:#fff}.check{width:80px;height:80px;border-radius:50%;display:grid;place-items:center;background:var(--g);color:#fff;font-size:38px;margin:25px auto}.center{text-align:center}.hidden{display:none}.bottom{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(460px,100%);padding:12px 17px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--b) 25%)}
-</style></head><body><div class="app"><header><div class="brand">💚 KRISTINE · REGIE</div><div class="step" id="step">1 / 7</div></header>
-<section class="screen on" id="s1"><h1>War ein Teil ein Zusatzauftrag (Regie)?</h1><p>Ich kenne die Baustellenzeit. Du bestimmst nur den tatsächlichen Regieabschnitt.</p><div id="segments"></div></section>
-<section class="screen" id="s2"><h1>Welcher Zeitraum war Regie?</h1><p id="rangeHint"></p><div class="card"><label>Von<input type="time" id="from"></label><br><label>Bis<input type="time" id="to"></label></div></section>
-<section class="screen" id="s3"><h1>Wer war dabei?</h1><p>Eine Person erstellt den Bericht. Das restliche Team bestätigt ihn danach nur noch.</p><div class="card" id="people"></div></section>
-<section class="screen" id="s4"><h1>Was wurde zusätzlich gemacht?</h1><p>Kurz sprechen oder schreiben. Kein Formulartext.</p><textarea id="description" placeholder="z. B. Gang auf Kundenwunsch zusätzlich gespachtelt und gestrichen"></textarea></section>
-<section class="screen" id="s5"><h1>Welches Material gehört zur Regie?</h1><p>Bei Regie steht der gesamte aktive Materialstamm zur Verfügung.</p><input id="search" placeholder="Material, Kürzel oder Alias"><div class="chips" id="groups"></div><div id="materialList"></div><div id="selectedMaterials"></div></section>
-<section class="screen" id="s6"><h1>Fotos zum Zusatzauftrag?</h1><p>Bestehende oder neue Fotos. Das Mischetikett wird bei relevantem Material direkt beim Material verlangt.</p><label class="photo">📷 Fotos auswählen<input class="hidden" type="file" id="photos" accept="image/*" multiple></label><div id="photoNames"></div></section>
-<section class="screen" id="s7"><h1>Passt der Regiebericht?</h1><div class="card summary" id="summary"></div></section>
-<section class="screen center" id="done"><div class="check">✓</div><h1>Regie vorbereitet.</h1><p>Die anderen Beteiligten bekommen nur noch: „Warst du dabei? – übernehmen?“</p></section>
-</div><div class="bottom"><button class="btn primary" id="next" style="width:100%" onclick="next()">Weiter</button></div>
-<dialog id="matDialog"><form id="matForm" style="padding:20px;min-width:min(420px,90vw)" onsubmit="saveMaterial(event)"><h2 id="matTitle"></h2><label>Menge<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center"><input id="qty" inputmode="decimal" required><strong id="qtyUnit" style="min-width:70px"></strong></div></label><div id="dynamic"></div><div class="actions"><button type="button" class="btn secondary" onclick="document.getElementById('matDialog').close()">Abbrechen</button><button type="submit" class="btn primary">Übernehmen</button></div></form></dialog>
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>KGO · Regie</title>
+<style>
+:root{--green:#236b43;--dark:#17482f;--soft:#e9f4ed;--paper:#fff;--bg:#f4f5f1;--ink:#152019;--muted:#68716b;--line:#d8e0da;--danger:#a43e38}*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;color:var(--ink);background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.app{width:min(100%,480px);min-height:100dvh;margin:auto;padding:calc(12px + env(safe-area-inset-top)) 16px calc(104px + env(safe-area-inset-bottom))}header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 1px 18px}.brand{font-weight:950;letter-spacing:.02em}.step{font-size:12px;font-weight:900;color:var(--dark);background:var(--soft);padding:7px 10px;border-radius:999px}.screen{display:none}.screen.on{display:block}h1{font-size:31px;line-height:1.08;letter-spacing:-.035em;margin:7px 0 9px}h2{font-size:20px;margin:0 0 10px}p{font-size:16px;line-height:1.43;color:var(--muted);margin:0 0 16px}.context{font-size:14px;color:var(--dark);background:var(--soft);border-radius:14px;padding:11px 13px;margin-bottom:18px}.choices,.actions{display:grid;gap:11px}.btn{width:100%;min-height:58px;border:0;border-radius:17px;padding:14px 16px;font:inherit;font-weight:900;cursor:pointer}.primary{color:#fff;background:var(--green)}.secondary{color:var(--ink);background:#fff;border:1px solid var(--line)}.choice{text-align:left;display:flex;gap:13px;align-items:center}.choice .icon{width:43px;height:43px;border-radius:13px;background:var(--soft);display:grid;place-items:center;font-size:22px;flex:none}.choice small{display:block;color:var(--muted);font-weight:500;margin-top:2px}.card{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:15px;margin:11px 0}.person{display:grid;grid-template-columns:26px 1fr;gap:11px;align-items:start;padding:12px 0;border-bottom:1px solid var(--line)}.person:last-child{border-bottom:0}.person input[type=checkbox]{width:24px;height:24px;margin:2px 0}.person strong,.material-title{display:block}.person-time{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}.person-time label{font-size:12px;color:var(--muted)}.net{grid-column:1/-1;background:var(--soft);border-radius:10px;padding:8px 10px;font-size:13px;color:var(--dark)}label{font-size:13px;font-weight:800}input,textarea{width:100%;font:inherit;font-size:16px;border:1px solid var(--line);border-radius:14px;background:#fff;padding:13px;color:var(--ink)}input:focus,textarea:focus{outline:3px solid #a8cfb6;border-color:var(--green)}textarea{min-height:150px;resize:vertical}.time-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.hint{font-size:13px;color:var(--muted);margin-top:8px}.material-picker{position:relative}.material-results{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 5px);max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 15px 35px #14251a25}.material-result{display:block;width:100%;border:0;border-bottom:1px solid var(--line);background:#fff;padding:12px;text-align:left;font:inherit}.material-result:last-child{border-bottom:0}.material-result small{display:block;color:var(--muted)}.quantity-wrap{margin-top:12px}.unit-line{display:grid;grid-template-columns:1fr 76px;gap:9px;align-items:center}.unit{height:51px;display:grid;place-items:center;background:var(--soft);border-radius:13px;font-weight:900;color:var(--dark)}.selected-material{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.remove{border:0;background:#f7e9e7;color:var(--danger);width:36px;height:36px;border-radius:11px;font-size:22px}.speech{display:flex;gap:9px;margin-top:10px}.speech .btn{min-height:50px}.photo-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.photo-button{display:grid;place-items:center;text-align:center;min-height:105px;border:2px dashed #9cb2a3;border-radius:18px;background:#fff;font-weight:900;cursor:pointer}.hidden{display:none!important}.photo-list{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.thumb{aspect-ratio:1;border-radius:13px;overflow:hidden;background:#e7ebe8;position:relative}.thumb img{width:100%;height:100%;object-fit:cover}.thumb button{position:absolute;right:4px;top:4px;border:0;border-radius:50%;width:28px;height:28px;background:#fff;color:var(--danger);font-weight:900}.summary-row{padding:12px 0;border-bottom:1px solid var(--line)}.summary-row:last-child{border:0}.summary-head{display:flex;justify-content:space-between;gap:10px}.summary-head b{color:var(--dark)}.edit{border:0;background:transparent;color:var(--green);font-weight:900}.bottom{position:fixed;z-index:10;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,480px);padding:18px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 22%)}.bottom-row{display:flex;gap:9px}.back{width:62px;flex:none}.done{text-align:center;padding-top:12vh}.check{width:82px;height:82px;margin:0 auto 24px;border-radius:50%;display:grid;place-items:center;background:var(--green);color:#fff;font-size:42px}.error{background:#f9e9e7;color:#852d28;padding:11px;border-radius:12px;margin-bottom:12px}.loading{opacity:.58;pointer-events:none}@media(max-width:360px){h1{font-size:27px}.photo-actions{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="app" id="app">
+  <header><div class="brand">💚 KGO · REGIE</div><div class="step" id="step">1 / 8</div></header>
+  <div class="context" id="context">Baustelle wird geladen …</div>
+  <div id="error" class="error hidden"></div>
+  <section class="screen on" id="s1"><h1>Welche Stunden?</h1><p>Immer netto ohne Pause. KGO rundet je Mitarbeiter auf die nächste Viertelstunde auf.</p><div class="choices"><button class="btn secondary choice" data-hours="day"><span class="icon">☀️</span><span>Ganzer Tag<small>Alle Arbeitsblöcke auf dieser Baustelle</small></span></button><button class="btn secondary choice" data-hours="range"><span class="icon">🕒</span><span>Bestimmte Stunden<small>Einen Zeitraum auswählen</small></span></button></div></section>
+  <section class="screen" id="s2"><h1>Wer war dabei?</h1><p>Das Team ist bereits von dieser Baustelle vorausgewählt.</p><div class="choices"><button class="btn secondary choice" data-team="all"><span class="icon">👷</span><span>Ganzes Team<small>Alle, die heute hier gearbeitet haben</small></span></button><button class="btn secondary choice" data-team="partial"><span class="icon">✓</span><span>Teile des Teams<small>Mitarbeiter auswählen</small></span></button></div></section>
+  <section class="screen" id="s3"><h1 id="detailTitle">Zeitraum und Team</h1><p id="detailHint"></p><div class="card hidden" id="rangeCard"><div class="time-grid"><label>Von<input type="time" id="rangeFrom" step="900"></label><label>Bis<input type="time" id="rangeTo" step="900"></label></div><div class="hint">Pausen innerhalb des Zeitraums werden nicht mitgerechnet.</div></div><div class="card" id="people"></div></section>
+  <section class="screen" id="s4"><h1>Stunden passen?</h1><p>Nettozeit je Mitarbeiter, bereits auf 00 / 15 / 30 / 45 aufgerundet.</p><div id="timeReview"></div><div class="card"><b>Regiestunden gesamt</b><div style="font-size:34px;font-weight:950;color:var(--dark)" id="totalHours">0 h</div></div></section>
+  <section class="screen" id="s5"><h1>Material</h1><p>Material auswählen, darunter die Menge. Preise sieht nur das Büro.</p><div class="card"><div class="material-picker"><label>Material<input id="materialSearch" autocomplete="off" placeholder="Tippen – Auswahl wird kleiner"></label><div class="material-results hidden" id="materialResults"></div></div><div class="quantity-wrap hidden" id="quantityWrap"><span class="material-title" id="pickedMaterial"></span><label>Menge<div class="unit-line"><input id="materialQuantity" inputmode="decimal" placeholder="z. B. 3 × 12,5"><span class="unit" id="materialUnit">Stk</span></div></label><div class="hint" id="quantityResult">Rechnungen im Feld sind erlaubt.</div></div><div class="actions" style="margin-top:12px"><button class="btn secondary hidden" id="addMaterial">+ Nächstes Material</button><button class="btn primary" id="materialsDone">Alles erfasst</button></div></div><div id="chosenMaterials"></div></section>
+  <section class="screen" id="s6"><h1>Was wurde gemacht?</h1><p>Schreiben oder einfach sprechen.</p><textarea id="description" placeholder="Arbeit kurz und verständlich beschreiben …"></textarea><div class="speech"><button class="btn secondary" id="speak" type="button">🎙️ Sprechen</button></div><div class="hint" id="speechHint"></div></section>
+  <section class="screen" id="s7"><h1>Fotos hinzufügen?</h1><p>Die Fotos werden auch bei der Baustelle unter „Fotos“ mit dem Tag „Regie“ gespeichert.</p><div class="photo-actions"><label class="photo-button">📷<br>Kamera<input class="hidden" id="camera" type="file" accept="image/*" capture="environment" multiple></label><label class="photo-button">🖼️<br>Mediathek<input class="hidden" id="library" type="file" accept="image/*" multiple></label></div><button class="btn secondary" id="noPhotos" style="margin-top:10px">Keine Fotos</button><div class="photo-list" id="photoList"></div></section>
+  <section class="screen" id="s8"><h1>Zusammenfassung</h1><p>Noch einmal prüfen – dann geht der Bericht an Alex.</p><div class="card" id="summary"></div></section>
+  <section class="screen done" id="done"><div class="check">✓</div><h1>Regie ausgestellt.</h1><p>Der Bericht ist bei Alex zur Prüfung. Auf der Baustelle steht jetzt der Status <b>Ausgestellt · Offen</b>.</p></section>
+</main>
+<footer class="bottom" id="bottom"><div class="bottom-row"><button class="btn secondary back hidden" id="back">‹</button><button class="btn primary" id="next">Weiter</button></div></footer>
 <script>
-const qs = new URLSearchParams(location.search);
-const employeeId = qs.get("employeeId") || "";
-const date = qs.get("date") || new Date().toISOString().slice(0, 10);
-const token = qs.get("token") || "";
-
-let page = 1;
-let ctx = { segments: [], team: [], teamCandidates: [], currentEmployeeName: "" };
-let segment = null;
-let materials = [];
-let activeGroup = "";
-let filtered = [];
-let chosen = [];
-let current = null;
-
-const $ = id => document.getElementById(id);
-
-async function api(url, options = {}) {
-  const finalUrl = token
-    ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token)
-    : url;
-
-  const response = await fetch(finalUrl, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
-
-  const raw = await response.text();
-  let body = {};
-
-  if (raw) {
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      throw new Error(
-        response.status === 403
-          ? "Zugriff verweigert – Admin-Token fehlt oder ist ungültig."
-          : raw
-      );
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(body.error || raw || `HTTP ${response.status}`);
-  }
-
-  return body;
-}
-
-function show(n) {
-  document.querySelectorAll(".screen").forEach(x => x.classList.remove("on"));
-  $("s" + n)?.classList.add("on");
-  page = n;
-  $("step").textContent = n + " / 7";
-  $("next").textContent = n === 7 ? "Regie vorbereiten" : "Weiter";
-}
-
-function searchableText(m) {
-  return [
-    m.materialId,
-    m.group,
-    m.subgroup,
-    m.manufacturer,
-    m.product,
-    m.productLine,
-    m.colorNumber,
-    m.colorName,
-    m.alias,
-    m.searchText
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
-async function loadCurrentEmployeeName() {
-  try {
-    const queue = await api(`/kristine/api/day-queue/${encodeURIComponent(date)}`);
-    const item = (queue.items || []).find(row =>
-      String(row.employeeId) === String(employeeId)
-    );
-    ctx.currentEmployeeName = item?.employeeName || employeeId;
-  } catch {
-    ctx.currentEmployeeName = employeeId;
-  }
-}
-
-async function init() {
-  if (!employeeId) {
-    segments.innerHTML = '<div class="card">Mitarbeiter-ID fehlt. Bitte den Regie-Assistenten aus KRISTOOL öffnen.</div>';
-    $("next").disabled = true;
-    return;
-  }
-
-  await loadCurrentEmployeeName();
-
-  const dayData = await api(
-    `/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`
-  );
-
-  ctx.segments = (dayData.segments || [])
-    .filter(s => s.type === "work" && s.from && s.to && s.jobId)
-    .map((s, i) => ({
-      id: s.id || `segment_${i}`,
-      from: s.from,
-      to: s.to,
-      jobId: s.jobId,
-      jobName: s.jobName || s.jobId,
-      employeeId
-    }));
-
-  try {
-    const teamData = await api(
-      `/kristine/api/team-candidates/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`
-    );
-    ctx.teamCandidates = teamData.candidates || [];
-  } catch {
-    ctx.teamCandidates = [];
-  }
-
-  segments.innerHTML = ctx.segments.length
-    ? ctx.segments.map((s, i) => `
-        <button class="btn secondary" style="width:100%;margin:6px 0;text-align:left" onclick="pickSegment(${i})">
-          <b>${esc(s.from)}–${esc(s.to)}</b><br>
-          ${esc(s.jobName || s.jobId)}
-        </button>
-      `).join("")
-    : `
-      <div class="card">
-        Keine korrigierte Baustellenzeit gefunden.<br><br>
-        <small>Mitarbeiter: ${esc(ctx.currentEmployeeName)} · Datum: ${esc(date)}</small>
-      </div>
-    `;
-
-  $("next").disabled = !ctx.segments.length;
-
-  // Regie darf den kompletten aktiven Materialstamm sehen.
- const response = await fetch("/api/regie/materials");
-const materialData = await response.json();
-
-if (!response.ok) {
-  throw new Error(materialData.error || `HTTP ${response.status}`);
-}
-
-  materials = (materialData.materials || []).map(m => ({
-    ...m,
-    _search: searchableText(m)
-  }));
-
-  filtered = [...materials];
-  drawGroups();
-  applyMaterialFilter();
-}
-
-function pickSegment(i) {
-  segment = ctx.segments[i];
-  from.value = segment.from;
-  to.value = segment.to;
-  rangeHint.textContent =
-    `Korrigierte KRISTOOL-Zeit: ${segment.from}–${segment.to} bei ${segment.jobName}`;
-
-  const shared = (ctx.teamCandidates || [])
-    .filter(candidate =>
-      (candidate.sharedJobs || []).some(job =>
-        String(job.jobId) === String(segment.jobId)
-      )
-    )
-    .map(candidate => ({
-      id: candidate.employeeId,
-      name: candidate.employeeName || candidate.employeeId
-    }));
-
-  const team = [
-    { id: employeeId, name: ctx.currentEmployeeName || employeeId },
-    ...shared
-  ];
-
-  ctx.team = [...new Map(team.map(person => [String(person.id), person])).values()];
-
-  people.innerHTML = ctx.team.map(p => `
-    <label class="row choice">
-      <span>${esc(p.name)}</span>
-      <input type="checkbox"
-             value="${esc(p.id)}"
-             data-name="${esc(p.name)}"
-             checked>
-    </label>
-  `).join("");
-
-  show(2);
-}
-
-function next() {
-  try {
-    if (page === 1) {
-      alert("Bitte Baustellenabschnitt auswählen.");
-      return;
-    }
-
-    if (page === 2) {
-      if (!from.value || !to.value || from.value >= to.value) {
-        throw new Error("Zeitraum prüfen");
-      }
-      if (from.value < segment.from || to.value > segment.to) {
-        throw new Error(`Regiezeit muss innerhalb ${segment.from}–${segment.to} liegen`);
-      }
-      show(3);
-    } else if (page === 3) {
-      if (![...people.querySelectorAll("input:checked")].length) {
-        throw new Error("Personen auswählen");
-      }
-      show(4);
-    } else if (page === 4) {
-      if (!description.value.trim()) throw new Error("Beschreibung fehlt");
-      show(5);
-      setTimeout(() => search.focus(), 150);
-    } else if (page === 5) {
-      show(6);
-    } else if (page === 6) {
-      buildSummary();
-      show(7);
-    } else if (page === 7) {
-      submit();
-    }
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-function drawGroups() {
-  const groupsList = [...new Set(materials.map(m => m.group).filter(Boolean))]
-    .sort((a, b) => String(a).localeCompare(String(b), "de"));
-
-  groups.innerHTML =
-    '<button type="button" class="chip on" onclick="filterGroup(\'\',this)">Alle</button>' +
-    groupsList.map(g =>
-      `<button type="button" class="chip" onclick="filterGroup('${js(g)}',this)">${esc(g)}</button>`
-    ).join("");
-}
-
-function filterGroup(group, element) {
-  activeGroup = group;
-  document.querySelectorAll(".chip").forEach(x => x.classList.remove("on"));
-  element.classList.add("on");
-  applyMaterialFilter();
-}
-
-search.oninput = applyMaterialFilter;
-
-function applyMaterialFilter() {
-  const query = search.value.trim().toLowerCase();
-
-  filtered = materials.filter(m => {
-    const groupMatches = !activeGroup || m.group === activeGroup;
-    const queryMatches = !query || m._search.includes(query);
-    return groupMatches && queryMatches;
-  });
-
-  drawMaterials();
-}
-
-function drawMaterials() {
-  if (!materials.length) {
-    materialList.innerHTML = `
-      <div class="empty-state">
-        <b>Der Materialstamm ist noch leer.</b>
-        Die Excel wurde noch nicht in KRISTINE importiert.
-        <div class="actions">
-          <button type="button" class="btn secondary"
-            onclick="location.href='/admin/material?token=${encodeURIComponent(token)}'">
-            Materialstamm öffnen
-          </button>
-        </div>
-      </div>
-    `;
-    drawChosen();
-    return;
-  }
-
-  const label = filtered.length === 1 ? "1 Treffer" : `${filtered.length} Treffer`;
-
-  materialList.innerHTML = `
-    <div class="material-count">${label}</div>
-    ${filtered.slice(0, 100).map(m => `
-      <button type="button"
-              class="material"
-              style="width:100%;text-align:left"
-              onclick="openMaterial('${js(m.materialId)}')">
-        <b>${esc(m.product || m.materialId)}</b><br>
-        <small>
-          ${esc([m.materialId, m.group, m.subgroup, m.manufacturer]
-            .filter(Boolean).join(" · "))}
-          ${m.unit ? ` · ${esc(m.unit)}` : ""}
-        </small>
-      </button>
-    `).join("")}
-    ${filtered.length > 100
-      ? '<div class="material-count">Bitte Suche genauer eingrenzen.</div>'
-      : ""}
-  `;
-
-  if (!filtered.length) {
-    materialList.innerHTML = `
-      <div class="empty-state">
-        <b>Kein Treffer für „${esc(search.value)}“.</b>
-        Suche auch mit Kürzel, Hersteller, Alias oder Materialgruppe.
-      </div>
-    `;
-  }
-
-  drawChosen();
-}
-
-function openMaterial(id) {
-  current = materials.find(m => String(m.materialId) === String(id));
-  if (!current) return;
-
-  $("matTitle").textContent = current.product || current.materialId;
-  $("qty").value = "";
-  $("qtyUnit").textContent = current.unit || "Einheit";
-
-  let html = "";
-
-  if (current.roomRequired) {
-    html += field("room", "Welcher Raum?");
-  }
-  if (current.componentRequired) {
-    html += field("component", "Welches Bauteil?");
-  }
-  if (current.areaRequired) {
-    html += field("area", "Welcher Bereich?");
-  }
-
-  const needsColor =
-    current.colorRequired ||
-    current.askColor ||
-    current.designRelevant ||
-    String(current.colorNumber || "").toLowerCase() === "ja";
-
-  if (needsColor) {
-    html += field("color", "Welcher Farbton / welche Farbnummer?");
-  }
-
-  if (current.extraQuestion) {
-    html += field("extra", current.extraQuestion);
-  }
-
-  const needsLabelPhoto =
-    current.labelPhotoRequired ||
-    current.designRelevant;
-
-  if (needsLabelPhoto) {
-    html += `
-      <label style="display:block;margin-top:10px">
-        Foto vom Mischetikett
-        <input id="labelPhoto"
-               type="file"
-               accept="image/*"
-               capture="environment">
-      </label>
-    `;
-  }
-
-  $("dynamic").innerHTML = html;
-  $("matDialog").showModal();
-}
-
-function field(id, label) {
-  return `
-    <label style="display:block;margin-top:10px">
-      ${esc(label)}
-      <input id="${id}">
-    </label>
-  `;
-}
-
-function saveMaterial(event) {
-  event.preventDefault();
-
-  const quantity = $("qty").value.trim();
-  if (!quantity) {
-    alert("Menge fehlt");
-    $("qty").focus();
-    return;
-  }
-  if (!current) {
-    alert("Material fehlt");
-    return;
-  }
-
-  chosen.push({
-    materialId: current.materialId,
-    product: current.product || current.materialId,
-    supplier: current.supplier || "",
-    quantity,
-    unit: current.unit || "Einheit",
-    purchasePrice: Number(current.purchasePrice || 0),
-    markup: Number(current.markupPercent ?? current.markup ?? 0),
-    salePrice: Number(current.salePrice || 0),
-    room: val("room"),
-    component: val("component"),
-    area: val("area"),
-    color: val("color"),
-    extraAnswer: val("extra"),
-    labelPhotoName: $("labelPhoto")?.files?.[0]?.name || ""
-  });
-
-  $("matDialog").close();
-  $("search").value = "";
-  activeGroup = "";
-  document.querySelectorAll(".chip").forEach((chip, index) => chip.classList.toggle("on", index === 0));
-  applyMaterialFilter();
-  drawChosen();
-
-  setTimeout(() => {
-    $("selectedMaterials").scrollIntoView({ behavior: "smooth", block: "center" });
-  }, 50);
-}
-
-function val(id) {
-  return $(id)?.value || "";
-}
-
-function drawChosen() {
-  selectedMaterials.innerHTML = chosen.length
-    ? "<h3>Ausgewählt</h3>" + chosen.map((m, i) => `
-        <div class="card">
-          <b>${esc(m.product)}</b><br>
-          ${esc(m.quantity)} ${esc(m.unit)}
-          ${esc([m.color, m.room, m.component, m.area]
-            .filter(Boolean).join(" · "))}
-          ${m.labelPhotoName ? "<br>📷 Mischetikett" : ""}
-          <button type="button"
-                  style="float:right"
-                  onclick="chosen.splice(${i},1);drawChosen()">×</button>
-        </div>
-      `).join("")
-    : "";
-}
-
-photos.onchange = () => {
-  photoNames.innerHTML = [...photos.files]
-    .map(file => `<div class="card">📷 ${esc(file.name)}</div>`)
-    .join("");
-};
-
-function selectedPeople() {
-  return [...people.querySelectorAll("input:checked")].map(input => ({
-    id: input.value,
-    name: input.dataset.name
-  }));
-}
-
-function buildSummary() {
-  const selected = selectedPeople();
-
-  summary.innerHTML = `
-    <b>Baustelle</b>${esc(segment.jobName)}
-    <hr>
-    <b>Zeit</b>${esc(from.value)}–${esc(to.value)}
-    <hr>
-    <b>Team</b>${selected.map(x => esc(x.name)).join(", ")}
-    <hr>
-    <b>Arbeit</b>${esc(description.value)}
-    <hr>
-    <b>Material</b>
-    ${chosen.length
-      ? chosen.map(x =>
-          `${esc(x.product)} – ${esc(x.quantity)} ${esc(x.unit)}`
-        ).join("<br>")
-      : "Kein Material"}
-    <hr>
-    <b>Fotos</b>${photos.files.length}
-  `;
-}
-
-async function submit() {
-  const selected = selectedPeople();
-
-  await api("/kristine/api/regie", {
-    method: "POST",
-    body: JSON.stringify({
-      date,
-      segment,
-      from: from.value,
-      to: to.value,
-      people: selected,
-      createdBy:
-        selected.find(x => String(x.id) === String(employeeId)) ||
-        selected[0],
-      description: description.value,
-      materials: chosen,
-      photos: [...photos.files].map(file => ({
-        name: file.name,
-        type: file.type
-      }))
-    })
-  });
-
-  document.querySelectorAll(".screen").forEach(x => x.classList.remove("on"));
-  done.classList.add("on");
-  step.textContent = "Fertig";
-  next.style.display = "none";
-}
-
-function esc(value) {
-  return String(value ?? "").replace(/[&<>"']/g, character => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[character]));
-}
-
-function js(value) {
-  return String(value ?? "")
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'");
-}
-
-init().catch(error => {
-  console.error(error);
-  alert(error.message);
-});
-</script></body></html>
+const qs=new URLSearchParams(location.search),employeeId=qs.get('employeeId')||'',requestedJobId=qs.get('jobId')||'',date=qs.get('date')||new Date().toISOString().slice(0,10),token=qs.get('token')||'';
+const $=id=>document.getElementById(id);let page=1,ctx={team:[]},segment=null,hoursMode='',teamMode='',peopleData=[],materials=[],picked=null,chosen=[],photoFiles=[];
+function tokenUrl(url){return token?url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(token):url}
+async function api(url,options={}){const r=await fetch(tokenUrl(url),{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}}),text=await r.text();let body={};try{body=text?JSON.parse(text):{}}catch{throw new Error(text||`HTTP ${r.status}`)}if(!r.ok)throw new Error(body.error||`HTTP ${r.status}`);return body}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function mins(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);return m?+m[1]*60 + +m[2]:null}
+function hourText(v){return `${Number(v||0).toLocaleString('de-AT',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})} h`}
+function roundQuarter(minutes){return Math.ceil(Math.max(0,minutes)/15)*15}
+function show(n){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));$('s'+n)?.classList.add('on');page=n;$('step').textContent=`${n} / 8`;$('back').classList.toggle('hidden',n===1);$('next').classList.toggle('hidden',[1,2,5,7].includes(n));$('next').textContent=n===8?'An Alex senden':'Weiter';$('error').classList.add('hidden');scrollTo({top:0,behavior:'smooth'})}
+function fail(message){$('error').textContent=message;$('error').classList.remove('hidden');scrollTo({top:0,behavior:'smooth'})}
+function overlapMinutes(blocks,from,to){const a=mins(from),b=mins(to);if(a===null||b===null||b<=a)return 0;return blocks.reduce((sum,x)=>{const start=Math.max(a,mins(x.from)??a),end=Math.min(b,mins(x.to)??b);return sum+Math.max(0,end-start)},0)}
+function workBlocks(segments,jobId){return (segments||[]).filter(x=>x.type==='work'&&String(x.jobId)===String(jobId)&&x.from&&x.to)}
+async function employeeSegments(id){try{return (await api(`/kristine/api/segments/${encodeURIComponent(id)}/${date}`)).segments||[]}catch{return []}}
+async function init(){if(!employeeId)throw new Error('Mitarbeiter fehlt. Regie bitte direkt aus KGO öffnen.');const own=await employeeSegments(employeeId),wanted=requestedJobId||own.find(x=>x.type==='work'&&x.jobId)?.jobId,jobs=workBlocks(own,wanted);if(!jobs.length)throw new Error('Für diese Baustelle gibt es heute keinen Arbeitsblock.');segment={jobId:jobs[0].jobId,jobName:jobs[0].jobName||jobs[0].jobId,from:jobs.map(x=>x.from).sort()[0],to:jobs.map(x=>x.to).sort().slice(-1)[0]};let name=employeeId;try{const q=await api(`/kristine/api/day-queue/${date}`);name=(q.items||[]).find(x=>String(x.employeeId)===String(employeeId))?.employeeName||name}catch{}let candidates=[];try{candidates=(await api(`/kristine/api/team-candidates/${encodeURIComponent(employeeId)}/${date}`)).candidates||[]}catch{}const team=[{id:employeeId,name},...candidates.filter(x=>(x.sharedJobs||[]).some(j=>String(j.jobId)===String(segment.jobId))).map(x=>({id:x.employeeId,name:x.employeeName||x.employeeId}))];ctx.team=[...new Map(team.map(x=>[String(x.id),x])).values()];peopleData=await Promise.all(ctx.team.map(async p=>({...p,selected:true,blocks:workBlocks(await employeeSegments(p.id),segment.jobId),hours:0})));$('context').innerHTML=`<b>${esc(segment.jobName)}</b><br>${new Date(date+'T12:00').toLocaleDateString('de-AT')} · ${esc(segment.from)}–${esc(segment.to)}`;const data=await api('/api/regie/materials');materials=(data.materials||[]).map(m=>({...m,_search:[m.materialId,m.product,m.name,m.group,m.subgroup,m.manufacturer,m.alias,m.searchText].filter(Boolean).join(' ').toLowerCase()}));renderPeople()}
+document.querySelectorAll('[data-hours]').forEach(b=>b.onclick=()=>{hoursMode=b.dataset.hours;show(2)});document.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>{try{teamMode=b.dataset.team;peopleData.forEach(x=>x.selected=teamMode==='all'||String(x.id)===String(employeeId));prepareDetail();if(hoursMode==='day'&&teamMode==='all'){calculateTimes();show(4)}else show(3)}catch(e){fail(e.message)}});
+function prepareDetail(){const ranged=hoursMode==='range';$('rangeCard').classList.toggle('hidden',!ranged);$('detailTitle').textContent=ranged?'Welche Stunden genau?':teamMode==='all'?'Das ganze Team':'Wer gehört dazu?';$('detailHint').textContent=ranged?'Zeitraum einmal wählen. Die Nettozeit wird je Mitarbeiter aus seinen Arbeitsblöcken berechnet.':'KGO zeigt die Arbeitszeit jedes ausgewählten Mitarbeiters.';$('rangeFrom').value=segment.from;$('rangeTo').value=segment.to;renderPeople()}
+function renderPeople(){if(!peopleData.length){$('people').innerHTML='Kein Team gefunden.';return}$('people').innerHTML=peopleData.map((p,i)=>`<label class="person"><input type="checkbox" data-person="${i}" ${p.selected?'checked':''} ${teamMode==='all'?'disabled':''}><span><strong>${esc(p.name)}</strong><small>${p.blocks.length?p.blocks.map(x=>`${esc(x.from)}–${esc(x.to)}`).join(' · '):'Keine Arbeitszeit auf dieser Baustelle'}</small></span></label>`).join('');$('people').querySelectorAll('[data-person]').forEach(x=>x.onchange=()=>peopleData[+x.dataset.person].selected=x.checked)}
+function calculateTimes(){const from=hoursMode==='range'?$('rangeFrom').value:segment.from,to=hoursMode==='range'?$('rangeTo').value:segment.to;if(mins(from)===null||mins(to)===null||mins(to)<=mins(from))throw new Error('Zeitraum prüfen.');for(const p of peopleData){if(!p.selected)continue;const net=overlapMinutes(p.blocks,from,to),rounded=roundQuarter(net);p.from=hoursMode==='range'?from:(p.blocks.map(x=>x.from).sort()[0]||from);p.to=hoursMode==='range'?to:(p.blocks.map(x=>x.to).sort().slice(-1)[0]||to);p.netMinutes=net;p.hours=rounded/60}if(!peopleData.some(x=>x.selected&&x.hours>0))throw new Error('Für die Auswahl wurde keine Arbeitszeit gefunden.');renderTimeReview()}
+function renderTimeReview(){$('timeReview').innerHTML=peopleData.filter(x=>x.selected).map(p=>`<div class="card"><strong>${esc(p.name)}</strong><div class="person-time"><label>Von<input type="time" value="${esc(p.from)}" disabled></label><label>Bis<input type="time" value="${esc(p.to)}" disabled></label><div class="net">Netto ohne Pause: ${Math.floor(p.netMinutes/60)}:${String(p.netMinutes%60).padStart(2,'0')} · aufgerundet <b>${hourText(p.hours)}</b></div><label style="grid-column:1/-1">Regiestunden<input data-hours-edit="${esc(p.id)}" type="number" min="0.25" step="0.25" value="${p.hours}"></label></div></div>`).join('');$('timeReview').querySelectorAll('[data-hours-edit]').forEach(x=>x.oninput=()=>{const p=peopleData.find(y=>String(y.id)===x.dataset.hoursEdit);p.hours=Math.ceil((Number(x.value)||0)*4)/4;updateTotal()});updateTotal()}
+function updateTotal(){$('totalHours').textContent=hourText(peopleData.filter(x=>x.selected).reduce((s,x)=>s+x.hours,0))}
+$('next').onclick=async()=>{try{if(page===3){if(!peopleData.some(x=>x.selected))throw new Error('Mindestens einen Mitarbeiter auswählen.');calculateTimes();show(4)}else if(page===4)show(5);else if(page===6){if(!$('description').value.trim())throw new Error('Bitte die Arbeit beschreiben.');show(7)}else if(page===8)await submit()}catch(e){fail(e.message)}};
+$('back').onclick=()=>{const map={2:1,3:2,4:(hoursMode==='day'&&teamMode==='all'?2:3),5:4,6:5,7:6,8:7};show(map[page]||1)};
+function materialLabel(m){return m.product||m.name||m.materialId||'Material'}
+function drawMaterialResults(){const q=$('materialSearch').value.trim().toLowerCase();if(!q){$('materialResults').classList.add('hidden');return}const rows=materials.filter(m=>m._search.includes(q)).slice(0,30);$('materialResults').innerHTML=rows.length?rows.map(m=>`<button class="material-result" data-mat="${materials.indexOf(m)}"><b>${esc(materialLabel(m))}</b><small>${esc([m.materialId,m.manufacturer,m.group,m.unit].filter(Boolean).join(' · '))}</small></button>`).join(''):'<div class="material-result">Kein Treffer – weiter tippen oder anders suchen.</div>';$('materialResults').classList.remove('hidden');$('materialResults').querySelectorAll('[data-mat]').forEach(b=>b.onclick=()=>pickMaterial(materials[+b.dataset.mat]))}
+$('materialSearch').oninput=drawMaterialResults;$('materialSearch').onfocus=drawMaterialResults;
+function pickMaterial(m){picked=m;$('materialSearch').value=materialLabel(m);$('materialResults').classList.add('hidden');$('pickedMaterial').textContent=materialLabel(m);$('materialUnit').textContent=m.unit||'Stk';$('materialQuantity').value='';$('quantityWrap').classList.remove('hidden');$('addMaterial').classList.remove('hidden');setTimeout(()=>$('materialQuantity').focus(),30)}
+function calculateQuantity(value){const clean=String(value||'').replace(/,/g,'.').replace(/[×x:]/gi,m=>m===':'?'/':'*').replace(/\s/g,'');if(!clean||!/^[0-9.+*/()-]+$/.test(clean))return null;try{const result=Function(`"use strict";return (${clean})`)();return Number.isFinite(result)&&result>0?Math.round(result*1000)/1000:null}catch{return null}}
+$('materialQuantity').oninput=()=>{const n=calculateQuantity($('materialQuantity').value);$('quantityResult').textContent=n===null?'Zahl oder Rechnung eingeben, z. B. 3 × 12,5':`= ${n.toLocaleString('de-AT')} ${picked?.unit||'Stk'}`};
+function commitMaterial(){if(!picked)return true;const quantity=calculateQuantity($('materialQuantity').value);if(quantity===null){fail('Materialmenge prüfen.');$('materialQuantity').focus();return false}chosen.push({materialId:picked.materialId,product:materialLabel(picked),supplier:picked.supplier||'',quantity,unit:picked.unit||'Stk',purchasePrice:picked.purchasePrice||0,markup:picked.markupPercent??picked.markup??0,salePrice:picked.salePrice||0});picked=null;$('materialSearch').value='';$('quantityWrap').classList.add('hidden');$('addMaterial').classList.add('hidden');drawChosen();return true}
+$('addMaterial').onclick=()=>{if(commitMaterial())setTimeout(()=>$('materialSearch').focus(),30)};$('materialsDone').onclick=()=>{if(commitMaterial()){show(6);setTimeout(()=>$('description').focus(),30)}};
+function drawChosen(){$('chosenMaterials').innerHTML=chosen.map((m,i)=>`<div class="card selected-material"><span><b>${esc(m.product)}</b><br>${m.quantity.toLocaleString('de-AT')} ${esc(m.unit)}</span><button class="remove" data-remove="${i}">×</button></div>`).join('');$('chosenMaterials').querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{chosen.splice(+b.dataset.remove,1);drawChosen()})}
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;$('speak').onclick=()=>{if(!SpeechRecognition){$('speechHint').textContent='Spracherkennung ist in diesem Browser nicht verfügbar.';return}const r=new SpeechRecognition();r.lang='de-AT';r.interimResults=false;$('speak').textContent='🎙️ Ich höre …';r.onresult=e=>{$('description').value=[$('description').value,e.results[0][0].transcript].filter(Boolean).join(' ')};r.onerror=()=>{$('speechHint').textContent='Nicht verstanden – bitte nochmals versuchen oder schreiben.'};r.onend=()=>{$('speak').textContent='🎙️ Sprechen'};r.start()};
+function addPhotos(files){for(const file of files)if(file.type.startsWith('image/')&&!photoFiles.some(x=>x.name===file.name&&x.size===file.size))photoFiles.push(file);drawPhotos();show(8);buildSummary()}$('camera').onchange=e=>addPhotos(e.target.files);$('library').onchange=e=>addPhotos(e.target.files);$('noPhotos').onclick=()=>{photoFiles=[];drawPhotos();show(8);buildSummary()};
+function drawPhotos(){$('photoList').innerHTML=photoFiles.map((f,i)=>`<div class="thumb"><img src="${URL.createObjectURL(f)}" alt="${esc(f.name)}"><button data-photo-remove="${i}">×</button></div>`).join('');$('photoList').querySelectorAll('[data-photo-remove]').forEach(b=>b.onclick=()=>{photoFiles.splice(+b.dataset.photoRemove,1);drawPhotos()})}
+function buildSummary(){const staff=peopleData.filter(x=>x.selected);$('summary').innerHTML=`<div class="summary-row"><div class="summary-head"><b>Stunden</b><button class="edit" data-edit="3">Ändern</button></div>${staff.map(x=>`${esc(x.name)} · ${hourText(x.hours)}`).join('<br>')}<br><strong>Gesamt ${hourText(staff.reduce((s,x)=>s+x.hours,0))}</strong></div><div class="summary-row"><div class="summary-head"><b>Material</b><button class="edit" data-edit="5">Ändern</button></div>${chosen.length?chosen.map(x=>`${esc(x.product)} · ${x.quantity.toLocaleString('de-AT')} ${esc(x.unit)}`).join('<br>'):'Kein Material'}</div><div class="summary-row"><div class="summary-head"><b>Arbeit</b><button class="edit" data-edit="6">Ändern</button></div>${esc($('description').value)}</div><div class="summary-row"><div class="summary-head"><b>Fotos</b><button class="edit" data-edit="7">Ändern</button></div>${photoFiles.length?photoFiles.length+' Foto(s)':'Keine Fotos'}</div>`;$('summary').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>show(+b.dataset.edit))}
+async function filesToData(files){return Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,type:file.type,data:reader.result});reader.onerror=reject;reader.readAsDataURL(file)})))}
+async function submit(){$('app').classList.add('loading');$('next').textContent='Wird gesendet …';try{const staff=peopleData.filter(x=>x.selected);await api('/kristine/api/regie',{method:'POST',body:JSON.stringify({date,segment,hoursMode,teamMode,people:staff.map(x=>({id:x.id,name:x.name})),employees:staff.map(x=>({id:x.id,name:x.name,from:x.from,to:x.to,netMinutes:x.netMinutes,hours:x.hours})),createdBy:staff.find(x=>String(x.id)===String(employeeId))||staff[0],description:$('description').value.trim(),materials:chosen,uploads:await filesToData(photoFiles)})});document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));$('done').classList.add('on');$('context').classList.add('hidden');$('step').textContent='Fertig';$('bottom').classList.add('hidden')}finally{$('app').classList.remove('loading');$('next').textContent='An Alex senden'}}
+init().catch(e=>{fail(e.message);$('next').disabled=true});
+</script>
+</body>
+</html>

@@ -16,16 +16,18 @@ const app = {
 };
 let documentation = [];
 let savedMeta = null;
+let sentMail = null;
 
 registerRegieAssistant(app, {
   dataDir: temporaryRoot,
   publicDir: path.join(__dirname, "..", "public"),
   requireAdmin: () => true,
-  readJobMeta: async () => ({ name: "Musterbaustelle", regieHourlyRate: 75, regieMaterialMarkup: 80 }),
+  readJobMeta: async () => ({ name: "Musterbaustelle", contactName: "Familie Muster", contactEmail: "kunde@example.test", regieHourlyRate: 75, regieMaterialMarkup: 80 }),
   writeJobMeta: async (_jobId, patch) => { savedMeta = patch; return patch; },
   appendJobHistory: async () => {},
   readDocumentation: async () => documentation,
   writeDocumentation: async (_jobId, rows) => { documentation = rows; },
+  sendRegieMail: async input => { sentMail = input; return { messageId: "mail-1" }; },
 });
 
 function invoke(handler, req) {
@@ -109,6 +111,48 @@ function invoke(handler, req) {
   } });
   assert.equal(duplicate.statusCode, 400);
   assert.match(duplicate.body.error, /bereits vergeben/);
+
+  const issue = routes.get("POST /kristine/api/regie");
+  const issued = await invoke(issue, { body: {
+    date: "2026-09-03",
+    segment: { jobId: "26097", jobName: "Handybaustelle", from: "07:00", to: "16:00" },
+    hoursMode: "day",
+    teamMode: "all",
+    people: [{ id: "ma-1", name: "Max Muster" }, { id: "ma-2", name: "Erika Beispiel" }],
+    employees: [
+      { id: "ma-1", name: "Max Muster", from: "07:00", to: "08:01", netMinutes: 61, hours: 1.02 },
+      { id: "ma-2", name: "Erika Beispiel", from: "07:00", to: "08:30", netMinutes: 90, hours: 1.5 },
+    ],
+    createdBy: { id: "ma-1", name: "Max Muster" },
+    description: "Zusatzfläche gestrichen",
+    materials: [{ materialId: "A01", product: "Innenfarbe", quantity: 3, unit: "kg", salePrice: 12 }],
+    uploads: [{ name: "regie.jpg", data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }],
+  } });
+  assert.equal(issued.statusCode, 200);
+  assert.equal(issued.body.report.processingStatus, "issued");
+  assert.equal(issued.body.report.billingStatus, "open");
+  assert.equal(issued.body.report.employees[0].hours, 1.25, "61 Nettominuten müssen auf 1,25 h aufgerundet werden");
+  assert.equal(issued.body.report.employees[1].hours, 1.5);
+  assert.equal(issued.body.report.attachments.length, 1);
+  const dayRegie = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26097", "2026", "09", "03", "regie.json"), "utf8"));
+  assert.equal(dayRegie.status, "Ausgestellt");
+  assert.equal(dayRegie.materials[0].name, "Innenfarbe");
+  const reviews = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "_kristine", "day-review-entries.json"), "utf8"));
+  assert.equal(reviews[0].tag, "Regie");
+  assert.equal(reviews[0].jobId, "26097");
+
+  const changeStatus = routes.get("POST /kristine/api/regie-reports/:id/status");
+  const approved = await invoke(changeStatus, { params: { id: issued.body.report.id }, body: { processingStatus: "approved", billingStatus: "open" } });
+  assert.equal(approved.statusCode, 200);
+  assert.equal(approved.body.report.status, "completed");
+  assert.equal(approved.body.report.processingStatus, "approved");
+  const recipients = await invoke(routes.get("GET /kristine/api/regie-reports/:id/recipients"), { params: { id: issued.body.report.id } });
+  assert.equal(recipients.body.recipients[0].email, "kunde@example.test");
+  const sent = await invoke(routes.get("POST /kristine/api/regie-reports/:id/send"), { params: { id: issued.body.report.id }, body: { to: "kunde@example.test" } });
+  assert.equal(sent.statusCode, 200);
+  assert.equal(sent.body.report.processingStatus, "sent");
+  assert.equal(sentMail.to, "kunde@example.test");
+  assert.equal(fs.readFileSync(sentMail.filePath).subarray(0, 4).toString(), "%PDF");
 
   fs.mkdirSync(path.join(temporaryRoot, "_kristine"), { recursive: true });
   fs.mkdirSync(path.join(temporaryRoot, "_system"), { recursive: true });

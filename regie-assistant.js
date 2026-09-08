@@ -4,6 +4,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
 function registerRegieAssistant(app, options) {
   const {
@@ -15,6 +16,7 @@ function registerRegieAssistant(app, options) {
     appendJobHistory,
     readDocumentation,
     writeDocumentation,
+    sendRegieMail,
   } = options;
   const ROOT = path.join(dataDir, "_kristine");
   const REPORTS = path.join(ROOT, "regie-reports.json");
@@ -24,6 +26,7 @@ function registerRegieAssistant(app, options) {
   const EMPLOYEES = path.join(ROOT, "employees.json");
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
   const FILES = path.join(ROOT, "regie-files");
+  const REVIEWS = path.join(ROOT, "day-review-entries.json");
 
   async function readJson(file, fallback) {
     try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; }
@@ -53,6 +56,7 @@ function registerRegieAssistant(app, options) {
     const a = minutes(from), b = minutes(to);
     return a === null || b === null || b <= a ? 0 : round((b - a) / 60);
   };
+  const quarterHours = value => Math.ceil(Math.max(0, num(value)) * 4) / 4;
   const validRange = (from, to, min, max) => {
     const a = minutes(from), b = minutes(to), lo = minutes(min), hi = minutes(max);
     return a !== null && b !== null && lo !== null && hi !== null && a >= lo && b <= hi && b > a;
@@ -93,6 +97,16 @@ function registerRegieAssistant(app, options) {
       hours: round(num(row?.hours) || hoursBetween(from, to)),
       hourlyRate: hasHourlyRate ? Math.max(0, round(num(row.hourlyRate))) : null,
     };
+  }
+
+  function normalizeIssuedEmployee(row) {
+    const employee = normalizeEmployee(row);
+    const netHours = row?.netMinutes !== undefined
+      ? Math.max(0, num(row.netMinutes) / 60)
+      : (num(row?.hours) || hoursBetween(employee.from, employee.to));
+    employee.netMinutes = Math.round(netHours * 60);
+    employee.hours = quarterHours(netHours);
+    return employee;
   }
 
   function employeeRate(row, fallback) {
@@ -174,6 +188,132 @@ function registerRegieAssistant(app, options) {
     return rows.slice(-100);
   }
 
+  async function storeRegiePhotos(report, uploads) {
+    const images = (Array.isArray(uploads) ? uploads : []).filter(upload => String(upload?.data || "").startsWith("data:image/")).slice(0, 30);
+    if (!images.length) return [];
+    const employeeId = safeId(report.createdBy?.id || "regie") || "regie";
+    const directory = path.join(ROOT, "media", report.date, employeeId);
+    await fsp.mkdir(directory, { recursive: true });
+    const reviews = await readJson(REVIEWS, []), stored = [];
+    for (const upload of images) {
+      const match = String(upload.data).match(/^data:([^;,]+);base64,(.+)$/s);
+      if (!match) continue;
+      const buffer = Buffer.from(match[2], "base64");
+      if (!buffer.length || buffer.length > 20 * 1024 * 1024) continue;
+      const extension = String(match[1]).includes("png") ? ".png" : String(match[1]).includes("webp") ? ".webp" : ".jpg";
+      const filename = `${Math.floor(Date.now() / 1000)}_${safeId(report.id)}_${crypto.randomBytes(3).toString("hex")}${extension}`;
+      const absolute = path.join(directory, filename);
+      await fsp.writeFile(absolute, buffer);
+      const relative = path.relative(dataDir, absolute).split(path.sep).join("/");
+      const entry = {
+        id: `regie_photo_${safeId(report.id)}_${crypto.randomBytes(4).toString("hex")}`,
+        createdAt: new Date().toISOString(),
+        employeeId: clean(report.createdBy?.id, 100),
+        employeeName: clean(report.createdBy?.name, 180),
+        date: report.date,
+        category: "photo",
+        kind: "photo",
+        source: "regie",
+        tag: "Regie",
+        tags: ["Regie"],
+        file: relative,
+        mime: clean(match[1], 100),
+        jobId: report.jobId,
+        jobName: report.jobName,
+        assignmentStatus: "assigned",
+        needsOfficeReview: false,
+        content: `Regie · ${clean(report.description, 500)}`,
+        reportId: report.id,
+      };
+      reviews.push(entry);
+      stored.push(entry);
+    }
+    await writeJson(REVIEWS, reviews.slice(-20000));
+    return stored;
+  }
+
+  async function storeInDayRegie(report) {
+    if (!validDate(report.date) || !safeId(report.jobId)) return;
+    const [year, month, day] = report.date.split("-");
+    const directory = path.join(dataDir, safeId(report.jobId), year, month, day);
+    const file = path.join(directory, "regie.json");
+    await fsp.mkdir(directory, { recursive: true });
+    const existing = await readJson(file, {}), reportIds = Array.isArray(existing.reportIds) ? existing.reportIds : [];
+    if (reportIds.includes(report.id)) return;
+    const materialRows = (Array.isArray(existing.materials) ? existing.materials : []).concat(report.materials.map(row => ({
+      name: row.product,
+      quantity: String(row.quantity),
+      unit: row.unit,
+      source: "Regie",
+      reportId: report.id,
+    })));
+    const employeeRows = (Array.isArray(existing.employees) ? existing.employees : []).concat(report.employees.map(row => ({
+      employeeId: row.id,
+      name: row.name,
+      from: row.from,
+      to: row.to,
+      breakMinutes: 0,
+      totalHours: row.hours,
+      regieHours: row.hours,
+      regieDescription: report.description,
+      reportId: report.id,
+    })));
+    const customerText = [clean(existing.customerText, 12000), report.description].filter(Boolean).join("\n\n").slice(0, 12000);
+    await writeJson(file, {
+      ...existing,
+      version: existing.version || "3.2.0",
+      jobId: report.jobId,
+      day: report.date,
+      status: "Ausgestellt",
+      employees: employeeRows,
+      customerText,
+      internalNote: clean(existing.internalNote, 12000),
+      materials: materialRows,
+      specialMaterial: clean(existing.specialMaterial, 4000),
+      materialTomorrow: existing.materialTomorrow || { needed: false, text: "" },
+      reportIds: [...reportIds, report.id],
+      createdAt: existing.createdAt || report.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function recipientRows(meta) {
+    const contacts = meta?.projectContacts || {}, owner = contacts.owner || {}, siteManager = contacts.siteManager || {};
+    const rows = [];
+    const add = (role, name, email) => {
+      const cleanEmail = clean(email, 180).toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || rows.some(row => row.email === cleanEmail)) return;
+      rows.push({ role, name: clean(name, 180) || role, email: cleanEmail });
+    };
+    add("Kunde", owner.customer || meta?.contactName, owner.womanEmail || owner.email || meta?.contactEmail);
+    add("Kunde", [owner.manFirstName, owner.manLastName].filter(Boolean).join(" "), owner.manEmail);
+    add("Bauleiter", [siteManager.firstName, siteManager.lastName].filter(Boolean).join(" ") || siteManager.company, siteManager.email);
+    return rows;
+  }
+
+  async function createRegiePdf(report, meta) {
+    const pdf = await PDFDocument.create(), regular = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const size = [595.28, 841.89], margin = 48, line = 15;
+    const wrap = (text, maxWidth, font = regular, fontSize = 10) => {
+      const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean), lines = []; let current = "";
+      for (const word of words) { const candidate = current ? `${current} ${word}` : word; if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) current = candidate; else { if (current) lines.push(current); current = word; } }
+      if (current) lines.push(current); return lines.length ? lines : [""];
+    };
+    let page, y;
+    const newPage = () => { page = pdf.addPage(size); y = size[1] - margin; page.drawText("KRISTA GmbH", { x: margin, y, size: 15, font: bold, color: rgb(.12,.34,.2) }); y -= 30; };
+    const ensure = height => { if (y - height < margin) newPage(); };
+    const text = (value, options = {}) => { const font = options.bold ? bold : regular, fontSize = options.size || 10, rows = wrap(value, options.width || size[0] - margin * 2, font, fontSize); ensure(rows.length * (options.line || line)); for (const row of rows) { page.drawText(row, { x: options.x || margin, y, size: fontSize, font, color: options.color || rgb(.08,.12,.09) }); y -= options.line || line; } };
+    newPage(); text(`Regiebericht Nr. ${reportSequenceOf(report, report.jobId) || report.reportNumber}`, { bold: true, size: 20, line: 26 });
+    text(`Projekt ${report.jobId} · ${report.jobName}`, { bold: true, size: 11 }); text(`Datum: ${dateLabel(report.date)}`); y -= 10;
+    text("Durchgeführte Arbeiten", { bold: true, size: 12, color: rgb(.12,.34,.2) }); text(report.description, { size: 11, line: 16 }); y -= 10;
+    text("Arbeitszeit", { bold: true, size: 12, color: rgb(.12,.34,.2) });
+    for (const row of report.employees) text(`${row.name} · ${row.from || ""}–${row.to || ""} · ${num(row.hours).toLocaleString("de-AT")} Std. · ${money(num(row.hours) * employeeRate(row, report.hourlyRate))}`);
+    if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product} · ${num(row.quantity).toLocaleString("de-AT")} ${row.unit} · ${money(num(row.quantity) * num(row.salePrice))}`); }
+    y -= 12; text(`Arbeit: ${money(report.totals.laborTotal)}`, { bold: true }); text(`Material: ${money(report.totals.materialTotal)}`, { bold: true }); text(`Netto: ${money(report.totals.net)} · 20 % MwSt.: ${money(report.totals.vat)} · Brutto: ${money(report.totals.gross)}`, { bold: true });
+    y -= 35; ensure(80); page.drawLine({ start: { x: margin, y }, end: { x: margin + 190, y }, thickness: .7 }); page.drawLine({ start: { x: size[0] - margin - 190, y }, end: { x: size[0] - margin, y }, thickness: .7 }); y -= 14; text("Ort, Datum                              Auftraggeber", { size: 9 });
+    const bytes = await pdf.save(); return Buffer.from(bytes);
+  }
+
   async function storeInJobFile(report) {
     if (!report.jobId || typeof readDocumentation !== "function" || typeof writeDocumentation !== "function") return;
     const rows = await readDocumentation(report.jobId);
@@ -183,6 +323,7 @@ function registerRegieAssistant(app, options) {
       name: `Regiebericht ${report.reportNumber}`,
       reportNumber: report.reportNumber,
       reportDate: report.date,
+      description: report.description,
       employees: report.employees.map(row => row.name).filter(Boolean).join(", "),
       totalHours: report.totals.laborHours,
       employeeDetails: report.employees.map(row => ({ name: row.name, hours: row.hours, hourlyRate: employeeRate(row, report.hourlyRate), cost: round(num(row.hours) * employeeRate(row, report.hourlyRate)) })),
@@ -194,6 +335,8 @@ function registerRegieAssistant(app, options) {
       source: report.source || "office",
       url: `/kristine/regie-report/${encodeURIComponent(report.id)}/print`,
       attachments: report.attachments || [],
+      processingStatus: report.processingStatus || (report.status === "completed" ? "approved" : "issued"),
+      billingStatus: report.billingStatus || "open",
     };
     const index = rows.findIndex(row => row.id === item.id);
     if (index >= 0) rows[index] = item; else rows.unshift(item);
@@ -227,6 +370,8 @@ function registerRegieAssistant(app, options) {
       ...existing,
       id,
       status: finish ? "completed" : "draft",
+      processingStatus: finish ? "approved" : (existing.processingStatus || (existing.status === "prepared" ? "issued" : "draft")),
+      billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
       reportNumber: fullReportNumber(jobId, reportSequence),
@@ -344,10 +489,78 @@ function registerRegieAssistant(app, options) {
     if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
     res.json({ ok: true, report });
   });
+  app.get("/kristine/api/regie-reports/:id/recipients", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const report = (await readJson(REPORTS, [])).find(row => row.id === safeId(req.params.id));
+    if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+    const meta = typeof readJobMeta === "function" ? await readJobMeta(report.jobId) : {};
+    res.json({ ok: true, recipients: recipientRows(meta) });
+  });
   app.post("/kristine/api/regie-reports/save", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
     catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
+  });
+  app.post("/kristine/api/regie-reports/:id/status", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
+      if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+      const processing = clean(req.body?.processingStatus, 30), billing = clean(req.body?.billingStatus, 30);
+      const allowedProcessing = ["issued", "approved", "sent", "signed"];
+      const allowedBilling = ["open", "billed"];
+      if (processing && !allowedProcessing.includes(processing)) return res.status(400).json({ ok: false, error: "Ungültiger Bearbeitungsstatus" });
+      if (billing && !allowedBilling.includes(billing)) return res.status(400).json({ ok: false, error: "Ungültiger Abrechnungsstatus" });
+      if (processing) report.processingStatus = processing;
+      if (billing) report.billingStatus = billing;
+      if (["approved", "sent", "signed"].includes(report.processingStatus)) report.status = "completed";
+      report.updatedAt = new Date().toISOString();
+      if (report.processingStatus === "approved" && !report.approvedAt) report.approvedAt = report.updatedAt;
+      if (report.processingStatus === "sent" && !report.sentAt) report.sentAt = report.updatedAt;
+      if (report.processingStatus === "signed" && !report.signedAt) report.signedAt = report.updatedAt;
+      if (report.billingStatus === "billed" && !report.billedAt) report.billedAt = report.updatedAt;
+      await writeJson(REPORTS, reports);
+      report.totals = report.totals || calculateTotals(report);
+      await storeInJobFile(report);
+      if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, {
+        type: "regie_status_changed",
+        title: `Regiebericht ${report.reportNumber} · ${report.processingStatus}`,
+        detail: `Bearbeitung ${report.processingStatus} · Abrechnung ${report.billingStatus}`,
+        source: "KRISTINE Eingang",
+        data: { reportId: report.id, processingStatus: report.processingStatus, billingStatus: report.billingStatus },
+      }).catch(() => {});
+      res.json({ ok: true, report });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
+  });
+  app.post("/kristine/api/regie-reports/:id/send", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
+      if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+      if (!["approved", "sent", "signed"].includes(report.processingStatus)) return res.status(409).json({ ok: false, error: "Regiebericht zuerst prüfen und freigeben." });
+      const to = clean(req.body?.to, 180).toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ ok: false, error: "Gültige Empfänger-E-Mail fehlt." });
+      if (typeof sendRegieMail !== "function") return res.status(503).json({ ok: false, error: "E-Mail-Versand ist nicht eingerichtet." });
+      report.totals = report.totals || calculateTotals(report);
+      const meta = typeof readJobMeta === "function" ? await readJobMeta(report.jobId) : {};
+      const directory = path.join(FILES, safeId(report.id)); await fsp.mkdir(directory, { recursive: true });
+      const filename = `Regiebericht_${safeId(report.reportNumber)}.pdf`, filePath = path.join(directory, filename);
+      await fsp.writeFile(filePath, await createRegiePdf(report, meta));
+      const info = await sendRegieMail({
+        to,
+        subject: `Regiebericht ${reportSequenceOf(report, report.jobId) || report.reportNumber} · ${report.jobName}`,
+        text: `Guten Tag,\n\nim Anhang erhalten Sie den Regiebericht ${report.reportNumber} vom ${dateLabel(report.date)}.\n\nFreundliche Grüße\nKrista GmbH`,
+        filePath,
+      });
+      if (!info) return res.status(502).json({ ok: false, error: "E-Mail konnte nicht versendet werden." });
+      report.processingStatus = "sent"; report.status = "completed"; report.sentAt = new Date().toISOString(); report.sentTo = to; report.updatedAt = report.sentAt;
+      const existingPdf = (report.attachments || []).find(row => row.kind === "generated_pdf");
+      const pdfAttachment = { id: existingPdf?.id || `file_${crypto.randomBytes(6).toString("hex")}`, name: filename, storedName: filename, type: "application/pdf", kind: "generated_pdf", createdAt: report.sentAt };
+      report.attachments = [...(report.attachments || []).filter(row => row.kind !== "generated_pdf"), pdfAttachment];
+      await writeJson(REPORTS, reports); await storeInJobFile(report);
+      if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, { type: "regie_report_sent", title: `Regiebericht ${report.reportNumber} versendet`, detail: `PDF an ${to}`, source: "KRISTINE Eingang", data: { reportId: report.id, to } }).catch(() => {});
+      res.json({ ok: true, report, to });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
   app.delete("/kristine/api/regie-reports/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -384,36 +597,67 @@ function registerRegieAssistant(app, options) {
   app.post("/kristine/api/regie", async (req, res) => {
     try {
       const body = req.body || {}, segment = body.segment || {};
-      if (!validRange(body.from, body.to, segment.from, segment.to)) return res.status(400).json({ ok: false, error: `Regiezeit muss innerhalb ${segment.from}-${segment.to} liegen` });
       if (!Array.isArray(body.people) || !body.people.length) return res.status(400).json({ ok: false, error: "Mindestens eine Person auswählen" });
       if (!clean(body.description)) return res.status(400).json({ ok: false, error: "Beschreibung fehlt" });
       const reports = await readJson(REPORTS, []), confirmations = await readJson(CONFIRMATIONS, []), now = new Date().toISOString();
+      const jobId = safeId(segment.jobId);
+      if (!jobId) return res.status(400).json({ ok: false, error: "Baustelle fehlt" });
+      const incomingEmployees = Array.isArray(body.employees) && body.employees.length
+        ? body.employees
+        : body.people.map(person => ({ ...person, from: body.from, to: body.to }));
+      const employees = incomingEmployees.map(normalizeIssuedEmployee).filter(row => row.name && row.hours > 0);
+      if (!employees.length) return res.status(400).json({ ok: false, error: "Mindestens ein Mitarbeiter mit Regiestunden fehlt" });
+      const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
+      const reportSequence = await nextReportSequence(jobId, reports);
       const report = {
         id: `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
         status: "prepared",
+        processingStatus: "issued",
+        billingStatus: "open",
         source: "kgo",
-        date: clean(body.date, 10),
-        jobId: clean(segment.jobId),
-        jobName: clean(segment.jobName),
+        reportSequence,
+        reportNumber: fullReportNumber(jobId, reportSequence),
+        date: validDate(body.date) ? body.date : new Date().toISOString().slice(0, 10),
+        jobId,
+        jobName: clean(segment.jobName || meta.name || jobId),
         segment: { from: segment.from, to: segment.to },
-        from: clean(body.from, 5),
-        to: clean(body.to, 5),
+        hoursMode: body.hoursMode === "range" ? "range" : "day",
+        teamMode: body.teamMode === "partial" ? "partial" : "all",
+        from: clean(body.from || employees.map(row => row.from).filter(Boolean).sort()[0], 5),
+        to: clean(body.to || employees.map(row => row.to).filter(Boolean).sort().slice(-1)[0], 5),
         createdBy: body.createdBy || body.people[0],
-        people: body.people.map(person => ({ id: clean(person.id), name: clean(person.name) })),
-        employees: body.people.map(person => normalizeEmployee({ ...person, from: body.from, to: body.to })),
+        people: employees.map(person => ({ id: person.id, name: person.name })),
+        employees,
         description: clean(body.description, 4000),
-        materials: (body.materials || []).map(material => ({ ...normalizeMaterial(material), labelPhotoName: clean(material.labelPhotoName) })),
-        photos: (body.photos || []).map(photo => ({ name: clean(photo.name), type: clean(photo.type) })),
+        materials: (body.materials || []).map(material => ({ ...normalizeMaterial(material, meta.regieMaterialMarkup ?? 80), labelPhotoName: clean(material.labelPhotoName) })),
+        hourlyRate: round(Math.max(0, num(meta.regieHourlyRate ?? 75))),
+        materialMarkup: round(Math.max(0, num(meta.regieMaterialMarkup ?? 80))),
         createdAt: now,
         updatedAt: now,
       };
+      report.attachments = await saveAttachments(report.id, body.uploads, []);
+      report.photos = report.attachments.filter(file => String(file.type || "").startsWith("image/"));
+      report.totals = calculateTotals(report);
       reports.push(report);
       for (const person of report.people) {
         if (String(person.id) === String(report.createdBy?.id)) continue;
         confirmations.push({ id: `confirm_${report.id}_${person.id}`, reportId: report.id, employeeId: person.id, employeeName: person.name, status: "open", createdAt: now });
       }
-      await Promise.all([writeJson(REPORTS, reports.slice(-10000)), writeJson(CONFIRMATIONS, confirmations.slice(-20000))]);
-      res.json({ ok: true, report, message: "Regiebericht liegt vorbereitet im KRISTINE-Eingang." });
+      await Promise.all([
+        writeJson(REPORTS, reports.slice(-10000)),
+        writeJson(CONFIRMATIONS, confirmations.slice(-20000)),
+        storeRegiePhotos(report, body.uploads),
+        storeInDayRegie(report),
+        storeInJobFile(report),
+      ]);
+      if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
+        type: "regie_report_issued",
+        title: `Regiebericht ${report.reportNumber} ausgestellt`,
+        detail: `${report.totals.laborHours} h · ${report.materials.length} Materialposition(en) · ${report.photos.length} Foto(s)`,
+        source: "KGO",
+        data: { reportId: report.id, processingStatus: "issued", billingStatus: "open" },
+      }).catch(() => {});
+      res.json({ ok: true, report, message: "Regiebericht ist ausgestellt und liegt bei Alex zur Prüfung." });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
   app.get("/kristine/api/regie/confirmations", async (req, res) => { const employeeId = clean(req.query.employeeId, 100); const rows = await readJson(CONFIRMATIONS, []); res.json({ ok: true, items: rows.filter(row => row.employeeId === employeeId && row.status === "open") }); });
