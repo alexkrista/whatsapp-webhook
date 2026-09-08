@@ -54,7 +54,8 @@ async function buildEvent(body) {
   const chips = Array.isArray(cfg?.chips) ? cfg.chips : [];
   let chip = hardwareId ? chips.find(c => clean(c?.hardwareId) === hardwareId) : null;
   if (!chip && internalChipNo) chip = chips.find(c => clean(c?.internalChipNo) === internalChipNo);
-  const outcome = explicitOutcome(body) || (!chip ? "unknown" : "read");
+  const unknownChip = !chip || (!clean(chip.employeeId) && !clean(chip.name || chip.employeeName || chip.legacyName)) || /^unbekannter chip$/i.test(clean(chip.name || chip.employeeName || chip.legacyName));
+  const outcome = explicitOutcome(body) || (unknownChip ? "unknown" : "read");
   const name = clean(chip?.name || chip?.employeeName || chip?.legacyName || body?.legacyName || body?.name || body?.personName) || (chip ? "Bekannter Chip" : "Unbekannter Chip");
   const reason = clean(body?.reason ?? body?.detail ?? body?.message);
   return {
@@ -63,12 +64,12 @@ async function buildEvent(body) {
     at, receivedAt:nowIso(), terminalId, terminalName:terminalName(terminalId),
     hardwareId:hardwareId || clean(chip?.hardwareId),
     internalChipNo:internalChipNo || clean(chip?.internalChipNo),
-    name, outcome, reason,
+    name, outcome, reason, unknownChip,
   };
 }
 let writeChain = Promise.resolve();
 function recordAccessEvent(body) {
-  writeChain = writeChain.then(async () => {
+  writeChain = writeChain.catch(() => {}).then(async () => {
     const event = await buildEvent(body);
     if (!event) return null;
     const store = await readJson(EVENTS_FILE, { events:[] });
@@ -93,7 +94,7 @@ function wrappedExpress(...args) {
     try {
       const store = await readJson(EVENTS_FILE, { events:[] });
       const events = Array.isArray(store?.events) ? store.events : [];
-      res.json({ ok:true, events:events.slice(0, 500), updatedAt:store?.updatedAt || null });
+      res.json({ ok:true, events:events.map(event=>({...event, unknownChip:event.unknownChip===true || event.outcome==="unknown" || /^unbekannter chip$/i.test(clean(event.name))})).sort((a,b)=>(Date.parse(b.at)||0)-(Date.parse(a.at)||0)).slice(0, MAX_EVENTS), updatedAt:store?.updatedAt || null });
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 
@@ -106,8 +107,9 @@ function wrappedExpress(...args) {
       handlers = handlers.map(handler => {
         if (typeof handler !== "function") return handler;
         return async function accessEventWrappedHandler(req, res, next) {
+          if (!requireAdmin(req, res)) return;
           try { await recordAccessEvent(req.body || {}); }
-          catch (e) { console.warn("KRISADMIN Zutrittsprotokoll:", e?.message || e); }
+          catch (e) { return res.status(503).json({ok:false,error:"Zutrittsprotokoll konnte nicht gespeichert werden; Bridge wiederholt."}); }
           return handler(req, res, next);
         };
       });
