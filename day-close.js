@@ -2,6 +2,7 @@
 
 const fsp = require("fs/promises");
 const path = require("path");
+const { UP_REASONS, upJob } = require("./up-reasons");
 
 function registerDayClose(app, {
   dataDir,
@@ -269,7 +270,7 @@ function registerDayClose(app, {
     if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
     try {
       const jobs = await listActiveJobs();
-      return res.json({ ok: true, jobs, count: jobs.length });
+      return res.json({ ok: true, jobs, upReasons: UP_REASONS.map(([code]) => upJob(code)), count: jobs.length });
     } catch (error) {
       logger.error("❌ KGO aktive Baustellen konnten nicht geladen werden", error);
       return res.status(500).json({ ok:false, error:String(error?.message || error) });
@@ -282,8 +283,12 @@ function registerDayClose(app, {
       const employeeId = String(req.body?.employeeId || "").trim();
       const date = String(req.body?.date || localDate()).trim();
       const requestedJobId = String(req.body?.jobId || "").trim();
+      const requestedUp = String(req.body?.upCode || "").trim();
       const expressName = String(req.body?.expressName || "").replace(/\s+/g, " ").trim().slice(0, 140);
       if (!employeeId) return res.status(400).json({ ok:false, error:"Mitarbeiter fehlt." });
+      if (date !== localDate()) return res.status(400).json({ok:false, error:"Ein Wechsel ist nur für heute möglich."});
+      if ([requestedUp, requestedJobId, expressName].filter(Boolean).length !== 1) return res.status(400).json({ok:false, error:"Bitte genau eine Baustelle oder UP-Art auswählen."});
+      if (requestedUp && !upJob(requestedUp)) return res.status(400).json({ok:false, error:"Unbekannte UP-Art."});
 
       const employees = await readEmployees();
       const employee = findEmployee(employees, employeeId);
@@ -312,10 +317,10 @@ function registerDayClose(app, {
       const todays = events
         .filter((event) => String(event?.employeeId || "") === employeeId && String(event?.date || "") === date)
         .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
-      const lastRelevant = [...todays].reverse().find((event) => ["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(String(event?.type || "").toLowerCase()));
+      const lastRelevant = [...todays].reverse().find((event) => ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(event?.type || "").toLowerCase()));
       const lastType = String(lastRelevant?.type || "").toLowerCase();
       if (!lastRelevant) state.mode = "idle";
-      else if (["start","weiter"].includes(lastType)) state.mode = "working";
+      else if (["start","weiter","up"].includes(lastType)) state.mode = "working";
       else if (lastType === "pause") state.mode = "pause";
       else if (lastType === "mittag") state.mode = "lunch";
       else if (["ende","fertig","stop","stopp"].includes(lastType)) state.mode = "finished_day";
@@ -326,7 +331,9 @@ function registerDayClose(app, {
 
       let selected = null;
       let isExpress = false;
-      if (expressName) {
+      if (requestedUp) {
+        selected = upJob(requestedUp);
+      } else if (expressName) {
         if (expressName.length < 2) return res.status(400).json({ ok:false, error:"Bitte einen kurzen Namen für die Expressbaustelle eingeben." });
         const compact = date.replace(/-/g, "");
         selected = {
@@ -348,10 +355,10 @@ function registerDayClose(app, {
       }
 
       const wasWorking = state.mode === "working";
-      if (wasWorking && !isExpress) selected = await markJobRunningLocal(selected);
+      if (wasWorking && !isExpress && !selected.upCode) selected = await markJobRunningLocal(selected);
 
       const currentOverrideId = String(state.activeJobOverride?.date === date ? state.activeJobOverride?.jobId || "" : "");
-      const lastWork = [...todays].reverse().find((event) => ["start","weiter"].includes(String(event?.type || "").toLowerCase()));
+      const lastWork = [...todays].reverse().find((event) => ["start","weiter","up"].includes(String(event?.type || "").toLowerCase()));
       const alreadyCurrent = currentOverrideId === selected.jobId || (wasWorking && String(lastWork?.jobId || "") === selected.jobId);
 
       state.activeAssignmentKey = null;
@@ -365,6 +372,8 @@ function registerDayClose(app, {
         contactPhone: selected.contactPhone || "",
         status: selected.status || "",
         express: isExpress,
+        upCode: selected.upCode || "",
+        reason: selected.reason || "",
       };
       state.pending = null;
       if (["finished_site"].includes(state.mode)) state.mode = "idle";
@@ -377,7 +386,9 @@ function registerDayClose(app, {
           employeeId,
           employeeName: employeeLabel,
           date,
-          type: "weiter",
+          type: selected.upCode ? "up" : "weiter",
+          reason: selected.reason || "",
+          upCode: selected.upCode || "",
           at: localTime(),
           jobId: selected.jobId,
           jobName: selected.jobName,
@@ -401,6 +412,7 @@ function registerDayClose(app, {
         express:isExpress,
         reply:isExpress
           ? `Expressbaustelle „${selected.jobName}“ ist aktiv. Chef/Büro bekommt sie zur Zuordnung.`
+          : selected.upCode ? `UP · ${selected.jobName} ausgewählt.${wasWorking ? " Buchung läuft ab jetzt." : " Mit Start beginnt die Buchung."}`
           : `Baustelle ${selected.jobId} · ${selected.jobName} ausgewählt.`,
       });
     } catch (error) {
@@ -426,12 +438,12 @@ function registerDayClose(app, {
       let events = Array.isArray(rawEvents) ? rawEvents : [];
       const closes = Array.isArray(rawCloses) ? rawCloses : [];
       const dayEvents = events.filter(e => String(e.employeeId) === employeeId && String(e.date) === yesterday);
-      const hasStarted = dayEvents.some(e => ["start","weiter"].includes(String(e.type||"").toLowerCase()));
+      const hasStarted = dayEvents.some(e => ["start","weiter","up"].includes(String(e.type||"").toLowerCase()));
       const hasEnded = dayEvents.some(e => ["ende","fertig","stop","stopp"].includes(String(e.type||"").toLowerCase()));
       let autoClosed = false;
 
       if (hasStarted && !hasEnded) {
-        const latestWork = [...dayEvents].reverse().find(e => ["start","weiter"].includes(String(e.type||"").toLowerCase()));
+        const latestWork = [...dayEvents].reverse().find(e => ["start","weiter","up"].includes(String(e.type||"").toLowerCase()));
         events = [...events, {
           id:`auto_close_${yesterday}_${employeeId}`,
           employeeId,
