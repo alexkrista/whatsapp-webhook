@@ -269,7 +269,11 @@ def install(ns):
                 return jsonify(ok=True,count=len(items),openCount=len(opened),openTotal=round(sum(float(x.get("amount") or 0) for x in opened),2),items=items)
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/payments")
-        def brain_incoming_payments_page():return Response(payments_page(),mimetype="text/html")
+        def brain_incoming_payments_page():
+            response=Response(payments_page(),mimetype="text/html")
+            response.headers["Cache-Control"]="no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"]="no-cache"
+            return response
         @app.get("/incoming/revolut")
         def brain_incoming_revolut_page():return Response(revolut_page(),mimetype="text/html")
 

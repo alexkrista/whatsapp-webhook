@@ -202,7 +202,8 @@ class FinanceStore(_BaseFinanceStore):
                 SELECT
                     id, doc_id, supplier_name, supplier_invoice_number, invoice_date,
                     COALESCE(NULLIF(net_due_date,''),NULLIF(due_date,''),invoice_date) AS due_date_effective,
-                    gross_amount, currency, payment_state, workflow_status, pdf_path,
+                    gross_amount, currency, iban, swift, account_holder,
+                    payment_state, workflow_status, pdf_path,
                     COALESCE(skonto_enabled,0) AS skonto_enabled,
                     skonto_percent,
                     COALESCE(skonto_due_date,'') AS skonto_due_date
@@ -233,6 +234,9 @@ class FinanceStore(_BaseFinanceStore):
                 dueDate=str(r["due_date_effective"] or ""),
                 amount=gross,
                 currency=str(r["currency"] or "EUR"),
+                iban=str(r["iban"] or ""),
+                bic=str(r["swift"] or ""),
+                accountHolder=str(r["account_holder"] or ""),
                 paymentState=st,
                 paymentStatus=st,
                 paymentMethod=m,
