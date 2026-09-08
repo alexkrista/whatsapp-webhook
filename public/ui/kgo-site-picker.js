@@ -1,9 +1,11 @@
 "use strict";
 
 (() => {
-  const VERSION = "2026-08-28-site-picker-1";
+  const VERSION = "2026-09-08-site-picker-up-1";
   const token = new URLSearchParams(location.search).get("token") || "";
   let jobs = [];
+  let upReasons = [];
+  let selectionMode = "site";
   let dialog = null;
   let input = null;
   let results = null;
@@ -71,6 +73,7 @@
       .kgsp-body{padding:16px}.kgsp-search{width:100%;box-sizing:border-box;border:2px solid #cfd6dd;border-radius:14px;background:#fff;padding:14px 15px;font:700 17px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10233f;outline:none}.kgsp-search:focus{border-color:#2f7d4a;box-shadow:0 0 0 3px rgba(47,125,74,.12)}
       .kgsp-status{min-height:20px;margin:8px 2px;color:#657387;font-size:12px}.kgsp-status.error{color:#a43f3a;font-weight:750}.kgsp-status.ok{color:#2f7d4a;font-weight:750}
       .kgsp-results{display:grid;gap:7px;max-height:44vh;overflow:auto}.kgsp-result{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:left;border:1px solid #dbe0e4;border-radius:13px;background:#fff;color:#10233f;padding:11px 12px;cursor:pointer}.kgsp-result:hover,.kgsp-result:focus{border-color:#91ad98;background:#f6fbf7}.kgsp-result strong{display:block;font-size:14px}.kgsp-result small{display:block;color:#657387;margin-top:3px}.kgsp-badge{flex:none;border-radius:999px;padding:5px 8px;background:#e9f3ec;color:#2f6e43;font-size:10px;font-weight:900}.kgsp-badge.order{background:#e9eef4;color:#355b7a}
+      .kgsp-modes{display:flex;gap:8px;margin-bottom:12px}.kgsp-modes button{flex:1;border:1px solid #cfd6dd;border-radius:11px;background:#fff;padding:12px 8px;color:#10233f;font-weight:800}.kgsp-modes button[aria-pressed="true"]{background:#10233f;color:#fff}
       .kgsp-empty{padding:16px;border:1px dashed #cfd6dd;border-radius:13px;color:#657387;text-align:center;background:#fff}
       .kgsp-footer{display:flex;gap:9px;justify-content:space-between;align-items:center;margin-top:13px;padding-top:13px;border-top:1px solid #dfe4e7}.kgsp-express-open{border:1px solid #d8a753;background:#fff6e3;color:#754c0c;border-radius:12px;padding:10px 12px;font-weight:850;cursor:pointer}.kgsp-cancel{border:0;background:#e8ecef;color:#10233f;border-radius:12px;padding:10px 12px;font-weight:800;cursor:pointer}
       .kgsp-express{margin-top:12px;padding:13px;border:1px solid #e0b76e;border-radius:14px;background:#fff8e9}.kgsp-express[hidden]{display:none!important}.kgsp-express strong{display:block}.kgsp-express p{margin:5px 0 10px;color:#765b2a;font-size:12px;line-height:1.4}.kgsp-express-row{display:flex;gap:8px}.kgsp-express-row input{min-width:0;flex:1;border:1px solid #cfb98d;border-radius:11px;padding:11px;font:inherit}.kgsp-express-row button{flex:none;border:0;border-radius:11px;background:#a96b14;color:#fff;padding:10px 12px;font-weight:850;cursor:pointer}
@@ -87,10 +90,11 @@
     dialog.className = "kg-site-picker";
     dialog.innerHTML = `
       <div class="kgsp-head">
-        <div><div class="kg-eyebrow">Baustellenwechsel</div><h2>Baustelle suchen</h2><small>Nur Auftrag und Laufend · Auswahl immer bewusst anklicken.</small></div>
+        <div><div class="kg-eyebrow">Baustellenwechsel</div><h2>Baustelle oder UP wählen</h2><small>Baustellen: Auftrag und Laufend · UP: Tätigkeit oder Abwesenheit.</small></div>
         <button class="kgsp-close" type="button" aria-label="Schließen">×</button>
       </div>
       <div class="kgsp-body">
+        <div class="kgsp-modes" role="group" aria-label="Buchungsart"><button type="button" data-mode="site" aria-pressed="true">Baustelle</button><button type="button" data-mode="up" aria-pressed="false">UP / Abwesenheit</button></div>
         <input id="kgspSearch" class="kgsp-search" type="search" autocomplete="off" placeholder="Nummer oder Name …" aria-label="Baustelle suchen">
         <div id="kgspStatus" class="kgsp-status">Tippe Nummer oder Name.</div>
         <div id="kgspResults" class="kgsp-results"></div>
@@ -115,6 +119,18 @@
       if (!expressBox.hidden) setTimeout(() => expressInput.focus(), 0);
     };
     dialog.querySelector("#kgspExpressSave").onclick = saveExpress;
+    dialog.querySelectorAll("[data-mode]").forEach(button => {
+      button.onclick = () => {
+        selectionMode = button.dataset.mode;
+        dialog.querySelectorAll("[data-mode]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+        input.value = "";
+        input.placeholder = selectionMode === "up" ? "UP suchen, z. B. Werkstatt, Arzt …" : "Nummer oder Name …";
+        input.setAttribute("aria-label", selectionMode === "up" ? "UP suchen" : "Baustelle suchen");
+        dialog.querySelector("#kgspExpressOpen").hidden = selectionMode === "up";
+        expressBox.hidden = true;
+        renderResults();
+      };
+    });
     input.addEventListener("input", renderResults);
     input.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
@@ -136,6 +152,14 @@
   function renderResults() {
     if (!results || !input) return;
     const q = normalize(input.value);
+    if (selectionMode === "up") {
+      const terms = q.split(/\s+/).filter(Boolean);
+      const matches = upReasons.filter(row => terms.every(term => normalize([row.upCode, row.jobName, row.upCode === "917" ? "Werkstatt aufräumen" : ""].join(" ")).includes(term)));
+      setStatus(matches.length ? `${matches.length} UP-Arten · bitte bewusst auswählen` : "Keine passende UP-Art gefunden.");
+      results.innerHTML = matches.map(row => `<button class="kgsp-result" type="button" data-up-code="${esc(row.upCode)}"><span><strong>${esc(row.jobName)}</strong><small>${esc(row.upCode)} · UP / Abwesenheit</small></span><span class="kgsp-badge">UP</span></button>`).join("");
+      results.querySelectorAll("[data-up-code]").forEach(button => { button.onclick = () => selectJob("", button.dataset.upCode); });
+      return;
+    }
     if (!q) {
       results.innerHTML = "";
       setStatus("Tippe Nummer oder Name. Geladen werden nur aktuelle Baustellen.");
@@ -166,10 +190,12 @@
     setStatus("Aktuelle Baustellen werden geladen …");
     const data = await api("/kristine/api/active-jobs");
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    setStatus("Tippe Nummer oder Name. Geladen werden nur Auftrag und Laufend.");
+    upReasons = Array.isArray(data.upReasons) ? data.upReasons : [];
+    renderResults();
+
   }
 
-  async function selectJob(jobId) {
+  async function selectJob(jobId, upCode = "") {
     if (busy) return;
     const id = employeeId();
     if (!id) return setStatus("Mitarbeiter fehlt. KGO bitte über deinen persönlichen Link öffnen.", "error");
@@ -177,7 +203,7 @@
     try {
       const data = await api("/kristine/api/switch-job", {
         method: "POST",
-        body: JSON.stringify({ employeeId:id, date:today(), jobId }),
+        body: JSON.stringify({ employeeId:id, date:today(), ...(upCode ? {upCode} : {jobId}) }),
       });
       setStatus(data.reply || "Baustelle ausgewählt.", "ok");
       setTimeout(() => {
@@ -227,6 +253,8 @@
     expressBox.hidden = true;
     expressInput.value = "";
     jobs = [];
+    upReasons = [];
+    dialog.querySelector('[data-mode="site"]').click();
     if (!dialog.open) dialog.showModal();
     setTimeout(() => input.focus(), 0);
     try { await loadJobs(); }
