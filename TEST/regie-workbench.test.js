@@ -142,6 +142,11 @@ function invoke(handler, req) {
   assert.equal(completedDay.status, "Ausgestellt");
   assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 1);
 
+  const expressOne = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma1_1" } } });
+  const expressTwo = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, createdBy: { id: "ma-2", name: "Erika Beispiel" }, people: [{ id: "ma-2", name: "Erika Beispiel" }], employees: [{ id: "ma-2", name: "Erika Beispiel", from: "07:00", to: "12:00", netMinutes: 300 }], segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma2_2" } } });
+  assert.equal(expressOne.body.report.reportNumber, "Express 202609001");
+  assert.equal(expressTwo.body.report.reportNumber, "Express 202609002");
+
   const issued = await invoke(issue, { body: {
     date: "2026-09-03",
     segment: { jobId: "26097", jobName: "Handybaustelle", from: "07:00", to: "16:00" },

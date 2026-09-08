@@ -159,13 +159,24 @@ function registerRegieAssistant(app, options) {
     return suffix ? Number(suffix) : 0;
   }
 
-  function fullReportNumber(jobId, sequence) {
-    return `${safeId(jobId)}${String(sequence).padStart(3, "0")}`;
+  const isExpressJob = jobId => /^express(?:_|-|$)/i.test(clean(jobId, 140));
+
+  function expressMonth(date) {
+    return validDate(date) ? String(date).slice(0, 7).replace("-", "") : new Date().toISOString().slice(0, 7).replace("-", "");
   }
 
-  async function nextReportSequence(jobId, reports) {
+  function fullReportNumber(jobId, sequence, date) {
+    return isExpressJob(jobId)
+      ? `Express ${expressMonth(date)}${String(sequence).padStart(3, "0")}`
+      : `${safeId(jobId)}${String(sequence).padStart(3, "0")}`;
+  }
+
+  async function nextReportSequence(jobId, reports, date) {
+    const month = expressMonth(date);
     const serials = (reports || [])
-      .filter(row => String(row.jobId) === String(jobId))
+      .filter(row => isExpressJob(jobId)
+        ? isExpressJob(row.jobId) && expressMonth(row.date) === month
+        : String(row.jobId) === String(jobId))
       .map(row => reportSequenceOf(row, jobId))
       .filter(value => value >= 1 && value <= 999);
     return (serials.length ? Math.max(...serials) : 0) + 1;
@@ -364,9 +375,11 @@ function registerRegieAssistant(app, options) {
     const materials = (Array.isArray(body.materials) ? body.materials : []).map(row => normalizeMaterial(row, materialMarkup)).filter(row => row.product && row.quantity > 0);
     let reportSequence = Number(body.reportSequence);
     if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = reportSequenceOf(body, jobId) || reportSequenceOf(existing, jobId);
-    if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = await nextReportSequence(jobId, reports);
+    if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = await nextReportSequence(jobId, reports, body.date || existing.date);
     if (reportSequence > 999) throw new Error("Für diese Baustelle sind bereits 999 Rapportnummern vergeben.");
-    if (reports.some(row => row.id !== id && String(row.jobId) === jobId && reportSequenceOf(row, jobId) === reportSequence)) {
+    if (reports.some(row => row.id !== id &&
+      (isExpressJob(jobId) ? isExpressJob(row.jobId) && expressMonth(row.date) === expressMonth(body.date || existing.date) : String(row.jobId) === jobId) &&
+      reportSequenceOf(row, jobId) === reportSequence)) {
       throw new Error(`Rapport-Nr. ${reportSequence} ist bei dieser Baustelle bereits vergeben.`);
     }
     const report = {
@@ -377,7 +390,7 @@ function registerRegieAssistant(app, options) {
       billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
-      reportNumber: fullReportNumber(jobId, reportSequence),
+      reportNumber: fullReportNumber(jobId, reportSequence, body.date || existing.date),
       date: validDate(body.date) ? body.date : new Date().toISOString().slice(0, 10),
       jobId,
       jobName: clean(body.jobName || meta.name || existing.jobName || jobId, 220),
@@ -468,9 +481,9 @@ function registerRegieAssistant(app, options) {
   });
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const reports = await readJson(REPORTS, []), jobId = safeId(req.query.jobId);
-    const reportSequence = await nextReportSequence(jobId, reports);
-    res.json({ ok: true, reportSequence, reportNumber: fullReportNumber(jobId, reportSequence) });
+    const reports = await readJson(REPORTS, []), jobId = safeId(req.query.jobId), date = clean(req.query.date, 10);
+    const reportSequence = await nextReportSequence(jobId, reports, date);
+    res.json({ ok: true, reportSequence, reportNumber: fullReportNumber(jobId, reportSequence, date) });
   });
   app.get("/kristine/api/regie-reports/time-suggestions", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -630,7 +643,7 @@ function registerRegieAssistant(app, options) {
       const employees = incomingEmployees.map(normalizeIssuedEmployee).filter(row => row.name && row.hours > 0);
       if (!employees.length) return res.status(400).json({ ok: false, error: "Mindestens ein Mitarbeiter mit Regiestunden fehlt" });
       const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
-      const reportSequence = reportSequenceOf(existing, jobId) || await nextReportSequence(jobId, reports);
+      const reportSequence = reportSequenceOf(existing, jobId) || await nextReportSequence(jobId, reports, body.date);
       const report = {
         id: existing?.id || `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
         status: draft ? "draft" : "prepared",
@@ -638,7 +651,7 @@ function registerRegieAssistant(app, options) {
         billingStatus: "open",
         source: "kgo",
         reportSequence,
-        reportNumber: fullReportNumber(jobId, reportSequence),
+        reportNumber: fullReportNumber(jobId, reportSequence, body.date),
         date: validDate(body.date) ? body.date : new Date().toISOString().slice(0, 10),
         jobId,
         jobName: clean(segment.jobName || meta.name || jobId),
