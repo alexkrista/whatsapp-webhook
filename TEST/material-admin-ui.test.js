@@ -10,7 +10,7 @@ const home = fs.readFileSync(path.join(__dirname, "..", "public", "ui", "krisadm
 const regie = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
 const brain = fs.readFileSync(path.join(__dirname, "..", "archive-connector.py"), "utf8");
 
-for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen"]) {
+for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
   assert(ui.includes(text), `Materialverwaltung enthält ${text}`);
 }
 assert(!ui.includes("WW jetzt einlesen"), "WW-Materialien werden nur einzeln ausgewählt übernommen");

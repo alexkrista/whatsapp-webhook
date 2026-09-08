@@ -22,6 +22,23 @@ const { registerMaterialMaster } = require("../material-master");
       { id: "M2", materialId: "M2", group: "Werkzeug", product: "Stilllegen", unit: "Stk", purchasePrice: 3, salePrice: 5, active: true },
     ]));
 
+    const invoke = (handler, req = {}) => new Promise((resolve, reject) => {
+      const result = { statusCode: 200, body: null };
+      const res = {
+        status(code) { result.statusCode = code; return this; },
+        json(body) { result.body = body; resolve(result); },
+      };
+      Promise.resolve(handler(req, res)).catch(reject);
+    });
+    const createdByMask = await invoke(routes["post:/admin/api/materials/auto"], { body: {
+      materialId: "A05", product: "Maskenartikel", unit: "Stk", purchasePrice: "10,00", salePrice: "18,00",
+    } });
+    assert.equal(createdByMask.statusCode, 200);
+    assert.equal(createdByMask.body.material.materialId, "A05", "Manuell eingegebenes Kürzel wird als Material-ID gespeichert");
+    const renamedByMask = await invoke(routes["put:/admin/api/materials/:materialId"], { params: { materialId: "A05" }, body: { materialId: "A06" } });
+    assert.equal(renamedByMask.statusCode, 200);
+    assert.equal(renamedByMask.body.material.materialId, "A06", "Kürzel kann in der Materialmaske korrigiert werden");
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ["Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel", "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Preisstand"],

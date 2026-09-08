@@ -658,11 +658,12 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
 
     for (const raw of rawRows) {
       const sourceId = clean(raw?.sourceId || raw?.number || raw?.materialId, 120);
+      const requestedMaterialId = clean(raw?.materialId, 120);
       const product = clean(raw?.product || raw?.shortText || raw?.name, 180);
       if (!sourceId || !product || seen.has(sourceId)) continue;
       seen.add(sourceId);
 
-      const existing = currentBySource.get(sourceId) || currentById.get(sourceId);
+      const existing = currentBySource.get(sourceId) || currentById.get(requestedMaterialId) || currentById.get(sourceId);
       const purchasePrice = number(raw?.purchasePrice ?? raw?.ek);
       const salePrice = number(raw?.salePrice ?? raw?.vk);
       const calculatedMarkup = purchasePrice > 0 && salePrice > 0
@@ -678,8 +679,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
 
       const updated = normalizeMaterial({
         ...(existing || {}),
-        materialId: existing?.materialId || sourceId,
-        id: existing?.materialId || sourceId,
+        materialId: existing?.materialId || requestedMaterialId || sourceId,
+        id: existing?.materialId || requestedMaterialId || sourceId,
         articleNumber: sourceId,
         group: clean(raw?.group || raw?.directory, 100) || existing?.group || "WinWorker",
         manufacturer: clean(raw?.manufacturer, 120) || existing?.manufacturer,
@@ -868,6 +869,10 @@ app.get("/api/regie/materials", async (req, res) => {
       const product = clean(req.body?.name || req.body?.product, 180);
       if (!product) return res.status(400).json({ ok: false, error: "Materialname fehlt" });
       const rows = await readJson(MATERIALS_FILE, []);
+      const requestedMaterialId = clean(req.body?.materialId, 120);
+      if (requestedMaterialId && rows.some(item => String(item.materialId).toLocaleLowerCase("de") === requestedMaterialId.toLocaleLowerCase("de"))) {
+        return res.status(409).json({ ok: false, error: `ID / Kürzel ${requestedMaterialId} ist bereits vergeben.` });
+      }
       const normalizedName = product.toLocaleLowerCase("de");
       const existing = rows.find(item =>
         clean(item.product, 180).toLocaleLowerCase("de") === normalizedName ||
@@ -875,6 +880,8 @@ app.get("/api/regie/materials", async (req, res) => {
       );
       if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
       const material = normalizeMaterial({
+        materialId: requestedMaterialId,
+        id: requestedMaterialId,
         group: req.body?.group || "Regie",
         product,
         unit: req.body?.unit,
@@ -890,7 +897,7 @@ app.get("/api/regie/materials", async (req, res) => {
         note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
         sourceSheet: req.body?.sourceSheet || "KRISTINE Regie",
       }, { index: rows.length + 1 });
-      while (rows.some(item => String(item.materialId) === String(material.materialId))) {
+      while (!requestedMaterialId && rows.some(item => String(item.materialId) === String(material.materialId))) {
         material.materialId = createMaterialId(material, rows.length + Math.floor(Math.random() * 10000));
         material.id = material.materialId;
       }
@@ -910,11 +917,16 @@ app.get("/api/regie/materials", async (req, res) => {
       if (index < 0) return res.status(404).json({ ok: false, error: "Material nicht gefunden" });
 
       const current = rows[index];
+      const requestedMaterialId = clean(req.body?.materialId || current.materialId, 120);
+      if (!requestedMaterialId) return res.status(400).json({ ok: false, error: "ID / Kürzel fehlt" });
+      if (rows.some((item, rowIndex) => rowIndex !== index && String(item.materialId).toLocaleLowerCase("de") === requestedMaterialId.toLocaleLowerCase("de"))) {
+        return res.status(409).json({ ok: false, error: `ID / Kürzel ${requestedMaterialId} ist bereits vergeben.` });
+      }
       const material = normalizeMaterial({
         ...current,
         ...req.body,
-        materialId: current.materialId,
-        id: current.materialId,
+        materialId: requestedMaterialId,
+        id: requestedMaterialId,
         createdAt: current.createdAt,
       });
       rows[index] = material;
