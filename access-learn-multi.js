@@ -225,9 +225,8 @@ function installRoutes(app) {
           await writeJson(LEARN_FILE,session);
         } else {
           const finishing=session.state==="reading" || Date.now() >= Date.parse(session.expiresAt);
-          if (finishing || session.localState==="queued")
-            return res.json({ok:true,job:{id:session.id+(finishing?":finish":":start"),sessionId:session.id,
-              type:finishing?"learn-finish":"learn-start",expiresAt:session.expiresAt}});
+          return res.json({ok:true,job:{id:session.id+(finishing?":finish":":read"),sessionId:session.id,
+            type:finishing?"learn-finish":"learn-read",terminalId:session.terminalId || "3",expiresAt:session.expiresAt}});
         }
       }
       const read = await readJson(READ_JOB_FILE,null);
@@ -260,7 +259,7 @@ function installRoutes(app) {
         const session=await readJson(LEARN_FILE,null);
         if(session?.id!==job.sessionId)return res.status(409).json({ok:false,error:"Einlesevorgang stimmt nicht ueberein"});
         if(!job.ok){session.state="error";session.error=job.error||"Lokaler Vorgang fehlgeschlagen";}
-        else if(job.type==="learn-start"){session.localState="waiting";}
+        else if(job.type==="learn-read"){session.localState="waiting";}
         else if(job.type==="learn-finish"){
           session.localState="complete";session.state="done";session.finishedAt=nowIso();session.read=job.result;
         }else return res.status(400).json({ok:false,error:"Unbekannte Aktion"});
