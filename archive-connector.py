@@ -68,7 +68,7 @@ def protect_remote_archive_access():
     # krista_token an den Brain-Rechner weitergegeben.
     supplied_query_token = str(request.args.get("krista_token") or "")
     if (
-        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}
+        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}
         and KRISTINE_ADMIN_TOKEN
         and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
     ):
@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -7751,6 +7751,28 @@ def ww_materials_preview():
 def ww_materials_search():
     """Geschützte WinWorker-Materialsuche für KRISADMIN."""
     return ww_materials_preview()
+
+
+@app.get("/ww-suppliers/search")
+def ww_suppliers_search():
+    """Geschützte WinWorker-Lieferantensuche für den KRISTINE-Materialstamm."""
+    query = str(request.args.get("q") or "").strip()
+    if len(query) < 2:
+        return jsonify({"ok": True, "query": query, "suppliers": [], "count": 0})
+    try:
+        rows = [
+            row for row in ww_address_search(query, request.args.get("limit", 30))
+            if row.get("supplierNumber") or int(row.get("incomingCount") or 0) > 0
+        ]
+        return jsonify({
+            "ok": True,
+            "query": query,
+            "suppliers": rows,
+            "count": len(rows),
+            "sourceOfTruth": "WinWorker Adressenstamm",
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.get("/schema-index/status")

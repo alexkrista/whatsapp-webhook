@@ -13,7 +13,7 @@ const inlineScript = ui.match(/<script>([\s\S]*?)<\/script>/);
 assert(inlineScript, "Materialverwaltung enthält ihr Seitenskript");
 new vm.Script(inlineScript[1], { filename: "material-admin.inline.js" });
 
-for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
+for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "Lieferanten verwalten", "openSupplierManager", "linkWwSupplier", "unsere KdNr.", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
   assert(ui.includes(text), `Materialverwaltung enthält ${text}`);
 }
 assert(!ui.includes("WW jetzt einlesen"), "WW-Materialien werden nur einzeln ausgewählt übernommen");
@@ -33,7 +33,7 @@ assert.equal(quantityContext.calculateQuantity("(2+3)*4"), 20);
 assert.equal(quantityContext.calculateQuantity("10/4"), 2.5);
 assert.equal(quantityContext.calculateQuantity("5*alert(1)"), null, "Mengenrechner führt keinen Code aus");
 assert.equal(quantityContext.calculateQuantity("10/0"), null, "Division durch null wird abgelehnt");
-for (const text of ["ww_material_master_rows", "MatLieferInfo_MIdx", "/ww-materials/sync", "/ww-materials/search", "sync-winworker", "import-winworker"]) {
+for (const text of ["ww_material_master_rows", "MatLieferInfo_MIdx", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search", "ourCustomerNumber", "sync-winworker", "import-winworker"]) {
   assert(brain.includes(text) || ui.includes(text), `WW-Materialabgleich enthält ${text}`);
 }
 console.log("OK: KRISADMIN-Materialpflege und feste Regiebericht-Preise sind verdrahtet.");

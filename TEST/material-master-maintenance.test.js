@@ -20,6 +20,13 @@ const { registerMaterialMaster } = require("../material-master");
     fs.writeFileSync(path.join(materialDir, "materials.json"), JSON.stringify([
       { id: "M1", materialId: "M1", group: "Farbe", product: "Alt", unit: "kg", purchasePrice: 1, salePrice: 2, supplier: "", active: true, note: "bleibt" },
       { id: "M2", materialId: "M2", group: "Werkzeug", product: "Stilllegen", unit: "Stk", purchasePrice: 3, salePrice: 5, active: true },
+      { id: "M3", materialId: "M3", group: "Farbe", product: "Absolute Matt", unit: "1 L", purchasePrice: 0, salePrice: 0, supplier: "LG", supplierArticleNumber: "SKU1", active: true },
+      { id: "M4", materialId: "M4", group: "Farbe", product: "LG Zubehör", unit: "Stk", purchasePrice: 4, salePrice: 8, supplier: "Little Greene", active: true },
+    ]));
+    const paintDir = path.join(root, "_kristine", "paint");
+    fs.mkdirSync(paintDir, { recursive: true });
+    fs.writeFileSync(path.join(paintDir, "articles.json"), JSON.stringify([
+      { id: "LG-SKU1", stockCode: "SKU1", manufacturer: "Little Greene", product: "Absolute Matt", size: "1 L", purchasePrice: 21, salePrice: 0, active: true, updatedAt: "2026-09-08T08:00:00Z" },
     ]));
 
     const invoke = (handler, req = {}) => new Promise((resolve, reject) => {
@@ -76,6 +83,30 @@ const { registerMaterialMaster } = require("../material-master");
     assert.equal(supplierList.statusCode, 200);
     assert(supplierList.body.materials.every(row => row.supplier === "Muster"), "Lieferantenfilter zeigt ausschließlich den gewählten Lieferanten");
     assert.equal(supplierList.body.summary.bySupplier.Muster, 1, "Lieferantenauswahl enthält die Trefferzahl");
+    const littleGreeneRows = await invoke(routes["get:/admin/api/materials"], { query: { supplier: "Little Greene", limit: "5000" } });
+    assert.equal(littleGreeneRows.body.materials.length, 2, "LG und Little Greene erscheinen als gemeinsamer Lieferant");
+    assert(littleGreeneRows.body.materials.every(row => row.supplier === "Little Greene"), "Dropdown und Liste verwenden nur den kanonischen Lieferantennamen");
+    const lgArticle = littleGreeneRows.body.materials.find(row => row.materialId === "M3");
+    assert.equal(lgArticle.purchasePrice, 21, "Little-Greene-EK wird aus dem LG-Stamm kopiert");
+    assert.equal(lgArticle.salePrice, 49.17, "Little-Greene-VK netto wird aus der LG-Retailpreisliste kopiert");
+    assert.equal(lgArticle.priceSource, "Little Greene");
+
+    const suppliers = await invoke(routes["get:/admin/api/material-suppliers"], { query: {} });
+    const lgSupplier = suppliers.body.suppliers.find(row => row.name === "Little Greene");
+    assert.equal(lgSupplier.materialCount, 2);
+    assert.deepEqual(lgSupplier.aliases, ["LG", "Little Greene"]);
+    const linked = await invoke(routes["post:/admin/api/material-suppliers/link-winworker"], { body: {
+      localKey: lgSupplier.key,
+      localName: lgSupplier.name,
+      wwSupplier: { addressId: "4711", name: "Little Greene Deutschland", supplierNumber: "815", ourCustomerNumber: "FAR207", address: "Musterweg 1" },
+    } });
+    assert.equal(linked.body.updatedMaterials, 2);
+    const linkedRows = await service.readMaterials();
+    assert(linkedRows.filter(row => ["M3", "M4"].includes(row.materialId)).every(row => row.wwSupplierAddressId === "4711"));
+    assert(linkedRows.filter(row => ["M3", "M4"].includes(row.materialId)).every(row => row.ourCustomerNumberAtSupplier === "FAR207"));
+    const futureLg = await invoke(routes["post:/admin/api/materials/auto"], { body: { materialId: "M5", product: "LG Zukunftsartikel", supplier: "LG", unit: "Stk" } });
+    assert.equal(futureLg.body.material.supplier, "Little Greene Deutschland", "Neue Alias-Artikel verwenden automatisch den WW-Stammlieferanten");
+    assert.equal(futureLg.body.material.ourCustomerNumberAtSupplier, "FAR207", "Unsere Kundennummer wird für spätere Bestellungen mitgeführt");
 
     const wwReport = await service.syncWinWorkerMaterials([
       {

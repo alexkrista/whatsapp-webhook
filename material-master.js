@@ -36,9 +36,12 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
 
   const ROOT = path.join(dataDir, "_kristine", "materials");
   const MATERIALS_FILE = path.join(ROOT, "materials.json");
+  const SUPPLIERS_FILE = path.join(ROOT, "suppliers.json");
   const INBOX_FILE = path.join(ROOT, "material-inbox.json");
   const IMPORTS_FILE = path.join(ROOT, "material-imports.json");
   const SETTINGS_FILE = path.join(ROOT, "material-settings.json");
+  const PAINT_ARTICLES_FILE = path.join(dataDir, "_kristine", "paint", "articles.json");
+  const LG_RETAIL_FILE = path.join(publicDir || path.join(process.cwd(), "public"), "lg-retail-preisliste-2025.html");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -175,6 +178,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     storageLocation: ["lagerplatz", "lagerort"],
     supplier: ["lieferant"],
     supplierArticleNumber: ["lieferanten artikelnummer", "lieferantenartikelnummer"],
+    wwSupplierAddressId: ["ww stammindex", "ww lieferanten stammindex"],
+    wwSupplierNumber: ["ww lieferantennummer", "lieferantennummer ww"],
+    ourCustomerNumberAtSupplier: ["unsere kundennummer", "unsere kundennummer beim lieferanten"],
     manufacturerArticleNumber: ["hersteller artikelnummer", "herstellerartikelnummer"],
     regieItem: ["regieartikel", "regiepflicht", "regie"],
     designRelevant: ["gestaltungsauftrag", "materialprotokoll", "dokumentationsrelevant", "projektrelevant"],
@@ -227,6 +233,188 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     ].join("|");
   }
 
+  function supplierFingerprint(value) {
+    const fingerprint = clean(value, 200)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/&/g, " und ")
+      .replace(/gesellschaft\s+mit\s+beschrankter\s+haftung/g, " gmbh ")
+      .replace(/ges\.?\s*m\.?\s*b\.?\s*h\.?/g, " gmbh ")
+      .replace(/\b(gmbh|mbh|ag|kg|og|e\.u|eu)\b/g, " ")
+      .replace(/\b(?:und\s+co|co)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, "") || "ohne-lieferant";
+    return fingerprint === "lg" ? "littlegreene" : fingerprint;
+  }
+
+  function supplierLinkForName(links, name) {
+    const fingerprint = supplierFingerprint(name);
+    return (links || []).find(link =>
+      supplierFingerprint(link.name) === fingerprint ||
+      (link.aliases || []).some(alias => supplierFingerprint(alias) === fingerprint)
+    ) || null;
+  }
+
+  function applySupplierLink(raw, links) {
+    const supplierName = clean(raw?.supplier, 120);
+    const link = supplierLinkForName(links, supplierName);
+    if (!link) return raw;
+    return {
+      ...raw,
+      supplier: link.name,
+      supplierId: link.id,
+      wwSupplierAddressId: link.wwAddressId,
+      wwSupplierNumber: link.wwSupplierNumber,
+      ourCustomerNumberAtSupplier: link.ourCustomerNumber,
+      supplierAliases: [...new Set([...(raw?.supplierAliases || []), ...(link.aliases || []), supplierName].map(value => clean(value, 120)).filter(Boolean))],
+    };
+  }
+
+  function supplierGroups(materials) {
+    const groups = new Map();
+    for (const item of materials.filter(material => material.active !== false && clean(material.supplier, 120))) {
+      const key = clean(item.supplierId, 160) || `local:${supplierFingerprint(item.supplier)}`;
+      const current = groups.get(key) || {
+        key,
+        name: clean(item.supplier, 120),
+        aliases: new Set(),
+        materialCount: 0,
+        linked: false,
+        wwAddressId: "",
+        wwSupplierNumber: "",
+        ourCustomerNumber: "",
+      };
+      current.materialCount += 1;
+      current.aliases.add(clean(item.supplier, 120));
+      if (!current.linked && clean(item.supplier, 120).length > current.name.length) current.name = clean(item.supplier, 120);
+      for (const alias of item.supplierAliases || []) if (clean(alias, 120)) current.aliases.add(clean(alias, 120));
+      if (item.wwSupplierAddressId) {
+        current.linked = true;
+        current.name = clean(item.supplier, 120) || current.name;
+        current.wwAddressId = clean(item.wwSupplierAddressId, 120);
+        current.wwSupplierNumber = clean(item.wwSupplierNumber, 80);
+        current.ourCustomerNumber = clean(item.ourCustomerNumberAtSupplier, 80);
+      }
+      groups.set(key, current);
+    }
+    return [...groups.values()].map(group => ({ ...group, aliases: [...group.aliases].sort((a, b) => a.localeCompare(b, "de")) }))
+      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+  }
+
+  function withCanonicalSupplierNames(materials) {
+    const names = new Map(supplierGroups(materials).map(group => [group.key, group]));
+    return materials.map(item => {
+      if (!clean(item.supplier, 120)) return item;
+      const key = clean(item.supplierId, 160) || `local:${supplierFingerprint(item.supplier)}`;
+      const group = names.get(key);
+      return group ? { ...item, supplier: group.name, supplierAliases: group.aliases } : item;
+    });
+  }
+
+  function compactArticleCode(value) {
+    return clean(value, 160).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function lgSize(value, containerSize = 0) {
+    let raw = `${containerSize || ""}${value || ""}`.toLowerCase().replace(/,/g, ".").replace(/litre|liter|ltr/g, "l").replace(/\s+/g, "");
+    const fromText = raw.match(/(?:^|[^0-9])((?:0\.)?25|0\.5|0\.75|1|2|2\.5|4|5|10)l(?:$|[^a-z])/);
+    if (fromText) return `${Number(fromText[1])}l`;
+    const ml = raw.match(/(?:^|[^0-9])(60|250|500|750)ml(?:$|[^a-z])/);
+    return ml ? `${Number(ml[1])}ml` : "";
+  }
+
+  function lgProductKey(value) {
+    return clean(value, 240).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+      .replace(/\b(little\s*greene|lg|hi\s*white|medium|deep|extra\s*deep|transparent|yellow|pastel|white\s*asp)\b/g, " ")
+      .replace(/\bemulsion\b/g, " ")
+      .replace(/\b(60|250|500|750)\s*ml\b|\b(?:0[.,])?(?:25|5|75)\s*l\b|\b(?:1|2|2[.,]5|4|5|10)\s*l\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function lgBaseKey(value) {
+    return clean(value, 120).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  }
+
+  async function lgRetailPriceRows() {
+    try {
+      const html = await fsp.readFile(LG_RETAIL_FILE, "utf8");
+      return [...html.matchAll(/<tr><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><\/tr>/gi)].map(match => ({
+        product: clean(match[1].replace(/<[^>]+>/g, ""), 180),
+        productKey: lgProductKey(match[1].replace(/<[^>]+>/g, "")),
+        size: lgSize(match[2].replace(/<[^>]+>/g, "")),
+        gross: number(match[3].replace(/<[^>]+>/g, "").replace(/[^0-9,.]/g, "")),
+      })).filter(row => row.productKey && row.size && row.gross > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  function findLgArticle(material, articles) {
+    const wantedCodes = new Set([
+      material.supplierArticleNumber, material.articleNumber, material.materialId, material.sourceId,
+    ].map(compactArticleCode).filter(Boolean));
+    const byCode = articles.find(article => [article.stockCode, article.ean, article.id].map(compactArticleCode).some(code => code && wantedCodes.has(code)));
+    if (byCode) return byCode;
+    const wantedProduct = lgProductKey(material.product);
+    const wantedSize = lgSize(`${material.product || ""} ${material.unit || ""}`, material.containerSize);
+    if (!wantedProduct || !wantedSize) return null;
+    const candidates = articles.filter(article => {
+      const articleProduct = lgProductKey(article.product);
+      return articleProduct && (wantedProduct.includes(articleProduct) || articleProduct.includes(wantedProduct)) && lgSize(article.size) === wantedSize;
+    });
+    if (candidates.length === 1) return candidates[0];
+    const wantedText = lgBaseKey(`${material.product} ${material.colorName || ""}`);
+    const withBase = candidates.filter(article => {
+      const base = lgBaseKey(article.baseName || article.baseCode);
+      return base && wantedText.includes(base);
+    });
+    if (withBase.length === 1) return withBase[0];
+    const prices = new Set(candidates.map(article => number(article.purchasePrice)).filter(price => price > 0));
+    return prices.size === 1 ? candidates[0] : null;
+  }
+
+  async function syncLittleGreenePrices() {
+    const [materials, articles, retailRows] = await Promise.all([
+      readJson(MATERIALS_FILE, []),
+      readJson(PAINT_ARTICLES_FILE, []),
+      lgRetailPriceRows(),
+    ]);
+    if (!materials.length || !articles.length) return { matched: 0, changed: 0 };
+    let matched = 0, changed = 0;
+    const now = new Date().toISOString();
+    for (let index = 0; index < materials.length; index += 1) {
+      const item = materials[index];
+      const isLittleGreene = [item.supplier, item.manufacturer, ...(item.supplierAliases || [])]
+        .some(value => supplierFingerprint(value) === "littlegreene");
+      if (!isLittleGreene) continue;
+      const article = findLgArticle(item, articles.filter(row => row && row.active !== false));
+      if (!article) continue;
+      matched += 1;
+      const purchasePrice = number(article.purchasePrice) || number(item.purchasePrice);
+      const productKey = lgProductKey(article.product || item.product);
+      const size = lgSize(article.size || `${item.product} ${item.unit}`, item.containerSize);
+      const retail = retailRows.find(row => row.productKey === productKey && row.size === size);
+      const salePrice = retail?.gross ? Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100 : (number(article.salePrice) || number(item.salePrice));
+      const sourceDate = retail?.gross ? "2025-05-01" : (clean(article.updatedAt, 10) || item.priceCheckedAt);
+      if (purchasePrice === number(item.purchasePrice) && salePrice === number(item.salePrice) && item.priceSource === "Little Greene") continue;
+      materials[index] = normalizeMaterial({
+        ...item,
+        supplier: item.wwSupplierAddressId ? item.supplier : "Little Greene",
+        purchasePrice,
+        salePrice,
+        priceCheckedAt: sourceDate,
+        priceValidFrom: sourceDate,
+        priceSource: "Little Greene",
+        priceSourceId: clean(article.id || article.stockCode, 160),
+        supplierAliases: [...new Set([...(item.supplierAliases || []), item.supplier, "LG", "Little Greene"].filter(Boolean))],
+        createdAt: item.createdAt,
+      });
+      changed += 1;
+    }
+    if (changed) await writeJson(MATERIALS_FILE, materials);
+    return { matched, changed, syncedAt: now };
+  }
+
   function createMaterialId(material, index = 0) {
     const prefix = slug(material.manufacturer || material.group || "MAT").slice(0, 4).toUpperCase() || "MAT";
     const product = slug(material.product || material.subgroup || "artikel").slice(0, 16).toUpperCase() || "ARTIKEL";
@@ -268,11 +456,18 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       salePrice: number(raw.salePrice),
       priceValidFrom: dateISO(raw.priceValidFrom),
       priceCheckedAt: dateISO(raw.priceCheckedAt),
+      priceSource: clean(raw.priceSource, 80),
+      priceSourceId: clean(raw.priceSourceId, 160),
       stock: number(raw.stock),
       minimumStock: number(raw.minimumStock),
       storageLocation: clean(raw.storageLocation, 120),
       supplier: clean(raw.supplier, 120),
       supplierArticleNumber: clean(raw.supplierArticleNumber, 100),
+      supplierId: clean(raw.supplierId, 160),
+      wwSupplierAddressId: clean(raw.wwSupplierAddressId, 120),
+      wwSupplierNumber: clean(raw.wwSupplierNumber, 80),
+      ourCustomerNumberAtSupplier: clean(raw.ourCustomerNumberAtSupplier, 80),
+      supplierAliases: [...new Set((Array.isArray(raw.supplierAliases) ? raw.supplierAliases : []).map(value => clean(value, 120)).filter(Boolean))],
       manufacturerArticleNumber: clean(raw.manufacturerArticleNumber, 100),
       regieItem: bool(raw.regieItem, true),
       designRelevant: bool(raw.designRelevant),
@@ -309,6 +504,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       normalized.colorName,
       normalized.supplier,
       normalized.supplierArticleNumber,
+      normalized.wwSupplierNumber,
+      normalized.ourCustomerNumberAtSupplier,
       normalized.manufacturerArticleNumber,
       normalized.articleNumber,
       normalized.alias,
@@ -359,6 +556,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       storageLocation: findValue(row, "storageLocation"),
       supplier: findValue(row, "supplier"),
       supplierArticleNumber: findValue(row, "supplierArticleNumber"),
+      wwSupplierAddressId: findValue(row, "wwSupplierAddressId"),
+      wwSupplierNumber: findValue(row, "wwSupplierNumber"),
+      ourCustomerNumberAtSupplier: findValue(row, "ourCustomerNumberAtSupplier"),
       manufacturerArticleNumber: findValue(row, "manufacturerArticleNumber"),
       regieItem: findValue(row, "regieItem"),
       designRelevant: findValue(row, "designRelevant"),
@@ -419,9 +619,12 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const bySupplier = {};
     for (const item of active) {
       byGroup[item.group || "Sonstiges"] = (byGroup[item.group || "Sonstiges"] || 0) + 1;
-      const supplier = clean(item.supplier, 120) || "Ohne Lieferant";
-      bySupplier[supplier] = (bySupplier[supplier] || 0) + 1;
     }
+    for (const supplier of supplierGroups(active)) {
+      bySupplier[supplier.name] = supplier.materialCount;
+    }
+    const withoutSupplier = active.filter(item => !clean(item.supplier, 120)).length;
+    if (withoutSupplier) bySupplier["Ohne Lieferant"] = withoutSupplier;
     return {
       count: materials.length,
       activeCount: active.length,
@@ -452,6 +655,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     });
 
     const incoming = [];
+    const supplierLinks = await readJson(SUPPLIERS_FILE, []);
     const skippedSheets = [];
     for (const sheetName of workbook.SheetNames) {
       if (/hinweis|warn|legende|kategorie|einstellung/i.test(sheetName)) {
@@ -465,11 +669,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const headers = matrix[headerIndex].map(value => clean(value, 120));
       const rows = matrix.slice(headerIndex + 1).map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
       rows.forEach((row, index) => {
-        const material = rowToMaterial(row, {
+        const material = applySupplierLink(rowToMaterial(row, {
           sheetName,
           index: index + 1,
           importedAt,
-        });
+        }), supplierLinks);
         if (hasUsableContent(material)) incoming.push(material);
       });
     }
@@ -584,20 +788,22 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       throw new Error('Excel-Export benötigt das Paket "xlsx". Bitte einmal "npm install xlsx" ausführen.');
     }
 
-    const allMaterials = await readJson(MATERIALS_FILE, []);
+    await syncLittleGreenePrices();
+    const allMaterials = withCanonicalSupplierNames(await readJson(MATERIALS_FILE, []));
     const query = clean(filters.q, 200).toLowerCase();
     const group = clean(filters.group, 100);
     const supplier = clean(filters.supplier, 120);
     const materials = allMaterials
       .filter(material => material.active !== false)
       .filter(material => !group || material.group === group)
-      .filter(material => !supplier || (clean(material.supplier, 120) || "Ohne Lieferant") === supplier)
+      .filter(material => !supplier || supplierFingerprint(material.supplier) === supplierFingerprint(supplier))
       .filter(material => !query || matchesMaterialQuery(material, query));
 
     const workbook = XLSX.utils.book_new();
     const headers = [
       "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
       "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Preisstand",
+      "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer",
     ];
     const data = materials
       .sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""), "de") || String(a.product || "").localeCompare(String(b.product || ""), "de"))
@@ -612,12 +818,15 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "VK netto (€)": item.salePrice || "",
         "VK brutto (€)": item.salePrice ? Math.round(item.salePrice * 120) / 100 : "",
         "Preisstand": item.priceCheckedAt || item.priceValidFrom,
+        "WW-Stammindex": item.wwSupplierAddressId || "",
+        "WW-Lieferantennummer": item.wwSupplierNumber || "",
+        "Unsere Kundennummer": item.ourCustomerNumberAtSupplier || "",
       }));
     for (let i = 0; i < 30; i += 1) data.push({ "Status B/N/L": "N", "Lieferant": supplier === "Ohne Lieferant" ? "" : supplier });
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
     worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 15].map(wch => ({ wch }));
+    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 15, 18, 22, 22].map(wch => ({ wch }));
     XLSX.utils.book_append_sheet(workbook, worksheet, "Materialpreisliste");
 
     const warningRows = materials.map(decorate).filter(item => item.priceStale).map(item => ({
@@ -653,7 +862,10 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     if (rawRows.length > 50000) throw new Error("WW-Materialliste ist unerwartet groß");
 
     const importedAt = new Date().toISOString();
-    const current = await readJson(MATERIALS_FILE, []);
+    const [current, supplierLinks] = await Promise.all([
+      readJson(MATERIALS_FILE, []),
+      readJson(SUPPLIERS_FILE, []),
+    ]);
     const merged = [...current];
     const currentBySource = new Map();
     const currentById = new Map();
@@ -691,6 +903,10 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         String(existing?.sourceSystem || "").toLowerCase() === "winworker" ? "" : existing?.alias,
       ].map(value => clean(value, 250)).filter(Boolean))].join(" ");
 
+      const linkedRaw = applySupplierLink({
+        supplier: clean(raw?.supplier, 120) || existing?.supplier,
+        supplierAliases: existing?.supplierAliases,
+      }, supplierLinks);
       const updated = normalizeMaterial({
         ...(existing || {}),
         materialId: existing?.materialId || requestedMaterialId || sourceId,
@@ -703,7 +919,12 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         purchasePrice,
         salePrice,
         markup: calculatedMarkup,
-        supplier: clean(raw?.supplier, 120),
+        supplier: linkedRaw.supplier,
+        supplierId: linkedRaw.supplierId || existing?.supplierId,
+        wwSupplierAddressId: linkedRaw.wwSupplierAddressId || existing?.wwSupplierAddressId,
+        wwSupplierNumber: linkedRaw.wwSupplierNumber || existing?.wwSupplierNumber,
+        ourCustomerNumberAtSupplier: linkedRaw.ourCustomerNumberAtSupplier || existing?.ourCustomerNumberAtSupplier,
+        supplierAliases: linkedRaw.supplierAliases || existing?.supplierAliases,
         supplierArticleNumber: clean(raw?.supplierArticleNumber || raw?.orderNumber, 100),
         priceValidFrom: raw?.priceCheckedAt || raw?.priceValidFrom,
         priceCheckedAt: raw?.priceCheckedAt || raw?.priceValidFrom,
@@ -776,6 +997,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
   app.get("/admin/api/materials", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      await syncLittleGreenePrices();
       const [materials, inbox] = await Promise.all([
         readJson(MATERIALS_FILE, []),
         readJson(INBOX_FILE, []),
@@ -788,11 +1010,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const staleOnly = String(req.query.staleOnly || "0") === "1";
       const mode = clean(req.query.mode, 30);
 
-      let rows = materials;
+      let rows = withCanonicalSupplierNames(materials);
       if (activeOnly) rows = rows.filter(item => item.active !== false);
       if (group) rows = rows.filter(item => item.group === group);
       if (subgroup) rows = rows.filter(item => item.subgroup === subgroup);
-      if (supplier) rows = rows.filter(item => (clean(item.supplier, 120) || "Ohne Lieferant") === supplier);
+      if (supplier) rows = rows.filter(item => supplierFingerprint(item.supplier) === supplierFingerprint(supplier));
       if (query) {
         rows = rows.filter(item => matchesMaterialQuery(item, query));
       }
@@ -811,12 +1033,89 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
   });
+
+  app.get("/admin/api/material-suppliers", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const materials = await readJson(MATERIALS_FILE, []);
+      res.json({ ok: true, suppliers: supplierGroups(materials) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/admin/api/material-suppliers/link-winworker", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const localKey = clean(req.body?.localKey, 220);
+      const localName = clean(req.body?.localName, 120);
+      const ww = req.body?.wwSupplier || {};
+      const wwAddressId = clean(ww.addressId, 120);
+      const canonicalName = clean(ww.name, 120);
+      if ((!localKey && !localName) || !wwAddressId || !canonicalName) {
+        return res.status(400).json({ ok: false, error: "Lieferant und WinWorker-Zuordnung fehlen." });
+      }
+
+      const [materials, storedLinks] = await Promise.all([
+        readJson(MATERIALS_FILE, []),
+        readJson(SUPPLIERS_FILE, []),
+      ]);
+      const targetFingerprint = localKey.startsWith("local:") ? localKey.slice(6) : supplierFingerprint(localName);
+      const supplierId = `ww:${wwAddressId}`;
+      const targetIndexes = [];
+      const aliases = new Set([canonicalName, localName]);
+      materials.forEach((item, index) => {
+        const sameLocalGroup = supplierFingerprint(item.supplier) === targetFingerprint;
+        const sameStoredGroup = clean(item.supplierId, 160) === localKey;
+        const sameWwSupplier = clean(item.wwSupplierAddressId, 120) === wwAddressId;
+        if (!sameLocalGroup && !sameStoredGroup && !sameWwSupplier) return;
+        targetIndexes.push(index);
+        if (item.supplier) aliases.add(clean(item.supplier, 120));
+        for (const alias of item.supplierAliases || []) if (alias) aliases.add(clean(alias, 120));
+      });
+      if (!targetIndexes.length) return res.status(404).json({ ok: false, error: "Lokaler Lieferant wurde nicht gefunden." });
+
+      const existingLink = storedLinks.find(link => clean(link.wwAddressId, 120) === wwAddressId);
+      for (const alias of existingLink?.aliases || []) if (alias) aliases.add(clean(alias, 120));
+      const aliasList = [...aliases].filter(Boolean).sort((a, b) => a.localeCompare(b, "de"));
+      const link = {
+        id: supplierId,
+        name: canonicalName,
+        aliases: aliasList,
+        wwAddressId,
+        wwSupplierNumber: clean(ww.supplierNumber, 80),
+        ourCustomerNumber: clean(ww.ourCustomerNumber, 80),
+        address: clean(ww.address, 300),
+        updatedAt: new Date().toISOString(),
+      };
+      for (const index of targetIndexes) {
+        materials[index] = normalizeMaterial({
+          ...materials[index],
+          supplier: canonicalName,
+          supplierId,
+          wwSupplierAddressId: wwAddressId,
+          wwSupplierNumber: link.wwSupplierNumber,
+          ourCustomerNumberAtSupplier: link.ourCustomerNumber,
+          supplierAliases: aliasList,
+          createdAt: materials[index].createdAt,
+        });
+      }
+      const links = storedLinks.filter(item => clean(item.wwAddressId, 120) !== wwAddressId && clean(item.id, 160) !== localKey);
+      links.push(link);
+      await Promise.all([writeJson(MATERIALS_FILE, materials), writeJson(SUPPLIERS_FILE, links)]);
+      res.json({ ok: true, supplier: link, updatedMaterials: targetIndexes.length });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   // ---------- KRISTINE Regie: Materialstamm nur lesend ----------
 app.get("/api/regie/materials", async (req, res) => {
   try {
+    await syncLittleGreenePrices();
     const materials = await readJson(MATERIALS_FILE, []);
 
-    let rows = materials.filter((item) => item.active !== false);
+    let rows = withCanonicalSupplierNames(materials).filter((item) => item.active !== false);
     rows = rows.map(decorate);
 
     res.json({
@@ -901,7 +1200,8 @@ app.get("/api/regie/materials", async (req, res) => {
         clean(item.materialId, 120).toLocaleLowerCase("de") === normalizedName
       );
       if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
-      const material = normalizeMaterial({
+      const supplierLinks = await readJson(SUPPLIERS_FILE, []);
+      const material = normalizeMaterial(applySupplierLink({
         materialId: requestedMaterialId,
         id: requestedMaterialId,
         group: req.body?.group || "Regie",
@@ -918,7 +1218,7 @@ app.get("/api/regie/materials", async (req, res) => {
         regieItem: true,
         note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
         sourceSheet: req.body?.sourceSheet || "KRISTINE Regie",
-      }, { index: rows.length + 1 });
+      }, supplierLinks), { index: rows.length + 1 });
       while (!requestedMaterialId && rows.some(item => String(item.materialId) === String(material.materialId))) {
         material.materialId = createMaterialId(material, rows.length + Math.floor(Math.random() * 10000));
         material.id = material.materialId;
@@ -944,13 +1244,14 @@ app.get("/api/regie/materials", async (req, res) => {
       if (rows.some((item, rowIndex) => rowIndex !== index && String(item.materialId).toLocaleLowerCase("de") === requestedMaterialId.toLocaleLowerCase("de"))) {
         return res.status(409).json({ ok: false, error: `ID / Kürzel ${requestedMaterialId} ist bereits vergeben.` });
       }
-      const material = normalizeMaterial({
+      const supplierLinks = await readJson(SUPPLIERS_FILE, []);
+      const material = normalizeMaterial(applySupplierLink({
         ...current,
         ...req.body,
         materialId: requestedMaterialId,
         id: requestedMaterialId,
         createdAt: current.createdAt,
-      });
+      }, supplierLinks));
       rows[index] = material;
       await writeJson(MATERIALS_FILE, rows);
       res.json({ ok: true, material: decorate(material) });
@@ -1070,7 +1371,8 @@ app.get("/api/regie/materials", async (req, res) => {
       }
 
       const source = inbox[index];
-      const material = normalizeMaterial({
+      const supplierLinks = await readJson(SUPPLIERS_FILE, []);
+      const material = normalizeMaterial(applySupplierLink({
         group: req.body?.group || source.groupSuggestion,
         subgroup: req.body?.subgroup || source.subgroupSuggestion,
         manufacturer: req.body?.manufacturer || source.manufacturerSuggestion,
@@ -1096,7 +1398,7 @@ app.get("/api/regie/materials", async (req, res) => {
         note: req.body?.note,
         sourceSheet: req.body?.sourceSheet || req.body?.group || source.groupSuggestion || "Sonstiges",
         status: "approved",
-      });
+      }, supplierLinks));
 
       const existing = materials.find(item =>
         String(item.materialId) === String(material.materialId) ||
@@ -1152,7 +1454,8 @@ app.get("/api/regie/materials", async (req, res) => {
   // ---------- Suchassistent ----------
   app.get("/kristine/api/material-search", async (req, res) => {
     try {
-      const materials = await readJson(MATERIALS_FILE, []);
+      await syncLittleGreenePrices();
+      const materials = withCanonicalSupplierNames(await readJson(MATERIALS_FILE, []));
       const query = clean(req.query.q, 100).toLowerCase();
       const group = clean(req.query.group, 100);
       const rows = materials
@@ -1180,6 +1483,7 @@ app.get("/api/regie/materials", async (req, res) => {
     importWorkbook,
     exportWorkbook,
     syncWinWorkerMaterials,
+    syncLittleGreenePrices,
   };
 }
 

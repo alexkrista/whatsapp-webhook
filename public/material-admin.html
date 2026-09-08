@@ -58,7 +58,12 @@ th{font-size:12px;text-transform:uppercase;color:var(--muted)}
 .ww-supplier-body{padding:0 12px}
 .ww-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
 .ww-result:last-child{border-bottom:0}.ww-result-title{font-weight:900}.ww-result-meta{color:var(--muted);font-size:13px;margin-top:4px}
+.supplier-manager{padding:20px;max-height:82vh;overflow:auto}.supplier-manager h2{margin-top:0}
+.supplier-manage-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}
+.supplier-manage-row:last-child{border-bottom:0}.supplier-link-search{display:flex;gap:8px;margin:14px 0}.supplier-link-search input{flex:1}
+.supplier-linked{color:var(--green);font-weight:800}.supplier-result{padding:12px;border:1px solid var(--line);border-radius:14px;margin-top:8px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}
 dialog{border:0;border-radius:22px;padding:0;max-width:650px;width:calc(100% - 24px)}
+#supplierDialog{max-width:920px}
 dialog::backdrop{background:rgba(0,0,0,.4)}
 .form{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form h2,.form .wide{grid-column:1/-1}.form label{display:grid;gap:5px;font-size:13px;color:var(--muted)}
@@ -111,6 +116,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <select id="supplier"><option value="">Alle Lieferanten</option></select>
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
+      <button class="btn" onclick="openSupplierManager()">Lieferanten verwalten</button>
       <button class="btn" id="wwSearchButton" onclick="searchWinWorker(this)">In WW suchen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="printMaterials()">Drucken</button>
@@ -180,6 +186,17 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   </div>
 </form>
 </dialog>
+<dialog id="supplierDialog">
+  <div class="supplier-manager">
+    <div class="section-head"><div><h2>Lieferanten zusammenführen</h2><div class="muted">Jeder Lieferant erscheint nur einmal. Die WW-Zuordnung speichert auch unsere Kundennummer für spätere Bestellungen.</div></div><button class="btn" onclick="supplierDialog.close()">Schließen</button></div>
+    <div id="supplierManagerRows"></div>
+    <section id="supplierLinkBox" class="hidden">
+      <h3 id="supplierLinkTitle">Mit WinWorker verknüpfen</h3>
+      <div class="supplier-link-search"><input id="supplierWwQuery" placeholder="Lieferant in WinWorker suchen"><button class="btn primary" id="supplierWwSearchButton" onclick="searchWwSuppliers()">In WW suchen</button></div>
+      <div id="supplierWwResults"></div>
+    </section>
+  </div>
+</dialog>
 <datalist id="supplierList"></datalist>
 
 <script>
@@ -199,6 +216,8 @@ let materialRequests=[];
 let materialItems=[];
 let wwSearchItems=[];
 let wwPendingMaterial=null;
+let supplierItems=[];
+let supplierLinkTarget=null;
 let requestFilter="open";
 
 function statusLabel(status){
@@ -311,13 +330,13 @@ async function loadMaterials(){
 function renderMaterials(){
   materialRows.innerHTML=materialItems.map(m=>`<tr>
     <td><strong>${escapeHtml(m.materialId)}</strong></td>
-    <td>${escapeHtml(m.supplier||"–")}<br><span class="muted">${escapeHtml(m.supplierArticleNumber||"")}</span></td>
+    <td>${escapeHtml(m.supplier||"–")}<br><span class="muted">${escapeHtml(m.supplierArticleNumber||"")}${m.ourCustomerNumberAtSupplier?` · unsere KdNr. ${escapeHtml(m.ourCustomerNumberAtSupplier)}`:""}</span></td>
     <td><strong>${escapeHtml(m.product||"–")}</strong></td>
     <td>${escapeHtml(m.unit||"–")}</td>
     <td>${money(m.purchasePrice)}</td>
     <td>${money(m.salePrice)}</td>
     <td>${money(Number(m.salePrice||0)*1.2)}</td>
-    <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span></td>
+    <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span>${m.priceSource?`<br><span class="muted">aus ${escapeHtml(m.priceSource)}</span>`:""}</td>
     <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
   </tr>`).join("");
 }
@@ -362,6 +381,50 @@ async function deleteMaterial(id){
   if(!confirm(`Material „${item?.product||id}“ wirklich stilllegen?\n\nEs verschwindet aus Suche und nächstem Excel-Export. Alte Belege bleiben unverändert.`))return;
   await api(`/admin/api/materials/${encodeURIComponent(id)}`,{method:"PUT",body:JSON.stringify({active:false})});
   await loadMaterials();
+}
+
+async function openSupplierManager(){
+  supplierLinkTarget=null;supplierLinkBox.classList.add("hidden");supplierWwResults.innerHTML="";
+  supplierManagerRows.innerHTML='<div class="muted">Lieferanten werden geladen …</div>';
+  if(!supplierDialog.open)supplierDialog.showModal();
+  try{
+    const data=await api("/admin/api/material-suppliers");
+    supplierItems=data.suppliers||[];
+    renderSupplierManager();
+  }catch(error){supplierManagerRows.innerHTML=`<strong>Lieferanten konnten nicht geladen werden.</strong><div class="muted">${escapeHtml(error.message)}</div>`}
+}
+
+function renderSupplierManager(){
+  supplierManagerRows.innerHTML=supplierItems.length?supplierItems.map((item,index)=>`<div class="supplier-manage-row"><div><strong>${escapeHtml(item.name)}</strong> <span class="pill">${item.materialCount} Artikel</span><div class="muted">${item.aliases?.length>1?`Zusammengefasst: ${item.aliases.map(escapeHtml).join(" · ")}`:"Eine Schreibweise"}</div>${item.linked?`<div class="supplier-linked">✓ WinWorker ${escapeHtml(item.wwSupplierNumber||item.wwAddressId)}${item.ourCustomerNumber?` · unsere KdNr. ${escapeHtml(item.ourCustomerNumber)}`:" · unsere Kundennummer fehlt in WW"}</div>`:'<div class="muted">Noch nicht mit WinWorker verknüpft</div>'}</div><button class="btn ${item.linked?"":"primary"}" onclick="startSupplierLink(${index})">${item.linked?"WW-Zuordnung ändern":"Mit WW verknüpfen"}</button></div>`).join(""):'<div class="muted">Noch keine Lieferanten im Materialstamm.</div>';
+}
+
+function startSupplierLink(index){
+  supplierLinkTarget=supplierItems[index];if(!supplierLinkTarget)return;
+  supplierLinkBox.classList.remove("hidden");supplierLinkTitle.textContent=`${supplierLinkTarget.name} mit WinWorker verknüpfen`;
+  supplierWwQuery.value=supplierLinkTarget.name;supplierWwResults.innerHTML="";supplierWwQuery.focus();
+  searchWwSuppliers();
+}
+
+async function searchWwSuppliers(){
+  const query=supplierWwQuery.value.trim();if(query.length<2){supplierWwResults.textContent="Bitte mindestens zwei Zeichen eingeben.";return}
+  const button=supplierWwSearchButton,old=button.textContent;button.disabled=true;button.textContent="WW sucht …";supplierWwResults.innerHTML='<div class="muted">WinWorker-Lieferanten werden gesucht …</div>';
+  try{
+    const url=new URL(WW_BRAIN_URL+"/ww-suppliers/search");url.searchParams.set("q",query);url.searchParams.set("limit","30");url.searchParams.set("krista_token",token);
+    const response=await fetch(url,{cache:"no-store"}),data=await response.json().catch(()=>({error:"Unbekannte WW-Antwort"}));
+    if(!response.ok||data.ok===false)throw new Error(data.error||"WW-Suche fehlgeschlagen");
+    const rows=data.suppliers||[];
+    supplierWwResults.innerHTML=rows.length?rows.map((item,index)=>`<div class="supplier-result"><div><strong>${escapeHtml(item.name||"–")}</strong><div class="muted">${escapeHtml(item.address||"")} · WW-Lieferant ${escapeHtml(item.supplierNumber||"–")}${item.ourCustomerNumber?` · unsere KdNr. ${escapeHtml(item.ourCustomerNumber)}`:""}</div></div><button class="btn primary" data-ww-supplier="${index}">Diesen übernehmen</button></div>`).join(""):'<div class="muted">Kein passender WW-Lieferant gefunden.</div>';
+    supplierWwResults.querySelectorAll("[data-ww-supplier]").forEach(button=>button.onclick=()=>linkWwSupplier(rows[Number(button.dataset.wwSupplier)]));
+  }catch(error){supplierWwResults.innerHTML=`<strong>WW-Suche nicht möglich.</strong><div class="muted">${escapeHtml(error.message)}</div>`}
+  finally{button.disabled=false;button.textContent=old}
+}
+
+async function linkWwSupplier(wwSupplier){
+  if(!supplierLinkTarget||!wwSupplier)return;
+  if(!confirm(`„${supplierLinkTarget.name}“ auf „${wwSupplier.name}“ zusammenführen und mit WinWorker verknüpfen?`))return;
+  const data=await api("/admin/api/material-suppliers/link-winworker",{method:"POST",body:JSON.stringify({localKey:supplierLinkTarget.key,localName:supplierLinkTarget.name,wwSupplier})});
+  alert(`${data.updatedMaterials} Materialartikel wurden dem WW-Lieferanten „${data.supplier.name}“ zugeordnet.${data.supplier.ourCustomerNumber?`\nUnsere Kundennummer: ${data.supplier.ourCustomerNumber}`:""}`);
+  await loadMaterials();await openSupplierManager();
 }
 
 async function searchWinWorker(button){
@@ -499,6 +562,7 @@ document.getElementById("search").addEventListener("input",()=>{clearTimeout(sea
 document.getElementById("search").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchWinWorker(wwSearchButton)}});
 document.getElementById("group").addEventListener("change",loadMaterials);
 document.getElementById("supplier").addEventListener("change",loadMaterials);
+supplierWwQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchWwSuppliers()}});
 editVk.addEventListener("input",updateGrossFromNet);
 editGross.addEventListener("input",updateNetFromGross);
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]);
