@@ -1,5 +1,6 @@
 
 "use strict";
+const { upFromJobId } = require("./up-reasons");
 
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -375,6 +376,12 @@ function clampOfficialStart(actualTime) {
       normalizedEvent.actualAt = actualAt;
       normalizedEvent.adjusted = bookedAt !== actualAt;
     }
+    const up = upFromJobId(normalizedEvent.jobId);
+    if (up && ["start", "weiter"].includes(normalizedEvent.type)) {
+      normalizedEvent.type = "up";
+      normalizedEvent.reason = up.reason;
+      normalizedEvent.upCode = up.upCode;
+    }
     rows.push(normalizedEvent);
     // Genug Historie für Büroprüfung behalten, Datei aber begrenzen.
     await writeJson(TIME_EVENTS, rows.slice(-20000));
@@ -512,7 +519,7 @@ function clampOfficialStart(actualTime) {
     for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
       if (String(event?.date || "") !== today) continue;
       const type = String(event?.type || "").toLowerCase();
-      if (!["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(type)) continue;
+      if (!["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(type)) continue;
       const id = String(event?.employeeId || "");
       if (!id) continue;
       const rows = byEmployee.get(id) || [];
@@ -521,7 +528,7 @@ function clampOfficialStart(actualTime) {
     }
     const modeForType = (type) => {
       type = String(type || "").toLowerCase();
-      if (["start","weiter"].includes(type)) return "working";
+      if (["start","weiter","up"].includes(type)) return "working";
       if (type === "pause") return "pause";
       if (type === "mittag") return "lunch";
       if (["ende","fertig","stop","stopp"].includes(type)) return "finished_day";
@@ -869,7 +876,7 @@ const intent = rawText.startsWith("task_call:")
       state.lastStartBooked = bookedTime;
       addTimeline("work_started", `Arbeitsbeginn ${bookedTime}${bookedTime !== actualTime ? ` (gestempelt ${actualTime})` : ""}`, current);
       await saveState();
-      if (typeof markJobRunning === "function") await markJobRunning(current.jobId, "time_booking").catch(() => false);
+      if (!upFromJobId(current.jobId) && typeof markJobRunning === "function") await markJobRunning(current.jobId, "time_booking").catch(() => false);
       await appendTimeEvent({
         employeeId,
         employeeName: state.employeeName,
