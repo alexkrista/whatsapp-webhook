@@ -6,6 +6,9 @@
   let status = null;
   let tapiStatus = null;
   let pendingPhone = "";
+  let lastIncomingEventId = 0;
+  let incomingPollBusy = false;
+  const incomingCalls = new Map();
 
   function endpoint(path) {
     return path + (token ? `${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : "");
@@ -51,6 +54,109 @@
     dialog.querySelector("[data-nfon-close]").onclick = () => dialog.close();
     document.body.appendChild(dialog);
     return dialog;
+  }
+  function ensureIncomingDialog() {
+    let dialog = document.getElementById("kristineIncomingCallDialog");
+    if (dialog) return dialog;
+    dialog = document.createElement("dialog");
+    dialog.id = "kristineIncomingCallDialog";
+    dialog.style.cssText = "border:0;border-radius:18px;padding:0;box-shadow:0 24px 90px #0007;width:min(520px,calc(100% - 24px));z-index:10001";
+    dialog.innerHTML = `<div style="padding:20px"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px"><div><div style="color:#16844b;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.05em">📞 Eingehender Anruf</div><h3 id="kristineIncomingNumber" style="margin:5px 0 2px;font-size:25px"></h3><div id="kristineIncomingState" class="small"></div></div><button type="button" class="secondary" data-incoming-close aria-label="Schließen">✕</button></div><div id="kristineIncomingMatches" style="display:grid;gap:9px;margin-top:16px"></div><div id="kristineIncomingMessage" class="small" style="margin-top:12px"></div></div>`;
+    dialog.querySelector("[data-incoming-close]").onclick = () => dialog.close();
+    document.body.appendChild(dialog);
+    return dialog;
+  }
+  function incomingCallKey(event) {
+    return String(event.callId || `${event.phone}:${event.extension || ""}`);
+  }
+  function stateLabel(state) {
+    return ({ RING:"Es läutet", CONN:"Gespräch verbunden", BUSY:"Besetzt", DISC:"Anruf beendet", IDLE:"Anruf beendet", DIAL:"Anruf wird aufgebaut" })[state] || state || "Eingehender Anruf";
+  }
+  function openJob(jobId) {
+    if (!jobId) return;
+    location.href = endpoint(`/admin/akte/${encodeURIComponent(jobId)}`);
+  }
+  function openTask(taskId) {
+    const dialog = ensureIncomingDialog();
+    dialog.close();
+    if (typeof window.openTaskListModal === "function") window.openTaskListModal(taskId || "");
+    else if (typeof window.showTab === "function") window.showTab("tasks");
+  }
+  function prepareCallbackTask(phone) {
+    ensureIncomingDialog().close();
+    if (typeof window.showTab === "function") window.showTab("tasks");
+    const title = document.getElementById("tTitle");
+    const contactPhone = document.getElementById("tContactPhone");
+    if (title && !title.value.trim()) title.value = "Rückruf – unbekannte Nummer";
+    if (contactPhone) contactPhone.value = phone;
+    const callbackType = document.querySelector('input[name="taskType"][value="Rückruf"]');
+    if (callbackType) callbackType.checked = true;
+    if (typeof window.updateTaskSelectionInfo === "function") window.updateTaskSelectionInfo();
+    document.getElementById("tContactName")?.focus();
+  }
+  async function showIncomingCall(event) {
+    const key = incomingCallKey(event);
+    incomingCalls.set(key, event);
+    const dialog = ensureIncomingDialog();
+    dialog.dataset.callKey = key;
+    dialog.querySelector("#kristineIncomingNumber").textContent = event.phone || "Unbekannte Nummer";
+    dialog.querySelector("#kristineIncomingState").textContent = `${stateLabel(event.state)}${event.extension ? ` · Nebenstelle ${event.extension}` : ""}`;
+    const matches = dialog.querySelector("#kristineIncomingMatches");
+    const message = dialog.querySelector("#kristineIncomingMessage");
+    matches.innerHTML = "";
+    message.textContent = "Suche Kunden, Lieferanten und Aufgaben …";
+    if (!dialog.open) dialog.showModal();
+    try {
+      const result = await request(`/kristine/api/nfon/lookup?phone=${encodeURIComponent(event.phone || "")}`);
+      if (dialog.dataset.callKey !== key) return;
+      const rows = Array.isArray(result.matches) ? result.matches : [];
+      message.textContent = rows.length ? `${rows.length} passende Zuordnung${rows.length === 1 ? "" : "en"}` : "Nummer ist noch keinem Kontakt zugeordnet.";
+      for (const row of rows) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.style.cssText = "text-align:left;padding:11px 13px";
+        const context = row.jobName || row.taskTitle || row.address || "";
+        button.innerHTML = `<strong>${escapeHtml(row.name)}</strong><br><span class="small">${escapeHtml(row.role)}${context ? ` · ${escapeHtml(context)}` : ""}</span>`;
+        button.onclick = () => row.jobId ? openJob(row.jobId) : openTask(row.taskId);
+        matches.appendChild(button);
+      }
+      const callback = document.createElement("button");
+      callback.type = "button";
+      callback.className = "secondary";
+      callback.textContent = rows.length ? "Andere Zuordnung / Rückruf-Aufgabe" : "Als Rückruf-Aufgabe erfassen";
+      callback.onclick = () => prepareCallbackTask(event.phone || "");
+      matches.appendChild(callback);
+    } catch (error) {
+      message.textContent = `Zuordnung konnte nicht geladen werden: ${error.message}`;
+    }
+  }
+  function updateIncomingCall(event) {
+    const key = incomingCallKey(event);
+    incomingCalls.set(key, event);
+    const dialog = ensureIncomingDialog();
+    if (dialog.open && dialog.dataset.callKey === key) {
+      dialog.querySelector("#kristineIncomingState").textContent = `${stateLabel(event.state)}${event.extension ? ` · Nebenstelle ${event.extension}` : ""}`;
+    }
+  }
+  async function pollIncomingEvents() {
+    if (!tapiStatus?.ready || incomingPollBusy) return;
+    incomingPollBusy = true;
+    try {
+      const result = await tapiRequest(`/events?after=${lastIncomingEventId}`);
+      if (Number(result.latestId || 0) < lastIncomingEventId) lastIncomingEventId = 0;
+      const events = Array.isArray(result.events) ? result.events : [];
+      for (const event of events) {
+        lastIncomingEventId = Math.max(lastIncomingEventId, Number(event.id || 0));
+        const state = String(event.state || "").toUpperCase();
+        const age = Date.now() - Date.parse(event.receivedAt || 0);
+        if ((state === "RING" || state === "DIAL") && age < 30000) await showIncomingCall(event);
+        else updateIncomingCall(event);
+      }
+    } catch {
+      // Der normale Statuscheck zeigt an, falls der lokale Connector beendet wurde.
+    } finally {
+      incomingPollBusy = false;
+    }
   }
   async function callFrom(extension) {
     const dialog = ensureDialog();
@@ -126,6 +232,7 @@
     try {
       tapiStatus = await tapiRequest("/status");
       document.documentElement.dataset.tapiReady = tapiStatus?.ready ? "1" : "0";
+      pollIncomingEvents();
     } catch {
       tapiStatus = null;
       document.documentElement.dataset.tapiReady = "0";
@@ -141,5 +248,6 @@
   });
   loadStatus();
   loadTapiStatus();
+  setInterval(pollIncomingEvents, 1500);
   setInterval(loadTapiStatus, 15000);
 })();

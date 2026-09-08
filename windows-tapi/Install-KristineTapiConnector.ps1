@@ -1,5 +1,5 @@
 param(
-  [string]$LineName = "snom Line 1"
+  [string]$LineName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,7 +15,19 @@ if (-not (Test-Path -LiteralPath $ConnectorSource)) {
 
 New-Item -ItemType Directory -Path $TargetDirectory -Force | Out-Null
 Copy-Item -LiteralPath $ConnectorSource -Destination $ConnectorTarget -Force
-@{ lineName = $LineName } | ConvertTo-Json | Set-Content -LiteralPath $ConfigTarget -Encoding UTF8
+$existingConfig = $null
+if (Test-Path -LiteralPath $ConfigTarget) {
+  try { $existingConfig = Get-Content -LiteralPath $ConfigTarget -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
+}
+if (-not $LineName) { $LineName = [string]$existingConfig.lineName }
+if (-not $LineName) { $LineName = "CTI Client TAPI-Connector" }
+$localSecret = [string]$existingConfig.localSecret
+if (-not $localSecret) {
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $localSecret = [Convert]::ToBase64String($bytes)
+}
+@{ lineName = $LineName; localSecret = $localSecret } | ConvertTo-Json | Set-Content -LiteralPath $ConfigTarget -Encoding UTF8
 
 $shell = New-Object -ComObject WScript.Shell
 $startup = [Environment]::GetFolderPath("Startup")
