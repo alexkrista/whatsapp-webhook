@@ -207,11 +207,11 @@ function authenticatedUrl(url) {
     if (!todaysEvents.length) {
       state.employeeState = { ...state.employeeState, mode:"idle", pending:null };
     } else {
-      const relevant = todaysEvents.filter(row => ["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(String(row.type||"").toLowerCase()))
+      const relevant = todaysEvents.filter(row => ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row.type||"").toLowerCase()))
         .sort((a,b) => String(a.createdAt||"").localeCompare(String(b.createdAt||"")) || String(a.at||"").localeCompare(String(b.at||"")));
       const last = relevant.at(-1);
       const t = String(last?.type||"").toLowerCase();
-      const mode = ["start","weiter"].includes(t) ? "working" : t === "pause" ? "pause" : t === "mittag" ? "lunch" : ["ende","fertig","stop","stopp"].includes(t) ? "finished_day" : state.employeeState.mode;
+      const mode = ["start","weiter","up"].includes(t) ? "working" : t === "pause" ? "pause" : t === "mittag" ? "lunch" : ["ende","fertig","stop","stopp"].includes(t) ? "finished_day" : state.employeeState.mode;
       state.employeeState = { ...state.employeeState, mode };
     }
 
@@ -242,7 +242,7 @@ function authenticatedUrl(url) {
     const today = state.bootstrap?.today || todayISO();
     const events = (state.bootstrap?.timeEvents || [])
       .filter(row => String(row.employeeId) === id && String(row.date) === today)
-      .filter(row => ["start","weiter","pause","mittag","ende"].includes(String(row.type)))
+      .filter(row => ["start","weiter","up","pause","mittag","ende"].includes(String(row.type)))
       .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
     return events.at(-1) || null;
   }
@@ -254,7 +254,7 @@ function authenticatedUrl(url) {
       .filter(row =>
         String(row.employeeId) === id &&
         String(row.date) === today &&
-        ["start","weiter"].includes(String(row.type))
+        ["start","weiter","up"].includes(String(row.type))
       )
       .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")))
       .at(-1) || null;

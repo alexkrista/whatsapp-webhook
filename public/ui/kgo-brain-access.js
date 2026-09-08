@@ -29,5 +29,5 @@
   suppressMorningPunishment();
   load("/public/ui/kgo-brain-access-core.js?v=20260826-brain-core", "data-kgo-brain-core");
   load("/public/ui/kgo-work-scope.js?v=20260826-scope1", "data-kgo-work-scope");
-  load("/public/ui/kgo-site-picker.js?v=20260828-site-picker1", "data-kgo-site-picker");
+  load("/public/ui/kgo-site-picker.js?v=20260908-site-picker-up1", "data-kgo-site-picker");
 })();
