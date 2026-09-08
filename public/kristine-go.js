@@ -768,7 +768,7 @@ if (contactPhone) {
     const def = assistantDefinitions(kind);
     if (!def) return;
     if (def.external) {
-      location.href = def.external;
+      location.href = authenticatedUrl(def.external);
       return;
     }
     state.assistant = {kind, def, index:0, values:[]};
