@@ -7,9 +7,9 @@ $running = Get-CimInstance Win32_Process | Where-Object {
 }
 
 if ($running) {
-    Write-Host "Bitte zuerst KRISTINE Zutritt und Access Bridge beenden." -ForegroundColor Red
-    Write-Host "Es wurden laufende Prozesse gefunden; es wurde nichts kopiert."
-    exit 2
+    Write-Host "KRISTINE Zutritt und Access Bridge werden beendet ..." -ForegroundColor Yellow
+    $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
 }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -27,4 +27,3 @@ Copy-Item (Join-Path $PSScriptRoot "access_bridge.py") $bridgeTarget -Force
 Write-Host "Chip-Lese-Hotfix wurde installiert." -ForegroundColor Green
 Write-Host "Der Tibbo wird jetzt nur waehrend 'Chip einlesen' und nur alle 5 Sekunden abgefragt."
 Write-Host "Bitte den PC jetzt neu starten."
-
