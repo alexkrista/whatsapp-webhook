@@ -230,6 +230,7 @@ let materialRequests=[];
 let materialItems=[];
 let wwSearchItems=[];
 let wwPendingMaterial=null;
+let copySourceId="";
 let supplierItems=[];
 let supplierLinkTarget=null;
 let mergeSource=null;
@@ -362,7 +363,7 @@ function renderMaterials(){
     <td>${money(m.salePrice)}${m.fixedSalePrice?'<br><span class="pill">Fix-VK</span>':""}</td>
     <td>${money(Number(m.salePrice||0)*1.2)}</td>
     <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span>${m.priceSource?`<br><span class="muted">aus ${escapeHtml(m.priceSource)}</span>`:""}</td>
-    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
+    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="copyMaterial('${js(m.materialId)}')">Kopieren</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
   </tr>`).join("");
 }
 
@@ -379,6 +380,7 @@ function renderWarnings(){
 
 function openMaterial(id=""){
   wwPendingMaterial=null;
+  copySourceId="";
   const item=materialItems.find(m=>String(m.materialId)===String(id))||{};
   materialDialogTitle.textContent=id?"Material bearbeiten":"Neues Material";
   editId.value=id;editMaterialId.value=item.materialId||"";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
@@ -390,7 +392,19 @@ function openMaterial(id=""){
   materialDialog.showModal();
 }
 
-function closeMaterialDialog(){wwPendingMaterial=null;materialDialog.close()}
+function copyMaterial(id){
+  const item=materialItems.find(m=>String(m.materialId)===String(id));
+  if(!item)return;
+  wwPendingMaterial=null;copySourceId=String(id);
+  materialDialogTitle.textContent="Material kopieren";
+  editId.value="";editMaterialId.value="";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
+  editSupplierArticle.value=item.supplierArticleNumber||"";editContainerSize.value=String(Number(item.containerSize)||1).replace(".",",");editUnit.value=item.unit||"Stk";
+  editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");editFixedVk.checked=item.fixedSalePrice===true;
+  updateGrossFromNet();editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
+  materialDialog.showModal();setTimeout(()=>editMaterialId.focus(),0);
+}
+
+function closeMaterialDialog(){wwPendingMaterial=null;copySourceId="";materialDialog.close()}
 
 async function saveMaterial(event){
   event.preventDefault();
@@ -398,8 +412,8 @@ async function saveMaterial(event){
   if(wwPendingMaterial){
     await api("/admin/api/materials/import-winworker",{method:"POST",body:JSON.stringify({material:{...wwPendingMaterial,...body}})});
   }else if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
-  else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify(body)});
-  wwPendingMaterial=null;materialDialog.close();await loadMaterials();
+  else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify({...body,forceCreate:Boolean(copySourceId),copiedFrom:copySourceId})});
+  wwPendingMaterial=null;copySourceId="";materialDialog.close();await loadMaterials();
 }
 
 async function deleteMaterial(id){

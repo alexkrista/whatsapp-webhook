@@ -1416,6 +1416,7 @@ app.get("/api/regie/materials", async (req, res) => {
       if (!product) return res.status(400).json({ ok: false, error: "Materialname fehlt" });
       const rows = await readJson(MATERIALS_FILE, []);
       const requestedMaterialId = clean(req.body?.materialId, 120);
+      const forceCreate = req.body?.forceCreate === true;
       if (requestedMaterialId && rows.some(item => String(item.materialId).toLocaleLowerCase("de") === requestedMaterialId.toLocaleLowerCase("de"))) {
         return res.status(409).json({ ok: false, error: `ID / Kürzel ${requestedMaterialId} ist bereits vergeben.` });
       }
@@ -1424,7 +1425,7 @@ app.get("/api/regie/materials", async (req, res) => {
         clean(item.product, 180).toLocaleLowerCase("de") === normalizedName ||
         clean(item.materialId, 120).toLocaleLowerCase("de") === normalizedName
       );
-      if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
+      if (existing && !forceCreate) return res.json({ ok: true, created: false, material: decorate(existing) });
       const supplierLinks = await readJson(SUPPLIERS_FILE, []);
       const material = normalizeMaterial(applySupplierLink({
         materialId: requestedMaterialId,
@@ -1443,7 +1444,7 @@ app.get("/api/regie/materials", async (req, res) => {
         priceCheckedAt: req.body?.priceCheckedAt || new Date().toISOString().slice(0, 10),
         active: true,
         regieItem: true,
-        note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
+        note: req.body?.note || (req.body?.copiedFrom ? `Kopie von ${clean(req.body.copiedFrom, 120)}` : "Direkt bei einer Regiebericht-Erfassung angelegt"),
         sourceSheet: req.body?.sourceSheet || "KRISTINE Regie",
       }, supplierLinks), { index: rows.length + 1 });
       while (!requestedMaterialId && rows.some(item => String(item.materialId) === String(material.materialId))) {

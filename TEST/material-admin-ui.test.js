@@ -13,7 +13,7 @@ const inlineScript = ui.match(/<script>([\s\S]*?)<\/script>/);
 assert(inlineScript, "Materialverwaltung enthält ihr Seitenskript");
 new vm.Script(inlineScript[1], { filename: "material-admin.inline.js" });
 
-for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "Lieferanten verwalten", "openSupplierManager", "linkWwSupplier", "unsere KdNr.", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editContainerSize", "Gebindegröße", "editGross", "VK brutto €", "editFixedVk", "Fix-VK", "updateGrossFromNet", "updateNetFromGross"]) {
+for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "Kopieren", "copyMaterial", "forceCreate", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "Lieferanten verwalten", "openSupplierManager", "linkWwSupplier", "unsere KdNr.", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editContainerSize", "Gebindegröße", "editGross", "VK brutto €", "editFixedVk", "Fix-VK", "updateGrossFromNet", "updateNetFromGross"]) {
   assert(ui.includes(text), `Materialverwaltung enthält ${text}`);
 }
 assert(!ui.includes("WW jetzt einlesen"), "WW-Materialien werden nur einzeln ausgewählt übernommen");

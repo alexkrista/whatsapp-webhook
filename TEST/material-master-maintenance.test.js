@@ -42,6 +42,12 @@ const { registerMaterialMaster } = require("../material-master");
     } });
     assert.equal(createdByMask.statusCode, 200);
     assert.equal(createdByMask.body.material.materialId, "A05", "Manuell eingegebenes Kürzel wird als Material-ID gespeichert");
+    const copiedByMask = await invoke(routes["post:/admin/api/materials/auto"], { body: {
+      product: "Maskenartikel", unit: "Stk", purchasePrice: "10,00", salePrice: "18,00", forceCreate: true, copiedFrom: "A05",
+    } });
+    assert.equal(copiedByMask.body.created, true, "Kopieren legt trotz gleicher Bezeichnung einen neuen Artikel an");
+    assert.notEqual(copiedByMask.body.material.materialId, "A05", "Die Kopie erhält eine eigene Material-ID");
+    assert.equal(copiedByMask.body.material.note, "Kopie von A05");
     const renamedByMask = await invoke(routes["put:/admin/api/materials/:materialId"], { params: { materialId: "A05" }, body: { materialId: "A06" } });
     assert.equal(renamedByMask.statusCode, 200);
     assert.equal(renamedByMask.body.material.materialId, "A06", "Kürzel kann in der Materialmaske korrigiert werden");
