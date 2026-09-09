@@ -319,6 +319,19 @@ function timeState(events, employeeId, date) {
   };
 }
 
+function bookedAssignment(time) {
+  const event = [...(time?.events || [])]
+    .reverse()
+    .find((row) => row?.jobId || row?.jobName || row?.siteCode);
+
+  if (!event) return null;
+  return {
+    jobId: event.jobId || null,
+    jobName: event.jobName || "",
+    siteCode: event.siteCode || "",
+  };
+}
+
 function lateNoticeFor(rows, employeeId, date) {
   return rowsForDate(rows, date)
     .filter(
@@ -555,13 +568,18 @@ function statusForEmployee({
   worktimeModels,
   date,
 }) {
-  const assignment = currentAssignment(
+  const plannedAssignment = currentAssignment(
     assignments,
     employee.id,
     date
   );
 
   const time = timeState(events, employee.id, date);
+  // Sobald der Mitarbeiter tatsächlich auf einer Baustelle gebucht hat, hat
+  // diese Auswahl Vorrang vor der Planung. Das ist besonders wichtig für
+  // Starts vor 07:00 Uhr: Die Startprüfung darf die gewählte Baustelle nicht
+  // scheinbar wieder auf die Planbaustelle zurücksetzen.
+  const assignment = bookedAssignment(time) || plannedAssignment;
   const late = lateNoticeFor(lateNotices, employee.id, date);
   const name = displayName(employee);
 
@@ -1402,6 +1420,7 @@ async function runSevenOClock(
 module.exports = {
   registerMorningStatus,
   clampStartTime,
+  bookedAssignment,
   DAILY_TARGET_HOURS,
   OFFICIAL_START,
 };

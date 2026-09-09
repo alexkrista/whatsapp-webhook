@@ -1377,9 +1377,11 @@ function renderControl(){
     if(absencePlan){const win=modelDayWindow(a.employeeId,today);segments=[{type:cardTypeOf(absencePlan)==='krank'?'sick':cardTypeOf(absencePlan)==='urlaub'?'vacation':cardTypeOf(absencePlan)==='za'?'za':'holiday',from:win.fromMin,to:win.toMin,fromText:win.from,toText:win.to,jobName:cardMeta(absencePlan).label}]}
     const workMinutes=segments.filter(x=>x.type==='work').reduce((sum,x)=>sum+x.to-x.from,0);
     const breakMinutes=segments.filter(x=>x.type==='pause'||x.type==='lunch').reduce((sum,x)=>sum+x.to-x.from,0);
-    const currentPlan=plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||plans[0];
+    const bookedJob=[...segments].reverse().find(x=>x.type==='work'&&(x.jobId||x.jobName));
+    const selectedJob=s.activeJobOverride?.date===today?s.activeJobOverride:null;
+    const currentPlan=plans.find(x=>String(x.jobId||'')===String(bookedJob?.jobId||selectedJob?.jobId||''))||plans.find(x=>String(s.activeAssignmentKey||'').includes(String(x.jobId||'')))||selectedJob||plans[0];
     const lastWork=[...segments].reverse().find(x=>x.type==='work');
-    const siteName=currentPlan?.jobName||lastWork?.jobName||'Nicht eingeteilt';
+    const siteName=bookedJob?.jobName||selectedJob?.jobName||currentPlan?.jobName||lastWork?.jobName||'Nicht eingeteilt';
     const dayStart=7*60;
     const plannedEnd=Math.max(17*60,...plans.map(x=>hmToMinutes(x.to)||0));
     const lastEvent=Math.max(0,...segments.map(x=>x.to||0));

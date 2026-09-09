@@ -217,6 +217,9 @@ function authenticatedUrl(url) {
 
     const activeKey = state.employeeState?.activeAssignmentKey;
     state.currentAssignment =
+      (state.employeeState?.activeJobOverride?.date === state.bootstrap?.today
+        ? state.employeeState.activeJobOverride
+        : null) ||
       state.todayAssignments.find(a => assignmentKey(a) === activeKey) ||
       state.todayAssignments[0] ||
       null;
