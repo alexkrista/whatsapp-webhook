@@ -120,7 +120,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
       <button class="btn" onclick="openSupplierManager()">Lieferanten verwalten</button>
-      <button class="btn" onclick="rebuildLittleGreene()">LG-Stamm neu aufbauen</button>
+      <button class="btn" id="lgRebuildButton" onclick="rebuildLittleGreene()">LG-Stamm neu aufbauen</button>
       <button class="btn" id="wwSearchButton" onclick="searchWinWorker(this)">In WW suchen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="printMaterials()">Drucken</button>
@@ -407,9 +407,18 @@ async function deleteMaterial(id){
 
 async function rebuildLittleGreene(){
   if(!confirm("LG-Materialstamm vollständig aus den exakten LG-Nummern neu aufbauen?\n\nDie bisherigen LG-Zeilen werden stillgelegt. Alte Belege bleiben unverändert. Vorher wird automatisch eine Sicherung erstellt."))return;
-  const data=await api("/admin/api/materials/rebuild-little-greene",{method:"POST",body:"{}"});
-  alert(`LG-Stamm fertig\n${data.total} Artikel aus der VK-Liste\nNeu: ${data.added}\nAktualisiert: ${data.updated}\nAlte Zeilen stillgelegt: ${data.deactivated}${data.fallbackBasis?`\nEK-Ersatzbasis, weil Hi White fehlt: ${data.fallbackBasis}`:""}${data.missingEk?`\nOhne verfügbaren EK: ${data.missingEk}`:""}`);
-  await loadMaterials();
+  const button=document.getElementById("lgRebuildButton");
+  const oldLabel=button?.textContent||"LG-Stamm neu aufbauen";
+  if(button){button.disabled=true;button.textContent="LG-Stamm wird aufgebaut …"}
+  try{
+    const data=await api("/admin/api/materials/rebuild-little-greene",{method:"POST",body:"{}"});
+    alert(`LG-Stamm fertig\n${data.total} Artikel aus der VK-Liste\nNeu: ${data.added}\nAktualisiert: ${data.updated}\nAlte Zeilen stillgelegt: ${data.deactivated}${data.fallbackBasis?`\nEK-Ersatzbasis, weil Hi White fehlt: ${data.fallbackBasis}`:""}${data.missingEk?`\nOhne verfügbaren EK: ${data.missingEk}`:""}`);
+    await loadMaterials();
+  }catch(error){
+    alert(`LG-Neuaufbau fehlgeschlagen:\n${error?.message||error}`);
+  }finally{
+    if(button){button.disabled=false;button.textContent=oldLabel}
+  }
 }
 
 function openMergeMaterial(id){
