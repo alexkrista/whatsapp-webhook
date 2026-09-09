@@ -505,11 +505,12 @@ function clampOfficialStart(actualTime) {
   }
 
   async function getBootstrap() {
-    const [assignments, states, tasks, timeEvents, employees, latestGps] = await Promise.all([
+    const [assignments, states, tasks, timeEvents, projectTimeArchive, employees, latestGps] = await Promise.all([
       readJson(ASSIGNMENTS, []),
       readJson(STATES, {}),
       readJson(TASKS, []),
       readJson(TIME_EVENTS, []),
+      readJson(PROJECT_TIME_ARCHIVE, []),
       typeof readEmployees === "function" ? readEmployees() : [],
       readGpsImport("latest"),
     ]);
@@ -574,7 +575,7 @@ function clampOfficialStart(actualTime) {
       enrichedAssignments.push(row);
     }
 
-    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, employees, gpsImport: gpsImportSummary(latestGps) };
+    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, projectTimeArchive, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {

@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-total-hours-fusion-2";
+  const VERSION="2026-09-09-project-archive-fusion-3";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -51,9 +51,22 @@
   function buildLiveMaps(){
     liveByJob=new Map();peopleByJob=new Map();
     const events=Array.isArray(bootstrap?.timeEvents)?bootstrap.timeEvents:[];
+    const archive=Array.isArray(bootstrap?.projectTimeArchive)?bootstrap.projectTimeArchive:[];
     const states=bootstrap?.states||{};
     const employees=new Map((bootstrap?.employees||[]).map(e=>[String(e.id||e.employeeId||""),e]));
-    const groups=new Map();
+    const groups=new Map(),archivedPersonDays=new Set(archive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
+
+    const addDuration=({employeeId,date,jobId,name,fink,duration})=>{
+      if(!employeeId||!date||!jobId||duration<=0||duration>18)return;
+      const personIdentity=identity(fink,name,employeeId),current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Map(),dayPeople:new Map()};
+      current.totalHours+=duration;current.segments++;current.days.set(date,num(current.days.get(date))+duration);liveByJob.set(jobId,current);
+      if(!peopleByJob.has(jobId))peopleByJob.set(jobId,new Map());
+      const people=peopleByJob.get(jobId),person=people.get(employeeId)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0,days:new Set()};
+      person.hours+=duration;person.days.add(date);people.set(employeeId,person);
+      if(!current.dayPeople.has(date))current.dayPeople.set(date,new Map());
+      const dayPeople=current.dayPeople.get(date),dayPerson=dayPeople.get(personIdentity)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0};
+      dayPerson.hours+=duration;dayPeople.set(personIdentity,dayPerson);
+    };
 
     events.forEach((event,index)=>{
       const employeeId=String(event?.employeeId||"");
@@ -61,6 +74,7 @@
       const minute=hmMinutes(event?.at);
       if(!employeeId||!date||minute===null)return;
       const key=employeeId+"|"+date;
+      if(archivedPersonDays.has(key))return;
       if(!groups.has(key))groups.set(key,[]);
       groups.get(key).push({...event,_index:index,_minute:minute});
     });
@@ -82,19 +96,18 @@
         const duration=(end-start)/60;
         if(duration<=0||duration>18)continue;
 
-        const current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Map(),dayPeople:new Map()};
-        current.totalHours+=duration;current.segments++;current.days.set(date,num(current.days.get(date))+duration);liveByJob.set(jobId,current);
-
-        if(!peopleByJob.has(jobId))peopleByJob.set(jobId,new Map());
-        const people=peopleByJob.get(jobId);
         const employee=employees.get(employeeId)||{};
         const name=String(row.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId);
-        const fink=finkNumber(employee,row),personIdentity=identity(fink,name,employeeId);
-        const person=people.get(employeeId)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0,days:new Set()};
-        person.hours+=duration;person.days.add(date);people.set(employeeId,person);
-        if(!current.dayPeople.has(date))current.dayPeople.set(date,new Map());
-        const dayPeople=current.dayPeople.get(date),dayPerson=dayPeople.get(personIdentity)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0};
-        dayPerson.hours+=duration;dayPeople.set(personIdentity,dayPerson);
+        addDuration({employeeId,date,jobId,name,fink:finkNumber(employee,row),duration});
+      }
+    }
+    for(const released of archive){
+      const employeeId=String(released?.employeeId||""),date=String(released?.date||"").slice(0,10),employee=employees.get(employeeId)||{},name=String(released?.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId),fink=finkNumber(employee,released);
+      for(const segment of Array.isArray(released?.segments)?released.segments:[]){
+        if(String(segment?.type||"")!=="work")continue;
+        const from=hmMinutes(segment?.from),to=hmMinutes(segment?.to),jobId=String(segment?.jobId||"").trim();
+        if(from===null||to===null||to<=from)continue;
+        addDuration({employeeId,date,jobId,name,fink,duration:(to-from)/60});
       }
     }
     for(const current of liveByJob.values()){

@@ -29,6 +29,10 @@ assert.match(ui,/return num\(liveByJob\.get\(String\(j\.jobId\)\)\?\.totalHours\
 assert.match(ui,/kristineTotal=Math\.max\(oldTotalHours\(j\),kristineDetailTotal\)/);
 assert.match(ui,/actual=fusion\(j\)\.total/);
 assert.match(ui,/IST inkl\. Regie/);
+assert.match(ui,/bootstrap\?\.projectTimeArchive/);
+assert.match(ui,/archivedPersonDays/);
+assert.match(ui,/for\(const released of archive\)/);
+assert.match(ui,/String\(segment\?\.type\|\|""\)!=="work"/);
 assert.match(ui,/excluded=selectedExclusions/);
 assert.match(ui,/person\.hours\*scale/);
 assert.match(ui,/Auswahl geändert – bitte speichern/);
