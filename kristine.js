@@ -2043,6 +2043,9 @@ const open = taskId
         jobId: String(row.jobId || ""),
         jobName: String(row.jobName || ""),
         reason: String(row.reason || (officeUnproductive ? "Büro" : "")),
+        unproductiveCategory: String(row.unproductiveCategory || ""),
+        unproductiveCode: String(row.unproductiveCode || row.upCode || ""),
+        absenceType: String(row.absenceType || ""),
         source: String(row.source || "employee"),
       });
     }
@@ -2058,6 +2061,23 @@ const open = taskId
 
   function productiveKind(segment) {
     return segment?.type === "work" ? "productive" : segment?.type === "up" ? "unproductive" : segment?.type;
+  }
+
+  function unproductiveDetails(segment) {
+    const reason=String(segment?.reason || segment?.jobName || segment?.absenceType || "").trim();
+    const raw=reason.toLowerCase();
+    const category=/urlaub/.test(raw)&&!/sonderurlaub/.test(raw)?"vacation":/krank/.test(raw)?"sick":/arzt|sonderurlaub/.test(raw)?"other":"";
+    const codes={"büro":"022","urlaub":"900","krank":"901","arzt":"902","berufsschule":"903","feiertag":"904","schulung extern":"905","schulung intern":"909","sonderurlaub":"911","musterung":"912","werkstatt":"913","firma aufräumen":"917","lehrlingswettbewerb":"918","betriebsausflug":"927","zeitausgleich":"930","quarantäne":"945","kurzarbeit":"946","sanierung":"9999"};
+    return {category,code:String(segment?.unproductiveCode || codes[raw] || ""),reason};
+  }
+
+  function employeeTimeKind(segment) {
+    if(segment?.type !== "up") return productiveKind(segment);
+    return unproductiveDetails(segment).category ? "unproductive" : "productive";
+  }
+
+  function employeeEventType(segment) {
+    return segment?.type === "up" && !unproductiveDetails(segment).category ? "start" : eventTypeForSegment(segment);
   }
 
   function segmentsAtRelease({ release, correction, currentSegments }) {
@@ -2087,6 +2107,7 @@ const open = taskId
         id:String(segment.id || ""), type:String(segment.type || ""), from:String(segment.from || ""), to:String(segment.to || ""),
         jobId:String(segment.jobId || ""), jobName:String(segment.jobName || ""), reason:String(segment.reason || ""),
         activityMode:productiveKind(segment),
+        ...(segment.type === "up" ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code} : {}),
       })),
     };
     archive.push(row);
@@ -2098,9 +2119,10 @@ const open = taskId
     const retained = allEvents.filter(row => !(String(row.employeeId) === String(employeeId) && String(row.date) === String(date)));
     const createdAt = new Date().toISOString();
     const replacement = (segments || []).map(segment => ({
-      employeeId, employeeName, date, type:eventTypeForSegment(segment), at:segment.from,
+      employeeId, employeeName, date, type:employeeEventType(segment), at:segment.from,
       jobId:null, jobName:"", reason:segment.type === "up" ? String(segment.reason || "") : "",
-      activityMode:productiveKind(segment), segmentId:segment.id, source:"released_employee_time",
+      activityMode:employeeTimeKind(segment), segmentId:segment.id, source:"released_employee_time",
+      ...(segment.type === "up" && unproductiveDetails(segment).category ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:String(segment.absenceType || "")} : {}),
       manual:true, detachedFromProject:true, createdAt,
     }));
     const last=(segments || []).at(-1);
@@ -2119,9 +2141,11 @@ const open = taskId
       const currentSegments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
       const correction=corrections.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
       await archiveReleasedProjectTime({release,segments:segmentsAtRelease({release,correction,currentSegments}),source:"historical_backfill"});
-      events=events.map(event=>String(event.employeeId)===employeeId&&String(event.date)===date
-        ? {...event,jobId:null,jobName:"",activityMode:event.type==="up"?"unproductive":["start","weiter"].includes(event.type)?"productive":event.activityMode||"boundary",detachedFromProject:true}
-        : event);
+      events=events.map(event=>{
+        if(String(event.employeeId)!==employeeId||String(event.date)!==date)return event;
+        const detail=unproductiveDetails(event),operationalUp=event.type==="up"&&!detail.category;
+        return {...event,type:operationalUp?"start":event.type,jobId:null,jobName:"",activityMode:operationalUp||["start","weiter"].includes(event.type)?"productive":event.type==="up"?"unproductive":event.activityMode||"boundary",...(event.type==="up"&&detail.category?{unproductiveCategory:detail.category,unproductiveCode:detail.code}:{}),detachedFromProject:true};
+      });
     }
     if(releasedRows.length) await writeJson(TIME_EVENTS,events.slice(-20000));
   }
@@ -2544,6 +2568,9 @@ const open = taskId
         jobId: String(segment.jobId || "").slice(0, 80),
         jobName: String(segment.jobName || "").trim().slice(0, 140),
         reason: String(segment.reason || "").trim().slice(0, 140),
+        absenceType: String(segment.absenceType || "").trim().slice(0, 40),
+        unproductiveCategory: String(segment.unproductiveCategory || "").trim().slice(0, 40),
+        unproductiveCode: String(segment.unproductiveCode || "").trim().slice(0, 12),
       })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
@@ -2604,11 +2631,12 @@ const open = taskId
       for (const segment of segments) {
         replacement.push({
           employeeId, employeeName, date,
-          type: eventTypeForSegment(segment), at: segment.from,
+          type: released ? employeeEventType(segment) : eventTypeForSegment(segment), at: segment.from,
           jobId: released ? null : (segment.type === "work" ? segment.jobId : null),
           jobName: released ? "" : (segment.type === "work" ? segment.jobName : ""),
           reason: segment.type === "up" ? segment.reason : "",
-          activityMode:productiveKind(segment), detachedFromProject:Boolean(released),
+          activityMode:released ? employeeTimeKind(segment) : productiveKind(segment), detachedFromProject:Boolean(released),
+          ...(released && segment.type === "up" && unproductiveDetails(segment).category ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:segment.absenceType} : {}),
           segmentId: segment.id, source: released ? "released_employee_time" : "office", manual: true, createdAt,
         });
       }

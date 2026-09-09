@@ -19,12 +19,16 @@ async function invoke(handler,{params={},body={}}={}){const res=response();await
     assert.equal(archive[0].segments[0].jobId,"26080");
     let personal=JSON.parse(await fsp.readFile(path.join(root,"time-events.json"),"utf8"));
     assert(personal.every(row=>!row.jobId&&row.detachedFromProject===true));
-    res=await invoke(routes.get("PUT /kristine/api/segments/:employeeId/:date"),{params:{employeeId:"139",date:"2026-09-08"},body:{employeeName:"Clemens",reason:"ZA alt",correctedBy:"Bettina",segments:[{id:"x",type:"work",from:"08:00",to:"14:00",jobId:"99999",jobName:"Andere Baustelle"}]}});
+    res=await invoke(routes.get("PUT /kristine/api/segments/:employeeId/:date"),{params:{employeeId:"139",date:"2026-09-08"},body:{employeeName:"Clemens",reason:"Korrektur",correctedBy:"Bettina",segments:[{id:"x",type:"up",from:"08:00",to:"14:00",jobId:"99999",jobName:"Andere Baustelle",reason:"Krank"}]}});
     assert.equal(res.statusCode,200);
     archive=JSON.parse(await fsp.readFile(path.join(root,"project-time-archive.json"),"utf8"));
     assert.equal(archive.length,1);assert.equal(archive[0].segments[0].jobId,"26080");assert.equal(archive[0].segments[0].from,"07:00");
     personal=JSON.parse(await fsp.readFile(path.join(root,"time-events.json"),"utf8"));
-    assert.equal(personal[0].at,"08:00");assert.equal(personal[0].jobId,null);assert.equal(personal[0].activityMode,"productive");
+    assert.equal(personal[0].at,"08:00");assert.equal(personal[0].jobId,null);assert.equal(personal[0].activityMode,"unproductive");assert.equal(personal[0].unproductiveCategory,"sick");assert.equal(personal[0].unproductiveCode,"901");
+    res=await invoke(routes.get("PUT /kristine/api/segments/:employeeId/:date"),{params:{employeeId:"139",date:"2026-09-08"},body:{employeeName:"Clemens",reason:"Korrektur",correctedBy:"Bettina",segments:[{id:"y",type:"up",from:"08:00",to:"14:00",reason:"Werkstatt"}]}});
+    assert.equal(res.statusCode,200);
+    personal=JSON.parse(await fsp.readFile(path.join(root,"time-events.json"),"utf8"));
+    assert.equal(personal[0].type,"start");assert.equal(personal[0].activityMode,"productive");assert(!personal[0].unproductiveCategory);
     console.log("OK: Freigabe trennt unveränderliche Baustellenstunden von der persönlichen Zeitkarte");
   }finally{await fsp.rm(temp,{recursive:true,force:true})}
 })().catch(error=>{console.error(error);process.exitCode=1});
