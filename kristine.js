@@ -19,6 +19,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
   const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
+  const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
   const EMPLOYEE_WORK_RULES = path.join(ROOT, "employee-work-rules.json");
@@ -2055,6 +2056,76 @@ const open = taskId
     return "start";
   }
 
+  function productiveKind(segment) {
+    return segment?.type === "work" ? "productive" : segment?.type === "up" ? "unproductive" : segment?.type;
+  }
+
+  function segmentsAtRelease({ release, correction, currentSegments }) {
+    const releasedAt = Date.parse(release?.releasedAt || release?.updatedAt || "") || 0;
+    const history = Array.isArray(correction?.history) ? [...correction.history].sort((a,b) =>
+      (Date.parse(a?.at || "") || 0) - (Date.parse(b?.at || "") || 0)
+    ) : [];
+    const beforeOrAt = history.filter(row => (Date.parse(row?.at || "") || 0) <= releasedAt).at(-1);
+    if (Array.isArray(beforeOrAt?.after)) return beforeOrAt.after;
+    const firstAfter = history.find(row => (Date.parse(row?.at || "") || 0) > releasedAt);
+    if (Array.isArray(firstAfter?.before)) return firstAfter.before;
+    return Array.isArray(currentSegments) ? currentSegments : [];
+  }
+
+  async function archiveReleasedProjectTime({ release, segments, source = "day_release" }) {
+    const archive = await readJson(PROJECT_TIME_ARCHIVE, []);
+    const key = `${String(release.employeeId)}|${String(release.date)}`;
+    let row = archive.find(item => `${String(item.employeeId)}|${String(item.date)}` === key);
+    if (row) return row;
+    const now = new Date().toISOString();
+    row = {
+      id:`project_time_${release.employeeId}_${release.date}`,
+      employeeId:String(release.employeeId), employeeName:String(release.employeeName || release.employeeId),
+      finkzeitPersonnelNumber:String(release.finkzeitPersonnelNumber || ""), date:String(release.date),
+      releasedAt:release.releasedAt || now, archivedAt:now, source,
+      segments:(segments || []).map(segment => ({
+        id:String(segment.id || ""), type:String(segment.type || ""), from:String(segment.from || ""), to:String(segment.to || ""),
+        jobId:String(segment.jobId || ""), jobName:String(segment.jobName || ""), reason:String(segment.reason || ""),
+        activityMode:productiveKind(segment),
+      })),
+    };
+    archive.push(row);
+    await writeJson(PROJECT_TIME_ARCHIVE, archive);
+    return row;
+  }
+
+  async function detachReleasedEmployeeTime({ employeeId, employeeName, date, segments, allEvents }) {
+    const retained = allEvents.filter(row => !(String(row.employeeId) === String(employeeId) && String(row.date) === String(date)));
+    const createdAt = new Date().toISOString();
+    const replacement = (segments || []).map(segment => ({
+      employeeId, employeeName, date, type:eventTypeForSegment(segment), at:segment.from,
+      jobId:null, jobName:"", reason:segment.type === "up" ? String(segment.reason || "") : "",
+      activityMode:productiveKind(segment), segmentId:segment.id, source:"released_employee_time",
+      manual:true, detachedFromProject:true, createdAt,
+    }));
+    const last=(segments || []).at(-1);
+    if(last?.to) replacement.push({employeeId,employeeName,date,type:"ende",at:last.to,jobId:null,jobName:"",activityMode:"boundary",source:"released_employee_time",manual:true,detachedFromProject:true,createdAt});
+    await writeJson(TIME_EVENTS,[...retained,...replacement].slice(-20000));
+  }
+
+  async function migrateHistoricalReleasedTime() {
+    const [releases,corrections,states]=await Promise.all([
+      readJson(DAY_RELEASES,[]),readJson(DAY_CORRECTIONS,[]),readJson(STATES,{})
+    ]);
+    let events=await readJson(TIME_EVENTS,[]);
+    const releasedRows=(releases || []).filter(row=>row?.released===true && row.employeeId && row.date);
+    for(const release of releasedRows){
+      const employeeId=String(release.employeeId),date=String(release.date);
+      const currentSegments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+      const correction=corrections.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
+      await archiveReleasedProjectTime({release,segments:segmentsAtRelease({release,correction,currentSegments}),source:"historical_backfill"});
+      events=events.map(event=>String(event.employeeId)===employeeId&&String(event.date)===date
+        ? {...event,jobId:null,jobName:"",activityMode:event.type==="up"?"unproductive":["start","weiter"].includes(event.type)?"productive":event.activityMode||"boundary",detachedFromProject:true}
+        : event);
+    }
+    if(releasedRows.length) await writeJson(TIME_EVENTS,events.slice(-20000));
+  }
+
   function entryMinutes(entry) {
     const direct = minutesFromHM(entry.at || entry.time || entry.capturedAt);
     if (direct !== null) return direct;
@@ -2196,6 +2267,14 @@ const open = taskId
         employeeIdentityKey:fink?`fink:${fink}`:`legacy:${String(master.id||master.employeeId||employeeId)}`,
         checks:{...checks},reviewer,note,released:true,releasedAt:now,updatedAt:now
       });
+      const [events,states,corrections]=await Promise.all([
+        readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_CORRECTIONS,[])
+      ]);
+      const currentSegments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+      const correction=corrections.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
+      const projectSegments=segmentsAtRelease({release,correction,currentSegments});
+      await archiveReleasedProjectTime({release,segments:projectSegments});
+      await detachReleasedEmployeeTime({employeeId:release.employeeId,employeeName:release.employeeName,date,segments:projectSegments,allEvents:events});
       await writeJson(DAY_RELEASES,releases);
       res.json({ok:true,release});
     } catch(error) {
@@ -2480,10 +2559,11 @@ const open = taskId
         }
       }
 
-      const [allEvents, states, reviewEntries, corrections] = await Promise.all([
-        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []), readJson(DAY_CORRECTIONS, []),
+      const [allEvents, states, reviewEntries, corrections, releases] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []), readJson(DAY_CORRECTIONS, []), readJson(DAY_RELEASES, []),
       ]);
       const oldSegments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
+      const released = releases.find(row => row?.released === true && String(row.employeeId) === employeeId && String(row.date) === date);
       let correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date);
       if (!correction) {
         correction = {
@@ -2512,6 +2592,12 @@ const open = taskId
       correction.history = correction.history.slice(-100);
       await writeJson(DAY_CORRECTIONS, corrections);
 
+      if(released) await archiveReleasedProjectTime({
+        release:released,
+        segments:segmentsAtRelease({release:released,correction,currentSegments:oldSegments}),
+        source:"historical_backfill",
+      });
+
       const retained = allEvents.filter((row) => !(String(row.employeeId) === employeeId && String(row.date) === date));
       const createdAt = new Date().toISOString();
       const replacement = [];
@@ -2519,24 +2605,26 @@ const open = taskId
         replacement.push({
           employeeId, employeeName, date,
           type: eventTypeForSegment(segment), at: segment.from,
-          jobId: segment.type === "work" ? segment.jobId : null,
-          jobName: segment.type === "work" ? segment.jobName : "",
+          jobId: released ? null : (segment.type === "work" ? segment.jobId : null),
+          jobName: released ? "" : (segment.type === "work" ? segment.jobName : ""),
           reason: segment.type === "up" ? segment.reason : "",
-          segmentId: segment.id, source: "office", manual: true, createdAt,
+          activityMode:productiveKind(segment), detachedFromProject:Boolean(released),
+          segmentId: segment.id, source: released ? "released_employee_time" : "office", manual: true, createdAt,
         });
       }
       const last = segments.at(-1);
       // WICHTIG: "Bis" leer = laufender Abschnitt. Speichern darf keinen Ende-Event erzeugen.
       if (last?.to) replacement.push({
         employeeId, employeeName, date, type: "ende", at: last.to,
-        jobId: last.type === "work" ? last.jobId : null,
-        jobName: last.type === "work" ? last.jobName : "",
-        source: "office", manual: true, createdAt,
+        jobId: released ? null : (last.type === "work" ? last.jobId : null),
+        jobName: released ? "" : (last.type === "work" ? last.jobName : ""),
+        activityMode:"boundary", detachedFromProject:Boolean(released),
+        source: released ? "released_employee_time" : "office", manual: true, createdAt,
       });
       await writeJson(TIME_EVENTS, [...retained, ...replacement].slice(-20000));
 
       let moved = 0;
-      if (moveLinked) {
+      if (moveLinked && !released) {
         for (const entry of reviewEntries) {
           if (String(entry.employeeId) !== employeeId || String(entry.date) !== date) continue;
           const minute = entryMinutes(entry);
@@ -2558,7 +2646,7 @@ const open = taskId
       // Tagesreport ist nur eine Ansicht: nach Zeitblockänderungen immer neu erzeugen.
       const reportFile = path.join(ROOT, "reports", `Tagesreport_${date}.pdf`);
       await fsp.rm(reportFile, { force: true }).catch(() => {});
-      const affectedJobs = new Set([
+      const affectedJobs = released ? new Set() : new Set([
         ...oldSegments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
         ...segments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
       ]);
@@ -2795,6 +2883,11 @@ const open = taskId
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
+
+  // Bestehende freigegebene Tage beim Start einmalig sauber trennen.
+  setImmediate(() => migrateHistoricalReleasedTime().catch(error =>
+    console.error("KRISZEIT historische Zeittrennung:", error)
+  ));
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
   return { handleMessage, localDateISO };
