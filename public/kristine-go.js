@@ -37,7 +37,7 @@ function authenticatedUrl(url) {
     [
       "kgLoading","kgError","kgErrorText","kgContent","kgGreeting","kgEmployeeButton","kgEmployeeName",
       "kgSiteTitle","kgSiteAddress","kgWorkStatus","kgTimeHeadline","kgTimeDetail","kgWrongSiteButton",
-      "kgNavigationButton","kgContextCard","kgContextIcon","kgContextTitle","kgContextText","kgContextAction",
+      "kgNavigationButton","kgAfterEntryButton","kgContextCard","kgContextIcon","kgContextTitle","kgContextText","kgContextAction",
       "kgScheduleSection","kgScheduleCount","kgSchedule","kgActionHeading","kgPhaseLabel","kgStartPanel",
       "kgStartButton","kgWorkActions","kgQuickActions","kgPauseButton","kgLunchButton","kgSwitchButton",
       "kgAfternoonCard","kgReviewTime","kgReviewPhotos","kgReviewMaterial","kgReviewOrder",
@@ -202,7 +202,8 @@ function authenticatedUrl(url) {
     // Statusdatei ist mitarbeiterbezogen, nicht tagesbezogen. Ohne heutiges Zeitevent
     // darf ein alter Status (z.B. finished_day/working von gestern) den neuen Tag nicht blockieren.
     const todaysEvents = (state.bootstrap?.timeEvents || []).filter(row =>
-      String(row.employeeId) === id && String(row.date) === today
+      String(row.employeeId) === id && String(row.date) === today &&
+      String(row.source || "") !== "employee_finished_job_afterentry"
     );
     if (!todaysEvents.length) {
       state.employeeState = { ...state.employeeState, mode:"idle", pending:null };
@@ -655,6 +656,31 @@ if (contactPhone) {
     // geplanten Tageszuordnung geöffnet werden.
     const a = state.employeeState?.activeJobOverride || state.currentAssignment;
     return {
+      afterentry: {
+        title:"Nachtrag fertige Baustelle",
+        steps:[
+          {question:"Welche fertige Baustelle?", type:"text", placeholder:"Name oder Baustellennummer"},
+          {question:"Datum des Nachtrags", type:"text", placeholder:state.bootstrap?.today || todayISO()},
+          {question:"Arbeitszeit von", type:"text", placeholder:"z. B. 07:45"},
+          {question:"Arbeitszeit bis", type:"text", placeholder:"z. B. 12:00"},
+          {question:"Warum ist der Nachtrag nötig?", type:"text", placeholder:"z. B. Restarbeit und Abschlussfotos"},
+          {question:"Nachtrag prüfen und eintragen", type:"summary"},
+        ],
+        async save(values) {
+          const result = await api("/kristine/api/finished-job-afterentry", {
+            method:"POST",
+            body:JSON.stringify({
+              employeeId:employeeId(state.employee), employeeName:employeeName(state.employee),
+              job:String(values[0] || "").trim(),
+              date:String(values[1] || state.bootstrap?.today || todayISO()).trim(),
+              from:String(values[2] || "").trim(), to:String(values[3] || "").trim(),
+              reason:String(values[4] || "").trim(),
+            }),
+          });
+          await reload(false);
+          toast(result.notification?.sent ? "Nachtrag gespeichert – Alexander wurde per WhatsApp informiert." : "Nachtrag gespeichert. WhatsApp-Mitteilung konnte nicht gesendet werden.");
+        },
+      },
       photo: {
         title:"Foto",
         steps:[
@@ -910,6 +936,7 @@ if (contactPhone) {
   function bindEvents() {
     elements.kgEmployeeButton.onclick = () => elements.kgEmployeeDialog.showModal();
     if (elements.kgBrainButton) elements.kgBrainButton.onclick = openBrain;
+    if (elements.kgAfterEntryButton) elements.kgAfterEntryButton.onclick = () => openAssistant("afterentry");
     elements.kgStartButton.onclick = () => sendMessage("Start").catch(showError);
     elements.kgWrongSiteButton.onclick = async () => {
   try {

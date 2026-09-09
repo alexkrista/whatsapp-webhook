@@ -7,7 +7,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, phoneNumberId, readEmployees, readJobMeta }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -519,6 +519,7 @@ function clampOfficialStart(actualTime) {
     const byEmployee = new Map();
     for (const event of Array.isArray(timeEvents) ? timeEvents : []) {
       if (String(event?.date || "") !== today) continue;
+      if (String(event?.source || "") === "employee_finished_job_afterentry") continue;
       const type = String(event?.type || "").toLowerCase();
       if (!["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(type)) continue;
       const id = String(event?.employeeId || "");
@@ -1932,6 +1933,71 @@ const open = taskId
       res.json({ ok: true, ...(await handleMessage({ employeeId, employeeName, text, date })) });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/kristine/api/finished-job-afterentry", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId = String(req.body?.employeeId || "").trim();
+      const employeeName = String(req.body?.employeeName || employeeId).trim().slice(0, 160);
+      const date = String(req.body?.date || localDateISO()).slice(0, 10);
+      const query = String(req.body?.job || "").trim();
+      const from = String(req.body?.from || "").trim().slice(0, 5);
+      const to = String(req.body?.to || "").trim().slice(0, 5);
+      const reason = String(req.body?.reason || "").trim().slice(0, 300);
+      if (!employeeId || !query || minutesFromHM(from) === null || minutesFromHM(to) === null) {
+        return res.status(400).json({ ok:false, error:"Mitarbeiter, Baustelle sowie Von und Bis sind erforderlich." });
+      }
+      if (minutesFromHM(to) <= minutesFromHM(from)) {
+        return res.status(400).json({ ok:false, error:"Die Bis-Zeit muss nach der Von-Zeit liegen." });
+      }
+      if (!reason) return res.status(400).json({ ok:false, error:"Bitte einen kurzen Grund für den Nachtrag angeben." });
+
+      const assignments = await readJson(ASSIGNMENTS, []);
+      const candidates = findSiteCandidates(assignments, query);
+      let selected = candidates.find(site => normalizeText(site.jobId) === normalizeText(query) || normalizeText(site.jobName) === normalizeText(query));
+      if (!selected && candidates.length === 1) selected = candidates[0];
+      if (!selected) {
+        const choices = candidates.slice(0, 5).map(site => assignmentLabel(site)).join(", ");
+        throw new Error(choices ? `Baustelle nicht eindeutig. Bitte genauer eingeben: ${choices}` : `Fertige Baustelle „${query}“ nicht gefunden.`);
+      }
+      const meta = typeof readJobMeta === "function" ? await readJobMeta(selected.jobId) : {};
+      if (!["Fertig – nicht abgerechnet", "Geschlossen"].includes(String(meta?.status || ""))) {
+        throw new Error(`${assignmentLabel(selected)} ist nicht als fertige Baustelle markiert. Bitte normal einstempeln.`);
+      }
+
+      const events = await readJson(TIME_EVENTS, []);
+      const segmentId = `afterentry_${employeeId}_${date}_${Date.now()}`;
+      const createdAt = new Date().toISOString();
+      events.push({ employeeId, employeeName, date, type:"start", at:from, jobId:selected.jobId, jobName:selected.jobName, segmentId, source:"employee_finished_job_afterentry", manual:true, afterCompletion:true, reason, createdAt });
+      events.push({ employeeId, employeeName, date, type:"ende", at:to, jobId:selected.jobId, jobName:selected.jobName, segmentId, source:"employee_finished_job_afterentry", manual:true, afterCompletion:true, reason, createdAt });
+      await writeJson(TIME_EVENTS, events.slice(-20000));
+
+      const states = await readJson(STATES, {});
+      const state = { ...(states[employeeId] || {}), employeeId, employeeName, timeline:Array.isArray(states[employeeId]?.timeline) ? states[employeeId].timeline : [] };
+      state.afterEntryJob = { date, jobId:selected.jobId, jobName:selected.jobName, from, to, reason, segmentId, createdAt };
+      state.timeline.push({ at:createdAt, time:to, type:"finished_job_afterentry", detail:`Nachtrag ${from}–${to} · ${reason}`, jobId:selected.jobId, jobName:selected.jobName, source:"employee", manual:true });
+      state.timeline = state.timeline.slice(-200);
+      states[employeeId] = state;
+      await writeJson(STATES, states);
+      await appendEvent({ type:"finished_job_afterentry", employeeId, employeeName, date, from, to, reason, jobId:selected.jobId, jobName:selected.jobName, source:"employee" });
+
+      let notification = { sent:false, reason:"notification_not_configured" };
+      const chefPhone = String(chefPhoneNumber || "").replace(/\D/g, "");
+      if (chefPhone && typeof sendWhatsApp === "function") {
+        try {
+          await sendWhatsApp({
+            to:chefPhone,
+            reply:["📝 Nachtrag auf fertige Baustelle", `👷 ${employeeName}`, `🏗️ ${assignmentLabel(selected)}`, `📅 ${date} · ${from}–${to}`, `ℹ️ ${reason}`, "📸 Weitere WhatsApp-Fotos werden diesem Nachtrag zugeordnet."].join("\n"),
+            buttons:[],
+          });
+          notification = { sent:true };
+        } catch (error) { notification = { sent:false, reason:String(error?.message || error) }; }
+      }
+      res.json({ ok:true, job:selected, from, to, date, notification, state });
+    } catch (error) {
+      res.status(400).json({ ok:false, error:String(error?.message || error) });
     }
   });
 

@@ -1438,7 +1438,7 @@ async function activeEmployeeJobAt(employeeId, date, at) {
     .filter((row) => row._minute !== null && row._minute <= wantedMinute)
     .sort((a, b) => a._minute - b._minute || a._index - b._index);
   const latestWork = [...events].reverse().find((row) => ["start", "weiter"].includes(row.type) && row.jobId);
-  return latestWork ? { jobId: latestWork.jobId, jobName: latestWork.jobName || latestWork.jobId, bookingSegmentId: latestWork.segmentId || null } : { jobId: null, jobName: "", bookingSegmentId: null };
+  return latestWork ? { jobId: latestWork.jobId, jobName: latestWork.jobName || latestWork.jobId, bookingSegmentId: latestWork.segmentId || null, afterCompletion:latestWork.afterCompletion === true || latestWork.source === "employee_finished_job_afterentry" } : { jobId: null, jobName: "", bookingSegmentId: null, afterCompletion:false };
 }
 
 async function saveEmployeeReviewMedia({ msg, employee, date, sender }) {
@@ -1479,6 +1479,14 @@ async function saveEmployeeReviewMedia({ msg, employee, date, sender }) {
     needsOfficeReview: !job.jobId,
     content: media.caption || "",
   });
+  if (job.afterCompletion && normalizeWhatsAppRecipient(CHEF_PHONE)) {
+    try {
+      await sendWhatsAppKristineReply({
+        to: normalizeWhatsAppRecipient(CHEF_PHONE),
+        reply: ["📸 Foto-Nachtrag auf fertige Baustelle", `👷 ${employee.name}`, `🏗️ #${job.jobId}${job.jobName ? ` · ${job.jobName}` : ""}`, `📅 ${date} · ${time}`, media.caption ? `ℹ️ ${media.caption}` : ""].filter(Boolean).join("\n"),
+      });
+    } catch (error) { console.error("Nachtragsfoto-Mitteilung fehlgeschlagen:", error?.message || error); }
+  }
   return { kind, job };
 }
 
