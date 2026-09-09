@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const VERSION = "2026-08-26-kalk-grid-v2";
+  const VERSION = "2026-09-09-regie-hours";
   const token = new URLSearchParams(location.search).get("token") || "";
   let currentJobId = "";
   let metaRows = [];
@@ -141,11 +141,7 @@
     const kind = tr.querySelector('[data-field="kind"]')?.value || "";
     const hourInput = tr.querySelector('[data-field="plannedHours"]');
     if (!["regie", "nachtrag_regie"].includes(kind)) return;
-    if (meta.componentType !== "arbeit") {
-      setBaseValue(hourInput, 0);
-      return;
-    }
-    if (/^std$/i.test(meta.unit) && meta.quantity > 0) setBaseValue(hourInput, meta.quantity);
+    if (meta.componentType === "arbeit" && /^std$/i.test(meta.unit) && meta.quantity > 0) setBaseValue(hourInput, meta.quantity);
   }
   function syncTotal(tr, meta) {
     const amountInput = tr.querySelector('[data-field="amount"]');
@@ -277,7 +273,8 @@
     const labor = Math.max(0, fixed - material);
     const rate = num(document.getElementById("kcv2Rate")?.value);
     const target = rate > 0 ? labor / rate : 0;
-    const plannedRegie = included.filter(row => ["regie", "nachtrag_regie"].includes(row.kind) && row.meta.componentType === "arbeit").reduce((s, row) => s + row.plannedHours, 0);
+    const plannedRegie = included.filter(row => ["regie", "nachtrag_regie"].includes(row.kind)).reduce((s, row) => s + row.plannedHours, 0);
+    const totalTarget = target + plannedRegie;
     const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
     set("kcv2SumContract", money(contract));
     set("kcv2SumRegie", `${money(regie)} · ${hours(plannedRegie)}`);
@@ -286,7 +283,7 @@
     set("kcv2SumFixed", money(fixed));
     set("kcv2SumMaterial", `${money(material)} · ${pct.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`);
     set("kcv2SumLabor", money(labor));
-    set("kcv2SumHours", hours(target));
+    set("kcv2SumHours", hours(totalTarget));
     const contractCard = document.getElementById("kcv2SumContract")?.closest(".kcv2-kpi");
     if (contractCard) {
       let badge = contractCard.querySelector(".kgridv2-meta-badge");

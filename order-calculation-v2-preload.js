@@ -116,11 +116,12 @@ function effectiveLine(row, stored, index) {
   const quantity = meta.quantity > 0 ? meta.quantity : parsed.quantity;
   const unit = meta.unit || parsed.unit;
   const unitPrice = meta.unitPrice > 0 ? meta.unitPrice : parsed.unitPrice;
+  const sourcePlannedHours = number(row?.plannedHours);
   const componentType = meta.componentType || inferComponent(row, { ...parsed, unit });
   const amount = quantity > 0 && unitPrice > 0 ? roundMoney(quantity * unitPrice) : number(row?.amount || parsed.total);
   const isRegie = row?.kind === "regie" || row?.kind === "nachtrag_regie";
-  const plannedHours = isRegie && componentType === "arbeit"
-    ? (number(row?.plannedHours) || (/^std$/i.test(unit) ? quantity : 0))
+  const plannedHours = isRegie && (componentType === "arbeit" || sourcePlannedHours > 0)
+    ? (sourcePlannedHours || (/^std$/i.test(unit) ? quantity : 0))
     : 0;
   return {
     ...row,
@@ -150,7 +151,7 @@ function derive(calc, meta, fallbackRate = 0) {
   const contractAmount = selectedBaseAmount + addedAmount;
   const sumKind = predicate => included.reduce((sum, row) => sum + (predicate(row) ? number(row.amount) : 0), 0);
   const regieAmount = sumKind(row => row.kind === "regie" || row.kind === "nachtrag_regie");
-  const regieLaborAmount = sumKind(row => (row.kind === "regie" || row.kind === "nachtrag_regie") && row.componentType === "arbeit");
+  const regieLaborAmount = sumKind(row => (row.kind === "regie" || row.kind === "nachtrag_regie") && (row.componentType === "arbeit" || number(row.plannedHours) > 0));
   const regieMaterialAmount = Math.max(0, regieAmount - regieLaborAmount);
   const externalServices = sumKind(row => row.kind === "fremdleistung");
   const otherExcludedAmount = sumKind(row => row.kind === "sonstiges");
@@ -160,7 +161,7 @@ function derive(calc, meta, fallbackRate = 0) {
   const laborAmount = Math.max(0, fixedOwnAmount - materialAmount);
   const billingRate = number(calc?.billingRate) || number(fallbackRate);
   const calculatedHours = billingRate > 0 ? laborAmount / billingRate : 0;
-  const plannedRegieHours = included.reduce((sum, row) => sum + ((row.kind === "regie" || row.kind === "nachtrag_regie") && row.componentType === "arbeit" ? number(row.plannedHours) : 0), 0);
+  const plannedRegieHours = included.reduce((sum, row) => sum + ((row.kind === "regie" || row.kind === "nachtrag_regie") ? number(row.plannedHours) : 0), 0);
   const excludedAmount = lines.filter(row => row.calcIncluded === false).reduce((sum, row) => sum + number(row.amount), 0);
   return {
     lines,

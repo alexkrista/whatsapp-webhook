@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-hours-detail-fused-3";
+  const VERSION="2026-09-09-meaningful-hours-4";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
@@ -72,7 +72,6 @@
         <button data-bk-tab="planning">Planung</button>
         <button data-bk-tab="protocols">Dokumentation</button>
         <button data-bk-tab="regie">Regie</button>
-        <button data-bk-tab="material">Material</button>
         <button data-bk-tab="invoices">Rechnungen</button>
       </div>
       <section class="bk-panel active" data-bk-panel="overview"><div id="bkOverviewHost"></div></section>
@@ -82,7 +81,6 @@
       <section class="bk-panel" data-bk-panel="planning"><div id="bkPlanning" class="bk-loading">Planung wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="protocols"><div id="bkProtocols" class="bk-loading">Protokolle, Fotos, Pläne und E-Mails werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="regie"><div id="bkRegie" class="bk-loading">Regieberichte werden geladen …</div></section>
-      <section class="bk-panel" data-bk-panel="material"><div id="bkMaterial" class="bk-loading">Materialwissen wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="invoices"><div id="bkInvoices" class="bk-loading">Rechnungsstand wird geladen …</div></section>`;
     if(existing)body.insertBefore(hub,existing);else body.appendChild(hub);
     const overview=hub.querySelector("#bkOverviewHost");if(existing)overview.appendChild(existing);
@@ -183,7 +181,7 @@
   async function loadJob(id){
     const serial=++loadSerial;currentJobId=String(id||"");if(!currentJobId)return;
     installHub();wireMasterLinks();selectTab("overview");
-    ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const e=document.getElementById(x);if(e){e.className="bk-loading";e.textContent="Daten werden gesammelt und der Baustelle zugeordnet …"}});
+    ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkInvoices"].forEach(x=>{const e=document.getElementById(x);if(e){e.className="bk-loading";e.textContent="Daten werden gesammelt und der Baustelle zugeordnet …"}});
     try{
       await baseData(true);if(serial!==loadSerial)return;
       const j=jobById(currentJobId);if(!j)throw new Error("Baustelle nicht gefunden");
@@ -197,10 +195,9 @@
       renderPlanning(j);
       renderProtocols(j,details,documentation.items||[]);
       renderRegie(j,regieRows,documentation.items||[]);
-      renderMaterial(j,regieRows,knowledge,documentation.items||[]);
       renderInvoices(j,billingResult?.billing||{found:false,error:billingResult?.error||""},documentation.items||[]);
     }catch(e){
-      ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkMaterial","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
+      ["bkMasterData","bkEconomy","bkHours","bkPlanning","bkProtocols","bkRegie","bkInvoices"].forEach(x=>{const el=document.getElementById(x);if(el){el.className="bk-placeholder";el.textContent="Konnte nicht laden: "+e.message}});
     }
   }
 
@@ -256,7 +253,7 @@
   function renderEconomy(j,regies,billing={},documents=[]){
     const c=calc(j),bs=billing?.summary||{},hasBilling=!!billing?.found,recorded=num(bs.recordedHoursNet),storedActual=num(c.orderHours??c.actualHours),actual=Math.max(storedActual,recorded),regie=num(c.actualRegieHours),contract=num(c.contractAmount??j.contractAmount),external=num(c.externalServices??j.externalServices),krista=num(c.kristaAmount),material=num(c.materialAmount),labor=num(c.laborAmount),rate=num(c.billingRate??j.billingRate),target=num(c.calculatedHours),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),plannedRegie=num(c.plannedRegieHours),planned=plannedFor(j.jobId),remaining=Math.max(0,target-actual),progress=target?actual/target*100:0;
     const missing=num(bs.materialMissingPrices),billedNet=num(bs.billedNet),billedGross=num(bs.billedGross),draftNet=num(bs.draftNet),draftGross=num(bs.draftGross),invoiceCount=num(bs.invoiceCount),draftCount=num(bs.draftCount),documentCount=num(bs.documentCount);
-    const regieReports=(documents||[]).filter(x=>x.type==='regie_report'),regieMaterialVk=regieReports.reduce((sum,x)=>sum+num(x.materialCost||String(x.materialTotal||'').replace(/\./g,'').replace(',','.')),0),regieMaterialEk=regieReports.reduce((sum,x)=>sum+(x.materials||[]).reduce((part,m)=>part+num(m.purchaseCost??(num(m.purchaseUnitPrice)*num(m.quantity))),0),0),regieMaterialProfit=regieMaterialVk-regieMaterialEk,fixedMaterialEk=material*.8,totalMaterialEk=fixedMaterialEk+regieMaterialEk,fixedMaterialProfit=material*.2,totalMaterialProfit=fixedMaterialProfit+regieMaterialProfit,documentNet=billedNet+draftNet,documentGross=billedGross+draftGross,documentPerHour=recorded>0?documentNet/recorded:0;
+    const regieReports=(documents||[]).filter(x=>x.type==='regie_report'),regieMaterialVk=regieReports.reduce((sum,x)=>sum+num(x.materialCost||String(x.materialTotal||'').replace(/\./g,'').replace(',','.')),0),regieMaterialEk=regieReports.reduce((sum,x)=>sum+(x.materials||[]).reduce((part,m)=>part+num(m.purchaseCost??(num(m.purchaseUnitPrice)*num(m.quantity))),0),0),regieMaterialProfit=regieMaterialVk-regieMaterialEk,fixedMaterialEk=material*.8,totalMaterialEk=fixedMaterialEk+regieMaterialEk,fixedMaterialProfit=material*.2,totalMaterialProfit=fixedMaterialProfit+regieMaterialProfit,documentNet=billedNet+draftNet,documentGross=billedGross+draftGross,documentPerHour=actual>0?documentNet/actual:0;
     const source=j.orderDocument||j.orderPdf||j.contractDocument||j.contractSource||"";
     const el=document.getElementById("bkEconomy");el.className="";el.dataset.billedNet=String(billedNet);el.dataset.billedGross=String(billedGross);el.dataset.draftNet=String(draftNet);el.dataset.draftGross=String(draftGross);el.dataset.invoiceCount=String(invoiceCount);el.dataset.draftCount=String(draftCount);el.dataset.regieMaterialVk=String(regieMaterialVk);el.dataset.regieMaterialEk=String(regieMaterialEk);el.dataset.regieMaterialProfit=String(regieMaterialProfit);el.innerHTML=`
       <div class="bk-grid">
@@ -266,8 +263,8 @@
         <div class="bk-card"><div class="bk-label">Noch offene Stunden</div><div class="bk-value">${hour(remaining)}</div><div class="bk-note">Planung aktuell ${hour(planned)}</div></div>
         <div class="bk-card"><div class="bk-label">Material-EK gesamt</div><div class="bk-value">${money2(totalMaterialEk)}</div><div class="bk-note">Fix: 80 % aus ${money2(material)} = ${money2(fixedMaterialEk)} · Regie-EK ${money2(regieMaterialEk)}${missing?` · ${missing} EK fehlt`:''}</div></div>
         <div class="bk-card"><div class="bk-label">Materialertrag gesamt</div><div class="bk-value ${totalMaterialProfit<0?'bk-bad':'bk-good'}">${money2(totalMaterialProfit)}</div><div class="bk-note">Fixer Auftrag: 20 % aus ${money2(material)} = ${money2(fixedMaterialProfit)} · Regie: VK ${money2(regieMaterialVk)} minus EK ${money2(regieMaterialEk)} = ${money2(regieMaterialProfit)}</div></div>
-        <div class="bk-card"><div class="bk-label">Rechnungswert je produktiver Stunde</div><div class="bk-value">${documentCount&&recorded?money2(documentPerHour):'–'}</div><div class="bk-note">gespeicherte + ausgestellte Rechnungen netto ÷ Stempelstunden nach Pause${draftCount?` · inkl. ${draftCount} nicht gedruckt`:''}</div></div>
-        <div class="bk-card"><div class="bk-label">Produktive Stempelstunden</div><div class="bk-value">${hasBilling?hour(recorded):'–'}</div><div class="bk-note">je Mitarbeiter/Tag minus 0,25 h Pause</div></div>
+        <div class="bk-card"><div class="bk-label">Rechnungswert je Auftragsstunde</div><div class="bk-value">${documentCount&&actual?money2(documentPerHour):'–'}</div><div class="bk-note">gespeicherte + ausgestellte Rechnungen netto ÷ zusammengeführte Iststunden${draftCount?` · inkl. ${draftCount} nicht gedruckt`:''}</div></div>
+        <div class="bk-card"><div class="bk-label">Produktive WW-Stempelstunden</div><div class="bk-value">${hasBilling?hour(recorded):'–'}</div><div class="bk-note">WW gesamt nach Pause; Überschneidungen mit KRISTINE werden oben nicht doppelt gezählt</div></div>
         <div class="bk-card bk-wide"><div class="bk-section-title"><h3>Vom Auftrag zu den Stunden</h3><span class="bk-source">live aus Baustellenkalkulation</span></div><div class="bk-flow">
           <div class="bk-step"><small>Auftrag brutto/netto lt. Datensatz</small><strong>${money(contract)}</strong></div>
           <div class="bk-step"><small>abzgl. Fremdleistung</small><strong>${money(external)}</strong></div>

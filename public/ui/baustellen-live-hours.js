@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-hours-detail-fused-14";
+  const VERSION="2026-09-09-meaningful-hours-15";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -204,6 +204,7 @@
     const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
     const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · ${fused.source}`:fused.source}
     const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
+    const reserve=pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,billable=fused.total*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),invoiced=billed+draft,strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(reserve.dataset.bcFinal==="1"){if(strong)strong.textContent="–";if(small)small.textContent="Schlussrechnung vorhanden"}else{if(strong)strong.textContent=money(Math.max(0,billable-invoiced));if(small)small.textContent=`${money(billable)} Leistung nach 10 % Reserve${invoiced>0?` · abzgl. ${money(invoiced)} bereits verrechnet`:""}`}}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
 
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));
@@ -222,9 +223,11 @@
     const live=hoursSummary(id),target=targetHours(j),progress=target?live.order/target*100:0;
     const setText=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
     const card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label);
-    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden");
+    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden"),revenueCard=card("Rechnungswert je Auftragsstunde"),wwCard=card("Produktive WW-Stempelstunden");
     if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
     if(remainingCard)setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));
+    const documentNet=num(host.dataset.billedNet)+num(host.dataset.draftNet);if(revenueCard){setText(revenueCard.querySelector(".bk-value"),live.order>0?money(documentNet/live.order):"–");setText(revenueCard.querySelector(".bk-note"),"gespeicherte + ausgestellte Rechnungen netto ÷ zusammengeführte Iststunden")}
+    const ww=wwByJob.get(String(id));if(wwCard&&ww?.found){const overlap=Math.max(0,num(ww.totalHours)-num(live.ww));setText(wwCard.querySelector(".bk-value"),hours(ww.totalHours));setText(wwCard.querySelector(".bk-note"),`${hours(live.ww)} zusätzlich gezählt · ${hours(overlap)} Überschneidung mit KRISTINE`)}
     const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
     if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
   }

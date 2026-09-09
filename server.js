@@ -2376,6 +2376,10 @@ function cleanOperationalDate(value) {
 function cleanSurfaceMaterialMeta(value) {
   return (Array.isArray(value) ? value : []).slice(0, 500).map(row => ({
     key: String(row?.key || "").trim().slice(0, 260),
+    custom: !!row?.custom,
+    name: String(row?.name || "").trim().slice(0, 240),
+    quantity: Math.max(0, Number(row?.quantity) || 0),
+    unit: String(row?.unit || "").trim().slice(0, 30),
     relevant: !!row?.relevant,
     category: String(row?.category || "").trim().slice(0, 80),
     use: String(row?.use || "").trim().slice(0, 240),
