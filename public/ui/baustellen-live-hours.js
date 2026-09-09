@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-gross-profit-detail-19";
+  const VERSION="2026-09-09-gross-profit-pdf-20";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -229,7 +229,7 @@
     if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
     if(remainingCard)setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));
     const documentNet=num(host.dataset.billedNet)+num(host.dataset.draftNet);if(revenueCard){setText(revenueCard.querySelector(".bk-value"),live.order>0?money(documentNet/live.order):"–");setText(revenueCard.querySelector(".bk-note"),"gespeicherte + ausgestellte Rechnungen netto ÷ zusammengeführte Iststunden")}
-    const materialEk=num(host.dataset.totalMaterialEk),wage=laborCost(id),grossProfit=documentNet-wage.total-materialEk;if(grossProfitCard){const value=grossProfitCard.querySelector(".bk-value");setText(value,documentNet>0?money2(grossProfit):"–");value?.classList.toggle("bk-bad",grossProfit<0);value?.classList.toggle("bk-good",grossProfit>=0);setText(grossProfitCard.querySelector(".bk-note"),documentNet>0?`${money2(documentNet)} Rechnungen netto − ${money2(wage.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(materialEk)} Material-EK`:"Noch keine Rechnung vorhanden");const details=grossProfitCard.querySelector("[data-bk-gross-profit-details]");if(details)details.innerHTML=profitDetailsHtml(wage,documentNet,materialEk,grossProfit)}
+    const materialEk=num(host.dataset.totalMaterialEk),wage=laborCost(id),grossProfit=documentNet-wage.total-materialEk;if(grossProfitCard){const value=grossProfitCard.querySelector(".bk-value");setText(value,documentNet>0?money2(grossProfit):"–");value?.classList.toggle("bk-bad",grossProfit<0);value?.classList.toggle("bk-good",grossProfit>=0);setText(grossProfitCard.querySelector(".bk-note"),documentNet>0?`${money2(documentNet)} Rechnungen netto − ${money2(wage.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(materialEk)} Material-EK`:"Noch keine Rechnung vorhanden");const details=grossProfitCard.querySelector("[data-bk-gross-profit-details]");if(details)details.innerHTML=profitDetailsHtml(wage,documentNet,materialEk,grossProfit);host._bkGrossProfitPdfData={rows:wage.rows,documentNet,materialEk}}
     const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
     if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
   }

@@ -13,6 +13,7 @@ const calculationUi = fs.readFileSync(path.join(root, "public", "ui", "baustelle
 const chronik = fs.readFileSync(path.join(root, "public", "ui", "baustellen-chronik.js"), "utf8");
 const server = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const preload = fs.readFileSync(path.join(root, "order-calculation-v2-preload.js"), "utf8");
+const grossProfitPdf = fs.readFileSync(path.join(root, "gross-profit-pdf.js"), "utf8");
 
 assert.match(preload, /totalCalculatedHours = d\.calculatedHours \+ d\.plannedRegieHours/);
 assert.match(preload, /sourcePlannedHours > 0/);
@@ -57,6 +58,14 @@ assert.match(hub, /cost\.wageTotal/);
 assert.match(hub, /cost\.gkTotal/);
 assert.match(liveHours, /grossProfit=documentNet-wage\.total-materialEk/);
 assert.match(liveHours, /profitDetailsHtml/);
+assert.match(hub, /data-bk-gross-profit-pdf/);
+assert.match(hub, /economy\/gross-profit\.pdf/);
+assert.match(liveHours, /_bkGrossProfitPdfData/);
+assert.match(server, /createGrossProfitPdf/);
+assert.match(server, /economy\/gross-profit\.pdf/);
+assert.match(grossProfitPdf, /Rohertragsberechnung/);
+assert.match(grossProfitPdf, /Summen Mitarbeiter/);
+assert.match(grossProfitPdf, /GK-Kosten/);
 assert.doesNotMatch(hub, /Produktive WW-Stempelstunden/);
 assert.match(calculationGrid, /const totalTarget = target \+ plannedRegie/);
 assert.match(calculationGrid, /set\("kcv2SumHours", hours\(totalTarget\)\)/);
