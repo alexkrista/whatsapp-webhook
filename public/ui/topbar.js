@@ -165,7 +165,7 @@
     loadScriptOnce("/public/ui/regie-billing-state.js?v=20260909-regie-billing-1", "data-krista-regie-billing-state");
     loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260909-regie-billing-9", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260909-regie-billing-5", "data-krista-baustellen-cockpit");
-    loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260909-quality-zones-3", "data-krista-baustellen-chronik");
+    loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260909-quality-zones-4", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
     loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260909-regie-billing-21", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260903-valid-dates", "data-krista-baustellen-foto-gallery");
