@@ -162,15 +162,15 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260909-economy-hours-invoices", "data-krista-baustellen-knowledge");
-    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260903-valid-dates", "data-krista-baustellen-cockpit");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260909-economy-meaningful-values-2", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260909-ww-regie-material", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260903-valid-dates", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
     loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260909-economy-hours", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260903-valid-dates", "data-krista-baustellen-foto-gallery");
     // Diese vorhandenen Module waren früher indirekt an KRISADMIN gekoppelt.
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.
-    loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260909-ww-offer-nachtrag", "data-krista-kalkulation-v1");
+    loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260909-ww-offer-nachtrag-2", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-parser-fix.js?v=20260826-flatpos1", "data-krista-kalkulation-parser-fix");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260826-grid2", "data-krista-kalkulation-grid-v2");
     loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260902-offer7", "data-krista-angebot-v7");

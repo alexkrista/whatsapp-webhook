@@ -206,6 +206,7 @@ async function enrichJobsPayload(payload) {
     const actualHours = number(old.actualHours);
     const actualRegieHours = number(old.actualRegieHours);
     const orderHours = number(old.orderHours ?? Math.max(0, actualHours - actualRegieHours));
+    const totalCalculatedHours = d.calculatedHours + d.plannedRegieHours;
     return {
       ...job,
       contractAmount,
@@ -228,12 +229,13 @@ async function enrichJobsPayload(payload) {
         materialAmount: d.materialAmount,
         laborAmount: d.laborAmount,
         billingRate: d.billingRate,
-        calculatedHours: d.calculatedHours,
+        fixedCalculatedHours: d.calculatedHours,
+        calculatedHours: totalCalculatedHours,
         actualHours,
         actualRegieHours,
         orderHours,
-        remainingOrderHours: d.calculatedHours - orderHours,
-        progressPercent: d.calculatedHours > 0 ? orderHours / d.calculatedHours * 100 : 0,
+        remainingOrderHours: totalCalculatedHours - orderHours,
+        progressPercent: totalCalculatedHours > 0 ? orderHours / totalCalculatedHours * 100 : 0,
         plannedRegieHours: d.plannedRegieHours,
         remainingRegieHours: d.plannedRegieHours - actualRegieHours,
       },

@@ -196,6 +196,7 @@ function enrichJobsPayload(data) {
     const actualHours = cleanNumber(old.actualHours);
     const actualRegieHours = cleanNumber(old.actualRegieHours);
     const orderHours = cleanNumber(old.orderHours ?? Math.max(0, actualHours - actualRegieHours));
+    const totalCalculatedHours = derived.calculatedHours + derived.plannedRegieHours;
     return {
       ...job,
       orderDocument: calc.sourceDocument || null,
@@ -216,12 +217,13 @@ function enrichJobsPayload(data) {
         materialAmount: derived.materialAmount,
         laborAmount: derived.laborAmount,
         billingRate: derived.billingRate,
-        calculatedHours: derived.calculatedHours,
+        fixedCalculatedHours: derived.calculatedHours,
+        calculatedHours: totalCalculatedHours,
         actualHours,
         actualRegieHours,
         orderHours,
-        remainingOrderHours: derived.calculatedHours - orderHours,
-        progressPercent: derived.calculatedHours > 0 ? orderHours / derived.calculatedHours * 100 : 0,
+        remainingOrderHours: totalCalculatedHours - orderHours,
+        progressPercent: totalCalculatedHours > 0 ? orderHours / totalCalculatedHours * 100 : 0,
         plannedRegieHours: derived.plannedRegieHours,
         remainingRegieHours: derived.plannedRegieHours - actualRegieHours,
       },
