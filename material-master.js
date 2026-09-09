@@ -956,7 +956,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const workbook = XLSX.utils.book_new();
     const headers = [
       "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
-      "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
+      "Gebindegröße", "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
       "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer",
     ];
     const data = materials
@@ -967,6 +967,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "Lieferant": item.supplier,
         "Lieferanten-Artikelnummer": item.supplierArticleNumber,
         "Artikel": item.product,
+        "Gebindegröße": item.containerSize || 1,
         "Einheit": item.unit,
         "EK netto (€)": item.purchasePrice || "",
         "VK netto (€)": item.salePrice || "",
@@ -981,7 +982,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
     worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 11, 15, 18, 22, 22].map(wch => ({ wch }));
+    worksheet["!cols"] = [12, 22, 22, 25, 42, 15, 12, 15, 15, 15, 11, 15, 18, 22, 22].map(wch => ({ wch }));
     XLSX.utils.book_append_sheet(workbook, worksheet, "Materialpreisliste");
 
     const warningRows = materials.map(decorate).filter(item => item.priceStale).map(item => ({
@@ -1430,6 +1431,7 @@ app.get("/api/regie/materials", async (req, res) => {
         id: requestedMaterialId,
         group: req.body?.group || "Regie",
         product,
+        containerSize: req.body?.containerSize,
         unit: req.body?.unit,
         purchasePrice: req.body?.purchasePrice ?? req.body?.unitPrice,
         markup: req.body?.markup,

@@ -128,12 +128,13 @@ function invoke(handler, req) {
     materialMarkup: 50,
     employees: [{ id: "ma-1", name: "Max Muster", hours: 1, hourlyRate: 99 }],
     materials: [
-      { product: "Normaler Artikel", quantity: 2, purchasePrice: 10, markup: 80, salePrice: 18 },
+      { product: "Normaler Artikel", quantity: 2, containerSize: 30, unit: "kg", purchasePrice: 10, markup: 80, salePrice: 18 },
       { product: "Fixpreis-Artikel", quantity: 1, purchasePrice: 10, markup: 80, salePrice: 14, fixedSalePrice: true },
     ],
   } });
   assert.equal(projectMaterialPrices.body.report.totals.laborTotal, 72);
   assert.equal(projectMaterialPrices.body.report.materials[0].markup, 50);
+  assert.equal(projectMaterialPrices.body.report.materials[0].containerSize, 30);
   assert.equal(projectMaterialPrices.body.report.materials[0].salePrice, 15, "Normaler Artikel verwendet EK plus Baustellen-Aufschlag");
   assert.equal(projectMaterialPrices.body.report.materials[1].markup, 0);
   assert.equal(projectMaterialPrices.body.report.materials[1].salePrice, 14, "Fix-VK bleibt ohne weiteren Aufschlag");

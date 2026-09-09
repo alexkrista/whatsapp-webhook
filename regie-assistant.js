@@ -138,6 +138,7 @@ function registerRegieAssistant(app, options) {
       supplier: clean(row?.supplier, 180),
       quantity: round(num(row?.quantity) || 1),
       unit: clean(row?.unit || "Stk", 40),
+      containerSize: round(num(row?.containerSize) || 1),
       purchasePrice,
       markup,
       salePrice,
