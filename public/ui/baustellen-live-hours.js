@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-gross-profit-pdf-20";
+  const VERSION="2026-09-09-regie-billing-21";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -206,7 +206,7 @@
     const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
     const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · ${fused.source}`:fused.source}
     const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
-    const reserve=pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,billable=fused.total*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(draft>0){if(strong)strong.textContent=money(draft);if(small)small.textContent="Rechnungsentwurf gespeichert · noch nicht gedruckt/ausgestellt"}else if(reserve.dataset.bcSettled==="1"){if(strong)strong.textContent=money(0);if(small)small.textContent="Rechnung ausgestellt · nichts mehr abzurechnen"}else{if(strong)strong.textContent=money(Math.max(0,billable-billed));if(small)small.textContent=`${money(billable)} Leistung nach 10 % Reserve${billed>0?` · abzgl. ${money(billed)} Teilrechnung bereits verrechnet`:""}`}}
+    const reserve=pulseItem("Abrechenbar gesamt")||pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,regieHours=num(reserve.dataset.bcRegieHours),openRegie=num(reserve.dataset.bcOpenRegie),fixedActual=Math.max(0,fused.total-regieHours),billable=fixedActual*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),fixedOpen=reserve.dataset.bcSettled==="1"?0:Math.max(0,billable-billed),strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(draft>0){if(strong)strong.textContent=money(draft);if(small)small.textContent="Rechnungsentwurf gespeichert · noch nicht gedruckt/ausgestellt"}else{if(strong)strong.textContent=money(fixedOpen+openRegie);if(small)small.textContent=`${money(fixedOpen)} Auftrag nach 10 % Reserve + ${money(openRegie)} offene Regie`}}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
 
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));

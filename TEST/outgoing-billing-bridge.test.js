@@ -14,6 +14,7 @@ test("summarizes booked WinWorker invoice and payment for a job", () => {
       currentOpen: 0,
       invoices: [{
         id: 33, status: "issued", kind: "TR", source: "WW",
+        source_id: "9f9c-ww-document",
         invoice_number: "202607011", issue_date: "2026-07-30", due_date: "2026-07-31",
         increment_net: 4850, increment_vat: 970, increment_gross: 5820,
       }, {
@@ -41,6 +42,7 @@ test("summarizes booked WinWorker invoice and payment for a job", () => {
   assert.equal(billing.invoices[0].invoiceNumber, "202607011");
   assert.equal(billing.invoices[0].paidGross, 5820);
   assert.equal(billing.invoices[0].openGross, 0);
+  assert.equal(billing.invoices[0].sourceId, "9f9c-ww-document");
   assert.equal(billing.invoices[1].status, "draft");
   assert.equal(billing.invoices[1].openGross, 0);
 });

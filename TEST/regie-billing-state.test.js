@@ -1,0 +1,40 @@
+"use strict";
+
+const assert=require("node:assert/strict");
+const test=require("node:test");
+const {summarize}=require("../public/ui/regie-billing-state");
+
+test("links rapports to the exact WinWorker invoice and sums only open reports",()=>{
+  const result=summarize([
+    {reportNumber:"1",reportDate:"2026-08-01",source:"WW",totalHours:8,totalNet:700,billedDocumentId:"{AA-BB}"},
+    {reportNumber:"2",reportDate:"2026-08-02",source:"WW",totalHours:6,laborCost:450,materialCost:75,billedDocumentId:""},
+  ],{invoices:[{kind:"TR",invoiceNumber:"2026007",sourceId:"aa-bb"}]});
+  assert.equal(result.rows[0].invoice.invoiceNumber,"2026007");
+  assert.equal(result.billedAmount,700);
+  assert.equal(result.openAmount,525);
+  assert.equal(result.openHours,6);
+  assert.equal(result.billedThrough.report.reportNumber,"1");
+  assert.equal(result.hasGap,false);
+});
+
+test("does not claim a through-boundary when billed reports have a gap",()=>{
+  const result=summarize([
+    {reportNumber:"1",reportDate:"2026-08-01",source:"WW",totalNet:100,billedDocumentId:"A"},
+    {reportNumber:"2",reportDate:"2026-08-02",source:"WW",totalNet:200},
+    {reportNumber:"3",reportDate:"2026-08-03",source:"WW",totalNet:300,billedDocumentId:"B"},
+  ]);
+  assert.equal(result.hasGap,true);
+  assert.equal(result.billedThrough,null);
+  assert.equal(result.openAmount,200);
+});
+
+test("does not mark PDF-only reports or a zero GUID as billed",()=>{
+  const result=summarize([
+    {reportNumber:"PDF",source:"PDF",totalNet:400},
+    {reportNumber:"WW",source:"WW",totalNet:250,billedDocumentId:"00000000-0000-0000-0000-000000000000"},
+  ]);
+  assert.equal(result.unknownRows.length,1);
+  assert.equal(result.openRows.length,1);
+  assert.equal(result.openAmount,250);
+  assert.equal(result.billedRows.length,0);
+});

@@ -1203,6 +1203,7 @@ def install(ns):
                     "paidGross": paid_gross,
                     "openGross": round(max(0, gross - paid_gross), 2) if status == "issued" else 0,
                     "source": "WW" if str(invoice.get("source") or "").upper() == "WW" else "KRISTINE",
+                    "sourceId": str(invoice.get("source_id") or invoice.get("sourceId") or ""),
                 }
                 run_invoices.append(row)
                 invoices.append(row)

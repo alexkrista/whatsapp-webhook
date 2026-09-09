@@ -60,6 +60,7 @@ function buildBillingSummary(project, runDetails) {
           paidGross,
           openGross: status === "issued" ? roundMoney(Math.max(0, gross - paidGross)) : 0,
           source: String(invoice.source || "KRISTINE").toUpperCase() === "WW" ? "WW" : "KRISTINE",
+          sourceId: String(invoice.source_id || invoice.sourceId || ""),
         };
       });
 
