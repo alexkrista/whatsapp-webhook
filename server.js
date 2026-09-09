@@ -2373,10 +2373,21 @@ function cleanOperationalDate(value) {
   return day;
 }
 
+function cleanSurfaceMaterialMeta(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 500).map(row => ({
+    key: String(row?.key || "").trim().slice(0, 260),
+    relevant: !!row?.relevant,
+    category: String(row?.category || "").trim().slice(0, 80),
+    use: String(row?.use || "").trim().slice(0, 240),
+    note: String(row?.note || "").trim().slice(0, 1000),
+    updatedAt: row?.updatedAt || null,
+  })).filter(row => row.key);
+}
+
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2412,13 +2423,14 @@ async function readJobMeta(jobId) {
       regieHourlyRate: Math.max(0, Number(meta.regieHourlyRate ?? 75)),
       regieMaterialMarkup: Math.max(0, Number(meta.regieMaterialMarkup ?? 80)),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
+      surfaceMaterialMeta: cleanSurfaceMaterialMeta(meta.surfaceMaterialMeta),
       hoursCutoverDate: cleanOperationalDate(meta.hoursCutoverDate),
       hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(meta.hoursOverlapExcludedWwKeys),
       hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2480,6 +2492,7 @@ async function writeJobMeta(jobId, patch) {
     regieHourlyRate: Math.max(0, Number(patch.regieHourlyRate ?? existing.regieHourlyRate ?? 75)),
     regieMaterialMarkup: Math.max(0, Number(patch.regieMaterialMarkup ?? existing.regieMaterialMarkup ?? 80)),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
+    surfaceMaterialMeta: cleanSurfaceMaterialMeta(patch.surfaceMaterialMeta ?? existing.surfaceMaterialMeta),
     hoursCutoverDate: cleanOperationalDate(patch.hoursCutoverDate ?? existing.hoursCutoverDate),
     hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
     hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
@@ -2831,6 +2844,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         regieHourlyRate: Number(meta.regieHourlyRate ?? 75),
         regieMaterialMarkup: Number(meta.regieMaterialMarkup ?? 80),
         plannedRegieHours: Number(meta.plannedRegieHours || 0),
+        surfaceMaterialMeta: meta.surfaceMaterialMeta || [],
         hoursCutoverDate: meta.hoursCutoverDate || "",
         hoursOverlapExcludedWwKeys: meta.hoursOverlapExcludedWwKeys || [],
         hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
@@ -2897,6 +2911,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       regieHourlyRate: req.body?.regieHourlyRate,
       regieMaterialMarkup: req.body?.regieMaterialMarkup,
       plannedRegieHours: req.body?.plannedRegieHours,
+      surfaceMaterialMeta: req.body?.surfaceMaterialMeta,
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
@@ -2904,6 +2919,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
     if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
+    if (JSON.stringify(before.surfaceMaterialMeta || []) !== JSON.stringify(meta.surfaceMaterialMeta || [])) changed.push("surfaceMaterialMeta");
     if (changed.length) {
       await appendJobHistory(jobId, {
         type: "job_meta_updated",
