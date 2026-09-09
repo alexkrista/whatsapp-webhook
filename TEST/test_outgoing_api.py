@@ -96,6 +96,15 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertEqual(preview_image.status_code, 200)
         self.assertTrue(preview_image.data.startswith(b"\x89PNG\r\n\x1a\n"))
         preview_image.close()
+        draft_billing = self.client.post(
+            "/api/outgoing/project-billing",
+            json={"projectNumber": "26001"},
+            headers={"Origin": "https://protokoll.krista.at", "X-Krista-Token": "test-admin-token"},
+        ).get_json()["billing"]
+        self.assertEqual(draft_billing["summary"]["invoiceCount"], 0)
+        self.assertEqual(draft_billing["summary"]["draftCount"], 1)
+        self.assertEqual(draft_billing["summary"]["billedNet"], 0)
+        self.assertEqual(draft_billing["invoices"][0]["status"], "draft")
         issue = self.client.post(f"/api/outgoing/invoices/{invoice_id}/issue", json={})
         self.assertEqual(issue.status_code, 200, issue.get_data(as_text=True))
         self.assertEqual(issue.get_json()["invoice"]["invoice_number"], "202608001")

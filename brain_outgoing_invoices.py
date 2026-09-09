@@ -1180,7 +1180,8 @@ def install(ns):
                     )
             run_invoices = []
             for invoice in run.get("invoices") or []:
-                if str(invoice.get("status") or "") != "issued":
+                status = str(invoice.get("status") or "draft").lower()
+                if status == "cancelled":
                     continue
                 invoice_id = int(invoice.get("id") or 0)
                 gross = round(float(invoice.get("increment_gross") or 0), 2)
@@ -1192,6 +1193,7 @@ def install(ns):
                     "id": invoice_id,
                     "runId": int(run.get("id") or 0),
                     "invoiceNumber": str(invoice.get("invoice_number") or ""),
+                    "status": status,
                     "kind": kind,
                     "issueDate": str(invoice.get("issue_date") or "")[:10],
                     "dueDate": str(invoice.get("due_date") or "")[:10],
@@ -1199,7 +1201,7 @@ def install(ns):
                     "vat": round(float(invoice.get("increment_vat") or 0), 2),
                     "gross": gross,
                     "paidGross": paid_gross,
-                    "openGross": round(max(0, gross - paid_gross), 2),
+                    "openGross": round(max(0, gross - paid_gross), 2) if status == "issued" else 0,
                     "source": "WW" if str(invoice.get("source") or "").upper() == "WW" else "KRISTINE",
                 }
                 run_invoices.append(row)
@@ -1234,18 +1236,21 @@ def install(ns):
                         material_purchase += quantity * purchase_price
                     elif quantity > 0:
                         material_missing_prices += 1
+            issued_invoices = [row for row in run_invoices if row["status"] == "issued"]
             run_summaries.append({
                 "id": int(run.get("id") or 0),
                 "label": str(run.get("label") or "Rechnungslauf"),
                 "status": "closed" if str(run.get("status") or "") == "closed" else "open",
-                "billedNet": round(sum(row["net"] for row in run_invoices), 2),
-                "billedGross": round(sum(row["gross"] for row in run_invoices), 2),
+                "billedNet": round(sum(row["net"] for row in issued_invoices), 2),
+                "billedGross": round(sum(row["gross"] for row in issued_invoices), 2),
                 "paidGross": round(sum(row["gross"] for row in run_payments), 2),
                 "openGross": round(max(0, float(run.get("currentOpen") or 0)), 2),
             })
         invoices.sort(key=lambda row: (row["issueDate"], row["id"]))
         payments.sort(key=lambda row: (row["paymentDate"], row["id"]))
-        billed_net = round(sum(row["net"] for row in invoices), 2)
+        issued_invoices = [row for row in invoices if row["status"] == "issued"]
+        draft_invoices = [row for row in invoices if row["status"] == "draft"]
+        billed_net = round(sum(row["net"] for row in issued_invoices), 2)
         recorded_hours_net = project_recorded_hours_net(project.get("projectNumber"))
         material_purchase = round(material_purchase, 2)
         material_revenue = round(material_revenue, 2)
@@ -1254,9 +1259,13 @@ def install(ns):
             "projectNumber": str(project.get("projectNumber") or ""),
             "projectIndex": project_index,
             "summary": {
-                "invoiceCount": len(invoices),
+                "invoiceCount": len(issued_invoices),
+                "draftCount": len(draft_invoices),
+                "documentCount": len(invoices),
+                "draftNet": round(sum(row["net"] for row in draft_invoices), 2),
+                "draftGross": round(sum(row["gross"] for row in draft_invoices), 2),
                 "billedNet": billed_net,
-                "billedGross": round(sum(row["gross"] for row in invoices), 2),
+                "billedGross": round(sum(row["gross"] for row in issued_invoices), 2),
                 "paidGross": round(sum(row["gross"] for row in payments), 2),
                 "openGross": round(sum(row["openGross"] for row in run_summaries), 2),
                 "recordedHoursNet": recorded_hours_net,

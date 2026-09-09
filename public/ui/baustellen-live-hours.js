@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-07-live-hours-12";
+  const VERSION="2026-09-09-economy-hours-13";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -212,7 +212,24 @@
     if(host&&people.length)host.innerHTML=people.slice(0,8).map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · KRISTINE</small></div>`).join("");
   }
 
-  function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);if(current)renderHoursReconciliation(current)}}
+  function hoursSummary(id){
+    const j=job(id);if(!j)return {total:0,order:0,regie:0,remaining:0,source:""};
+    const fused=fusion(j),regie=num(calc(j).actualRegieHours),order=Math.max(0,fused.total-regie),target=targetHours(j);
+    return {total:fused.total,order,regie,remaining:Math.max(0,target-order),source:fused.source,ww:fused.ww,kristine:fused.kristine};
+  }
+  function patchEconomy(id){
+    const j=job(id),host=document.getElementById("bkEconomy");if(!j||!host)return;
+    const live=hoursSummary(id),target=targetHours(j),progress=target?live.order/target*100:0;
+    const setText=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
+    const card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label);
+    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden");
+    if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
+    if(remainingCard)setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));
+    const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
+    if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
+  }
+
+  function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);if(current)renderHoursReconciliation(current)}}
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
@@ -237,5 +254,5 @@
   }
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);else install();
-  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours};
+  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,summary:hoursSummary};
 })();

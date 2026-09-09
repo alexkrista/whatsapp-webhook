@@ -38,15 +38,17 @@ function buildBillingSummary(project, runDetails) {
     }
 
     const runInvoices = (Array.isArray(run.invoices) ? run.invoices : [])
-      .filter((invoice) => String(invoice.status || "") === "issued")
+      .filter((invoice) => String(invoice.status || "draft").toLowerCase() !== "cancelled")
       .map((invoice) => {
         const id = number(invoice.id);
+        const status = String(invoice.status || "draft").toLowerCase();
         const gross = roundMoney(invoice.increment_gross);
         const paidGross = roundMoney(paidByInvoice.get(id) || 0);
         return {
           id,
           runId: number(run.id),
           invoiceNumber: String(invoice.invoice_number || ""),
+          status,
           kind: ["TR", "SR", "RE", "GS", "ST"].includes(String(invoice.kind || "").toUpperCase())
             ? String(invoice.kind).toUpperCase()
             : "RE",
@@ -56,19 +58,20 @@ function buildBillingSummary(project, runDetails) {
           vat: roundMoney(invoice.increment_vat),
           gross,
           paidGross,
-          openGross: roundMoney(Math.max(0, gross - paidGross)),
+          openGross: status === "issued" ? roundMoney(Math.max(0, gross - paidGross)) : 0,
           source: String(invoice.source || "KRISTINE").toUpperCase() === "WW" ? "WW" : "KRISTINE",
         };
       });
 
+    const issuedInvoices = runInvoices.filter((invoice) => invoice.status === "issued");
     invoices.push(...runInvoices);
     payments.push(...runPayments);
     runs.push({
       id: number(run.id),
       label: String(run.label || "Rechnungslauf"),
       status: String(run.status || "open") === "closed" ? "closed" : "open",
-      billedNet: roundMoney(runInvoices.reduce((sum, invoice) => sum + invoice.net, 0)),
-      billedGross: roundMoney(runInvoices.reduce((sum, invoice) => sum + invoice.gross, 0)),
+      billedNet: roundMoney(issuedInvoices.reduce((sum, invoice) => sum + invoice.net, 0)),
+      billedGross: roundMoney(issuedInvoices.reduce((sum, invoice) => sum + invoice.gross, 0)),
       paidGross: roundMoney(runPayments.reduce((sum, payment) => sum + payment.gross, 0)),
       openGross: roundMoney(Math.max(0, number(run.currentOpen))),
     });
@@ -76,14 +79,20 @@ function buildBillingSummary(project, runDetails) {
 
   invoices.sort((a, b) => a.issueDate.localeCompare(b.issueDate) || a.id - b.id);
   payments.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate) || a.id - b.id);
+  const issuedInvoices = invoices.filter((invoice) => invoice.status === "issued");
+  const draftInvoices = invoices.filter((invoice) => invoice.status === "draft");
   return {
     found: true,
     projectNumber: String(project?.projectNumber || ""),
     projectIndex: number(project?.projectIndex),
     summary: {
-      invoiceCount: invoices.length,
-      billedNet: roundMoney(invoices.reduce((sum, invoice) => sum + invoice.net, 0)),
-      billedGross: roundMoney(invoices.reduce((sum, invoice) => sum + invoice.gross, 0)),
+      invoiceCount: issuedInvoices.length,
+      draftCount: draftInvoices.length,
+      documentCount: invoices.length,
+      draftNet: roundMoney(draftInvoices.reduce((sum, invoice) => sum + invoice.net, 0)),
+      draftGross: roundMoney(draftInvoices.reduce((sum, invoice) => sum + invoice.gross, 0)),
+      billedNet: roundMoney(issuedInvoices.reduce((sum, invoice) => sum + invoice.net, 0)),
+      billedGross: roundMoney(issuedInvoices.reduce((sum, invoice) => sum + invoice.gross, 0)),
       paidGross: roundMoney(payments.reduce((sum, payment) => sum + payment.gross, 0)),
       openGross: roundMoney(runs.reduce((sum, run) => sum + run.openGross, 0)),
     },
