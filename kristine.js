@@ -1951,7 +1951,12 @@ const open = taskId
     const result = [];
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
+      const officeUnproductive =
+        row.activityMode === "unproductive" ||
+        row.billingType === "unproductive" ||
+        row.source === "kgo-office-core";
       const type =
+        (row.type === "start" || row.type === "weiter") && officeUnproductive ? "up" :
         row.type === "start" || row.type === "weiter" ? "work" :
         row.type === "pause" ? "pause" :
         row.type === "mittag" ? "lunch" :
@@ -1969,7 +1974,7 @@ const open = taskId
         to: toMinutes === null ? "" : hmFromMinutes(toMinutes),
         jobId: String(row.jobId || ""),
         jobName: String(row.jobName || ""),
-        reason: String(row.reason || ""),
+        reason: String(row.reason || (officeUnproductive ? "Büro" : "")),
         source: String(row.source || "employee"),
       });
     }

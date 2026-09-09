@@ -184,6 +184,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   <label>EK netto €<input id="editEk" inputmode="decimal"></label>
   <label>VK netto €<input id="editVk" inputmode="decimal"></label>
   <label>VK brutto €<input id="editGross" inputmode="decimal"></label>
+  <label class="wide"><span><input id="editFixedVk" type="checkbox" style="width:auto"> Fix-VK – im Regiebericht ohne Baustellen-Aufschlag verwenden</span></label>
   <div class="wide toolbar">
     <button type="button" class="btn" onclick="closeMaterialDialog()">Abbrechen</button>
     <button class="btn primary">Speichern</button>
@@ -356,7 +357,7 @@ function renderMaterials(){
     <td><strong>${escapeHtml(m.product||"–")}</strong></td>
     <td>${escapeHtml(m.unit||"–")}</td>
     <td>${money(m.purchasePrice)}</td>
-    <td>${money(m.salePrice)}</td>
+    <td>${money(m.salePrice)}${m.fixedSalePrice?'<br><span class="pill">Fix-VK</span>':""}</td>
     <td>${money(Number(m.salePrice||0)*1.2)}</td>
     <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span>${m.priceSource?`<br><span class="muted">aus ${escapeHtml(m.priceSource)}</span>`:""}</td>
     <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
@@ -381,6 +382,7 @@ function openMaterial(id=""){
   editId.value=id;editMaterialId.value=item.materialId||"";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
   editSupplierArticle.value=item.supplierArticleNumber||"";editUnit.value=item.unit||"Stk";
   editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
+  editFixedVk.checked=item.fixedSalePrice===true;
   updateGrossFromNet();
   editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
   materialDialog.showModal();
@@ -390,7 +392,7 @@ function closeMaterialDialog(){wwPendingMaterial=null;materialDialog.close()}
 
 async function saveMaterial(event){
   event.preventDefault();
-  const body={materialId:editMaterialId.value.trim(),product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
+  const body={materialId:editMaterialId.value.trim(),product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,fixedSalePrice:editFixedVk.checked,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
   if(wwPendingMaterial){
     await api("/admin/api/materials/import-winworker",{method:"POST",body:JSON.stringify({material:{...wwPendingMaterial,...body}})});
   }else if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
@@ -531,6 +533,7 @@ function prepareWinWorkerImport(index){
   editId.value="";editMaterialId.value=item.materialId||item.sourceId||"";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
   editSupplierArticle.value=item.supplierArticleNumber||item.orderNumber||"";editUnit.value=item.unit||"Stk";
   editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
+  editFixedVk.checked=item.fixedSalePrice===true;
   updateGrossFromNet();
   editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
   materialDialog.showModal();

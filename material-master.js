@@ -171,6 +171,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     markup: ["aufschlag"],
     overhead: ["gemeinkosten"],
     salePrice: ["vk", "vk netto", "vk netto netto", "verkaufspreis", "verkaufspreis netto"],
+    fixedSalePrice: ["fix vk", "fixpreis", "vk fix", "fester vk", "festpreis vk"],
     priceValidFrom: ["preis gultig ab", "preisstand", "datenstand", "preisdatum"],
     priceCheckedAt: ["zuletzt gepruft", "preis gepruft am", "gepruft am", "preisstand"],
     stock: ["lagerbestand", "aktueller bestand", "bestand"],
@@ -405,12 +406,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const retail = retailRows.find(row => row.productKey === productKey && row.size === size);
       const salePrice = retail?.gross ? Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100 : (number(article.salePrice) || number(item.salePrice));
       const sourceDate = retail?.gross ? "2025-05-01" : (clean(article.updatedAt, 10) || item.priceCheckedAt);
-      if (purchasePrice === number(item.purchasePrice) && salePrice === number(item.salePrice) && item.priceSource === "Little Greene") continue;
+      if (purchasePrice === number(item.purchasePrice) && salePrice === number(item.salePrice) && item.priceSource === "Little Greene" && item.fixedSalePrice === true) continue;
       materials[index] = normalizeMaterial({
         ...item,
         supplier: item.wwSupplierAddressId ? item.supplier : "Little Greene",
         purchasePrice,
         salePrice,
+        fixedSalePrice: true,
         priceCheckedAt: sourceDate,
         priceValidFrom: sourceDate,
         priceSource: "Little Greene",
@@ -508,6 +510,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         unit: "Stk",
         purchasePrice: number(article?.purchasePrice),
         salePrice,
+        fixedSalePrice: true,
         priceValidFrom: sourceDate,
         priceCheckedAt: sourceDate,
         priceSource: `Little Greene · EK Basis ${base || "fehlt"}`,
@@ -600,6 +603,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       markup: number(raw.markup),
       overhead: number(raw.overhead),
       salePrice: number(raw.salePrice),
+      fixedSalePrice: bool(raw.fixedSalePrice),
       priceValidFrom: dateISO(raw.priceValidFrom),
       priceCheckedAt: dateISO(raw.priceCheckedAt),
       priceSource: clean(raw.priceSource, 80),
@@ -698,6 +702,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       markup: findValue(row, "markup"),
       overhead: findValue(row, "overhead"),
       salePrice: findValue(row, "salePrice"),
+      fixedSalePrice: findValue(row, "fixedSalePrice"),
       priceValidFrom: findValue(row, "priceValidFrom"),
       priceCheckedAt: findValue(row, "priceCheckedAt"),
       stock: findValue(row, "stock"),
@@ -951,7 +956,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const workbook = XLSX.utils.book_new();
     const headers = [
       "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
-      "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Preisstand",
+      "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
       "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer",
     ];
     const data = materials
@@ -966,6 +971,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "EK netto (€)": item.purchasePrice || "",
         "VK netto (€)": item.salePrice || "",
         "VK brutto (€)": item.salePrice ? Math.round(item.salePrice * 120) / 100 : "",
+        "Fix-VK": item.fixedSalePrice === true ? "Ja" : "Nein",
         "Preisstand": item.priceCheckedAt || item.priceValidFrom,
         "WW-Stammindex": item.wwSupplierAddressId || "",
         "WW-Lieferantennummer": item.wwSupplierNumber || "",
@@ -975,7 +981,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
     worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 15, 18, 22, 22].map(wch => ({ wch }));
+    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 11, 15, 18, 22, 22].map(wch => ({ wch }));
     XLSX.utils.book_append_sheet(workbook, worksheet, "Materialpreisliste");
 
     const warningRows = materials.map(decorate).filter(item => item.priceStale).map(item => ({
@@ -1372,6 +1378,7 @@ app.get("/api/regie/materials", async (req, res) => {
         ...target,
         purchasePrice: number(target.purchasePrice) || number(source.purchasePrice),
         salePrice: number(target.salePrice) || number(source.salePrice),
+        fixedSalePrice: target.fixedSalePrice === true || source.fixedSalePrice === true,
         priceCheckedAt: target.priceCheckedAt || source.priceCheckedAt,
         priceValidFrom: target.priceValidFrom || source.priceValidFrom,
         alias: aliases,
@@ -1427,6 +1434,7 @@ app.get("/api/regie/materials", async (req, res) => {
         purchasePrice: req.body?.purchasePrice ?? req.body?.unitPrice,
         markup: req.body?.markup,
         salePrice: req.body?.salePrice,
+        fixedSalePrice: req.body?.fixedSalePrice,
         supplier: req.body?.supplier,
         supplierArticleNumber: req.body?.supplierArticleNumber,
         priceValidFrom: req.body?.priceValidFrom,
@@ -1601,6 +1609,7 @@ app.get("/api/regie/materials", async (req, res) => {
         unit: req.body?.unit || source.unit,
         purchasePrice: req.body?.purchasePrice,
         salePrice: req.body?.salePrice,
+        fixedSalePrice: req.body?.fixedSalePrice,
         priceValidFrom: req.body?.priceValidFrom,
         priceCheckedAt: req.body?.priceCheckedAt,
         stock: req.body?.stock,

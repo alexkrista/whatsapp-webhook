@@ -70,6 +70,22 @@ function invoke(handler, req) {
   assert.equal(documentation[0].materials[0].cost, 36);
   assert.equal(first.body.report.attachments.length, 1);
 
+  const locked = await invoke(save, { body: {
+    id: first.body.report.id,
+    finish: false,
+    jobId: "26096",
+    date: "2026-09-03",
+    description: "Textkorrektur im fertigen Bericht",
+    hourlyRate: 99,
+    materialMarkup: 50,
+    employees: [{ id: "ma-1", name: "Max Muster", hours: 1, hourlyRate: 99 }],
+    materials: [{ product: "Farbe", quantity: 1, purchasePrice: 10, salePrice: 999 }],
+  } });
+  assert.equal(locked.body.report.status, "completed");
+  assert.equal(locked.body.report.hourlyRate, 75);
+  assert.equal(locked.body.report.totals.laborTotal, 562.5);
+  assert.equal(locked.body.report.materials[0].salePrice, 18, "Preise eines fertigen Rapports bleiben eingefroren");
+
   const second = await invoke(save, { body: {
     finish: false,
     jobId: "26096",
@@ -89,28 +105,59 @@ function invoke(handler, req) {
   assert.equal(protectedReport.statusCode, 409);
   assert.match(protectedReport.body.error, /geschützt/);
 
-  const individualRate = await invoke(save, { body: {
+  const projectRate = await invoke(save, { body: {
     finish: false,
     jobId: "26096",
     reportSequence: 7,
     date: "2026-09-03",
-    description: "Eigener Stundensatz",
+    description: "Baustellen-Stundensatz",
     hourlyRate: 75,
     employees: [{ id: "ma-1", name: "Max Muster", hours: 2, hourlyRate: 90 }],
   } });
-  assert.equal(individualRate.body.report.reportNumber, "26096007");
-  assert.equal(individualRate.body.report.totals.laborTotal, 180);
+  assert.equal(projectRate.body.report.reportNumber, "26096007");
+  assert.equal(projectRate.body.report.employees[0].hourlyRate, null);
+  assert.equal(projectRate.body.report.totals.laborTotal, 150, "Der Baustellen-Stundensatz gilt für jede Mitarbeiterzeile");
+
+  const projectMaterialPrices = await invoke(save, { body: {
+    finish: false,
+    jobId: "26096",
+    reportSequence: 8,
+    date: "2026-09-03",
+    description: "Baustellen-Materialaufschlag",
+    hourlyRate: 72,
+    materialMarkup: 50,
+    employees: [{ id: "ma-1", name: "Max Muster", hours: 1, hourlyRate: 99 }],
+    materials: [
+      { product: "Normaler Artikel", quantity: 2, purchasePrice: 10, markup: 80, salePrice: 18 },
+      { product: "Fixpreis-Artikel", quantity: 1, purchasePrice: 10, markup: 80, salePrice: 14, fixedSalePrice: true },
+    ],
+  } });
+  assert.equal(projectMaterialPrices.body.report.totals.laborTotal, 72);
+  assert.equal(projectMaterialPrices.body.report.materials[0].markup, 50);
+  assert.equal(projectMaterialPrices.body.report.materials[0].salePrice, 15, "Normaler Artikel verwendet EK plus Baustellen-Aufschlag");
+  assert.equal(projectMaterialPrices.body.report.materials[1].markup, 0);
+  assert.equal(projectMaterialPrices.body.report.materials[1].salePrice, 14, "Fix-VK bleibt ohne weiteren Aufschlag");
 
   const duplicate = await invoke(save, { body: {
     finish: false,
     jobId: "26096",
-    reportSequence: 7,
+    reportSequence: 9,
     date: "2026-09-03",
     description: "Doppelte Nummer",
     employees: [{ id: "ma-1", name: "Max Muster", hours: 1 }],
   } });
-  assert.equal(duplicate.statusCode, 400);
-  assert.match(duplicate.body.error, /bereits vergeben/);
+  assert.equal(duplicate.statusCode, 201);
+
+  const actualDuplicate = await invoke(save, { body: {
+    finish: false,
+    jobId: "26096",
+    reportSequence: 9,
+    date: "2026-09-03",
+    description: "Doppelte Nummer erneut",
+    employees: [{ id: "ma-1", name: "Max Muster", hours: 1 }],
+  } });
+  assert.equal(actualDuplicate.statusCode, 400);
+  assert.match(actualDuplicate.body.error, /bereits vergeben/);
 
   const issue = routes.get("POST /kristine/api/regie");
   const mobileDraftBody = {
@@ -207,8 +254,10 @@ function invoke(handler, req) {
     { id: "ma-real", name: "Max Muster", active: true },
   ]));
   fs.writeFileSync(path.join(temporaryRoot, "_kristine", "time-events.json"), JSON.stringify([
-    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "07:00", type: "start" },
-    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:37", type: "stop" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "07:45", type: "start" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:00", type: "mittag" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:30", type: "weiter" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "16:30", type: "stop" },
   ]));
   fs.writeFileSync(path.join(temporaryRoot, "_kristine", "assignments.json"), JSON.stringify([
     { employeeId: "ma-real", employeeName: "Max Muster", date: "2026-09-03", jobId: "26096", from: "07:00", to: "17:00", hours: 10 },
@@ -216,7 +265,9 @@ function invoke(handler, req) {
   const suggestions = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
   assert.equal(suggestions.body.suggestions.length, 1);
   assert.equal(suggestions.body.suggestions[0].name, "Max Muster");
-  assert.equal(suggestions.body.suggestions[0].hours, 5.62);
+  assert.equal(suggestions.body.suggestions[0].hours, 8.25);
+  assert.equal(suggestions.body.suggestions[0].timeLabel, "07:45–12:00 / 12:30–16:30");
+  assert.deepEqual(suggestions.body.suggestions[0].blocks, [{ from:"07:45", to:"12:00" }, { from:"12:30", to:"16:30" }]);
 
   const print = routes.get("GET /kristine/regie-report/:id/print");
   const printed = await invoke(print, { params: { id: first.body.report.id } });
@@ -247,7 +298,7 @@ function invoke(handler, req) {
     const longReport = await invoke(save, { body: {
       finish: false,
       jobId: "26096",
-      reportSequence: 8,
+      reportSequence: 10,
       date: "2026-09-03",
       description: "Ausführliche Arbeiten mit mehreren Materialzeilen zur Prüfung des sauberen Seitenumbruchs.",
       employees: [{ id: "ma-1", name: "Max Muster", from: "07:00", to: "12:00", hourlyRate: 82 }],
