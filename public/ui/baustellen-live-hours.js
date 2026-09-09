@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-invoice-state-16";
+  const VERSION="2026-09-09-gross-profit-17";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -9,6 +9,7 @@
   let liveByJob=new Map();
   let peopleByJob=new Map();
   let wwByJob=new Map();
+  let costEmployees=[];
   const reconciliationDrafts=new Map();
   const wwErrors=new Map();
   let timer=null;
@@ -17,6 +18,7 @@
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
+  const money2=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",minimumFractionDigits:2,maximumFractionDigits:2}).format(num(v));
   const dateLabel=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);return m&&year>=1900&&year<=2099?`${m[3]}.${m[2]}.${m[1]}`:"–"};
   const nameKey=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
   const canonicalPersonName=v=>({"mandi-faes":"Manuel Faes","edi-mock":"Edmund Mock","cathrin-grabherr":"Cathrin Anna Grabherr","anna-cathrin-grabherr":"Cathrin Anna Grabherr","cathrin-anna-grabherr":"Cathrin Anna Grabherr"})[nameKey(v)]||String(v||"").trim();
@@ -223,11 +225,11 @@
     const live=hoursSummary(id),target=targetHours(j),progress=target?live.order/target*100:0;
     const setText=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
     const card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label);
-    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden"),revenueCard=card("Rechnungswert je Auftragsstunde"),wwCard=card("Produktive WW-Stempelstunden");
+    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden"),revenueCard=card("Rechnungswert je Auftragsstunde"),grossProfitCard=card("Rohertrag");
     if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
     if(remainingCard)setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));
     const documentNet=num(host.dataset.billedNet)+num(host.dataset.draftNet);if(revenueCard){setText(revenueCard.querySelector(".bk-value"),live.order>0?money(documentNet/live.order):"–");setText(revenueCard.querySelector(".bk-note"),"gespeicherte + ausgestellte Rechnungen netto ÷ zusammengeführte Iststunden")}
-    const ww=wwByJob.get(String(id));if(wwCard&&ww?.found){const overlap=Math.max(0,num(ww.totalHours)-num(live.ww));setText(wwCard.querySelector(".bk-value"),hours(ww.totalHours));setText(wwCard.querySelector(".bk-note"),`${hours(live.ww)} zusätzlich gezählt · ${hours(overlap)} Überschneidung mit KRISTINE`)}
+    const materialEk=num(host.dataset.totalMaterialEk),wageCost=laborCost(id),grossProfit=documentNet-wageCost-materialEk;if(grossProfitCard){const value=grossProfitCard.querySelector(".bk-value");setText(value,documentNet>0?money2(grossProfit):"–");value?.classList.toggle("bk-bad",grossProfit<0);value?.classList.toggle("bk-good",grossProfit>=0);setText(grossProfitCard.querySelector(".bk-note"),documentNet>0?`${money2(documentNet)} Rechnungen netto − ${money2(wageCost)} Lohnkosten − ${money2(materialEk)} Material-EK`:"Noch keine Rechnung vorhanden")}
     const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
     if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
   }
@@ -246,6 +248,8 @@
     const map=new Map();for(const row of personDayHours(jobId)){const key=nameKey(canonicalPersonName(row.name)),person=map.get(key)||{name:canonicalPersonName(row.name)||"Unbekannt",hours:0,days:new Set(),sources:new Set()};person.hours+=num(row.hours);person.days.add(row.date);for(const source of String(row.source||"").split(" + ").filter(Boolean))person.sources.add(source);map.set(key,person)}return [...map.values()].sort((a,b)=>b.hours-a.hours||a.name.localeCompare(b.name,"de"));
   }
 
+  function laborCost(jobId){const people=personDayHours(jobId),usable=costEmployees.filter(e=>num(e?.calculation?.fullCostRate)>0),average=usable.length?usable.reduce((sum,e)=>sum+num(e.calculation.fullCostRate),0)/usable.length:0,rateFor=name=>{const wanted=nameKey(canonicalPersonName(name)),employee=usable.find(e=>[e.name,e.nickname,e.shortCode].some(value=>nameKey(canonicalPersonName(value))===wanted));return num(employee?.calculation?.fullCostRate)||average};return people.reduce((sum,person)=>sum+num(person.hours)*rateFor(person.name),0)}
+
   function patchHoursTab(id){
     const host=document.getElementById("bkHours");if(!host)return;const live=hoursSummary(id),people=fusedPeople(id),regie=Math.max(num(calc(job(id)).actualRegieHours),num(host.dataset.regieReportHours)),card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label),set=(label,value,note="")=>{const el=card(label);if(!el)return;const valueEl=el.querySelector(".bk-value");if(valueEl&&valueEl.textContent!==value)valueEl.textContent=value;let noteEl=el.querySelector(".bk-note");if(note&&!noteEl){noteEl=document.createElement("div");noteEl.className="bk-note";el.appendChild(noteEl)}if(noteEl&&note&&noteEl.textContent!==note)noteEl.textContent=note};
     set("Erfasste Stunden",hours(live.total),`${hours(live.kristine)} KRISTINE + ${hours(live.ww)} WW`);set("davon Regie",hours(regie),"aus Regieberichten");set("Mitarbeiter auf Baustelle",String(people.length),"nach WW-/KRISTINE-Abgleich");
@@ -253,7 +257,7 @@
   }
 
   async function refresh(){
-    try{const [j,b]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap")]);jobs=j.jobs||[];bootstrap=b||{};buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1));if(id){try{const ww=await loadWwHours(id);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll()}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1));if(id){try{const ww=await loadWwHours(id);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll()}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
   function install(){
