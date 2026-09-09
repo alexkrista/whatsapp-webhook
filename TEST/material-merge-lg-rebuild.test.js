@@ -65,6 +65,7 @@ function invoke(handler, req = {}) {
     assert(direct && direct.active);
     assert.equal(direct.purchasePrice, 21);
     assert.equal(direct.salePrice, 49.17);
+    assert.equal(direct.fixedSalePrice, true, "Little-Greene-VK wird im Regiebericht unverändert verwendet");
     assert.equal(direct.supplierArticleNumber, "SKU1");
     assert.match(direct.priceSource, /EK Basis Hi White/);
     assert(fs.existsSync(path.join(materialDir, rebuilt.body.backupName)), "Vor dem LG-Neuaufbau wird eine Sicherung erstellt");

@@ -115,11 +115,18 @@ function registerRegieAssistant(app, options) {
       : Math.max(0, num(row.hourlyRate));
   }
 
-  function normalizeMaterial(row, defaultMarkup = 80) {
+  function normalizeMaterial(row, defaultMarkup = 80, preservePrice = false) {
     const purchasePrice = round(num(row?.purchasePrice ?? row?.unitPrice ?? row?.ek));
-    const markup = Math.max(0, round(num(row?.markup ?? row?.markupPercent ?? defaultMarkup)));
     const explicitSale = num(row?.salePrice ?? row?.vkNet);
-    const salePrice = round(explicitSale || purchasePrice * (1 + markup / 100));
+    const fixedSalePrice = row?.fixedSalePrice === true || (!purchasePrice && explicitSale > 0);
+    const markup = fixedSalePrice
+      ? 0
+      : Math.max(0, round(num(preservePrice ? (row?.markup ?? row?.markupPercent ?? defaultMarkup) : defaultMarkup)));
+    const salePrice = round(
+      fixedSalePrice || preservePrice
+        ? (explicitSale || purchasePrice * (1 + markup / 100))
+        : purchasePrice * (1 + markup / 100)
+    );
     return {
       materialId: clean(row?.materialId, 140),
       product: clean(row?.product || row?.name, 240),
@@ -129,6 +136,7 @@ function registerRegieAssistant(app, options) {
       purchasePrice,
       markup,
       salePrice,
+      fixedSalePrice,
       salePriceGross: round(salePrice * 1.2),
       total: round((num(row?.quantity) || 1) * salePrice),
       color: clean(row?.color, 120),
@@ -395,13 +403,21 @@ function registerRegieAssistant(app, options) {
     if (!jobId) throw new Error("Bitte eine Baustelle auswählen.");
     if (!clean(body.description || existing.description, 4000)) throw new Error("Beschreibung der Arbeit fehlt.");
     const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
-    const hourlyRate = Math.max(0, num(body.hourlyRate ?? meta.regieHourlyRate ?? 75));
-    const materialMarkup = Math.max(0, num(body.materialMarkup ?? meta.regieMaterialMarkup ?? 80));
-    if (typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
+    const priceLocked = existing.status === "completed";
+    const hourlyRate = Math.max(0, num(priceLocked ? existing.hourlyRate : (body.hourlyRate ?? meta.regieHourlyRate ?? 75)));
+    const materialMarkup = Math.max(0, num(priceLocked ? existing.materialMarkup : (body.materialMarkup ?? meta.regieMaterialMarkup ?? 80)));
+    if (!priceLocked && typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
     const now = new Date().toISOString();
-    const employees = (Array.isArray(body.employees) ? body.employees : []).map(normalizeEmployee).filter(row => row.name && row.hours > 0);
+    const employeeSource = priceLocked ? existing.employees : (Array.isArray(body.employees) ? body.employees : []);
+    const employees = employeeSource
+      .map(normalizeEmployee)
+      .map(row => priceLocked ? row : { ...row, hourlyRate: null })
+      .filter(row => row.name && row.hours > 0);
     if (!employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
-    const materials = (Array.isArray(body.materials) ? body.materials : []).map(row => normalizeMaterial(row, materialMarkup)).filter(row => row.product && row.quantity > 0);
+    const materialSource = priceLocked ? existing.materials : (Array.isArray(body.materials) ? body.materials : []);
+    const materials = materialSource
+      .map(row => normalizeMaterial(row, materialMarkup, priceLocked))
+      .filter(row => row.product && row.quantity > 0);
     let reportSequence = Number(body.reportSequence);
     if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = reportSequenceOf(body, jobId) || reportSequenceOf(existing, jobId);
     if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = await nextReportSequence(jobId, reports, body.date || existing.date);
@@ -414,8 +430,8 @@ function registerRegieAssistant(app, options) {
     const report = {
       ...existing,
       id,
-      status: finish ? "completed" : "draft",
-      processingStatus: finish ? "approved" : (existing.processingStatus || (existing.status === "prepared" ? "issued" : "draft")),
+      status: priceLocked ? existing.status : (finish ? "completed" : "draft"),
+      processingStatus: priceLocked ? existing.processingStatus : (finish ? "approved" : (existing.processingStatus || (existing.status === "prepared" ? "issued" : "draft"))),
       billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
@@ -670,7 +686,7 @@ function registerRegieAssistant(app, options) {
       const incomingEmployees = Array.isArray(body.employees) && body.employees.length
         ? body.employees
         : body.people.map(person => ({ ...person, from: body.from, to: body.to }));
-      const employees = incomingEmployees.map(normalizeIssuedEmployee).filter(row => row.name && row.hours > 0);
+      const employees = incomingEmployees.map(normalizeIssuedEmployee).map(row => ({ ...row, hourlyRate: null })).filter(row => row.name && row.hours > 0);
       if (!employees.length) return res.status(400).json({ ok: false, error: "Mindestens ein Mitarbeiter mit Regiestunden fehlt" });
       const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
       const reportSequence = reportSequenceOf(existing, jobId) || await nextReportSequence(jobId, reports, body.date);

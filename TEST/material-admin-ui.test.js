@@ -13,7 +13,7 @@ const inlineScript = ui.match(/<script>([\s\S]*?)<\/script>/);
 assert(inlineScript, "Materialverwaltung enthält ihr Seitenskript");
 new vm.Script(inlineScript[1], { filename: "material-admin.inline.js" });
 
-for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "Lieferanten verwalten", "openSupplierManager", "linkWwSupplier", "unsere KdNr.", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "updateGrossFromNet", "updateNetFromGross"]) {
+for (const text of ["Preiswarnungen", "+ Neues Material", "Bearbeiten", "deleteMaterial", "Excel importieren", "Excel exportieren", "Alle Lieferanten", "printMaterials", "Drucken", "Lieferanten verwalten", "openSupplierManager", "linkWwSupplier", "unsere KdNr.", "supplierArticleNumber", "In WW suchen", "searchWinWorker", "prepareWinWorkerImport", "WW-Material übernehmen und ergänzen", "supplierGroups", "ww-supplier-count", "Übernehmen", "editMaterialId", "ID / Kürzel", "editGross", "VK brutto €", "editFixedVk", "Fix-VK", "updateGrossFromNet", "updateNetFromGross"]) {
   assert(ui.includes(text), `Materialverwaltung enthält ${text}`);
 }
 assert(!ui.includes("WW jetzt einlesen"), "WW-Materialien werden nur einzeln ausgewählt übernommen");
@@ -23,6 +23,8 @@ assert(regie.includes("hasPurchase=owns(item,['purchasePrice','unitPrice','ek'])
 assert(regie.includes("queue-delete"), "Offene Regieberichte können nach Rückfrage gelöscht werden");
 assert(regie.includes("m?.supplierArticleNumber"), "Regiebericht-Suche zeigt auch WW-Kürzel wie A 01");
 assert(regie.includes('placeholder="25 oder 5*5"'), "Mengenfeld weist auf die Rechenfunktion hin");
+assert(regie.includes("applyProjectPricing"), "Baustellen-Stundensatz und -Aufschlag werden auf alle normalen Zeilen angewendet");
+assert(regie.includes("fixedSalePrice"), "Fix-VK-Artikel werden ohne Baustellen-Aufschlag übernommen");
 const quantityFunction = regie.split(/\r?\n/).find(line => line.startsWith("function calculateQuantity"));
 const quantityContext = {};
 vm.runInNewContext(`const round=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;${quantityFunction};this.calculateQuantity=calculateQuantity`, quantityContext);
