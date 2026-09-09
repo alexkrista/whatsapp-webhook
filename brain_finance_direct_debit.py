@@ -328,7 +328,7 @@ def install(ns):
             html = html.replace("<h2>Offene Überweisungen</h2>", "<h2>Zu zahlende Rechnungen</h2>")
             section = r'''
 <section class="card" id="directDebitCard">
-  <div class="section-title"><h2>Erwartete Einzüge</h2><span class="hint">Bleiben hier bis zum tatsächlichen CAMT-Treffer – auch wenn WinWorker bereits „Lastschrift beglichen“ meldet.</span></div>
+  <div class="section-title"><h2>Erwartete Einzüge</h2><div><label class="dd-range">Zeitraum <select id="directDebitRange"><option value="7">7 Tage</option><option value="31">1 Monat</option></select></label><div class="hint">Überfällige bleiben bis zum tatsächlichen CAMT-Treffer sichtbar.</div></div></div>
   <div id="directDebitMeta" class="note">Einzüge werden geladen …</div>
   <div id="directDebitRows"><div class="empty">Wird geladen …</div></div>
 </section>
@@ -338,7 +338,7 @@ def install(ns):
                 html = html.replace(marker, section + marker, 1)
             css = r'''
 <style id="kristaDirectDebitCss">
-.dd-group{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.dd-group:first-child{border-top:0;margin-top:0}.dd-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:5px 6px 8px}.dd-head strong{font-size:14px}.dd-head span{color:var(--muted);font-size:12px}.dd-row{display:grid;grid-template-columns:105px minmax(160px,1.2fr) minmax(120px,.8fr) 125px 190px 90px;gap:9px;align-items:center;padding:9px 6px;border-top:1px solid var(--line);font-size:13px}.dd-wait{color:#9cc7ff;font-weight:850;font-size:11px}.dd-warn{color:var(--warn);font-weight:850;font-size:11px}.dd-blocked{color:var(--danger);font-weight:850;font-size:11px}@media(max-width:900px){.dd-row{grid-template-columns:1fr 1fr}}@media(max-width:520px){.dd-row{grid-template-columns:1fr}}
+.dd-range{display:flex;gap:7px;align-items:center;justify-content:flex-end;color:var(--muted);font-size:12px;margin-bottom:5px}.dd-range select{padding:6px 9px}.dd-group{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.dd-group:first-child{border-top:0;margin-top:0}.dd-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:5px 6px 8px}.dd-head strong{font-size:14px}.dd-head span{color:var(--muted);font-size:12px}.dd-row{display:grid;grid-template-columns:105px minmax(160px,1.2fr) minmax(120px,.8fr) 125px 190px 90px;gap:9px;align-items:center;padding:9px 6px;border-top:1px solid var(--line);font-size:13px}.dd-wait{color:#9cc7ff;font-weight:850;font-size:11px}.dd-warn{color:var(--warn);font-weight:850;font-size:11px}.dd-blocked{color:var(--danger);font-weight:850;font-size:11px}@media(max-width:900px){.dd-row{grid-template-columns:1fr 1fr}}@media(max-width:520px){.dd-row{grid-template-columns:1fr}}
 </style>
 '''
             if 'kristaDirectDebitCss' not in html:
@@ -346,21 +346,23 @@ def install(ns):
             script = r'''
 <script id="kristaDirectDebitV1">
 (function(){
- const box=document.getElementById('directDebitRows'),meta=document.getElementById('directDebitMeta');if(!box||!meta)return;
+ const box=document.getElementById('directDebitRows'),meta=document.getElementById('directDebitMeta'),range=document.getElementById('directDebitRange');if(!box||!meta)return;let all=[];
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const money=(n,c='EUR')=>{try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:c||'EUR'}).format(Number(n||0))}catch(_){return Number(n||0).toFixed(2)+' '+c}};
  const date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')};
  const status=x=>x.approvalStatus==='blocked'?'<span class="dd-blocked">⛔ gesperrt · Einzug trotzdem beobachten</span>':x.approvalStatus==='pending'?'<span class="dd-warn">⏳ Freigabe offen · wartet auf CAMT</span>':'<span class="dd-wait">↙ erwartet · wartet auf CAMT</span>';
  const pdf=x=>x.path?`<a class="pdf" href="/pdf?path=${encodeURIComponent(x.path)}" target="_blank">PDF</a>`:'–';
  function totals(rows){const t={};rows.forEach(x=>{const c=x.currency||'EUR';t[c]=(t[c]||0)+Number(x.amount||0)});return Object.entries(t).map(([c,n])=>money(n,c)).join(' · ')}
+ function visible(rows){const days=Number(range?.value||7),today=new Date();today.setHours(12,0,0,0);return (rows||[]).filter(x=>{const raw=x.expectedDebitDate||x.dueDate;if(!raw)return true;const due=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(due.getTime())||Math.round((due-today)/86400000)<=days})}
  function render(rows){
-   rows=[...(rows||[])].sort((a,b)=>String(a.expectedDebitDate||a.dueDate||'9999').localeCompare(String(b.expectedDebitDate||b.dueDate||'9999'))||String(a.supplier||'').localeCompare(String(b.supplier||''),'de'));
+   rows=visible(rows).sort((a,b)=>String(a.expectedDebitDate||a.dueDate||'9999').localeCompare(String(b.expectedDebitDate||b.dueDate||'9999'))||String(a.supplier||'').localeCompare(String(b.supplier||''),'de'));
    meta.innerHTML=`<strong>${rows.length} erwartete Einzüge</strong>${rows.length?' · '+esc(totals(rows)):''} · älteste Fälligkeit zuerst`;
    if(!rows.length){box.innerHTML='<div class="empty">Keine erwarteten Einzüge.</div>';return}
    const groups=new Map();rows.forEach(x=>{const k=String(x.supplier||'Ohne Lieferant');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x)});
    box.innerHTML=[...groups.entries()].map(([supplier,items])=>`<div class="dd-group"><div class="dd-head"><strong>${esc(supplier)}</strong><span>${items.length} Rechnung(en) · ${esc(totals(items))}</span></div>${items.map(x=>`<div class="dd-row"><div><strong>${esc(date(x.expectedDebitDate||x.dueDate))}</strong><div class="sub">erwarteter Einzug</div></div><div><div>${esc(x.invoiceNumber||'–')}</div><div class="sub">${esc(x.source||'')}</div></div><div class="amount">${esc(money(x.amount,x.currency))}</div><div>${status(x)}</div><div class="sub">${x.wwStatusRaw?'WW: '+esc(x.wwStatusRaw):''}</div><div>${pdf(x)}</div></div>`).join('')}</div>`).join('');
  }
- fetch('/incoming/payment-open-items',{cache:'no-store'}).then(r=>r.json().then(d=>[r,d])).then(([r,d])=>{if(!r.ok||!d.ok)throw Error(d.error||'Einzüge konnten nicht geladen werden');render(d.directDebit||[])}).catch(e=>{meta.textContent='Einzüge konnten nicht geladen werden';box.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+ if(range)range.onchange=()=>render(all);
+ fetch('/incoming/payment-open-items',{cache:'no-store'}).then(r=>r.json().then(d=>[r,d])).then(([r,d])=>{if(!r.ok||!d.ok)throw Error(d.error||'Einzüge konnten nicht geladen werden');all=d.directDebit||[];render(all)}).catch(e=>{meta.textContent='Einzüge konnten nicht geladen werden';box.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
 })();
 </script>
 '''

@@ -20,6 +20,22 @@ def _clean(value, length):
     return " ".join(str(value or "").split())[:length]
 
 
+def _filename_part(value, length=28):
+    value = re.sub(r"[^0-9A-Za-zÄÖÜäöüß]+", "-", str(value or "").strip())
+    return value.strip("-")[:length].rstrip("-") or "Empfaenger"
+
+
+def _recipient_filename(rows):
+    names = []
+    for row in rows:
+        name = _filename_part(row.get("creditor"))
+        if name.casefold() not in {item.casefold() for item in names}:
+            names.append(name)
+    if len(names) <= 3:
+        return "_".join(names)
+    return "_".join(names[:2]) + f"_plus-{len(names) - 2}"
+
+
 def _iban(value):
     return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
@@ -138,4 +154,5 @@ def build_sepa_xml(items, debtor_name, debtor_iban, debtor_bic="", created_at=No
             _child(_child(transaction, "RmtInf"), "Ustrd", row["reference"])
 
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-    return xml, f"SEPA_{now.strftime('%Y-%m-%d_%H-%M-%S')}.xml"
+    recipients = _recipient_filename(rows)
+    return xml, f"SEPA_{now.strftime('%Y-%m-%d_%H-%M-%S')}_{recipients}.xml"

@@ -1,6 +1,7 @@
 # coding: utf-8
 from __future__ import annotations
 import hashlib
+import json
 from datetime import datetime
 
 METHODS={"unknown","transfer","direct_debit","revolut","cash"}
@@ -26,6 +27,7 @@ class FinanceStore:
         c=f(db)
         c.execute("CREATE TABLE IF NOT EXISTS brain_op_overrides(source TEXT NOT NULL,source_id TEXT NOT NULL,status TEXT NOT NULL,note TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
         c.execute("CREATE TABLE IF NOT EXISTS brain_payment_meta(source TEXT NOT NULL,source_id TEXT NOT NULL,payment_method TEXT NOT NULL DEFAULT 'unknown',payment_status TEXT NOT NULL DEFAULT 'open',payment_id TEXT NOT NULL DEFAULT '',note TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
+        c.execute("CREATE TABLE IF NOT EXISTS brain_sepa_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT NOT NULL,filename TEXT NOT NULL,transaction_count INTEGER NOT NULL,total_amount REAL NOT NULL,currency TEXT NOT NULL DEFAULT 'EUR',summary TEXT NOT NULL DEFAULT '',items_json TEXT NOT NULL DEFAULT '[]',xml_text TEXT NOT NULL)")
         c.commit(); return c
     def meta(self):
         c=self.con()
@@ -45,6 +47,36 @@ class FinanceStore:
             if m!="transfer" and s=="sepa_submitted": s="open"
             c.execute("INSERT INTO brain_payment_meta(source,source_id,payment_method,payment_status,payment_id,note,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET payment_method=excluded.payment_method,payment_status=excluded.payment_status,payment_id=excluded.payment_id,note=excluded.note,updated_at=excluded.updated_at",(source,source_id,m,s,pid,n,datetime.now().isoformat(timespec="seconds")))
             c.commit(); return {"paymentMethod":m,"paymentStatus":s,"paymentId":pid,"paymentNote":n}
+        finally:c.close()
+    def save_sepa_batch(self,filename,xml_text,items,total=None,created_at=None):
+        created_at=str(created_at or datetime.now().isoformat(timespec="seconds"))
+        rows=[]
+        for item in items or []:
+            amount=round(float(item.get("paymentAmount") if item.get("paymentAmount") is not None else item.get("amount") or 0),2)
+            rows.append({"source":str(item.get("source") or ""),"id":str(item.get("id") or ""),"supplier":str(item.get("supplier") or item.get("accountHolder") or "Empfänger").strip(),"invoiceNumber":str(item.get("invoiceNumber") or "").strip(),"amount":amount,"currency":str(item.get("currency") or "EUR").upper()})
+        if not rows: raise ValueError("Keine Zahlungen für das SEPA-Archiv vorhanden.")
+        total=round(float(total if total is not None else sum(x["amount"] for x in rows)),2)
+        summary=" · ".join(f'{x["supplier"]} {x["amount"]:.2f} {x["currency"]}' for x in rows)
+        c=self.con()
+        try:
+            cur=c.execute("INSERT INTO brain_sepa_batches(created_at,filename,transaction_count,total_amount,currency,summary,items_json,xml_text) VALUES(?,?,?,?,?,?,?,?)",(created_at,str(filename or "SEPA.xml"),len(rows),total,"EUR",summary,json.dumps(rows,ensure_ascii=False),str(xml_text or "")))
+            c.commit(); batch_id=int(cur.lastrowid)
+        finally:c.close()
+        return self.sepa_batch(batch_id)
+    def _sepa_public(self,row,include_xml=False):
+        if not row:return None
+        try:items=json.loads(str(row["items_json"] or "[]"))
+        except Exception:items=[]
+        out={"id":int(row["id"]),"createdAt":str(row["created_at"] or ""),"filename":str(row["filename"] or "SEPA.xml"),"count":int(row["transaction_count"] or 0),"total":float(row["total_amount"] or 0),"currency":str(row["currency"] or "EUR"),"summary":str(row["summary"] or ""),"items":items}
+        if include_xml:out["xml"]=str(row["xml_text"] or "")
+        return out
+    def sepa_batches(self,limit=100):
+        c=self.con()
+        try:return [self._sepa_public(row) for row in c.execute("SELECT * FROM brain_sepa_batches ORDER BY created_at DESC,id DESC LIMIT ?",(max(1,min(500,int(limit or 100))),)).fetchall()]
+        finally:c.close()
+    def sepa_batch(self,batch_id):
+        c=self.con()
+        try:return self._sepa_public(c.execute("SELECT * FROM brain_sepa_batches WHERE id=?",(int(batch_id),)).fetchone(),include_xml=True)
         finally:c.close()
     def legacy(self):
         c=self.con()

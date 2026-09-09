@@ -64,7 +64,7 @@ def install(ns):
     page=str(ns.get("MOBILE_PAGE") or ""); app=ns.get("app")
     if not page or app is None:return
     allowed=ns.get("MOBILE_ALLOWED_PATHS")
-    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
+    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
     if isinstance(allowed,set):
         for p in paths:allowed.add(p)
     store=FinanceStore(ns)
@@ -238,21 +238,36 @@ def install(ns):
                     try:_boot,tasks=finance_tasks()
                     except Exception:tasks=[]
                 idx=approval_index(tasks);all_items=[apply_approval(x,idx) for x in store.items(False)]
-                transfer=[x for x in all_items if norm_method(x.get("paymentMethod"))=="transfer" and norm_status(x.get("paymentStatus"))!="paid"]
+                transfer_all=[x for x in all_items if norm_method(x.get("paymentMethod"))=="transfer" and norm_status(x.get("paymentStatus"))!="paid"]
+                submitted=[x for x in transfer_all if norm_status(x.get("paymentStatus"))=="sepa_submitted"]
+                transfer=[x for x in transfer_all if norm_status(x.get("paymentStatus"))!="sepa_submitted"]
                 unknown=[x for x in all_items if norm_method(x.get("paymentMethod"))=="unknown" and norm_status(x.get("paymentStatus"))!="paid"]
                 local=[x for x in all_items if str(x.get("source") or "")=="KRISTINE" and norm_status(x.get("paymentStatus"))!="paid"]
                 pending=[x for x in local if x.get("approvalStatus")=="pending"]; blocked=[x for x in local if x.get("approvalStatus")=="blocked"]; approved=[x for x in local if x.get("approvalStatus") in FINAL_APPROVALS]
                 payable=[x for x in transfer if x.get("approvalStatus") in FINAL_APPROVALS or x.get("approvalStatus")=="not_required"]
-                return jsonify(ok=True,count=len(transfer),total=round(sum(float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0) for x in payable),2),unclassifiedCount=len(unknown),approvalPendingCount=len(pending),approvalBlockedCount=len(blocked),approvalApprovedCount=len(approved),approvalSyncError=sync_error,items=transfer,unclassified=unknown)
+                return jsonify(ok=True,count=len(transfer),total=round(sum(float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0) for x in payable),2),submittedCount=len(submitted),unclassifiedCount=len(unknown),approvalPendingCount=len(pending),approvalBlockedCount=len(blocked),approvalApprovedCount=len(approved),approvalSyncError=sync_error,items=transfer,submitted=submitted,unclassified=unknown)
+            except Exception as e:return jsonify(ok=False,error=str(e)),500
+        @app.get("/incoming/payment-batches")
+        def brain_incoming_payment_batches():
+            try:return jsonify(ok=True,batches=store.sepa_batches(request.args.get("limit") or 100))
+            except Exception as e:return jsonify(ok=False,error=str(e)),500
+        @app.get("/incoming/payment-batches/xml")
+        def brain_incoming_payment_batch_archive_xml():
+            try:
+                batch=store.sepa_batch(request.args.get("id") or 0)
+                if not batch:return jsonify(ok=False,error="SEPA-Datei nicht gefunden."),404
+                return jsonify(ok=True,**batch)
+            except (ValueError,TypeError):return jsonify(ok=False,error="Ungültige SEPA-Datei."),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.post("/incoming/payment-batch/prepare")
         def brain_incoming_payment_batch_prepare():
             try:
                 b=request.get_json(silent=True) or {}; req=b.get("items") or []
                 out,total=requested_live_items(req);download=sepa_payload(out)
+                batch=store.save_sepa_batch(download["filename"],download["xml"],out,total)
                 for y in out:
                     saved=store.set_meta(y["source"],y["id"],method="transfer",status="sepa_submitted",note=y["remittanceText"]);y.update(saved)
-                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,message="SEPA-Datei erstellt; bezahlt erst nach Bankabgleich.",**download)
+                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,archiveId=batch["id"],message="SEPA-Datei erstellt und archiviert; bezahlt erst nach Bankabgleich.",**download)
             except ValueError as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.post("/incoming/payment-batch/xml")
