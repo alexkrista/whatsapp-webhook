@@ -3154,6 +3154,27 @@ app.delete("/admin/api/job/:jobId", async (req, res) => {
     if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
     const jobDir = path.join(DATA_DIR, jobId);
     if (!fs.existsSync(jobDir)) return res.status(404).json({ ok: false, error: "Job not found" });
+    if (String(req.query.emptyOnly || "") === "1") {
+      const meta = await readJobMeta(jobId);
+      const companySummary = await calculationSummary();
+      const hours = await summarizeJobHours(jobId);
+      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
+      const assignmentsPath = path.join(DATA_DIR, "_kristine", "assignments.json");
+      const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
+      const assignments = await fsp.readFile(assignmentsPath, "utf8").then(JSON.parse).catch(() => []);
+      const timeEvents = await fsp.readFile(timeEventsPath, "utf8").then(JSON.parse).catch(() => []);
+      const hasPlanning = (Array.isArray(assignments) ? assignments : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
+      const hasTimeEvents = (Array.isArray(timeEvents) ? timeEvents : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
+      const documentation = await readDocumentation(jobId);
+      const hasRegieReports = documentation.some(row => row?.type === "regie_report");
+      const days = await listDaysForJob(jobId);
+      const hasWorkData = days.length > 0;
+      const hasFinancialData = calculation.contractAmount > .005 || calculation.calculatedHours > .005;
+      const hasRecordedHours = calculation.actualHours > .005 || calculation.actualRegieHours > .005;
+      if (hasPlanning || hasTimeEvents || hasRegieReports || hasWorkData || hasFinancialData || hasRecordedHours) {
+        return res.status(409).json({ ok: false, error: "Diese Baustelle enthält bereits Stunden, Planung, Auftragswerte, Regieberichte oder Bautage und kann deshalb nicht als Fehlanlage gelöscht werden." });
+      }
+    }
     const sizeBytes = await dirSizeBytes(jobDir);
     await fsp.rm(jobDir, { recursive: true, force: true });
     res.json({ ok: true, jobId, deletedBytes: sizeBytes });
