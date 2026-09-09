@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-regie-billing-9";
+  const VERSION="2026-09-09-project-wage-rate-10";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
@@ -267,12 +267,12 @@
       const wageCost=hours*wageRate,gkCost=hours*gkRate;
       return{name:person.name||'Unbekannt',hours,wageRate,wageCost,gkRate,gkCost,totalCost:wageCost+gkCost,matched};
     });
-    const wageTotal=rows.reduce((sum,row)=>sum+row.wageCost,0),gkTotal=rows.reduce((sum,row)=>sum+row.gkCost,0);
-    return{rows,wageTotal,gkTotal,total:wageTotal+gkTotal,averageWageRate,averageGkRate};
+    const wageTotal=rows.reduce((sum,row)=>sum+row.wageCost,0),gkTotal=rows.reduce((sum,row)=>sum+row.gkCost,0),totalHours=rows.reduce((sum,row)=>sum+row.hours,0),projectWageRate=totalHours>0?wageTotal/totalHours:0,projectGkRate=totalHours>0?gkTotal/totalHours:0;
+    return{rows,wageTotal,gkTotal,total:wageTotal+gkTotal,totalHours,projectWageRate,projectGkRate,averageWageRate,averageGkRate};
   }
   function grossProfitDetails(cost,documentNet,totalMaterialEk,grossProfit){
     const rows=cost.rows.length?cost.rows.map(row=>`<tr><td>${esc(row.name)}${row.matched?'':' <span class="bk-profit-warning">(Ø-Sätze)</span>'}</td><td class="num">${hour(row.hours)}</td><td class="num">${money2(row.wageRate)} / h</td><td class="num">${money2(row.wageCost)}</td><td class="num">${money2(row.gkRate)} / h</td><td class="num">${money2(row.gkCost)}</td><td class="num"><strong>${money2(row.totalCost)}</strong></td></tr>`).join(''):'<tr><td colspan="7">Noch keine Mitarbeiterstunden zugeordnet.</td></tr>';
-    return `<div class="bk-note">Je Mitarbeiter: Stunden × Lohnkostensatz + Stunden × GK-Satz = Gesamtkosten. Lohnsatz = Monatsbrutto × 18 ÷ 1.650; GK-Satz = jährliche Gemeinkosten ÷ produktive Jahresstunden.</div><div class="bk-profit-table-wrap"><table class="bk-table"><thead><tr><th>Mitarbeiter</th><th class="num">Stunden</th><th class="num">Lohn €/h</th><th class="num">Lohnkosten</th><th class="num">GK €/h</th><th class="num">GK-Kosten</th><th class="num">Gesamtkosten</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th colspan="3">Summen</th><th class="num">${money2(cost.wageTotal)}</th><th></th><th class="num">${money2(cost.gkTotal)}</th><th class="num">${money2(cost.total)}</th></tr><tr><td colspan="6">Material-EK gesamt</td><td class="num">${money2(totalMaterialEk)}</td></tr><tr><td colspan="6">Rechnungen netto</td><td class="num">${money2(documentNet)}</td></tr><tr><td colspan="6"><strong>Rohertrag</strong></td><td class="num"><strong>${money2(grossProfit)}</strong></td></tr></tfoot></table></div>${cost.rows.some(row=>!row.matched)?'<div class="bk-note bk-profit-warning">Ø-Sätze = Mitarbeitername nicht eindeutig im Mitarbeiterstamm gefunden.</div>':''}`;
+    return `<div class="bk-note">Je Mitarbeiter: Stunden × Lohnkostensatz + Stunden × GK-Satz = Gesamtkosten. Lohnsatz = Monatsbrutto × 18 ÷ 1.650; GK-Satz = jährliche Gemeinkosten ÷ produktive Jahresstunden.</div><div class="bk-profit-table-wrap"><table class="bk-table"><thead><tr><th>Mitarbeiter</th><th class="num">Stunden</th><th class="num">Lohn €/h</th><th class="num">DN-Lohnkosten</th><th class="num">GK €/h</th><th class="num">GK-Kosten</th><th class="num">Gesamtkosten</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th>Summen / DN-Lohn</th><th class="num">${hour(cost.totalHours)}</th><th class="num">${money2(cost.projectWageRate)} / h</th><th class="num">${money2(cost.wageTotal)}</th><th class="num">${money2(cost.projectGkRate)} / h</th><th class="num">${money2(cost.gkTotal)}</th><th class="num">${money2(cost.total)}</th></tr><tr><td colspan="7" class="bk-note">Baustellen-Lohnkostensatz: ${money2(cost.wageTotal)} DN-Lohn ÷ ${hour(cost.totalHours)} = ${money2(cost.projectWageRate)} / h</td></tr><tr><td colspan="6">Material-EK gesamt</td><td class="num">${money2(totalMaterialEk)}</td></tr><tr><td colspan="6">Rechnungen netto</td><td class="num">${money2(documentNet)}</td></tr><tr><td colspan="6"><strong>Rohertrag</strong></td><td class="num"><strong>${money2(grossProfit)}</strong></td></tr></tfoot></table></div>${cost.rows.some(row=>!row.matched)?'<div class="bk-note bk-profit-warning">Ø-Sätze = Mitarbeitername nicht eindeutig im Mitarbeiterstamm gefunden.</div>':''}`;
   }
   async function downloadGrossProfitPdf(host,j,button){
     const data=host?._bkGrossProfitPdfData;if(!data)return;const old=button.textContent;button.disabled=true;button.textContent="PDF wird erstellt …";

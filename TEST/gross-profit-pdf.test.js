@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
 const { PDFDocument } = require("pdf-lib");
 const { createGrossProfitPdf } = require("../gross-profit-pdf");
 
@@ -20,6 +21,10 @@ const { createGrossProfitPdf } = require("../gross-profit-pdf");
   assert.ok(bytes.length > 1500);
   const pdf = await PDFDocument.load(bytes);
   assert.strictEqual(pdf.getPageCount(), 1);
+  const source = fs.readFileSync(require.resolve("../gross-profit-pdf"), "utf8");
+  assert.match(source, /DN-Lohnkosten/);
+  assert.match(source, /Baustellen-Lohnkostensatz/);
+  assert.match(source, /projectWageRate/);
   console.log("gross profit PDF tests passed");
 })().catch(error => {
   console.error(error);

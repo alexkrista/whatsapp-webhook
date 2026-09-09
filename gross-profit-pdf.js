@@ -22,6 +22,9 @@ async function createGrossProfitPdf(data = {}) {
   const rowHeight = 21;
   const columns = [34, 218, 290, 376, 468, 540, 630, 808];
   const rows = Array.isArray(data.rows) ? data.rows : [];
+  const totalHours = rows.reduce((sum, row) => sum + Number(row.hours || 0), 0);
+  const projectWageRate = totalHours > 0 ? Number(data.wageTotal || 0) / totalHours : 0;
+  const projectGkRate = totalHours > 0 ? Number(data.gkTotal || 0) / totalHours : 0;
   const green = rgb(.15, .36, .22);
   const dark = rgb(.12, .16, .13);
   const muted = rgb(.40, .43, .40);
@@ -38,7 +41,7 @@ async function createGrossProfitPdf(data = {}) {
     for (let i = 0; i < 7; i++) {
       page.drawRectangle({ x: columns[i], y: y - 4, width: columns[i + 1] - columns[i], height: rowHeight, color: rgb(.91, .93, .90) });
     }
-    const labels = ["Mitarbeiter", "Stunden", "Lohn EUR/h", "Lohnkosten", "GK EUR/h", "GK-Kosten", "Gesamtkosten"];
+    const labels = ["Mitarbeiter", "Stunden", "Lohn EUR/h", "DN-Lohnkosten", "GK EUR/h", "GK-Kosten", "Gesamtkosten"];
     labels.forEach((label, index) => {
       if (index === 0) page.drawText(label, { x: columns[index] + 4, y: y + 3, size: 8, font: bold, color: dark });
       else drawRight(label, columns[index + 1], y + 3, bold, 8, dark);
@@ -84,11 +87,16 @@ async function createGrossProfitPdf(data = {}) {
   if (y < 150) addPage(false);
   y -= 5;
   page.drawRectangle({ x: left, y: y - 4, width: right - left, height: rowHeight, color: rgb(.95, .95, .92) });
-  page.drawText("Summen Mitarbeiter", { x: left + 4, y: y + 3, size: 9, font: bold, color: dark });
+  page.drawText("Summen / DN-Lohn", { x: left + 4, y: y + 3, size: 9, font: bold, color: dark });
+  drawRight(`${number(totalHours, 1)} h`, columns[2], y + 3, bold, 9);
+  drawRight(`${number(projectWageRate)} EUR/h`, columns[3], y + 3, bold, 9);
   drawRight(money(data.wageTotal), columns[4], y + 3, bold, 9);
+  drawRight(`${number(projectGkRate)} EUR/h`, columns[5], y + 3, bold, 9);
   drawRight(money(data.gkTotal), columns[6], y + 3, bold, 9);
   drawRight(money(data.employeeTotal), columns[7], y + 3, bold, 9);
-  y -= 31;
+  y -= 17;
+  page.drawText(clean(`Baustellen-Lohnkostensatz: ${money(data.wageTotal)} DN-Lohn / ${number(totalHours, 1)} h = ${number(projectWageRate)} EUR/h`), { x: left + 4, y: y + 3, size: 8, font: regular, color: muted });
+  y -= 29;
   const summaryRows = [
     ["Rechnungen netto", data.documentNet],
     ["Mitarbeiter-Gesamtkosten", -Number(data.employeeTotal || 0)],
