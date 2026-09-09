@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-economy-meaningful-values-2";
+  const VERSION="2026-09-09-hours-detail-fused-3";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
@@ -193,7 +193,7 @@
       const billingResult=await billingApi(currentJobId).catch(e=>({ok:false,error:e.message}));if(serial!==loadSerial)return;
       renderMasterData(j);
       renderEconomy(j,regieRows,billingResult?.billing||{},documentation.items||[]);
-      renderHours(j,regieRows);
+      renderHours(j,regieRows,documentation.items||[]);
       renderPlanning(j);
       renderProtocols(j,details,documentation.items||[]);
       renderRegie(j,regieRows,documentation.items||[]);
@@ -281,14 +281,14 @@
 
   function personStats(regies){
     const map=new Map();for(const row of regies){if(!row||row.__error)continue;for(const e of row.regie?.employees||[]){const key=String(e.employeeId||e.name||"");if(!key)continue;if(!map.has(key))map.set(key,{name:e.name||key,hours:0,regie:0,days:new Set(),first:null,last:null});const p=map.get(key);p.hours+=num(e.totalHours);p.regie+=num(e.regieHours);p.days.add(row.day);if(!p.first||row.day<p.first)p.first=row.day;if(!p.last||row.day>p.last)p.last=row.day}}return [...map.values()].sort((a,b)=>b.hours-a.hours)}
-  function renderHours(j,regies){
-    const people=personStats(regies),events=eventRows(j.jobId),total=people.reduce((s,p)=>s+p.hours,0),regie=people.reduce((s,p)=>s+p.regie,0);
+  function renderHours(j,regies,documents=[]){
+    const people=personStats(regies),events=eventRows(j.jobId),total=people.reduce((s,p)=>s+p.hours,0),localRegie=people.reduce((s,p)=>s+p.regie,0),reportRegie=documents.filter(x=>x?.type==='regie_report').reduce((s,x)=>s+num(x.totalHours),0),regie=Math.max(localRegie,reportRegie);
     const peopleHtml=people.length?people.map(p=>`<div class="bk-person"><strong>${esc(p.name)}</strong><div class="big">${hour(p.hours)}</div><small>${p.days.size} Arbeitstag(e) · Regie ${hour(p.regie)}<br>${fmtDate(p.first)} – ${fmtDate(p.last)}</small></div>`).join(""):'<div class="bk-placeholder">Noch keine Tageserfassungen mit Mitarbeitern vorhanden.</div>';
     const correctionGroups=new Map();for(const event of events){const date=String(event.date||"").slice(0,10),employeeId=String(event.employeeId||"");if(!date||!employeeId)continue;const key=`${date}|${employeeId}`,row=correctionGroups.get(key)||{date,employeeId,employeeName:event.employeeName||employeeId,count:0};row.count++;correctionGroups.set(key,row)}
     const correctionRows=[...correctionGroups.values()].sort((a,b)=>b.date.localeCompare(a.date)||String(a.employeeName).localeCompare(String(b.employeeName),"de")).map(row=>`<tr><td>${fmtDate(row.date)}</td><td>${esc(row.employeeName)}</td><td class="num">${row.count}</td><td class="num"><button type="button" data-bk-time-edit data-employee-id="${esc(row.employeeId)}" data-date="${esc(row.date)}" data-employee-name="${esc(row.employeeName)}">Bearbeiten / umbuchen</button></td></tr>`).join("");
     const correctionHtml=correctionRows?`<div style="overflow:auto"><table class="bk-table bk-correction-table"><thead><tr><th>Datum</th><th>Mitarbeiter</th><th class="num">Ereignisse hier</th><th></th></tr></thead><tbody>${correctionRows}</tbody></table></div>`:'<div class="bk-placeholder">Keine bearbeitbaren KRISTINE-Buchungen auf dieser Baustelle.</div>';
     const eventHtml=events.length?`<div style="overflow:auto"><table class="bk-table"><thead><tr><th>Datum</th><th>Zeit</th><th>Mitarbeiter</th><th>Buchung</th><th>Quelle</th></tr></thead><tbody>${events.slice(0,250).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${esc(e.at||'–')}</td><td>${esc(e.employeeName||e.employeeId||'–')}</td><td>${esc(eventLabel(e.type))}</td><td>${esc(e.source||'KRISTINE')}</td></tr>`).join('')}</tbody></table></div>${events.length>250?`<div class="bk-note">${events.length-250} ältere Einzelereignisse vorhanden; die Summen oben enthalten weiterhin alle zugeordneten Tageserfassungen.</div>`:''}`:'<div class="bk-placeholder">Für diese Baustelle wurden noch keine einzelnen KRISTINE-Zeitereignisse gefunden.</div>';
-    const el=document.getElementById("bkHours");el.className="";el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Erfasste Stunden</div><div class="bk-value">${hour(total)}</div></div><div class="bk-card"><div class="bk-label">davon Regie</div><div class="bk-value">${hour(regie)}</div></div><div class="bk-card"><div class="bk-label">Mitarbeiter auf Baustelle</div><div class="bk-value">${people.length}</div></div><div class="bk-card"><div class="bk-label">Einzelne Zeitereignisse</div><div class="bk-value">${events.length}</div></div><div class="bk-card bk-wide"><h3>Wer hat hier gearbeitet?</h3><div class="bk-people">${peopleHtml}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Fehlerhafte Stunden korrigieren</h3><div class="bk-note">Zeiten ändern, Abschnitte löschen oder auf eine andere Baustelle umbuchen. Jede Korrektur bleibt in der Historie gespeichert.</div></div></div>${correctionHtml}</div><div class="bk-card bk-wide"><h3>Einzelne Zeitereignisse</h3>${eventHtml}</div></div>`;
+    const el=document.getElementById("bkHours");el.className="";el.dataset.regieReportHours=String(reportRegie);el.innerHTML=`<div class="bk-grid"><div class="bk-card"><div class="bk-label">Erfasste Stunden</div><div class="bk-value">${hour(total)}</div></div><div class="bk-card"><div class="bk-label">davon Regie</div><div class="bk-value">${hour(regie)}</div><div class="bk-note">aus Regieberichten</div></div><div class="bk-card"><div class="bk-label">Mitarbeiter auf Baustelle</div><div class="bk-value">${people.length}</div></div><div class="bk-card"><div class="bk-label">Einzelne Zeitereignisse</div><div class="bk-value">${events.length}</div></div><div class="bk-card bk-wide"><h3>Wer hat hier gearbeitet?</h3><div class="bk-people">${peopleHtml}</div></div><div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Fehlerhafte Stunden korrigieren</h3><div class="bk-note">Zeiten ändern, Abschnitte löschen oder auf eine andere Baustelle umbuchen. Jede Korrektur bleibt in der Historie gespeichert.</div></div></div>${correctionHtml}</div><div class="bk-card bk-wide"><h3>Einzelne Zeitereignisse</h3>${eventHtml}</div></div>`;
     el.querySelectorAll("[data-bk-time-edit]").forEach(button=>button.onclick=()=>openTimeCorrection(button.dataset.employeeId,button.dataset.date,button.dataset.employeeName));
   }
 

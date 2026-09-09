@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-economy-hours-13";
+  const VERSION="2026-09-09-hours-detail-fused-14";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -207,9 +207,9 @@
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
 
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));
-    const host=card?.querySelector(".bc-people-row");
-    const people=[...(peopleByJob.get(String(id))?.values()||[])].sort((a,b)=>b.hours-a.hours);
-    if(host&&people.length)host.innerHTML=people.slice(0,8).map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · KRISTINE</small></div>`).join("");
+    const host=card?.querySelector(".bc-people-row"),people=fusedPeople(id),sub=card?.querySelector(".bc-sub");
+    if(sub)sub.textContent=`${hours(fused.kristine)} KRISTINE + ${hours(fused.ww)} WW = ${hours(fused.total)}`;
+    if(host&&people.length)host.innerHTML=people.map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></div>`).join("");
   }
 
   function hoursSummary(id){
@@ -229,7 +229,7 @@
     if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
   }
 
-  function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);if(current)renderHoursReconciliation(current)}}
+  function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);patchHoursTab(id);if(current)renderHoursReconciliation(current)}}
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
@@ -237,6 +237,16 @@
     for(const [date,people] of kr?.dayPeople||[])if(!legacyCutover||date>=legacyCutover)for(const person of people.values())add(date,person.name,person.hours*scale,"KRISTINE");
     for(const row of ww?.rows||[])if(legacyCutover?row.date<legacyCutover:!excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
     return [...out.values()];
+  }
+
+  function fusedPeople(jobId){
+    const map=new Map();for(const row of personDayHours(jobId)){const key=nameKey(canonicalPersonName(row.name)),person=map.get(key)||{name:canonicalPersonName(row.name)||"Unbekannt",hours:0,days:new Set(),sources:new Set()};person.hours+=num(row.hours);person.days.add(row.date);for(const source of String(row.source||"").split(" + ").filter(Boolean))person.sources.add(source);map.set(key,person)}return [...map.values()].sort((a,b)=>b.hours-a.hours||a.name.localeCompare(b.name,"de"));
+  }
+
+  function patchHoursTab(id){
+    const host=document.getElementById("bkHours");if(!host)return;const live=hoursSummary(id),people=fusedPeople(id),regie=Math.max(num(calc(job(id)).actualRegieHours),num(host.dataset.regieReportHours)),card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label),set=(label,value,note="")=>{const el=card(label);if(!el)return;const valueEl=el.querySelector(".bk-value");if(valueEl&&valueEl.textContent!==value)valueEl.textContent=value;let noteEl=el.querySelector(".bk-note");if(note&&!noteEl){noteEl=document.createElement("div");noteEl.className="bk-note";el.appendChild(noteEl)}if(noteEl&&note&&noteEl.textContent!==note)noteEl.textContent=note};
+    set("Erfasste Stunden",hours(live.total),`${hours(live.kristine)} KRISTINE + ${hours(live.ww)} WW`);set("davon Regie",hours(regie),"aus Regieberichten");set("Mitarbeiter auf Baustelle",String(people.length),"nach WW-/KRISTINE-Abgleich");
+    const peopleCard=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Wer hat hier gearbeitet/i.test(el.querySelector("h3")?.textContent||"")),peopleHost=peopleCard?.querySelector(".bk-people"),peopleSignature=JSON.stringify(people.map(p=>[p.name,p.hours,[...p.days].sort(),[...p.sources].sort()]));if(peopleHost&&peopleHost.dataset.fusedSignature!==peopleSignature){peopleHost.dataset.fusedSignature=peopleSignature;peopleHost.innerHTML=people.length?people.map(p=>`<div class="bk-person"><strong>${escapeHtml(p.name)}</strong><div class="big">${hours(p.hours)}</div><small>${p.days.size} Arbeitstag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></div>`).join(""):'<div class="bk-placeholder">Noch keine zugeordneten Stunden vorhanden.</div>'}
   }
 
   async function refresh(){
