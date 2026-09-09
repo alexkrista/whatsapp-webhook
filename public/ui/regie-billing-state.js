@@ -16,6 +16,40 @@
     return number(report?.laborCost)+number(report?.materialCost??report?.materialTotal);
   };
   const reportSort=(a,b)=>String(a?.reportDate||"").localeCompare(String(b?.reportDate||""),"de",{numeric:true})||String(a?.sheetNumber||a?.reportNumber||"").localeCompare(String(b?.sheetNumber||b?.reportNumber||""),"de",{numeric:true});
+  const reportSequence=report=>{
+    const sheet=String(report?.sheetNumber||"").match(/(\d+)\D*$/);
+    if(sheet)return String(Number(sheet[1]));
+    const label=String(report?.reportNumber||report?.name||"").trim();
+    const slash=label.match(/\/(\d+)\D*$/);
+    if(slash)return String(Number(slash[1]));
+    const match=label.match(/(?:^|\D)(\d{1,3})\D*$/);
+    return match?String(Number(match[1])):"";
+  };
+  const reportDedupeKey=report=>{
+    const date=String(report?.reportDate||"").slice(0,10),sequence=reportSequence(report);
+    if(date&&sequence)return `report:${date}|${sequence}`;
+    const sourceId=documentKey(report?.sourceId??report?.source_id);
+    return sourceId?`source:${sourceId}`:`row:${date}|${String(report?.reportNumber||report?.name||"").trim().toLowerCase()}`;
+  };
+
+  function dedupeReports(reports){
+    const unique=new Map();
+    for(const report of Array.isArray(reports)?reports:[]){
+      const key=reportDedupeKey(report),previous=unique.get(key);
+      if(!previous){unique.set(key,{...report,sourceCopies:[String(report?.source||"").toUpperCase()].filter(Boolean)});continue}
+      const previousIsWw=String(previous?.source||"").toUpperCase()==="WW",currentIsWw=String(report?.source||"").toUpperCase()==="WW";
+      const ww=currentIsWw?report:previousIsWw?previous:null,pdf=currentIsWw?previous:report;
+      const preferred=ww||previous;
+      unique.set(key,{
+        ...pdf,...preferred,
+        url:pdf?.url||preferred?.url||"",
+        pdfUrl:pdf?.url||pdf?.pdfUrl||preferred?.pdfUrl||"",
+        hasPdfCopy:Boolean(pdf?.url||pdf?.pdfUrl||previous?.hasPdfCopy||report?.hasPdfCopy),
+        sourceCopies:[...new Set([...(previous?.sourceCopies||[]),String(previous?.source||"").toUpperCase(),String(report?.source||"").toUpperCase()].filter(Boolean))],
+      });
+    }
+    return [...unique.values()].sort(reportSort);
+  }
 
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours));
@@ -43,7 +77,7 @@
       const key=documentKey(invoice?.sourceId??invoice?.source_id);
       if(key)invoiceBySourceId.set(key,invoice);
     }
-    const rows=(Array.isArray(reports)?reports:[]).slice().sort(reportSort).map(report=>{
+    const rows=dedupeReports(reports).map(report=>{
       const billedDocumentId=String(report?.billedDocumentId||"").trim(),billedKey=documentKey(billedDocumentId);
       const invoice=invoiceBySourceId.get(billedKey)||null,source=String(report?.source||"").toUpperCase(),manualStatus=String(report?.billingStatus||"").toLowerCase();
       const billed=Boolean(billedKey)||(source==="KGO"&&manualStatus==="billed"),open=!billed&&(source==="WW"||(source==="KGO"&&manualStatus==="open"));
@@ -67,5 +101,5 @@
     };
   }
 
-  return {summarize,calculatePerformance,documentKey,reportAmount};
+  return {summarize,calculatePerformance,dedupeReports,reportDedupeKey,documentKey,reportAmount};
 });

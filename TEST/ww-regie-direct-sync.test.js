@@ -20,12 +20,16 @@ assert.match(server,/documentation\/regie-report-sync/);
 assert.match(server,/source:"WW"/);
 assert.match(server,/ww_regie_synced/);
 assert.match(server,/description:cleanText\(raw\.description/);
+assert.match(server,/removeDuplicateRegiePdfRows/);
+assert.match(server,/regie-report-deduplicate/);
+assert.match(server,/regie_pdf_duplicates_removed/);
 
 assert.match(ui,/LOCAL_BRAIN_REGIE/);
 assert.match(ui,/WW-Rapporte synchronisieren/);
 assert.match(ui,/WW direkt \+ PDFs/);
 assert.match(ui,/Tätigkeit/);
-assert.match(ui,/2026-09-07-ww-regie-6/);
-assert.match(topbar,/20260907-ww-regie/);
+assert.match(ui,/removedPdfDuplicates/);
+assert.match(ui,/2026-09-09-regie-dedupe-1/);
+assert.match(topbar,/20260909-regie-dedupe-1/);
 
 console.log("ww regie direct sync test: ok");

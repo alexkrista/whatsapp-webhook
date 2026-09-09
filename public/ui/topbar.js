@@ -162,12 +162,12 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/regie-billing-state.js?v=20260909-performance-2", "data-krista-regie-billing-state");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260909-performance-alias-3", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/regie-billing-state.js?v=20260909-regie-dedupe-1", "data-krista-regie-billing-state");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260909-regie-dedupe-1", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260909-regie-billing-5", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260909-quality-zones-4", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260909-performance-alias-3", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260909-total-hours-fusion-2", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260903-valid-dates", "data-krista-baustellen-foto-gallery");
     // Diese vorhandenen Module waren früher indirekt an KRISADMIN gekoppelt.
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.

@@ -6,6 +6,8 @@ const path=require("path");
 
 const root=path.resolve(__dirname,"..");
 const ui=fs.readFileSync(path.join(root,"public","ui","baustellen-live-hours.js"),"utf8");
+assert.doesNotMatch(ui,/if\(!token\)return null/);
+assert.match(ui,/if\(token\)headers\["X-Krista-Token"\]=token/);
 const server=fs.readFileSync(path.join(root,"server.js"),"utf8");
 const brain=fs.readFileSync(path.join(root,"brain_outgoing_invoices.py"),"utf8");
 
@@ -24,7 +26,9 @@ assert.match(ui,/personDayHours/);
 for(const pair of [["mandi-faes","Manuel Faes"],["edi-mock","Edmund Mock"],["cathrin-grabherr","Cathrin Anna Grabherr"],["anna-cathrin-grabherr","Cathrin Anna Grabherr"],["cathrin-anna-grabherr","Cathrin Anna Grabherr"]])assert.ok(ui.includes(`"${pair[0]}":"${pair[1]}"`));
 assert.match(ui,/person\.hours=Math\.max\(0,person\.hours-\.25\)/);
 assert.match(ui,/return num\(liveByJob\.get\(String\(j\.jobId\)\)\?\.totalHours\)/);
-assert.doesNotMatch(ui,/return Math\.max\(oldOrderHours\(j\)/);
+assert.match(ui,/kristineTotal=Math\.max\(oldTotalHours\(j\),kristineDetailTotal\)/);
+assert.match(ui,/actual=fusion\(j\)\.total/);
+assert.match(ui,/IST inkl\. Regie/);
 assert.match(ui,/excluded=selectedExclusions/);
 assert.match(ui,/person\.hours\*scale/);
 assert.match(ui,/Auswahl geändert – bitte speichern/);

@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-performance-alias-3";
+  const VERSION="2026-09-09-total-hours-fusion-2";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -28,8 +28,8 @@
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function loadWwHours(jobId){
-    if(!token)return null;
-    const r=await fetch(LOCAL_BRAIN_HOURS,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json","X-Krista-Token":token},body:JSON.stringify({projectNumber:String(jobId)})});
+    const headers={Accept:"application/json","Content-Type":"application/json"};if(token)headers["X-Krista-Token"]=token;
+    const r=await fetch(LOCAL_BRAIN_HOURS,{method:"POST",headers,body:JSON.stringify({projectNumber:String(jobId)})});
     const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
@@ -124,19 +124,19 @@
     return suggestedExclusions(ww,kr);
   }
   function fusion(j){
-    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=liveByJob.get(jobId),kristineTotal=liveOrderHours(j);
-    if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
+    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=liveByJob.get(jobId),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
+    if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,detailTotal:kristineDetailTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
     const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
     const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
     const excluded=selectedExclusions(j,ww,kr),legacyCutover=String(j?.hoursCutoverDate||"");
     let wwHours=0,kristineHours=0;
     if(legacyCutover&&!reconciliationDrafts.has(jobId)){for(const [day,value] of ww.days)if(day<legacyCutover)wwHours+=num(value);for(const [day,value] of krDays)if(day>=legacyCutover)kristineHours+=num(value)*scale}
     else{wwHours=(ww.rows||[]).reduce((sum,row)=>sum+(excluded.has(row.key)?0:num(row.hours)),0);kristineHours=kristineTotal}
-    return {total:wwHours+kristineHours,ww:wwHours,kristine:kristineHours,overlaps,excluded,source:"WW + KRISTINE",legacyCutover};
+    return {total:wwHours+kristineHours,ww:wwHours,kristine:kristineHours,detailTotal:kristineDetailTotal,overlaps,excluded,source:"WW + KRISTINE",legacyCutover};
   }
   function openHours(j){
     const status=String(j?.status||"");
-    const target=targetHours(j),actual=liveOrderHours(j);
+    const target=targetHours(j),actual=fusion(j).total;
     if(status==="Auftrag")return Math.max(0,target);
     if(status==="Laufend")return Math.max(0,target-actual);
     return 0;
@@ -168,7 +168,7 @@
     const dh=document.getElementById("detailHours"),dn=document.getElementById("detailHoursNote"),op=document.getElementById("detailOpen"),bar=document.getElementById("detailProgress"),note=document.getElementById("detailProgressNote");
     if(dh)dh.textContent=`${hours(actual)} / ${hours(target)}`;
     const split=fused.source==="WW + KRISTINE"?`${hours(actual)} = ${hours(fused.kristine)} KRISTINE + ${hours(fused.ww)} WW`:fused.source;
-    if(dn)dn.textContent=target>0?`${Math.round(pct)} % verbraucht · ${split}`:`${split} · keine Sollstunden hinterlegt`;
+    if(dn)dn.textContent=target>0?`${Math.round(pct)} % verbraucht · IST inkl. Regie · ${split}`:`IST inkl. Regie · ${split} · keine Sollstunden hinterlegt`;
     if(op)op.textContent=hours(remaining);
     if(bar){bar.style.width=Math.min(100,Math.max(0,pct))+"%";bar.style.background=pct>100?"var(--red)":"var(--green)"}
     if(note)note.textContent=target>0?`${hours(actual)} von ${hours(target)} · ${Math.round(pct)} % · live gebucht`:"Noch keine Stundenkalkulation hinterlegt.";
@@ -204,7 +204,7 @@
   function patchCockpit(id){
     const j=job(id),shell=document.getElementById("bcShell");if(!j||!shell)return;
     const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
-    const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · ${fused.source}`:fused.source}
+    const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · inkl. Regie · ${fused.source}`:`inkl. Regie · ${fused.source}`}
     const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
     const reserve=pulseItem("Abrechenbar gesamt")||pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,regieHours=num(reserve.dataset.bcRegieHours),openRegie=num(reserve.dataset.bcOpenRegie),fixedActual=Math.max(0,fused.total-regieHours),billable=fixedActual*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),fixedOpen=reserve.dataset.bcSettled==="1"?0:Math.max(0,billable-billed),strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(draft>0){if(strong)strong.textContent=money(draft);if(small)small.textContent="Rechnungsentwurf gespeichert · noch nicht gedruckt/ausgestellt"}else{if(strong)strong.textContent=money(fixedOpen+openRegie);if(small)small.textContent=`${money(fixedOpen)} Auftrag nach 10 % Reserve + ${money(openRegie)} offene Regie`}}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}

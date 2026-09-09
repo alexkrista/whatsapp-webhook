@@ -2,7 +2,23 @@
 
 const assert=require("node:assert/strict");
 const test=require("node:test");
-const {summarize,calculatePerformance}=require("../public/ui/regie-billing-state");
+const {summarize,calculatePerformance,dedupeReports}=require("../public/ui/regie-billing-state");
+
+test("merges a synced WW report with its imported PDF original",()=>{
+  const reports=dedupeReports([
+    {reportNumber:"M 08",sheetNumber:"8",reportDate:"2026-08-26",source:"WW",totalHours:19,totalNet:1575,billedDocumentId:"DOC-1"},
+    {reportNumber:"202609001/8",reportDate:"2026-08-26",source:"PDF",totalHours:19,totalNet:1575,url:"/admin/pdf/report-8"},
+  ]);
+  assert.equal(reports.length,1);
+  assert.equal(reports[0].source,"WW");
+  assert.equal(reports[0].url,"/admin/pdf/report-8");
+  assert.equal(reports[0].hasPdfCopy,true);
+  assert.deepEqual(reports[0].sourceCopies,["WW","PDF"]);
+  const result=summarize(reports,{invoices:[{sourceId:"DOC-1",invoiceNumber:"TR 1"}]});
+  assert.equal(result.rows.length,1);
+  assert.equal(result.totalAmount,1575);
+  assert.equal(result.billedHours,19);
+});
 
 test("links rapports to the exact WinWorker invoice and sums only open reports",()=>{
   const result=summarize([
