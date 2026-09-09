@@ -298,10 +298,15 @@ def render_invoice_pdf(invoice, settings, destination):
     group_rows = []
     subtotal_rows = []
     section_subtotal_rows = []
+    category_subtotal_rows = []
     report_net = Decimal("0")
     labor_net = Decimal("0")
     material_raw = Decimal("0")
     material_net = Decimal("0")
+    contract_net = Decimal("0")
+    regie_net = Decimal("0")
+    contract_position_count = 0
+    regie_position_count = 0
     in_material = False
     has_material = False
     visible_position = 0
@@ -318,6 +323,10 @@ def render_invoice_pdf(invoice, settings, destination):
         marker = str(line.get("unit") or "").upper()
         if marker in {"TAG", "BAUTEIL", "ARBEIT", "MATERIAL", "SUMME"}:
             if marker == "TAG":
+                if report_number == 0 and contract_position_count:
+                    category_row = len(line_rows)
+                    line_rows.append(["", "", "", Paragraph("Summe Arbeiten nach m²", heading), "", money(contract_net)])
+                    category_subtotal_rows.append(category_row)
                 report_number += 1
                 report_position = 0
                 report_net = Decimal("0")
@@ -368,6 +377,12 @@ def render_invoice_pdf(invoice, settings, destination):
         if is_labor:
             saw_labor = True
         report_net += net
+        if report_number:
+            regie_net += net
+            regie_position_count += 1
+        else:
+            contract_net += net
+            contract_position_count += 1
         if in_material:
             material_raw += raw_total
             material_net += net
@@ -386,6 +401,10 @@ def render_invoice_pdf(invoice, settings, destination):
                 "", "", "", Paragraph(f"{percent(disc)} Rabatt", small),
                 money(-discount_amount), money(net),
             ])
+    if regie_position_count:
+        category_row = len(line_rows)
+        line_rows.append(["", "", "", Paragraph("Summe Zusatzarbeiten in Regie", heading), "", money(regie_net)])
+        category_subtotal_rows.append(category_row)
     line_table = Table(line_rows, repeatRows=1, colWidths=[19.5 * mm, 12 * mm, 19 * mm, 82.5 * mm, 21 * mm, 21 * mm])
     line_style = [
         ("FONTNAME", (0, 0), (-1, -1), regular_font),
@@ -403,6 +422,8 @@ def render_invoice_pdf(invoice, settings, destination):
         line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 3), ("BOTTOMPADDING", (0, row_index), (5, row_index), 4), ("LINEABOVE", (3, row_index), (5, row_index), 0.3, colors.HexColor("#b7b7b7"))])
     for row_index, _marker in subtotal_rows:
         line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 4), ("BOTTOMPADDING", (0, row_index), (5, row_index), 7), ("LINEABOVE", (0, row_index), (5, row_index), 0.5, colors.HexColor("#9aa397"))])
+    for row_index in category_subtotal_rows:
+        line_style.extend([("SPAN", (0, row_index), (2, row_index)), ("FONTNAME", (3, row_index), (5, row_index), bold_font), ("ALIGN", (5, row_index), (5, row_index), "RIGHT"), ("TOPPADDING", (0, row_index), (5, row_index), 5), ("BOTTOMPADDING", (0, row_index), (5, row_index), 8), ("LINEABOVE", (0, row_index), (5, row_index), 0.8, colors.black)])
     line_table.setStyle(TableStyle(line_style))
     story.append(line_table)
     complex_summary = bool(
@@ -410,6 +431,24 @@ def render_invoice_pdf(invoice, settings, destination):
         or _d(invoice.get("retention_percent")) or _d(invoice.get("cash_discount_percent"))
     )
     story.append(Spacer(1, 0 if complex_summary else 115))
+
+    category_summary_flowables = []
+    if contract_position_count and regie_position_count:
+        category_summary = Table([
+            [Paragraph("Aufstellung der Rechnungssumme Netto:", heading), ""],
+            [Paragraph("1. Arbeiten nach m²", base), money(contract_net)],
+            [Paragraph("2. Zusatzarbeiten in Regie", base), money(regie_net)],
+        ], colWidths=[150 * mm, 25 * mm])
+        category_summary.setStyle(TableStyle([
+            ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 0), bold_font),
+            ("FONTNAME", (0, 1), (-1, -1), regular_font),
+            ("FONTSIZE", (0, 0), (-1, -1), 9.92), ("LEADING", (0, 0), (-1, -1), 11.9),
+            ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (1, 0), (1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LINEABOVE", (0, 0), (-1, 0), .75, colors.black),
+        ]))
+        category_summary_flowables.extend([category_summary, Spacer(1, 2.5 * mm)])
 
     # The monetary result stays in the same right-hand column as the position total (GP).
     calc = []
@@ -446,7 +485,7 @@ def render_invoice_pdf(invoice, settings, destination):
     calc_style.extend(("FONTNAME", (0, row), (-1, row), bold_font) for row in strong_rows)
     calc_table = Table(calc, colWidths=[80 * mm, 18 * mm, 26 * mm, 26 * mm, 25 * mm], hAlign="RIGHT")
     calc_table.setStyle(TableStyle(calc_style))
-    story.append(KeepTogether([calc_table, Spacer(1, 1.5 * mm)]))
+    story.append(KeepTogether(category_summary_flowables + [calc_table, Spacer(1, 1.5 * mm)]))
 
     previous = invoice.get("previousInvoices") or []
     if previous and invoice.get("kind") in {"TR", "SR"}:
