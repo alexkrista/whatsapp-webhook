@@ -63,6 +63,7 @@ th{font-size:12px;text-transform:uppercase;color:var(--muted)}
 .supplier-manage-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}
 .supplier-manage-row:last-child{border-bottom:0}.supplier-link-search{display:flex;gap:8px;margin:14px 0}.supplier-link-search input{flex:1}
 .supplier-linked{color:var(--green);font-weight:800}.supplier-result{padding:12px;border:1px solid var(--line);border-radius:14px;margin-top:8px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}
+.merge-results{display:grid;gap:8px;max-height:52vh;overflow:auto;margin-top:12px}.merge-result{padding:12px;border:1px solid var(--line);border-radius:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}
 dialog{border:0;border-radius:22px;padding:0;max-width:650px;width:calc(100% - 24px)}
 #supplierDialog{max-width:920px}
 dialog::backdrop{background:rgba(0,0,0,.4)}
@@ -119,6 +120,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <button class="btn" onclick="loadMaterials()">Suchen</button>
       <button class="btn primary" onclick="openMaterial()">+ Neues Material</button>
       <button class="btn" onclick="openSupplierManager()">Lieferanten verwalten</button>
+      <button class="btn" onclick="rebuildLittleGreene()">LG-Stamm neu aufbauen</button>
       <button class="btn" id="wwSearchButton" onclick="searchWinWorker(this)">In WW suchen</button>
       <label class="btn">Excel importieren<input id="file" type="file" accept=".xlsx,.xls" hidden onchange="importExcel(this.files[0])"></label>
       <button class="btn" onclick="printMaterials()">Drucken</button>
@@ -199,6 +201,14 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     </section>
   </div>
 </dialog>
+<dialog id="mergeDialog">
+  <div class="supplier-manager">
+    <div class="section-head"><div><h2>Material zusammenführen</h2><div class="muted" id="mergeSourceLabel"></div></div><button class="btn" onclick="mergeDialog.close()">Schließen</button></div>
+    <div class="supplier-link-search"><input id="mergeSearch" placeholder="Richtiges Material, Nummer oder Lieferant suchen"><button class="btn primary" onclick="searchMergeTargets()">Suchen</button></div>
+    <div class="muted">Die alte Nummer bleibt als Suchbegriff erhalten. Der doppelte Eintrag wird stillgelegt.</div>
+    <div id="mergeResults" class="merge-results"></div>
+  </div>
+</dialog>
 <datalist id="supplierList"></datalist>
 
 <script>
@@ -220,6 +230,8 @@ let wwSearchItems=[];
 let wwPendingMaterial=null;
 let supplierItems=[];
 let supplierLinkTarget=null;
+let mergeSource=null;
+let mergeTargetItems=[];
 let requestFilter="open";
 
 function statusLabel(status){
@@ -347,7 +359,7 @@ function renderMaterials(){
     <td>${money(m.salePrice)}</td>
     <td>${money(Number(m.salePrice||0)*1.2)}</td>
     <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span>${m.priceSource?`<br><span class="muted">aus ${escapeHtml(m.priceSource)}</span>`:""}</td>
-    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
+    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
   </tr>`).join("");
 }
 
@@ -391,6 +403,37 @@ async function deleteMaterial(id){
   if(!confirm(`Material „${item?.product||id}“ wirklich stilllegen?\n\nEs verschwindet aus Suche und nächstem Excel-Export. Alte Belege bleiben unverändert.`))return;
   await api(`/admin/api/materials/${encodeURIComponent(id)}`,{method:"PUT",body:JSON.stringify({active:false})});
   await loadMaterials();
+}
+
+async function rebuildLittleGreene(){
+  if(!confirm("LG-Materialstamm vollständig aus den exakten LG-Nummern neu aufbauen?\n\nDie bisherigen LG-Zeilen werden stillgelegt. Alte Belege bleiben unverändert. Vorher wird automatisch eine Sicherung erstellt."))return;
+  const data=await api("/admin/api/materials/rebuild-little-greene",{method:"POST",body:"{}"});
+  alert(`LG-Stamm fertig\n${data.total} Artikel aus der VK-Liste\nNeu: ${data.added}\nAktualisiert: ${data.updated}\nAlte Zeilen stillgelegt: ${data.deactivated}${data.fallbackBasis?`\nEK-Ersatzbasis, weil Hi White fehlt: ${data.fallbackBasis}`:""}${data.missingEk?`\nOhne verfügbaren EK: ${data.missingEk}`:""}`);
+  await loadMaterials();
+}
+
+function openMergeMaterial(id){
+  mergeSource=materialItems.find(item=>String(item.materialId)===String(id));
+  if(!mergeSource)return;
+  mergeSourceLabel.textContent=`${mergeSource.materialId} · ${mergeSource.product||"Material"}`;
+  mergeSearch.value="";mergeResults.innerHTML='<div class="muted">Richtiges Material oben suchen.</div>';
+  mergeDialog.showModal();mergeSearch.focus();
+}
+
+async function searchMergeTargets(){
+  const query=mergeSearch.value.trim();
+  if(!query){mergeResults.innerHTML='<div class="muted">Bitte Artikel, Nummer oder Lieferant eingeben.</div>';return}
+  const data=await api(`/admin/api/materials?q=${encodeURIComponent(query)}&limit=50`);
+  mergeTargetItems=(data.materials||[]).filter(item=>String(item.materialId)!==String(mergeSource?.materialId));
+  mergeResults.innerHTML=mergeTargetItems.length?mergeTargetItems.map((item,index)=>`<div class="merge-result"><div><strong>${escapeHtml(item.materialId)} · ${escapeHtml(item.product||"–")}</strong><div class="muted">${escapeHtml(item.supplier||"Ohne Lieferant")} · ${escapeHtml(item.unit||"–")} · EK ${money(item.purchasePrice)} · VK ${money(item.salePrice)}</div></div><button class="btn primary" onclick="mergeMaterialInto(${index})">Damit verknüpfen</button></div>`).join(""):'<div class="muted">Kein passendes Material gefunden.</div>';
+}
+
+async function mergeMaterialInto(index){
+  const target=mergeTargetItems[index];
+  if(!mergeSource||!target)return;
+  if(!confirm(`„${mergeSource.materialId} · ${mergeSource.product}“ mit „${target.materialId} · ${target.product}“ zusammenführen?\n\n${mergeSource.materialId} bleibt als Suchbegriff erhalten; der alte Eintrag wird stillgelegt.`))return;
+  await api(`/admin/api/materials/${encodeURIComponent(mergeSource.materialId)}/merge`,{method:"POST",body:JSON.stringify({targetMaterialId:target.materialId})});
+  mergeDialog.close();await loadMaterials();
 }
 
 async function openSupplierManager(){
@@ -573,6 +616,7 @@ document.getElementById("search").addEventListener("keydown",event=>{if(event.ke
 document.getElementById("group").addEventListener("change",loadMaterials);
 document.getElementById("supplier").addEventListener("change",loadMaterials);
 supplierWwQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchWwSuppliers()}});
+mergeSearch.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchMergeTargets()}});
 editVk.addEventListener("input",updateGrossFromNet);
 editGross.addEventListener("input",updateNetFromGross);
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]);

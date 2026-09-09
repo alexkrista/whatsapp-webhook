@@ -424,12 +424,149 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return { matched, changed, syncedAt: now };
   }
 
+  async function rebuildLittleGreeneMaterials() {
+    const [materials, articles, retailRows, supplierLinks] = await Promise.all([
+      readJson(MATERIALS_FILE, []),
+      readJson(PAINT_ARTICLES_FILE, []),
+      lgRetailPriceRows(),
+      readJson(SUPPLIERS_FILE, []),
+    ]);
+    const lgArticles = articles.filter(article => {
+      if (!article || article.active === false || !clean(article.product, 180) || !clean(article.stockCode, 100)) return false;
+      return supplierFingerprint(article.manufacturer) === "littlegreene" || /^lg[-_]/i.test(clean(article.id, 160));
+    });
+    if (!retailRows.length) throw new Error("Die LG-VK-Liste enthält keine verwendbaren Positionen.");
+    if (!lgArticles.length) throw new Error("Im LG-Lagerstamm wurden keine nummerierten Artikel gefunden.");
+
+    const rebuiltAt = new Date().toISOString();
+    const backupName = `materials.before-lg-rebuild.${rebuiltAt.replace(/[:.]/g, "-")}.json`;
+    await writeJson(path.join(ROOT, backupName), materials);
+
+    let deactivated = 0;
+    for (let index = 0; index < materials.length; index += 1) {
+      const item = materials[index];
+      const isLittleGreene = [item.supplier, item.manufacturer, ...(item.supplierAliases || [])]
+        .some(value => supplierFingerprint(value) === "littlegreene") || String(item.sourceSystem || "").toLowerCase() === "littlegreene";
+      if (!isLittleGreene || item.active === false || String(item.sourceSystem || "").toLowerCase() === "littlegreene") continue;
+      materials[index] = normalizeMaterial({ ...item, active: false, mergedAt: rebuiltAt, createdAt: item.createdAt });
+      deactivated += 1;
+    }
+
+    const directBySource = new Map();
+    const directById = new Map();
+    materials.forEach((item, index) => {
+      if (String(item.sourceSystem || "").toLowerCase() === "littlegreene" && item.sourceId) directBySource.set(String(item.sourceId), index);
+      directById.set(String(item.materialId || item.id).toLowerCase(), index);
+    });
+
+    const preferredBaseRank = article => {
+      const key = lgBaseKey(article?.baseName || article?.baseCode);
+      if (["h", "hi", "hiwhite", "highwhite"].includes(key) || /HHHHH$/i.test(clean(article?.stockCode, 100))) return 0;
+      if (["w", "white", "whiteasp"].includes(key)) return 1;
+      if (["p", "pastel"].includes(key)) return 2;
+      return 3;
+    };
+    const displaySize = value => {
+      const key = lgSize(value);
+      if (key.endsWith("ml")) return `${Number(key.slice(0, -2))} ml`;
+      if (key.endsWith("l")) return `${String(Number(key.slice(0, -1))).replace(".", ",")} L`;
+      return clean(value, 40);
+    };
+
+    let added = 0, updated = 0, missingEk = 0, fallbackBasis = 0;
+    for (const retail of retailRows) {
+      const candidates = lgArticles
+        .filter(article => lgProductKey(article.product) === retail.productKey && lgSize(article.size) === retail.size)
+        .sort((a, b) => preferredBaseRank(a) - preferredBaseRank(b));
+      const article = candidates[0] || null;
+      if (article && preferredBaseRank(article) > 0) fallbackBasis += 1;
+      if (!article || number(article.purchasePrice) <= 0) missingEk += 1;
+      const size = displaySize(retail.size);
+      const base = clean(article?.baseName || article?.baseCode, 100);
+      const generatedCode = `LG-${slug(retail.product)}-${String(retail.size).replace(/[^a-z0-9]/gi, "")}`.toUpperCase();
+      const stockCode = clean(article?.stockCode, 100).toUpperCase() || generatedCode;
+      const sourceId = clean(article?.id || stockCode, 160);
+      const salePrice = Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100;
+      const sourceDate = clean(article?.updatedAt, 10) || "2025-05-01";
+      const linked = applySupplierLink({ supplier: "Little Greene", supplierAliases: ["LG", "Little Greene"] }, supplierLinks);
+      let materialId = stockCode;
+      let index = directBySource.get(sourceId);
+      if (index === undefined) {
+        const idIndex = directById.get(materialId.toLowerCase());
+        if (idIndex !== undefined && String(materials[idIndex].sourceSystem || "").toLowerCase() === "littlegreene") index = idIndex;
+        else if (idIndex !== undefined) materialId = `LG-${stockCode}`;
+      }
+      const existing = index === undefined ? null : materials[index];
+      const rebuilt = normalizeMaterial({
+        ...(existing || {}),
+        materialId,
+        id: materialId,
+        group: "Little Greene",
+        manufacturer: "Little Greene",
+        product: [retail.product, size].filter(Boolean).join(" · "),
+        productLine: retail.product,
+        unit: "Stk",
+        purchasePrice: number(article?.purchasePrice),
+        salePrice,
+        priceValidFrom: sourceDate,
+        priceCheckedAt: sourceDate,
+        priceSource: `Little Greene · EK Basis ${base || "fehlt"}`,
+        priceSourceId: stockCode,
+        supplier: linked.supplier || "Little Greene",
+        supplierId: linked.supplierId,
+        wwSupplierAddressId: linked.wwSupplierAddressId,
+        wwSupplierNumber: linked.wwSupplierNumber,
+        ourCustomerNumberAtSupplier: linked.ourCustomerNumberAtSupplier,
+        supplierAliases: linked.supplierAliases || ["LG", "Little Greene"],
+        supplierArticleNumber: stockCode,
+        manufacturerArticleNumber: clean(article?.ean, 100),
+        articleNumber: stockCode,
+        alias: [existing?.alias, article?.ean, base, article?.baseCode, size, "Hi White", "High White"].filter(Boolean).join(" "),
+        active: true,
+        regieItem: true,
+        sourceSystem: "LittleGreene",
+        sourceId,
+        sourceLinks: normalizeSourceLinks([...(existing?.sourceLinks || []), { system: "LittleGreene", id: sourceId }]),
+        sourceUpdatedAt: article?.updatedAt || rebuiltAt,
+        sourceSheet: "LG-VK-Liste · EK Hi White",
+        status: "approved",
+        mergedInto: "",
+        mergedAt: "",
+        createdAt: existing?.createdAt || rebuiltAt,
+      }, { sheetName: "LG-Lagerstamm", importedAt: rebuiltAt });
+      if (index === undefined) {
+        materials.push(rebuilt);
+        directById.set(materialId.toLowerCase(), materials.length - 1);
+        directBySource.set(sourceId, materials.length - 1);
+        added += 1;
+      } else {
+        materials[index] = rebuilt;
+        updated += 1;
+      }
+    }
+
+    await writeJson(MATERIALS_FILE, materials);
+    return { ok: true, total: retailRows.length, added, updated, deactivated, missingEk, fallbackBasis, backupName, rebuiltAt };
+  }
+
   function createMaterialId(material, index = 0) {
     const prefix = slug(material.manufacturer || material.group || "MAT").slice(0, 4).toUpperCase() || "MAT";
     const product = slug(material.product || material.subgroup || "artikel").slice(0, 16).toUpperCase() || "ARTIKEL";
     const color = slug(material.colorNumber || material.colorName || "").slice(0, 10).toUpperCase();
     const size = String(material.containerSize || "").replace(/[^0-9a-z]/gi, "").slice(0, 8);
     return [prefix, product, color, size, index ? String(index) : ""].filter(Boolean).join("-");
+  }
+
+  function normalizeSourceLinks(value) {
+    const links = Array.isArray(value) ? value : [];
+    const unique = new Map();
+    for (const raw of links) {
+      const system = clean(raw?.system || raw?.sourceSystem, 40);
+      const id = clean(raw?.id || raw?.sourceId, 120);
+      if (!system || !id) continue;
+      unique.set(`${system.toLowerCase()}:${id.toLowerCase()}`, { system, id });
+    }
+    return [...unique.values()];
   }
 
   function normalizeMaterial(raw, context = {}) {
@@ -492,6 +629,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       note: clean(raw.note, 1000),
       sourceSystem: clean(raw.sourceSystem, 40),
       sourceId: clean(raw.sourceId, 120),
+      sourceLinks: normalizeSourceLinks(raw.sourceLinks),
+      mergedInto: clean(raw.mergedInto, 120),
+      mergedAt: raw.mergedAt || "",
       sourceUpdatedAt: raw.sourceUpdatedAt || "",
       sourceSheet: clean(raw.sourceSheet || context.sheetName, 100),
       status: clean(raw.status, 30) || "approved",
@@ -884,6 +1024,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         currentBySource.set(String(item.sourceId), item);
       }
     }
+    for (const item of current) {
+      for (const link of normalizeSourceLinks(item.sourceLinks)) {
+        if (link.system.toLowerCase() === "winworker") currentBySource.set(link.id, item);
+      }
+    }
 
     let added = 0;
     let changed = 0;
@@ -916,6 +1061,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         supplier: clean(raw?.supplier, 120) || existing?.supplier,
         supplierAliases: existing?.supplierAliases,
       }, supplierLinks);
+      const keepPrimarySource = existing?.sourceSystem && String(existing.sourceSystem).toLowerCase() !== "winworker";
+      const sourceLinks = normalizeSourceLinks([
+        ...(existing?.sourceLinks || []),
+        { system: "WinWorker", id: sourceId },
+      ]);
       const updated = normalizeMaterial({
         ...(existing || {}),
         materialId: existing?.materialId || requestedMaterialId || sourceId,
@@ -940,8 +1090,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         alias: aliases,
         active: raw?.active === false ? false : existing ? existing.active !== false : true,
         regieItem: existing?.regieItem ?? true,
-        sourceSystem: "WinWorker",
-        sourceId,
+        sourceSystem: keepPrimarySource ? existing.sourceSystem : "WinWorker",
+        sourceId: keepPrimarySource ? existing.sourceId : sourceId,
+        sourceLinks,
         sourceUpdatedAt: raw?.sourceUpdatedAt || raw?.priceCheckedAt || importedAt,
         sourceSheet: "WinWorker",
         status: "approved",
@@ -1180,6 +1331,63 @@ app.get("/api/regie/materials", async (req, res) => {
     try {
       const report = await syncWinWorkerMaterials([req.body?.material], { deactivateMissing: false });
       res.json({ ok: true, report });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/admin/api/materials/rebuild-little-greene", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      res.json(await rebuildLittleGreeneMaterials());
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/admin/api/materials/:materialId/merge", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rows = await readJson(MATERIALS_FILE, []);
+      const sourceIndex = rows.findIndex(item => String(item.materialId) === String(req.params.materialId));
+      const targetId = clean(req.body?.targetMaterialId, 120);
+      const targetIndex = rows.findIndex(item => String(item.materialId) === targetId);
+      if (sourceIndex < 0) return res.status(404).json({ ok: false, error: "Ausgangsmaterial nicht gefunden." });
+      if (targetIndex < 0 || rows[targetIndex].active === false) return res.status(404).json({ ok: false, error: "Zielmaterial nicht gefunden." });
+      if (sourceIndex === targetIndex) return res.status(400).json({ ok: false, error: "Ein Material kann nicht mit sich selbst zusammengeführt werden." });
+
+      const source = rows[sourceIndex];
+      const target = rows[targetIndex];
+      const sourceLinks = normalizeSourceLinks([
+        ...(target.sourceLinks || []),
+        ...(source.sourceLinks || []),
+        source.sourceSystem && source.sourceId ? { system: source.sourceSystem, id: source.sourceId } : null,
+        { system: "WinWorker", id: source.materialId },
+      ]);
+      const aliases = [...new Set([
+        target.alias, source.materialId, source.product, source.alias, source.articleNumber, source.supplierArticleNumber,
+      ].map(value => clean(value, 250)).filter(Boolean))].join(" ");
+      const mergedAt = new Date().toISOString();
+      rows[targetIndex] = normalizeMaterial({
+        ...target,
+        purchasePrice: number(target.purchasePrice) || number(source.purchasePrice),
+        salePrice: number(target.salePrice) || number(source.salePrice),
+        priceCheckedAt: target.priceCheckedAt || source.priceCheckedAt,
+        priceValidFrom: target.priceValidFrom || source.priceValidFrom,
+        alias: aliases,
+        sourceLinks,
+        active: true,
+        createdAt: target.createdAt,
+      });
+      rows[sourceIndex] = normalizeMaterial({
+        ...source,
+        active: false,
+        mergedInto: target.materialId,
+        mergedAt,
+        createdAt: source.createdAt,
+      });
+      await writeJson(MATERIALS_FILE, rows);
+      res.json({ ok: true, sourceMaterialId: source.materialId, material: decorate(rows[targetIndex]) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
@@ -1493,6 +1701,7 @@ app.get("/api/regie/materials", async (req, res) => {
     exportWorkbook,
     syncWinWorkerMaterials,
     syncLittleGreenePrices,
+    rebuildLittleGreeneMaterials,
   };
 }
 
