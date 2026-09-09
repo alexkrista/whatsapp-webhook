@@ -19,12 +19,15 @@ async function createGrossProfitPdf(data = {}) {
   const pageSize = [841.89, 595.28];
   const left = 34;
   const right = 808;
-  const rowHeight = 21;
+  const rowHeight = 18;
   const columns = [34, 218, 290, 376, 468, 540, 630, 808];
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const totalHours = rows.reduce((sum, row) => sum + Number(row.hours || 0), 0);
   const projectWageRate = totalHours > 0 ? Number(data.wageTotal || 0) / totalHours : 0;
   const projectGkRate = totalHours > 0 ? Number(data.gkTotal || 0) / totalHours : 0;
+  const employeePerHour = totalHours > 0 ? Number(data.employeeTotal || 0) / totalHours : 0;
+  const materialPerHour = totalHours > 0 ? Number(data.materialEk || 0) / totalHours : 0;
+  const grossProfitPerHour = totalHours > 0 ? Number(data.grossProfit || 0) / totalHours : 0;
   const green = rgb(.15, .36, .22);
   const dark = rgb(.12, .16, .13);
   const muted = rgb(.40, .43, .40);
@@ -110,6 +113,25 @@ async function createGrossProfitPdf(data = {}) {
     drawRight(`${Number(value) < 0 ? "- " : ""}${money(Math.abs(Number(value || 0)))}`, right, y + 2, isTotal ? bold : regular, isTotal ? 11 : 9, isTotal ? green : dark);
     y -= isTotal ? 27 : 20;
   }
+
+  if (y < 105) addPage(false);
+  y -= 4;
+  const tileGap = 8;
+  const tileWidth = (right - left - tileGap * 2) / 3;
+  const tileHeight = 55;
+  const tileData = [
+    ["Mitarbeiterkosten je Stunde", employeePerHour, data.employeeTotal, "Lohn + GK"],
+    ["Material-EK je Stunde", materialPerHour, data.materialEk, "Materialkosten"],
+    ["Rohertrag je Stunde", grossProfitPerHour, data.grossProfit, "Rohertrag"],
+  ];
+  tileData.forEach(([label, value, numerator, description], index) => {
+    const x = left + index * (tileWidth + tileGap);
+    page.drawRectangle({ x, y: y - tileHeight, width: tileWidth, height: tileHeight, color: rgb(.94, .97, .94), borderColor: rgb(.80, .87, .81), borderWidth: .7 });
+    page.drawText(label, { x: x + 10, y: y - 15, size: 8, font: bold, color: muted });
+    page.drawText(clean(`${number(value)} EUR/h`), { x: x + 10, y: y - 34, size: 13, font: bold, color: index === 2 ? green : dark });
+    page.drawText(clean(`${description}: ${money(numerator)} / Summe ${number(totalHours, 1)} h`), { x: x + 10, y: y - 48, size: 7, font: regular, color: muted });
+  });
+  y -= tileHeight + 8;
 
   const pages = pdf.getPages();
   pages.forEach((current, index) => {
