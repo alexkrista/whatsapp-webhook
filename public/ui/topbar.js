@@ -147,6 +147,10 @@
     if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
   }
 
+  function loadKristineRegieApproval() {
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-regie-approval.js?v=20260909-review1", "data-krista-regie-approval");
+  }
+
   function loadKristineInbox() {
     if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260904-regie-workbench", "data-krista-inbox-v2");
   }
@@ -286,6 +290,7 @@
     loadKristineTaskList();
     loadKristineTaskCreateModal();
     loadKristineFinanceApproval();
+    loadKristineRegieApproval();
     loadKristineInbox();
     loadKristineCustomerMaster();
     loadBaustellenKnowledgeStack();

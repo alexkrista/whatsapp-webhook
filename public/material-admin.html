@@ -129,7 +129,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     <div id="wwResults" class="ww-results hidden"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Lieferant</th><th>Artikel</th><th>Einheit</th><th>EK netto</th><th>VK netto</th><th>VK brutto</th><th>Preisstand</th><th>Aktion</th></tr></thead>
+        <thead><tr><th>ID</th><th>Lieferant</th><th>Artikel</th><th>Gebindegröße</th><th>Einheit</th><th>EK netto</th><th>VK netto</th><th>VK brutto</th><th>Preisstand</th><th>Aktion</th></tr></thead>
         <tbody id="materialRows"></tbody>
       </table>
     </div>
@@ -179,6 +179,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   <label class="wide">Artikel *<input id="editProduct" required></label>
   <label>Lieferant<input id="editSupplier" list="supplierList"></label>
   <label>Lieferanten-Artikelnummer<input id="editSupplierArticle"></label>
+  <label>Gebindegröße<input id="editContainerSize" inputmode="decimal" placeholder="z. B. 50"></label>
   <label>Einheit<input id="editUnit" placeholder="z. B. Stk, kg, Rolle"></label>
   <label>Preisstand<input id="editPriceDate" type="date"></label>
   <label>EK netto €<input id="editEk" inputmode="decimal"></label>
@@ -229,6 +230,7 @@ let materialRequests=[];
 let materialItems=[];
 let wwSearchItems=[];
 let wwPendingMaterial=null;
+let copySourceId="";
 let supplierItems=[];
 let supplierLinkTarget=null;
 let mergeSource=null;
@@ -355,12 +357,13 @@ function renderMaterials(){
     <td><strong>${escapeHtml(m.materialId)}</strong></td>
     <td>${escapeHtml(m.supplier||"–")}<br><span class="muted">${escapeHtml(m.supplierArticleNumber||"")}${m.ourCustomerNumberAtSupplier?` · unsere KdNr. ${escapeHtml(m.ourCustomerNumberAtSupplier)}`:""}</span></td>
     <td><strong>${escapeHtml(m.product||"–")}</strong></td>
+    <td>${escapeHtml(String(Number(m.containerSize)||1).replace(".",","))} ${escapeHtml(m.unit||"")}</td>
     <td>${escapeHtml(m.unit||"–")}</td>
     <td>${money(m.purchasePrice)}</td>
     <td>${money(m.salePrice)}${m.fixedSalePrice?'<br><span class="pill">Fix-VK</span>':""}</td>
     <td>${money(Number(m.salePrice||0)*1.2)}</td>
     <td><span class="pill ${m.priceStaleLevel==="red"?"red":m.priceStale?"yellow":""}">${escapeHtml(m.priceCheckedAt||m.priceValidFrom||"nicht geprüft")}</span>${m.priceSource?`<br><span class="muted">aus ${escapeHtml(m.priceSource)}</span>`:""}</td>
-    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
+    <td><button class="btn" onclick="openMaterial('${js(m.materialId)}')">Bearbeiten</button> <button class="btn" onclick="copyMaterial('${js(m.materialId)}')">Kopieren</button> <button class="btn" onclick="openMergeMaterial('${js(m.materialId)}')">Zusammenführen</button> <button class="btn" onclick="deleteMaterial('${js(m.materialId)}')">Löschen</button></td>
   </tr>`).join("");
 }
 
@@ -377,10 +380,11 @@ function renderWarnings(){
 
 function openMaterial(id=""){
   wwPendingMaterial=null;
+  copySourceId="";
   const item=materialItems.find(m=>String(m.materialId)===String(id))||{};
   materialDialogTitle.textContent=id?"Material bearbeiten":"Neues Material";
   editId.value=id;editMaterialId.value=item.materialId||"";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
-  editSupplierArticle.value=item.supplierArticleNumber||"";editUnit.value=item.unit||"Stk";
+  editSupplierArticle.value=item.supplierArticleNumber||"";editContainerSize.value=String(Number(item.containerSize)||1).replace(".",",");editUnit.value=item.unit||"Stk";
   editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
   editFixedVk.checked=item.fixedSalePrice===true;
   updateGrossFromNet();
@@ -388,16 +392,28 @@ function openMaterial(id=""){
   materialDialog.showModal();
 }
 
-function closeMaterialDialog(){wwPendingMaterial=null;materialDialog.close()}
+function copyMaterial(id){
+  const item=materialItems.find(m=>String(m.materialId)===String(id));
+  if(!item)return;
+  wwPendingMaterial=null;copySourceId=String(id);
+  materialDialogTitle.textContent="Material kopieren";
+  editId.value="";editMaterialId.value="";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
+  editSupplierArticle.value=item.supplierArticleNumber||"";editContainerSize.value=String(Number(item.containerSize)||1).replace(".",",");editUnit.value=item.unit||"Stk";
+  editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");editFixedVk.checked=item.fixedSalePrice===true;
+  updateGrossFromNet();editPriceDate.value=item.priceCheckedAt||item.priceValidFrom||new Date().toISOString().slice(0,10);
+  materialDialog.showModal();setTimeout(()=>editMaterialId.focus(),0);
+}
+
+function closeMaterialDialog(){wwPendingMaterial=null;copySourceId="";materialDialog.close()}
 
 async function saveMaterial(event){
   event.preventDefault();
-  const body={materialId:editMaterialId.value.trim(),product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,fixedSalePrice:editFixedVk.checked,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
+  const body={materialId:editMaterialId.value.trim(),product:editProduct.value.trim(),supplier:editSupplier.value.trim(),supplierArticleNumber:editSupplierArticle.value.trim(),containerSize:editContainerSize.value,unit:editUnit.value.trim(),purchasePrice:editEk.value,salePrice:editVk.value,fixedSalePrice:editFixedVk.checked,priceCheckedAt:editPriceDate.value,priceValidFrom:editPriceDate.value,active:true};
   if(wwPendingMaterial){
     await api("/admin/api/materials/import-winworker",{method:"POST",body:JSON.stringify({material:{...wwPendingMaterial,...body}})});
   }else if(editId.value)await api(`/admin/api/materials/${encodeURIComponent(editId.value)}`,{method:"PUT",body:JSON.stringify(body)});
-  else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify(body)});
-  wwPendingMaterial=null;materialDialog.close();await loadMaterials();
+  else await api("/admin/api/materials/auto",{method:"POST",body:JSON.stringify({...body,forceCreate:Boolean(copySourceId),copiedFrom:copySourceId})});
+  wwPendingMaterial=null;copySourceId="";materialDialog.close();await loadMaterials();
 }
 
 async function deleteMaterial(id){
@@ -531,7 +547,7 @@ function prepareWinWorkerImport(index){
   wwPendingMaterial={...item};
   materialDialogTitle.textContent="WW-Material übernehmen und ergänzen";
   editId.value="";editMaterialId.value=item.materialId||item.sourceId||"";editProduct.value=item.product||"";editSupplier.value=item.supplier||"";
-  editSupplierArticle.value=item.supplierArticleNumber||item.orderNumber||"";editUnit.value=item.unit||"Stk";
+  editSupplierArticle.value=item.supplierArticleNumber||item.orderNumber||"";editContainerSize.value=String(Number(item.containerSize)||1).replace(".",",");editUnit.value=item.unit||"Stk";
   editEk.value=String(Number(item.purchasePrice||0)).replace(".",",");editVk.value=String(Number(item.salePrice||0)).replace(".",",");
   editFixedVk.checked=item.fixedSalePrice===true;
   updateGrossFromNet();
@@ -631,7 +647,23 @@ supplierWwQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event
 mergeSearch.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchMergeTargets()}});
 editVk.addEventListener("input",updateGrossFromNet);
 editGross.addEventListener("input",updateNetFromGross);
-Promise.all([loadMaterials(),loadInbox(),loadRequests()]);
+let nextIdTimer,nextIdRequest=0;
+editMaterialId.addEventListener("input",()=>{
+  if(editId.value||wwPendingMaterial)return;
+  const prefix=editMaterialId.value.trim().toLocaleUpperCase("de");
+  if(!/^[A-ZÄÖÜ]{1,10}$/.test(prefix))return;
+  clearTimeout(nextIdTimer);const request=++nextIdRequest;
+  nextIdTimer=setTimeout(async()=>{
+    try{
+      const data=await api(`/admin/api/materials/next-id?prefix=${encodeURIComponent(prefix)}`);
+      if(request===nextIdRequest&&editMaterialId.value.trim().toLocaleUpperCase("de")===prefix){
+        editMaterialId.value=data.materialId;
+        editMaterialId.setSelectionRange(data.materialId.length,data.materialId.length);
+      }
+    }catch{}
+  },180);
+});
+Promise.all([loadMaterials(),loadInbox(),loadRequests()]).then(()=>{const edit=new URLSearchParams(location.search).get("edit");if(edit)openMaterial(edit)});
 </script>
 </body>
 </html>

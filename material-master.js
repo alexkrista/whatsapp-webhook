@@ -956,7 +956,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const workbook = XLSX.utils.book_new();
     const headers = [
       "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
-      "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
+      "Gebindegröße", "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
       "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer",
     ];
     const data = materials
@@ -967,6 +967,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "Lieferant": item.supplier,
         "Lieferanten-Artikelnummer": item.supplierArticleNumber,
         "Artikel": item.product,
+        "Gebindegröße": item.containerSize || 1,
         "Einheit": item.unit,
         "EK netto (€)": item.purchasePrice || "",
         "VK netto (€)": item.salePrice || "",
@@ -981,7 +982,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
     worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    worksheet["!cols"] = [12, 22, 22, 25, 42, 12, 15, 15, 15, 11, 15, 18, 22, 22].map(wch => ({ wch }));
+    worksheet["!cols"] = [12, 22, 22, 25, 42, 15, 12, 15, 15, 15, 11, 15, 18, 22, 22].map(wch => ({ wch }));
     XLSX.utils.book_append_sheet(workbook, worksheet, "Materialpreisliste");
 
     const warningRows = materials.map(decorate).filter(item => item.priceStale).map(item => ({
@@ -1322,6 +1323,30 @@ app.get("/api/regie/materials", async (req, res) => {
     res.json({ ok: true, imports: await readJson(IMPORTS_FILE, []) });
   });
 
+  app.get("/admin/api/materials/next-id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const prefix = clean(req.query?.prefix, 10).replace(/[^a-zA-ZÄÖÜäöü]/g, "").toLocaleUpperCase("de");
+      if (!prefix) return res.status(400).json({ ok: false, error: "Buchstabe fehlt" });
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`^${escaped}([\\s-]*)(\\d+)$`, "i");
+      const rows = await readJson(MATERIALS_FILE, []), used = new Set();
+      let separator = prefix.length > 1 ? " " : "", width = 2;
+      for (const item of rows) {
+        const match = clean(item.materialId || item.id, 120).match(pattern);
+        if (!match) continue;
+        used.add(Number(match[2]));
+        if (match[1]) separator = match[1];
+        width = Math.max(width, match[2].length);
+      }
+      let next = 1;
+      while (used.has(next)) next += 1;
+      res.json({ ok: true, prefix, number: next, materialId: `${prefix}${separator}${String(next).padStart(width, "0")}` });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.post("/admin/api/materials/sync-winworker", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1415,6 +1440,7 @@ app.get("/api/regie/materials", async (req, res) => {
       if (!product) return res.status(400).json({ ok: false, error: "Materialname fehlt" });
       const rows = await readJson(MATERIALS_FILE, []);
       const requestedMaterialId = clean(req.body?.materialId, 120);
+      const forceCreate = req.body?.forceCreate === true;
       if (requestedMaterialId && rows.some(item => String(item.materialId).toLocaleLowerCase("de") === requestedMaterialId.toLocaleLowerCase("de"))) {
         return res.status(409).json({ ok: false, error: `ID / Kürzel ${requestedMaterialId} ist bereits vergeben.` });
       }
@@ -1423,13 +1449,14 @@ app.get("/api/regie/materials", async (req, res) => {
         clean(item.product, 180).toLocaleLowerCase("de") === normalizedName ||
         clean(item.materialId, 120).toLocaleLowerCase("de") === normalizedName
       );
-      if (existing) return res.json({ ok: true, created: false, material: decorate(existing) });
+      if (existing && !forceCreate) return res.json({ ok: true, created: false, material: decorate(existing) });
       const supplierLinks = await readJson(SUPPLIERS_FILE, []);
       const material = normalizeMaterial(applySupplierLink({
         materialId: requestedMaterialId,
         id: requestedMaterialId,
         group: req.body?.group || "Regie",
         product,
+        containerSize: req.body?.containerSize,
         unit: req.body?.unit,
         purchasePrice: req.body?.purchasePrice ?? req.body?.unitPrice,
         markup: req.body?.markup,
@@ -1441,7 +1468,7 @@ app.get("/api/regie/materials", async (req, res) => {
         priceCheckedAt: req.body?.priceCheckedAt || new Date().toISOString().slice(0, 10),
         active: true,
         regieItem: true,
-        note: req.body?.note || "Direkt bei einer Regiebericht-Erfassung angelegt",
+        note: req.body?.note || (req.body?.copiedFrom ? `Kopie von ${clean(req.body.copiedFrom, 120)}` : "Direkt bei einer Regiebericht-Erfassung angelegt"),
         sourceSheet: req.body?.sourceSheet || "KRISTINE Regie",
       }, supplierLinks), { index: rows.length + 1 });
       while (!requestedMaterialId && rows.some(item => String(item.materialId) === String(material.materialId))) {

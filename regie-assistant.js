@@ -27,6 +27,7 @@ function registerRegieAssistant(app, options) {
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
   const FILES = path.join(ROOT, "regie-files");
   const REVIEWS = path.join(ROOT, "day-review-entries.json");
+  const TASKS = path.join(ROOT, "tasks.json");
 
   async function readJson(file, fallback) {
     try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; }
@@ -97,11 +98,65 @@ function registerRegieAssistant(app, options) {
       name: clean(row?.name || row?.employeeName, 180),
       from,
       to,
-      hours: round(num(row?.hours) || hoursBetween(from, to)),
+      hours: round(num(row?.hours) || blocks.reduce((sum, block) => sum + hoursBetween(block.from, block.to), 0)),
       blocks,
       timeLabel: blocks.map(block => `${block.from}–${block.to}`).join(" / "),
       hourlyRate: hasHourlyRate ? Math.max(0, round(num(row.hourlyRate))) : null,
     };
+  }
+
+  const REGIE_TASK_MARKER = "[REGIE_APPROVAL]";
+  const normalizedName = value => clean(value, 180).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+  async function alexAssignee() {
+    const employees = [...await readJson(SYSTEM_EMPLOYEES, []), ...await readJson(EMPLOYEES, [])];
+    const alex = employees.find(row => /\balexander\b.*\bkrista\b|\balex\b.*\bkrista\b/.test(normalizedName(row?.name)))
+      || employees.find(row => /\balexander\b|\balex\b/.test(normalizedName(row?.name)));
+    return { id: clean(alex?.id || alex?.employeeId || "admin", 100), name: clean(alex?.name || "Alexander Krista", 180) };
+  }
+
+  function regieTaskMeta(report) {
+    return `${REGIE_TASK_MARKER}reportId=${encodeURIComponent(report.id)};reportNumber=${encodeURIComponent(report.reportNumber || "")}`;
+  }
+
+  async function ensureRegieReviewTask(report) {
+    const tasks = await readJson(TASKS, []), assignee = await alexAssignee(), marker = `${REGIE_TASK_MARKER}reportId=${encodeURIComponent(report.id)}`;
+    const now = new Date().toISOString(), existing = tasks.find(row => String(row.reminder || "").includes(marker));
+    const task = {
+      ...(existing || {}),
+      id: existing?.id || `regie_review_${safeId(report.id)}`,
+      title: `Regiebericht prüfen · Rapport ${reportSequenceOf(report, report.jobId) || report.reportNumber || "–"}`,
+      taskType: "Freigabe",
+      priority: "heute",
+      assigneeId: assignee.id,
+      assigneeName: assignee.name,
+      jobId: report.jobId,
+      jobName: report.jobName,
+      dueDate: new Date().toISOString().slice(0, 10),
+      reminder: regieTaskMeta(report),
+      creatorId: "regie-office",
+      creatorName: "Bettina / Büro",
+      status: "open",
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    if (existing) Object.assign(existing, task); else tasks.unshift(task);
+    await writeJson(TASKS, tasks.slice(0, 20000));
+    return task;
+  }
+
+  async function completeRegieReviewTask(report, decision) {
+    const tasks = await readJson(TASKS, []), marker = `${REGIE_TASK_MARKER}reportId=${encodeURIComponent(report.id)}`, now = new Date().toISOString();
+    let changed = false;
+    for (const task of tasks.filter(row => String(row.reminder || "").includes(marker))) {
+      task.status = "done";
+      task.completedAt = now;
+      task.updatedAt = now;
+      task.regieDecision = decision;
+      changed = true;
+    }
+    if (changed) await writeJson(TASKS, tasks);
   }
 
   function normalizeIssuedEmployee(row) {
@@ -138,6 +193,7 @@ function registerRegieAssistant(app, options) {
       supplier: clean(row?.supplier, 180),
       quantity: round(num(row?.quantity) || 1),
       unit: clean(row?.unit || "Stk", 40),
+      containerSize: round(num(row?.containerSize) || 1),
       purchasePrice,
       markup,
       salePrice,
@@ -408,7 +464,7 @@ function registerRegieAssistant(app, options) {
     if (!jobId) throw new Error("Bitte eine Baustelle auswählen.");
     if (!clean(body.description || existing.description, 4000)) throw new Error("Beschreibung der Arbeit fehlt.");
     const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
-    const priceLocked = existing.status === "completed";
+    const priceLocked = ["prepared", "completed"].includes(existing.status);
     const hourlyRate = Math.max(0, num(priceLocked ? existing.hourlyRate : (body.hourlyRate ?? meta.regieHourlyRate ?? 75)));
     const materialMarkup = Math.max(0, num(priceLocked ? existing.materialMarkup : (body.materialMarkup ?? meta.regieMaterialMarkup ?? 80)));
     if (!priceLocked && typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
@@ -435,8 +491,8 @@ function registerRegieAssistant(app, options) {
     const report = {
       ...existing,
       id,
-      status: priceLocked ? existing.status : (finish ? "completed" : "draft"),
-      processingStatus: priceLocked ? existing.processingStatus : (finish ? "approved" : (existing.processingStatus || (existing.status === "prepared" ? "issued" : "draft"))),
+      status: priceLocked ? existing.status : (finish ? "prepared" : "draft"),
+      processingStatus: priceLocked ? existing.processingStatus : (finish ? "issued" : (existing.processingStatus || "draft")),
       billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
@@ -454,16 +510,19 @@ function registerRegieAssistant(app, options) {
       attachments: await saveAttachments(id, body.uploads, existing.attachments),
       createdAt: existing.createdAt || now,
       updatedAt: now,
-      completedAt: finish ? (existing.completedAt || now) : existing.completedAt || null,
+      submittedAt: finish ? now : existing.submittedAt || null,
+      reviewStatus: finish ? "pending" : (existing.reviewStatus || "draft"),
+      completedAt: existing.status === "completed" ? existing.completedAt || now : null,
     };
     report.totals = calculateTotals(report);
     if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
     await writeJson(REPORTS, reports.slice(-10000));
     if (finish) {
+      await ensureRegieReviewTask(report);
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
-        type: "regie_report_completed",
-        title: `Regiebericht ${report.reportNumber} gespeichert`,
+        type: "regie_report_submitted",
+        title: `Regiebericht ${report.reportNumber} an Alex zur Prüfung`,
         detail: `${report.totals.laborHours} h · Material ${money(report.totals.materialTotal)} · Gesamt ${money(report.totals.net)}`,
         source: "KRISTINE Eingang",
         data: { reportId: report.id },
@@ -591,6 +650,43 @@ function registerRegieAssistant(app, options) {
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
     catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
   });
+  app.post("/kristine/api/regie-reports/:id/review", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
+      if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+      if (report.status !== "prepared" || report.processingStatus !== "issued") return res.status(409).json({ ok: false, error: "Dieser Regiebericht wartet nicht auf Freigabe." });
+      const decision = clean(req.body?.decision, 30), now = new Date().toISOString();
+      if (!['changes', 'archive'].includes(decision)) return res.status(400).json({ ok: false, error: "Bitte Ändern oder Nur ablegen auswählen." });
+      report.reviewedAt = now;
+      report.reviewedBy = { id: "admin", name: "Alexander Krista" };
+      report.updatedAt = now;
+      if (decision === "changes") {
+        report.status = "draft";
+        report.processingStatus = "draft";
+        report.reviewStatus = "changes_requested";
+        report.reviewNote = clean(req.body?.note, 1000);
+        report.completedAt = null;
+      } else {
+        report.status = "completed";
+        report.processingStatus = "approved";
+        report.reviewStatus = "approved";
+        report.approvedAt = now;
+        report.completedAt = now;
+      }
+      await writeJson(REPORTS, reports);
+      await completeRegieReviewTask(report, decision);
+      await storeInJobFile(report);
+      if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, {
+        type: decision === "changes" ? "regie_changes_requested" : "regie_report_approved",
+        title: decision === "changes" ? `Regiebericht ${report.reportNumber} zurück zur Änderung` : `Regiebericht ${report.reportNumber} nur abgelegt`,
+        detail: decision === "changes" ? (report.reviewNote || "Änderung durch Alex angefordert") : "Von Alex geprüft und in der Baustellenakte abgelegt",
+        source: "KRISTINE Eingang",
+        data: { reportId: report.id, decision },
+      }).catch(() => {});
+      res.json({ ok: true, report, decision });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
+  });
   app.post("/kristine/api/regie-reports/:id/status", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -610,6 +706,7 @@ function registerRegieAssistant(app, options) {
       if (report.processingStatus === "signed" && !report.signedAt) report.signedAt = report.updatedAt;
       if (report.billingStatus === "billed" && !report.billedAt) report.billedAt = report.updatedAt;
       await writeJson(REPORTS, reports);
+      if (["approved", "sent", "signed"].includes(report.processingStatus)) await completeRegieReviewTask(report, report.processingStatus);
       report.totals = report.totals || calculateTotals(report);
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, {
@@ -647,7 +744,7 @@ function registerRegieAssistant(app, options) {
       const existingPdf = (report.attachments || []).find(row => row.kind === "generated_pdf");
       const pdfAttachment = { id: existingPdf?.id || `file_${crypto.randomBytes(6).toString("hex")}`, name: filename, storedName: filename, type: "application/pdf", kind: "generated_pdf", createdAt: report.sentAt };
       report.attachments = [...(report.attachments || []).filter(row => row.kind !== "generated_pdf"), pdfAttachment];
-      await writeJson(REPORTS, reports); await storeInJobFile(report);
+      await writeJson(REPORTS, reports); await completeRegieReviewTask(report, "sent"); await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, { type: "regie_report_sent", title: `Regiebericht ${report.reportNumber} versendet`, detail: `PDF an ${to}`, source: "KRISTINE Eingang", data: { reportId: report.id, to } }).catch(() => {});
       res.json({ ok: true, report, to });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
@@ -746,6 +843,7 @@ function registerRegieAssistant(app, options) {
         storeInDayRegie(report),
         storeInJobFile(report),
       ]);
+      if (!draft) await ensureRegieReviewTask(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
         type: draft ? "regie_report_draft_saved" : "regie_report_issued",
         title: draft ? `Regiebericht ${report.reportNumber} als Entwurf gespeichert` : `Regiebericht ${report.reportNumber} ausgestellt`,

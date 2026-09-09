@@ -69,6 +69,13 @@ function invoke(handler, req) {
   assert.equal(documentation[0].employeeDetails[0].hours, 7.5);
   assert.equal(documentation[0].materials[0].cost, 36);
   assert.equal(first.body.report.attachments.length, 1);
+  assert.equal(first.body.report.status, "prepared");
+  assert.equal(first.body.report.processingStatus, "issued");
+  const reviewTasksFile = path.join(temporaryRoot, "_kristine", "tasks.json");
+  let reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  assert.equal(reviewTasks.filter(task => task.reminder.includes(`reportId=${first.body.report.id}`)).length, 1);
+  assert.equal(reviewTasks[0].status, "open");
+  assert.equal(reviewTasks[0].assigneeName, "Alexander Krista");
 
   const locked = await invoke(save, { body: {
     id: first.body.report.id,
@@ -81,21 +88,42 @@ function invoke(handler, req) {
     employees: [{ id: "ma-1", name: "Max Muster", hours: 1, hourlyRate: 99 }],
     materials: [{ product: "Farbe", quantity: 1, purchasePrice: 10, salePrice: 999 }],
   } });
-  assert.equal(locked.body.report.status, "completed");
+  assert.equal(locked.body.report.status, "prepared");
   assert.equal(locked.body.report.hourlyRate, 75);
   assert.equal(locked.body.report.totals.laborTotal, 562.5);
   assert.equal(locked.body.report.materials[0].salePrice, 18, "Preise eines fertigen Rapports bleiben eingefroren");
+
+  const review = routes.get("POST /kristine/api/regie-reports/:id/review");
+  const archived = await invoke(review, { params: { id: first.body.report.id }, body: { decision: "archive" } });
+  assert.equal(archived.statusCode, 200);
+  assert.equal(archived.body.report.status, "completed");
+  assert.equal(archived.body.report.processingStatus, "approved");
+  reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  assert.equal(reviewTasks.find(task => task.reminder.includes(`reportId=${first.body.report.id}`)).status, "done");
 
   const second = await invoke(save, { body: {
     finish: false,
     jobId: "26096",
     date: "2026-09-03",
     description: "Zweiter Bericht",
-    employees: [{ id: "ma-1", name: "Max Muster", from: "07:00", to: "12:00" }],
+    employees: [{ id: "ma-1", name: "Max Muster", blocks: [{ from: "07:45", to: "12:00" }, { from: "12:30", to: "16:30" }] }],
   } });
   assert.equal(second.body.report.reportNumber, "26096002");
   assert.equal(second.body.report.reportSequence, 2);
-  assert.equal(second.body.report.employees[0].hours, 5);
+  assert.equal(second.body.report.employees[0].hours, 8.25);
+
+  const submittedSecond = await invoke(save, { body: { ...second.body.report, finish: true } });
+  assert.equal(submittedSecond.body.report.status, "prepared");
+  const changesRequested = await invoke(review, { params: { id: second.body.report.id }, body: { decision: "changes", note: "Bitte Beschreibung ergänzen" } });
+  assert.equal(changesRequested.body.report.status, "draft");
+  assert.equal(changesRequested.body.report.reviewStatus, "changes_requested");
+  assert.equal(changesRequested.body.report.reviewNote, "Bitte Beschreibung ergänzen");
+  const resubmittedSecond = await invoke(save, { body: { ...changesRequested.body.report, description: "Beschreibung ergänzt", finish: true } });
+  assert.equal(resubmittedSecond.body.report.status, "prepared");
+  reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  assert.equal(reviewTasks.filter(task => task.reminder.includes(`reportId=${second.body.report.id}`)).length, 1, "Erneutes Einreichen darf keine doppelte Aufgabe erzeugen");
+  assert.equal(reviewTasks.find(task => task.reminder.includes(`reportId=${second.body.report.id}`)).status, "open");
+  await invoke(review, { params: { id: second.body.report.id }, body: { decision: "changes" } });
 
   const remove = routes.get("DELETE /kristine/api/regie-reports/:id");
   const removed = await invoke(remove, { params: { id: second.body.report.id } });
@@ -128,12 +156,13 @@ function invoke(handler, req) {
     materialMarkup: 50,
     employees: [{ id: "ma-1", name: "Max Muster", hours: 1, hourlyRate: 99 }],
     materials: [
-      { product: "Normaler Artikel", quantity: 2, purchasePrice: 10, markup: 80, salePrice: 18 },
+      { product: "Normaler Artikel", quantity: 2, containerSize: 30, unit: "kg", purchasePrice: 10, markup: 80, salePrice: 18 },
       { product: "Fixpreis-Artikel", quantity: 1, purchasePrice: 10, markup: 80, salePrice: 14, fixedSalePrice: true },
     ],
   } });
   assert.equal(projectMaterialPrices.body.report.totals.laborTotal, 72);
   assert.equal(projectMaterialPrices.body.report.materials[0].markup, 50);
+  assert.equal(projectMaterialPrices.body.report.materials[0].containerSize, 30);
   assert.equal(projectMaterialPrices.body.report.materials[0].salePrice, 15, "Normaler Artikel verwendet EK plus Baustellen-Aufschlag");
   assert.equal(projectMaterialPrices.body.report.materials[1].markup, 0);
   assert.equal(projectMaterialPrices.body.report.materials[1].salePrice, 14, "Fix-VK bleibt ohne weiteren Aufschlag");
