@@ -54,7 +54,7 @@ async function createGrossProfitPdf(data = {}) {
   const addPage = (showTableHeader = true) => {
     page = pdf.addPage(pageSize);
     y = 556;
-    page.drawText("Ertragsberechnung", { x: left, y, size: 18, font: bold, color: green });
+    page.drawText("Nachkalkulation", { x: left, y, size: 18, font: bold, color: green });
     const jobLine = clean([data.jobId, data.jobName].filter(Boolean).join(" - "));
     if (jobLine) page.drawText(jobLine.slice(0, 125), { x: left, y: y - 22, size: 10, font: bold, color: dark });
     page.drawText(clean(`Stand: ${data.createdAt || new Date().toLocaleString("de-AT")}`), { x: left, y: y - 38, size: 8, font: regular, color: muted });

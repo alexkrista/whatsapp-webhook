@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-performance-2";
+  const VERSION="2026-09-09-performance-alias-3";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
@@ -256,11 +256,12 @@
   }
 
   const costNameKey=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"");
+  const costPersonName=v=>({maxkrista:"Maximilian Krista",mandi:"Manuel Faes",mandifaes:"Manuel Faes",johannes:"Johannes Wiederin",edimock:"Edmund Mock",cathringrabherr:"Cathrin Anna Grabherr",annacathringrabherr:"Cathrin Anna Grabherr",cathrinannagrabherr:"Cathrin Anna Grabherr"})[costNameKey(v)]||String(v||"").trim();
   function laborCostForPeople(people,employees=[]){
     const usable=employees.filter(e=>num(e?.calculation?.fullCostRate)>0);
     const averageWageRate=usable.length?usable.reduce((sum,e)=>sum+num(e.calculation.salaryCostRate),0)/usable.length:0;
     const averageGkRate=usable.length?usable.reduce((sum,e)=>sum+Math.max(0,num(e.calculation.fullCostRate)-num(e.calculation.salaryCostRate)),0)/usable.length:0;
-    const grouped=[...(people||[]).reduce((map,person)=>{const key=costNameKey(person.name)||'unbekannt',current=map.get(key)||{name:person.name||'Unbekannt',hours:0};current.hours+=num(person.hours);map.set(key,current);return map},new Map()).values()];
+    const grouped=[...(people||[]).reduce((map,person)=>{const name=costPersonName(person.name)||'Unbekannt',key=costNameKey(name)||'unbekannt',current=map.get(key)||{name,hours:0};current.hours+=num(person.hours);map.set(key,current);return map},new Map()).values()];
     const rows=grouped.map(person=>{
       const wanted=costNameKey(person.name),employee=usable.find(e=>[e.name,e.nickname,e.shortCode].some(value=>costNameKey(value)===wanted)),matched=!!employee,hours=num(person.hours);
       const wageRate=matched?num(employee.calculation.salaryCostRate):averageWageRate,gkRate=matched?Math.max(0,num(employee.calculation.fullCostRate)-wageRate):averageGkRate;
@@ -294,7 +295,7 @@
         <div class="bk-card"><div class="bk-label">Material-EK gesamt</div><div class="bk-value">${money2(totalMaterialEk)}</div><div class="bk-note">Fix: 60 % aus ${money2(material)} = ${money2(fixedMaterialEk)} · Regie-EK ${money2(regieMaterialEk)}${missing?` · ${missing} EK fehlt`:''}</div></div>
         <div class="bk-card"><div class="bk-label">Materialertrag gesamt</div><div class="bk-value ${totalMaterialProfit<0?'bk-bad':'bk-good'}">${money2(totalMaterialProfit)}</div><div class="bk-note">Fixer Auftrag: 40 % aus ${money2(material)} = ${money2(fixedMaterialProfit)} · Regie: VK ${money2(regieMaterialVk)} minus EK ${money2(regieMaterialEk)} = ${money2(regieMaterialProfit)}</div></div>
         <div class="bk-card"><div class="bk-label">Abrechenbare Leistung</div><div class="bk-value">${money2(performance.billablePerformance)}</div><div class="bk-note">${hour(performance.orderHours)} × ${money2(performance.hourlyRate)} × 90 % + ${money2(performance.actualRegieAmount)} Regie · Deckel ${money2(performance.performanceLimit)}</div></div>
-        <div class="bk-card"><div class="bk-label">${hasClosingInvoice?'Ertrag':'Noch abzurechnen'}</div><div class="bk-value ${hasClosingInvoice?(grossProfit<0?'bk-bad':'bk-good'):''}">${money2(hasClosingInvoice?grossProfit:performance.amountToInvoice)}</div><div class="bk-note">${hasClosingInvoice?`${money2(documentNet)} Rechnungen netto − ${money2(laborCosts.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(totalMaterialEk)} Material-EK`:`${money2(performance.billablePerformance)} Leistung − ${money2(partialInvoiceNet)} geschriebene Teilrechnungen`}</div>${hasClosingInvoice?`<details class="bk-profit-details"><summary>Berechnung anzeigen</summary><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" data-bk-gross-profit-pdf>PDF herunterladen</button></div><div data-bk-gross-profit-details>${grossProfitDetails(laborCosts,documentNet,totalMaterialEk,grossProfit)}</div></details>`:''}</div>
+        <div class="bk-card"><div class="bk-label">${hasClosingInvoice?'Ertrag':'Noch abzurechnen'}</div><div class="bk-value ${hasClosingInvoice?(grossProfit<0?'bk-bad':'bk-good'):''}">${money2(hasClosingInvoice?grossProfit:performance.amountToInvoice)}</div><div class="bk-note">${hasClosingInvoice?`${money2(documentNet)} Rechnungen netto − ${money2(laborCosts.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(totalMaterialEk)} Material-EK`:`${money2(performance.billablePerformance)} Leistung − ${money2(partialInvoiceNet)} geschriebene Teilrechnungen`}</div>${hasClosingInvoice?`<details class="bk-profit-details"><summary>Nachkalkulation anzeigen</summary><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" data-bk-gross-profit-pdf>PDF herunterladen</button></div><div data-bk-gross-profit-details>${grossProfitDetails(laborCosts,documentNet,totalMaterialEk,grossProfit)}</div></details>`:''}</div>
         <div class="bk-card bk-wide"><div class="bk-section-title"><h3>Vom Auftrag zu den Stunden</h3><span class="bk-source">live aus Baustellenkalkulation</span></div><div class="bk-flow">
           <div class="bk-step"><small>Auftrag brutto/netto lt. Datensatz</small><strong>${money(contract)}</strong></div>
           <div class="bk-step"><small>abzgl. Fremdleistung</small><strong>${money(external)}</strong></div>
@@ -306,6 +307,8 @@
       </div>`;
     el._bkGrossProfitPdfData=hasClosingInvoice?{rows:laborCosts.rows,documentNet,materialEk:totalMaterialEk}:null;
     el.querySelector("[data-bk-gross-profit-pdf]")?.addEventListener("click",event=>downloadGrossProfitPdf(el,j,event.currentTarget));
+    const profitDisclosure=el.querySelector(".bk-profit-details"),profitSummary=profitDisclosure?.querySelector("summary");
+    profitSummary?.addEventListener("click",event=>{event.preventDefault();profitDisclosure.open=!profitDisclosure.open;profitSummary.textContent=profitDisclosure.open?"Nachkalkulation einklappen":"Nachkalkulation anzeigen"});
   }
 
   function personStats(regies){
