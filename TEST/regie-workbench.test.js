@@ -123,13 +123,18 @@ function invoke(handler, req) {
     employees: [{ id: "ma-1", name: "Max Muster", from: "07:00", to: "12:00", netMinutes: 300 }],
     createdBy: { id: "ma-1", name: "Max Muster" },
     description: "Regie begonnen",
-    materials: [{ materialId: "A02", product: "Spachtel", quantity: 2, unit: "kg", salePrice: 9 }],
-    uploads: [{ name: "entwurf.jpg", data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }],
+    materials: [{ materialId: "A02", product: "Spachtel", quantity: 2, unit: "kg", salePrice: 9, searchAlias: "feine spachtel" }, { product: "Unbekannte Grundierung", quantity: 1, unit: "Gebinde", provisional: true, unknownMaterialId: "unknown_test_1", regieEntryId: "kgo_test_1", labelPhotoName: "Material-kgo_test_1.jpg" }],
+    uploads: [{ name: "entwurf.jpg", data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }, { name: "Material-kgo_test_1.jpg", data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }],
   };
   const mobileDraft = await invoke(issue, { body: mobileDraftBody });
   assert.equal(mobileDraft.statusCode, 200);
   assert.equal(mobileDraft.body.report.status, "draft");
   assert.equal(mobileDraft.body.report.processingStatus, "draft");
+  assert.equal(mobileDraft.body.report.materials[0].searchAlias, "feine spachtel");
+  assert.equal(mobileDraft.body.report.materials[1].provisional, true);
+  assert.equal(mobileDraft.body.report.materials[1].unknownMaterialId, "unknown_test_1");
+  assert.equal(mobileDraft.body.report.materials[1].labelPhotoName, "Material-kgo_test_1.jpg");
+  assert.equal(mobileDraft.body.report.attachments.length, 2);
   const draftList = await invoke(routes.get("GET /kristine/api/regie/drafts"), { query: { employeeId: "ma-1", jobId: "26098", date: "2026-09-03" } });
   assert.equal(draftList.body.drafts[0].id, mobileDraft.body.report.id);
   const draftDay = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26098", "2026", "09", "03", "regie.json"), "utf8"));
@@ -138,9 +143,10 @@ function invoke(handler, req) {
   const completedDraft = await invoke(issue, { body: { ...mobileDraftBody, id: mobileDraft.body.report.id, draft: false, description: "Regie fertig" } });
   assert.equal(completedDraft.body.report.id, mobileDraft.body.report.id);
   assert.equal(completedDraft.body.report.processingStatus, "issued");
+  assert.equal(completedDraft.body.report.materials[1].unknownMaterialId, "unknown_test_1");
   const completedDay = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26098", "2026", "09", "03", "regie.json"), "utf8"));
   assert.equal(completedDay.status, "Ausgestellt");
-  assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 1);
+  assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 2);
 
   const expressOne = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma1_1" } } });
   const expressTwo = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, createdBy: { id: "ma-2", name: "Erika Beispiel" }, people: [{ id: "ma-2", name: "Erika Beispiel" }], employees: [{ id: "ma-2", name: "Erika Beispiel", from: "07:00", to: "12:00", netMinutes: 300 }], segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma2_2" } } });

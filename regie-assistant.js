@@ -136,6 +136,11 @@ function registerRegieAssistant(app, options) {
       component: clean(row?.component, 120),
       area: clean(row?.area, 120),
       extraAnswer: clean(row?.extraAnswer, 300),
+      provisional: row?.provisional === true,
+      unknownMaterialId: clean(row?.unknownMaterialId, 150),
+      regieEntryId: clean(row?.regieEntryId, 150),
+      labelPhotoName: clean(row?.labelPhotoName, 500),
+      searchAlias: clean(row?.searchAlias, 240),
     };
   }
 
@@ -689,7 +694,7 @@ function registerRegieAssistant(app, options) {
         people: employees.map(person => ({ id: person.id, name: person.name })),
         employees,
         description: clean(body.description, 4000),
-        materials: (body.materials || []).map(material => ({ ...normalizeMaterial(material, meta.regieMaterialMarkup ?? 80), labelPhotoName: clean(material.labelPhotoName) })),
+        materials: (body.materials || []).map(material => normalizeMaterial(material, meta.regieMaterialMarkup ?? 80)),
         hourlyRate: round(Math.max(0, num(meta.regieHourlyRate ?? 75))),
         materialMarkup: round(Math.max(0, num(meta.regieMaterialMarkup ?? 80))),
         createdAt: existing?.createdAt || now,

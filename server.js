@@ -74,10 +74,10 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.11";
-const APP_BUILD = "0031.16-kgo-regie-express-migrate";
+const APP_VERSION = "3.5.12";
+const APP_BUILD = "0031.17-kgo-regie-new-material";
 const APP_STATUS = "KGO-Regie: mobil ausstellen, prüfen, versenden und abrechnen";
-const APP_BUILD_DATE = "2026-09-08";
+const APP_BUILD_DATE = "2026-09-09";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));
