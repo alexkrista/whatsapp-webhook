@@ -88,6 +88,9 @@ function registerRegieAssistant(app, options) {
 
   function normalizeEmployee(row) {
     const from = clean(row?.from, 5), to = clean(row?.to, 5);
+    const blocks = (Array.isArray(row?.blocks) && row.blocks.length ? row.blocks : [{ from, to }])
+      .map(block => ({ from: clean(block?.from, 5), to: clean(block?.to, 5) }))
+      .filter(block => hoursBetween(block.from, block.to) > 0);
     const hasHourlyRate = row?.hourlyRate !== undefined && row?.hourlyRate !== null && String(row.hourlyRate).trim() !== "";
     return {
       id: clean(row?.employeeId || row?.id, 100),
@@ -95,6 +98,8 @@ function registerRegieAssistant(app, options) {
       from,
       to,
       hours: round(num(row?.hours) || hoursBetween(from, to)),
+      blocks,
+      timeLabel: blocks.map(block => `${block.from}–${block.to}`).join(" / "),
       hourlyRate: hasHourlyRate ? Math.max(0, round(num(row.hourlyRate))) : null,
     };
   }
@@ -468,7 +473,7 @@ function registerRegieAssistant(app, options) {
   }
 
   function printHtml(report, meta) {
-    const employeeRows = report.employees.map(row => { const rate = employeeRate(row, report.hourlyRate); return `<tr><td>${esc(row.name)}</td><td>${esc(row.from || "")}</td><td>${esc(row.to || "")}</td><td class="n">${num(row.hours).toLocaleString("de-AT")} Std</td><td class="n">${money(rate)}</td><td class="n">${money(num(row.hours) * rate)}</td></tr>`; }).join("");
+    const employeeRows = report.employees.map(row => { const rate = employeeRate(row, report.hourlyRate), time = clean(row.timeLabel, 300); const timeCells = time && (row.blocks || []).length > 1 ? `<td colspan="2">${esc(time)}</td>` : `<td>${esc(row.from || "")}</td><td>${esc(row.to || "")}</td>`; return `<tr><td>${esc(row.name)}</td>${timeCells}<td class="n">${num(row.hours).toLocaleString("de-AT")} Std</td><td class="n">${money(rate)}</td><td class="n">${money(num(row.hours) * rate)}</td></tr>`; }).join("");
     const materialRows = report.materials.map(row => `<tr><td>${esc(row.product)}</td><td class="n">${num(row.quantity).toLocaleString("de-AT")} ${esc(row.unit)}</td><td class="n">${money(row.salePrice)}</td><td class="n">${money(num(row.quantity) * num(row.salePrice))}</td></tr>`).join("");
     const address = [meta?.contactName || meta?.name || report.jobName, `${meta?.street || ""} ${meta?.houseNumber || ""}`.trim(), `${meta?.postalCode || ""} ${meta?.city || ""}`.trim()].filter(Boolean);
     const sequence = reportSequenceOf(report, report.jobId) || report.reportNumber;
@@ -553,7 +558,17 @@ function registerRegieAssistant(app, options) {
       const key = String(row.id || normName(row.name));
       const current = grouped.get(key);
       if (!current) grouped.set(key, { ...row });
-      else grouped.set(key, { ...current, from: [current.from, row.from].filter(Boolean).sort()[0] || "", to: [current.to, row.to].filter(Boolean).sort().slice(-1)[0] || "", hours: round(num(current.hours) + num(row.hours)) });
+      else {
+        const blocks = [...(current.blocks || []), ...(row.blocks || [])];
+        grouped.set(key, {
+          ...current,
+          from: [current.from, row.from].filter(Boolean).sort()[0] || "",
+          to: [current.to, row.to].filter(Boolean).sort().slice(-1)[0] || "",
+          hours: round(num(current.hours) + num(row.hours)),
+          blocks,
+          timeLabel: blocks.map(block => `${block.from}–${block.to}`).join(" / "),
+        });
+      }
     }
     const suggestions = [...grouped.values()];
     res.json({ ok: true, suggestions });

@@ -135,7 +135,9 @@ function installOfficeRoutes(app, deps = {}) {
       id:`office_${type}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
       employeeId:employeeId(employee), employeeName:employeeName(employee), date, type, at,
       actualAt:localTime(), adjusted:false, command:type === "start" ? "start" : "feierabend",
-      jobId:OFFICE_JOB_ID, jobName:OFFICE_JOB_NAME, source:"kgo-office-core", createdAt:new Date().toISOString()
+      jobId:OFFICE_JOB_ID, jobName:OFFICE_JOB_NAME,
+      activityMode:"unproductive", billingType:"unproductive", reason:"Büro",
+      source:"kgo-office-core", createdAt:new Date().toISOString()
     };
   }
 

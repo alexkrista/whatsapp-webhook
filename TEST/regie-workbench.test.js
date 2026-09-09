@@ -254,8 +254,10 @@ function invoke(handler, req) {
     { id: "ma-real", name: "Max Muster", active: true },
   ]));
   fs.writeFileSync(path.join(temporaryRoot, "_kristine", "time-events.json"), JSON.stringify([
-    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "07:00", type: "start" },
-    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:37", type: "stop" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "07:45", type: "start" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:00", type: "mittag" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "12:30", type: "weiter" },
+    { employeeId: "ma-real", employeeName: "", date: "2026-09-03", jobId: "26096", at: "16:30", type: "stop" },
   ]));
   fs.writeFileSync(path.join(temporaryRoot, "_kristine", "assignments.json"), JSON.stringify([
     { employeeId: "ma-real", employeeName: "Max Muster", date: "2026-09-03", jobId: "26096", from: "07:00", to: "17:00", hours: 10 },
@@ -263,7 +265,9 @@ function invoke(handler, req) {
   const suggestions = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
   assert.equal(suggestions.body.suggestions.length, 1);
   assert.equal(suggestions.body.suggestions[0].name, "Max Muster");
-  assert.equal(suggestions.body.suggestions[0].hours, 5.62);
+  assert.equal(suggestions.body.suggestions[0].hours, 8.25);
+  assert.equal(suggestions.body.suggestions[0].timeLabel, "07:45–12:00 / 12:30–16:30");
+  assert.deepEqual(suggestions.body.suggestions[0].blocks, [{ from:"07:45", to:"12:00" }, { from:"12:30", to:"16:30" }]);
 
   const print = routes.get("GET /kristine/regie-report/:id/print");
   const printed = await invoke(print, { params: { id: first.body.report.id } });
