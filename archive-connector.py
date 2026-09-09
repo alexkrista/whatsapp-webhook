@@ -7984,9 +7984,22 @@ def tower_planning_api():
 def tower_live_summary_api():
     """Nur die für den Tower nötigen Summen ausgeben, keine OP-Einzelposten."""
     try:
+        project_numbers = []
+        for value in str(request.args.get("projects") or "").split(","):
+            number = value.strip()
+            if number.isdigit() and len(number) <= 12 and number not in project_numbers:
+                project_numbers.append(number)
+            if len(project_numbers) >= 100:
+                break
         with app.test_client() as client:
             debtors = client.get("/api/outgoing/open-items").get_json(silent=True) or {}
             creditors = client.get("/incoming/payment-open-items").get_json(silent=True) or {}
+            billing_by_project = {}
+            for project_number in project_numbers:
+                response = client.post("/api/outgoing/project-billing", json={"projectNumber": project_number})
+                payload = response.get_json(silent=True) or {}
+                if response.status_code < 400 and payload.get("billing") is not None:
+                    billing_by_project[project_number] = payload["billing"]
         if debtors.get("ok") is False or creditors.get("ok") is False:
             raise RuntimeError(debtors.get("error") or creditors.get("error") or "OP-Summen nicht verfügbar")
         planning = company_planning_year(request.args.get("year", 2026))
@@ -8001,6 +8014,7 @@ def tower_live_summary_api():
                 "total": float(creditors.get("total") or 0),
                 "count": int(creditors.get("count") or 0),
             },
+            "billingByProject": billing_by_project,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

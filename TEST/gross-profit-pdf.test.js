@@ -27,7 +27,7 @@ const { createGrossProfitPdf } = require("../gross-profit-pdf");
   assert.match(source, /projectWageRate/);
   assert.match(source, /Mitarbeiterkosten je Stunde/);
   assert.match(source, /Material-EK je Stunde/);
-  assert.match(source, /Rohertrag je Stunde/);
+  assert.match(source, /Ertrag je Stunde/);
   assert.match(source, /grossProfitPerHour/);
   console.log("gross profit PDF tests passed");
 })().catch(error => {

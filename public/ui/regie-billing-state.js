@@ -17,6 +17,25 @@
   };
   const reportSort=(a,b)=>String(a?.reportDate||"").localeCompare(String(b?.reportDate||""),"de",{numeric:true})||String(a?.sheetNumber||a?.reportNumber||"").localeCompare(String(b?.sheetNumber||b?.reportNumber||""),"de",{numeric:true});
 
+  function calculatePerformance(input={}){
+    const actualHours=Math.max(0,number(input.actualHours));
+    const regieHours=Math.min(actualHours,Math.max(0,number(input.regieHours)));
+    const orderHours=Math.max(0,actualHours-regieHours);
+    const hourlyRate=85;
+    const productivityFactor=.9;
+    const contractAmount=Math.max(0,number(input.contractAmount));
+    const plannedRegieAmount=Math.max(0,number(input.plannedRegieAmount));
+    const actualRegieAmount=Math.max(0,number(input.actualRegieAmount));
+    const excessRegieAmount=Math.max(0,actualRegieAmount-plannedRegieAmount);
+    const orderPerformance=orderHours*hourlyRate*productivityFactor;
+    const performanceBeforeCap=orderPerformance+actualRegieAmount;
+    const performanceLimit=contractAmount>0?contractAmount*1.1+excessRegieAmount:performanceBeforeCap;
+    const billablePerformance=Math.min(performanceBeforeCap,performanceLimit);
+    const partialInvoiceNet=Math.max(0,number(input.partialInvoiceNet));
+    const amountToInvoice=input.hasClosingInvoice?0:Math.max(0,billablePerformance-partialInvoiceNet);
+    return {actualHours,regieHours,orderHours,hourlyRate,productivityFactor,contractAmount,plannedRegieAmount,actualRegieAmount,excessRegieAmount,orderPerformance,performanceBeforeCap,performanceLimit,billablePerformance,partialInvoiceNet,amountToInvoice};
+  }
+
   function summarize(reports,billing={}){
     const invoices=Array.isArray(billing?.invoices)?billing.invoices:[];
     const invoiceBySourceId=new Map();
@@ -48,5 +67,5 @@
     };
   }
 
-  return {summarize,documentKey,reportAmount};
+  return {summarize,calculatePerformance,documentKey,reportAmount};
 });

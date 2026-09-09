@@ -2,7 +2,7 @@
 
 const assert=require("node:assert/strict");
 const test=require("node:test");
-const {summarize}=require("../public/ui/regie-billing-state");
+const {summarize,calculatePerformance}=require("../public/ui/regie-billing-state");
 
 test("links rapports to the exact WinWorker invoice and sums only open reports",()=>{
   const result=summarize([
@@ -37,4 +37,24 @@ test("does not mark PDF-only reports or a zero GUID as billed",()=>{
   assert.equal(result.openRows.length,1);
   assert.equal(result.openAmount,250);
   assert.equal(result.billedRows.length,0);
+});
+
+test("calculates billable performance from non-regie hours and subtracts partial invoices",()=>{
+  const result=calculatePerformance({actualHours:120,regieHours:20,hourlyRate:72,contractAmount:10000,plannedRegieAmount:1000,actualRegieAmount:1500,partialInvoiceNet:4000});
+  assert.equal(result.orderHours,100);
+  assert.equal(result.hourlyRate,85);
+  assert.equal(result.orderPerformance,7650);
+  assert.equal(result.excessRegieAmount,500);
+  assert.equal(result.performanceBeforeCap,9150);
+  assert.equal(result.performanceLimit,11500);
+  assert.equal(result.billablePerformance,9150);
+  assert.equal(result.amountToInvoice,5150);
+});
+
+test("caps performance at 110 percent of order plus excess regie",()=>{
+  const result=calculatePerformance({actualHours:220,regieHours:20,hourlyRate:85,contractAmount:10000,plannedRegieAmount:1000,actualRegieAmount:1800,partialInvoiceNet:3000});
+  assert.equal(result.performanceBeforeCap,17100);
+  assert.equal(result.performanceLimit,11800);
+  assert.equal(result.billablePerformance,11800);
+  assert.equal(result.amountToInvoice,8800);
 });

@@ -27,7 +27,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .table input{width:100%;max-width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px}.table input[type="checkbox"]{width:auto;cursor:pointer}
 .notice{background:#eef7ee;border:1px solid #b8d4bc;border-radius:12px;padding:12px;margin-bottom:14px}.navbtn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#27713d;color:#fff;border-radius:9px;padding:8px 10px;font-size:13px}.navbtn:hover{filter:brightness(.95)}.employee-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:10px}.employee-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ddd;border-radius:10px;padding:9px}.employee-chip input{width:auto}.auto-box{background:#f7f7f7;border-radius:12px;padding:10px;line-height:1.5}.muted-input{background:#f5f5f5;color:#555}
-.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.control-grid{display:grid;gap:12px}.control-card{background:#fff;border:1px solid #e7e3dc;border-radius:14px;padding:14px}.control-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.control-name{font-size:18px;font-weight:800}.control-site{font-size:15px;font-weight:700;color:#333;margin-top:5px}.control-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:10px}.daybar-wrap{margin-top:12px}.daybar-labels{display:grid;font-size:11px;color:#777;margin-bottom:4px}.daybar{height:20px;background:#dedbd4;border-radius:999px;overflow:hidden;display:flex;position:relative}.daybar-segment{height:100%;min-width:2px}.daybar-switch-marker{position:absolute;top:0;bottom:0;width:4px;z-index:3;background:#24577c;box-shadow:0 0 0 2px #fff;transform:translateX(-2px);pointer-events:auto}.seg-work{background:#2e8b57}.seg-pause{background:#c83d3d}.seg-lunch{background:#e4a11b}.seg-travel{background:#3677b8}.seg-empty{background:#dedbd4}.control-details{font-size:12px;color:#555;margin-top:8px;line-height:1.55}.status.lunch{background:#ffe8b1;color:#7a4e00}.status.idle{background:#efefef;color:#555}.status.finished_site{background:#e7e7e7;color:#555}.status.finished_day{background:#e5e5e5;color:#555}.status.working{background:#d9f1df;color:#145829}.status.pause{background:#ffd9d9;color:#7b1717}.bar-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#666}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}.legend-switch{display:inline-block;width:4px;height:11px;background:#24577c;box-shadow:0 0 0 1px #fff,0 0 0 2px #9ba8b2;margin:0 6px 0 3px;vertical-align:-1px}
 @media(max-width:800px){.chatwrap{grid-template-columns:1fr}.week{grid-template-columns:repeat(5,280px)}header{align-items:flex-start;flex-direction:column}}
 
 /* Build 0020.6: ruhiges Konfigurationsmodul als Akkordeon */
@@ -138,7 +138,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 </style>
 </head>
 <body>
-<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.34"></div>
+<div id="kristaTopbar" data-krista-active="kristine" data-krista-build="0023.36"></div>
 <main>
 <nav class="krista-module-nav">
   <button class="active" onclick="showTab('kristool')">🧰 KRISTOOL</button>
@@ -988,7 +988,7 @@ function renderAxisLabels(dayStart,dayEnd){
 }
 function renderDayBar(segments,dayStart,dayEnd){
   const total=Math.max(60,dayEnd-dayStart);
-  let cursor=dayStart,html='';
+  let cursor=dayStart,html='',markers='',lastWork=null;
   for(const seg of segments){
     const from=Math.max(dayStart,Math.min(dayEnd,seg.from));
     const to=Math.max(dayStart,Math.min(dayEnd,seg.to));
@@ -996,11 +996,20 @@ function renderDayBar(segments,dayStart,dayEnd){
     if(from>cursor)html+=`<span class="daybar-segment seg-empty" style="width:${((from-cursor)/total)*100}%"></span>`;
     const cls=seg.type==='work'?'seg-work':seg.type==='pause'?'seg-pause':seg.type==='lunch'?'seg-lunch':seg.type==='vacation'?'seg-vacation':seg.type==='sick'?'seg-sick':seg.type==='za'?'seg-za':'seg-holiday';
     const label=`${seg.fromText}–${seg.toText} ${seg.type==='work'?'Arbeit · '+(seg.jobName||seg.jobId||'Baustelle'):seg.type==='pause'?'Pause':seg.type==='lunch'?'Mittag':(seg.jobName||'Abwesenheit')}`;
+    if(seg.type==='work'){
+      const jobKey=String(seg.jobId||seg.jobName||'').trim();
+      const jobLabel=String(seg.jobName||seg.jobId||'Baustelle').trim();
+      if(lastWork&&jobKey&&jobKey!==lastWork.key){
+        const left=Math.max(0,Math.min(100,((from-dayStart)/total)*100));
+        markers+=`<span class="daybar-switch-marker" style="left:${left}%" title="${esc(`Baustellenwechsel ${formatAxisHM(from)}: ${lastWork.label} → ${jobLabel}`)}"></span>`;
+      }
+      if(jobKey)lastWork={key:jobKey,label:jobLabel};
+    }
     html+=`<span class="daybar-segment ${cls}" style="width:${((to-from)/total)*100}%" title="${esc(label)}"></span>`;
     cursor=Math.max(cursor,to);
   }
   if(cursor<dayEnd)html+=`<span class="daybar-segment seg-empty" style="width:${((dayEnd-cursor)/total)*100}%"></span>`;
-  return html||'<span class="daybar-segment seg-empty" style="width:100%"></span>';
+  return (html||'<span class="daybar-segment seg-empty" style="width:100%"></span>')+markers;
 }
 
 
@@ -1045,15 +1054,18 @@ function timeEditorContextCell(seg,index){
   return '<span class="small">–</span>';
 }
 function renderTimeEditor(){
-  let rows='';
+  let rows='',lastWork=null;
   const lastIndex=timeEditorSegments.length-1;
   for(let index=0;index<timeEditorSegments.length;index++){
     const seg=timeEditorSegments[index];
-    const previous=timeEditorSegments[index-1];
     const isLast=index===lastIndex;
     const isOpen=isLast&&!seg.to;
-    if(seg.type==='work'&&previous?.type==='work'&&String(previous.jobId||'')!==String(seg.jobId||'')){
-      rows+=`<tr class="time-editor-site-divider"><td colspan="5"><div class="time-editor-site-divider-line"><span class="time-editor-site-divider-label">🏠 Baustellenwechsel · ${esc(seg.jobName||seg.jobId||'Baustelle wählen')}</span></div></td></tr>`;
+    if(seg.type==='work'){
+      const jobKey=String(seg.jobId||seg.jobName||'').trim();
+      if(lastWork&&jobKey&&jobKey!==lastWork.key){
+        rows+=`<tr class="time-editor-site-divider"><td colspan="5"><div class="time-editor-site-divider-line"><span class="time-editor-site-divider-label">🏠 Baustellenwechsel · ${esc(seg.jobName||seg.jobId||'Baustelle wählen')}</span></div></td></tr>`;
+      }
+      if(jobKey)lastWork={key:jobKey};
     }
     rows+=`<tr class="time-editor-row-${esc(seg.type)}">
       <td><select onchange="updateTimeEditorRow(${index},'type',this.value)">
@@ -1364,7 +1376,7 @@ function renderControl(){
   controlAlerts.innerHTML=alerts.length?`<strong>Offene Punkte</strong><br><span style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px">${alerts.join('<span>·</span>')}</span>`:'';
   if(!employees.length){controlList.innerHTML='<span class="small">Keine aktiven Mitarbeiter gefunden.</span>';return}
 
-  controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
+  controlList.innerHTML=`<div class="bar-legend"><span><i class="legend-dot" style="background:#2e8b57"></i>Arbeit</span><span><i class="legend-dot" style="background:#c83d3d"></i>Pause</span><span><i class="legend-dot" style="background:#e4a11b"></i>Mittag</span><span><i class="legend-dot" style="background:#dedbd4"></i>offen</span><span><i class="legend-switch"></i>Baustellenwechsel</span></div><div class="control-grid" style="margin-top:12px">${employees.map(a=>{
     const aliasIds=a.aliasIds||[a.employeeId];
     const stateCandidates=aliasIds.map(id=>data.states?.[id]).filter(Boolean).sort((x,y)=>((y.timeline||[]).length+(y.mode&&y.mode!=='idle'?1000:0))-((x.timeline||[]).length+(x.mode&&x.mode!=='idle'?1000:0)));
     const s=stateCandidates[0]||{mode:'idle',employeeId:a.employeeId,employeeName:a.employeeName};

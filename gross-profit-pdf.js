@@ -54,7 +54,7 @@ async function createGrossProfitPdf(data = {}) {
   const addPage = (showTableHeader = true) => {
     page = pdf.addPage(pageSize);
     y = 556;
-    page.drawText("Rohertragsberechnung", { x: left, y, size: 18, font: bold, color: green });
+    page.drawText("Ertragsberechnung", { x: left, y, size: 18, font: bold, color: green });
     const jobLine = clean([data.jobId, data.jobName].filter(Boolean).join(" - "));
     if (jobLine) page.drawText(jobLine.slice(0, 125), { x: left, y: y - 22, size: 10, font: bold, color: dark });
     page.drawText(clean(`Stand: ${data.createdAt || new Date().toLocaleString("de-AT")}`), { x: left, y: y - 38, size: 8, font: regular, color: muted });
@@ -104,10 +104,10 @@ async function createGrossProfitPdf(data = {}) {
     ["Rechnungen netto", data.documentNet],
     ["Mitarbeiter-Gesamtkosten", -Number(data.employeeTotal || 0)],
     ["Material-EK gesamt", -Number(data.materialEk || 0)],
-    ["Rohertrag", data.grossProfit],
+    ["Ertrag", data.grossProfit],
   ];
   for (const [label, value] of summaryRows) {
-    const isTotal = label === "Rohertrag";
+    const isTotal = label === "Ertrag";
     if (isTotal) page.drawRectangle({ x: left, y: y - 5, width: right - left, height: 23, color: rgb(.89, .94, .90) });
     page.drawText(label, { x: left + 4, y: y + 2, size: isTotal ? 11 : 9, font: isTotal ? bold : regular, color: isTotal ? green : dark });
     drawRight(`${Number(value) < 0 ? "- " : ""}${money(Math.abs(Number(value || 0)))}`, right, y + 2, isTotal ? bold : regular, isTotal ? 11 : 9, isTotal ? green : dark);
@@ -122,7 +122,7 @@ async function createGrossProfitPdf(data = {}) {
   const tileData = [
     ["Mitarbeiterkosten je Stunde", employeePerHour, data.employeeTotal, "Lohn + GK"],
     ["Material-EK je Stunde", materialPerHour, data.materialEk, "Materialkosten"],
-    ["Rohertrag je Stunde", grossProfitPerHour, data.grossProfit, "Rohertrag"],
+    ["Ertrag je Stunde", grossProfitPerHour, data.grossProfit, "Ertrag"],
   ];
   tileData.forEach(([label, value, numerator, description], index) => {
     const x = left + index * (tileWidth + tileGap);
