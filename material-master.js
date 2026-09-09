@@ -247,6 +247,15 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     return fingerprint === "lg" ? "littlegreene" : fingerprint;
   }
 
+  function matchesSupplierFilter(item, filter) {
+    const selected = clean(filter, 120);
+    if (!selected) return true;
+    if (supplierFingerprint(selected) === supplierFingerprint("Ohne Lieferant")) {
+      return !clean(item?.supplier, 120);
+    }
+    return supplierFingerprint(item?.supplier) === supplierFingerprint(selected);
+  }
+
   function supplierLinkForName(links, name) {
     const fingerprint = supplierFingerprint(name);
     return (links || []).find(link =>
@@ -796,7 +805,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const materials = allMaterials
       .filter(material => material.active !== false)
       .filter(material => !group || material.group === group)
-      .filter(material => !supplier || supplierFingerprint(material.supplier) === supplierFingerprint(supplier))
+      .filter(material => matchesSupplierFilter(material, supplier))
       .filter(material => !query || matchesMaterialQuery(material, query));
 
     const workbook = XLSX.utils.book_new();
@@ -1014,7 +1023,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       if (activeOnly) rows = rows.filter(item => item.active !== false);
       if (group) rows = rows.filter(item => item.group === group);
       if (subgroup) rows = rows.filter(item => item.subgroup === subgroup);
-      if (supplier) rows = rows.filter(item => supplierFingerprint(item.supplier) === supplierFingerprint(supplier));
+      if (supplier) rows = rows.filter(item => matchesSupplierFilter(item, supplier));
       if (query) {
         rows = rows.filter(item => matchesMaterialQuery(item, query));
       }
