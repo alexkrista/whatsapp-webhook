@@ -647,6 +647,22 @@ supplierWwQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event
 mergeSearch.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchMergeTargets()}});
 editVk.addEventListener("input",updateGrossFromNet);
 editGross.addEventListener("input",updateNetFromGross);
+let nextIdTimer,nextIdRequest=0;
+editMaterialId.addEventListener("input",()=>{
+  if(editId.value||wwPendingMaterial)return;
+  const prefix=editMaterialId.value.trim().toLocaleUpperCase("de");
+  if(!/^[A-ZÄÖÜ]{1,10}$/.test(prefix))return;
+  clearTimeout(nextIdTimer);const request=++nextIdRequest;
+  nextIdTimer=setTimeout(async()=>{
+    try{
+      const data=await api(`/admin/api/materials/next-id?prefix=${encodeURIComponent(prefix)}`);
+      if(request===nextIdRequest&&editMaterialId.value.trim().toLocaleUpperCase("de")===prefix){
+        editMaterialId.value=data.materialId;
+        editMaterialId.setSelectionRange(data.materialId.length,data.materialId.length);
+      }
+    }catch{}
+  },180);
+});
 Promise.all([loadMaterials(),loadInbox(),loadRequests()]).then(()=>{const edit=new URLSearchParams(location.search).get("edit");if(edit)openMaterial(edit)});
 </script>
 </body>

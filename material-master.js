@@ -1323,6 +1323,30 @@ app.get("/api/regie/materials", async (req, res) => {
     res.json({ ok: true, imports: await readJson(IMPORTS_FILE, []) });
   });
 
+  app.get("/admin/api/materials/next-id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const prefix = clean(req.query?.prefix, 10).replace(/[^a-zA-ZÄÖÜäöü]/g, "").toLocaleUpperCase("de");
+      if (!prefix) return res.status(400).json({ ok: false, error: "Buchstabe fehlt" });
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`^${escaped}([\\s-]*)(\\d+)$`, "i");
+      const rows = await readJson(MATERIALS_FILE, []), used = new Set();
+      let separator = prefix.length > 1 ? " " : "", width = 2;
+      for (const item of rows) {
+        const match = clean(item.materialId || item.id, 120).match(pattern);
+        if (!match) continue;
+        used.add(Number(match[2]));
+        if (match[1]) separator = match[1];
+        width = Math.max(width, match[2].length);
+      }
+      let next = 1;
+      while (used.has(next)) next += 1;
+      res.json({ ok: true, prefix, number: next, materialId: `${prefix}${separator}${String(next).padStart(width, "0")}` });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
   app.post("/admin/api/materials/sync-winworker", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
