@@ -794,6 +794,21 @@ if (contactPhone) {
   }
 
   function openAssistant(kind) {
+    if (kind === "photo" && window.KristaPhotoFollowup) {
+      const assignment = state.employeeState?.activeJobOverride || state.currentAssignment;
+      window.KristaPhotoFollowup.open({
+        defaultJobId: assignment?.jobId || "",
+        uploaderId: employeeId(state.employee),
+        uploaderName: employeeName(state.employee),
+        source: "KGO",
+        onUploaded({ count }) {
+          saveReview("photo", { summary: `${count} Foto${count === 1 ? "" : "s"} nachgereicht` });
+          renderReview();
+          toast(`${count} Foto${count === 1 ? "" : "s"} gespeichert.`);
+        },
+      });
+      return;
+    }
     const def = assistantDefinitions(kind);
     if (!def) return;
     if (def.external) {

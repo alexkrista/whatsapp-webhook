@@ -3,6 +3,13 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const crypto = require("crypto");
+const express = require("express");
+
+let sharp = null;
+try { sharp = require("sharp"); } catch {}
+
+let photoUploadQueue = Promise.resolve();
 
 function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
@@ -55,6 +62,118 @@ function mediaKind(filename) {
   if (/\.(jpg|jpeg|png|webp)$/i.test(filename)) return "photo";
   if (/\.(mp4|mov|m4v|avi|webm)$/i.test(filename)) return "video";
   return "";
+}
+
+function viennaNow() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Vienna",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, at: `${parts.hour}:${parts.minute}` };
+}
+
+function decodedHeader(headers, name, fallback = "") {
+  let value = String(headers?.[name] || fallback);
+  try { value = decodeURIComponent(value); } catch {}
+  return value.trim();
+}
+
+function safePhotoPart(value, fallback) {
+  return (String(value || fallback)
+    .replace(/[\x00-\x1f<>:"/\\|?*]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim() || fallback).slice(0, 120);
+}
+
+function photoFormat(filename, mimeType) {
+  const ext = path.extname(String(filename || "")).toLowerCase();
+  const mime = String(mimeType || "").toLowerCase().split(";", 1)[0].trim();
+  if ([".jpg", ".jpeg"].includes(ext) || mime === "image/jpeg") return { ext: ".jpg", mime: "image/jpeg" };
+  if (ext === ".png" || mime === "image/png") return { ext: ".png", mime: "image/png" };
+  if (ext === ".webp" || mime === "image/webp") return { ext: ".webp", mime: "image/webp" };
+  if ([".heic", ".heif"].includes(ext) || ["image/heic", "image/heif"].includes(mime)) return { ext: ".heic", mime: mime || "image/heic", convert: true };
+  return null;
+}
+
+async function preparePhoto(raw, filename, mimeType) {
+  const format = photoFormat(filename, mimeType);
+  if (!format) throw new Error("Bitte ein Foto als JPG, PNG, WEBP oder HEIC verwenden.");
+  if (!format.convert) return { data: raw, ext: format.ext, mime: format.mime };
+  if (!sharp) throw new Error("HEIC-Fotos können auf diesem Server derzeit nicht umgewandelt werden.");
+  try {
+    const data = await sharp(raw).rotate().jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
+    return { data, ext: ".jpg", mime: "image/jpeg" };
+  } catch {
+    throw new Error("Das HEIC-Foto konnte nicht gelesen werden. Bitte als JPG senden.");
+  }
+}
+
+async function saveJobPhoto({ dataDir, jobId, raw, filename, mimeType, employeeId, employeeName, caption, source }) {
+  const safeId = String(jobId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(safeId)) throw new Error("Ungültige Baustelle");
+  if (!fs.existsSync(path.join(dataDir, safeId))) throw new Error("Baustelle nicht gefunden");
+  if (!Buffer.isBuffer(raw) || !raw.length) throw new Error("Das Foto ist leer");
+  if (raw.length > 30 * 1024 * 1024) throw new Error("Das Foto ist größer als 30 MB");
+
+  const prepared = await preparePhoto(raw, filename, mimeType);
+  const now = viennaNow();
+  const uploaderId = safePhotoPart(employeeId, "office").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 80) || "office";
+  const dir = path.join(dataDir, "_kristine", "media", now.date, uploaderId);
+  const stamp = Math.floor(Date.now() / 1000);
+  const random = crypto.randomBytes(5).toString("hex");
+  const originalBase = safePhotoPart(path.basename(String(filename || "Foto"), path.extname(String(filename || ""))), "Foto");
+  const storedName = `${stamp}_${random}_${originalBase}${prepared.ext}`;
+  const full = path.join(dir, storedName);
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.writeFile(full, prepared.data);
+
+  const relative = path.relative(dataDir, full).split(path.sep).join("/");
+  const meta = await readJson(path.join(dataDir, safeId, ".meta.json"), {});
+  const entry = {
+    id: `photo_followup_${stamp}_${random}`,
+    createdAt: new Date().toISOString(),
+    employeeId: String(employeeId || "").trim().slice(0, 120),
+    employeeName: String(employeeName || "").trim().slice(0, 160),
+    date: now.date,
+    category: "photo",
+    source: String(source || "Foto-Nachreichung").trim().slice(0, 120),
+    file: relative,
+    at: now.at,
+    capturedAt: now.at,
+    jobId: safeId,
+    jobName: String(meta.name || safeId),
+    bookingSegmentId: null,
+    content: String(caption || "").trim().slice(0, 2000),
+    originalName: safePhotoPart(filename, "Foto"),
+    mimeType: prepared.mime,
+    lateUpload: true,
+  };
+
+  const reviewFile = path.join(dataDir, "_kristine", "day-review-entries.json");
+  const reviews = await readJson(reviewFile, []);
+  reviews.push(entry);
+  await fsp.mkdir(path.dirname(reviewFile), { recursive: true });
+  const temp = `${reviewFile}.${process.pid}.${random}.tmp`;
+  await fsp.writeFile(temp, JSON.stringify(reviews.slice(-50000), null, 2), "utf8");
+  await fsp.rename(temp, reviewFile);
+
+  return {
+    ...entry,
+    filename: storedName,
+    kind: "photo",
+    url: `/admin/api/job/${encodeURIComponent(safeId)}/media-file?file=${encodeURIComponent(relative)}`,
+  };
+}
+
+function enqueueJobPhoto(input) {
+  const next = photoUploadQueue.then(() => saveJobPhoto(input));
+  photoUploadQueue = next.catch(() => {});
+  return next;
 }
 
 function timestampFromFilename(filename) {
@@ -409,6 +528,34 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
     }
   });
 
+  app.post("/admin/api/job/:jobId/media", express.raw({
+    type: ["image/*", "application/octet-stream"],
+    limit: "30mb",
+  }), async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const jobId = String(req.params.jobId || "").trim();
+      const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+      const item = await enqueueJobPhoto({
+        dataDir,
+        jobId,
+        raw,
+        filename: decodedHeader(req.headers, "x-file-name", "Foto.jpg"),
+        mimeType: String(req.headers["content-type"] || "application/octet-stream"),
+        employeeId: decodedHeader(req.headers, "x-employee-id"),
+        employeeName: decodedHeader(req.headers, "x-employee-name"),
+        caption: decodedHeader(req.headers, "x-photo-caption"),
+        source: decodedHeader(req.headers, "x-photo-source", "Foto-Nachreichung"),
+      });
+      res.status(201).json({ ok: true, jobId, item });
+    } catch (error) {
+      console.error("Baustellen photo follow-up failed:", error);
+      const message = String(error?.message || error);
+      const status = /nicht gefunden/i.test(message) ? 404 : /Ungültig|Bitte|leer|größer|HEIC/i.test(message) ? 400 : 500;
+      res.status(status).json({ ok: false, error: message });
+    }
+  });
+
   app.get("/admin/api/job/:jobId/knowledge", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -453,4 +600,4 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
   });
 }
 
-module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge };
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge, saveJobPhoto };
