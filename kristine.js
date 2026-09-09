@@ -22,6 +22,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
   const EMPLOYEE_WORK_RULES = path.join(ROOT, "employee-work-rules.json");
+  const ZA_OLD_LEDGER = path.join(ROOT, "za-old-ledger.json");
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -2246,6 +2247,57 @@ const open = taskId
     } catch (error) {
       res.status(500).json({ ok:false, error:String(error?.message || error) });
     }
+  });
+
+  function normalizeZaOldEntry(row = {}) {
+    return {
+      id:String(row.id || ""), employeeId:String(row.employeeId || ""), employeeName:String(row.employeeName || ""),
+      date:String(row.date || "").slice(0,10), minutes:Math.round(Number(row.minutes) || 0),
+      type:row.type === "payout" ? "payout" : "monthly_transfer",
+      from:String(row.from || "").slice(0,10), to:String(row.to || "").slice(0,10),
+      note:String(row.note || "").slice(0,300), createdAt:String(row.createdAt || ""), updatedAt:String(row.updatedAt || ""),
+    };
+  }
+  function zaOldBalances(entries) {
+    const balances = {};
+    for (const row of entries) balances[row.employeeId] = (balances[row.employeeId] || 0) + Number(row.minutes || 0);
+    return balances;
+  }
+  app.get("/kristine/api/za-old-ledger", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const entries = (await readJson(ZA_OLD_LEDGER, [])).map(normalizeZaOldEntry).sort((a,b)=>String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
+      res.json({ok:true, entries, balances:zaOldBalances(entries)});
+    } catch(error) { res.status(500).json({ok:false,error:String(error?.message || error)}); }
+  });
+  app.post("/kristine/api/za-old-ledger/monthly-transfer", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const from=String(req.body?.from||"").slice(0,10),to=String(req.body?.to||"").slice(0,10),people=Array.isArray(req.body?.people)?req.body.people:[];
+      if(!from||!to||from>to)return res.status(400).json({ok:false,error:"Zeitraum prüfen."});
+      const entries=(await readJson(ZA_OLD_LEDGER,[])).map(normalizeZaOldEntry),now=new Date().toISOString();
+      for(const person of people){
+        const employeeId=String(person.employeeId||"").trim(),minutes=Math.max(0,Math.round(Number(person.minutes)||0));
+        if(!employeeId||!minutes)continue;
+        const key=`monthly:${employeeId}:${from}:${to}`;
+        let row=entries.find(item=>item.id===key);
+        if(!row){row={id:key,employeeId,employeeName:String(person.employeeName||employeeId),type:"monthly_transfer",date:to,from,to,minutes,note:"Aus Monatsübersicht in ZA alt übertragen",createdAt:now,updatedAt:now};entries.push(row)}
+        else Object.assign(row,{employeeName:String(person.employeeName||row.employeeName),minutes,date:to,from,to,updatedAt:now});
+      }
+      await writeJson(ZA_OLD_LEDGER,entries);
+      res.json({ok:true,entries,balances:zaOldBalances(entries)});
+    }catch(error){res.status(400).json({ok:false,error:String(error?.message||error)})}
+  });
+  app.post("/kristine/api/za-old-ledger/payout", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const employeeId=String(req.body?.employeeId||"").trim(),employeeName=String(req.body?.employeeName||employeeId).trim(),date=String(req.body?.date||localDateISO()).slice(0,10),minutes=Math.max(0,Math.round(Number(req.body?.minutes)||0)),note=String(req.body?.note||"Auszahlung").trim().slice(0,300);
+      if(!employeeId||!minutes)return res.status(400).json({ok:false,error:"Mitarbeiter und auszuzahlende Stunden angeben."});
+      const entries=(await readJson(ZA_OLD_LEDGER,[])).map(normalizeZaOldEntry),balance=zaOldBalances(entries)[employeeId]||0;
+      if(minutes>balance)return res.status(400).json({ok:false,error:`Auszahlung ist höher als der ZA-alt-Stand (${Math.floor(balance/60)}:${String(balance%60).padStart(2,"0")}).`});
+      const now=new Date().toISOString();entries.push({id:`payout:${employeeId}:${Date.now()}`,employeeId,employeeName,type:"payout",date,from:"",to:"",minutes:-minutes,note,createdAt:now,updatedAt:now});
+      await writeJson(ZA_OLD_LEDGER,entries);res.json({ok:true,entries,balances:zaOldBalances(entries)});
+    }catch(error){res.status(400).json({ok:false,error:String(error?.message||error)})}
   });
 
 
