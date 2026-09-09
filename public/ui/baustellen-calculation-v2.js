@@ -1,7 +1,8 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-economy-invoices-2";
+  const VERSION="2026-09-09-ww-offer-nachtrag-1";
+  const LOCAL_BRAIN="http://127.0.0.1:5051";
   const token=new URLSearchParams(location.search).get("token")||"";
   const KINDS={
     auftrag:"Auftrag",
@@ -17,6 +18,10 @@
   let pendingFile=null;
   let loadSerial=0;
   let economyObserver=null;
+  let wwOffers=[];
+  let wwOfferIndex=0;
+  let wwOfferError="";
+  let wwPdfObjectUrl="";
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const num=v=>{const n=Number(v);return Number.isFinite(n)?Math.max(0,n):0};
@@ -24,12 +29,14 @@
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
   async function api(p,o={}){const r=await fetch(tokenUrl(p),o);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d||{}}
+  async function brainJson(path,options={}){const headers={Accept:"application/json",...(options.headers||{})};if(token)headers["X-Krista-Token"]=token;const r=await fetch(LOCAL_BRAIN+path,{...options,headers,cache:"no-store"});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d||{}}
 
   function installCss(){
     if(document.getElementById("kcv2Css"))return;
     const s=document.createElement("style");s.id="kcv2Css";s.textContent=`
       .kcv2-shell{display:grid;gap:11px}.kcv2-top{display:grid;grid-template-columns:1.1fr .9fr;gap:11px}.kcv2-card{background:#fff;border:1px solid #ddd9cf;border-radius:15px;padding:15px;box-shadow:0 5px 18px rgba(23,33,27,.045)}.kcv2-card h3{margin:0 0 10px;font-size:15px}.kcv2-muted{color:#707670;font-size:11px;line-height:1.45}.kcv2-source{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kcv2-source a{color:#2f7d4a;font-weight:850;text-decoration:none}.kcv2-source strong{font-size:12px}
       .kcv2-drop{min-height:154px;border:2px dashed #bfc8bd;border-radius:14px;background:#f8faf7;display:grid;place-items:center;text-align:center;padding:18px;cursor:pointer;transition:.15s}.kcv2-drop:hover,.kcv2-drop.drag{border-color:#2f7d4a;background:#eef6ef}.kcv2-drop strong{display:block;font-size:17px}.kcv2-drop span{display:block;margin-top:5px;color:#687068;font-size:11px}.kcv2-drop input{display:none}.kcv2-status{margin-top:9px;font-size:11px;font-weight:800;color:#2f7d4a}.kcv2-status.error{color:#a84540}
+      .kcv2-ww{margin-top:12px;padding:11px;border:1px solid #cfe0d1;border-radius:12px;background:#eef6ef}.kcv2-ww-head{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.kcv2-ww-head strong{margin-right:auto}.kcv2-ww select,.kcv2-ww button{min-height:35px;border:1px solid #bfcabe;border-radius:8px;background:#fff;padding:7px 9px;font:800 10.5px system-ui}.kcv2-ww button.primary{background:#2f7d4a;border-color:#2f7d4a;color:#fff}.kcv2-ww iframe{display:block;width:100%;height:560px;border:0;border-radius:9px;background:#fff;margin-top:10px}
       .kcv2-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.kcv2-field label{display:block;color:#707670;font-size:10px;font-weight:800;margin-bottom:4px}.kcv2-field input{width:100%;min-height:39px;border:1px solid #cbc8bf;border-radius:9px;padding:8px 9px;font:inherit}.kcv2-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.kcv2-kpi{border:1px solid #e2ded5;border-radius:12px;padding:11px;background:#faf9f5}.kcv2-kpi span{display:block;font-size:9.5px;color:#707670;font-weight:800;text-transform:uppercase}.kcv2-kpi strong{display:block;font-size:17px;margin-top:4px}.kcv2-kpi.emph{background:#eef6ef;border-color:#cee0d2}.kcv2-kpi.warn{background:#fff7e6;border-color:#ead4a9}
       .kcv2-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.kcv2-section-head h3{margin:0}.kcv2-actions{display:flex;gap:7px;flex-wrap:wrap}.kcv2-actions button{min-height:36px;border:1px solid #cfcac0;border-radius:9px;background:#fff;padding:7px 10px;font:800 11px/1 system-ui;cursor:pointer}.kcv2-actions button.primary{background:#2f7d4a;border-color:#2f7d4a;color:#fff}.kcv2-actions button.regie{background:#fff2dd;border-color:#e4c899;color:#744d1d}
       .kcv2-table-wrap{overflow:auto}.kcv2-table{width:100%;border-collapse:collapse;font-size:11px;min-width:900px}.kcv2-table th,.kcv2-table td{padding:8px 6px;border-bottom:1px solid #ece9e2;vertical-align:middle}.kcv2-table th{text-align:left;color:#707670;font-size:9px;text-transform:uppercase;letter-spacing:.03em}.kcv2-table input,.kcv2-table select{width:100%;border:1px solid #d4d0c7;border-radius:8px;background:#fff;padding:7px 8px;font:inherit;font-size:11px}.kcv2-table input[type=number]{text-align:right}.kcv2-table input[type=checkbox]{width:auto}.kcv2-table .num{text-align:right}.kcv2-pos{font-weight:900;white-space:nowrap}.kcv2-review{display:inline-flex;margin-top:3px;padding:3px 6px;border-radius:999px;background:#fff0cf;color:#80591e;font-size:8px;font-weight:900}.kcv2-delete{border:0;background:transparent;color:#a84540;font-size:17px;cursor:pointer}.kcv2-empty{padding:19px;border:1px dashed #d5d0c6;background:#faf9f5;border-radius:12px;text-align:center;color:#707670;font-size:11px}
@@ -48,15 +55,15 @@
   function derive(calc){
     const rows=Array.isArray(calc?.positions)?calc.positions:[];
     const sum=fn=>rows.reduce((s,r)=>s+(fn(r)?num(r.amount):0),0);
-    const baseNet=num(calc?.netTotal),added=sum(r=>r.addToContract),contract=baseNet+added;
-    const regie=sum(r=>r.kind==="regie"||r.kind==="nachtrag_regie");
+    const baseNet=num(calc?.netTotal),added=sum(r=>r.addToContract),legacyNachtragRegie=num(calc?.legacyNachtragRegieAmount),contract=baseNet+added+legacyNachtragRegie;
+    const regie=sum(r=>r.kind==="regie"||r.kind==="nachtrag_regie")+legacyNachtragRegie;
     const external=sum(r=>r.kind==="fremdleistung");
     const other=sum(r=>r.kind==="sonstiges");
     const fixed=Math.max(0,contract-regie-external-other);
     const pct=Math.min(100,num(calc?.materialPercent));
     const material=fixed*pct/100,labor=Math.max(0,fixed-material),rate=num(calc?.billingRate),target=rate?labor/rate:0;
     const plannedRegie=rows.reduce((s,r)=>s+((["regie","nachtrag_regie"].includes(r.kind))?num(r.plannedHours):0),0);
-    return {baseNet,added,contract,regie,external,other,fixed,pct,material,labor,rate,target,plannedRegie};
+    return {baseNet,added,legacyNachtragRegie,contract,regie,external,other,fixed,pct,material,labor,rate,target,plannedRegie};
   }
 
   function installTab(){
@@ -88,7 +95,8 @@
       calculation=calcData.calculation||blankCalculation(currentJob);
       if(!calculation.billingRate)calculation.billingRate=num(currentJob?.calculation?.billingRate||currentJob?.billingRate);
       if(!calculation.materialPercent)calculation.materialPercent=num(currentJob?.materialPercent||currentJob?.calculation?.materialPercent);
-      pendingFile=null;render();installEconomyObserver();setTimeout(patchEconomy,80);
+      calculation.legacyNachtragRegieAmount=num(currentJob?.calculation?.legacyNachtragRegieAmount);
+      pendingFile=null;wwOffers=[];wwOfferIndex=0;wwOfferError="";render();loadWwOffers(serial);installEconomyObserver();setTimeout(patchEconomy,80);
     }catch(error){if(host){host.className="bk-placeholder";host.textContent="Kalkulation konnte nicht geladen werden: "+error.message}}
   }
 
@@ -97,6 +105,28 @@
     if(!src)return '<div class="kcv2-muted">Noch kein Auftrags-PDF gespeichert. Das PDF wird beim Speichern zur Baustelle gelegt.</div>';
     return `<div class="kcv2-source"><strong>📄 ${esc(src.name||'Auftrag.pdf')}</strong><a href="${esc(tokenUrl(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-document`))}" target="_blank" rel="noopener">PDF öffnen</a><span class="kcv2-muted">${src.importedAt?new Date(src.importedAt).toLocaleString('de-AT'):''}</span></div>`;
   }
+  function wwOfferHtml(){
+    if(wwOfferError)return `<div class="kcv2-ww"><div class="kcv2-muted">WW-Angebot derzeit nicht erreichbar: ${esc(wwOfferError)}</div></div>`;
+    if(!wwOffers.length)return '<div class="kcv2-ww"><div class="kcv2-muted">Suche Angebot direkt in WinWorker …</div></div>';
+    const selected=wwOffers[wwOfferIndex]||wwOffers[0];
+    const offerLabel=x=>(/Nachtragsangebot/i.test(String(x.path||''))?'Nachtragsangebot':'Angebot')+' · '+String(x.filename||x.bookNumber||'PDF');
+    return `<div class="kcv2-ww"><div class="kcv2-ww-head"><strong>✓ Angebot in WinWorker gefunden</strong>${wwOffers.length>1?`<select id="kcv2WwSelect">${wwOffers.map((x,i)=>`<option value="${i}" ${i===wwOfferIndex?'selected':''}>${esc(offerLabel(x))}</option>`).join('')}</select>`:''}<button id="kcv2WwShow" type="button">PDF anzeigen</button><button id="kcv2WwImport" class="primary" type="button">Positionen übernehmen</button></div><div class="kcv2-muted" style="margin-top:6px">${esc(offerLabel(selected))}</div><div id="kcv2WwPreview"></div></div>`;
+  }
+  async function loadWwOffers(serial){
+    if(!/^\d+$/.test(currentJobId)||!token){wwOfferError="Anmeldung fehlt";render();return}
+    try{
+      const bill=await brainJson('/api/outgoing/project-billing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectNumber:currentJobId})});
+      const projectIndex=Number(bill?.billing?.projectIndex||0);if(!projectIndex)throw new Error('Projekt in WinWorker nicht eindeutig gefunden');
+      const docs=await brainJson('/project/documents?projectIndex='+encodeURIComponent(projectIndex));
+      if(serial!==loadSerial)return;
+      const found=(docs.documents||[]).filter(x=>x.pdfFound&&x.path&&String(x.documentType||x.dokumenttyp)==='Angebot').sort((a,b)=>String(a.filename||'').localeCompare(String(b.filename||'')));
+      const latestByDocument=new Map();for(const item of found)latestByDocument.set(String(item.filename||'').replace(/\s*\([^)]*\)\.pdf$/i,''),item);wwOffers=[...latestByDocument.values()].sort((a,b)=>String(a.documentDate||a.printDate||'').localeCompare(String(b.documentDate||b.printDate||''))||String(a.filename||'').localeCompare(String(b.filename||'')));
+      if(!wwOffers.length)wwOfferError='Kein Angebots-PDF im WinWorker-Archiv gefunden';
+    }catch(error){if(serial!==loadSerial)return;wwOfferError=error.message}
+    render();
+  }
+  function wwPdfUrl(item){return LOCAL_BRAIN+'/pdf?path='+encodeURIComponent(item?.path||'')}
+  async function fetchWwOfferFile(item){const headers={};if(token)headers['X-Krista-Token']=token;const r=await fetch(wwPdfUrl(item),{headers,cache:'no-store'});if(!r.ok)throw new Error('WW-Angebot konnte nicht geladen werden');const blob=await r.blob();return new File([blob],item?.filename||'WinWorker-Angebot.pdf',{type:'application/pdf',lastModified:Date.now()})}
   function options(kind){return Object.entries(KINDS).map(([key,label])=>`<option value="${key}" ${key===kind?'selected':''}>${esc(label)}</option>`).join('')}
   function positionRows(){
     const rows=calculation?.positions||[];if(!rows.length)return '<div class="kcv2-empty">Noch keine Positionen. Auftrag oben hineinziehen oder einen Nachtrag anlegen.</div>';
@@ -112,7 +142,7 @@
     const host=document.getElementById("kcv2Host");if(!host||!calculation)return;host.className="";
     host.innerHTML=`<div class="kcv2-shell">
       <div class="kcv2-top">
-        <div class="kcv2-card"><h3>Auftrag / Angebot hineinziehen</h3><label id="kcv2Drop" class="kcv2-drop"><input id="kcv2File" type="file" accept="application/pdf,.pdf"><div><strong>PDF hier hineinziehen</strong><span>KRISTINE liest Positionen, Regie, Beträge und macht einen ersten Vorschlag.</span></div></label><div id="kcv2ParseStatus" class="kcv2-status"></div><div style="margin-top:10px">${sourceHtml()}</div></div>
+        <div class="kcv2-card"><h3>Auftrag / Angebot</h3><label id="kcv2Drop" class="kcv2-drop"><input id="kcv2File" type="file" accept="application/pdf,.pdf"><div><strong>PDF hier hineinziehen</strong><span>KRISTINE liest Positionen, Regie, Beträge und macht einen ersten Vorschlag.</span></div></label><div id="kcv2ParseStatus" class="kcv2-status"></div><div style="margin-top:10px">${sourceHtml()}</div>${wwOfferHtml()}</div>
         <div class="kcv2-card"><h3>Grundlage</h3><div class="kcv2-muted">Wir starten bewusst einfach. Materialanteil und Satz bleiben korrigierbar; Positionen kommen aus dem echten Auftrag.</div><div class="kcv2-settings"><div class="kcv2-field"><label>Auftrag netto lt. PDF</label><input id="kcv2Net" type="number" step="0.01" min="0" value="${num(calculation.netTotal)}"></div><div class="kcv2-field"><label>Materialanteil % fixer Auftrag</label><input id="kcv2Material" type="number" step="0.1" min="0" max="100" value="${num(calculation.materialPercent)}"></div><div class="kcv2-field"><label>Kalkulationssatz €/h</label><input id="kcv2Rate" type="number" step="0.01" min="0" value="${num(calculation.billingRate)}"></div></div><div class="kcv2-muted" style="margin-top:9px">${calculation.orderNo?`Auftrag ${esc(calculation.orderNo)} · `:''}${calculation.projectNo?`Projekt ${esc(calculation.projectNo)} · `:''}${esc(calculation.subject||currentJob?.name||'')}</div></div>
       </div>
       <div class="kcv2-card"><div class="kcv2-section-head"><h3>Kalkulationsweg</h3><span class="kcv2-muted">Regie und Nachtrag Regie laufen getrennt von den fixen Auftragsstunden.</span></div><div class="kcv2-summary"><div class="kcv2-kpi"><span>Auftrag inkl. Nachträge</span><strong id="kcv2SumContract">–</strong></div><div class="kcv2-kpi warn"><span>Regie separat</span><strong id="kcv2SumRegie">–</strong></div><div class="kcv2-kpi"><span>Fremdleistung</span><strong id="kcv2SumExternal">–</strong></div><div class="kcv2-kpi"><span>Fahrt / Sonstiges</span><strong id="kcv2SumOther">–</strong></div><div class="kcv2-kpi emph"><span>KRISTA fixer Auftrag</span><strong id="kcv2SumFixed">–</strong></div><div class="kcv2-kpi"><span>Material</span><strong id="kcv2SumMaterial">–</strong></div><div class="kcv2-kpi"><span>Lohnanteil</span><strong id="kcv2SumLabor">–</strong></div><div class="kcv2-kpi emph"><span>Sollstunden</span><strong id="kcv2SumHours">–</strong></div></div></div>
@@ -135,6 +165,9 @@
     document.getElementById("kcv2AddOrder").onclick=()=>addNachtrag("nachtrag_auftrag");
     document.getElementById("kcv2AddRegie").onclick=()=>addNachtrag("nachtrag_regie");
     document.getElementById("kcv2Save").onclick=save;
+    document.getElementById("kcv2WwSelect")?.addEventListener('change',e=>{wwOfferIndex=Number(e.target.value)||0;if(wwPdfObjectUrl){URL.revokeObjectURL(wwPdfObjectUrl);wwPdfObjectUrl=''}render()});
+    document.getElementById("kcv2WwShow")?.addEventListener('click',async e=>{const button=e.currentTarget,preview=document.getElementById('kcv2WwPreview');if(preview?.querySelector('iframe')){preview.innerHTML='';return}button.disabled=true;try{const file=await fetchWwOfferFile(wwOffers[wwOfferIndex]);if(wwPdfObjectUrl)URL.revokeObjectURL(wwPdfObjectUrl);wwPdfObjectUrl=URL.createObjectURL(file);preview.innerHTML=`<iframe src="${esc(wwPdfObjectUrl)}" title="WinWorker-Angebot"></iframe>`}catch(error){preview.innerHTML=`<div class="kcv2-status error">${esc(error.message)}</div>`}finally{button.disabled=false}});
+    document.getElementById("kcv2WwImport")?.addEventListener('click',async e=>{const button=e.currentTarget;button.disabled=true;try{await handlePdf(await fetchWwOfferFile(wwOffers[wwOfferIndex]))}catch(error){const status=document.getElementById('kcv2ParseStatus');if(status){status.textContent=error.message;status.className='kcv2-status error'}}finally{button.disabled=false}});
     bindRows();
   }
   function bindRows(){
@@ -194,7 +227,7 @@
       const start=lines.findIndex(x=>/^Titelzusammenstellung/i.test(x));if(start>=0){for(const line of lines.slice(start+1)){if(/^Nettosumme/i.test(line))break;const m=line.match(/^(\d{1,2})\s+(.+?)\s+(\d[\d.]*,\d{2})$/);if(!m)continue;const cls=classify(m[2],m[2]);positions.push({id:`title_${m[1]}`,number:m[1],titleNo:m[1],title:m[2],shortText:cleanLead(m[2]),description:m[2],amount:euroValue(m[3]),plannedHours:0,kind:cls.kind,suggestedKind:cls.suggestedKind,needsReview:cls.needsReview||/gerüst|geruest/i.test(m[2]),employeeVisible:true,addToContract:false,source:"pdf-title"})}}
     }
     const basename=String(file?.name||"").replace(/\.pdf$/i,"").replace(/^Auftragssteuerung\s*/i,"").trim();
-    return {...blankCalculation(currentJob),orderNo,projectNo,subject:currentJob?.name||basename,netTotal:netTotal||positions.reduce((s,r)=>s+num(r.amount),0),vatAmount,grossTotal,rawText:whole.slice(0,60000),positions,sourceDocument:calculation?.sourceDocument||null,billingRate:num(calculation?.billingRate||currentJob?.calculation?.billingRate),materialPercent:num(calculation?.materialPercent||currentJob?.materialPercent),parseVersion:1};
+    return {...blankCalculation(currentJob),orderNo,projectNo,subject:currentJob?.name||basename,netTotal:netTotal||positions.reduce((s,r)=>s+num(r.amount),0),vatAmount,grossTotal,rawText:whole.slice(0,60000),positions,sourceDocument:calculation?.sourceDocument||null,billingRate:num(calculation?.billingRate||currentJob?.calculation?.billingRate),materialPercent:num(calculation?.materialPercent||currentJob?.materialPercent),legacyNachtragRegieAmount:num(calculation?.legacyNachtragRegieAmount||currentJob?.calculation?.legacyNachtragRegieAmount),parseVersion:1};
   }
 
   function loadPdfJs(){
@@ -225,7 +258,7 @@
     const button=document.getElementById("kcv2Save"),msg=document.getElementById("kcv2SaveMsg");button.disabled=true;msg.textContent="Speichert …";
     try{
       if(pendingFile){const dataBase64=await fileBase64(pendingFile);const upload=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-document`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fileName:pendingFile.name,dataBase64})});calculation.sourceDocument=upload.sourceDocument||calculation.sourceDocument}
-      const result=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-calculation`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({calculation})});calculation=result.calculation||calculation;pendingFile=null;msg.textContent="✓ Gespeichert · Wirtschaft und Mitarbeiteransicht sind aktualisiert";render();setTimeout(()=>{window.BaustellenKnowledgeHub?.load?.(currentJobId);loadJob(currentJobId)},450);
+      const legacyNachtragRegieAmount=num(calculation.legacyNachtragRegieAmount);const result=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-calculation`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({calculation})});calculation=result.calculation||calculation;calculation.legacyNachtragRegieAmount=legacyNachtragRegieAmount;pendingFile=null;msg.textContent="✓ Gespeichert · Wirtschaft und Mitarbeiteransicht sind aktualisiert";render();setTimeout(()=>{window.BaustellenKnowledgeHub?.load?.(currentJobId);loadJob(currentJobId)},450);
     }catch(error){msg.textContent="Fehler: "+error.message;msg.style.color="#a84540"}finally{button.disabled=false}
   }
 

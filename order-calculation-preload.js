@@ -184,6 +184,15 @@ function enrichJobsPayload(data) {
     if (!calc) return job;
     const old = job.calculation || {};
     const derived = deriveCalculation(calc, calc.billingRate || old.billingRate || job.billingRate);
+    const previousContractAmount = cleanNumber(job.contractAmount ?? old.contractAmount);
+    const previousRegieAmount = cleanNumber(old.regieBudgetAmount);
+    const legacyNachtragRegieAmount = Math.max(
+      0,
+      previousContractAmount - derived.contractAmount,
+      previousRegieAmount - derived.regieAmount,
+    );
+    const contractAmount = derived.contractAmount + legacyNachtragRegieAmount;
+    const regieBudgetAmount = derived.regieAmount + legacyNachtragRegieAmount;
     const actualHours = cleanNumber(old.actualHours);
     const actualRegieHours = cleanNumber(old.actualRegieHours);
     const orderHours = cleanNumber(old.orderHours ?? Math.max(0, actualHours - actualRegieHours));
@@ -191,15 +200,16 @@ function enrichJobsPayload(data) {
       ...job,
       orderDocument: calc.sourceDocument || null,
       orderCalculation: calc,
-      contractAmount: derived.contractAmount,
+      contractAmount,
       externalServices: derived.externalServices,
       materialPercent: derived.materialPercent,
       plannedRegieHours: derived.plannedRegieHours,
       calculation: {
         ...old,
-        contractAmount: derived.contractAmount,
+        contractAmount,
         externalServices: derived.externalServices,
-        regieBudgetAmount: derived.regieAmount,
+        regieBudgetAmount,
+        legacyNachtragRegieAmount,
         otherExcludedAmount: derived.otherExcludedAmount,
         kristaAmount: derived.fixedOwnAmount,
         materialPercent: derived.materialPercent,

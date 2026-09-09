@@ -193,22 +193,33 @@ async function enrichJobsPayload(payload) {
     const meta = await readMeta(job.jobId);
     const old = job.calculation || {};
     const d = derive(calc, meta, old.billingRate || job.billingRate);
+    const previousContractAmount = number(job.contractAmount ?? old.contractAmount);
+    const previousRegieAmount = number(old.regieBudgetAmount);
+    const legacyNachtragRegieAmount = Math.max(
+      0,
+      number(old.legacyNachtragRegieAmount),
+      previousContractAmount - d.contractAmount,
+      previousRegieAmount - d.regieAmount,
+    );
+    const contractAmount = d.contractAmount + legacyNachtragRegieAmount;
+    const regieBudgetAmount = d.regieAmount + legacyNachtragRegieAmount;
     const actualHours = number(old.actualHours);
     const actualRegieHours = number(old.actualRegieHours);
     const orderHours = number(old.orderHours ?? Math.max(0, actualHours - actualRegieHours));
     return {
       ...job,
-      contractAmount: d.contractAmount,
+      contractAmount,
       externalServices: d.externalServices,
       plannedRegieHours: d.plannedRegieHours,
       orderLineMetaV2: meta,
       calculation: {
         ...old,
-        contractAmount: d.contractAmount,
+        contractAmount,
         selectedBaseAmount: d.selectedBaseAmount,
         excludedPositionAmount: d.excludedAmount,
         externalServices: d.externalServices,
-        regieBudgetAmount: d.regieAmount,
+        regieBudgetAmount,
+        legacyNachtragRegieAmount,
         regieLaborAmount: d.regieLaborAmount,
         regieMaterialAmount: d.regieMaterialAmount,
         otherExcludedAmount: d.otherExcludedAmount,
