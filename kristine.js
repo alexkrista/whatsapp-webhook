@@ -606,6 +606,19 @@ function clampOfficialStart(actualTime) {
 } else if (state.activeJobOverride) {
   delete state.activeJobOverride;
 }
+    // Ein bereits gebuchter Arbeitsbeginn ist stärker als die Planung. Besonders
+    // bei einem Start vor 07:00 darf der auf 07:00 gerundete Zeitstempel niemals
+    // wieder die Planbaustelle aktivieren oder einen zweiten Startblock erzeugen.
+    const bookedSiteEvent=[...timeEvents].reverse().find(row=>
+      String(row.employeeId)===String(employeeId) && String(row.date)===String(today) &&
+      ["start","weiter","up"].includes(String(row.type||"").toLowerCase()) &&
+      (row.jobId||row.jobName)
+    );
+    if(["working","pause","lunch"].includes(state.mode)&&bookedSiteEvent){
+      current={jobId:String(bookedSiteEvent.jobId||""),jobName:String(bookedSiteEvent.jobName||bookedSiteEvent.jobId||""),city:""};
+      state.activeAssignmentKey=null;
+      state.activeJobOverride={date:today,jobId:current.jobId,jobName:current.jobName,city:""};
+    }
     const rawText = String(text || "").trim();
 
 if (rawText.startsWith("task_call:")) {
@@ -864,6 +877,15 @@ const intent = rawText.startsWith("task_call:")
     }
 
     if (intent === "start") {
+      if (state.mode === "working") {
+        state.pending = null;
+        await saveState();
+        return {
+          reply:`Deine Arbeitszeit läuft bereits auf ${assignmentLabel(current)}. Es wurde kein zweiter Start und kein Baustellenwechsel gespeichert.`,
+          buttons:["Andere Baustelle"],
+          state,
+        };
+      }
       if (!current) {
         state.pending = { type: "ask_actual_assignment", createdAt: now };
         await saveState();
