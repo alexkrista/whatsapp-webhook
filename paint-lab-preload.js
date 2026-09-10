@@ -101,7 +101,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-sent-order-ui.js?v=20260822-2134"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-stock-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260910-colours"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260910-lager"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-local-hardware-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20260910-0845"></script>\n</body>');

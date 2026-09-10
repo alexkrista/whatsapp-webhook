@@ -47,7 +47,19 @@ const { JSDOM } = require("jsdom");
     el("returnStockTabBtn").click();
     await tick();
     assert.equal(w.localStorage.getItem("kristineReturnJob"), null);
-    assert.equal(el("returnProjectValue").textContent, "Baustelle wählen …");
+    assert.equal(el("returnProjectValue").textContent, "Lager / keine Baustelle");
+    // With no selection, even the first booking uses Lager rather than a stale saved project.
+    el("returnEan").value = "1234567890123";
+    await el("returnLookupBtn").onclick();
+    el("returnColour").value = "Stock";
+    el("returnWeight").value = "2";
+    failBooking = true;
+    await el("returnBookBtn").onclick();
+    const firstBooking = requests.find((r) => r.path === "/admin/api/paint/returns" && r.method === "POST");
+    assert.equal(firstBooking.body.jobId, "__lager__");
+    assert.equal(firstBooking.body.jobName, "Lager / keine Baustelle");
+    assert.equal(el("returnProjectModal").hidden, true);
+    failBooking = false;
     assert.equal(w.document.querySelector("[data-return-edit]").textContent, "Ändern");
     assert.equal(w.document.querySelector(".return-reprint-btn").textContent, "Etikett nochmal");
 
@@ -85,7 +97,8 @@ const { JSDOM } = require("jsdom");
     failBooking = false;
     await el("returnBookBtn").onclick();
     await tick();
-    assert.equal(el("returnProjectValue").textContent, "Baustelle wählen …");
+    assert.equal(el("returnProjectValue").textContent, "Lager / keine Baustelle");
+    assert.equal(requests.filter((r) => r.path === "/admin/api/paint/returns" && r.method === "POST").at(-1).body.jobId, "A");
     assert.equal(requests.filter((r) => r.path === "/print").length, 2);
     assert(requests.some((r) => r.path.endsWith("/print-new/ack")));
     await el("returnLookupBtn").onclick(); // Empty scan cannot create a return.
@@ -93,10 +106,14 @@ const { JSDOM } = require("jsdom");
     await el("returnLookupBtn").onclick();
     el("returnColour").value = "Stock";
     el("returnWeight").value = "2";
-    const count = requests.length;
+    const bookings = () => requests.filter((r) => r.path === "/admin/api/paint/returns" && r.method === "POST");
+    const count = bookings().length;
     await el("returnBookBtn").onclick();
-    assert.equal(requests.length, count);
-    assert.equal(el("returnProjectModal").hidden, false);
+    assert.equal(bookings().length, count + 1);
+    assert.equal(bookings().at(-1).body.jobId, "__lager__");
+    assert.equal(bookings().at(-1).body.jobName, "Lager / keine Baustelle");
+    assert.equal(el("returnProjectModal").hidden, true);
+    assert.equal(el("returnProjectValue").textContent, "Lager / keine Baustelle");
     console.log("paint-return-stock UI + hardware regression test ok");
   } finally { observers.forEach((observer) => observer.disconnect()); w.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

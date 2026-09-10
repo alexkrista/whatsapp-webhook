@@ -72,7 +72,7 @@
   section.className = "hidden";
   section.innerHTML = `
     <div class="return-project">
-      <div><div class="return-project-label">Baustelle für diese Rückware</div><div id="returnProjectValue" class="return-project-value">Baustelle wählen …</div></div>
+      <div><div class="return-project-label">Baustelle für diese Rückware</div><div id="returnProjectValue" class="return-project-value">Lager / keine Baustelle</div></div>
       <button id="returnProjectBtn" class="btn" type="button">Wechseln</button>
     </div>
     <div class="return-layout">
@@ -163,8 +163,7 @@
   function renderProject() {
     const node = el("returnProjectValue");
     if (!node) return;
-    if (!project) node.textContent = "Baustelle wählen …";
-    else if (project.id === "__lager__") node.textContent = "Lager / keine Baustelle";
+    if (!project || project.id === "__lager__") node.textContent = "Lager / keine Baustelle";
     else node.textContent = `${project.id} · ${project.name || project.id}`;
   }
 
@@ -394,11 +393,7 @@
 
   el("returnBookBtn").onclick = async () => {
     if (!currentMaterial || !currentEan) return setStatus("Zuerst Dose scannen.", "err");
-    if (!project) {
-      setStatus("Bitte für diese Rückware eine Baustelle wählen.", "err");
-      el("returnProjectBtn").click();
-      return;
-    }
+    const bookingProject = project || { id: "__lager__", name: "Lager / keine Baustelle" };
     const colour = el("returnColour").value.trim();
     const weightKg = Number(String(el("returnWeight").value || "").replace(",", "."));
     if (!colour) return setStatus("Farbnummer/Farbton fehlt.", "err");
@@ -412,8 +407,8 @@
           ean: currentEan,
           colour,
           weightKg,
-          jobId: project.id,
-          jobName: project.name,
+          jobId: bookingProject.id,
+          jobName: bookingProject.name,
         }),
       });
       const no = data.item?.returnNo;
