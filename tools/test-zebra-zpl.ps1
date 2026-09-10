@@ -51,18 +51,22 @@ if (-not ('RawPrinterHelper' -as [type])) {
 
 # ZD220 mit 203 dpi: ca. 8 dots/mm.
 # Gesamtbreite 58 mm = 464 dots.
-# Bereich 1: 16 x 40 mm = 128 x 320 dots.
-# Bereich 2: 42 x 44 mm = 336 x 352 dots, direkt anschliessend.
+# Bereich 1 links: 16 x 40 mm = 128 x 320 dots.
+# Bereich 2 rechts: 42 x 44 mm = 336 x 352 dots.
+# KORREKT: beide Bereiche sind UNTEN buendig.
+# Daher beginnt der kleinere linke Bereich 4 mm (= 32 dots) spaeter.
+# Y-Korrektur jetzt bewusst in die GEGENRICHTUNG der letzten -5-mm-Korrektur:
+# ^LT40 statt ^LT-40. Das sind 10 mm Unterschied zum zuletzt wirksamen Wert.
 $zpl = @"
 ^XA
 ^PW464
 ^LL352
+^LT40
 ^LH0,0
-^FO1,1^GB126,318,2^FS
+^FO1,33^GB126,318,2^FS
 ^FO129,1^GB334,350,2^FS
-^FO127,0^GB2,352,2^FS
-^FO18,30^A0N,32,32^FD1^FS
-^FO10,82^A0N,20,20^FD16 x 40^FS
+^FO18,62^A0N,32,32^FD1^FS
+^FO10,114^A0N,20,20^FD16 x 40^FS
 ^FO150,28^A0N,36,36^FD$Text^FS
 ^FO150,86^A0N,24,24^FD42 x 44 mm^FS
 ^FO150,132^A0N,22,22^FD58 mm Gesamtbreite^FS
@@ -114,5 +118,5 @@ finally {
 }
 
 Write-Host "OK: RAW-ZPL an '$PrinterName' gesendet."
-Write-Host "Format: 58 mm breit | links 16 x 40 mm | rechts 42 x 44 mm"
+Write-Host "Format: 58 mm breit | links 16 x 40 mm | rechts 42 x 44 mm | UNTEN buendig | ^LT40"
 Write-Host "Port: $($printer.PortName) | Treiber: $($printer.DriverName) | Status: $($printer.PrinterStatus)"
