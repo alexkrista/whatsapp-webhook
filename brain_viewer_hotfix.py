@@ -17,6 +17,8 @@ def install(ns):
     brain_material_history.install(ns)
     import brain_lg_sync
     brain_lg_sync.install(ns)
+    import brain_invoice_material_review
+    brain_invoice_material_review.install(ns)
     import brain_home_nav
     brain_home_nav.install(ns)
 

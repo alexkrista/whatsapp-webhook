@@ -121,7 +121,7 @@ function registerPaintInventory(app, options = {}) {
   function parseLgPaintLines(text,articles){
     const byCode=new Map(articles.map(a=>[clean(a.stockCode,100).toUpperCase(),a]));
     const lines=[];
-    const re=/^([A-Z0-9]{8,20})\s+LG\s+(.+?)\s+(Hi White|Medium|Deep|Extra Deep|Transparent|Yellow|Pastel|White ASP)\s+(250ml|500ml|750ml|1L|2L|2\.5L|4L|5L|10L)\s+([0-9.,]+)\s+([0-9.,]+)\s+([0-9.,]+)/i;
+    const re=/^(?:\d{1,4}\s+)?([A-Z0-9]{8,20})\s+LG\s+(.+?)\s+(Hi White|Medium|Deep|Extra Deep|Transparent|Yellow|Pastel|White ASP)\s+(250ml|500ml|750ml|1L|2L|2[.,]5L|4L|5L|10L)\s+([0-9.,]+)\s+([0-9.,]+)\s+([0-9.,]+)/i;
     for(const rawLine of String(text||"").split(/\r?\n/)){
       const m=rawLine.trim().match(re); if(!m)continue;
       const stockCode=m[1].toUpperCase(), article=byCode.get(stockCode)||null;
@@ -140,6 +140,7 @@ function registerPaintInventory(app, options = {}) {
       if(!invoiceRef||!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||!Number.isFinite(netAmount))return res.status(400).json({ok:false,error:"invoiceRef, invoiceDate und netAmount erforderlich"});
       const sync=await readJson(syncFile,{}); if(sync[invoiceRef])return res.json({ok:true,duplicate:true,invoiceRef,previous:sync[invoiceRef]});
       const articles=await readJson(articlesFile,[]); const lines=parseLgPaintLines(text,articles); const unmatched=lines.filter(x=>!x.article);
+      if(!lines.length)return res.status(422).json({ok:false,error:"Keine eindeutigen LG-Lagerpositionen in der Rechnung erkannt. Der Lagerstand wurde nicht verändert."});
       if(unmatched.length)return res.status(409).json({ok:false,error:"LG-Rechnung enthaelt unbekannte Lagerartikel",unmatched:unmatched.map(x=>({stockCode:x.stockCode,description:x.description,base:x.base,size:x.size,quantity:x.quantity}))});
       const results=[];
       for(const line of lines){
