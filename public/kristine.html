@@ -1128,6 +1128,17 @@ function addTimeEditorRow(type='work'){
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
 function moveTimeEditorRow(index,direction){const target=index+direction;if(target<0||target>=timeEditorSegments.length)return;[timeEditorSegments[index],timeEditorSegments[target]]=[timeEditorSegments[target],timeEditorSegments[index]];renderTimeEditor()}
 function timeEditorJobIds(segments){return new Set((segments||[]).filter(x=>x.type==='work'&&x.jobId).map(x=>String(x.jobId)))}
+function leitstandProjectSegments(employeeId,date,segments){
+  const archived=(data.projectTimeArchive||[]).find(row=>String(row.employeeId)===String(employeeId)&&String(row.date)===String(date));
+  const projects=(archived?.segments||[]).filter(row=>row.type==='work'&&(row.jobId||row.jobName));
+  if(!projects.length)return (segments||[]).map(row=>({...row}));
+  return (segments||[]).map(segment=>{
+    if(segment.type!=='work'||segment.jobId||segment.jobName)return {...segment};
+    const from=hmToMinutes(segment.from),to=hmToMinutes(segment.to);let best=null,bestOverlap=0;
+    for(const project of projects){const pf=hmToMinutes(project.from),pt=hmToMinutes(project.to);if(from===null||to===null||pf===null||pt===null)continue;const overlap=Math.max(0,Math.min(to,pt)-Math.max(from,pf));if(overlap>bestOverlap){best=project;bestOverlap=overlap}}
+    return best?{...segment,jobId:String(best.jobId||''),jobName:String(best.jobName||''),projectArchiveView:true}:{...segment};
+  });
+}
 function populateTimeCopyEmployees(){
   const select=document.getElementById('timeCopyEmployee');if(!select)return;
   const targetJobs=timeEditorJobIds(timeEditorSegments);const date=selectedWorkDate();
@@ -1160,7 +1171,7 @@ async function openEmployeeActionModal(employeeId){
   timeEditorCopiedFrom=null;employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
   try{
     const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
-    timeEditorSegments=(result.segments||[]).map(x=>({...x}));
+    timeEditorSegments=leitstandProjectSegments(employeeId,date,result.segments||[]);
     const state=data.states?.[employeeId]||{mode:'idle'};
     employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.</span>`;
     const hint=document.getElementById('timeCopyHint');if(hint)hint.textContent='Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.';
@@ -1189,7 +1200,7 @@ async function saveTimeEditor(){
   employeeActionNote.textContent='Speichert …';
   try{
     const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
-    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
+    await loadSilent();timeEditorSegments=leitstandProjectSegments(selectedControlEmployeeId,date,result.segments||[]);timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
     if(continues){
       employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert · ${employee?.name||'Mitarbeiter'} arbeitet weiter. Kein Tagesabschluss ausgelöst.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
       return;
