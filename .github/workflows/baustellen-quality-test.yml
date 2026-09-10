@@ -1,0 +1,31 @@
+name: Baustellen quality material test
+
+on:
+  pull_request:
+    paths:
+      - "public/ui/baustellen-chronik.js"
+      - "public/ui/topbar.js"
+      - "TEST/baustellen-job-materials-quality.test.js"
+      - ".github/workflows/baustellen-quality-test.yml"
+  push:
+    branches: [main]
+    paths:
+      - "public/ui/baustellen-chronik.js"
+      - "public/ui/topbar.js"
+      - "TEST/baustellen-job-materials-quality.test.js"
+      - ".github/workflows/baustellen-quality-test.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check JavaScript syntax
+        run: |
+          node --check public/ui/baustellen-chronik.js
+          node --check public/ui/topbar.js
+      - name: Test Baustellen material integration
+        run: node TEST/baustellen-job-materials-quality.test.js
