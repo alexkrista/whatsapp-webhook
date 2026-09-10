@@ -39,6 +39,7 @@ public static class KristineRawPrinterHelper {
 
 function ConvertTo-SafeLabelText([object]$Value, [int]$MaxLength = 40) {
   $text = [string]$Value
+  $text = $text.Replace('Ä','Ae').Replace('Ö','Oe').Replace('Ü','Ue').Replace('ä','ae').Replace('ö','oe').Replace('ü','ue').Replace('ß','ss')
   $text = $text -replace '[^A-Za-z0-9 .:/_\-]', ''
   if ($text.Length -gt $MaxLength) { $text = $text.Substring(0, $MaxLength) }
   return $text.Trim()
@@ -102,31 +103,46 @@ function Get-PmaWeight {
   }
 }
 
-function New-ReturnLabelZpl([string]$Big, [string]$Small) {
+function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
   $bigText = ConvertTo-SafeLabelText $Big 16
   $smallText = ConvertTo-SafeLabelText $Small 24
+  $jobText = ConvertTo-SafeLabelText $Job 44
   if (-not $bigText) { throw "Archivnummer fehlt" }
   if (-not $smallText) { throw "Datum fehlt" }
 
   $len = $bigText.Length
-  $fontH = 168
-  $fontW = 105
-  if ($len -ge 3) { $fontH = 160; $fontW = 86 }
-  if ($len -ge 4) { $fontH = 150; $fontW = 68 }
-  if ($len -ge 5) { $fontH = 138; $fontW = 55 }
-  if ($len -ge 7) { $fontH = 118; $fontW = 42 }
+  # Archivnummer bewusst ca. 6 Druckpunkte groesser als bisher.
+  $fontH = 174
+  $fontW = 111
+  if ($len -ge 3) { $fontH = 166; $fontW = 92 }
+  if ($len -ge 4) { $fontH = 156; $fontW = 74 }
+  if ($len -ge 5) { $fontH = 144; $fontW = 61 }
+  if ($len -ge 7) { $fontH = 124; $fontW = 48 }
 
   # Kalibriertes Medium am ZD220:
   # Gesamt 58 mm, links 16 x 40 mm, rechts 42 x 44 mm, UNTEN buendig, ^LT40.
-  # Links beginnt deshalb 4 mm (=32 dots) tiefer. Datum wird um 90 Grad gedreht.
+  # Links beginnt deshalb 4 mm (=32 dots) tiefer.
+  # Grosses Etikett: Datum klein oben, Archivnummer maximal gross + doppelt gedruckt (=fetter), Baustelle klein unten.
+  # Kleines Etikett: Datum + Archivnummer, beide 90 Grad gedreht.
+  # ^PQ1 erzwingt genau einen Etiketten-Satz pro Druckauftrag.
+  $jobLine = ""
+  if ($jobText) {
+    $jobLine = "^FO145,276^FB310,2,2,C,0^A0N,18,18^FD$jobText^FS"
+  }
+
   return @"
 ^XA
 ^PW464
 ^LL352
 ^LT40
 ^LH0,0
+^FO150,48^FB300,1,0,C,0^A0N,20,20^FD$smallText^FS
 ^FO128,92^FB336,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
-^FO72,58^A0R,28,28^FD$smallText^FS
+^FO129,93^FB334,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
+$jobLine
+^FO42,58^A0R,24,24^FD$smallText^FS
+^FO106,58^A0R,50,50^FD$bigText^FS
+^PQ1,0,0,N
 ^XZ
 "@
 }
@@ -248,7 +264,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.0.0'
+            version = '1.1.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })
@@ -261,8 +277,9 @@ try {
           $data = $request.Body | ConvertFrom-Json
           $big = ConvertTo-SafeLabelText $data.big 16
           $small = ConvertTo-SafeLabelText $data.small 24
-          Send-RawZpl (New-ReturnLabelZpl $big $small)
-          Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; printer=$PrinterName })
+          $job = ConvertTo-SafeLabelText $data.job 44
+          Send-RawZpl (New-ReturnLabelZpl $big $small $job)
+          Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
         }
         else {
           Write-HttpJson $stream 404 ([ordered]@{ ok=$false; error='Not found' })
