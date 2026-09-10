@@ -55,7 +55,7 @@
 
     async function search(q, request) {
       // Reuse the main search endpoint and its name/number/altCode scoring.
-      const systems = ["LG", "RAL", "NCS"];
+      const systems = ["LG", "RAL", "NCS", "CAPAROL3D"];
       const responses = await Promise.allSettled(systems.map((system) =>
         api(`/admin/api/paint/search?system=${system}&q=${encodeURIComponent(q)}`)));
       if (request !== colourRequest || colour.value.trim() !== q) return;
@@ -76,7 +76,7 @@
         const title = document.createElement("b");
         title.textContent = row.name || row.code;
         const detail = document.createElement("span");
-        detail.textContent = [row.system, row.code !== row.name ? row.code : "", row.altCode,
+        detail.textContent = [row.system === "CAPAROL3D" ? "Caparol 3D" : row.system, row.code !== row.name ? row.code : "", row.altCode,
           ...(Array.isArray(row.aliases) ? row.aliases.slice(0, 2) : [])].filter(Boolean).join(" · ");
         button.append(title, detail);
         button.addEventListener("pointerdown", (event) => event.preventDefault());

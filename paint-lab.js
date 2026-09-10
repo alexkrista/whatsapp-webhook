@@ -7,6 +7,8 @@ const { LEGACY, selectCatalog, searchColors, formulaChanged } = require("./paint
 let XLSX = null;
 try { XLSX = require("xlsx"); } catch {}
 
+const caparol3d = require("./data/caparol-3d.json").colors;
+
 const BASE_NAMES = {
   H: "Hi White",
   HI: "Hi White",
@@ -309,6 +311,7 @@ function registerPaintLab(app, options = {}) {
     const system = clean(req.query.system || "LG", 20).toUpperCase();
     const q = clean(req.query.q, 120);
     if (!q) return res.json({ ok: true, results: [] });
+    if (system === "CAPAROL3D") return res.json({ ok:true, results:caparol3d.map(c => ({...c, score:Math.max(scoreHit(c.name,q),scoreHit(c.code,q))})).filter(c=>c.score).sort((a,b)=>b.score-a.score || a.name.localeCompare(b.name,"de",{numeric:true})).slice(0,80) });
     if (system === "F&B" || system === "FB") {
       const aliases = await readJson(FB_ALIASES, []);
       const groups = new Map();
@@ -339,6 +342,11 @@ function registerPaintLab(app, options = {}) {
   app.get("/admin/api/paint/color/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const system = clean(req.query.system || "LG", 20).toUpperCase();
+    if (system === "CAPAROL3D") {
+      const color=caparol3d.find(c=>c.id===req.params.id);
+      if (!color) return res.status(404).json({ok:false,error:"Farbton nicht gefunden"});
+      return res.json({ok:true,color,products:[],paletteOnly:true});
+    }
     if (system === "F&B" || system === "FB") {
       const aliases = await readJson(FB_ALIASES, []);
       const [nameNorm, noNorm] = String(req.params.id || "").split("|");

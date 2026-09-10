@@ -108,7 +108,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20260910-prefixes"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-enhancements-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-return-enhancements-ui.js?v=20260910-prefixes"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-return-enhancements-ui.js?v=20260910-caparol"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-outflow-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260825-1135"></script>\n</body>');

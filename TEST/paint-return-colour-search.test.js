@@ -97,7 +97,12 @@ const { registerPaintLab } = require("../paint-lab");
       assert.equal(el("returnColour").value, expected);
       assert.equal(el("returnColourResults").hidden, true);
     }
-    assert.deepEqual([...new Set(requests.filter((u) => u.pathname.endsWith("/search")).map((u) => u.searchParams.get("system")))].sort(), ["LG", "NCS", "RAL"]);
+    assert.deepEqual([...new Set(requests.filter((u) => u.pathname.endsWith("/search")).map((u) => u.searchParams.get("system")))].sort(), ["CAPAROL3D", "LG", "NCS", "RAL"]);
+
+    type("Laser 90"); await waitForResults();
+    const caparolHit = options().find(node => node.querySelector("b").textContent === "3D Laser 90");
+    assert.ok(caparolHit); caparolHit.click();
+    assert.equal(el("returnColour").value, "Caparol 3D Laser 90");
 
     let weighEnter = 0;
     el("returnColour").addEventListener("keydown", (event) => { if (event.key === "Enter") weighEnter++; });
@@ -150,7 +155,7 @@ const { registerPaintLab } = require("../paint-lab");
     type("158"); await waitForResults();
     assert.equal(options().length, 1, "partial API failure preserves other results");
     assert.match(el("returnColourResults").textContent, /RAL nicht verfügbar/);
-    failSystems = ["LG", "RAL", "NCS"];
+    failSystems = ["LG", "RAL", "NCS", "CAPAROL3D"];
     type("158"); await waitForResults();
     assert.equal(options().length, 0);
     assert.match(el("returnColourResults").textContent, /nicht verfügbar/);
