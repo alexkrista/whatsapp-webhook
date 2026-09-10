@@ -72,7 +72,7 @@
   section.className = "hidden";
   section.innerHTML = `
     <div class="return-project">
-      <div><div class="return-project-label">Baustelle bleibt aktiv</div><div id="returnProjectValue" class="return-project-value">Baustelle wählen …</div></div>
+      <div><div class="return-project-label">Baustelle für diese Rückware</div><div id="returnProjectValue" class="return-project-value">Baustelle wählen …</div></div>
       <button id="returnProjectBtn" class="btn" type="button">Wechseln</button>
     </div>
     <div class="return-layout">
@@ -136,7 +136,11 @@
   let returns = [];
   let scanner = null;
   let scannerLocked = false;
-  let project = loadProject();
+  let project = null;
+  try { localStorage.removeItem("kristineReturnJob"); } catch {}
+  let editing = null;
+  let editProject = null;
+  let projectTarget = "create";
   let initialized = false;
   let searchTimer = null;
 
@@ -147,12 +151,13 @@
     node.classList.toggle("err", kind === "err");
   }
 
-  function loadProject() {
-    try { return JSON.parse(localStorage.getItem("kristineReturnJob") || "null"); } catch { return null; }
-  }
   function saveProject(value) {
+    if (projectTarget === "edit") {
+      editProject = value;
+      el("returnEditProjectValue").textContent = `${value.id} · ${value.name}`;
+      return;
+    }
     project = value;
-    try { localStorage.setItem("kristineReturnJob", JSON.stringify(value)); } catch {}
     renderProject();
   }
   function renderProject() {
@@ -220,12 +225,14 @@
     });
   }
 
-  el("returnProjectBtn").onclick = () => {
+  function openProject(target) {
+    projectTarget = target;
     modal.hidden = false;
     el("returnProjectSearch").value = "";
     renderProjectRows("");
     setTimeout(() => el("returnProjectSearch").focus(), 60);
-  };
+  }
+  el("returnProjectBtn").onclick = () => openProject("create");
   el("returnProjectClose").onclick = () => { modal.hidden = true; };
   modal.addEventListener("click", (event) => { if (event.target === modal) modal.hidden = true; });
   el("returnProjectSearch").oninput = (event) => renderProjectRows(event.target.value);
@@ -299,6 +306,62 @@
     return `${d} Tage alt`;
   }
 
+  const editModal = document.createElement("div");
+  editModal.className = "return-modal";
+  editModal.id = "returnEditModal";
+  editModal.hidden = true;
+  editModal.innerHTML = `<div class="return-modal-card" role="dialog" aria-modal="true" aria-labelledby="returnEditTitle">
+    <div class="return-modal-head"><h2 id="returnEditTitle">Rückware ändern</h2><button id="returnEditClose" class="btn" type="button">Abbrechen</button></div>
+    <div class="return-project"><div id="returnEditProjectValue"></div><button id="returnEditProjectBtn" class="btn" type="button">Baustelle wählen</button></div>
+    <div class="return-field"><label for="returnEditWeight">Gewicht in kg</label><input id="returnEditWeight" class="field" type="number" min="0.001" max="1000" step="0.001" inputmode="decimal"></div>
+    <p>Die Archivnummer bleibt erhalten. Änderungen werden im Verlauf gespeichert.</p>
+    <button id="returnEditSave" class="btn primary" type="button">Änderung speichern</button>
+    <div id="returnEditStatus" class="return-status" role="status"></div>
+    <h3>Änderungsverlauf</h3><div id="returnEditHistory"></div>
+  </div>`;
+  // Keep the project picker above the editor when both are open.
+  document.body.insertBefore(editModal, modal);
+  el("returnEditProjectBtn").onclick = () => openProject("edit");
+  el("returnEditClose").onclick = () => { editModal.hidden = true; editing = null; };
+  const historyValues = (value) => `${formatWeight(value?.weightKg)} · ${[value?.jobId, value?.jobName].filter(Boolean).join(" · ") || "Keine Baustelle"}`;
+  function openEdit(row) {
+    editing = row;
+    editProject = row.jobId ? { id: row.jobId, name: row.jobName || row.jobId } : null;
+    el("returnEditTitle").textContent = `Rückware ${row.returnNo} ändern`;
+    el("returnEditProjectValue").textContent = editProject ? `${editProject.id} · ${editProject.name}` : "Baustelle wählen …";
+    el("returnEditWeight").value = row.weightKg;
+    el("returnEditStatus").textContent = "";
+    el("returnEditHistory").innerHTML = (row.history || []).slice().reverse().map((entry) =>
+      `<div class="return-job-row"><b>${esc(new Date(entry.changedAt).toLocaleString("de-AT"))}</b><div>Vorher: ${esc(historyValues(entry.before))}</div><div>Danach: ${esc(historyValues(entry.after))}</div></div>`
+    ).join("") || "Noch keine Änderungen.";
+    editModal.hidden = false;
+    el("returnEditWeight").focus();
+  }
+  el("returnEditSave").onclick = async () => {
+    if (!editing || el("returnEditSave").disabled) return;
+    const weightKg = Number(String(el("returnEditWeight").value).replace(",", "."));
+    if (!Number.isFinite(weightKg) || weightKg < 0.001 || weightKg > 1000 || !editProject) {
+      el("returnEditStatus").textContent = "Bitte gültiges Gewicht und Baustelle wählen.";
+      return;
+    }
+    const row = editing;
+    const controls = ["returnEditSave", "returnEditClose", "returnEditProjectBtn", "returnEditWeight"];
+    controls.forEach((id) => { el(id).disabled = true; });
+    try {
+      await api(`/admin/api/paint/returns/${encodeURIComponent(row.id)}/update`, {
+        method: "POST",
+        body: JSON.stringify({ weightKg, jobId: editProject.id, jobName: editProject.name, revision: row.revision || 0 }),
+      });
+      editModal.hidden = true;
+      editing = null;
+      setStatus(`Rückware ${row.returnNo} geändert ✓ · Archivnummer bleibt erhalten.`, "ok");
+      await loadReturns(el("returnSearch").value || "");
+    } catch (error) {
+      el("returnEditStatus").textContent = error.message;
+      if (error.status === 409) await loadReturns(el("returnSearch").value || "");
+    } finally { controls.forEach((id) => { el(id).disabled = false; }); }
+  };
+
   function renderReturns(items) {
     returns = Array.isArray(items) ? items : [];
     el("returnCount").textContent = String(returns.length);
@@ -311,8 +374,11 @@
     el("returnResults").innerHTML = returns.map((row) => {
       const material = [row.manufacturer, row.material, row.size].filter(Boolean).join(" · ");
       const projectText = row.jobId === "__lager__" ? "Lager" : [row.jobId, row.jobName].filter(Boolean).join(" · ");
-      return `<div class="return-row"><div class="return-no">${esc(row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div></div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div></div></div>`;
+      return `<div class="return-row"><div class="return-no">${esc(row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div></div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div><button class="btn" type="button" data-return-edit="${esc(row.id)}">Ändern</button></div></div>`;
     }).join("");
+    el("returnResults").querySelectorAll("[data-return-edit]").forEach((button) => {
+      button.onclick = () => openEdit(returns.find((row) => row.id === button.dataset.returnEdit));
+    });
   }
 
   async function loadReturns(query) {
@@ -331,7 +397,7 @@
   el("returnBookBtn").onclick = async () => {
     if (!currentMaterial || !currentEan) return setStatus("Zuerst Dose scannen.", "err");
     if (!project) {
-      setStatus("Bitte einmal Baustelle wählen – sie bleibt danach stehen.", "err");
+      setStatus("Bitte für diese Rückware eine Baustelle wählen.", "err");
       el("returnProjectBtn").click();
       return;
     }
@@ -355,6 +421,8 @@
       const no = data.item?.returnNo;
       setStatus(`${no} gebucht ✓ · Etikett ${no} / ${data.printJob?.small || "heute"} liegt in der Druckwarteschlange.`, "ok");
       resetMaterial();
+      project = null;
+      renderProject();
       await loadReturns(el("returnSearch").value || "");
       setTimeout(() => el("returnCameraBtn").focus(), 80);
     } catch (error) { setStatus(error.message, "err"); }

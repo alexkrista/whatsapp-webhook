@@ -104,6 +104,9 @@ function registerPaintReturnStock(app, options = {}) {
       jobName: clean(row?.jobName, 180),
       status: clean(row?.status || "available", 30),
       createdAt: clean(row?.createdAt, 40),
+      updatedAt: clean(row?.updatedAt || row?.createdAt, 40),
+      revision: Number(row?.revision || 0),
+      history: Array.isArray(row?.history) ? row.history : [],
       ageDays: ageDays(row?.createdAt),
     };
   }
@@ -258,6 +261,41 @@ function registerPaintReturnStock(app, options = {}) {
         return { item, printJob };
       });
       res.json({ ok: true, item: publicReturn(result.item), printJob: result.printJob });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.post("/admin/api/paint/returns/:id/update", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const weightKg = Math.round(num(req.body?.weightKg) * 1000) / 1000;
+      const jobId = clean(req.body?.jobId, 100);
+      const jobName = clean(req.body?.jobName, 180);
+      const revision = req.body?.revision;
+      if (!Number.isFinite(weightKg) || weightKg <= 0 || weightKg > 1000)
+        return res.status(400).json({ ok: false, error: "Gewicht in kg ist ungültig" });
+      if (!jobId || !jobName || !Number.isInteger(revision) || revision < 0)
+        return res.status(400).json({ ok: false, error: "Baustelle und gültiger Bearbeitungsstand fehlen" });
+      const result = await serial(async () => {
+        // Fail closed: never replace unreadable archive data with an empty list.
+        const rows = JSON.parse(await fsp.readFile(returnsFile, "utf8"));
+        const item = rows.find((row) => row.id === req.params.id);
+        if (!item) return { status: 404, error: "Rückware nicht gefunden" };
+        if (Number(item.revision || 0) !== revision)
+          return { status: 409, error: "Rückware wurde inzwischen geändert. Bitte neu öffnen." };
+        const before = { weightKg: item.weightKg, jobId: item.jobId, jobName: item.jobName };
+        const after = { weightKg, jobId, jobName };
+        if (Object.keys(after).some((key) => before[key] !== after[key])) {
+          const changedAt = new Date().toISOString();
+          item.history = [...(Array.isArray(item.history) ? item.history : []), { changedAt, before, after }];
+          Object.assign(item, after, { updatedAt: changedAt, revision: revision + 1 });
+          await writeJson(returnsFile, rows);
+        }
+        return { item };
+      });
+      if (result.error) return res.status(result.status).json({ ok: false, error: result.error });
+      res.json({ ok: true, item: publicReturn(result.item) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }

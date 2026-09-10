@@ -71,6 +71,52 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   res = await call(app, "GET", "/admin/api/paint/returns", { query: { q: "26083" } });
   assert.equal(res.body.count, 2);
 
+  const archiveFile = path.join(paintDir, "returns.json");
+  const queueFile = path.join(paintDir, "return-print-queue.json");
+  const original = JSON.parse(await fs.readFile(archiveFile, "utf8"));
+  const originalQueue = await fs.readFile(queueFile, "utf8");
+  const update = (body, id = "R-1") => call(app, "POST", "/admin/api/paint/returns/:id/update", { params: { id }, body });
+  const change = { weightKg: "2,125", jobId: "26099", jobName: "Andere Baustelle", revision: 0 };
+  res = await update(change);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.item.weightKg, 2.125);
+  assert.equal(res.body.item.revision, 1);
+  assert.equal(res.body.item.history.length, 1);
+  assert.deepEqual(res.body.item.history[0].before, { weightKg: 3.4, jobId: "26083", jobName: "Muster Baustelle" });
+  assert.deepEqual(res.body.item.history[0].after, { weightKg: 2.125, jobId: "26099", jobName: "Andere Baustelle" });
+  assert(Number.isFinite(Date.parse(res.body.item.history[0].changedAt)));
+  const saved = JSON.parse(await fs.readFile(archiveFile, "utf8"));
+  assert.equal(saved.length, 2);
+  for (const key of ["id", "returnNo", "createdAt", "ean", "colour", "material", "status"])
+    assert.equal(saved[0][key], original[0][key]);
+  assert.deepEqual(saved[1], original[1]);
+  assert.equal(await fs.readFile(queueFile, "utf8"), originalQueue);
+  assert.equal((await update(change)).statusCode, 409);
+  assert.equal((await update({ ...change, revision: 1 })).body.item.history.length, 1);
+  for (const weightKg of [0, -1, 1001, "", "abc", 0.0001])
+    assert.equal((await update({ ...change, revision: 1, weightKg })).statusCode, 400);
+  assert.equal((await update({ ...change, jobId: "" })).statusCode, 400);
+  assert.equal((await update({ ...change, revision: undefined })).statusCode, 400);
+  assert.equal((await update(change, "R-missing")).statusCode, 404);
+  const races = await Promise.all([
+    update({ weightKg: 1, jobId: "__lager__", jobName: "Lager / keine Baustelle", revision: 1 }),
+    update({ ...change, weightKg: 0.5, revision: 1 }),
+  ]);
+  assert.deepEqual(races.map((r) => r.statusCode).sort(), [200, 409]);
+  const restartedApp = fakeApp();
+  registerPaintReturnStock(restartedApp, { dataDir });
+  res = await call(restartedApp, "GET", "/admin/api/paint/returns", { query: { q: "__lager__" } });
+  assert.equal(res.body.items[0].history.length, 2);
+  assert.equal(res.body.items[0].returnNo, 1);
+  const previousToken = process.env.ADMIN_TOKEN;
+  process.env.ADMIN_TOKEN = "test-only";
+  const securedApp = fakeApp();
+  registerPaintReturnStock(securedApp, { dataDir });
+  if (previousToken === undefined) delete process.env.ADMIN_TOKEN;
+  else process.env.ADMIN_TOKEN = previousToken;
+  res = await call(securedApp, "POST", "/admin/api/paint/returns/:id/update", { params: { id: "R-1" }, body: change });
+  assert.equal(res.statusCode, 403);
+
   res = await call(app, "GET", "/admin/api/paint/returns/print-queue", { query: {} });
   assert.equal(res.body.jobs.length, 2);
   const printId = res.body.jobs[0].id;
