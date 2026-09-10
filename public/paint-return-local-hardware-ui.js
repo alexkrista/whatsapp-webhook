@@ -35,6 +35,16 @@
     return data;
   }
 
+  function asciiLabelText(value) {
+    return String(value || "")
+      .replace(/Ä/g, "Ae").replace(/Ö/g, "Oe").replace(/Ü/g, "Ue")
+      .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+      .replace(/[·•]/g, "-")
+      .replace(/[^A-Za-z0-9 .:/_\-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function isLittleGreene(item) {
     return /little\s*greene/i.test(String(item?.manufacturer || ""));
   }
@@ -58,7 +68,7 @@
 
   function projectLabel(item) {
     if (!item || item.jobId === "__lager__") return "";
-    return [item.jobId, item.jobName].filter(Boolean).join(" · ");
+    return asciiLabelText([item.jobId, item.jobName].filter(Boolean).join(" - "));
   }
 
   function setHardwareState(text, ok) {
@@ -111,9 +121,9 @@
     if (!id || printedJobs.has(id)) return;
     printedJobs.add(id);
     const item = job?.item || null;
-    const big = archiveLabel(item, job.big || job.returnNo || "");
-    const small = String(job.small || dateLabel(item?.createdAt) || "");
-    const project = String(job.job || projectLabel(item) || "");
+    const big = asciiLabelText(archiveLabel(item, job.big || job.returnNo || ""));
+    const small = asciiLabelText(String(job.small || dateLabel(item?.createdAt) || ""));
+    const project = asciiLabelText(String(job.job || projectLabel(item) || ""));
     try {
       await localApi("/print", {
         method: "POST",
