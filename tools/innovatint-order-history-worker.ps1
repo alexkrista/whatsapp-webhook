@@ -64,8 +64,9 @@ function Sync-Once {
   $secure=Get-Content -LiteralPath (Join-Path $root 'connection.key') -Raw|ConvertTo-SecureString
   $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try{$token=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)}
-  $body=@{filter='';matchType='1';customerID='';startDate='';endDate='';maxResults='0';status='';source='';localOnly='False';startingFrom='';orderByStatus='False';visibleOnly='False';productName='';baseCode='';canName=''}
+  $body=@{filter='';matchType='1';customerID='';startDate='';endDate='';maxResults='10000';status='';source='';localOnly='False';startingFrom='';orderByStatus='False';visibleOnly='False';productName='';baseCode='';canName=''}
   $rows=@(Read-Api 'orderitems_search' $body)
+  if($rows.Count -ge 10000){throw 'Ergebnisgrenze erreicht; bitte Verbindung pruefen lassen'}
   $events=@();$next=@{};foreach($key in $state.signatures.Keys){$next[$key]=$state.signatures[$key]}
   foreach($group in @($rows|Group-Object orderID)) {
     if(-not $group.Name){throw 'Auftrags-ID fehlt'}
