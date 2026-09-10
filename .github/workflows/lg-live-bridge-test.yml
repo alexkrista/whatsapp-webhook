@@ -43,6 +43,7 @@ on:
       - 'tools/find-innovatint-sqlite-native-v2.ps1'
       - 'tools/extract-innovatint-tint-history.ps1'
       - 'tools/watch-innovatint-mix-files.ps1'
+      - 'tools/test-zebra-zpl.ps1'
 
 jobs:
   syntax:
@@ -92,7 +93,8 @@ jobs:
             "tools/find-innovatint-sqlite-native.ps1",
             "tools/find-innovatint-sqlite-native-v2.ps1",
             "tools/extract-innovatint-tint-history.ps1",
-            "tools/watch-innovatint-mix-files.ps1"
+            "tools/watch-innovatint-mix-files.ps1",
+            "tools/test-zebra-zpl.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -120,7 +122,8 @@ jobs:
             "tools/find-innovatint-sqlite-native.ps1",
             "tools/find-innovatint-sqlite-native-v2.ps1",
             "tools/extract-innovatint-tint-history.ps1",
-            "tools/watch-innovatint-mix-files.ps1"
+            "tools/watch-innovatint-mix-files.ps1",
+            "tools/test-zebra-zpl.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
