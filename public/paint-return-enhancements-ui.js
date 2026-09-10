@@ -17,48 +17,117 @@
     return data;
   }
 
-  function isLittleGreeneMaterial() {
-    return /little\s*greene/i.test(String(el("returnMaterialNameView")?.textContent || ""));
-  }
-
-  function mergeColourOptions(results) {
-    const list = el("returnColourList");
-    if (!list) return;
-    const values = new Set(Array.from(list.options || []).map((option) => option.value).filter(Boolean));
-    for (const row of results || []) {
-      const code = String(row?.code || row?.name || "").trim();
-      const alt = String(row?.altCode || "").trim();
-      if (code) values.add(code);
-      if (alt && alt !== code) values.add(alt);
-    }
-    list.innerHTML = [...values]
-      .sort((a, b) => a.localeCompare(b, "de", { numeric: true }))
-      .slice(0, 180)
-      .map((value) => `<option value="${value.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}"></option>`)
-      .join("");
-  }
-
-  async function searchLgColours(value) {
-    const q = String(value || "").trim();
-    if (!isLittleGreeneMaterial() || q.length < 1) return;
-    const request = ++colourRequest;
-    try {
-      const data = await api(`/admin/api/paint/search?system=LG&q=${encodeURIComponent(q)}`);
-      if (request !== colourRequest) return;
-      mergeColourOptions(Array.isArray(data.results) ? data.results : []);
-    } catch {}
-  }
-
   function attachColourSearch() {
     const colour = el("returnColour");
-    if (!colour || colour.dataset.lgLookupAttached === "1") return;
-    colour.dataset.lgLookupAttached = "1";
-    colour.addEventListener("input", () => {
+    if (!colour || colour.dataset.colourLookupAttached === "1") return;
+    colour.dataset.colourLookupAttached = "1";
+    colour.removeAttribute("list");
+    colour.setAttribute("role", "combobox");
+    colour.setAttribute("aria-autocomplete", "list");
+    colour.setAttribute("aria-controls", "returnColourResults");
+    colour.setAttribute("aria-expanded", "false");
+    const list = document.createElement("div");
+    list.id = "returnColourResults";
+    list.className = "return-colour-results";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Farbvorschläge");
+    list.hidden = true;
+    colour.insertAdjacentElement("afterend", list);
+    let hits = [];
+    let active = -1;
+
+    function close() {
+      ++colourRequest;
       clearTimeout(colourTimer);
-      colourTimer = setTimeout(() => searchLgColours(colour.value), 130);
-    });
-    colour.addEventListener("focus", () => {
-      if (colour.value) searchLgColours(colour.value);
+      list.hidden = true;
+      hits = [];
+      active = -1;
+      colour.setAttribute("aria-expanded", "false");
+      colour.removeAttribute("aria-activedescendant");
+    }
+
+    function select(row) {
+      // altCode is a search alias, never the saved colour identifier.
+      colour.value = String(row.code || row.name || "").trim();
+      close();
+      colour.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    async function search(q, request) {
+      // Reuse the main search endpoint and its name/number/altCode scoring.
+      const systems = ["LG", "RAL", "NCS"];
+      const responses = await Promise.allSettled(systems.map((system) =>
+        api(`/admin/api/paint/search?system=${system}&q=${encodeURIComponent(q)}`)));
+      if (request !== colourRequest || colour.value.trim() !== q) return;
+      hits = responses.flatMap((result, i) => result.status === "fulfilled" && Array.isArray(result.value.results)
+        ? result.value.results.map((row) => ({ ...row, system: systems[i] })) : [])
+        .filter((row) => String(row.code || row.name || "").trim())
+        .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+      list.replaceChildren();
+      active = -1;
+      for (const [i, row] of hits.entries()) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "return-colour-hit";
+        button.id = `returnColourHit-${i}`;
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", "false");
+        button.tabIndex = -1;
+        const title = document.createElement("b");
+        title.textContent = row.name || row.code;
+        const detail = document.createElement("span");
+        detail.textContent = [row.system, row.code !== row.name ? row.code : "", row.altCode,
+          ...(Array.isArray(row.aliases) ? row.aliases.slice(0, 2) : [])].filter(Boolean).join(" · ");
+        button.append(title, detail);
+        button.addEventListener("pointerdown", (event) => event.preventDefault());
+        button.addEventListener("click", () => select(row));
+        list.appendChild(button);
+      }
+      const failed = responses.flatMap((result, i) => result.status === "rejected" ? [systems[i]] : []);
+      if (!hits.length || failed.length) {
+        const message = document.createElement("div");
+        message.className = "return-colour-message";
+        message.setAttribute("role", "status");
+        message.textContent = failed.length
+          ? `Farbsuche für ${failed.join(", ")} nicht verfügbar. Bitte erneut versuchen oder Farbton frei eingeben.`
+          : "Keine passende Farbe gefunden. Freie Eingabe ist möglich.";
+        list.appendChild(message);
+      }
+      list.hidden = false;
+      colour.setAttribute("aria-expanded", "true");
+    }
+
+    function schedule() {
+      close(); // Invalidate in-flight answers immediately, including during debounce.
+      const q = colour.value.trim();
+      if (!q) return;
+      const request = colourRequest;
+      colourTimer = setTimeout(() => search(q, request), 130);
+    }
+    colour.addEventListener("input", schedule);
+    colour.addEventListener("focus", schedule);
+    colour.addEventListener("blur", close);
+    colour.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { close(); return; }
+      if (list.hidden || !hits.length) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        active = (active + (event.key === "ArrowDown" ? 1 : active < 0 ? 0 : -1) + hits.length) % hits.length;
+        list.querySelectorAll('[role="option"]').forEach((node, i) => node.setAttribute("aria-selected", String(i === active)));
+        colour.setAttribute("aria-activedescendant", `returnColourHit-${active}`);
+        el(`returnColourHit-${active}`)?.scrollIntoView?.({ block: "nearest" });
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopImmediatePropagation(); // Do not start weighing before the colour is selected.
+        select(hits[active < 0 ? 0 : active]);
+      }
+    }, true);
+    const card = el("returnMaterialCard");
+    if (card) new MutationObserver(close).observe(card, { attributes: true, attributeFilter: ["hidden"] });
+    const material = el("returnMaterialNameView");
+    if (material) new MutationObserver(close).observe(material, { childList: true, subtree: true, characterData: true });
+    document.addEventListener("pointerdown", (event) => {
+      if (event.target !== colour && !list.contains(event.target)) close();
     });
   }
 
@@ -119,6 +188,12 @@
       const style = document.createElement("style");
       style.id = "returnEnhancementStyles";
       style.textContent = `
+        .return-colour-results{max-height:300px;overflow:auto;border:1px solid var(--line,#ccd2c9);border-radius:8px;background:#fff;margin-top:5px}
+        .return-colour-results[hidden]{display:none}
+        .return-colour-hit{display:block;width:100%;text-align:left;background:#fff;color:inherit;border:0;border-bottom:1px solid var(--line,#ccd2c9);padding:10px 12px;min-height:48px;cursor:pointer;font:inherit}
+        .return-colour-hit:hover,.return-colour-hit[aria-selected="true"]{background:#edf3e9}
+        .return-colour-hit span{display:block;font-size:12px;color:#596058;margin-top:3px}
+        .return-colour-message{padding:10px 12px;font-size:13px;color:#596058}
         .return-reprint-btn{display:block;margin-top:7px;min-height:30px;padding:5px 8px;font-size:11px;font-weight:800}
         @media(max-width:760px){.return-reprint-btn{display:inline-block;margin-top:0;margin-left:8px}}
       `;

@@ -5,21 +5,29 @@ on:
     paths:
       - 'paint-lab-preload.js'
       - 'paint-return-stock.js'
+      - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
       - 'public/paint-return-enhancements-ui.js'
       - 'tools/kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-local-bridge.ps1'
       - 'TEST/paint-return-stock.test.js'
+      - 'TEST/paint-return-stock-ui.test.js'
+      - 'TEST/paint-return-colour-search.test.js'
+      - 'paint-lab.js'
       - '.github/workflows/paint-return-hardware-test.yml'
   pull_request:
     paths:
       - 'paint-lab-preload.js'
       - 'paint-return-stock.js'
+      - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
       - 'public/paint-return-enhancements-ui.js'
       - 'tools/kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-local-bridge.ps1'
       - 'TEST/paint-return-stock.test.js'
+      - 'TEST/paint-return-stock-ui.test.js'
+      - 'TEST/paint-return-colour-search.test.js'
+      - 'paint-lab.js'
       - '.github/workflows/paint-return-hardware-test.yml'
 
 jobs:
@@ -34,10 +42,19 @@ jobs:
         run: |
           node --check paint-lab-preload.js
           node --check paint-return-stock.js
+          node --check public/paint-return-stock-ui.js
           node --check public/paint-return-local-hardware-ui.js
           node --check public/paint-return-enhancements-ui.js
       - name: Return stock backend test
         run: node TEST/paint-return-stock.test.js
+      - name: Install isolated browser test runtime
+        run: |
+          npm install --prefix "$RUNNER_TEMP/return-test-runtime" --ignore-scripts --no-audit --no-fund jsdom@26.1.0
+          echo "NODE_PATH=$RUNNER_TEMP/return-test-runtime/node_modules" >> "$GITHUB_ENV"
+      - name: Return UI, hardware and colour search regression tests
+        run: |
+          node TEST/paint-return-stock-ui.test.js
+          node TEST/paint-return-colour-search.test.js
 
   powershell51:
     runs-on: windows-latest
