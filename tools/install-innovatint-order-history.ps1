@@ -6,7 +6,7 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {$_
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'innovatint-order-history-worker.ps1') -Destination $worker -Force
 $config=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Verbindung.json') -Raw -Encoding UTF8|ConvertFrom-Json
 $secure=ConvertTo-SecureString ([string]$config.token) -AsPlainText -Force
-ConvertFrom-SecureString $secure|Set-Content -LiteralPath (Join-Path $target 'connection.key') -Encoding ASCII
+ConvertFrom-SecureString $secure|Set-Content -LiteralPath (Join-Path $target 'connection.key') -Encoding ASCII -NoNewline
 $activatedAt=[datetime]::UtcNow.ToString('o')
 $existingConfig=Join-Path $target 'connection.json'
 if(Test-Path -LiteralPath $existingConfig){$previous=Get-Content -LiteralPath $existingConfig -Raw -Encoding UTF8|ConvertFrom-Json;if($previous.activatedAt){$activatedAt=[string]$previous.activatedAt}}

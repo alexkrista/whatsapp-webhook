@@ -61,7 +61,8 @@ function Sync-Once {
     foreach($prop in $old.signatures.PSObject.Properties){$state.signatures[$prop.Name]=[string]$prop.Value}
   }
   $config=Get-Content -LiteralPath (Join-Path $root 'connection.json') -Raw -Encoding UTF8|ConvertFrom-Json
-  $secure=Get-Content -LiteralPath (Join-Path $root 'connection.key') -Raw|ConvertTo-SecureString
+  $encryptedKey=(Get-Content -LiteralPath (Join-Path $root 'connection.key') -Raw).Trim()
+  $secure=ConvertTo-SecureString $encryptedKey
   $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try{$token=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)}
   $body=@{filter='';matchType='1';customerID='';startDate='';endDate='';maxResults='10000';status='';source='';localOnly='False';startingFrom='';orderByStatus='False';visibleOnly='False';productName='';baseCode='';canName=''}
