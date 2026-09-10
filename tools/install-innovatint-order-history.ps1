@@ -7,7 +7,10 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'innovatint-order-history-worker
 $config=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Verbindung.json') -Raw -Encoding UTF8|ConvertFrom-Json
 $secure=ConvertTo-SecureString ([string]$config.token) -AsPlainText -Force
 ConvertFrom-SecureString $secure|Set-Content -LiteralPath (Join-Path $target 'connection.key') -Encoding ASCII
-@{url=[string]$config.url;machine=$env:COMPUTERNAME;activatedAt=[datetime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $target 'connection.json') -Encoding UTF8
+$activatedAt=[datetime]::UtcNow.ToString('o')
+$existingConfig=Join-Path $target 'connection.json'
+if(Test-Path -LiteralPath $existingConfig){$previous=Get-Content -LiteralPath $existingConfig -Raw -Encoding UTF8|ConvertFrom-Json;if($previous.activatedAt){$activatedAt=[string]$previous.activatedAt}}
+@{url=[string]$config.url;machine=$env:COMPUTERNAME;activatedAt=$activatedAt}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $target 'connection.json') -Encoding UTF8
 Write-Host 'Erste Uebernahme der vorhandenen Historie. Kein Lagerabzug. Bitte warten ...'
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $worker -Mode Once
 if($LASTEXITCODE -ne 0){throw 'Erste Uebernahme fehlgeschlagen. Bitte die angezeigte Meldung schicken.'}
