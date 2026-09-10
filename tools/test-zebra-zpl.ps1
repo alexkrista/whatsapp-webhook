@@ -53,22 +53,23 @@ if (-not ('RawPrinterHelper' -as [type])) {
 # Gesamtbreite 58 mm = 464 dots.
 # Bereich 1: 16 x 40 mm = 128 x 320 dots.
 # Bereich 2: 42 x 44 mm = 336 x 352 dots, direkt anschliessend.
-# Beide Bereiche sind UNTEN buendig: der 40-mm-Bereich beginnt deshalb 4 mm tiefer.
-# Die komplette Etikettengruppe sitzt ca. 5 mm tiefer als der Medienanfang.
-# Daraus: rechts Y=40 dots, links Y=72 dots; Gesamtlaenge 49 mm = 392 dots.
+# KORREKTUR: Beide Bereiche sind OBEN buendig, nicht unten.
+# Die komplette Etikettengruppe muss gegenueber dem letzten Test ca. 5 mm NACH OBEN.
+# ^LT-40 verschiebt den Druck um ca. 5 mm entgegen der Vorschubrichtung.
 $zpl = @"
 ^XA
 ^PW464
-^LL392
+^LL352
+^LT-40
 ^LH0,0
-^FO1,73^GB126,318,2^FS
-^FO129,41^GB334,350,2^FS
-^FO127,40^GB2,352,2^FS
-^FO18,102^A0N,32,32^FD1^FS
-^FO10,154^A0N,20,20^FD16 x 40^FS
-^FO150,68^A0N,36,36^FD$Text^FS
-^FO150,126^A0N,24,24^FD42 x 44 mm^FS
-^FO150,172^A0N,22,22^FD58 mm Gesamtbreite^FS
+^FO1,1^GB126,318,2^FS
+^FO129,1^GB334,350,2^FS
+^FO127,0^GB2,352,2^FS
+^FO18,30^A0N,32,32^FD1^FS
+^FO10,82^A0N,20,20^FD16 x 40^FS
+^FO150,28^A0N,36,36^FD$Text^FS
+^FO150,86^A0N,24,24^FD42 x 44 mm^FS
+^FO150,132^A0N,22,22^FD58 mm Gesamtbreite^FS
 ^XZ
 "@
 
@@ -117,5 +118,5 @@ finally {
 }
 
 Write-Host "OK: RAW-ZPL an '$PrinterName' gesendet."
-Write-Host "Format: 58 mm breit | links 16 x 40 mm | rechts 42 x 44 mm | unten buendig | +5 mm Y-Offset"
+Write-Host "Format: 58 mm breit | links 16 x 40 mm | rechts 42 x 44 mm | oben buendig | -5 mm Y-Offset"
 Write-Host "Port: $($printer.PortName) | Treiber: $($printer.DriverName) | Status: $($printer.PrinterStatus)"
