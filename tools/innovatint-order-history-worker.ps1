@@ -43,6 +43,17 @@ function Save-State($state) {
   Move-Item -LiteralPath $tmp -Destination $stateFile -Force
 }
 function Sync-Once {
+  $client=New-Object Net.Sockets.TcpClient
+  try {
+    $attempt=$client.ConnectAsync('127.0.0.1',9502)
+    try {$ready=$attempt.Wait(1200) -and $client.Connected} catch {$ready=$false}
+  } finally {$client.Dispose()}
+  if(-not $ready){
+    $paused=(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')+' | PAUSE | Innovatint ist ausgeschaltet; kein Fehler.'
+    $paused|Set-Content -LiteralPath (Join-Path $root 'Status.txt') -Encoding UTF8
+    Write-Host $paused
+    return
+  }
   $state=@{initialized=$false;signatures=@{}}
   if(Test-Path -LiteralPath $stateFile){
     $old=Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8|ConvertFrom-Json
@@ -66,11 +77,22 @@ function Sync-Once {
     $next[$id]=$signature
   }
   if($events.Count -gt 5000){throw 'Mehr als 5000 Dosierungen: Aufteilung erforderlich'}
-  $payload=@{machine=[string]$config.machine;rows=@($events);baseline=(-not $state.initialized);createTasks=$true;source='verified-order-load'}|ConvertTo-Json -Depth 12 -Compress
-  $answer=Invoke-RestMethod -Uri (([string]$config.url)+'/admin/api/paint/bridge/history') -Method Post -Headers @{'x-lg-bridge-token'=$token} -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($payload)) -TimeoutSec 60
-  if(-not $answer.ok){throw 'KRISTINE hat die Uebernahme nicht bestaetigt'}
+  $groups=@(@{baseline=$false;rows=@($events)})
+  if(-not $state.initialized){
+    $cutoff=[datetimeoffset]::Parse([string]$config.activatedAt)
+    $older=@($events|Where-Object {[datetimeoffset]::Parse($_.completedAt) -le $cutoff})
+    $newer=@($events|Where-Object {[datetimeoffset]::Parse($_.completedAt) -gt $cutoff})
+    $groups=@(@{baseline=$true;rows=$older},@{baseline=$false;rows=$newer})
+  }
+  $added=0
+  foreach($batch in $groups){
+    $payload=@{machine=[string]$config.machine;rows=@($batch.rows);baseline=[bool]$batch.baseline;createTasks=$true;source='verified-order-load'}|ConvertTo-Json -Depth 12 -Compress
+    $answer=Invoke-RestMethod -Uri (([string]$config.url)+'/admin/api/paint/bridge/history') -Method Post -Headers @{'x-lg-bridge-token'=$token} -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($payload)) -TimeoutSec 60
+    if(-not $answer.ok){throw 'KRISTINE hat die Uebernahme nicht bestaetigt'}
+    $added+=[int]$answer.added
+  }
   Save-State @{initialized=$true;signatures=$next;lastSuccess=[datetime]::UtcNow.ToString('o')}
-  $message=(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')+' | OK | '+$answer.added+' neu | Historie beim Start: '+(-not $state.initialized)
+  $message=(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')+' | OK | '+$added+' neu | Historie beim Start: '+(-not $state.initialized)
   $message|Set-Content -LiteralPath (Join-Path $root 'Status.txt') -Encoding UTF8
   Write-Host $message
 }
