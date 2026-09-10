@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$expectedVersion = "1.1.0"
+$expectedVersion = "1.2.0"
 
 $installDir = Join-Path $env:LOCALAPPDATA "KRISTINE\PaintLocalBridge"
 $bridgePath = Join-Path $installDir "kristine-paint-local-bridge.ps1"
