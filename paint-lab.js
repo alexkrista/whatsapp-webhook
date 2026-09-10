@@ -3,6 +3,7 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const { LEGACY, selectCatalog, searchColors, formulaChanged } = require("./paint-catalog-history");
 let XLSX = null;
 try { XLSX = require("xlsx"); } catch {}
 
@@ -231,7 +232,9 @@ function registerPaintLab(app, options = {}) {
       if (visited.has(pid)) break;
       visited.add(pid);
       const candidates = links.filter(x => Number(x.productId ?? x.PRODUCTID) === pid)
-        .sort((a,b) => Number(b.version ?? b.VERSION ?? 0) - Number(a.version ?? a.VERSION ?? 0));
+        // Innovatint keeps the current manufacturer recipe at VERSION=0.
+        // Positive versions are prior recipes, not newer revisions.
+        .sort((a,b) => Number(a.version ?? a.VERSION ?? 0) - Number(b.version ?? b.VERSION ?? 0));
       if (candidates.length) {
         const link = candidates[0];
         const formula = idx.formulaById.get(Number(link.formulaId ?? link.FORMULAID));
@@ -321,15 +324,15 @@ function registerPaintLab(app, options = {}) {
     const catalog = await readJson(CATALOG, null);
     if (!catalog) return res.status(503).json({ ok: false, error: "Innovatint-Katalog noch nicht importiert" });
     const results = [];
-    for (const c of catalog.colors || []) {
+    for (const c of searchColors(catalog)) {
       const id = Number(c.colourId ?? c.COLOURID);
       const code = clean(c.colourCode ?? c.COLOURCODE, 120);
       if (systemOfCode(code) !== system) continue;
       const alt = clean(c.altColourCode ?? c.ALTCOLOURCODE, 120);
-      const score = Math.max(scoreHit(code, q), scoreHit(alt, q));
-      if (score) results.push({ id, system, name: code, code, altCode: alt, rgb: c.rgb ?? c.RGB ?? null, score });
+      const score = Math.max(scoreHit(code, q), scoreHit(alt, q), scoreHit(c.previousName || "", q));
+      if (score) results.push({ id:c.archiveOnly ? `old:${id}` : id, legacy:!!c.legacy, system, name: code, code, altCode: alt, rgb: c.rgb ?? c.RGB ?? null, score });
     }
-    results.sort((a,b) => b.score-a.score || String(a.code).localeCompare(String(b.code), "de", { numeric: true }));
+    results.sort((a,b) => b.score-a.score || Number(a.legacy)-Number(b.legacy) || String(a.code).localeCompare(String(b.code), "de", { numeric: true }));
     res.json({ ok: true, results: results.slice(0,80) });
   });
 
@@ -343,13 +346,16 @@ function registerPaintLab(app, options = {}) {
       if (!rows.length) return res.status(404).json({ ok:false,error:"Farbton nicht gefunden" });
       return res.json({ ok:true, color:{ system:"F&B", name:rows[0].name, code:rows[0].number, aliases:[...new Set(rows.map(r=>r.alias).filter(Boolean))] }, products:[] });
     }
-    const [catalog, articles] = await Promise.all([readJson(CATALOG, null), readJson(ARTICLES, [])]);
+    const [allCatalog, articles] = await Promise.all([readJson(CATALOG, null), readJson(ARTICLES, [])]);
+    const catalog = selectCatalog(allCatalog,req);
     if (!catalog) return res.status(503).json({ ok:false,error:"Innovatint-Katalog noch nicht importiert" });
-    const colourId = Number(req.params.id);
+    const colourId = Number(String(req.params.id).replace(/^old:/,""));
     const color = (catalog.colors || []).find(c => Number(c.colourId ?? c.COLOURID) === colourId);
     if (!color) return res.status(404).json({ ok:false,error:"Farbton nicht gefunden" });
     const idx = buildCatalogIndex(catalog);
     const stockByKey = new Map(articles.map(a => [articleKey(a), a]));
+    const previous = allCatalog?.previousCatalog;
+    const previousIdx = previous ? buildCatalogIndex(previous) : null;
     const products = [];
     for (const p of catalog.products || []) {
       const pid = Number(p.productId ?? p.PRODUCTID);
@@ -378,17 +384,27 @@ function registerPaintLab(app, options = {}) {
         const art = stockByKey.get([norm(productName), norm(baseCode), sizeNorm(s.size)].join("|"));
         return { ...s, stock: art ? Number(art.stock || 0) : null, minimumStock: art ? Number(art.minimumStock || 0) : null, purchasePrice: art ? Number(art.purchasePrice || 0) : null, salePrice: art ? Number(art.salePrice || 0) : null, ean: art?.ean || "", stockCode: art?.stockCode || "", articleId: art?.id || "" };
       }).sort((a,b) => Number(b.nominalAmount||0)-Number(a.nominalAmount||0));
-      products.push({ productId:pid, productName, productCode:clean(p.productCode ?? p.PRODUCTCODE,80), inheritedFromProductId:resolved.inheritedFromProductId, formulaId:Number(resolved.formula.formulaId ?? resolved.formula.FORMULAID), version:Number(resolved.link.version ?? resolved.link.VERSION ?? 0), aBaseId:aid, baseCode, baseName:baseName(baseCode), baseId, sizes, recipeAvailable:!!parseFormulaContents(resolved.formula.cntInFormula ?? resolved.formula.CNTINFORMULA) });
+      let oldRecipe = null;
+      if (previousIdx && catalog === allCatalog) {
+        const oldResolved = resolveFormulaForProduct(colourId,pid,previousIdx);
+        if (oldResolved && formulaChanged(oldResolved.formula,resolved.formula)) {
+          const oldAid=Number(oldResolved.formula.aBaseId);
+          const oldBase=previousIdx.baseByProductAbstract.get(`${pid}|${oldAid}`) || previousIdx.baseByProductAbstract.get(`${oldResolved.inheritedFromProductId}|${oldAid}`);
+          if (oldBase) oldRecipe={catalogVersion:LEGACY,baseName:baseName(oldBase.baseCode),formulaId:Number(oldResolved.formula.formulaId)};
+        }
+      }
+      products.push({ oldRecipe, legacy:catalog !== allCatalog || /\bOLD\b/i.test(p.productName || "") || String(color.colourCode).includes("*"), productId:pid, productName, productCode:clean(p.productCode ?? p.PRODUCTCODE,80), inheritedFromProductId:resolved.inheritedFromProductId, formulaId:Number(resolved.formula.formulaId ?? resolved.formula.FORMULAID), version:Number(resolved.link.version ?? resolved.link.VERSION ?? 0), aBaseId:aid, baseCode, baseName:baseName(baseCode), baseId, sizes, recipeAvailable:!!parseFormulaContents(resolved.formula.cntInFormula ?? resolved.formula.CNTINFORMULA) });
     }
     products.sort((a,b)=>a.productName.localeCompare(b.productName,"de"));
-    res.json({ ok:true, color:{ id:colourId, system, name:clean(color.colourCode ?? color.COLOURCODE,120), code:clean(color.colourCode ?? color.COLOURCODE,120), altCode:clean(color.altColourCode ?? color.ALTCOLOURCODE,120), rgb:color.rgb ?? color.RGB ?? null }, products });
+    res.json({ ok:true, color:{ id:catalog !== allCatalog ? `old:${colourId}` : colourId, legacy:catalog !== allCatalog || String(color.colourCode).includes("*"), system, name:clean(color.colourCode ?? color.COLOURCODE,120), code:clean(color.colourCode ?? color.COLOURCODE,120), altCode:clean(color.altColourCode ?? color.ALTCOLOURCODE,120), rgb:color.rgb ?? color.RGB ?? null }, products });
   });
 
   app.get("/admin/api/paint/recipe", async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const [catalog, settings] = await Promise.all([readJson(CATALOG, null), readJson(SETTINGS, DEFAULT_SETTINGS)]);
+    const [allCatalog, settings] = await Promise.all([readJson(CATALOG, null), readJson(SETTINGS, DEFAULT_SETTINGS)]);
+    const catalog = selectCatalog(allCatalog,req);
     if (!catalog) return res.status(503).json({ ok:false,error:"Innovatint-Katalog noch nicht importiert" });
-    const colourId = Number(req.query.colourId), productId = Number(req.query.productId), canSizeId = Number(req.query.canSizeId);
+    const colourId = Number(String(req.query.colourId).replace(/^old:/,"")), productId = Number(req.query.productId), canSizeId = Number(req.query.canSizeId);
     const idx = buildCatalogIndex(catalog);
     const resolved = resolveFormulaForProduct(colourId, productId, idx);
     if (!resolved) return res.status(404).json({ok:false,error:"Keine Rezeptur gefunden"});
@@ -397,6 +413,8 @@ function registerPaintLab(app, options = {}) {
     if (!parsed || !Array.isArray(parsed[0]) || !Array.isArray(parsed[1])) return res.status(404).json({ok:false,error:"Rezepturinhalt nicht lesbar"});
     const cs = idx.canSizeById.get(canSizeId);
     if (!cs) return res.status(404).json({ok:false,error:"Gebinde nicht gefunden"});
+    const resolvedBase = idx.baseByProductAbstract.get(`${productId}|${Number(formula.aBaseId)}`) || idx.baseByProductAbstract.get(`${resolved.inheritedFromProductId}|${Number(formula.aBaseId)}`);
+    if (!resolvedBase || !(idx.cansByBaseId.get(Number(resolvedBase.baseId)) || []).some(c => Number(c.canSizeId) === canSizeId)) return res.status(400).json({ok:false,error:"Gebinde passt nicht zur Rezeptbasis"});
     const nominalMl = Number(cs.nominalAmount ?? cs.NOMINALAMOUNT ?? 0);
     const factorL = nominalMl / 1000;
     const unitMl = Number(settings.recipeUnitMl || DEFAULT_SETTINGS.recipeUnitMl);
@@ -407,14 +425,15 @@ function registerPaintLab(app, options = {}) {
       const machineUnits = unitMl > 0 ? ml / unitMl : null;
       return { cntId:Number(cntId), code:clean(c.cntCode ?? c.CNTCODE,20), description:clean(c.description ?? c.DESCRIPTION,80), specificGravity:Number(c.specificGravity ?? c.SPECIFICGRAVITY ?? 0), perLiter:perL, ml:Number(ml.toFixed(4)), machineUnits:machineUnits===null?null:Number(machineUnits.toFixed(2)) };
     });
-    res.json({ ok:true, formulaId:Number(formula.formulaId ?? formula.FORMULAID), inheritedFromProductId:resolved.inheritedFromProductId, canSizeId, canSize:clean(cs.canSizeCode ?? cs.CANSIZECODE,40), nominalMl, recipeUnitMl:unitMl, calibrationNote:settings.recipeCalibrationNote || "", recipe });
+    const legacy = catalog !== allCatalog || /\bOLD\b/i.test(idx.productById.get(productId)?.productName || "") || String((catalog.colors || []).find(c=>Number(c.colourId)===colourId)?.colourCode || "").includes("*");
+    res.json({ ok:true, baseName:baseName(resolvedBase.baseCode), legacy, formulaId:Number(formula.formulaId ?? formula.FORMULAID), inheritedFromProductId:resolved.inheritedFromProductId, canSizeId, canSize:clean(cs.canSizeCode ?? cs.CANSIZECODE,40), nominalMl, recipeUnitMl:unitMl, calibrationNote:settings.recipeCalibrationNote || "", recipe });
   });
 
   app.get("/admin/api/paint/scan", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const ean = eanNorm(req.query.ean);
     const articles = await readJson(ARTICLES, []);
-    const article = articles.find(a => ean && eanNorm(a.ean) === ean);
+    const article = articles.find(a => ean && eanNorm(a.ean) === ean) || articles.find(a => ean && (a.eanAliases || []).some(alias => eanNorm(alias) === ean));
     if (!article) return res.status(404).json({ok:false,error:"EAN nicht im KRISTINE-Lagerstamm"});
     res.json({ok:true,article});
   });

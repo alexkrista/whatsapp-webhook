@@ -28,6 +28,7 @@ const { registerPaintStockLedgerApi } = require("./paint-stock-ledger-api");
 const { registerPaintRuntimeSafety } = require("./paint-runtime-safety");
 const { registerPaintMixHistory } = require("./paint-mix-history");
 const { registerPaintCatalogSync } = require("./paint-catalog-sync");
+const { registerPaintEanReconcile } = require("./paint-ean-reconcile");
 const { registerPaintColorStockOverlay } = require("./paint-color-stock-overlay");
 
 function registerPaintHtmlHotfix(app, publicDir) {
@@ -172,6 +173,7 @@ function wrappedExpress(...args) {
         // Muss vor paint-lab stehen: Mischdaten erst pruefen und Farbsuche danach
         // mit dem autoritativen Bestand aus Inventur/Lagerbuch ueberlagern.
         registerPaintCatalogSync(app, opts);
+        registerPaintEanReconcile(app, opts);
         registerPaintColorStockOverlay(app, opts);
         registerPaintLab(app, opts);
         registerPaintCommercial(app, opts);

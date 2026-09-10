@@ -1,0 +1,19 @@
+name: Paint catalog history
+on:
+  push:
+    paths: ['paint-*.js', 'public/paint-*.html', 'public/paint-*.js', 'TEST/paint-catalog-history*.js', '.github/workflows/paint-catalog-history-test.yml']
+  pull_request:
+    paths: ['paint-*.js', 'public/paint-*.html', 'public/paint-*.js', 'TEST/paint-catalog-history*.js']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts jsdom@26
+      - run: node TEST/paint-catalog-history.test.js
+      - run: node TEST/paint-catalog-history-ui.test.js
+      - run: node TEST/paint-return-stock.test.js

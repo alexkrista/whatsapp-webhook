@@ -76,7 +76,7 @@ function registerPaintReturnStock(app, options = {}) {
       readJson(articlesFile, []),
       readJson(materialsFile, []),
     ]);
-    const article = (Array.isArray(articles) ? articles : []).find((row) => eanNorm(row?.ean) === code);
+    const article = (Array.isArray(articles) ? articles : []).find((row) => eanNorm(row?.ean) === code) || (Array.isArray(articles) ? articles : []).find(row => (row.eanAliases || []).some(ean => eanNorm(ean) === code));
     if (article) return articleMaterial(article);
     const learned = (Array.isArray(materials) ? materials : []).find((row) => eanNorm(row?.ean) === code && row?.active !== false);
     return learned ? { ...learned, ean: code, source: "learned" } : null;

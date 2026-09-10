@@ -2,6 +2,7 @@
 
 const fsp = require("fs/promises");
 const path = require("path");
+const { activateCatalog, validateCatalog } = require("./paint-catalog-history");
 
 function registerPaintCatalogSync(app, options = {}) {
   const dataDir = options.dataDir || process.env.DATA_DIR || "/var/data";
@@ -76,7 +77,7 @@ function registerPaintCatalogSync(app, options = {}) {
     if (kind === "canSizes") return String(valueOf(row,["canSizeId","CANSIZEID","id"]) || `${norm(valueOf(row,["canSizeCode","CANSIZECODE","code"]))}|${index}`);
     if (kind === "cans") return String(valueOf(row,["canId","CANID","id"]) || `${valueOf(row,["baseId","BASEID"])}|${valueOf(row,["canSizeId","CANSIZEID"])}|${index}`);
     if (kind === "colorants") return String(valueOf(row,["cntId","CNTID","id"]) || `${norm(valueOf(row,["cntCode","CNTCODE","code"]))}|${index}`);
-    if (kind === "colorInProduct") return [valueOf(row,["colourId","COLOURID"]), valueOf(row,["productId","PRODUCTID"]), valueOf(row,["formulaId","FORMULAID"]), valueOf(row,["version","VERSION"])].join("|") || String(index);
+    if (kind === "colorInProduct") return [valueOf(row,["colourId","COLOURID"]), valueOf(row,["productId","PRODUCTID"]), valueOf(row,["version","VERSION"])].join("|") || String(index);
     return String(index);
   }
 
@@ -122,6 +123,7 @@ function registerPaintCatalogSync(app, options = {}) {
 
   async function stageCandidate(raw, source = "manual") {
     const candidate = normalizeCatalog(raw);
+    validateCatalog(candidate);
     if (!candidate.colors.length || !candidate.products.length) throw new Error("Innovatint-Export ist leer oder ungültig");
     const current = await readJson(catalogFile, null);
     const comparison = compareCatalogs(current || {}, candidate);
@@ -187,7 +189,8 @@ function registerPaintCatalogSync(app, options = {}) {
       const candidate = await readJson(candidateFile,null);
       if (!candidate) return res.status(404).json({ ok:false,error:"Kein geprüfter Mischdaten-Stand vorhanden" });
       const backup = await backupCurrent();
-      await writeJson(catalogFile,candidate);
+      const current = await readJson(catalogFile,null);
+      await writeJson(catalogFile,activateCatalog(current,candidate));
       await Promise.all([
         fsp.unlink(candidateFile).catch(()=>{}), fsp.unlink(candidateMetaFile).catch(()=>{})
       ]);
