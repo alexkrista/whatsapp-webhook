@@ -74,8 +74,9 @@
     wrap.className = "mixhist-project"; wrap.hidden = true;
     const select = document.createElement("select"); select.className = "field";
     const save = document.createElement("button"); save.className = "btn primary"; save.type = "button"; save.textContent = "Baustelle buchen";
-    wrap.append(select, save); row.appendChild(wrap);
-    return { wrap, select, save };
+    const component = document.createElement("input"); component.className = "field"; component.placeholder = "Raum / Bauteil, z. B. Fassade oder Türen"; component.setAttribute("aria-label", "Raum / Bauteil"); component.maxLength = 180;
+    wrap.append(select, component, save); row.appendChild(wrap);
+    return { wrap, select, component, save };
   }
 
   async function resolve(id, resolution, extra = {}, button = null) {
@@ -119,9 +120,11 @@
       }
       if (item.status !== "open" && !(item.status === "baseline" && !item.jobId && (item.colourCode || item.colourName))) {
         row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" + (item.jobId ? " · Farbwissen: " + item.jobId + " · " + item.jobName : "") : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
+        if (item.component) row.querySelector(".mixhist-actions").appendChild(document.createTextNode(" · " + item.component));
         list.appendChild(row); continue;
       }
       const picker = projectPicker(row);
+      if (item.status === "baseline") picker.save.textContent = "Farbwissen speichern – ohne Lagerabzug";
       row.querySelector('[data-resolution="sale"]')?.addEventListener("click", event => resolve(item.id, "sale", {}, event.currentTarget));
       row.querySelector('[data-resolution="stock"]')?.addEventListener("click", event => resolve(item.id, "stock", {}, event.currentTarget));
       row.querySelector('[data-resolution="waste"]')?.addEventListener("click", event => resolve(item.id, "waste", {}, event.currentTarget));
@@ -136,7 +139,7 @@
       });
       picker.save.addEventListener("click", () => {
         const option = picker.select.selectedOptions[0]; if (!option) return;
-        resolve(item.id, "project", { jobId:picker.select.value, jobName:option.dataset.name || option.textContent || "" }, picker.save);
+        resolve(item.id, "project", { component:picker.component.value.trim(), jobId:picker.select.value, jobName:option.dataset.name || option.textContent || "" }, picker.save);
       });
       list.appendChild(row);
     }

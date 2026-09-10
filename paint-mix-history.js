@@ -260,7 +260,7 @@ function registerPaintMixHistory(app, options = {}) {
     if (resolution !== "project") return;
     const booking = {
       id: `mixmat_${crypto.createHash("sha1").update(`${row.id}|${jobId}`).digest("hex").slice(0, 18)}`,
-      at: movement.at, mixedAt: row.mixedAt, historyId: row.id, jobId, jobName,
+      component: movement.component || row.component || "", at: movement.at, mixedAt: row.mixedAt, historyId: row.id, jobId, jobName,
       articleId: article.id || "", product: article.product || row.productName || "",
       baseCode: article.baseCode || row.baseCode || "", baseName: article.baseName || row.baseName || "",
       size: article.size || row.size || "", colourTone: row.colourCode || row.colourName || "",
@@ -290,8 +290,8 @@ function registerPaintMixHistory(app, options = {}) {
       const existing=(await readJsonl(jobMaterialsFile)).find(x=>x.historyId===row.id && x.knowledgeOnly);
       if ((existing && existing.jobId!==jobId) || (row.jobId && row.jobId!==jobId)) return {statusCode:409,error:"Altbestand ist bereits einer anderen Baustelle zugeordnet"};
       const at=existing?.at || new Date().toISOString();
-      await appendProjectMaterial(row,{},"project",jobId,jobName,{at,quantity:row.quantity,knowledgeOnly:true});
-      Object.assign(row,{resolution:"project",jobId,jobName,knowledgeOnly:true,resolvedAt:at});
+      await appendProjectMaterial(row,{},"project",jobId,jobName,{at,quantity:row.quantity,knowledgeOnly:true,component:existing?.component || clean(body?.component,180)});
+      Object.assign(row,{resolution:"project",jobId,jobName,component:existing?.component || clean(body?.component,180),knowledgeOnly:true,resolvedAt:at});
       await writeJson(historyFile,history);
       return {statusCode:200,row,knowledgeOnly:true};
     }
@@ -303,7 +303,7 @@ function registerPaintMixHistory(app, options = {}) {
       const article = articles.find(x => x.id === recorded.articleId) || {};
       const resolution = recorded.reason === "mixed_stock" ? "stock" : recorded.reason;
       await appendProjectMaterial(row, article, resolution, recorded.jobId, recorded.jobName, recorded);
-      Object.assign(row, {status:"resolved",resolution,jobId:recorded.jobId,jobName:recorded.jobName,resolvedAt:recorded.at,articleId:recorded.articleId,stockBefore:recorded.before,stockAfter:recorded.after});
+      Object.assign(row, {status:"resolved",resolution,component:recorded.component || "",jobId:recorded.jobId,jobName:recorded.jobName,resolvedAt:recorded.at,articleId:recorded.articleId,stockBefore:recorded.before,stockAfter:recorded.after});
       await writeJson(historyFile,history); await markTaskDone(row.taskId);
       return {statusCode:200,row,alreadyResolved:true};
     }
@@ -336,7 +336,7 @@ function registerPaintMixHistory(app, options = {}) {
       at, articleId: article.id || "", ean: article.ean || "", stockCode: article.stockCode || "",
       product: article.product || row.productName || "", baseCode: article.baseCode || row.baseCode || "",
       baseName: article.baseName || row.baseName || row.baseCode || "", size: article.size || row.size || "",
-      direction: "out", quantity, delta: -quantity, before, after, reason, jobId, jobName,
+      direction: "out", quantity, delta: -quantity, before, after, reason, jobId, jobName, component: resolution === "project" ? clean(body?.component,180) : "",
       colourTone: row.colourCode || row.colourName || "", historyId: row.id, mixedAt: row.mixedAt,
       source: "innovatint-history", user: clean(body?.user || "KRISTINE Misch-History", 120),
       purchasePrice: Number(article.purchasePrice || 0), salePrice: Number(article.salePrice || 0),
@@ -345,7 +345,7 @@ function registerPaintMixHistory(app, options = {}) {
     await writeJson(articlesFile, articles);
     await appendProjectMaterial(row, article, resolution, jobId, jobName, movement);
 
-    row.status = "resolved"; row.resolution = resolution; row.jobId = jobId; row.jobName = jobName;
+    row.component = movement.component; row.status = "resolved"; row.resolution = resolution; row.jobId = jobId; row.jobName = jobName;
     row.resolvedAt = at; row.resolvedBy = movement.user; row.articleId = article.id || "";
     row.stockBefore = before; row.stockAfter = after;
     await writeJson(historyFile, history);

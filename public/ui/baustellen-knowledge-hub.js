@@ -391,7 +391,7 @@
     api('/admin/api/paint/job-materials?jobId='+encodeURIComponent(j.jobId)).then(data=>{
       if(!mixHost.isConnected)return;
       const mixes=Array.isArray(data.items)?data.items:[];
-      mixHost.innerHTML='<h3>Material aus der Mischmaschine</h3>'+(mixes.length?mixes.map(m=>'<div class="bk-material"><strong>'+esc([m.product,m.colourTone].filter(Boolean).join(' · '))+'</strong><span>'+esc(m.quantity+' × '+m.size+' · '+m.baseName+' · '+fmtDate(m.mixedAt||m.at)+(m.knowledgeOnly?' · Altbestand / nur Farbwissen – kein Lagerabzug':''))+'</span></div>').join(''):'<div class="bk-placeholder">Noch keine Mischung dieser Baustelle zugeordnet.</div>');
+      mixHost.innerHTML='<h3>Material aus der Mischmaschine</h3>'+(mixes.length?mixes.map(m=>'<div class="bk-material"><strong>'+esc([m.component,m.product,m.colourTone].filter(Boolean).join(' · '))+'</strong><span>'+esc(m.quantity+' × '+m.size+' · '+m.baseName+' · '+fmtDate(m.mixedAt||m.at)+(m.knowledgeOnly?' · Altbestand / nur Farbwissen – kein Lagerabzug':''))+'</span></div>').join(''):'<div class="bk-placeholder">Noch keine Mischung dieser Baustelle zugeordnet.</div>');
     }).catch(()=>{if(mixHost.isConnected)mixHost.textContent="Mischmaschinen-Material konnte nicht geladen werden."});
   }
 
