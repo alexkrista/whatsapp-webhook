@@ -31,20 +31,23 @@ function registerPaintMixHistory(app, options = {}) {
     return true;
   }
 
-  function requireBridge(req, res) {
-    if (!bridgeToken) {
-      res.status(503).json({ ok: false, error: "KRISTINE_LG_BRIDGE_TOKEN fehlt" });
-      return false;
-    }
-    if (String(req.headers["x-lg-bridge-token"] || "") !== bridgeToken) {
-      res.status(403).json({ ok: false, error: "Forbidden" });
-      return false;
-    }
+  async function requireBridge(req, res) {
+    const token = String(req.headers["x-lg-bridge-token"] || "");
+    const paired = await readJson(path.join(root,"mix-bridge-pair.json"),{});
+    const valid = token && ((bridgeToken && token === bridgeToken) || crypto.createHash("sha256").update(token).digest("hex") === paired.hash);
+    if (!valid) { res.status(403).json({ok:false,error:"Mischcomputer nicht verbunden"}); return false; }
     return true;
   }
+  app.post("/admin/api/paint/bridge/pair", async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    try { const token = crypto.randomBytes(32).toString("hex");
+      await serial(() => writeJson(path.join(root,"mix-bridge-pair.json"),{hash:crypto.createHash("sha256").update(token).digest("hex"),createdAt:new Date().toISOString()}));
+      res.json({ok:true,token});
+    } catch { res.status(500).json({ok:false,error:"Verbindung konnte nicht vorbereitet werden"}); }
+  });
 
   async function ensureDir(file) { await fsp.mkdir(path.dirname(file), { recursive: true }); }
-  async function readJson(file, fallback) { try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; } }
+  async function readJson(file, fallback) { try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch (error) { if (error.code === "ENOENT") return fallback; throw error; } }
   async function writeJson(file, value) {
     await ensureDir(file);
     const tmp = `${file}.tmp`;
@@ -159,6 +162,8 @@ function registerPaintMixHistory(app, options = {}) {
       colourId: number(pick(row, ["colour.id", "color.id", "colourId", "colorId"], 0), 0),
       colourCode, colourName, productName, baseCode, baseName, size, quantity,
       liters: Number((sizeLiters(size) * quantity).toFixed(3)),
+      requiresReview: row.requiresReview === true,
+      ean: clean(row.ean, 40),
       sourceStatus: clean(pick(row, ["status", "orderStatus", "state"], ""), 80),
       cancelled: clearlyCancelled,
       raw: compactRaw(row),
@@ -279,6 +284,7 @@ function registerPaintMixHistory(app, options = {}) {
     if (row.status === "resolved") return { statusCode: 200, row, alreadyResolved: true };
     if (row.status === "baseline") return { statusCode: 409, error: "Historischer Baseline-Eintrag wird nicht gebucht" };
 
+    if (row.requiresReview) return {statusCode:409,error:"Freie Dosierung oder Nachmischung: kein automatischer Dosenabzug. Bitte prüfen."};
     const recorded = (await readJsonl(movementsFile)).find(x => x.historyId === row.id && x.source === "innovatint-history");
     if (recorded) {
       const articles = await readJson(articlesFile, []);
@@ -366,7 +372,7 @@ function registerPaintMixHistory(app, options = {}) {
   }
 
   app.post("/admin/api/paint/bridge/history", async (req, res) => {
-    if (!requireBridge(req, res)) return;
+    if (!await requireBridge(req, res)) return;
     try {
       const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 5000) : [];
       const result = await serial(() => ingest(rows, req.body?.machine || "", { baseline: req.body?.baseline === true, createTasks: req.body?.createTasks !== false }));
@@ -390,7 +396,7 @@ function registerPaintMixHistory(app, options = {}) {
     try {
       const [state, rows] = await Promise.all([readJson(syncStateFile, {}), readJson(historyFile, [])]);
       const list = Array.isArray(rows) ? rows : [];
-      res.json({ ok: true, state, open: list.filter(row => row.status === "open").length, total: list.length, schedule: "Mo-Fr 06:00-18:00 / 15 Minuten" });
+      res.json({ ok: true, connectorVersion: 2, state, open: list.filter(row => row.status === "open").length, total: list.length, schedule: "Täglich 06:15–18:30 · jede Minute" });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 

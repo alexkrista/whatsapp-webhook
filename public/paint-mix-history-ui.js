@@ -113,6 +113,7 @@
           <button class="btn" data-resolution="stock" type="button">Lager</button>
           <button class="btn" data-resolution="waste" type="button">Fehlmischung</button>
         </div>`;
+      if (item.requiresReview && item.status === "open") { row.querySelector(".mixhist-actions").textContent = "Freie Dosierung / Nachmischung: manuell prüfen, kein automatischer Dosenabzug."; list.appendChild(row); continue; }
       if (item.status !== "open") {
         row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
         list.appendChild(row); continue;
