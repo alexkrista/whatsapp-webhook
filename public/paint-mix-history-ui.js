@@ -63,7 +63,7 @@
 
   let jobs = null;
   async function loadJobs() {
-    if (jobs) return jobs;
+
     const data = await api("/admin/api/paint/jobs");
     jobs = Array.isArray(data.jobs) ? data.jobs : [];
     return jobs;
@@ -72,11 +72,28 @@
   function projectPicker(row) {
     const wrap = document.createElement("div");
     wrap.className = "mixhist-project"; wrap.hidden = true;
-    const select = document.createElement("select"); select.className = "field";
+    const select = document.createElement("select"); select.className = "field"; select.size = 6; select.setAttribute("aria-label", "Baustelle auswählen");
+    const search = document.createElement("input"); search.className = "field"; search.type = "search"; search.placeholder = "Baustelle suchen: Name, Nummer oder Ort"; search.setAttribute("aria-label", "Baustellen filtern");
+    const count = document.createElement("div"); count.className = "mixhist-meta"; count.setAttribute("aria-live", "polite");
+    let allJobs = [];
+    const normalize = value => String(value || "").toLocaleLowerCase("de").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ß/g,"ss");
+    function filter() {
+      const previous = select.value;
+      const terms = normalize(search.value).trim().split(/\s+/).filter(Boolean);
+      const filtered = allJobs.filter(job => terms.every(term => normalize([job.id,job.name,job.city].join(" ")).includes(term)));
+      select.replaceChildren();
+      for (const job of filtered) { const option = document.createElement("option"); option.value=job.id; option.dataset.name=job.name || ""; option.textContent=[job.id,job.name,job.city].filter(Boolean).join(" · "); select.appendChild(option); }
+      select.value = previous; if (!previous || !filtered.some(job=>String(job.id)===previous)) select.selectedIndex=-1;
+      save.disabled = !select.value;
+      count.textContent = filtered.length ? filtered.length + " von " + allJobs.length + " Baustellen" : "Keine passende Baustelle";
+    }
+    search.addEventListener("input", filter);
+    select.addEventListener("change", () => { save.disabled = !select.value; });
+    function setJobs(rows) { allJobs=rows; filter(); }
     const save = document.createElement("button"); save.className = "btn primary"; save.type = "button"; save.textContent = "Baustelle buchen";
     const component = document.createElement("input"); component.className = "field"; component.placeholder = "Raum / Bauteil, z. B. Fassade oder Türen"; component.setAttribute("aria-label", "Raum / Bauteil"); component.maxLength = 180;
-    wrap.append(select, component, save); row.appendChild(wrap);
-    return { wrap, select, component, save };
+    wrap.append(search, count, select, component, save); row.appendChild(wrap);
+    return { wrap, select, component, save, search, setJobs };
   }
 
   async function resolve(id, resolution, extra = {}, button = null) {
@@ -132,8 +149,9 @@
         const button = event.currentTarget; button.disabled = true;
         try {
           const rows = await loadJobs();
-          picker.select.innerHTML = rows.map(job => `<option value="${esc(job.id)}" data-name="${esc(job.name || "")}">${esc(job.id)} · ${esc(job.name || "")}</option>`).join("");
+          picker.setJobs(rows);
           picker.wrap.hidden = !picker.wrap.hidden;
+          if (!picker.wrap.hidden) picker.search.focus();
         } catch (error) { alert(String(error?.message || error)); }
         finally { button.disabled = false; }
       });
