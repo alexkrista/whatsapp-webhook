@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-project-archive-fusion-3";
+  const VERSION="2026-09-10-project-archive-repair-4";
   const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
@@ -54,7 +54,11 @@
     const archive=Array.isArray(bootstrap?.projectTimeArchive)?bootstrap.projectTimeArchive:[];
     const states=bootstrap?.states||{};
     const employees=new Map((bootstrap?.employees||[]).map(e=>[String(e.id||e.employeeId||""),e]));
-    const groups=new Map(),archivedPersonDays=new Set(archive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
+    // Nur ein tatsächlich brauchbarer Baustellenstand darf die Live-Ereignisse
+    // dieses Tages ersetzen. Ein leerer/unvollständiger Archivsatz darf niemals
+    // alle Baustellen aus dem Leitstand verschwinden lassen.
+    const usableArchive=archive.filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||"")==="work"&&String(segment?.jobId||segment?.jobName||"").trim()));
+    const groups=new Map(),archivedPersonDays=new Set(usableArchive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
 
     const addDuration=({employeeId,date,jobId,name,fink,duration})=>{
       if(!employeeId||!date||!jobId||duration<=0||duration>18)return;
@@ -101,7 +105,7 @@
         addDuration({employeeId,date,jobId,name,fink:finkNumber(employee,row),duration});
       }
     }
-    for(const released of archive){
+    for(const released of usableArchive){
       const employeeId=String(released?.employeeId||""),date=String(released?.date||"").slice(0,10),employee=employees.get(employeeId)||{},name=String(released?.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId),fink=finkNumber(employee,released);
       for(const segment of Array.isArray(released?.segments)?released.segments:[]){
         if(String(segment?.type||"")!=="work")continue;

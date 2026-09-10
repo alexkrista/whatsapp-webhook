@@ -2112,6 +2112,12 @@ const open = taskId
     if (Array.isArray(beforeOrAt?.after)) return beforeOrAt.after;
     const firstAfter = history.find(row => (Date.parse(row?.at || "") || 0) > releasedAt);
     if (Array.isArray(firstAfter?.before)) return firstAfter.before;
+    // Bei alten Freigaben kann die Mitarbeiterzeit inzwischen bereits entkoppelt
+    // sein. Dann ist der ursprüngliche Korrekturstand die letzte Quelle mit
+    // Baustellenwissen und muss vor der baustellenlosen Zeitkarte Vorrang haben.
+    if (Array.isArray(correction?.originalSegments) && correction.originalSegments.some(row=>row?.jobId||row?.jobName)) {
+      return correction.originalSegments;
+    }
     return Array.isArray(currentSegments) ? currentSegments : [];
   }
 
@@ -2119,7 +2125,20 @@ const open = taskId
     const archive = await readJson(PROJECT_TIME_ARCHIVE, []);
     const key = `${String(release.employeeId)}|${String(release.date)}`;
     let row = archive.find(item => `${String(item.employeeId)}|${String(item.date)}` === key);
-    if (row) return row;
+    if (row) {
+      const existingJobs=(row.segments||[]).filter(segment=>segment?.type==="work"&&(segment.jobId||segment.jobName)).length;
+      const candidateJobs=(segments||[]).filter(segment=>segment?.type==="work"&&(segment.jobId||segment.jobName)).length;
+      if(existingJobs||!candidateJobs)return row;
+      row.segments=(segments||[]).map(segment=>({
+        id:String(segment.id||""),type:String(segment.type||""),from:String(segment.from||""),to:String(segment.to||""),
+        jobId:String(segment.jobId||""),jobName:String(segment.jobName||""),reason:String(segment.reason||""),activityMode:productiveKind(segment),
+        ...(segment.type==="up"?{unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code}:{}),
+      }));
+      row.repairedAt=new Date().toISOString();
+      row.repairSource=source;
+      await writeJson(PROJECT_TIME_ARCHIVE,archive);
+      return row;
+    }
     const now = new Date().toISOString();
     row = {
       id:`project_time_${release.employeeId}_${release.date}`,
