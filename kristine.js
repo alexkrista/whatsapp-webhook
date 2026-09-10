@@ -642,6 +642,27 @@ const intent = rawText.startsWith("task_call:")
       states[employeeId] = state;
       await writeJson(STATES, states);
     };
+    const hasDayEnd = () => timeEvents.some((row) =>
+      String(row.employeeId) === String(employeeId) &&
+      String(row.date) === String(today) &&
+      ["ende", "fertig", "stop", "stopp"].includes(String(row.type || "").toLowerCase())
+    );
+    const ensureDayEnd = async (at = actualTime) => {
+      if (hasDayEnd()) return false;
+      const endEvent = {
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        type: "ende",
+        at,
+        jobId: current?.jobId || state.activeJobOverride?.jobId || null,
+        jobName: current?.jobName || state.activeJobOverride?.jobName || "",
+        createdAt: now,
+      };
+      await appendTimeEvent(endEvent);
+      timeEvents.push(endEvent);
+      return true;
+    };
     const addTimeline = (type, detail, assignment = current) => {
       state.timeline = Array.isArray(state.timeline) ? state.timeline : [];
       state.timeline.push({
@@ -1040,7 +1061,7 @@ const intent = rawText.startsWith("task_call:")
       state.pending = null;
       state.mode = "finished_day";
       addTimeline("day_finished", "Tagesabschluss bestätigt", current);
-      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: current?.jobId || state.activeJobOverride?.jobId || null, jobName: current?.jobName || state.activeJobOverride?.jobName || "", createdAt: now });
+      await ensureDayEnd(state.dayReview?.finishedAt || actualTime);
       await appendEvent({ type: "day_finished", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || state.activeJobOverride?.jobId || null, time: actualTime, review: state.dayReview || {} });
       await saveState();
       return { reply: "✅ Tagesabschluss gespeichert. Danke und schönen Feierabend! 👋", buttons: [], state };
@@ -1058,19 +1079,20 @@ const intent = rawText.startsWith("task_call:")
       state.pending = null;
       state.mode = "finished_day";
       addTimeline("day_finished", "Tagesabschluss bestätigt", current);
-      await appendTimeEvent({ employeeId, employeeName: state.employeeName, date: today, type: "ende", at: actualTime, jobId: current?.jobId || state.activeJobOverride?.jobId || null, jobName: current?.jobName || state.activeJobOverride?.jobName || "", createdAt: now });
+      await ensureDayEnd(state.dayReview?.finishedAt || actualTime);
       await appendEvent({ type: "day_finished", employeeId, employeeName: state.employeeName, date: today, jobId: current?.jobId || state.activeJobOverride?.jobId || null, time: actualTime, review: state.dayReview || {} });
       await saveState();
       return { reply: `✅ Aufgabe „${title}“ gespeichert. Tagesabschluss erledigt. Schönen Feierabend! 👋`, buttons: [], state };
     }
 
     if (intent === "finish") {
+      await ensureDayEnd(actualTime);
       const summary = formatDaySummary(timeEvents, employeeId, today, state);
       state.pending = { type: "day_review_summary", createdAt: now };
-      state.dayReview = { startedAt: now, summary };
+      state.dayReview = { startedAt: now, finishedAt: actualTime, summary };
       await saveState();
       return {
-        reply: `📋 Tageszusammenfassung\n${summary}\n\nPasst das so?`,
+        reply: `✅ Ende ${actualTime} ist gespeichert.\n\n📋 Tageszusammenfassung\n${summary}\n\nPasst das so?`,
         buttons: ["Ja", "Nein"],
         state,
       };
