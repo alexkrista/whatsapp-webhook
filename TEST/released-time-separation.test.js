@@ -19,6 +19,8 @@ async function invoke(handler,{params={},body={}}={}){const res=response();await
     assert.equal(archive[0].segments[0].jobId,"26080");
     let personal=JSON.parse(await fsp.readFile(path.join(root,"time-events.json"),"utf8"));
     assert(personal.every(row=>!row.jobId&&row.detachedFromProject===true));
+    const releasedSegments=await invoke(routes.get("GET /kristine/api/segments/:employeeId/:date"),{params:{employeeId:"139",date:"2026-09-08"}});
+    assert.equal(releasedSegments.body.released,true);assert(releasedSegments.body.segments.every(row=>!row.jobId));
     let bootstrap=await invoke(routes.get("GET /kristine/api/bootstrap"));
     assert.equal(bootstrap.body.projectTimeArchive[0].segments[0].jobId,"26080");
     res=await invoke(routes.get("PUT /kristine/api/segments/:employeeId/:date"),{params:{employeeId:"139",date:"2026-09-08"},body:{employeeName:"Clemens",reason:"Korrektur",correctedBy:"Bettina",segments:[{id:"x",type:"up",from:"08:00",to:"14:00",jobId:"99999",jobName:"Andere Baustelle",reason:"Krank"}]}});

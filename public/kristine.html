@@ -408,14 +408,14 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
     </div>
     <div id="timeEditorTable"></div>
     <div class="actions" style="margin-top:12px">
-      <button type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
-      <button type="button" class="green" onclick="addTimeEditorRow('site')">+ Baustelle</button>
+      <button id="timeAddWork" type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
+      <button id="timeAddSite" type="button" class="green" onclick="addTimeEditorRow('site')">+ Baustelle</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('lunch')">+ Mittag</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('pause')">+ Pause</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('up')">+ Unproduktiv</button>
       <button type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
     </div>
-    <div class="notice" style="margin-top:12px"><strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.</div><input id="moveLinkedEntries" type="hidden" value="1">
+    <div id="timeEditorLinkNotice" class="notice" style="margin-top:12px"><strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.</div><input id="moveLinkedEntries" type="hidden" value="1">
     <div id="employeeActionNote" class="task-done-note" style="margin-top:10px"></div>
     <div class="small" style="margin-top:8px">Die Zeitabschnitte sind die Wahrheit. Änderungen werden protokolliert; zugehörige Dokumentation kann automatisch der richtigen Baustelle folgen.</div>
   </div>
@@ -1016,7 +1016,8 @@ function renderDayBar(segments,dayStart,dayEnd){
 let selectedControlEmployeeId='';
 let timeEditorSegments=[];
 let timeEditorCopiedFrom=null;
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;}
+let timeEditorReleased=false;
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorReleased=false;}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
 function jobOptions(selected=''){
   const jobs=[...masterJobs].filter(j=>j.active!==false).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
@@ -1046,9 +1047,12 @@ function addMinuteToHM(hm){
   return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
 }
 function upReasonOptions(selected=''){
-  return UP_REASONS.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
+  const reasons=timeEditorReleased?['Krank','Arzt','Urlaub','Sonderurlaub']:UP_REASONS;
+  const legacy=selected&&!reasons.includes(String(selected))?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:'';
+  return legacy+reasons.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
 }
 function timeEditorContextCell(seg,index){
+  if(timeEditorReleased&&seg.type==='work')return '<span class="fink-code-badge">Produktiv · ohne Baustellenbezug</span>';
   if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
   if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'Werkstatt')}</select>`;
   return '<span class="small">–</span>';
@@ -1069,7 +1073,7 @@ function renderTimeEditor(){
     }
     rows+=`<tr class="time-editor-row-${esc(seg.type)}">
       <td><select onchange="updateTimeEditorRow(${index},'type',this.value)">
-        <option value="work" ${seg.type==='work'?'selected':''}>Arbeit</option>
+        <option value="work" ${seg.type==='work'?'selected':''}>${timeEditorReleased?'Produktiv':'Arbeit'}</option>
         <option value="lunch" ${seg.type==='lunch'?'selected':''}>Mittag</option>
         <option value="pause" ${seg.type==='pause'?'selected':''}>Pause</option>
         <option value="up" ${seg.type==='up'?'selected':''}>Unproduktiv</option>
@@ -1128,17 +1132,6 @@ function addTimeEditorRow(type='work'){
 function removeTimeEditorRow(index){timeEditorSegments.splice(index,1);renderTimeEditor()}
 function moveTimeEditorRow(index,direction){const target=index+direction;if(target<0||target>=timeEditorSegments.length)return;[timeEditorSegments[index],timeEditorSegments[target]]=[timeEditorSegments[target],timeEditorSegments[index]];renderTimeEditor()}
 function timeEditorJobIds(segments){return new Set((segments||[]).filter(x=>x.type==='work'&&x.jobId).map(x=>String(x.jobId)))}
-function leitstandProjectSegments(employeeId,date,segments){
-  const archived=(data.projectTimeArchive||[]).find(row=>String(row.employeeId)===String(employeeId)&&String(row.date)===String(date));
-  const projects=(archived?.segments||[]).filter(row=>row.type==='work'&&(row.jobId||row.jobName));
-  if(!projects.length)return (segments||[]).map(row=>({...row}));
-  return (segments||[]).map(segment=>{
-    if(segment.type!=='work'||segment.jobId||segment.jobName)return {...segment};
-    const from=hmToMinutes(segment.from),to=hmToMinutes(segment.to);let best=null,bestOverlap=0;
-    for(const project of projects){const pf=hmToMinutes(project.from),pt=hmToMinutes(project.to);if(from===null||to===null||pf===null||pt===null)continue;const overlap=Math.max(0,Math.min(to,pt)-Math.max(from,pf));if(overlap>bestOverlap){best=project;bestOverlap=overlap}}
-    return best?{...segment,jobId:String(best.jobId||''),jobName:String(best.jobName||''),projectArchiveView:true}:{...segment};
-  });
-}
 function populateTimeCopyEmployees(){
   const select=document.getElementById('timeCopyEmployee');if(!select)return;
   const targetJobs=timeEditorJobIds(timeEditorSegments);const date=selectedWorkDate();
@@ -1171,9 +1164,14 @@ async function openEmployeeActionModal(employeeId){
   timeEditorCopiedFrom=null;employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
   try{
     const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
-    timeEditorSegments=leitstandProjectSegments(employeeId,date,result.segments||[]);
+    timeEditorReleased=Boolean(result.released);
+    timeEditorSegments=(result.segments||[]).map(x=>({...x}));
     const state=data.states?.[employeeId]||{mode:'idle'};
-    employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.</span>`;
+    employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">${timeEditorReleased?'Zeit oder arbeitsrechtliche Art ändern und anschließend speichern.':'Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.'}</span>`;
+    if(timeEditorReleased)employeeActionInfo.innerHTML+=`<br><span class="small"><strong>Freigegeben:</strong> unabhängige KRISZEIT-Kopie – nur Zeit sowie Produktiv/Unproduktiv, ohne Baustellenverbindung.</span>`;
+    document.getElementById('timeAddSite').hidden=timeEditorReleased;
+    document.getElementById('timeAddWork').textContent=timeEditorReleased?'+ Produktiv':'+ Arbeit';
+    document.getElementById('timeEditorLinkNotice').innerHTML=timeEditorReleased?'<strong>Nach Freigabe getrennt:</strong> Änderungen wirken nur auf die Mitarbeiterzeit. Baustellenstunden, Fotos, Material und Regie bleiben unverändert.':'<strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.';
     const hint=document.getElementById('timeCopyHint');if(hint)hint.textContent='Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.';
     renderTimeEditor();populateTimeCopyEmployees();
   }catch(error){employeeActionInfo.textContent='Fehler: '+error.message}
@@ -1188,7 +1186,7 @@ async function saveTimeEditor(){
     if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}
     if(!seg.to)openIndexes.push(index);
     if(seg.to&&hmToMinutes(seg.to)<=hmToMinutes(seg.from)){employeeActionNote.textContent=`Ungültiger Zeitraum ${seg.from}–${seg.to}.`;return}
-    if(seg.type==='work'&&!seg.jobId){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
+    if(seg.type==='work'&&!seg.jobId&&!timeEditorReleased){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
     if(seg.type==='up'&&!seg.reason)seg.reason='Sonstiges';
   }
   if(openIndexes.some(index=>index!==timeEditorSegments.length-1)){employeeActionNote.textContent='Nur der letzte Abschnitt darf offen sein.';return}
@@ -1200,7 +1198,7 @@ async function saveTimeEditor(){
   employeeActionNote.textContent='Speichert …';
   try{
     const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
-    await loadSilent();timeEditorSegments=leitstandProjectSegments(selectedControlEmployeeId,date,result.segments||[]);timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
+    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
     if(continues){
       employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert · ${employee?.name||'Mitarbeiter'} arbeitet weiter. Kein Tagesabschluss ausgelöst.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
       return;

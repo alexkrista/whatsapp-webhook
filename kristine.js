@@ -2353,13 +2353,16 @@ const open = taskId
     try {
       const employeeId = String(req.params.employeeId || "");
       const date = String(req.params.date || localDateISO()).slice(0, 10);
-      const [events, states, corrections] = await Promise.all([
-        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(DAY_CORRECTIONS, []),
+      const [events, states, corrections, releases] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(DAY_CORRECTIONS, []), readJson(DAY_RELEASES, []),
       ]);
       const segments = buildEditableSegments(events, employeeId, date, states[employeeId] || {});
       const correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date) || null;
+      const release = releases.find(row => row?.released === true && String(row.employeeId) === employeeId && String(row.date) === date) || null;
       res.json({
         ok: true,
+        released:Boolean(release),
+        releasedAt:release?.releasedAt || null,
         segments,
         originalSegments: correction?.originalSegments || segments,
         correction: correction ? {

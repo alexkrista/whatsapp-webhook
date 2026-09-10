@@ -11,8 +11,10 @@ const baustellen=fs.readFileSync(path.join(root,"public","baustellen.html"),"utf
 const leitstand=fs.readFileSync(path.join(root,"public","kristine.html"),"utf8");
 assert.match(topbar,/baustellen-live-hours\.js\?v=20260910-project-archive-repair-4/);
 assert.match(baustellen,/topbar\.js\?v=20260910-project-archive-repair-4/);
-assert.match(leitstand,/function leitstandProjectSegments/);
-assert.match(leitstand,/timeEditorSegments=leitstandProjectSegments\(employeeId,date,result\.segments\|\|\[\]\)/);
+assert.match(leitstand,/timeEditorReleased=Boolean\(result\.released\)/);
+assert.match(leitstand,/Produktiv · ohne Baustellenbezug/);
+assert.match(leitstand,/Änderungen wirken nur auf die Mitarbeiterzeit/);
+assert.match(leitstand,/\['Krank','Arzt','Urlaub','Sonderurlaub'\]/);
 assert.doesNotMatch(ui,/if\(!token\)return null/);
 assert.match(ui,/if\(token\)headers\["X-Krista-Token"\]=token/);
 const server=fs.readFileSync(path.join(root,"server.js"),"utf8");
