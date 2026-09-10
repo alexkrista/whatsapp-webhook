@@ -34,15 +34,22 @@
   }
 
   function installCard() {
-    const tab = document.getElementById("tab-scan");
+    let tab = document.getElementById("tab-mixes");
+    if (!tab && document.querySelector(".tabs") && document.querySelector(".wrap")) {
+      tab = document.createElement("section"); tab.id = "tab-mixes"; tab.className = "hidden"; document.querySelector(".wrap").appendChild(tab);
+      const button = document.createElement("button"); button.className = "btn"; button.dataset.tab = "mixes"; button.textContent = "Mischungen";
+      button.onclick = () => { if (typeof showTab === "function") showTab("mixes"); loadAll(); }; document.querySelector(".tabs").appendChild(button);
+      const notice = document.createElement("button"); notice.id = "mixHistoryNotice"; notice.className = "btn primary"; notice.hidden = true; notice.style.margin = "12px 0";
+      notice.onclick = button.onclick; document.querySelector(".wrap").prepend(notice);
+    }
     if (!tab || document.getElementById("mixHistoryCard")) return false;
     const card = document.createElement("div");
     card.id = "mixHistoryCard";
     card.className = "card mixhist-card";
     card.innerHTML = `
       <div class="mixhist-head">
-        <div><h2>Mischmaschinen-History</h2><div id="mixHistoryStatus" class="mixhist-status">Wird geladen …</div></div>
-        <button id="mixHistoryReload" class="btn" type="button">Neu laden</button>
+        <div><h2>Mischungen · Verkauf oder Baustelle?</h2><div id="mixHistoryStatus" class="mixhist-status">Wird geladen …</div></div>
+        <select id="mixHistoryView" class="field" aria-label="Mischungen anzeigen"><option value="open">Offen</option><option value="resolved">Zugeordnet</option><option value="all">Alle</option></select><button id="mixHistoryReload" class="btn" type="button">Neu laden</button>
       </div>
       <div id="mixHistoryStats" class="mixhist-stats"></div>
       <div id="mixHistoryList" class="mixhist-list"></div>
@@ -50,6 +57,7 @@
     const grid = tab.querySelector(".grid2");
     if (grid) grid.insertAdjacentElement("afterend", card); else tab.prepend(card);
     document.getElementById("mixHistoryReload")?.addEventListener("click", loadAll);
+    document.getElementById("mixHistoryView").onchange = loadAll;
     return true;
   }
 
@@ -105,6 +113,10 @@
           <button class="btn" data-resolution="stock" type="button">Lager</button>
           <button class="btn" data-resolution="waste" type="button">Fehlmischung</button>
         </div>`;
+      if (item.status !== "open") {
+        row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
+        list.appendChild(row); continue;
+      }
       const picker = projectPicker(row);
       row.querySelector('[data-resolution="sale"]')?.addEventListener("click", event => resolve(item.id, "sale", {}, event.currentTarget));
       row.querySelector('[data-resolution="stock"]')?.addEventListener("click", event => resolve(item.id, "stock", {}, event.currentTarget));
@@ -140,14 +152,16 @@
     try {
       if (status) status.textContent = "Misch-History wird geladen …";
       const [history, sync, stats] = await Promise.all([
-        api("/admin/api/paint/mix-history?status=open"), api("/admin/api/paint/mix-history/status"), api("/admin/api/paint/sales-stats"),
+        api("/admin/api/paint/mix-history?status=" + (document.getElementById("mixHistoryView")?.value || "open")), api("/admin/api/paint/mix-history/status"), api("/admin/api/paint/sales-stats"),
       ]);
       renderRows(history.items || []); renderStats(stats);
-      const last = sync.state?.lastSyncAt ? fmtDate(sync.state.lastSyncAt) : "noch kein Sync";
+      const notice = document.getElementById("mixHistoryNotice"); if (notice) { notice.hidden = !sync.open; notice.textContent = sync.open + " neue/offene Mischung(en): Verkauf oder Baustelle?"; }
+      const last = sync.state?.lastSyncAt ? fmtDate(sync.state.lastSyncAt) : "Noch keine Verbindung zur Mischmaschine";
       if (status) status.textContent = `${history.count || 0} offen · letzte History-Prüfung ${last} · ${sync.schedule || ""}`;
     } catch (error) { if (status) status.textContent = String(error?.message || error); }
   }
 
+  setInterval(() => { if (!document.hidden && !document.querySelector(".mixhist-project:not([hidden])")) loadAll(); }, 60000);
   installStyle();
   if (!installCard()) {
     const observer = new MutationObserver(() => { if (installCard()) { observer.disconnect(); loadAll(); } });

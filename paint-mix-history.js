@@ -18,6 +18,9 @@ function registerPaintMixHistory(app, options = {}) {
   const tasksFile = path.join(kristineRoot, "tasks.json");
   const jobMaterialsFile = path.join(root, "job-materials.jsonl");
 
+  let writeChain = Promise.resolve();
+  function serial(fn) { const result = writeChain.then(fn); writeChain = result.catch(() => {}); return result; }
+
   function requireAdmin(req, res) {
     if (!adminToken) return true;
     const token = req.headers["x-admin-token"] || req.query.token || "";
@@ -218,7 +221,7 @@ function registerPaintMixHistory(app, options = {}) {
       list.push(normalized); additions.push(normalized); known.add(normalized.id);
     }
     const tasksCreated = options.baseline || options.createTasks === false ? 0 : await createTasksForNewRows(additions);
-    if (additions.length) await writeJson(historyFile, list.slice(-20000));
+    if (additions.length) await writeJson(historyFile, list);
     const now = new Date().toISOString();
     const state = await readJson(syncStateFile, {});
     const newest = additions.map(row => row.mixedAt).filter(Boolean).sort().at(-1) || state.lastHistoryAt || null;
@@ -245,12 +248,6 @@ function registerPaintMixHistory(app, options = {}) {
     const wanted = identityKey({ product: row.productName, baseCode: row.baseCode || row.baseName, baseName: row.baseName, size: row.size });
     let candidates = (Array.isArray(articles) ? articles : []).filter(article => article && article.active !== false && identityKey(article) === wanted);
     if (candidates.length === 1) return { article: candidates[0], candidates };
-    const wantedProduct = norm(row.productName), wantedBase = norm(row.baseCode || row.baseName);
-    candidates = (Array.isArray(articles) ? articles : []).filter(article => {
-      if (!article || article.active === false || norm(article.product) !== wantedProduct) return false;
-      return norm(article.baseCode || article.baseName) === wantedBase;
-    });
-    if (candidates.length === 1) return { article: candidates[0], candidates };
     return { article: null, candidates };
   }
 
@@ -265,11 +262,12 @@ function registerPaintMixHistory(app, options = {}) {
       quantity: movement.quantity, liters: Number((sizeLiters(article.size || row.size) * movement.quantity).toFixed(3)),
       purchasePrice: Number(article.purchasePrice || 0), salePrice: Number(article.salePrice || 0), source: "innovatint-history",
     };
-    await appendJsonl(jobMaterialsFile, booking);
+    const existingBookings = await readJsonl(jobMaterialsFile);
+    if (!existingBookings.some(x => x.id === booking.id)) await appendJsonl(jobMaterialsFile, booking);
     const jobDir = path.join(dataDir, String(jobId));
     try {
       const stat = await fsp.stat(jobDir);
-      if (stat.isDirectory()) await appendJsonl(path.join(jobDir, "_chronik", "material-bookings.jsonl"), booking);
+      if (stat.isDirectory()) { const file = path.join(jobDir, "_chronik", "material-bookings.jsonl"); if (!(await readJsonl(file)).some(x => x.id === booking.id)) await appendJsonl(file, booking); }
     } catch {}
   }
 
@@ -281,12 +279,22 @@ function registerPaintMixHistory(app, options = {}) {
     if (row.status === "resolved") return { statusCode: 200, row, alreadyResolved: true };
     if (row.status === "baseline") return { statusCode: 409, error: "Historischer Baseline-Eintrag wird nicht gebucht" };
 
+    const recorded = (await readJsonl(movementsFile)).find(x => x.historyId === row.id && x.source === "innovatint-history");
+    if (recorded) {
+      const articles = await readJson(articlesFile, []);
+      const article = articles.find(x => x.id === recorded.articleId) || {};
+      const resolution = recorded.reason === "mixed_stock" ? "stock" : recorded.reason;
+      await appendProjectMaterial(row, article, resolution, recorded.jobId, recorded.jobName, recorded);
+      Object.assign(row, {status:"resolved",resolution,jobId:recorded.jobId,jobName:recorded.jobName,resolvedAt:recorded.at,articleId:recorded.articleId,stockBefore:recorded.before,stockAfter:recorded.after});
+      await writeJson(historyFile,history); await markTaskDone(row.taskId);
+      return {statusCode:200,row,alreadyResolved:true};
+    }
     const aliases = { verkauf: "sale", baustelle: "project", lager: "stock", fehlmischung: "waste", waste: "waste", stock: "stock", sale: "sale", project: "project" };
     const resolution = aliases[norm(body?.resolution)] || "";
     if (!resolution) return { statusCode: 400, error: "Verkauf, Baustelle, Lager oder Fehlmischung wählen" };
     const jobId = resolution === "project" ? clean(body?.jobId, 80) : "";
     const jobName = resolution === "project" ? clean(body?.jobName, 180) : "";
-    if (resolution === "project" && !jobId) return { statusCode: 400, error: "Baustelle fehlt" };
+    if (resolution === "project" && (!jobId || !/^[A-Za-z0-9_-]+$/.test(jobId))) return { statusCode: 400, error: "Baustelle fehlt" };
 
     const articles = await readJson(articlesFile, []);
     const match = await findArticleForMix(row, articles);
@@ -305,7 +313,6 @@ function registerPaintMixHistory(app, options = {}) {
 
     const at = new Date().toISOString();
     article.stock = after; article.updatedAt = at;
-    await writeJson(articlesFile, articles);
     const reason = resolution === "project" ? "project" : resolution === "sale" ? "sale" : resolution === "stock" ? "mixed_stock" : "waste";
     const movement = {
       at, articleId: article.id || "", ean: article.ean || "", stockCode: article.stockCode || "",
@@ -317,6 +324,7 @@ function registerPaintMixHistory(app, options = {}) {
       purchasePrice: Number(article.purchasePrice || 0), salePrice: Number(article.salePrice || 0),
     };
     await appendJsonl(movementsFile, movement);
+    await writeJson(articlesFile, articles);
     await appendProjectMaterial(row, article, resolution, jobId, jobName, movement);
 
     row.status = "resolved"; row.resolution = resolution; row.jobId = jobId; row.jobName = jobName;
@@ -361,7 +369,7 @@ function registerPaintMixHistory(app, options = {}) {
     if (!requireBridge(req, res)) return;
     try {
       const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 5000) : [];
-      const result = await ingest(rows, req.body?.machine || "", { baseline: req.body?.baseline === true, createTasks: req.body?.createTasks !== false });
+      const result = await serial(() => ingest(rows, req.body?.machine || "", { baseline: req.body?.baseline === true, createTasks: req.body?.createTasks !== false }));
       res.json({ ok: true, ...result });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
@@ -389,7 +397,7 @@ function registerPaintMixHistory(app, options = {}) {
   app.post("/admin/api/paint/mix-history/:id/resolve", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const result = await resolveMix(req.params.id, req.body || {});
+      const result = await serial(() => resolveMix(req.params.id, req.body || {}));
       if (result.error) return res.status(result.statusCode || 400).json({ ok: false, ...result });
       res.status(result.statusCode || 200).json({ ok: true, ...result });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }

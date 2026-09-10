@@ -117,7 +117,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-unmixed-scan-fix.js?v=20260825-1135"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-mix-history-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-mix-history-ui.js?v=20260825-1135"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-mix-history-ui.js?v=20260910-assignment"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-catalog-sync-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-catalog-sync-ui.js?v=20260825-1202"></script>\n</body>');
