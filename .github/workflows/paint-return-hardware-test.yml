@@ -1,0 +1,58 @@
+name: Restfarben hardware integration
+
+on:
+  push:
+    paths:
+      - 'paint-lab-preload.js'
+      - 'paint-return-stock.js'
+      - 'public/paint-return-local-hardware-ui.js'
+      - 'tools/kristine-paint-local-bridge.ps1'
+      - 'tools/install-kristine-paint-local-bridge.ps1'
+      - 'TEST/paint-return-stock.test.js'
+      - '.github/workflows/paint-return-hardware-test.yml'
+  pull_request:
+    paths:
+      - 'paint-lab-preload.js'
+      - 'paint-return-stock.js'
+      - 'public/paint-return-local-hardware-ui.js'
+      - 'tools/kristine-paint-local-bridge.ps1'
+      - 'tools/install-kristine-paint-local-bridge.ps1'
+      - 'TEST/paint-return-stock.test.js'
+      - '.github/workflows/paint-return-hardware-test.yml'
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: |
+          node --check paint-lab-preload.js
+          node --check paint-return-stock.js
+          node --check public/paint-return-local-hardware-ui.js
+      - name: Return stock backend test
+        run: node TEST/paint-return-stock.test.js
+
+  powershell51:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $files = @(
+            'tools/kristine-paint-local-bridge.ps1',
+            'tools/install-kristine-paint-local-bridge.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | Format-List
+              exit 1
+            }
+          }
