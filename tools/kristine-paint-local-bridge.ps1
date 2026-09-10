@@ -123,7 +123,7 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
   # Gesamt 58 mm, links 16 x 40 mm, rechts 42 x 44 mm, UNTEN buendig, ^LT40.
   # Links beginnt deshalb 4 mm (=32 dots) tiefer.
   # Grosses Etikett: Datum klein oben, Archivnummer maximal gross + doppelt gedruckt (=fetter), Baustelle klein unten.
-  # Kleines Etikett: Archivnummer zuerst und Datum DIREKT DANACH in derselben gedrehten Zeile.
+  # Kleines Etikett: Archivnummer und Datum in getrennten gedrehten Zeilen mit Abstand.
   # Beide Texte bleiben vollstaendig im 16-mm-Bereich; dadurch laeuft LG 1 nicht mehr ins grosse Etikett.
   # ^PQ1 erzwingt genau einen Etiketten-Satz pro Druckauftrag.
   $jobLine = ""
@@ -141,8 +141,8 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
 ^FO128,92^FB336,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
 ^FO129,93^FB334,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
 $jobLine
-^FO68,58^A0R,50,50^FD$bigText^FS
-^FO82,168^A0R,22,22^FD$smallText^FS
+^FO68,58^A0R,36,28^FD$bigText^FS
+^FO30,58^A0R,22,22^FD$smallText^FS
 ^PQ1,0,0,N
 ^XZ
 "@
@@ -265,7 +265,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.2.0'
+            version = '1.3.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })

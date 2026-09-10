@@ -162,8 +162,8 @@
       if (!no || !side) return;
 
       const sub = String(row.querySelector(".return-sub")?.textContent || "");
-      if (/little\s*greene/i.test(sub) && noNode && !/^LG\s/i.test(noNode.textContent)) {
-        noNode.textContent = `LG ${no}`;
+      if (/little\s*greene/i.test(sub) && noNode && !/^LG[-\s]/i.test(noNode.textContent)) {
+        noNode.textContent = `LG-${no}`;
       }
 
       const button = document.createElement("button");

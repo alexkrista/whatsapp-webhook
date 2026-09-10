@@ -42,8 +42,8 @@
     .return-status{margin-top:10px;font-weight:750;min-height:20px}.return-status.ok{color:#23673e}.return-status.err{color:#a7322d}
     .return-search-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.return-search-head h2{margin:0}
     .return-search{margin-top:10px}.return-results{margin-top:10px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:white}
-    .return-row{display:grid;grid-template-columns:72px 1fr auto;gap:11px;align-items:center;padding:11px 12px;border-top:1px solid var(--line)}.return-row:first-child{border-top:0}
-    .return-no{font-size:27px;font-weight:950;line-height:1}.return-main{min-width:0}.return-main b{font-size:15px}.return-sub{font-size:12px;color:var(--muted);margin-top:3px;white-space:normal}.return-side{text-align:right;font-weight:850}.return-age{font-size:11px;color:var(--muted);font-weight:650;margin-top:3px}
+    .return-row{display:grid;grid-template-columns:110px 1fr auto;gap:11px;align-items:center;padding:11px 12px;border-top:1px solid var(--line)}.return-row:first-child{border-top:0}
+    .return-no{overflow-wrap:anywhere;font-size:23px;font-weight:950;line-height:1}.return-main{min-width:0}.return-main b{font-size:15px}.return-sub{font-size:12px;color:var(--muted);margin-top:3px;white-space:normal}.return-side{text-align:right;font-weight:850}.return-age{font-size:11px;color:var(--muted);font-weight:650;margin-top:3px}
     .return-empty{padding:16px;color:var(--muted);text-align:center}
     .return-modal{position:fixed;inset:0;z-index:1300;background:#0009;display:flex;align-items:center;justify-content:center;padding:14px}.return-modal[hidden]{display:none!important}
     .return-modal-card{background:#fff;border-radius:17px;width:min(720px,100%);max-height:88vh;overflow:auto;padding:16px;box-shadow:0 20px 70px #0005}
@@ -51,7 +51,7 @@
     .return-job-row{padding:11px;border-top:1px solid var(--line);cursor:pointer}.return-job-row:first-child{border-top:0}.return-job-row:hover{background:#f4f7f4}.return-job-id{font-weight:900}.return-job-name{font-size:13px;color:var(--muted);margin-top:2px}
     #returnCameraReader{width:100%;min-height:270px;background:#111;border-radius:13px;overflow:hidden}#returnCameraReader video{width:100%!important;height:auto!important}
     .return-camera-hint{font-size:12px;color:var(--muted);margin-top:8px}
-    @media(max-width:760px){.return-layout{grid-template-columns:1fr}.return-project{align-items:flex-start}.return-project-value{font-size:16px}.return-scan-actions{display:grid;grid-template-columns:1fr}.return-scan-actions .btn,.return-ean{width:100%;max-width:none}.return-fields,.return-learn-grid{grid-template-columns:1fr}.return-row{grid-template-columns:60px 1fr}.return-side{grid-column:2;text-align:left;display:flex;gap:9px;align-items:baseline}.return-no{font-size:31px}}
+    @media(max-width:760px){.return-layout{grid-template-columns:1fr}.return-project{align-items:flex-start}.return-project-value{font-size:16px}.return-scan-actions{display:grid;grid-template-columns:1fr}.return-scan-actions .btn,.return-ean{width:100%;max-width:none}.return-fields,.return-learn-grid{grid-template-columns:1fr}.return-row{grid-template-columns:90px 1fr}.return-side{grid-column:2;text-align:left;display:flex;gap:9px;align-items:baseline}.return-no{font-size:23px}}
   `;
   document.head.appendChild(style);
 
@@ -73,8 +73,9 @@
   section.innerHTML = `
     <div class="return-project">
       <div><div class="return-project-label">Baustelle für diese Rückware</div><div id="returnProjectValue" class="return-project-value">Lager / keine Baustelle</div></div>
-      <button id="returnProjectBtn" class="btn" type="button">Wechseln</button>
+      <div><label><input id="returnKeepProject" type="checkbox"> Baustelle behalten</label> <button id="returnProjectBtn" class="btn" type="button">Wechseln</button></div>
     </div>
+    <div class="return-project"><div class="return-field" style="flex:1"><label for="returnSupplier">Hersteller / Lieferant</label><select id="returnSupplier" class="field"><option value="">Bitte auswählen …</option><option value="Little Greene">LG · Little Greene</option><option value="Sto">ST · Sto</option><option value="Synthesa">SY · Synthesa</option><option value="KABE Farben">KB · KABE Farben</option><option value="FarbenCenter">FC · FarbenCenter</option><option value="Brillux">BX · Brillux</option><option value="Farben Morscher">FM · Farben Morscher</option></select></div><label><input id="returnKeepSupplier" type="checkbox"> Behalten</label></div>
     <div class="return-layout">
       <div class="card">
         <h2 style="margin-top:0">Rückware erfassen</h2>
@@ -106,6 +107,8 @@
       <div class="card">
         <div class="return-search-head"><h2>Rückware finden</h2><span id="returnCount" class="chip">0</span></div>
         <input id="returnSearch" class="field return-search" autocomplete="off" placeholder="Farbe, Material, Nr. oder Baustelle …">
+        <label for="returnManufacturerFilter">Hersteller</label><select id="returnManufacturerFilter" class="field"><option value="">Alle Hersteller</option></select>
+        <label><input id="returnIncludeRemoved" type="checkbox"> Auch entfernte Dosen anzeigen</label>
         <div id="returnResults" class="return-results"><div class="return-empty">Noch keine Rückware geladen.</div></div>
       </div>
     </div>
@@ -254,6 +257,7 @@
     el("returnMaterialNameView").textContent = [material.manufacturer, material.material].filter(Boolean).join(" · ");
     el("returnMaterialMeta").textContent = [material.size, material.base, material.stockCode ? `SKU ${material.stockCode}` : "", currentEan ? `EAN ${currentEan}` : ""].filter(Boolean).join(" · ");
     setStatus("Material erkannt ✓", "ok");
+    if (!el("returnKeepSupplier").checked) el("returnSupplier").value = material.manufacturer;
     setTimeout(() => el("returnColour").focus(), 60);
   }
 
@@ -269,7 +273,7 @@
       currentMaterial = null;
       el("returnMaterialCard").hidden = true;
       el("returnLearn").hidden = false;
-      el("returnManufacturer").value = "";
+      el("returnManufacturer").value = el("returnSupplier").value;
       el("returnMaterialName").value = "";
       el("returnSize").value = "";
       setStatus("Neuer Barcode – einmal Hersteller und Material zuordnen.");
@@ -277,6 +281,7 @@
     } catch (error) { setStatus(error.message, "err"); }
   }
 
+  el("returnSupplier").onchange = () => { if (!el("returnLearn").hidden) el("returnManufacturer").value = el("returnSupplier").value; };
   el("returnLookupBtn").onclick = () => lookupEan(el("returnEan").value);
   el("returnEan").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); lookupEan(event.currentTarget.value); } });
 
@@ -322,13 +327,15 @@
   document.body.insertBefore(editModal, modal);
   el("returnEditProjectBtn").onclick = () => openProject("edit");
   el("returnEditClose").onclick = () => { editModal.hidden = true; editing = null; };
-  const historyValues = (value) => `${formatWeight(value?.weightKg)} · ${[value?.jobId, value?.jobName].filter(Boolean).join(" · ") || "Keine Baustelle"}`;
+  const statusLabel = value => ({used:"Aufgebraucht",dried:"Eingetrocknet",available:"Verfügbar"}[value] || value);
+  const historyValues = (value) => value?.status ? statusLabel(value.status) : `${formatWeight(value?.weightKg)} · ${[value?.jobId, value?.jobName].filter(Boolean).join(" · ") || "Keine Baustelle"}`;
   function openEdit(row) {
     editing = row;
     editProject = row.jobId ? { id: row.jobId, name: row.jobName || row.jobId } : null;
-    el("returnEditTitle").textContent = `Rückware ${row.returnNo} ändern`;
+    el("returnEditTitle").textContent = `Rückware ${row.returnLabel || row.returnNo} ändern`;
     el("returnEditProjectValue").textContent = editProject ? `${editProject.id} · ${editProject.name}` : "Baustelle wählen …";
     el("returnEditWeight").value = row.weightKg;
+    el("returnEditSave").hidden = row.status !== "available";
     el("returnEditStatus").textContent = "";
     el("returnEditHistory").innerHTML = (row.history || []).slice().reverse().map((entry) =>
       `<div class="return-job-row"><b>${esc(new Date(entry.changedAt).toLocaleString("de-AT"))}</b><div>Vorher: ${esc(historyValues(entry.before))}</div><div>Danach: ${esc(historyValues(entry.after))}</div></div>`
@@ -353,7 +360,7 @@
       });
       editModal.hidden = true;
       editing = null;
-      setStatus(`Rückware ${row.returnNo} geändert ✓ · Archivnummer bleibt erhalten.`, "ok");
+      setStatus(`Rückware ${row.returnLabel || row.returnNo} geändert ✓ · Archivnummer bleibt erhalten.`, "ok");
       await loadReturns(el("returnSearch").value || "");
     } catch (error) {
       el("returnEditStatus").textContent = error.message;
@@ -362,7 +369,7 @@
   };
 
   function renderReturns(items) {
-    returns = Array.isArray(items) ? items : [];
+    returns = Array.isArray(items) ? items.map(row => ({ ...row, status: row.status || "available" })) : [];
     el("returnCount").textContent = String(returns.length);
     if (!returns.length) {
       el("returnResults").innerHTML = `<div class="return-empty">Keine passende Rückware.</div>`;
@@ -371,19 +378,58 @@
     el("returnResults").innerHTML = returns.map((row) => {
       const material = [row.manufacturer, row.material, row.size].filter(Boolean).join(" · ");
       const projectText = row.jobId === "__lager__" ? "Lager" : [row.jobId, row.jobName].filter(Boolean).join(" · ");
-      return `<div class="return-row"><div class="return-no">${esc(row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div></div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div><button class="btn" type="button" data-return-edit="${esc(row.id)}">Ändern</button></div></div>`;
+      return `<div class="return-row"><div class="return-no">${esc(row.returnLabel || row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div>${row.status !== "available" ? `<strong style="color:#a7322d">${esc(statusLabel(row.status))}</strong>` : ""}</div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div><button class="btn" type="button" data-return-edit="${esc(row.id)}">${row.status === "available" ? "Ändern" : "Verlauf"}</button>${row.status === "available" ? `<button class="btn" type="button" style="color:#a7322d" data-return-remove="${esc(row.id)}">Entfernen</button>` : ""}</div></div>`;
     }).join("");
     el("returnResults").querySelectorAll("[data-return-edit]").forEach((button) => {
       button.onclick = () => openEdit(returns.find((row) => row.id === button.dataset.returnEdit));
     });
+    el("returnResults").querySelectorAll("[data-return-remove]").forEach(button => {
+      button.onclick = () => openRemove(returns.find(row => row.id === button.dataset.returnRemove));
+    });
   }
 
-  async function loadReturns(query) {
-    try {
-      const data = await api("/admin/api/paint/returns?q=" + encodeURIComponent(query || ""));
-      renderReturns(data.items);
-    } catch (error) { el("returnResults").innerHTML = `<div class="return-empty">${esc(error.message)}</div>`; }
+  const removeModal = document.createElement("div");
+  removeModal.className = "return-modal";
+  removeModal.hidden = true;
+  removeModal.innerHTML = `<div class="return-modal-card" role="dialog" aria-modal="true" aria-labelledby="returnRemoveTitle"><h2 id="returnRemoveTitle">Dose entfernen</h2><p id="returnRemoveDescription"></p><label for="returnRemoveReason">Grund</label><select id="returnRemoveReason" class="field"><option value="used">Aufgebraucht</option><option value="dried">Eingetrocknet</option></select><p>Die Dose wird aus dem verfügbaren Lager entfernt. Nummer und Verlauf bleiben erhalten.</p><button id="returnRemoveCancel" class="btn">Abbrechen</button> <button id="returnRemoveSave" class="btn primary">Dose entfernen</button><div id="returnRemoveStatus" role="status"></div></div>`;
+  document.body.appendChild(removeModal);
+  let removing = null;
+  function openRemove(row) {
+    removing = row;
+    el("returnRemoveDescription").textContent = `Nr. ${row.returnLabel || row.returnNo} · ${row.manufacturer} · ${row.material} · ${row.colour} · ${formatWeight(row.weightKg)}`;
+    el("returnRemoveStatus").textContent = "";
+    el("returnRemoveReason").value = "used";
+    removeModal.hidden = false;
+    el("returnRemoveReason").focus();
   }
+  el("returnRemoveCancel").onclick = () => { removeModal.hidden = true; removing = null; };
+  el("returnRemoveSave").onclick = async () => {
+    if (!removing || el("returnRemoveSave").disabled) return;
+    const row = removing;
+    const controls = ["returnRemoveSave", "returnRemoveCancel", "returnRemoveReason"];
+    controls.forEach(id => el(id).disabled = true);
+    try {
+      await api(`/admin/api/paint/returns/${encodeURIComponent(row.id)}/remove`, { method: "POST", body: JSON.stringify({ reason: el("returnRemoveReason").value, revision: row.revision || 0 }) });
+      removeModal.hidden = true;
+      removing = null;
+      await loadReturns(el("returnSearch").value);
+      setStatus(`Dose ${row.returnLabel || row.returnNo} entfernt. Verlauf bleibt erhalten.`, "ok");
+    } catch (error) { el("returnRemoveStatus").textContent = error.message; }
+    finally { controls.forEach(id => el(id).disabled = false); }
+  };
+  let returnLoadRevision = 0;
+  async function loadReturns(query) {
+    const revision = ++returnLoadRevision;
+    try {
+      const manufacturer = el("returnManufacturerFilter").value;
+      const data = await api("/admin/api/paint/returns?q=" + encodeURIComponent(query || "") + "&manufacturer=" + encodeURIComponent(manufacturer) + "&includeUsed=" + (el("returnIncludeRemoved").checked ? "1" : "0"));
+      if (revision !== returnLoadRevision) return;
+      el("returnManufacturerFilter").innerHTML = '<option value="">Alle Hersteller</option>' + (data.manufacturers || []).map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+      el("returnManufacturerFilter").value = manufacturer;
+      renderReturns(data.items);
+    } catch (error) { if (revision === returnLoadRevision) el("returnResults").innerHTML = `<div class="return-empty">${esc(error.message)}</div>`; }
+  }
+  el("returnManufacturerFilter").onchange = el("returnIncludeRemoved").onchange = () => loadReturns(el("returnSearch").value);
 
   el("returnSearch").oninput = (event) => {
     clearTimeout(searchTimer);
@@ -411,10 +457,11 @@
           jobName: bookingProject.name,
         }),
       });
-      const no = data.item?.returnNo;
+      const no = data.item?.returnLabel || data.item?.returnNo;
       setStatus(`${no} gebucht ✓ · Etikett ${no} / ${data.printJob?.small || "heute"} liegt in der Druckwarteschlange.`, "ok");
       resetMaterial();
-      project = null;
+      if (!el("returnKeepProject").checked) project = null;
+      if (!el("returnKeepSupplier").checked) el("returnSupplier").value = "";
       renderProject();
       await loadReturns(el("returnSearch").value || "");
       setTimeout(() => el("returnCameraBtn").focus(), 80);

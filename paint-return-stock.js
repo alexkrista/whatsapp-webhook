@@ -88,10 +88,16 @@ function registerPaintReturnStock(app, options = {}) {
     return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
   }
 
+  function returnLabel(row) {
+    const maker = String(row.manufacturer || "").trim().toLowerCase();
+    const prefix = ({ "little greene": "LG", "lg": "LG", "sto": "ST", "synthesa": "SY", "kabe farben": "KB", "kabe": "KB", "farbencenter": "FC", "brillux": "BX", "farben morscher": "FM" })[maker];
+    return prefix ? `${prefix}-${row.returnNo}` : String(row.returnNo);
+  }
   function publicReturn(row) {
     return {
       id: clean(row?.id, 80),
       returnNo: Number(row?.returnNo || 0),
+      returnLabel: returnLabel(row),
       ean: eanNorm(row?.ean),
       manufacturer: clean(row?.manufacturer, 120),
       material: clean(row?.material, 180),
@@ -112,10 +118,11 @@ function registerPaintReturnStock(app, options = {}) {
   }
 
   function matchesReturn(row, query) {
+    if (/^(LG|ST|SY|KB|FC|BX|FM)-\d+$/i.test(String(query).trim())) return returnLabel(row).toLowerCase() === String(query).trim().toLowerCase();
     const q = norm(query);
     if (!q) return true;
     const hay = norm([
-      row?.returnNo, row?.ean, row?.manufacturer, row?.material, row?.size,
+      row?.returnNo, returnLabel(row), row?.ean, row?.manufacturer, row?.material, row?.size,
       row?.base, row?.stockCode, row?.colour, row?.jobId, row?.jobName,
     ].join(" "));
     return q.split(/\s+/).filter(Boolean).every((part) => hay.includes(part));
@@ -192,14 +199,40 @@ function registerPaintReturnStock(app, options = {}) {
     const q = clean(req.query.q, 200);
     const includeUsed = String(req.query.includeUsed || "") === "1";
     const rows = await readJson(returnsFile, []);
+    const manufacturer = clean(req.query.manufacturer, 120);
+    const manufacturers = [...new Set(rows.map(row => clean(row.manufacturer, 120)).filter(Boolean))].sort((a,b) => a.localeCompare(b, "de"));
     const items = (Array.isArray(rows) ? rows : [])
       .filter((row) => includeUsed || String(row?.status || "available") === "available")
       .filter((row) => matchesReturn(row, q))
+      .filter((row) => !manufacturer || clean(row.manufacturer, 120) === manufacturer)
       .sort((a, b) => Number(a.returnNo || 0) - Number(b.returnNo || 0))
       .reverse()
       .slice(0, 250)
       .map(publicReturn);
-    res.json({ ok: true, items, count: items.length });
+    res.json({ ok: true, items, count: items.length, manufacturers });
+  });
+
+  app.post("/admin/api/paint/returns/:id/remove", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const { reason, revision } = req.body || {};
+      if (!["used", "dried"].includes(reason) || !Number.isInteger(revision) || revision < 0)
+        return res.status(400).json({ ok: false, error: "Grund und gültiger Bearbeitungsstand erforderlich" });
+      const result = await serial(async () => {
+        const rows = JSON.parse(await fsp.readFile(returnsFile, "utf8"));
+        const item = rows.find(row => row.id === req.params.id);
+        if (!item) return { status: 404, error: "Rückware nicht gefunden" };
+        if (Number(item.revision || 0) !== revision || (item.status || "available") !== "available")
+          return { status: 409, error: "Rückware wurde inzwischen geändert. Bitte neu laden." };
+        const changedAt = new Date().toISOString();
+        item.history = [...(item.history || []), { changedAt, before: { status: item.status || "available" }, after: { status: reason }, reason }];
+        Object.assign(item, { status: reason, updatedAt: changedAt, revision: revision + 1 });
+        await writeJson(returnsFile, rows);
+        return { item };
+      });
+      if (result.error) return res.status(result.status).json({ ok: false, error: result.error });
+      res.json({ ok: true, item: publicReturn(result.item) });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
   app.post("/admin/api/paint/returns", async (req, res) => {
@@ -248,7 +281,7 @@ function registerPaintReturnStock(app, options = {}) {
           id: crypto.randomUUID(),
           kind: "paint-return-label",
           returnNo,
-          big: String(returnNo),
+          big: returnLabel(item),
           small: dateLabel,
           createdAt,
           status: "pending",

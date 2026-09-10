@@ -57,7 +57,7 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   assert.equal(res.body.item.returnNo, 1);
   assert.equal(res.body.item.weightKg, 3.4);
   assert.equal(res.body.item.jobId, "26083");
-  assert.equal(res.body.printJob.big, "1");
+  assert.equal(res.body.printJob.big, "ST-1");
   assert.match(res.body.printJob.small, /^\d{2}\.\d{2}\.\d{4}$/);
 
   res = await call(app, "POST", "/admin/api/paint/returns", { body: { ean: "5050173000001", colour: "Stock 37", weightKg: 1.2, jobId: "26083", jobName: "Muster Baustelle" } });
@@ -127,5 +127,29 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   res = await call(app, "GET", "/admin/api/paint/returns/print-queue", { query: {} });
   assert.equal(res.body.jobs.length, 1);
 
+  res = await call(app, "GET", "/admin/api/paint/returns", {query:{manufacturer:"Little Greene"}});
+  assert.deepEqual(res.body.items.map(x => x.returnLabel), ["LG-2"]);
+  assert.deepEqual(res.body.manufacturers, ["Little Greene", "Sto"]);
+  res = await call(app, "GET", "/admin/api/paint/returns", {query:{q:"ST-1"}});
+  assert.equal(res.body.items.length, 1);
+  const remove = body => call(app, "POST", "/admin/api/paint/returns/:id/remove", {params:{id:"R-2"},body});
+  assert.equal((await remove({reason:"invalid",revision:0})).statusCode,400);
+  assert.equal((await remove({reason:"dried",revision:9})).statusCode,409);
+  res = await remove({reason:"dried",revision:0});
+  assert.equal(res.body.item.status,"dried");
+  assert.equal(res.body.item.weightKg,1.2);
+  assert.equal(res.body.item.history[0].reason,"dried");
+  assert.equal((await remove({reason:"used",revision:0})).statusCode,409);
+  res = await call(app,"GET","/admin/api/paint/returns",{query:{manufacturer:"Little Greene"}});
+  assert.equal(res.body.items.length,0);
+  res = await call(app,"GET","/admin/api/paint/returns",{query:{manufacturer:"Little Greene",includeUsed:"1"}});
+  assert.equal(res.body.items[0].returnLabel,"LG-2");
+  assert.equal((await call(securedApp,"POST","/admin/api/paint/returns/:id/remove",{params:{id:"R-1"},body:{reason:"used",revision:2}})).statusCode,403);
+  for (const [maker,prefix] of [["Synthesa","SY"],["KABE Farben","KB"],["FarbenCenter","FC"],["Brillux","BX"],["Farben Morscher","FM"]]) {
+    await call(app,"POST","/admin/api/paint/returns/material",{body:{ean:"9001234567890",manufacturer:maker,material:"Test",size:"1 L"}});
+    res = await call(app,"POST","/admin/api/paint/returns",{body:{ean:"9001234567890",colour:"Test",weightKg:1}});
+    assert.equal(res.body.item.returnLabel,`${prefix}-${res.body.item.returnNo}`);
+    assert.equal(res.body.printJob.big,res.body.item.returnLabel);
+  }
   console.log("paint-return-stock test ok");
 })().catch((error) => { console.error(error); process.exit(1); });

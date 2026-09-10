@@ -50,9 +50,11 @@
   }
 
   function archiveLabel(item, fallback) {
+    if (item?.returnLabel) return item.returnLabel;
     const no = Number(item?.returnNo || fallback || 0);
     if (!no) return String(fallback || "");
-    return isLittleGreene(item) ? `LG ${no}` : String(no);
+    const prefix = ({"little greene":"LG",lg:"LG",sto:"ST",synthesa:"SY","kabe farben":"KB",kabe:"KB",farbencenter:"FC",brillux:"BX","farben morscher":"FM"})[String(item?.manufacturer || "").trim().toLowerCase()];
+    return prefix ? `${prefix}-${no}` : String(no);
   }
 
   function dateLabel(value) {
