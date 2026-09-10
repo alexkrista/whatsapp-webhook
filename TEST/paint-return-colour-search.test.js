@@ -58,6 +58,14 @@ const { registerPaintLab } = require("../paint-lab");
     return response({ items: [] });
   };
   const wait = (ms = 190) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function waitFor(predicate) {
+    const deadline = Date.now() + 5000;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, "Timed out waiting for browser state");
+      await wait(10);
+    }
+  }
+  const waitForResults = () => waitFor(() => !el("returnColourResults").hidden);
   const type = (value) => {
     el("returnColour").value = value;
     el("returnColour").dispatchEvent(new w.Event("input", { bubbles: true }));
@@ -82,7 +90,7 @@ const { registerPaintLab } = require("../paint-lab");
       ["0500 n", "NCS S 0500-N"], ["neutral white", "NCS S 0500-N"],
     ]) {
       type(query);
-      await wait();
+      await waitForResults();
       const hit = options().find((node) => node.querySelector("b").textContent === expected);
       assert.ok(hit, `search ${query} finds ${expected} even for non-LG material`);
       hit.click();
@@ -93,7 +101,7 @@ const { registerPaintLab } = require("../paint-lab");
 
     let weighEnter = 0;
     el("returnColour").addEventListener("keydown", (event) => { if (event.key === "Enter") weighEnter++; });
-    type("rolling"); await wait();
+    type("rolling"); await waitForResults();
     key("ArrowUp");
     const selected = options().find((node) => node.getAttribute("aria-selected") === "true");
     assert.ok(selected);
@@ -104,22 +112,22 @@ const { registerPaintLab } = require("../paint-lab");
     key("Enter");
     assert.equal(weighEnter, 1, "Enter after selection still reaches the scale");
 
-    type("158"); await wait(); key("Escape");
+    type("158"); await waitForResults(); key("Escape");
     assert.equal(el("returnColourResults").hidden, true);
     assert.equal(el("returnColour").getAttribute("aria-expanded"), "false");
-    type("missing colour"); await wait();
+    type("missing colour"); await waitForResults();
     assert.equal(options().length, 0);
     assert.match(el("returnColourResults").textContent, /Keine passende Farbe/);
     assert.equal(el("returnColour").value, "missing colour");
 
     heldQuery = "rolling";
-    type("rolling"); await wait();
+    type("rolling"); await waitFor(() => held);
     assert.ok(held);
     type("158");
     held(); heldQuery = "";
     await wait(25);
     assert.equal(el("returnColourResults").hidden, true, "old response cannot reopen during debounce");
-    await wait();
+    await waitForResults();
     assert.equal(options().length, 1);
     assert.match(options()[0].textContent, /Pale 158/);
 
@@ -131,7 +139,7 @@ const { registerPaintLab } = require("../paint-lab");
       el("returnMaterialCard").hidden = false;
       el("returnColour").focus(); await wait(5);
       held = null; heldQuery = "rolling";
-      type("rolling"); await wait(); assert.ok(held);
+      type("rolling"); await waitFor(() => held); assert.ok(held);
       dismiss(); await wait(5); held(); heldQuery = ""; await wait(25);
       assert.equal(el("returnColourResults").hidden, true, "dismissal invalidates pending requests");
     }
@@ -139,22 +147,24 @@ const { registerPaintLab } = require("../paint-lab");
     el("returnMaterialCard").hidden = false;
     await wait(5);
     failSystems = ["RAL"];
-    type("158"); await wait();
+    type("158"); await waitForResults();
     assert.equal(options().length, 1, "partial API failure preserves other results");
     assert.match(el("returnColourResults").textContent, /RAL nicht verfügbar/);
     failSystems = ["LG", "RAL", "NCS"];
-    type("158"); await wait();
+    type("158"); await waitForResults();
     assert.equal(options().length, 0);
     assert.match(el("returnColourResults").textContent, /nicht verfügbar/);
     failSystems = [];
     customRows = [{ code: "Canonical 7", name: '<img src=x onerror="alert(1)">', altCode: "old7" }];
-    type("old7"); await wait();
+    type("old7"); await waitForResults();
     assert.equal(el("returnColourResults").querySelector("img"), null, "API strings are rendered as text");
     options()[0].click();
     assert.equal(el("returnColour").value, "Canonical 7");
     assert.equal(requests.some((u) => u.pathname.endsWith("/print")), false);
     console.log("OK: Return colour search, real LG/RAL/NCS API matching, canonical selection, keyboard/scale interaction, races, dismissal, errors and safe rendering.");
   } finally {
+    if (el("returnColour")) key("Escape");
+    if (held) held();
     observers.forEach((observer) => observer.disconnect());
     w.close();
     await fs.rm(dataDir, { recursive: true, force: true });
