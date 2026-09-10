@@ -35,6 +35,32 @@
     return data;
   }
 
+  function isLittleGreene(item) {
+    return /little\s*greene/i.test(String(item?.manufacturer || ""));
+  }
+
+  function archiveLabel(item, fallback) {
+    const no = Number(item?.returnNo || fallback || 0);
+    if (!no) return String(fallback || "");
+    return isLittleGreene(item) ? `LG ${no}` : String(no);
+  }
+
+  function dateLabel(value) {
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("de-AT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "Europe/Vienna",
+    }).format(date);
+  }
+
+  function projectLabel(item) {
+    if (!item || item.jobId === "__lager__") return "";
+    return [item.jobId, item.jobName].filter(Boolean).join(" · ");
+  }
+
   function setHardwareState(text, ok) {
     const node = el("returnHardwareState");
     if (!node) return;
@@ -84,18 +110,24 @@
     const id = String(job?.id || "");
     if (!id || printedJobs.has(id)) return;
     printedJobs.add(id);
+    const item = job?.item || null;
+    const big = archiveLabel(item, job.big || job.returnNo || "");
+    const small = String(job.small || dateLabel(item?.createdAt) || "");
+    const project = String(job.job || projectLabel(item) || "");
     try {
       await localApi("/print", {
         method: "POST",
-        body: JSON.stringify({ big: String(job.big || job.returnNo || ""), small: String(job.small || "") }),
+        body: JSON.stringify({ big, small, job: project }),
       });
-      await serverApi(`/admin/api/paint/returns/print-queue/${encodeURIComponent(id)}/ack`, {
-        method: "POST",
-        body: JSON.stringify({ success: true }),
-      });
+      if (!job.skipAck) {
+        await serverApi(`/admin/api/paint/returns/print-queue/${encodeURIComponent(id)}/ack`, {
+          method: "POST",
+          body: JSON.stringify({ success: true }),
+        });
+      }
       const status = el("returnStatus");
       if (status) {
-        status.textContent = `${job.big || job.returnNo} archiviert ✓ · Etikett gedruckt ✓`;
+        status.textContent = job.skipAck ? `${big} · Etikett nochmal gedruckt ✓` : `${big} archiviert ✓ · Etikett gedruckt ✓`;
         status.classList.add("ok");
         status.classList.remove("err");
       }
@@ -105,13 +137,27 @@
       printedJobs.delete(id);
       const status = el("returnStatus");
       if (status) {
-        status.textContent = `${job.big || job.returnNo} ist archiviert. Etikett noch nicht gedruckt: ${error.message}`;
+        status.textContent = job.skipAck ? `${big} konnte nicht nochmals gedruckt werden: ${error.message}` : `${big} ist archiviert. Etikett noch nicht gedruckt: ${error.message}`;
         status.classList.remove("ok");
         status.classList.add("err");
       }
       setHardwareState("● Zebra/Dienst prüfen", false);
+      throw error;
     }
   }
+
+  window.kristinePrintReturnLabel = async function kristinePrintReturnLabel(item) {
+    if (!item?.returnNo) throw new Error("Archivnummer fehlt");
+    return printJob({
+      id: `reprint-${item.id || item.returnNo}-${Date.now()}`,
+      returnNo: item.returnNo,
+      big: archiveLabel(item, item.returnNo),
+      small: dateLabel(item.createdAt),
+      job: projectLabel(item),
+      item,
+      skipAck: true,
+    });
+  };
 
   // Nur NEU erzeugte Druckauftraege dieser Browser-Sitzung automatisch lokal drucken.
   // Alte pending Jobs werden absichtlich nicht automatisch abgearbeitet.
@@ -123,7 +169,9 @@
       const pathname = new URL(url, location.href).pathname;
       if (method === "POST" && pathname === "/admin/api/paint/returns" && response.ok) {
         const data = await response.clone().json();
-        if (data?.ok !== false && data?.printJob?.id) setTimeout(() => printJob(data.printJob), 0);
+        if (data?.ok !== false && data?.printJob?.id) {
+          setTimeout(() => printJob({ ...data.printJob, item: data.item || null }), 0);
+        }
       }
     } catch {}
     return response;
