@@ -265,7 +265,7 @@ function registerPaintMixHistory(app, options = {}) {
       baseCode: article.baseCode || row.baseCode || "", baseName: article.baseName || row.baseName || "",
       size: article.size || row.size || "", colourTone: row.colourCode || row.colourName || "",
       quantity: movement.quantity, liters: Number((sizeLiters(article.size || row.size) * movement.quantity).toFixed(3)),
-      purchasePrice: Number(article.purchasePrice || 0), salePrice: Number(article.salePrice || 0), source: "innovatint-history",
+      purchasePrice: Number(article.purchasePrice || 0), salePrice: Number(article.salePrice || 0), source: "innovatint-history", knowledgeOnly: movement.knowledgeOnly === true,
     };
     const existingBookings = await readJsonl(jobMaterialsFile);
     if (!existingBookings.some(x => x.id === booking.id)) await appendJsonl(jobMaterialsFile, booking);
@@ -282,7 +282,19 @@ function registerPaintMixHistory(app, options = {}) {
     const row = history.find(item => String(item?.id || "") === String(id));
     if (!row) return { statusCode: 404, error: "Mischung nicht gefunden" };
     if (row.status === "resolved") return { statusCode: 200, row, alreadyResolved: true };
-    if (row.status === "baseline") return { statusCode: 409, error: "Historischer Baseline-Eintrag wird nicht gebucht" };
+    if (row.status === "baseline") {
+      if (body?.resolution !== "project") return {statusCode:409,error:"Altbestand kann nur ohne Lagerabzug einer Baustelle zugeordnet werden"};
+      const jobId=clean(body?.jobId,80), jobName=clean(body?.jobName,180);
+      if (!jobId || !/^[A-Za-z0-9_-]+$/.test(jobId)) return {statusCode:400,error:"Baustelle fehlt"};
+      if (!row.colourCode && !row.colourName) return {statusCode:409,error:"Kein Farbton bekannt; Farbwissen kann nicht zugeordnet werden"};
+      const existing=(await readJsonl(jobMaterialsFile)).find(x=>x.historyId===row.id && x.knowledgeOnly);
+      if ((existing && existing.jobId!==jobId) || (row.jobId && row.jobId!==jobId)) return {statusCode:409,error:"Altbestand ist bereits einer anderen Baustelle zugeordnet"};
+      const at=existing?.at || new Date().toISOString();
+      await appendProjectMaterial(row,{},"project",jobId,jobName,{at,quantity:row.quantity,knowledgeOnly:true});
+      Object.assign(row,{resolution:"project",jobId,jobName,knowledgeOnly:true,resolvedAt:at});
+      await writeJson(historyFile,history);
+      return {statusCode:200,row,knowledgeOnly:true};
+    }
 
     if (row.requiresReview) return {statusCode:409,error:"Freie Dosierung oder Nachmischung: kein automatischer Dosenabzug. Bitte prüfen."};
     const recorded = (await readJsonl(movementsFile)).find(x => x.historyId === row.id && x.source === "innovatint-history");

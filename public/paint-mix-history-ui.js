@@ -114,8 +114,11 @@
           <button class="btn" data-resolution="waste" type="button">Fehlmischung</button>
         </div>`;
       if (item.requiresReview && item.status === "open") { row.querySelector(".mixhist-actions").textContent = "Freie Dosierung / Nachmischung: manuell prüfen, kein automatischer Dosenabzug."; list.appendChild(row); continue; }
-      if (item.status !== "open") {
-        row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
+      if (item.status === "baseline" && !item.jobId && (item.colourCode || item.colourName)) {
+        row.querySelector(".mixhist-actions").innerHTML = '<button class="btn" data-resolution="project" type="button">Baustelle zuordnen – nur Farbwissen</button>';
+      }
+      if (item.status !== "open" && !(item.status === "baseline" && !item.jobId && (item.colourCode || item.colourName))) {
+        row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" + (item.jobId ? " · Farbwissen: " + item.jobId + " · " + item.jobName : "") : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
         list.appendChild(row); continue;
       }
       const picker = projectPicker(row);
@@ -158,7 +161,7 @@
       renderRows(history.items || []); renderStats(stats);
       const notice = document.getElementById("mixHistoryNotice"); if (notice) { notice.hidden = !sync.open; notice.textContent = sync.open + " neue/offene Mischung(en): Verkauf oder Baustelle?"; }
       const last = sync.state?.lastSyncAt ? fmtDate(sync.state.lastSyncAt) : "Noch keine Verbindung zur Mischmaschine";
-      if (status) status.textContent = `${history.count || 0} offen · letzte History-Prüfung ${last} · ${sync.schedule || ""}`;
+      if (status) status.textContent = `${sync.open || 0} offen · letzte History-Prüfung ${last} · ${sync.schedule || ""}`;
     } catch (error) { if (status) status.textContent = String(error?.message || error); }
   }
 
