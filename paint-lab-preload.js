@@ -103,6 +103,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-return-stock-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260822-2058"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-return-local-hardware-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20260910-0815"></script>\n</body>');
+      }
       if (!fixed.includes("/public/paint-outflow-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-outflow-ui.js?v=20260825-1135"></script>\n</body>');
       }
