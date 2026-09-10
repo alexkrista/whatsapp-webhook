@@ -76,6 +76,10 @@ function invoke(handler, req) {
   assert.equal(reviewTasks.filter(task => task.reminder.includes(`reportId=${first.body.report.id}`)).length, 1);
   assert.equal(reviewTasks[0].status, "open");
   assert.equal(reviewTasks[0].assigneeName, "Alexander Krista");
+  reviewTasks[0].id = "legacy_regie_review_task";
+  const firstReviewTaskId = reviewTasks[0].id;
+  reviewTasks[0].reminder = "[REGIE_APPROVAL]legacy=1";
+  fs.writeFileSync(reviewTasksFile, JSON.stringify(reviewTasks, null, 2));
 
   const locked = await invoke(save, { body: {
     id: first.body.report.id,
@@ -94,12 +98,21 @@ function invoke(handler, req) {
   assert.equal(locked.body.report.materials[0].salePrice, 18, "Preise eines fertigen Rapports bleiben eingefroren");
 
   const review = routes.get("POST /kristine/api/regie-reports/:id/review");
-  const archived = await invoke(review, { params: { id: first.body.report.id }, body: { decision: "archive" } });
+  const archived = await invoke(review, { params: { id: first.body.report.id }, body: { decision: "archive", taskId: firstReviewTaskId } });
   assert.equal(archived.statusCode, 200);
   assert.equal(archived.body.report.status, "completed");
   assert.equal(archived.body.report.processingStatus, "approved");
   reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
-  assert.equal(reviewTasks.find(task => task.reminder.includes(`reportId=${first.body.report.id}`)).status, "done");
+  assert.equal(reviewTasks.find(task => task.id === firstReviewTaskId).status, "done", "Die konkrete Regie-Aufgabe wird auch bei einer alten Markierung geschlossen");
+
+  reviewTasks[0].status = "open";
+  reviewTasks[0].completedAt = null;
+  reviewTasks[0].reminder = `[REGIE_APPROVAL]reportId=${first.body.report.id};reportNumber=${first.body.report.reportNumber}`;
+  fs.writeFileSync(reviewTasksFile, JSON.stringify(reviewTasks, null, 2));
+  const listReports = routes.get("GET /kristine/api/regie-reports");
+  await invoke(listReports, { query: {} });
+  reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  assert.equal(reviewTasks[0].status, "done", "Bereits abgelegte Berichte reparieren eine noch offene Alt-Aufgabe");
 
   const second = await invoke(save, { body: {
     finish: false,

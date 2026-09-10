@@ -146,14 +146,41 @@ function registerRegieAssistant(app, options) {
     return task;
   }
 
-  async function completeRegieReviewTask(report, decision) {
+  async function completeRegieReviewTask(report, decision, requestedTaskId = "") {
     const tasks = await readJson(TASKS, []), marker = `${REGIE_TASK_MARKER}reportId=${encodeURIComponent(report.id)}`, now = new Date().toISOString();
+    const explicitTaskId = safeId(requestedTaskId), canonicalTaskId = `regie_review_${safeId(report.id)}`;
     let changed = false;
-    for (const task of tasks.filter(row => String(row.reminder || "").includes(marker))) {
+    for (const task of tasks.filter(row => {
+      if (String(row.reminder || "").includes(marker)) return true;
+      const taskId = String(row.id || "");
+      return taskId === canonicalTaskId || (explicitTaskId && taskId === explicitTaskId && String(row.reminder || "").includes(REGIE_TASK_MARKER));
+    })) {
       task.status = "done";
       task.completedAt = now;
       task.updatedAt = now;
       task.regieDecision = decision;
+      changed = true;
+    }
+    if (changed) await writeJson(TASKS, tasks);
+  }
+
+  async function reconcileCompletedRegieReviewTasks(reports) {
+    const finished = new Map((reports || [])
+      .filter(report => report?.status === "completed" || ["approved", "sent", "signed"].includes(report?.processingStatus))
+      .map(report => [String(report.id || ""), String(report.processingStatus || "approved")]));
+    if (!finished.size) return;
+    const tasks = await readJson(TASKS, []), now = new Date().toISOString();
+    let changed = false;
+    for (const task of tasks) {
+      if (task?.status === "done" || !String(task?.reminder || "").includes(REGIE_TASK_MARKER)) continue;
+      const encodedReportId = String(task.reminder).match(/reportId=([^;]*)/)?.[1];
+      let reportId = "";
+      try { reportId = decodeURIComponent(encodedReportId || ""); } catch { reportId = encodedReportId || ""; }
+      if (!finished.has(reportId)) continue;
+      task.status = "done";
+      task.completedAt = task.completedAt || now;
+      task.updatedAt = now;
+      task.regieDecision = task.regieDecision || finished.get(reportId);
       changed = true;
     }
     if (changed) await writeJson(TASKS, tasks);
@@ -587,6 +614,7 @@ function registerRegieAssistant(app, options) {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []);
     if (normalizeLegacyExpressNumbers(reports)) await writeJson(REPORTS, reports);
+    await reconcileCompletedRegieReviewTasks(reports);
     res.json({ ok: true, reports: reports.slice().sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))) });
   });
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {
@@ -675,7 +703,7 @@ function registerRegieAssistant(app, options) {
         report.completedAt = now;
       }
       await writeJson(REPORTS, reports);
-      await completeRegieReviewTask(report, decision);
+      await completeRegieReviewTask(report, decision, req.body?.taskId);
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, {
         type: decision === "changes" ? "regie_changes_requested" : "regie_report_approved",

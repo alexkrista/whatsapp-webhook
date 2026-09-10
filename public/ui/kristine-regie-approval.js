@@ -31,9 +31,10 @@
     return String(button?.getAttribute("onclick") || "").match(/openTaskListModal\(['"]([^'"]+)['"]\)/)?.[1] || "";
   }
 
-  function reportUrl(reportId) {
+  function reportUrl(reportId, taskId) {
     const url = new URL("/kristine/eingang", location.origin);
     url.searchParams.set("reportId", reportId);
+    if (taskId) url.searchParams.set("taskId", taskId);
     const token = new URLSearchParams(location.search).get("token");
     if (token) url.searchParams.set("token", token);
     return url.pathname + url.search;
@@ -42,7 +43,7 @@
   function openButton(task, cssClass) {
     const details = meta(task);
     if (!details || task.status === "done") return "";
-    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId))}&quot;">Regiebericht prüfen</button>`;
+    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId, task.id))}&quot;">Regiebericht prüfen</button>`;
   }
 
   function decorateRows() {
@@ -96,6 +97,18 @@
     decorateRows();
   }
 
+  let refreshTimer = null;
+  function refreshAfterReturn() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(async () => {
+      if (document.visibilityState === "hidden" || typeof loadSilent !== "function") return;
+      try { await loadSilent(); decorateRows(); } catch {}
+    }, 120);
+  }
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true }); else install();
+  window.addEventListener("pageshow", event => { if (event.persisted) refreshAfterReturn(); });
+  window.addEventListener("focus", refreshAfterReturn);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAfterReturn(); });
   setInterval(() => { installHooks(); decorateRows(); }, 1200);
 })();
