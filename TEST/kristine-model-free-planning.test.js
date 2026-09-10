@@ -1,0 +1,11 @@
+"use strict";
+const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
+const html=fs.readFileSync(path.join(__dirname,"..","public","kristine.html"),"utf8");
+const inline=html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1]||"";
+assert.ok(inline,"Inline-Planungslogik fehlt");
+new vm.Script(inline,{filename:"public/kristine.html"});
+assert.match(html,/matrix-cell dropzone\$\{modelFree\?' model-free':''\}/,"Freie Modelltage müssen grau markiert werden");
+assert.match(html,/Nicht verfügbar<span>\$\{esc\(rule\.model\?\.name/,"Das Zeitmodell muss im freien Tag sichtbar sein");
+assert.match(html,/availableEmployees=masterEmployees\.filter\(e=>!isModelFreeDay/,"Nicht verfügbare Mitarbeiter dürfen keine Planlücke erzeugen");
+assert.match(html,/confirmModelFreePlanning\(targetEmployee,date\)/,"Eine Ausnahmeplanung muss bewusst bestätigt werden");
+console.log("OK: Freie Zeitmodell-Tage sind grau, ohne Planlücke und nur als bestätigte Ausnahme belegbar");
