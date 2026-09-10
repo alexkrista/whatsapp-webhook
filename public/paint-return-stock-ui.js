@@ -96,7 +96,7 @@
           <div id="returnMaterialNameView" class="return-material-name"></div>
           <div id="returnMaterialMeta" class="return-material-meta"></div>
           <div class="return-fields">
-            <div class="return-field"><label>Farbnummer / Farbton</label><input id="returnColour" class="field" list="returnColourList" autocomplete="off" placeholder="z. B. StoColor 32145"></div>
+            <div class="return-field"><label for="returnColour">Farbnummer / Farbton</label><input id="returnColour" class="field" autocomplete="off" placeholder="z. B. StoColor 32145"></div>
             <div class="return-field"><label>Gewicht in kg</label><input id="returnWeight" class="field" type="number" min="0.001" step="0.01" inputmode="decimal" placeholder="z. B. 3,40"></div>
           </div>
           <button id="returnBookBtn" class="btn primary return-book" type="button">Rückware buchen & Etikett</button>
@@ -109,7 +109,7 @@
         <div id="returnResults" class="return-results"><div class="return-empty">Noch keine Rückware geladen.</div></div>
       </div>
     </div>
-    <datalist id="returnManufacturerList"></datalist><datalist id="returnMaterialList"></datalist><datalist id="returnColourList"></datalist>
+    <datalist id="returnManufacturerList"></datalist><datalist id="returnMaterialList"></datalist>
   `;
   const adminSection = document.getElementById("tab-admin");
   wrap.insertBefore(section, adminSection || null);
@@ -365,8 +365,6 @@
   function renderReturns(items) {
     returns = Array.isArray(items) ? items : [];
     el("returnCount").textContent = String(returns.length);
-    const colours = [...new Set(returns.map((row) => row.colour).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
-    el("returnColourList").innerHTML = colours.map((value) => `<option value="${esc(value)}"></option>`).join("");
     if (!returns.length) {
       el("returnResults").innerHTML = `<div class="return-empty">Keine passende Rückware.</div>`;
       return;
