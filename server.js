@@ -75,10 +75,10 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.13";
-const APP_BUILD = "0031.18-photo-followup";
-const APP_STATUS = "Fotos mobil oder im Büro in jede Baustelle nachreichen";
-const APP_BUILD_DATE = "2026-09-09";
+const APP_VERSION = "3.5.14";
+const APP_BUILD = "0031.19-material-alias";
+const APP_STATUS = "Material-Aliase bearbeiten und aus bestätigten Zuordnungen lernen";
+const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI
 app.use("/public", express.static("public"));

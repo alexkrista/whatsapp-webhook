@@ -629,6 +629,8 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       labelPhotoRequired: bool(raw.labelPhotoRequired),
       extraQuestion: clean(raw.extraQuestion, 250),
       alias: clean(raw.alias, 1000),
+      aliasLearnedAt: clean(raw.aliasLearnedAt, 40),
+      aliasLearningSource: clean(raw.aliasLearningSource, 240),
       active: bool(raw.active, true),
       note: clean(raw.note, 1000),
       sourceSystem: clean(raw.sourceSystem, 40),
@@ -957,7 +959,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
     const headers = [
       "Status B/N/L", "Material-ID", "Lieferant", "Lieferanten-Artikelnummer", "Artikel",
       "Gebindegröße", "Einheit", "EK netto (€)", "VK netto (€)", "VK brutto (€)", "Fix-VK", "Preisstand",
-      "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer",
+      "WW-Stammindex", "WW-Lieferantennummer", "Unsere Kundennummer", "Alias",
     ];
     const data = materials
       .sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""), "de") || String(a.product || "").localeCompare(String(b.product || ""), "de"))
@@ -967,6 +969,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         "Lieferant": item.supplier,
         "Lieferanten-Artikelnummer": item.supplierArticleNumber,
         "Artikel": item.product,
+        "Alias": item.alias || "",
         "Gebindegröße": item.containerSize || 1,
         "Einheit": item.unit,
         "EK netto (€)": item.purchasePrice || "",
@@ -1057,12 +1060,13 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         ? Math.round((((salePrice / purchasePrice) - 1) * 100 + Number.EPSILON) * 100) / 100
         : number(existing?.markup);
       const aliases = [...new Set([
+        existing?.alias,
+        raw?.alias,
         raw?.matchCode,
         raw?.orderNumber,
         raw?.supplierArticleNumber,
         raw?.directory,
-        String(existing?.sourceSystem || "").toLowerCase() === "winworker" ? "" : existing?.alias,
-      ].map(value => clean(value, 250)).filter(Boolean))].join(" ");
+      ].flatMap(value => String(value || "").split(/[;\n]+/)).map(value => clean(value, 1000)).filter(Boolean))].join("; ");
 
       const linkedRaw = applySupplierLink({
         supplier: clean(raw?.supplier, 120) || existing?.supplier,
@@ -1456,6 +1460,7 @@ app.get("/api/regie/materials", async (req, res) => {
         id: requestedMaterialId,
         group: req.body?.group || "Regie",
         product,
+        alias: req.body?.alias,
         containerSize: req.body?.containerSize,
         unit: req.body?.unit,
         purchasePrice: req.body?.purchasePrice ?? req.body?.unitPrice,
@@ -1507,6 +1512,34 @@ app.get("/api/regie/materials", async (req, res) => {
       rows[index] = material;
       await writeJson(MATERIALS_FILE, rows);
       res.json({ ok: true, material: decorate(material) });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  // Kristine can add a confirmed designation without replacing the official name or prices.
+  app.post("/admin/api/materials/:materialId/learn-alias", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const alias = clean(req.body?.alias, 1001);
+      if (!alias || alias.length > 240 || req.body?.confirmed !== true) {
+        return res.status(400).json({ ok: false, error: "Ein bestätigter Suchname mit höchstens 240 Zeichen ist erforderlich." });
+      }
+      const rows = await readJson(MATERIALS_FILE, []);
+      const index = rows.findIndex(row => String(row.materialId) === String(req.params.materialId));
+      if (index < 0 || rows[index].active === false) return res.status(404).json({ ok: false, error: "Aktives Material nicht gefunden" });
+      const current = rows[index];
+      const key = value => clean(value, 1000).toLocaleLowerCase("de");
+      const names = String(current.alias || "").split(/[;\n]+/).map(value => clean(value, 1000)).filter(Boolean);
+      if (key(alias) === key(current.product) || names.some(value => key(value) === key(alias))) {
+        return res.json({ ok: true, learned: false, material: decorate(current) });
+      }
+      const combined = [...names, alias].join("; ");
+      if (combined.length > 1000) return res.status(400).json({ ok: false, error: "Alias-Feld ist voll. Bitte Suchnamen im Materialstamm bereinigen." });
+      const material = normalizeMaterial({ ...current, alias: combined, aliasLearnedAt: new Date().toISOString(), aliasLearningSource: clean(req.body?.source, 240) || "Bestätigte Zuordnung in Kristine" });
+      rows[index] = material;
+      await writeJson(MATERIALS_FILE, rows);
+      res.json({ ok: true, learned: true, material: decorate(material) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
@@ -1576,6 +1609,7 @@ app.get("/api/regie/materials", async (req, res) => {
         id: `unknown_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         status: "open",
         description: clean(req.body?.description, 500),
+        searchAlias: clean(req.body?.searchAlias, 240),
         quantity: number(req.body?.quantity),
         unit: clean(req.body?.unit, 30),
         groupSuggestion: clean(req.body?.groupSuggestion, 100),
@@ -1629,6 +1663,9 @@ app.get("/api/regie/materials", async (req, res) => {
         subgroup: req.body?.subgroup || source.subgroupSuggestion,
         manufacturer: req.body?.manufacturer || source.manufacturerSuggestion,
         product: req.body?.product || source.productSuggestion || source.description,
+        alias: req.body?.alias ?? (source.searchAlias || source.description),
+        aliasLearnedAt: new Date().toISOString(),
+        aliasLearningSource: `Bürofreigabe ${source.id}`,
         productLine: req.body?.productLine,
         colorNumber: req.body?.colorNumber || source.colorNumberSuggestion,
         colorName: req.body?.colorName || source.colorNameSuggestion,
