@@ -183,4 +183,6 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
+    import brain_material_selection
+    brain_material_selection.install(ns)
     print("✅ Brain Viewer V10 aktiv: Bildviewer + markierbare Textebene")
