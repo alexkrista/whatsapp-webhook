@@ -237,6 +237,27 @@ function invoke(handler, req) {
   assert.equal(completedDay.status, "Ausgestellt");
   assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 2);
 
+  const fieldBody = { ...mobileDraftBody, uploads: [], segment: { jobId: "26111" }, employees: [{ id: "ma-1", name: "Max Muster", from: "07:00", to: "11:53", netMinutes: 293, blocks: [{ from: "07:00", to: "11:53" }] }] };
+  const field = (await invoke(issue, { body: fieldBody })).body.report;
+  assert.equal(field.employees[0].to, "12:00");
+  assert.equal(field.employees[0].hours, 5);
+  assert.equal(field.employees[0].bookedTo, "11:53");
+  assert.equal(field.employees[0].bookedBlocks[0].to, "11:53");
+  assert.equal(field.employees[0].blocks[0].to, "12:00");
+  assert.equal(fieldBody.employees[0].blocks[0].to, "11:53", "Original booking is unchanged");
+  const attach = routes.get("POST /kristine/api/regie-reports/:id/attachments");
+  const photos = Array.from({ length: 10 }, (_, i) => ({ name: `photo-${i}.jpg`, data: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }));
+  const uploadOne = upload => invoke(attach, { params: { id: field.id }, body: { upload, uploadToken: field.attachmentUploadToken } });
+  for (const upload of photos) assert.equal((await uploadOne(upload)).statusCode, 200);
+  assert.equal((await uploadOne(photos[4])).body.report.attachments.length, 10, "Retry does not duplicate photos");
+  assert.equal((await uploadOne({ name: "large.pdf", data: "data:application/pdf;base64," + Buffer.alloc(8 * 1024 * 1024 + 1).toString("base64") })).statusCode, 413);
+  assert.equal((await uploadOne(photos[9])).body.report.status, "draft");
+  const issuedField = (await invoke(issue, { body: { ...fieldBody, id: field.id, draft: false } })).body.report;
+  assert.equal(issuedField.attachments.length, 10);
+  const retryField = (await invoke(issue, { body: { ...fieldBody, id: field.id, draft: true } })).body.report;
+  assert.equal(retryField.id, field.id);
+  assert.equal(retryField.status, "prepared", "Lost final response cannot create another report");
+
   const expressOne = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma1_1" } } });
   const expressTwo = await invoke(issue, { body: { ...mobileDraftBody, id: "", draft: false, createdBy: { id: "ma-2", name: "Erika Beispiel" }, people: [{ id: "ma-2", name: "Erika Beispiel" }], employees: [{ id: "ma-2", name: "Erika Beispiel", from: "07:00", to: "12:00", netMinutes: 300 }], segment: { ...mobileDraftBody.segment, jobId: "express_20260908_ma2_2" } } });
   assert.equal(expressOne.body.report.reportNumber, "Express 202609001");
