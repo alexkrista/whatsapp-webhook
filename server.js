@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.15";
-const APP_BUILD = "0031.20-regie-fieldtest";
-const APP_STATUS = "Material-Aliase bearbeiten und aus bestätigten Zuordnungen lernen";
+const APP_VERSION = "3.5.16";
+const APP_BUILD = "0031.21-regie-corrections";
+const APP_STATUS = "Manuelle Regie-Korrekturen speichern und vor PDF übernehmen";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI

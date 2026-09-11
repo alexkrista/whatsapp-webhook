@@ -371,7 +371,24 @@ function invoke(handler, req) {
     fs.writeFileSync(path.join(fixtureDir, "regie-multi-page.html"), standalone(longPrinted.body));
   }
 
-  console.log("OK: Regiebericht wird berechnet, nummeriert, archiviert und ohne Gesamtübersicht gedruckt.");
+  const archivedField = (await invoke(review, { params: { id: issuedField.id }, body: { decision: "archive" } })).body.report;
+  const corrected = await invoke(save, { body: { ...archivedField, correctReport: true, finish: false,
+    employees: [{ ...archivedField.employees[0], from: "07:00", to: "12:15", hours: 5.25, blocks: [{ from: "07:00", to: "12:15" }] }],
+    materials: [{ ...archivedField.materials[0], quantity: 40, unit: "kg", containerSize: 20 }],
+  } });
+  assert.equal(corrected.statusCode, 201);
+  assert.equal(corrected.body.report.status, "completed");
+  assert.equal(corrected.body.report.employees[0].to, "12:15");
+  assert.equal(corrected.body.report.materials[0].unit, "kg");
+  assert.equal(corrected.body.report.materials[0].quantity, 40);
+  assert.equal(corrected.body.report.materials[0].salePrice, archivedField.materials[0].salePrice);
+  const correctionPrint = await invoke(print, { params: { id: issuedField.id } });
+  assert.match(correctionPrint.body, /12:15/);
+  assert.match(correctionPrint.body, /40 kg/);
+  const storedCorrection = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "_kristine", "regie-reports.json"), "utf8")).find(row => row.id === issuedField.id);
+  assert.equal(storedCorrection.employees[0].to, "12:15");
+  assert.equal(storedCorrection.materials[0].unit, "kg");
+  console.log("OK: Regiebericht wird berechnet, korrigiert, nummeriert, archiviert und mit gespeicherten Änderungen gedruckt.");
 })().finally(() => {
   if (temporaryRoot.startsWith(os.tmpdir())) fs.rmSync(temporaryRoot, { recursive: true, force: true });
 });

@@ -513,13 +513,14 @@ function registerRegieAssistant(app, options) {
     const materialMarkup = Math.max(0, num(priceLocked ? existing.materialMarkup : (body.materialMarkup ?? meta.regieMaterialMarkup ?? 80)));
     if (!priceLocked && typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
     const now = new Date().toISOString();
-    const employeeSource = priceLocked ? existing.employees : (Array.isArray(body.employees) ? body.employees : []);
+    const correctReport = body.correctReport === true;
+    const employeeSource = priceLocked && !correctReport ? existing.employees : (Array.isArray(body.employees) ? body.employees : existing.employees || []);
     const employees = employeeSource
       .map(normalizeEmployee)
       .map(row => priceLocked ? row : { ...row, hourlyRate: null })
       .filter(row => row.name && row.hours > 0);
     if (!employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
-    const materialSource = priceLocked ? existing.materials : (Array.isArray(body.materials) ? body.materials : []);
+    const materialSource = priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
     const materials = materialSource
       .map(row => normalizeMaterial(row, materialMarkup, priceLocked))
       .filter(row => row.product && row.quantity > 0);
@@ -561,6 +562,15 @@ function registerRegieAssistant(app, options) {
     report.totals = calculateTotals(report);
     if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
     await writeJson(REPORTS, reports.slice(-10000));
+    if (correctReport) {
+      await storeInDayRegie(report);
+      await storeInJobFile(report);
+      if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
+        type: "regie_report_corrected", title: `Regiebericht ${report.reportNumber} gespeichert`,
+        detail: `${report.totals.laborHours} h · Material ${money(report.totals.materialTotal)}`,
+        source: "Regie-Büro", data: { reportId: report.id },
+      }).catch(() => {});
+    }
     if (finish) {
       await ensureRegieReviewTask(report);
       await storeInJobFile(report);
