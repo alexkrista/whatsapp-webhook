@@ -101,6 +101,8 @@ function registerRegieAssistant(app, options) {
       hours: round(num(row?.hours) || blocks.reduce((sum, block) => sum + hoursBetween(block.from, block.to), 0)),
       blocks,
       timeLabel: blocks.map(block => `${block.from}–${block.to}`).join(" / "),
+      bookedTo: clean(row?.bookedTo, 5),
+      bookedBlocks: Array.isArray(row?.bookedBlocks) ? row.bookedBlocks : [],
       hourlyRate: hasHourlyRate ? Math.max(0, round(num(row.hourlyRate))) : null,
     };
   }
@@ -192,7 +194,17 @@ function registerRegieAssistant(app, options) {
       ? Math.max(0, num(row.netMinutes) / 60)
       : (num(row?.hours) || hoursBetween(employee.from, employee.to));
     employee.netMinutes = Math.round(netHours * 60);
-    employee.hours = quarterHours(netHours);
+    employee.hours = quarterHours(num(row?.hours) || netHours);
+    employee.bookedTo = clean(row?.bookedTo || employee.to, 5);
+    employee.bookedBlocks = row?.bookedBlocks || employee.blocks.map(block => ({ ...block }));
+    const extra = Math.round(employee.hours * 60) - employee.netMinutes;
+    const end = minutes(employee.bookedTo);
+    if (end !== null && extra >= 0 && extra < 15 && end + extra < 1440) {
+      const roundedEnd = end + extra;
+      employee.to = `${String(Math.floor(roundedEnd / 60)).padStart(2, "0")}:${String(roundedEnd % 60).padStart(2, "0")}`;
+      if (employee.blocks.length) employee.blocks[employee.blocks.length - 1].to = employee.to;
+      employee.timeLabel = employee.blocks.map(block => `${block.from}–${block.to}`).join(" / ");
+    }
     return employee;
   }
 
@@ -317,9 +329,11 @@ function registerRegieAssistant(app, options) {
       const buffer = Buffer.from(match[2], "base64");
       if (!buffer.length || buffer.length > 20 * 1024 * 1024) continue;
       const originalName = path.basename(clean(upload.name, 180)).replace(/[^a-zA-Z0-9äöüÄÖÜß._ -]/g, "_") || "Anlage";
+      const contentHash = crypto.createHash("sha256").update(originalName).update(buffer).digest("hex");
+      if (rows.some(row => row.contentHash === contentHash)) continue;
       const storedName = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${originalName}`;
       await fsp.writeFile(path.join(directory, storedName), buffer);
-      rows.push({ id: `file_${crypto.randomBytes(6).toString("hex")}`, name: originalName, storedName, type: clean(match[1], 100), size: buffer.length, createdAt: new Date().toISOString() });
+      rows.push({ id: `file_${crypto.randomBytes(6).toString("hex")}`, contentHash, name: originalName, storedName, type: clean(match[1], 100), size: buffer.length, createdAt: new Date().toISOString() });
     }
     return rows.slice(-100);
   }
@@ -337,6 +351,8 @@ function registerRegieAssistant(app, options) {
       const buffer = Buffer.from(match[2], "base64");
       if (!buffer.length || buffer.length > 20 * 1024 * 1024) continue;
       const extension = String(match[1]).includes("png") ? ".png" : String(match[1]).includes("webp") ? ".webp" : ".jpg";
+      const contentHash = crypto.createHash("sha256").update(String(upload.name || "")).update(buffer).digest("hex");
+      if (reviews.some(row => row.reportId === report.id && row.contentHash === contentHash)) continue;
       const filename = `${Math.floor(Date.now() / 1000)}_${safeId(report.id)}_${crypto.randomBytes(3).toString("hex")}${extension}`;
       const absolute = path.join(directory, filename);
       await fsp.writeFile(absolute, buffer);
@@ -360,6 +376,7 @@ function registerRegieAssistant(app, options) {
         needsOfficeReview: false,
         content: `Regie · ${clean(report.description, 500)}`,
         reportId: report.id,
+        contentHash,
       };
       reviews.push(entry);
       stored.push(entry);
@@ -673,6 +690,31 @@ function registerRegieAssistant(app, options) {
     const meta = typeof readJobMeta === "function" ? await readJobMeta(report.jobId) : {};
     res.json({ ok: true, recipients: recipientRows(meta) });
   });
+  let attachmentQueue = Promise.resolve();
+  app.post("/kristine/api/regie-reports/:id/attachments", async (req, res) => {
+    const operation = attachmentQueue.then(async () => {
+      const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
+      if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+      const supplied = clean(req.body?.uploadToken, 100);
+      if (!(supplied && supplied === report.attachmentUploadToken) && !requireAdmin(req, res)) return;
+      if (report.status !== "draft") return res.status(409).json({ ok: false, error: "Fotos bitte an einen offenen Entwurf anhängen." });
+      const upload = req.body?.upload, match = String(upload?.data || "").match(/^data:(image\/(?:jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/);
+      if (!match || !upload?.name) return res.status(400).json({ ok: false, error: "Eine JPEG-, PNG-, WebP- oder PDF-Datei ist erforderlich." });
+      const bytes = Buffer.from(match[2], "base64").length;
+      if (!bytes || bytes > 8 * 1024 * 1024) return res.status(413).json({ ok: false, error: "Einzeldatei ist größer als 8 MB." });
+      const hash = crypto.createHash("sha256").update(path.basename(clean(upload.name, 180)).replace(/[^a-zA-Z0-9äöüÄÖÜß._ -]/g, "_")).update(Buffer.from(match[2], "base64")).digest("hex");
+      if ((report.attachments || []).length >= 100 && !report.attachments.some(row => row.contentHash === hash)) return res.status(400).json({ ok: false, error: "Maximal 100 Anlagen pro Bericht." });
+      report.attachments = await saveAttachments(report.id, [upload], report.attachments);
+      report.photos = report.attachments.filter(file => String(file.type).startsWith("image/"));
+      report.updatedAt = new Date().toISOString();
+      await writeJson(REPORTS, reports);
+      await storeRegiePhotos(report, [upload]);
+      await storeInJobFile(report);
+      res.json({ ok: true, report });
+    });
+    attachmentQueue = operation.catch(() => {});
+    try { await operation; } catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
+  });
   app.post("/kristine/api/regie-reports/save", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
@@ -818,6 +860,8 @@ function registerRegieAssistant(app, options) {
       const jobId = safeId(segment.jobId);
       if (!jobId) return res.status(400).json({ ok: false, error: "Baustelle fehlt" });
       const requestedId = safeId(body.id);
+      const alreadyIssued = requestedId && reports.find(report => report.id === requestedId && report.status !== "draft");
+      if (alreadyIssued) return res.json({ ok: true, report: alreadyIssued, message: "Regiebericht wurde bereits ausgestellt." });
       const existingIndex = reports.findIndex(report => report.status === "draft" && (
         (requestedId && report.id === requestedId) ||
         (!requestedId && String(report.jobId) === jobId && String(report.date) === String(body.date) && String(report.createdBy?.id) === String(body.createdBy?.id))
@@ -836,6 +880,7 @@ function registerRegieAssistant(app, options) {
         processingStatus: draft ? "draft" : "issued",
         billingStatus: "open",
         source: "kgo",
+        attachmentUploadToken: existing?.attachmentUploadToken || crypto.randomBytes(24).toString("hex"),
         reportSequence,
         reportNumber: fullReportNumber(jobId, reportSequence, body.date),
         date: validDate(body.date) ? body.date : new Date().toISOString().slice(0, 10),
