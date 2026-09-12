@@ -377,7 +377,7 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
         try { items.push(JSON.parse(await fsp.readFile(path.join(ITEMS, file), "utf8"))); } catch {}
       }
       items.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-      res.json({ ok: true, items: items.slice(0, 100) });
+      res.json({ ok: true, items: items.filter(item => req.query.dismissed === "true" ? item.status === "dismissed" : item.status !== "dismissed").slice(0, 100) });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
@@ -441,6 +441,21 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
       console.error("KRISTINE Voicemail erneut transkribieren:", error);
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
+  });
+
+  app.post("/kristine/api/inbox/:id/dismiss", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const item = await readItem(req.params.id);
+      if (!item) return res.status(404).json({ok:false,error:"Eingang nicht gefunden"});
+      if (req.body?.restore === true) {
+        if (item.status === "dismissed") { item.status = item.previousStatus || "analyzed"; delete item.previousStatus; delete item.dismissedAt; }
+      } else if (item.status !== "dismissed") {
+        item.previousStatus = item.status; item.status = "dismissed"; item.dismissedAt = new Date().toISOString();
+      }
+      item.updatedAt = new Date().toISOString(); await writeItem(item);
+      res.json({ok:true,item});
+    } catch (error) { res.status(500).json({ok:false,error:String(error?.message||error)}); }
   });
 
   app.post("/kristine/api/inbox/:id/route", async (req, res) => {

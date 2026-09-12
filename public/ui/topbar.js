@@ -152,7 +152,7 @@
   }
 
   function loadKristineInbox() {
-    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260912-shared-mailbox", "data-krista-inbox-v2");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-inbox-v2.js?v=20260912-dismiss", "data-krista-inbox-v2");
   }
 
   function loadKristineCustomerMaster() {

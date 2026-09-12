@@ -1,0 +1,8 @@
+const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{const page=await browser.newPage();
+const html=fs.readFileSync(path.join(__dirname,'../public/regie-workbench.html'),'utf8');const functions=html.slice(html.indexOf('function openInboxItem('),html.indexOf('async function loadMailboxStatus('));
+await page.setContent('<input type="checkbox" id="showDismissed"><span id="mailSideCount"></span><p id="inboxActionStatus"></p><div id="mailInbox"></div>');
+await page.addScriptTag({content:`const $=id=>document.getElementById(id),esc=v=>String(v||''),formatRecentDate=v=>v,tokenUrl=v=>v;let inboxItems=[];const row={id:'mail1',name:'Testmail',status:'analyzed'};async function api(url,options){if(options){row.status=JSON.parse(options.body).restore?'analyzed':'dismissed';return {item:row}}return {items:(url.includes('dismissed=true')?row.status==='dismissed':row.status!=='dismissed')?[row]:[]}};${functions};loadInbox();`});
+await page.getByRole('button',{name:'Verwerfen',exact:true}).click();await page.getByText('✓ E-Mail- und Dokumenteneingang leer.').waitFor();
+await page.locator('#showDismissed').check();await page.getByRole('button',{name:'Wiederherstellen',exact:true}).click();await page.locator('#showDismissed').uncheck();await page.getByRole('button',{name:'Verwerfen',exact:true}).waitFor();assert.equal(await page.locator('[data-inbox-open]').count(),1);console.log('OK: Eingang verwerfen, verworfene anzeigen und wiederherstellen.');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
