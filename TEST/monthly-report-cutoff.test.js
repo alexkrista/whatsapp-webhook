@@ -1,0 +1,13 @@
+"use strict";
+const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
+const root=path.join(__dirname,".."),code=fs.readFileSync(path.join(root,"public","kristool-preview","monthly-report.js"),"utf8"),html=fs.readFileSync(path.join(root,"public","kristool-preview","index.html"),"utf8");
+new vm.Script(code,{filename:"monthly-report.js"});
+assert.match(code,/const yesterday=\(\)=>/,"Stichtag gestern fehlt");
+assert.match(code,/dayData\?\.released===true/,"Monatsübersicht muss auf freigegebene Tage begrenzt sein");
+assert.match(code,/segments=released\?\(dayData\.segments\|\|\[\]\):\[\]/,"Unbestätigte Stunden dürfen nicht angezeigt werden");
+assert.match(code,/Stand bis \$\{through\} · nur freigegebene Stunden · keine Live-Zeiten/);
+assert.match(code,/zaBalancesThrough/,"ZA-alt-Stand muss ebenfalls auf gestern begrenzt sein");
+assert.match(code,/Geplanter Urlaub · nächste 6 Monate/,"Urlaubsvorschau für sechs Monate fehlt");
+assert.match(code,/data-person-pdf/,"Einzel-PDF je Mitarbeiter fehlt");
+assert.match(html,/monthly-report\.js\?v=3/,"Browser-Cacheversion wurde nicht angehoben");
+console.log("OK: Monatsübersicht und Einzel-PDF enden gestern und verwenden nur freigegebene Stunden");
