@@ -151,6 +151,7 @@ def archive_security_headers(response):
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, X-Krista-Brain-Permit, Content-Type"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
             response.headers["Access-Control-Max-Age"] = "600"
 
     return response
