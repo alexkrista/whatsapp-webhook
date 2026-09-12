@@ -319,7 +319,7 @@ async function listJobDayDirectories(dataDir, jobId) {
   return out.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-async function listJobMedia({ dataDir, jobId }) {
+async function listOriginalJobMedia({ dataDir, jobId }) {
   const safeId = String(jobId || "").trim();
   if (!/^[A-Za-z0-9_-]+$/.test(safeId)) return [];
 
@@ -399,6 +399,32 @@ async function listJobMedia({ dataDir, jobId }) {
   }
 
   return items.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")) || a.filename.localeCompare(b.filename, "de"));
+}
+
+async function listJobMedia({ dataDir, jobId }) {
+  const assignments = await readJson(path.join(dataDir, "_kristine", "media-assignments.json"), {});
+  const items = (await listOriginalJobMedia({ dataDir, jobId })).filter(item => !assignments[item.file] || assignments[item.file].jobId === jobId);
+  const sources = new Set(Object.values(assignments).filter(row => row.jobId === jobId && row.originalJobId !== jobId).map(row => row.originalJobId));
+  for (const originalJobId of sources) for (const item of await listOriginalJobMedia({ dataDir, jobId: originalJobId })) {
+    if (assignments[item.file]?.jobId === jobId && !items.some(row => row.file === item.file)) items.push({ ...item, jobId, url: `/admin/api/job/${encodeURIComponent(jobId)}/media-file?file=${encodeURIComponent(item.file)}` });
+  }
+  return items.sort((a,b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")));
+}
+
+let mediaAssignmentQueue = Promise.resolve();
+async function reassignJobMedia({ dataDir, jobId, targetJobId, files }) {
+  const run = mediaAssignmentQueue.then(async () => {
+    if (![jobId,targetJobId].every(id => /^[A-Za-z0-9_-]+$/.test(String(id || ""))) || jobId === targetJobId) throw Error("Bitte eine andere gültige Baustelle wählen.");
+    if (!(await fsp.stat(path.join(dataDir,targetJobId)).catch(()=>null))?.isDirectory()) throw Error("Zielbaustelle nicht gefunden.");
+    if (!Array.isArray(files) || !files.length || files.length > 100) throw Error("Bitte 1 bis 100 Fotos oder Videos auswählen.");
+    const selected = [...new Set(files)], available = await listJobMedia({dataDir,jobId});
+    if (selected.some(file => !available.some(item => item.file === file))) throw Error("Die Foto-Zuordnung hat sich geändert. Bitte neu laden.");
+    const file = path.join(dataDir,"_kristine","media-assignments.json"), assignments = await readJson(file,{}), at = new Date().toISOString();
+    for (const key of selected) { const previous = assignments[key]; assignments[key] = { originalJobId: previous?.originalJobId || jobId, jobId: targetJobId, updatedAt: at, history: [...(previous?.history || []), { from: jobId, to: targetJobId, at }] }; }
+    await fsp.mkdir(path.dirname(file),{recursive:true});await fsp.writeFile(file+".tmp",JSON.stringify(assignments,null,2));await fsp.rename(file+".tmp",file);
+    return { count:selected.length, jobId:targetJobId };
+  });
+  mediaAssignmentQueue=run.catch(()=>{});return run;
 }
 
 async function listJobKnowledge({ dataDir, jobId }) {
@@ -500,6 +526,11 @@ async function listJobKnowledge({ dataDir, jobId }) {
 }
 
 function registerMediaMigration(app, { dataDir, requireAdmin }) {
+  app.post("/admin/api/job/:jobId/media/reassign", async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    try { res.json({ok:true,...await reassignJobMedia({dataDir,jobId:req.params.jobId,targetJobId:req.body?.targetJobId,files:req.body?.files})}); }
+    catch(error) { res.status(400).json({ok:false,error:String(error.message || error)}); }
+  });
   app.post("/admin/api/media-migration/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -580,6 +611,9 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
       const jobRoot = path.resolve(dataDir, jobId) + path.sep;
       const kgoRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
       const inJobFolder = full.startsWith(jobRoot);
+      const assignments = await readJson(path.join(dataDir,"_kristine","media-assignments.json"),{});
+      const assignment = assignments[relative];
+      const reassignedMedia = assignment?.jobId === jobId && (full.startsWith(path.resolve(dataDir,assignment.originalJobId)+path.sep) || full.startsWith(kgoRoot));
       let assignedKgoMedia = false;
       if (full.startsWith(kgoRoot)) {
         const reviews = await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
@@ -588,7 +622,7 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
           String(entry?.file || "").replace(/\\/g, "/") === relative
         );
       }
-      if ((!inJobFolder && !assignedKgoMedia) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
+      if ((assignment && assignment.jobId !== jobId) || (!inJobFolder && !assignedKgoMedia && !reassignedMedia) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
         return res.status(404).send("Datei nicht gefunden");
       }
       res.setHeader("Cache-Control", "private, max-age=3600");
@@ -600,4 +634,4 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
   });
 }
 
-module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge, saveJobPhoto };
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge, saveJobPhoto, reassignJobMedia };

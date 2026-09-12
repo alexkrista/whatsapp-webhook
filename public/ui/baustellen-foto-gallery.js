@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-23-gallery-1";
+  const VERSION="2026-09-12-photo-assignment-1";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
   let media=[];
@@ -11,7 +11,7 @@
   const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
   const fmtDate=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);if(!m||year<1900||year>2099)return"–";const d=new Date(s+"T12:00:00");return Number.isNaN(d.getTime())||d.getFullYear()!==year||d.getMonth()+1!==Number(m[2])||d.getDate()!==Number(m[3])?"–":d.toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"})};
-  async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
+  async function api(p,options={}){const r=await fetch(tokenUrl(p),options);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
 
   function installCss(){
     if(document.getElementById("baustellenFotoGalleryCss"))return;
@@ -51,8 +51,25 @@
     const host=document.getElementById("bkProtocols");if(!host||host.querySelector(".bf-wrap"))return;
     const wrap=document.createElement("section");wrap.className="bf-wrap";
     if(!media.length){wrap.innerHTML='<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt aus der Baustellendokumentation.</p></div><span class="bf-count">0 Medien</span></div><div class="bf-empty">Für diese Baustelle sind derzeit keine einzelnen Fotos oder Videos gespeichert.</div>';host.prepend(wrap);return}
-    const groups=groupByDay(media);wrap.innerHTML=`<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt sichtbar · nach Bautag geordnet · Klick zum Vergrößern.</p></div><span class="bf-count">${media.length} Medien</span></div><div class="bf-days">${groups.map(([day,items])=>`<section class="bf-day" data-bf-day="${esc(day)}"><div class="bf-day-head"><strong>${fmtDate(day)}</strong><span>${items.filter(x=>x.kind==='photo').length} Fotos · ${items.filter(x=>x.kind==='video').length} Videos</span></div><div class="bf-grid">${items.map(item=>{const index=media.indexOf(item),url=tokenUrl(item.url),meta=[item.at,item.employeeName].filter(Boolean).join(' · ');return `<article class="bf-item"><button type="button" class="bf-open" data-bf-index="${index}" aria-label="${item.kind==='video'?'Video':'Foto'} öffnen">${item.kind==='video'?`<video src="${esc(url)}" muted preload="metadata" playsinline></video><span class="bf-video-badge">▶ Video</span>`:`<img src="${esc(url)}" loading="lazy" alt="Baustellenfoto ${esc(day)}">`}</button><div class="bf-meta"><strong>${esc(meta||item.source||'Baustellendokumentation')}</strong>${item.content?`<p>${esc(item.content)}</p>`:''}</div></article>`}).join('')}</div></section>`).join('')}</div>`;
+    const groups=groupByDay(media);wrap.innerHTML=`<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt sichtbar · nach Bautag geordnet · Klick zum Vergrößern.</p></div><span class="bf-count">${media.length} Medien</span></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><button type="button" data-bf-reassign disabled>Baustelle ändern</button><span data-bf-selected>0 ausgewählt</span></div><div class="bf-days">${groups.map(([day,items])=>`<section class="bf-day" data-bf-day="${esc(day)}"><div class="bf-day-head"><strong>${fmtDate(day)}</strong><label><input type="checkbox" data-bf-select-day> Tag auswählen</label><span>${items.filter(x=>x.kind==='photo').length} Fotos · ${items.filter(x=>x.kind==='video').length} Videos</span></div><div class="bf-grid">${items.map(item=>{const index=media.indexOf(item),url=tokenUrl(item.url),meta=[item.at,item.employeeName].filter(Boolean).join(' · ');return `<article class="bf-item"><label style="display:block;padding:6px"><input type="checkbox" data-bf-select="${index}"> Auswählen</label><button type="button" class="bf-open" data-bf-index="${index}" aria-label="${item.kind==='video'?'Video':'Foto'} öffnen">${item.kind==='video'?`<video src="${esc(url)}" muted preload="metadata" playsinline></video><span class="bf-video-badge">▶ Video</span>`:`<img src="${esc(url)}" loading="lazy" alt="Baustellenfoto ${esc(day)}">`}</button><div class="bf-meta"><strong>${esc(meta||item.source||'Baustellendokumentation')}</strong>${item.content?`<p>${esc(item.content)}</p>`:''}</div></article>`}).join('')}</div></section>`).join('')}</div>`;
+    const updateSelection=()=>{const count=wrap.querySelectorAll('[data-bf-select]:checked').length;wrap.querySelector('[data-bf-selected]').textContent=count+' ausgewählt';wrap.querySelector('[data-bf-reassign]').disabled=!count};
+    wrap.querySelectorAll('[data-bf-select]').forEach(el=>el.onchange=updateSelection);
+    wrap.querySelectorAll('[data-bf-select-day]').forEach(el=>el.onchange=()=>{el.closest('.bf-day').querySelectorAll('[data-bf-select]').forEach(input=>input.checked=el.checked);updateSelection()});
+    wrap.querySelector('[data-bf-reassign]').onclick=()=>chooseTarget([...wrap.querySelectorAll('[data-bf-select]:checked')].map(el=>media[Number(el.dataset.bfSelect)]));
     host.prepend(wrap);wrap.querySelectorAll("[data-bf-index]").forEach(el=>el.addEventListener("click",()=>openLightbox(Number(el.dataset.bfIndex))));
+  }
+
+  async function chooseTarget(items){
+    const sourceJob=currentJobId,dialog=document.createElement('dialog');dialog.style.cssText='border:1px solid #ddd;border-radius:14px;padding:24px;max-width:520px;width:90%';
+    dialog.innerHTML='<h3>Baustelle ändern</h3><p>'+items.length+' Foto(s) / Video(s) ausgewählt. Datum und Mitarbeiter bleiben erhalten.</p><label>Zielbaustelle <select style="width:100%;padding:10px" data-target><option value="">Wird geladen …</option></select></label><p data-status></p><button type="button" data-cancel>Abbrechen</button> <button type="button" data-save disabled>Zuordnung speichern</button>';
+    document.body.appendChild(dialog);dialog.showModal();let busy=false;
+    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});dialog.addEventListener('close',()=>dialog.remove());dialog.querySelector('[data-cancel]').onclick=()=>dialog.close();
+    const select=dialog.querySelector('[data-target]'),button=dialog.querySelector('[data-save]'),status=dialog.querySelector('[data-status]');
+    try{const result=await api('/admin/api/jobs');select.innerHTML='<option value="">Bitte wählen …</option>'+(result.jobs||[]).filter(job=>String(job.jobId)!==sourceJob).sort((a,b)=>String(b.jobId).localeCompare(String(a.jobId))).map(job=>'<option value="'+esc(job.jobId)+'">'+esc(job.jobId+' · '+(job.name||''))+'</option>').join('');select.onchange=()=>button.disabled=!select.value}catch(error){status.textContent=error.message}
+    button.onclick=async()=>{if(!select.value||busy)return;busy=true;button.disabled=true;select.disabled=true;dialog.querySelector('[data-cancel]').disabled=true;status.textContent='Zuordnung wird gespeichert …';
+      try{await api('/admin/api/job/'+encodeURIComponent(sourceJob)+'/media/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targetJobId:select.value,files:items.map(item=>item.file)})});dialog.close();if(currentJobId===sourceJob)await load(sourceJob)}
+      catch(error){status.textContent=error.message;busy=false;button.disabled=false;select.disabled=false;dialog.querySelector('[data-cancel]').disabled=false}
+    };
   }
 
   function watchProtocolHost(){

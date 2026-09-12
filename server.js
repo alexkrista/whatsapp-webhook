@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.18";
-const APP_BUILD = "0031.23-lg-surface";
-const APP_STATUS = "Little Greene automatisch oberflächenrelevant";
+const APP_VERSION = "3.5.19";
+const APP_BUILD = "0031.24-photo-assignment";
+const APP_STATUS = "Fotos und Videos einer anderen Baustelle zuordnen";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI
