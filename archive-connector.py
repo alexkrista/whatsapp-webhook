@@ -3956,14 +3956,18 @@ def search_projects(terms, include_metrics=True, limit=100):
 
 
 def open_order_projects(query="", limit=500):
-    """Aktive, noch nicht abgeschlossene WW-Aufträge für die KRISTINE-Auswahl."""
+    """Aktive, noch nicht abgeschlossene WW-Aufträge für die KRISTINE-Auswahl.
+
+    bAbgerechnet ist hier bewusst kein Ausschlusskriterium: WinWorker setzt das
+    Feld auch bei Abschlagsrechnungen. Ein solcher Auftrag bleibt bis zum
+    tatsächlichen Abschluss für die Baustellenübernahme sichtbar.
+    """
     limit = max(1, min(int(limit or 500), 1000))
     needle = str(query or "").strip()
     conditions = [
         "ISNULL(p.bAktiv, 1) = 1",
         "ISNULL(p.bArchiv, 0) = 0",
         "ISNULL(p.bIstAbgeschlossen, 0) = 0",
-        "ISNULL(p.bAbgerechnet, 0) = 0",
         "(ISNULL(p.AuftragErteilt, 0) = 1 OR p.dzAuftragErteilt IS NOT NULL OR ISNULL(p.bInArbeit, 0) = 1)",
         "NULLIF(LTRIM(RTRIM(ISNULL(p.sProjektNummer, ''))), '') IS NOT NULL",
     ]
@@ -8085,7 +8089,30 @@ def project_open_orders_api():
             "ok": True,
             "projects": rows,
             "count": len(rows),
-            "sourceOfTruth": "WinWorker · aktive, nicht abgeschlossene Aufträge",
+            "sourceOfTruth": "WinWorker · aktive, nicht abgeschlossene Aufträge; Abschlagsrechnungen bleiben offen",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/project/search")
+def project_search_api():
+    """Durchsucht alle WW-Projekte, auch abgeschlossene und nicht zugewiesene."""
+    query = str(request.args.get("q") or "").strip()
+    if len(query) < 2:
+        return jsonify({"ok": True, "query": query, "projects": [], "count": 0})
+    try:
+        terms = [value for value in query.split() if value]
+        rows = search_projects(terms, include_metrics=False, limit=request.args.get("limit", 250))
+        for row in rows:
+            row["wwStatus"] = "Gesamtsuche · Status in WW prüfen"
+            row["orderDate"] = row.get("lastDate") or row.get("firstDate")
+        return jsonify({
+            "ok": True,
+            "query": query,
+            "projects": rows,
+            "count": len(rows),
+            "sourceOfTruth": "WinWorker · alle Projekte einschließlich abgeschlossen und nicht zugewiesen",
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
