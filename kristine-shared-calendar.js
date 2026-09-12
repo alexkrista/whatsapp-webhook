@@ -96,6 +96,19 @@ function validDate(value) {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? "" : date;
 }
 
+function validTime(value) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hour = Number(match[1]), minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function timeFromMinutes(value) {
+  const minutes = Math.max(0, Math.min((24 * 60) - 1, Number(value) || 0));
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
 function annualDate(original, year) {
   const suffix = validDate(original).slice(4);
   return suffix ? validDate(`${year}${suffix}`) : "";
@@ -126,9 +139,14 @@ function desiredCalendarEntries({ from, to, assignments = [], employees = [], jo
 
   for (const row of assignments) {
     const type = assignmentType(row);
-    if (!["urlaub", "krank"].includes(type) || row?.source === SOURCE) continue;
+    if (!["urlaub", "krank", "feiertag", "betriebsurlaub"].includes(type) || row?.source === SOURCE) continue;
+    if (["feiertag", "betriebsurlaub"].includes(type)) {
+      add({ key:`holiday:${type}:${row.date}`, date:row.date, subject:type === "feiertag" ? "Feiertag" : "Betriebsurlaub", kind:type, showAs:"free", allDay:true });
+      continue;
+    }
     const employee = String(row.employeeName || "Mitarbeiter").trim();
-    add({ key:`absence:${row.id || `${row.date}:${row.employeeId}:${type}`}`, date:row.date, subject:`${type === "krank" ? "Krank" : "Urlaub"} · ${employee}`, kind:type, showAs:"oof" });
+    const startTime = validTime(row.from) || "07:00", endTime = validTime(row.to) || "17:00";
+    add({ key:`absence:${row.id || `${row.date}:${row.employeeId}:${type}`}`, date:row.date, subject:`${type === "krank" ? "Krank" : "Urlaub"} · ${employee}`, kind:type, showAs:"oof", startTime, endTime:endTime > startTime ? endTime : "17:00" });
   }
 
   const fromYear = Number(from.slice(0, 4)), toYear = Number(to.slice(0, 4));
@@ -138,9 +156,9 @@ function desiredCalendarEntries({ from, to, assignments = [], employees = [], jo
     const employeeName = String(employee.name || employee.employeeName || "Mitarbeiter").trim();
     for (let year = fromYear; year <= toYear; year += 1) {
       const birthday = annualDate(employee.birthDate, year);
-      if (birthday) add({ key:`birthday:${employeeId}:${year}`, date:birthday, subject:`Geburtstag · ${employeeName}`, kind:"birthday", showAs:"free" });
+      if (birthday) add({ key:`birthday:${employeeId}:${year}`, date:birthday, subject:`Geburtstag · ${employeeName}`, kind:"birthday", showAs:"free", startTime:"07:00", endTime:"07:30" });
       const employmentStart = validDate(employee.employmentStart), anniversary = annualDate(employmentStart, year), years = year - Number(employmentStart.slice(0, 4));
-      if (anniversary && years >= 0) add({ key:`anniversary:${employeeId}:${year}`, date:anniversary, subject:years ? `${years}. Eintrittsjahrestag · ${employeeName}` : `Eintritt · ${employeeName}`, kind:"anniversary", showAs:"free" });
+      if (anniversary && years >= 0) add({ key:`anniversary:${employeeId}:${year}`, date:anniversary, subject:years ? `${years}. Eintrittsjahrestag · ${employeeName}` : `Eintritt · ${employeeName}`, kind:"anniversary", showAs:"free", startTime:"07:00", endTime:"07:30" });
     }
   }
 
@@ -156,7 +174,12 @@ function desiredCalendarEntries({ from, to, assignments = [], employees = [], jo
     const current = starts.get(jobId);
     if (!current || date < current.date) starts.set(jobId, { date, name:String(row.jobName || current?.name || jobId).trim() });
   }
-  for (const [jobId, start] of starts) add({ key:`job-start:${jobId}`, date:start.date, subject:`Baustellenstart · #${jobId} · ${start.name}`, kind:"job-start", showAs:"free" });
+  const startsPerDay = new Map();
+  for (const [jobId, start] of [...starts].sort((a, b) => a[1].date.localeCompare(b[1].date) || a[0].localeCompare(b[0], "de"))) {
+    const position = startsPerDay.get(start.date) || 0, startMinutes = (6 * 60) + (position * 15);
+    startsPerDay.set(start.date, position + 1);
+    add({ key:`job-start:${jobId}`, date:start.date, subject:`Baustellenstart · #${jobId} · ${start.name}`, kind:"job-start", showAs:"free", startTime:timeFromMinutes(startMinutes), endTime:timeFromMinutes(startMinutes + 15) });
+  }
 
   const unique = new Map();
   for (const row of desired) {
@@ -246,12 +269,13 @@ function installKristineSharedCalendar(app, deps = {}) {
   }
 
   function outboundPayload(row, creating) {
+    const allDay = row.allDay === true;
     const payload = {
       subject:row.subject,
       body:{ contentType:"text", content:`[${MANAGED_MARKER}:${row.syncId}]\nAutomatisch aus KRISTINE synchronisiert.` },
-      start:{ dateTime:`${row.date}T00:00:00`, timeZone:TIME_ZONE },
-      end:{ dateTime:`${addDays(row.date, 1)}T00:00:00`, timeZone:TIME_ZONE },
-      isAllDay:true,
+      start:{ dateTime:`${row.date}T${allDay ? "00:00:00" : `${row.startTime || "07:00"}:00`}`, timeZone:TIME_ZONE },
+      end:{ dateTime:`${allDay ? addDays(row.date, 1) : row.date}T${allDay ? "00:00:00" : `${row.endTime || "07:30"}:00`}`, timeZone:TIME_ZONE },
+      isAllDay:allDay,
       showAs:row.showAs,
     };
     if (creating) payload.transactionId = row.syncId;
@@ -259,7 +283,7 @@ function installKristineSharedCalendar(app, deps = {}) {
   }
 
   function outboundFingerprint(row) {
-    return crypto.createHash("sha256").update(JSON.stringify([row.subject, row.date, row.showAs])).digest("hex");
+    return crypto.createHash("sha256").update(JSON.stringify([row.subject, row.date, row.showAs, row.allDay === true, row.startTime || "", row.endTime || ""])).digest("hex");
   }
 
   async function reconcileOutbound({ from, to, events, assignments, employees, jobs }) {

@@ -29,6 +29,8 @@ async function call(routes, method, route) {
     { id:"sick-duplicate", date:"2026-09-16", cardType:"krank", employeeId:"edmund", employeeName:"Edmund Mock" },
     { id:"work-1", date:"2026-09-20", cardType:"site", jobId:"26080", jobName:"Fink Loos", employeeId:"edmund", employeeName:"Edmund Mock" },
     { id:"work-2", date:"2026-09-20", cardType:"site", jobId:"26080", jobName:"Fink Loos", employeeId:"manuel", employeeName:"Manuel Faes" },
+    { id:"holiday-1", date:"2026-09-17", cardType:"feiertag", employeeId:"edmund", employeeName:"Edmund Mock" },
+    { id:"holiday-duplicate", date:"2026-09-17", cardType:"feiertag", employeeId:"manuel", employeeName:"Manuel Faes" },
     { id:"shop-1", date:"2026-09-21", cardType:"werkstatt", employeeId:"manuel", employeeName:"Manuel Faes" },
   ]), "utf8");
 
@@ -38,7 +40,7 @@ async function call(routes, method, route) {
     if (String(url).includes("/calendarView?")) return new Response(JSON.stringify({ value:graphEvents }), { status:200, headers:{ "Content-Type":"application/json" } });
     if (method === "POST" && String(url).endsWith("/events")) {
       const payload = JSON.parse(options.body), id = `event-${graphEvents.length + 1}`;
-      graphEvents.push({ id, subject:payload.subject, start:payload.start, end:payload.end, isAllDay:true, categories:payload.categories, bodyPreview:payload.body.content });
+      graphEvents.push({ id, subject:payload.subject, start:payload.start, end:payload.end, isAllDay:payload.isAllDay, categories:payload.categories, bodyPreview:payload.body.content });
       writes.push({ method, payload });
       return new Response(JSON.stringify({ id }), { status:201, headers:{ "Content-Type":"application/json" } });
     }
@@ -57,15 +59,22 @@ async function call(routes, method, route) {
     dataDir:temporary, requireAdmin:() => true, accessToken:async () => "token", fetch:fetchMock, autoStart:false,
     today:() => "2026-09-12",
     readEmployees:async () => [{ id:"edmund", name:"Edmund Mock", active:true, birthDate:"1980-09-18", employmentStart:"2020-09-19" }],
-    readJobs:async () => [{ jobId:"26080", name:"Fink Loos", startDate:"2026-09-20" }],
+    readJobs:async () => [
+      { jobId:"26080", name:"Fink Loos", startDate:"2026-09-20" },
+      { jobId:"26081", name:"Zweite Baustelle", startDate:"2026-09-20" },
+    ],
     logger:{ warn(){} },
   });
 
   const first = await call(routes, "POST", "/kristine/api/shared-calendar/sync");
   assert.equal(first.statusCode, 200);
-  assert.equal(first.body.outboundCreated, 6, "sick leave, two birthdays, two anniversaries and one site start must be created");
-  assert.equal(writes.filter(row => row.method === "POST").length, 6);
-  assert.equal(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).length, 1, "site start must be independent of assigned employee count");
+  assert.equal(first.body.outboundCreated, 8, "sick leave, holiday, two birthdays, two anniversaries and two site starts must be created");
+  assert.equal(writes.filter(row => row.method === "POST").length, 8);
+  assert.equal(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).length, 2, "site start must be independent of assigned employee count");
+  assert.ok(graphEvents.filter(event => event.subject !== "Feiertag").every(event => event.isAllDay === false), "ordinary shared calendar entries must have a time");
+  assert.equal(graphEvents.find(event => event.subject === "Feiertag").isAllDay, true, "holidays must remain all-day events");
+  assert.ok(graphEvents.filter(event => !event.subject.startsWith("Baustellenstart") && event.subject !== "Feiertag").every(event => event.start.dateTime.endsWith("T07:00:00")), "personal notices must start at 07:00");
+  assert.deepEqual(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).map(event => event.start.dateTime.slice(11, 16)).sort(), ["06:00", "06:15"], "site starts on the same day must be staggered by 15 minutes");
   assert(graphEvents.some(event => event.subject === "Krank · Edmund Mock"));
   assert(graphEvents.some(event => event.subject === "Geburtstag · Edmund Mock"));
   assert(graphEvents.some(event => event.subject.includes("Eintrittsjahrestag · Edmund Mock")));
@@ -75,7 +84,7 @@ async function call(routes, method, route) {
   assert.equal(second.statusCode, 200);
   assert.equal(second.body.outboundCreated, 0, "second sync must not create duplicates");
   assert.equal(second.body.outboundUpdated, 0);
-  assert.equal(graphEvents.length, 6);
+  assert.equal(graphEvents.length, 8);
   const assignments = JSON.parse(await fsp.readFile(assignmentsFile, "utf8"));
   assert.equal(assignments.filter(row => row.source === "kristine_shared_calendar").length, 0, "managed Outlook entries must not be imported back into planning");
 
