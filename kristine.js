@@ -1953,7 +1953,13 @@ const open = taskId
         vehicle: String(a.vehicle || "").trim().slice(0, 100),
         from: String(a.from || "").slice(0, 5),
         to: String(a.to || "").slice(0, 5),
+        hours: Math.max(0, Number(a.hours || 0)),
         note: String(a.note || "").trim().slice(0, 500),
+        source: String(a.source || "").trim().slice(0, 80),
+        externalEventId: String(a.externalEventId || "").trim().slice(0, 500),
+        externalSeriesMasterId: String(a.externalSeriesMasterId || "").trim().slice(0, 500),
+        externalLastModified: String(a.externalLastModified || "").trim().slice(0, 80),
+        syncedAt: String(a.syncedAt || "").trim().slice(0, 80),
         });
       }).filter(a => a.date && a.employeeId && (a.jobId || a.jobName));
       await writeJson(ASSIGNMENTS, clean);

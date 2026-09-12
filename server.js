@@ -65,6 +65,7 @@ const { registerArchiveSearch } = require("./archive-search");
 const { registerTowerPlanning } = require("./tower-planning");
 const { installOutlookCalendar } = require("./kristine-outlook-calendar");
 const { installKristineSharedMailbox } = require("./kristine-shared-mailbox");
+const { installKristineSharedCalendar } = require("./kristine-shared-calendar");
 const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 const { parseMsg, getMsgAttachment } = require("./kristine-msg-reader");
 const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
@@ -1760,6 +1761,13 @@ installKristineSharedMailbox(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   accessToken: kristineOutlook.accessToken,
+  logger: console,
+});
+installKristineSharedCalendar(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  accessToken: kristineOutlook.accessToken,
+  readEmployees,
   logger: console,
 });
 
