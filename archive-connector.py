@@ -3913,6 +3913,10 @@ def search_projects(terms, include_metrics=True, limit=100):
             p.sBaustelle,
             p.sBauvorhaben,
             p.KundenIndex,
+            p.bAktiv,
+            p.bArchiv,
+            p.bIstAbgeschlossen,
+            p.sPrjStatus,
             k.lKundenNr,
             k.sFirma,
             k.sName,
@@ -3935,6 +3939,10 @@ def search_projects(terms, include_metrics=True, limit=100):
             p.sBaustelle,
             p.sBauvorhaben,
             p.KundenIndex,
+            p.bAktiv,
+            p.bArchiv,
+            p.bIstAbgeschlossen,
+            p.sPrjStatus,
             k.lKundenNr,
             k.sFirma,
             k.sName,
@@ -3949,7 +3957,25 @@ def search_projects(terms, include_metrics=True, limit=100):
     rows = cur.fetchall()
     con.close()
 
-    result = [_project_row_to_dict(row) for row in rows]
+    result = []
+    for row in rows:
+        item = _project_row_to_dict(row)
+        is_hidden = bool(row.bArchiv) or (row.bAktiv is not None and not bool(row.bAktiv))
+        is_completed = bool(row.bIstAbgeschlossen)
+        status_parts = []
+        if is_hidden:
+            status_parts.append("ausgeblendet")
+        if is_completed:
+            status_parts.append("abgeschlossen")
+        ww_status = str(row.sPrjStatus or "").strip()
+        if ww_status and ww_status.lower() not in status_parts:
+            status_parts.append(ww_status)
+        item.update({
+            "hidden": is_hidden,
+            "completed": is_completed,
+            "wwStatus": " · ".join(status_parts),
+        })
+        result.append(item)
     if include_metrics:
         _attach_project_metrics(result)
     return result
@@ -8105,7 +8131,8 @@ def project_search_api():
         terms = [value for value in query.split() if value]
         rows = search_projects(terms, include_metrics=False, limit=request.args.get("limit", 250))
         for row in rows:
-            row["wwStatus"] = "Gesamtsuche · Status in WW prüfen"
+            if not row.get("wwStatus"):
+                row["wwStatus"] = "in WW vorhanden"
             row["orderDate"] = row.get("lastDate") or row.get("firstDate")
         return jsonify({
             "ok": True,

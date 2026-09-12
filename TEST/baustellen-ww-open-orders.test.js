@@ -12,18 +12,25 @@ for(const filter of ["bAktiv", "bArchiv", "bIstAbgeschlossen", "AuftragErteilt"]
 }
 assert.match(brain,/@app\.get\("\/project\/search"\)/);
 assert.match(brain,/Abschlagsrechnungen bleiben offen/);
-assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-project-search-5/);
+assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-project-search-7/);
 assert.match(ui,/Mit vorhandener Akte verbinden/);
-assert.match(ui,/Mit anderer Akte verbinden/);
+assert.match(ui,/Weitere Akte verschmelzen/);
+assert.match(ui,/WW-Akte ansehen/);
+assert.match(ui,/KRISTINE öffnen/);
+assert.match(ui,/\/project\/documents\?projectIndex=/);
+assert.match(ui,/brainUrl\("\/pdf"/);
 assert.match(ui,/data-wwi-link/);
 assert.match(ui,/\/admin\/api\/job\/\$\{encodeURIComponent\(sourceJobId\)\}\/merge/);
 assert.match(ui,/ZUSAMMEN/);
+assert.match(ui,/Alles verschmelzen/);
 for(const text of ["WinWorker-Aufträge übernehmen","Aus WW übernehmen","Ausgewählte übernehmen","bereits da","wwProjectIndex","wwProjectNumber"]){
   assert.ok(ui.includes(text),`Auswahl enthält ${text}`);
 }
 for(const text of ["Ganz WW durchsuchen","Offene anzeigen","/project/search?q="]){
   assert.ok(ui.includes(text),`Gesamtsuche enthält ${text}`);
 }
+assert.match(ui,/einschließlich ausgeblendeter Aufträge/);
+assert.match(brain,/"hidden": is_hidden/);
 assert.match(ui,/visibleRows\(\)\.length===0/);
 assert.match(ui,/setTimeout\(searchAll,450\)/);
 assert.equal((brain.match(/"\/project\/search"/g)||[]).length>=3,true,"WW-Gesamtsuche ist für KRISTINE und CORS freigegeben");
