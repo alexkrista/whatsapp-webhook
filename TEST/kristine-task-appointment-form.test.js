@@ -12,6 +12,11 @@ assert.match(html, /id="tAppointmentDate"[^>]*type="date"/, "appointment date is
 assert.match(html, /id="tAppointmentFrom"[^>]*type="time"/, "appointment start is missing");
 assert.match(html, /id="tAppointmentTo"[^>]*type="time"/, "appointment end is missing");
 assert.match(html, /id="tCalendarAlex"[^>]*checked disabled/, "Alex must be selected in V1");
+assert.match(html, /id="tAppointmentPhotoDrop"[^>]*role="button"/, "new appointment form needs a photo drop zone");
+assert.match(html, /id="tAppointmentPhotoInput"[^>]*accept="image\/\*"[^>]*multiple/, "appointment form must support multiple photos");
+assert.match(html, /drop\.addEventListener\('drop',event=>addPendingTaskAppointmentPhotos/, "appointment form must accept dropped photos");
+assert.match(html, /uploadPendingTaskAppointmentPhotos\(newTask\)/, "selected photos must upload after the task has an ID");
+assert.match(html, /visitProtocol:isAppointment\?\{files:\[\]\}:null/, "new appointments must retain offer-ready photo metadata");
 assert.match(html, /selectedTaskType\(\)==='Termin'/, "field switch must only target appointments");
 assert.match(html, /dueDate:isAppointment\?'':tDueDate\.value/, "non-appointment due dates must remain unchanged");
 assert.match(html, /await persistTasks\(\);\s*let outlookResult=null;\s*if\(isAppointment\)/, "internal task must save before Outlook sync");
@@ -21,5 +26,8 @@ assert.match(html, /Outlook-Termin erstellt ✅/, "success status is missing");
 assert.match(html, /Outlook noch nicht synchronisiert/, "retry status is missing");
 assert.match(calendar, /Termin ausgemacht/, "saved appointments must show information instead of opening a second appointment form");
 assert.match(calendar, /saveButton\.disabled=true;saveButton\.textContent="Bereits gespeichert ✓"/, "saved appointment must not remain clickable");
+assert.match(calendar, /id="ktcPhotoDrop"[^>]*role="button"/, "existing-task appointment modal needs a photo drop zone");
+assert.match(calendar, /uploadAppointmentPhotos\(event\.dataTransfer\?\.files\)/, "existing-task appointment modal must accept dropped photos");
+assert.match(calendar, /kommt in die Angebotsmappe mit/, "photo handoff to the offer workflow must be explicit");
 
-console.log("OK: Termin fields and additive Outlook save are wired into Neue Aufgabe");
+console.log("OK: Termin fields, photo drop and additive Outlook/offer save are wired into Neue Aufgabe");

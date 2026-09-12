@@ -165,7 +165,7 @@
 (function loadTaskCalendar(){
   if(document.querySelector('script[data-krista-task-calendar]'))return;
   const s=document.createElement('script');
-  s.src='/public/ui/kristine-task-calendar.js?v=20260912-job-workflow-v10';
+  s.src='/public/ui/kristine-task-calendar.js?v=20260912-appointment-photo-drop-job-workflow-v11';
   s.defer=true;
   s.setAttribute('data-krista-task-calendar','1');
   document.head.appendChild(s);
