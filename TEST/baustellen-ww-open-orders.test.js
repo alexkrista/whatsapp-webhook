@@ -10,8 +10,9 @@ assert.match(brain,/@app\.get\("\/project\/open-orders"\)/);
 for(const filter of ["bAktiv", "bArchiv", "bIstAbgeschlossen", "bAbgerechnet", "AuftragErteilt"]){
   assert.ok(brain.includes(filter),`WW-Offenfilter enthält ${filter}`);
 }
-assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-open-orders-2/);
+assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-open-orders-3/);
 assert.match(ui,/Mit vorhandener Akte verbinden/);
+assert.match(ui,/Mit anderer Akte verbinden/);
 assert.match(ui,/data-wwi-link/);
 assert.match(ui,/\/admin\/api\/job\/\$\{encodeURIComponent\(sourceJobId\)\}\/merge/);
 assert.match(ui,/ZUSAMMEN/);
