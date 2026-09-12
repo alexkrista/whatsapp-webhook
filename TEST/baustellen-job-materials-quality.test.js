@@ -13,6 +13,6 @@ assert.match(chronik, /admin\/api\/paint\/job-materials\?jobId=/, "Baustellen-Ma
 assert.match(chronik, /Mischmaschine/, "Mischmaschinen-History wird als Materialquelle sichtbar");
 assert.match(chronik, /Lager → Baustelle/, "Einlagerung auf Baustelle wird als Materialquelle sichtbar");
 assert.match(chronik, /state\.surface=collectSurface\(regies,documents,j\.surfaceMaterialMeta\|\|\[\],jobMaterials\)/, "Geladene Baustellen-Materialien fließen in Qualität & Oberfläche ein");
-assert.match(topbar, /baustellen-chronik\.js\?v=20260910-job-materials-1/, "Cache-Version lädt die neue Qualitätsansicht");
+assert.match(topbar, /baustellen-chronik\.js\?v=20260912-lg-surface-1/, "Cache-Version lädt die neue Qualitätsansicht");
 
 console.log("OK: Baustellenmaterial aus Lager und Misch-History erscheint in Qualität & Oberfläche.");
