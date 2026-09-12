@@ -10,6 +10,7 @@
   const contactName=row=>row.company||row.customer||[row.firstName,row.lastName].filter(Boolean).join(" ")||displayName(row);
   const formatDate=value=>value?new Date(String(value).slice(0,10)+"T12:00:00").toLocaleDateString("de-AT"):"–";
   const same=value=>String(value||"").trim().toLowerCase();
+  const searchText=value=>same(value).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();
 
   function ensureUi(){
     if(document.getElementById("wwOrderImport"))return;
@@ -25,7 +26,7 @@
   function existingKeys(){const keys=new Set();for(const job of existingJobs){keys.add(`n:${same(job.jobId)}`);if(job.wwProjectNumber)keys.add(`n:${same(job.wwProjectNumber)}`);if(Number(job.wwProjectIndex)>0)keys.add(`i:${Number(job.wwProjectIndex)}`)}return keys}
   function isExisting(row,keys=existingKeys()){return keys.has(`n:${same(row.projectNumber)}`)||keys.has(`i:${Number(row.projectIndex)}`)}
   function existingJob(row){return existingJobs.find(job=>same(job.jobId)===same(row.projectNumber)||same(job.wwProjectNumber)===same(row.projectNumber)||(Number(row.projectIndex)>0&&Number(job.wwProjectIndex)===Number(row.projectIndex)))||null}
-  function visibleRows(){const q=same(document.getElementById("wwiSearch")?.value);return wwProjects.filter(row=>!q||[row.projectNumber,displayName(row),row.company,row.customer,row.address,row.city,row.wwStatus].some(value=>same(value).includes(q)))}
+  function visibleRows(){const terms=searchText(document.getElementById("wwiSearch")?.value).split(/\s+/).filter(Boolean);return wwProjects.filter(row=>{if(!terms.length)return true;const haystack=searchText([row.projectNumber,displayName(row),row.company,row.customer,row.address,row.city,row.wwStatus].join(" "));return terms.every(term=>haystack.includes(term))})}
   function render(){
     const list=document.getElementById("wwiList"),keys=existingKeys(),rows=visibleRows();
     const cards=rows.map(row=>{
