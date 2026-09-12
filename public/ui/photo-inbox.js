@@ -2,7 +2,16 @@
  'use strict';
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const url=p=>{const u=new URL(p,location.origin),token=new URLSearchParams(location.search).get('token');if(token)u.searchParams.set('token',token);return u.pathname+u.search};
- const api=async(p,options={})=>{const r=await fetch(url(p),options),d=await r.json();if(!r.ok)throw Error(d.error||'Fotoeingang konnte nicht geladen werden');return d};
+ const api=async(p,options={})=>{
+  for(let attempt=0;attempt<3;attempt++){
+   let r;try{r=await fetch(url(p),options)}catch(error){if(attempt<2){await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));continue}throw Error('Verbindung unterbrochen. Deine Auswahl bleibt erhalten. Bitte erneut bestätigen.')}
+   const raw=await r.text();let data;try{data=JSON.parse(raw)}catch{}
+   if([502,503,504].includes(r.status)&&attempt<2){await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));continue}
+   if([401,403].includes(r.status))throw Error('Anmeldung abgelaufen. Bitte KRISTINE erneut öffnen.');
+   if(!data||!r.ok)throw Error(data?.error||'Der Server konnte die Anfrage gerade nicht abschließen (HTTP '+r.status+'). Deine Auswahl bleibt erhalten. Bitte erneut versuchen.');
+   return data;
+  }
+ };
  let jobs=[],items=[],historyImport=null;
  const section=document.createElement('section');section.id='photoInbox';section.className='panel recent-panel';section.innerHTML='<div class="recent-head"><h2>Fotos zuordnen <span data-count></span></h2><button class="button" data-refresh>Neu laden</button></div><p>Baustelle aus der Stempelung vorschlagen lassen, prüfen und bestätigen. Erst danach erscheinen neue Mitarbeiterfotos in der Baustellengalerie.</p><label><input type="checkbox" data-trash> Papierkorb anzeigen</label><p data-history></p><details data-missing hidden><summary>Fehlende Dateien anzeigen</summary><ul></ul></details><datalist id="photoInboxJobs"></datalist><div data-groups></div>';
  document.querySelector('main.shell').appendChild(section);
