@@ -525,7 +525,41 @@ async function listJobKnowledge({ dataDir, jobId }) {
   };
 }
 
-function registerMediaMigration(app, { dataDir, requireAdmin }) {
+async function prepareSharedPhotos({dataDir,jobId,files}) {
+  if (!Array.isArray(files) || !files.length || files.length > 20) throw Error("Bitte 1 bis 20 Fotos auswählen.");
+  const available=await listJobMedia({dataDir,jobId}), attachments=[];let total=0;
+  for(const file of [...new Set(files)]) {
+    const item=available.find(row=>row.file===file);
+    if(!item || item.kind!=="photo")throw Error("Die Auswahl enthält kein gültiges Foto dieser Baustelle. Videos bitte separat teilen.");
+    const full=path.resolve(dataDir,item.file);
+    if(!full.startsWith(path.resolve(dataDir)+path.sep))throw Error("Ungültige Datei.");
+    if((await fsp.stat(full)).size>40*1024*1024)throw Error("Ein Foto ist zu groß zum Teilen.");
+    let content=await fsp.readFile(full),filename=item.filename;
+    if(sharp){content=await sharp(content).rotate().resize({width:1600,height:1600,fit:"inside",withoutEnlargement:true}).jpeg({quality:80}).toBuffer();filename=path.parse(filename).name+".jpg";}
+    total+=content.length;if(total>12*1024*1024)throw Error("Die Fotos sind zusammen zu groß. Bitte weniger auswählen.");
+    attachments.push({filename:`${attachments.length+1}_${filename}`,content,contentType:/\.png$/i.test(filename)?"image/png":/\.webp$/i.test(filename)?"image/webp":"image/jpeg"});
+  }
+  return attachments;
+}
+
+function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
+  app.post("/admin/api/job/:jobId/media/email",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const to=String(req.body?.to||"").trim(),subject=String(req.body?.subject||"Baustellenfotos").trim();
+      if(!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(to)||to.length>254)throw Error("Bitte eine gültige Empfänger-E-Mail eingeben.");
+      if(/[\r\n]/.test(subject)||subject.length>200)throw Error("Ungültiger Betreff.");
+      if(typeof sendPhotoMail!=="function")throw Error("E-Mail-Versand ist nicht eingerichtet.");
+      const attachments=await prepareSharedPhotos({dataDir,jobId:req.params.jobId,files:req.body?.files});
+      await sendPhotoMail({to,subject,text:String(req.body?.text||"").slice(0,5000),attachments});
+      res.json({ok:true,count:attachments.length});
+    }catch(error){res.status(400).json({ok:false,error:String(error.message||error)})}
+  });
+  app.get("/admin/api/job/:jobId/media/share-file",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{const [file]=await prepareSharedPhotos({dataDir,jobId:req.params.jobId,files:[req.query.file]});res.type(file.contentType);res.setHeader("Cache-Control","private, no-store");res.send(file.content)}
+    catch(error){res.status(400).json({ok:false,error:String(error.message||error)})}
+  });
   app.post("/admin/api/job/:jobId/media/reassign", async (req,res) => {
     if (!requireAdmin(req,res)) return;
     try { res.json({ok:true,...await reassignJobMedia({dataDir,jobId:req.params.jobId,targetJobId:req.body?.targetJobId,files:req.body?.files})}); }
@@ -634,4 +668,4 @@ function registerMediaMigration(app, { dataDir, requireAdmin }) {
   });
 }
 
-module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge, saveJobPhoto, reassignJobMedia };
+module.exports = { migrateLegacyMediaForDate, registerMediaMigration, listJobMedia, listJobKnowledge, saveJobPhoto, reassignJobMedia, prepareSharedPhotos };
