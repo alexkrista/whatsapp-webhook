@@ -77,8 +77,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.29";
-const APP_BUILD = "0031.34-photo-partial";
+const APP_VERSION = "3.5.30";
+const APP_BUILD = "0031.35-photo-job-label";
 const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-12";
 
