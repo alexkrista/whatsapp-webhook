@@ -1763,11 +1763,21 @@ installKristineSharedMailbox(app, {
   accessToken: kristineOutlook.accessToken,
   logger: console,
 });
+async function readSharedCalendarJobs() {
+  const entries = await fsp.readdir(DATA_DIR, { withFileTypes:true }).catch(() => []), jobs = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith("_") || !isSafeJobId(entry.name) || entry.name === "unknown") continue;
+    const meta = await readJobMeta(entry.name);
+    jobs.push({ jobId:entry.name, name:meta.name || entry.name, startDate:meta.startDate || "", status:meta.status || "" });
+  }
+  return jobs;
+}
 installKristineSharedCalendar(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   accessToken: kristineOutlook.accessToken,
   readEmployees,
+  readJobs: readSharedCalendarJobs,
   logger: console,
 });
 

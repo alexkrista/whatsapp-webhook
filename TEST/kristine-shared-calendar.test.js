@@ -24,7 +24,7 @@ async function call(routes, method, route) {
   const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), "kristine-shared-calendar-test-"));
   const assignmentsFile = path.join(temporary, "_kristine", "assignments.json");
   await fsp.mkdir(path.dirname(assignmentsFile), { recursive:true });
-  await fsp.writeFile(assignmentsFile, JSON.stringify([{ id:"manual", date:"2026-09-14", cardType:"site", jobId:"26001", jobName:"Baustelle", employeeId:"edmund", employeeName:"Edmund Mock" }]), "utf8");
+  await fsp.writeFile(assignmentsFile, JSON.stringify([{ id:"manual", date:"2026-09-14", cardType:"werkstatt", jobId:"__werkstatt__", jobName:"Werkstatt", employeeId:"edmund", employeeName:"Edmund Mock" }]), "utf8");
   let events = [
     { id:"vacation-1", subject:"Urlaub – Edmund Mock", isAllDay:true, start:{ dateTime:"2026-09-14T00:00:00" }, end:{ dateTime:"2026-09-16T00:00:00" }, lastModifiedDateTime:"2026-09-12T09:00:00Z", categories:[] },
     { id:"vacation-unknown", subject:"Urlaub – Unbekannt", isAllDay:true, start:{ dateTime:"2026-09-17T00:00:00" }, end:{ dateTime:"2026-09-18T00:00:00" }, categories:[] },
@@ -40,7 +40,7 @@ async function call(routes, method, route) {
   });
 
   const first = await call(routes, "POST", "/kristine/api/shared-calendar/sync");
-  assert.equal(first.statusCode, 200);
+  assert.equal(first.statusCode, 200, first.body?.error);
   assert.equal(first.body.importedCount, 2, "two weekdays from the all-day vacation must be imported");
   assert.equal(first.body.unmatched.length, 1);
   let rows = JSON.parse(await fsp.readFile(assignmentsFile, "utf8"));
