@@ -40,7 +40,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -68,7 +68,7 @@ def protect_remote_archive_access():
     # krista_token an den Brain-Rechner weitergegeben.
     supplied_query_token = str(request.args.get("krista_token") or "")
     if (
-        request.path in {"/project/address-search", "/project/address-projects", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}
+        request.path in {"/project/address-search", "/project/address-projects", "/project/open-orders", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}
         and KRISTINE_ADMIN_TOKEN
         and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
     ):
@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/documents", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/documents", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -3952,6 +3952,112 @@ def search_projects(terms, include_metrics=True, limit=100):
     result = [_project_row_to_dict(row) for row in rows]
     if include_metrics:
         _attach_project_metrics(result)
+    return result
+
+
+def open_order_projects(query="", limit=500):
+    """Aktive, noch nicht abgeschlossene WW-Aufträge für die KRISTINE-Auswahl."""
+    limit = max(1, min(int(limit or 500), 1000))
+    needle = str(query or "").strip()
+    conditions = [
+        "ISNULL(p.bAktiv, 1) = 1",
+        "ISNULL(p.bArchiv, 0) = 0",
+        "ISNULL(p.bIstAbgeschlossen, 0) = 0",
+        "ISNULL(p.bAbgerechnet, 0) = 0",
+        "(ISNULL(p.AuftragErteilt, 0) = 1 OR p.dzAuftragErteilt IS NOT NULL OR ISNULL(p.bInArbeit, 0) = 1)",
+        "NULLIF(LTRIM(RTRIM(ISNULL(p.sProjektNummer, ''))), '') IS NOT NULL",
+    ]
+    params = []
+    if needle:
+        like = f"%{needle}%"
+        conditions.append("""
+            (
+                ISNULL(p.sProjektNummer, '') LIKE ?
+                OR ISNULL(p.sProjekt, '') LIKE ?
+                OR ISNULL(p.sBaustelle, '') LIKE ?
+                OR ISNULL(p.sBauvorhaben, '') LIKE ?
+                OR ISNULL(k.sFirma, '') LIKE ?
+                OR ISNULL(k.sName, '') LIKE ?
+                OR ISNULL(k.sVorname, '') LIKE ?
+                OR ISNULL(k.sStrasse, '') LIKE ?
+                OR ISNULL(k.sOrt, '') LIKE ?
+            )
+        """)
+        params.extend([like] * 9)
+
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute(f"""
+        SELECT TOP {limit}
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum,
+            p.sPrjStatus,
+            p.AuftragErteilt,
+            p.bInArbeit,
+            COALESCE(p.dzAuftragErteilt, p.dzStart, p.Geändert, p.Aufgenommen) AS Auftragsdatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE {" AND ".join(conditions)}
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            p.sPrjStatus,
+            p.AuftragErteilt,
+            p.bInArbeit,
+            p.dzAuftragErteilt,
+            p.dzStart,
+            p.Geändert,
+            p.Aufgenommen
+        ORDER BY
+            COALESCE(p.dzAuftragErteilt, p.dzStart, p.Geändert, p.Aufgenommen) DESC,
+            p.ProjektIndex DESC
+    """, params).fetchall()
+    con.close()
+
+    # Projektzweige können dieselbe sichtbare Projektnummer tragen. In der
+    # Auswahlliste erscheint jede WW-Auftragsnummer bewusst nur einmal.
+    result = []
+    seen_numbers = set()
+    for row in rows:
+        item = _project_row_to_dict(row)
+        number_key = str(item.get("projectNumber") or "").strip().lower()
+        if not number_key or number_key in seen_numbers:
+            continue
+        seen_numbers.add(number_key)
+        item.update({
+            "wwStatus": str(row.sPrjStatus or "").strip(),
+            "orderGranted": bool(row.AuftragErteilt),
+            "inProgress": bool(row.bInArbeit),
+            "orderDate": clean_date(row.Auftragsdatum),
+        })
+        result.append(item)
     return result
 
 
@@ -7966,6 +8072,20 @@ def project_address_search_api():
             "addresses": rows,
             "count": len(rows),
             "sourceOfTruth": "WinWorker Projekte + Kunden + Belegnummern",
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/project/open-orders")
+def project_open_orders_api():
+    try:
+        rows = open_order_projects(request.args.get("q"), request.args.get("limit", 500))
+        return jsonify({
+            "ok": True,
+            "projects": rows,
+            "count": len(rows),
+            "sourceOfTruth": "WinWorker · aktive, nicht abgeschlossene Aufträge",
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
