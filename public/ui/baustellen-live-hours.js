@@ -1,8 +1,9 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-10-project-archive-repair-4";
-  const LOCAL_BRAIN_HOURS="http://127.0.0.1:5051/api/outgoing/project-hours";
+  const VERSION="2026-09-12-remote-brain-1";
+  const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
+  const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
   let bootstrap={};
@@ -28,9 +29,21 @@
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function loadWwHours(jobId){
-    const headers={Accept:"application/json","Content-Type":"application/json"};if(token)headers["X-Krista-Token"]=token;
-    const r=await fetch(LOCAL_BRAIN_HOURS,{method:"POST",headers,body:JSON.stringify({projectNumber:String(jobId)})});
-    const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);
+    let d,lastError=new Error("WinWorker-Stunden sind nicht erreichbar.");
+    for(const host of BRAIN_HOURS_HOSTS){
+      try{
+        const headers={Accept:"application/json","Content-Type":"application/json"};
+        if(host.includes("127.0.0.1")){if(token)headers["X-Krista-Token"]=token}
+        else{
+          const auth=await api(`/admin/api/brain-permit?path=${encodeURIComponent(BRAIN_HOURS_PATH)}`);
+          headers["X-Krista-Brain-Permit"]=auth.permit;
+        }
+        const r=await fetch(host+BRAIN_HOURS_PATH,{method:"POST",headers,body:JSON.stringify({projectNumber:String(jobId)})});
+        const t=await r.text();try{d=JSON.parse(t)}catch{d=null}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);
+        break;
+      }catch(error){lastError=error;d=null}
+    }
+    if(!d?.ok)throw lastError;
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
     for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}

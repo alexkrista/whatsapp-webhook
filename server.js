@@ -334,6 +334,36 @@ function requireAdmin(req, res) {
   return true;
 }
 
+const BRAIN_PERMIT_PATHS = new Set([
+  "/api/outgoing/project-hours",
+  "/project/open-orders",
+  "/project/search",
+  "/project/documents",
+  "/pdf",
+]);
+function createBrainPermit(pathname) {
+  const cleanPath = String(pathname || "");
+  if (!ADMIN_TOKEN || !BRAIN_PERMIT_PATHS.has(cleanPath)) return "";
+  const expiresAt = Math.floor(Date.now() / 1000) + 120;
+  const nonce = crypto.randomBytes(9).toString("base64url");
+  const signature = crypto.createHmac("sha256", ADMIN_TOKEN)
+    .update(`${cleanPath}\n${expiresAt}\n${nonce}`)
+    .digest("base64url");
+  return `${expiresAt}.${nonce}.${signature}`;
+}
+
+app.get("/admin/api/brain-permit", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const pathname = String(req.query.path || "");
+  if (!BRAIN_PERMIT_PATHS.has(pathname)) {
+    return res.status(400).json({ ok: false, error: "Brain-Zugriff nicht freigegeben." });
+  }
+  const permit = createBrainPermit(pathname);
+  if (!permit) return res.status(503).json({ ok: false, error: "Brain-Verbindung ist nicht eingerichtet." });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, path: pathname, permit, expiresInSeconds: 120 });
+});
+
 function fileSizeMB(bytes) {
   return `${(Number(bytes || 0) / 1024 / 1024).toFixed(1)} MB`;
 }

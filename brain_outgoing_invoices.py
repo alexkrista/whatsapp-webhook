@@ -1465,7 +1465,7 @@ def install(ns):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, X-Krista-Brain-Permit, Content-Type"
             response.headers["Access-Control-Allow-Private-Network"] = "true"
             response.headers["Access-Control-Max-Age"] = "600"
         response.headers["Cache-Control"] = "no-store"
@@ -1525,7 +1525,8 @@ def install(ns):
                 supplied = str(request.headers.get("X-Krista-Token") or "")
                 if not expected:
                     return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
-                if not hmac.compare_digest(supplied, expected):
+                permit_ok = bool(request.environ.get("kristine.brain_permit_ok"))
+                if not permit_ok and not hmac.compare_digest(supplied, expected):
                     return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
             data = request.get_json(silent=True) or {}
             project_number = str(data.get("projectNumber") or "").strip()

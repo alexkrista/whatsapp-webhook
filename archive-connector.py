@@ -40,11 +40,30 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
     return (request.remote_addr or "") in {"127.0.0.1", "::1"}
+
+
+def _valid_brain_permit(pathname):
+    permit = str(request.headers.get("X-Krista-Brain-Permit") or request.args.get("brain_permit") or "")
+    if not permit or not KRISTINE_ADMIN_TOKEN:
+        return False
+    try:
+        expires_raw, nonce, supplied = permit.split(".", 2)
+        expires_at = int(expires_raw)
+    except (TypeError, ValueError):
+        return False
+    now = int(datetime.now().timestamp())
+    if expires_at < now - 5 or expires_at > now + 300 or not nonce:
+        return False
+    message = f"{pathname}\n{expires_at}\n{nonce}".encode("utf-8")
+    expected = __import__("base64").urlsafe_b64encode(
+        hmac.new(KRISTINE_ADMIN_TOKEN.encode("utf-8"), message, hashlib.sha256).digest()
+    ).decode("ascii").rstrip("=")
+    return hmac.compare_digest(supplied, expected)
 
 
 @app.before_request
@@ -52,6 +71,13 @@ def protect_remote_archive_access():
     # Bestehende lokale KRISTINE-Aufrufe auf 127.0.0.1 bleiben unverändert.
     if _request_is_local():
         return None
+
+    if request.path in {"/api/outgoing/project-hours", "/project/open-orders", "/project/search", "/project/documents", "/pdf"}:
+        if request.method == "OPTIONS":
+            return None
+        if _valid_brain_permit(request.path):
+            request.environ["kristine.brain_permit_ok"] = True
+            return None
 
     # KRISTINE ACCESS CONTROL V3 AUTH
     # Physisch nur am Tailscale-Listener; zusätzlich KRISTINE Admin-Token.
@@ -118,13 +144,13 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "X-Krista-Token, X-Krista-Brain-Permit, Content-Type"
             response.headers["Access-Control-Max-Age"] = "600"
 
     return response
