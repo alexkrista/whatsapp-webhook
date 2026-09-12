@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-04-regie-workbench";
+  const VERSION="2026-09-12-shared-mailbox";
   const PENDING_KEY="kristaInboxPendingTaskItems";
   const ROUTES={task:"Aufgabe",invoice:"Rechnung",filing:"Ablage",appointment:"Termin",order:"Bestellung"};
   let current=null;
@@ -93,8 +93,9 @@
   function showAnalysis(item){
     current=item;routing=false;
     const a=item.analysis||{},rec=a.recommended||"filing",pct=Math.round(Number(a.confidence||0)*100);
+    const attachments=(item.mail?.attachments||[]).filter(x=>!x.isInline).map(x=>`<a target="_blank" rel="noopener" href="${tokenUrl(`/kristine/api/inbox/${encodeURIComponent(item.id)}/msg-attachment/${encodeURIComponent(x.index)}`)}">📎 ${esc(x.name||"Anlage")}</a>`).join("<br>");
     document.getElementById("kristaInboxFile").textContent=item.name;
-    document.getElementById("kristaInboxContent").innerHTML=`<div class="krista-inbox-reco"><strong>KRISTINE empfiehlt: ${esc(ROUTES[rec]||"Ablage")}</strong> · ${pct}%<br><span class="small">${esc((a.reasons||[]).join(" · ")||"Inhalt wurde analysiert.")}</span></div><div class="krista-inbox-meta"><div><strong>Betreff</strong><br>${esc(a.subject||"–")}</div><div><strong>Fällig/Termin</strong><br>${esc(a.dueDate||"–")}</div><div><strong>Kontakt</strong><br>${esc(a.contactName||"–")}</div><div><strong>Telefon</strong><br>${esc(a.contactPhone||"–")}</div><div><strong>E-Mail</strong><br>${esc(a.contactEmail||"–")}</div><div><strong>Erkannt</strong><br>${esc(a.product||a.colorName||"–")}</div></div><div class="krista-inbox-assignee"><label><strong>Aufgabe für</strong></label><select id="kristaInboxAssignee">${assigneeOptionsHtml()}</select><div class="small" style="margin-top:5px">Standard: Alexander Krista · bei Bedarf ändern.</div></div><div class="krista-inbox-routes">${Object.keys(ROUTES).map(r=>`<button type="button" class="${r===rec?'recommended':''}" onclick="return window.KristineInboxV2.route('${r}',event)">${ROUTES[r]}</button>`).join("")}</div><div id="kristaInboxRouteStatus" class="krista-inbox-route-status"></div>${a.excerpt?`<div class="krista-inbox-preview">${esc(a.excerpt)}</div>`:""}`;
+    document.getElementById("kristaInboxContent").innerHTML=`<div class="krista-inbox-reco"><strong>KRISTINE empfiehlt: ${esc(ROUTES[rec]||"Ablage")}</strong> · ${pct}%<br><span class="small">${esc((a.reasons||[]).join(" · ")||"Inhalt wurde analysiert.")}</span></div><div class="krista-inbox-meta"><div><strong>Betreff</strong><br>${esc(a.subject||"–")}</div><div><strong>Fällig/Termin</strong><br>${esc(a.dueDate||"–")}</div><div><strong>Kontakt</strong><br>${esc(a.contactName||"–")}</div><div><strong>Telefon</strong><br>${esc(a.contactPhone||"–")}</div><div><strong>E-Mail</strong><br>${esc(a.contactEmail||"–")}</div><div><strong>Erkannt</strong><br>${esc(a.product||a.colorName||"–")}</div></div>${attachments?`<div class="krista-inbox-pending"><strong>Anlagen</strong><br>${attachments}</div>`:""}<div class="krista-inbox-assignee"><label><strong>Aufgabe für</strong></label><select id="kristaInboxAssignee">${assigneeOptionsHtml()}</select><div class="small" style="margin-top:5px">Standard: Alexander Krista · bei Bedarf ändern.</div></div><div class="krista-inbox-routes">${Object.keys(ROUTES).map(r=>`<button type="button" class="${r===rec?'recommended':''}" onclick="return window.KristineInboxV2.route('${r}',event)">${ROUTES[r]}</button>`).join("")}</div><div id="kristaInboxRouteStatus" class="krista-inbox-route-status"></div>${a.excerpt?`<div class="krista-inbox-preview">${esc(a.excerpt)}</div>`:""}`;
     document.getElementById("kristaInboxModalBg").classList.add("open");
   }
   function routeStatus(text,error=false){const el=document.getElementById("kristaInboxRouteStatus");if(!el)return;el.textContent=text||"";el.className="krista-inbox-route-status "+(text?(error?"error":"show"):"")}
@@ -167,6 +168,8 @@
     document.addEventListener("dragleave",e=>{if(e.dataTransfer?.types?.includes("Files"))dragOff()});
     document.addEventListener("dragover",e=>{if(e.dataTransfer?.types?.includes("Files")){e.preventDefault();e.dataTransfer.dropEffect="copy"}});
     document.addEventListener("drop",e=>{if(e.dataTransfer?.files?.length){e.preventDefault();dragDepth=0;document.getElementById("kristaInboxDrop")?.classList.remove("open");importFiles(e.dataTransfer.files)}});
+    const requested=new URLSearchParams(location.search).get("inbox");
+    if(requested)api(`/kristine/api/inbox/${encodeURIComponent(requested)}`).then(result=>showAnalysis(result.item)).catch(error=>alert("Eingang: "+error.message));
     console.info("KRISTINE Eingang V2",VERSION);
   }
 

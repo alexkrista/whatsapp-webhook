@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
@@ -253,10 +254,72 @@ function analyzeInboxBuffer(buffer, filename, mimeType) {
   return { text: decoded.text, analysis, mail: decoded.mail };
 }
 
+function inboxStorage(dataDir) {
+  const root = path.join(dataDir, "_kristine", "inbox");
+  return { root, items:path.join(root, "items"), files:path.join(root, "files") };
+}
+
+async function importInboxBuffer({ dataDir, buffer, name, mimeType, externalKey = "", source = null, mail = null, attachments = [] }) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("Datei ist leer");
+  if (buffer.length > 25 * 1024 * 1024) throw new Error("Datei ist größer als 25 MB");
+  const storage = inboxStorage(dataDir);
+  await Promise.all([fsp.mkdir(storage.items, { recursive:true }), fsp.mkdir(storage.files, { recursive:true })]);
+  const storedName = safeFilename(name);
+  const fingerprint = externalKey ? crypto.createHash("sha256").update(String(externalKey)).digest("hex").slice(0, 28) : "";
+  const id = fingerprint ? `inbox_mail_${fingerprint}` : `inbox_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const metadataFile = path.join(storage.items, `${id}.json`);
+  try {
+    const existing = JSON.parse(await fsp.readFile(metadataFile, "utf8"));
+    return { item:existing, duplicate:true };
+  } catch {}
+
+  const dir = path.join(storage.files, id);
+  await fsp.mkdir(dir, { recursive:true });
+  await fsp.writeFile(path.join(dir, storedName), buffer);
+  const parsed = analyzeInboxBuffer(buffer, storedName, mimeType);
+  const effectiveMail = mail ? { ...(parsed.mail || {}), ...mail } : parsed.mail;
+  const analysis = effectiveMail ? applyMailToAnalysis(parsed.analysis, effectiveMail) : parsed.analysis;
+  const savedAttachments = [];
+  for (let index = 0; index < attachments.length; index += 1) {
+    const attachment = attachments[index] || {};
+    if (!Buffer.isBuffer(attachment.content) || !attachment.content.length) continue;
+    const attachmentName = safeFilename(attachment.name || `Anlage-${index + 1}`);
+    const attachmentStoredName = `attachment-${index}-${attachmentName}`;
+    await fsp.writeFile(path.join(dir, attachmentStoredName), attachment.content);
+    savedAttachments.push({
+      index,
+      name:attachmentName,
+      mimeType:String(attachment.mimeType || "application/octet-stream").slice(0, 160),
+      size:attachment.content.length,
+      storedFilename:attachmentStoredName,
+      isInline:!!attachment.isInline,
+    });
+  }
+  if (effectiveMail && savedAttachments.length) effectiveMail.attachments = savedAttachments;
+  const now = new Date().toISOString();
+  const item = {
+    id,
+    name:storedName,
+    mimeType:String(mimeType || "application/octet-stream").slice(0, 160),
+    size:buffer.length,
+    createdAt:String(source?.receivedAt || now),
+    importedAt:now,
+    updatedAt:now,
+    status:"analyzed",
+    route:"",
+    links:{ taskIds:[], jobIds:[] },
+    analysis,
+    textPreview:parsed.text.slice(0, 12000),
+    storedFilename:storedName,
+    ...(source ? { source } : {}),
+    ...(effectiveMail ? { mail:effectiveMail } : {}),
+  };
+  await fsp.writeFile(metadataFile, JSON.stringify(item, null, 2), "utf8");
+  return { item, duplicate:false };
+}
+
 function registerKristineInbox(app, { dataDir, requireAdmin }) {
-  const ROOT = path.join(dataDir, "_kristine", "inbox");
-  const ITEMS = path.join(ROOT, "items");
-  const FILES = path.join(ROOT, "files");
+  const { root:ROOT, items:ITEMS, files:FILES } = inboxStorage(dataDir);
 
   async function ensure() {
     await Promise.all([fsp.mkdir(ITEMS, { recursive: true }), fsp.mkdir(FILES, { recursive: true })]);
@@ -297,30 +360,7 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
       if (!buffer.length) return res.status(400).json({ ok: false, error: "Datei ist leer" });
       if (buffer.length > MAX_FILE_BYTES) return res.status(413).json({ ok: false, error: "Datei ist größer als 12 MB" });
 
-      await ensure();
-      const id = `inbox_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const dir = path.join(FILES, id);
-      await fsp.mkdir(dir, { recursive: true });
-      const originalPath = path.join(dir, name);
-      await fsp.writeFile(originalPath, buffer);
-      const { text, analysis, mail } = analyzeInboxBuffer(buffer, name, mimeType);
-      const now = new Date().toISOString();
-      const item = {
-        id,
-        name,
-        mimeType,
-        size: buffer.length,
-        createdAt: now,
-        updatedAt: now,
-        status: "analyzed",
-        route: "",
-        links: { taskIds: [], jobIds: [] },
-        analysis,
-        textPreview: text.slice(0, 12000),
-        storedFilename: name,
-        ...(mail ? { mail } : {}),
-      };
-      await writeItem(item);
+      const { item } = await importInboxBuffer({ dataDir, buffer, name, mimeType });
       res.json({ ok: true, item });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
@@ -356,10 +396,19 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
     if (!requireAdmin(req, res)) return;
     const item = await readItem(req.params.id);
     if (!item) return res.status(404).send("Eingang nicht gefunden");
-    if (!isMsgItem(item)) return res.status(400).send("Keine MSG-Datei");
     const file = originalFilePath(item);
     if (!fs.existsSync(file)) return res.status(404).send("Originaldatei fehlt");
     try {
+      const storedAttachment = (item.mail?.attachments || []).find((entry) => String(entry.index) === String(req.params.index) && entry.storedFilename);
+      if (storedAttachment) {
+        const storedFile = path.join(FILES, item.id, safeFilename(storedAttachment.storedFilename));
+        if (!fs.existsSync(storedFile)) return res.status(404).send("Mail-Anlage nicht gefunden");
+        const disposition = String(req.query.download || "") === "1" ? "attachment" : "inline";
+        res.setHeader("Content-Type", storedAttachment.mimeType || "application/octet-stream");
+        res.setHeader("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(storedAttachment.name || "Anlage")}`);
+        return res.sendFile(storedFile);
+      }
+      if (!isMsgItem(item)) return res.status(400).send("Keine MSG-Datei");
       const buffer = await fsp.readFile(file);
       const attachment = getMsgAttachment(buffer, req.params.index);
       if (!attachment) return res.status(404).send("Mail-Anlage nicht gefunden");
@@ -439,4 +488,4 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
   console.log(`✅ KRISTINE Eingang registriert · MSG Reader ${msgReaderAvailable() ? "aktiv" : "Fallback"}`);
 }
 
-module.exports = { registerKristineInbox, analyzeInboxBuffer, extractMsgText };
+module.exports = { registerKristineInbox, importInboxBuffer, analyzeInboxBuffer, extractMsgText };

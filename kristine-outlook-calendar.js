@@ -7,7 +7,7 @@ const path = require("path");
 const CLIENT_ID = "b4ba8fb2-b833-455c-843b-b59824198dbb";
 const TENANT_ID = "5a41643d-fb28-4542-aed2-71672311a92c";
 const EXPECTED_ACCOUNT = "alexander.krista@krista.at";
-const SCOPES = "openid profile offline_access Calendars.ReadWrite Mail.Read";
+const SCOPES = "openid profile offline_access Calendars.ReadWrite Calendars.ReadWrite.Shared Mail.Read Mail.Read.Shared";
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 const LOGIN_ROOT = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0`;
 const TIME_ZONE = "Europe/Berlin";
@@ -101,7 +101,7 @@ function installOutlookCalendar(app, deps = {}) {
 
   function hasRequiredScopes(token) {
     const granted = new Set(String(token?.scope || "").split(/\s+/).filter(Boolean).map(scope => scope.toLowerCase()));
-    return ["calendars.readwrite", "mail.read"].every(scope => granted.has(scope));
+    return ["calendars.readwrite", "calendars.readwrite.shared", "mail.read", "mail.read.shared"].every(scope => granted.has(scope));
   }
 
   async function tokenRequest(values) {
@@ -335,7 +335,7 @@ function installOutlookCalendar(app, deps = {}) {
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 
-  return { syncAppointment };
+  return { syncAppointment, accessToken };
 }
 
 module.exports = { installOutlookCalendar };

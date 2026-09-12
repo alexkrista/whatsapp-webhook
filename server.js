@@ -64,6 +64,7 @@ const { registerDayClose } = require("./day-close");
 const { registerArchiveSearch } = require("./archive-search");
 const { registerTowerPlanning } = require("./tower-planning");
 const { installOutlookCalendar } = require("./kristine-outlook-calendar");
+const { installKristineSharedMailbox } = require("./kristine-shared-mailbox");
 const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 const { parseMsg, getMsgAttachment } = require("./kristine-msg-reader");
 const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
@@ -1747,7 +1748,7 @@ registerTowerPlanning(app, {
   requireAdmin,
   readEmployees,
 });
-installOutlookCalendar(app, {
+const kristineOutlook = installOutlookCalendar(app, {
   dataDir: DATA_DIR,
   requireAdmin,
   publicBaseUrl: PUBLIC_BASE_URL,
@@ -1755,6 +1756,12 @@ installOutlookCalendar(app, {
   logger: console,
 });
 console.log("✅ KRISTINE Outlook-Kalender registriert");
+installKristineSharedMailbox(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  accessToken: kristineOutlook.accessToken,
+  logger: console,
+});
 
 // ===================== WhatsApp Incoming =====================
 app.post("/webhook", async (req, res) => {
