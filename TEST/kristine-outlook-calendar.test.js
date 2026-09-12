@@ -82,13 +82,21 @@ function jwt(account) {
     assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/outlook-entry\?task=task-42&sig=/);
     assert.equal(graphPayload.transactionId, create.body.appointment.id);
 
+    const duplicate = await call(routes, "POST", "/kristine/api/appointments", { body:{
+      requestId:"request-2", taskId:"task-42", title:"Kundentermin", date:"2026-09-03", allDay:false,
+      from:"14:00", to:"14:30", location:"Musterstraße 1", details:"Besprechung vor Ort",
+    } });
+    assert.equal(duplicate.statusCode, 200);
+    assert.equal(duplicate.body.duplicatePrevented, true, "same natural appointment must not create a second Outlook event");
+    assert.equal(duplicate.body.appointment.id, create.body.appointment.id);
+
     const stored = JSON.parse(fs.readFileSync(path.join(temporary, "_kristine", "appointments.json"), "utf8"));
     assert.equal(stored.length, 1, "Idempotent request must only create one internal appointment");
     assert.equal(stored[0].outlook.status, "synced");
     assert.equal(stored[0].outlook.eventId, "outlook-event-123");
     const audit = fs.readFileSync(path.join(temporary, "_kristine", "outlook-calendar.jsonl"), "utf8");
-    for (const event of ["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error"]) assert.match(audit, new RegExp(`\"type\":\"${event}\"`));
-    console.log("OK: internal save survives Graph failure; login, retry, Event-ID and KGO link work");
+    for (const event of ["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error", "appointment_duplicate_prevented"]) assert.match(audit, new RegExp(`\"type\":\"${event}\"`));
+    console.log("OK: internal save survives Graph failure; login, retry, deduplication, Event-ID and KGO link work");
   } finally {
     global.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.KRISTINE_OUTLOOK_TOKEN_KEY; else process.env.KRISTINE_OUTLOOK_TOKEN_KEY = originalKey;

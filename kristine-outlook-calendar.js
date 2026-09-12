@@ -229,6 +229,14 @@ function installOutlookCalendar(app, deps = {}) {
     };
   }
 
+  function appointmentFingerprint(appointment) {
+    const normalized = value => String(value || "").trim().toLocaleLowerCase("de").replace(/\s+/g, " ");
+    return crypto.createHash("sha256").update(JSON.stringify([
+      String(appointment.taskId || ""), normalized(appointment.title), String(appointment.date || ""), Boolean(appointment.allDay),
+      String(appointment.from || ""), String(appointment.to || ""), normalized(appointment.location),
+    ])).digest("hex");
+  }
+
   async function syncAppointment(id) {
     const rows = await readJson(appointmentsFile, []);
     const current = rows.find(row => row.id === id);
@@ -307,14 +315,15 @@ function installOutlookCalendar(app, deps = {}) {
   app.post("/kristine/api/appointments", async (req, res) => {
     if (!allowed(req, res)) return;
     try {
-      const input = cleanInput(req.body || {}); const requestId = String(req.body?.requestId || "").slice(0, 100);
-      const appointment = await serialized(async () => {
+      const input = cleanInput(req.body || {}); const requestId = String(req.body?.requestId || "").slice(0, 100); const fingerprint = appointmentFingerprint(input);
+      const saved = await serialized(async () => {
         const rows = await readJson(appointmentsFile, []);
-        if (requestId) { const existing = rows.find(row => row.requestId === requestId); if (existing) return existing; }
-        const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null } };
-        rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return row;
+        const existing = rows.find(row => (requestId && row.requestId === requestId) || appointmentFingerprint(row) === fingerprint);
+        if (existing) { await audit("appointment_duplicate_prevented", { appointmentId:existing.id, taskId:input.taskId, requestId }); return { appointment:existing, created:false }; }
+        const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, fingerprint, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null } };
+        rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return { appointment:row, created:true };
       });
-      const synced = await syncAppointment(appointment.id); res.status(201).json({ ok:true, appointment:synced, internalSaved:true, outlookSynced:synced.outlook.status === "synced" });
+      const synced = await syncAppointment(saved.appointment.id); res.status(saved.created ? 201 : 200).json({ ok:true, appointment:synced, internalSaved:true, duplicatePrevented:!saved.created, outlookSynced:synced.outlook.status === "synced" });
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 

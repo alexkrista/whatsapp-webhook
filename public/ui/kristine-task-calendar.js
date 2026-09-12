@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-02-job-workflow-v9";
+  const VERSION="2026-09-12-job-workflow-v10";
   let currentTask=null;
   let currentRequestId="";
   let visitRecorder=null,visitStream=null,visitChunks=[],visitConsentAt="",discardVisitRecording=false,visitOwnMemo=false;
@@ -106,10 +106,11 @@
     document.getElementById("ktcRetry").hidden=true;
     syncAllDay();bg.classList.add("open");
     if(task.appointment?.id&&task.appointment?.outlook?.status!=="synced"){
+      saveButton.disabled=true;saveButton.textContent="Bereits gespeichert ✓";
       const retry=document.getElementById("ktcRetry");retry.hidden=false;retry.onclick=()=>retryOutlook(task.appointment.id);
       setStatus("Outlook noch nicht synchronisiert","warn");
     }else if(task.appointment?.outlook?.status==="synced"){
-      setStatus("Outlook-Termin erstellt ✅","ok");document.getElementById("ktcSave").textContent="Gespeichert ✓";
+      saveButton.disabled=true;saveButton.textContent="Bereits gespeichert ✓";setStatus("Outlook-Termin erstellt ✅","ok");
     }else loadOutlookStatus();
   }
 

@@ -20,5 +20,6 @@ assert.match(html, /newTask\.appointment\.outlook=outlookResult\.appointment\.ou
 assert.match(html, /Outlook-Termin erstellt ✅/, "success status is missing");
 assert.match(html, /Outlook noch nicht synchronisiert/, "retry status is missing");
 assert.match(calendar, /Termin ausgemacht/, "saved appointments must show information instead of opening a second appointment form");
+assert.match(calendar, /saveButton\.disabled=true;saveButton\.textContent="Bereits gespeichert ✓"/, "saved appointment must not remain clickable");
 
 console.log("OK: Termin fields and additive Outlook save are wired into Neue Aufgabe");
