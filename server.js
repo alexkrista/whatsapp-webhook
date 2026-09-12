@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.16";
-const APP_BUILD = "0031.21-regie-corrections";
-const APP_STATUS = "Manuelle Regie-Korrekturen speichern und vor PDF übernehmen";
+const APP_VERSION = "3.5.17";
+const APP_BUILD = "0031.22-mix-job-material-session";
+const APP_STATUS = "Mischmaschinen-Material mit Browser-Anmeldung in Baustellen laden";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI

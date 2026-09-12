@@ -24,7 +24,9 @@ function registerPaintMixHistory(app, options = {}) {
   function requireAdmin(req, res) {
     if (!adminToken) return true;
     const token = req.headers["x-admin-token"] || req.query.token || "";
-    if (String(token) !== String(adminToken)) {
+    const cookies = Object.fromEntries(String(req.headers.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
+    const browserSession = crypto.createHmac("sha256", adminToken).update("kristine-browser-session-v1").digest("base64url");
+    if (String(token) !== String(adminToken) && cookies.kristine_session !== browserSession) {
       res.status(403).json({ ok: false, error: "Forbidden" });
       return false;
     }
