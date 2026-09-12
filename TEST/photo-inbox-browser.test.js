@@ -1,12 +1,12 @@
 const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
 (async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
- const page=await browser.newPage();let confirmed=false,changes=null;const discarded=new Set();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage();let confirmed=false,changes=null,confirmAttempts=0;const discarded=new Set();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('http://inbox.test/**',route=>{const u=new URL(route.request().url());
  if(u.pathname==='/')return route.fulfill({contentType:'text/html; charset=utf-8',body:'<main class="shell"><div class="hero"></div></main><script src="/photos.js"></script>'});
  if(u.pathname==='/photos.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'../public/ui/photo-inbox.js'),'utf8')});
  if(u.pathname==='/admin/api/jobs')return route.fulfill({json:{jobs:[{jobId:'26080',name:'Baustelle A'},{jobId:'26091',name:'Baustelle B'}]}});
  if(u.pathname.endsWith('/dismiss')){const body=route.request().postDataJSON();body.files.forEach(file=>body.restore?discarded.delete(file):discarded.add(file));return route.fulfill({json:{ok:true}})}
- if(u.pathname.endsWith('/confirm')){changes=route.request().postDataJSON().changes;confirmed=true;return route.fulfill({json:{ok:true,count:2}})}
+ if(u.pathname.endsWith('/confirm')){if(++confirmAttempts===1)return route.fulfill({status:502,contentType:'text/html',body:'<!DOCTYPE html><h1>Bad Gateway</h1>'});changes=route.request().postDataJSON().changes;confirmed=true;return route.fulfill({json:{ok:true,count:2}})}
  if(u.pathname==='/kristine/api/photo-inbox')return route.fulfill({json:{historyImport:{added:2,reopened:0,alreadyPending:0,missing:['missing.jpg']},items:confirmed?[]:[0,1].map(i=>({retrospective:true,previousJobId:'26091',groupId:'g1',file:'photo'+i+'.jpg',status:discarded.has('photo'+i+'.jpg')?'dismissed':'pending',url:'/image.jpg',employeeName:'Clemens',date:'2026-09-12',at:'10:00',category:'photo',suggestion:{jobId:i?'':'26080',reason:i?'Keine Stempelung':'Stempelung um 07:00'}})).filter(item=>(u.searchParams.get('dismissed')==='true')===(item.status==='dismissed'))}});
  return route.fulfill({body:''});});
  await page.goto('http://inbox.test/?photoGroup=g1');await page.locator('[data-group]').waitFor();assert.equal(await page.locator('[data-job]').first().inputValue(),'26080 · Baustelle A');
@@ -18,5 +18,5 @@ const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=
  await page.getByRole('button',{name:'Ganze Gruppe löschen',exact:true}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();
  await page.locator('[data-trash]').check();await page.getByRole('button',{name:'Ganze Gruppe wiederherstellen',exact:true}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();await page.locator('[data-trash]').uncheck();await page.waitForFunction(()=>document.querySelectorAll('[data-file]').length===2);
  await page.locator('[data-all]').fill('Baustelle B');await page.locator('[data-all]').press('Tab');await page.getByRole('button',{name:'Zuordnungen bestätigen'}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();
- assert.equal(changes.length,2);assert(changes.every(c=>c.jobId==='26091'));assert.deepEqual(errors,[]);console.log('OK: Fotoeingang shows proposals, requires missing assignments and confirms the grouped photos.');
+ assert.equal(confirmAttempts,2);assert.equal(changes.length,2);assert(changes.every(c=>c.jobId==='26091'));assert.deepEqual(errors,[]);console.log('OK: Fotoeingang shows proposals, requires missing assignments and confirms the grouped photos.');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

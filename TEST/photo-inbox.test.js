@@ -48,3 +48,14 @@ test('History includes separate copies and orphan files, preserves galleries and
  assert((await listJobMedia({dataDir,jobId:'26091'})).some(x=>x.file===old));assert.equal((await listJobMedia({dataDir,jobId:'26092'})).length,2);
  assert.deepEqual(await createPhotoInbox(dataDir).importHistory(),result);state=await inbox.sync();assert(Object.values(state.items).every(x=>x.status==='confirmed'));
 });
+
+test('Photo delivery reads only inbox metadata and never starts a synchronization',async t=>{
+ const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),'photo-read-'));t.after(()=>fs.rm(dataDir,{recursive:true,force:true}));
+ const {registerPhotoInbox}=require('../photo-inbox'),routes=new Map(),app={get:(route,handler)=>routes.set(route,handler),post:()=>{}};
+ const inbox=registerPhotoInbox(app,{dataDir,requireAdmin:()=>true});await inbox.importHistory();
+ const relative='_kristine/media/test.jpg';await fs.mkdir(path.join(dataDir,'_kristine','media'),{recursive:true});await fs.writeFile(path.join(dataDir,relative),'image');
+ await fs.writeFile(path.join(dataDir,'_kristine','photo-inbox.json'),JSON.stringify({items:{[relative]:{file:relative,status:'pending'}}}));
+ inbox.sync=()=>{throw Error('Image request must not synchronize')};let served;
+ await routes.get('/kristine/api/photo-inbox/file')({query:{file:relative}},{setHeader:()=>{},sendFile:file=>served=file,status:()=>{throw Error('Photo delivery failed')}});
+ assert.equal(served,path.join(dataDir,relative));
+});
