@@ -96,14 +96,6 @@ function validDate(value) {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? "" : date;
 }
 
-function validTime(value) {
-  const match = String(value || "").match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return "";
-  const hour = Number(match[1]), minute = Number(match[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
 function timeFromMinutes(value) {
   const minutes = Math.max(0, Math.min((24 * 60) - 1, Number(value) || 0));
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
@@ -145,8 +137,7 @@ function desiredCalendarEntries({ from, to, assignments = [], employees = [], jo
       continue;
     }
     const employee = String(row.employeeName || "Mitarbeiter").trim();
-    const startTime = validTime(row.from) || "07:00", endTime = validTime(row.to) || "17:00";
-    add({ key:`absence:${row.id || `${row.date}:${row.employeeId}:${type}`}`, date:row.date, subject:`${type === "krank" ? "Krank" : "Urlaub"} · ${employee}`, kind:type, showAs:"oof", startTime, endTime:endTime > startTime ? endTime : "17:00" });
+    add({ key:`absence:${row.id || `${row.date}:${row.employeeId}:${type}`}`, date:row.date, subject:`${type === "krank" ? "Krank" : "Urlaub"} · ${employee}`, kind:type, showAs:"free", allDay:true });
   }
 
   const fromYear = Number(from.slice(0, 4)), toYear = Number(to.slice(0, 4));
@@ -156,9 +147,9 @@ function desiredCalendarEntries({ from, to, assignments = [], employees = [], jo
     const employeeName = String(employee.name || employee.employeeName || "Mitarbeiter").trim();
     for (let year = fromYear; year <= toYear; year += 1) {
       const birthday = annualDate(employee.birthDate, year);
-      if (birthday) add({ key:`birthday:${employeeId}:${year}`, date:birthday, subject:`Geburtstag · ${employeeName}`, kind:"birthday", showAs:"free", startTime:"07:00", endTime:"07:30" });
+      if (birthday) add({ key:`birthday:${employeeId}:${year}`, date:birthday, subject:`Geburtstag · ${employeeName}`, kind:"birthday", showAs:"free", allDay:true });
       const employmentStart = validDate(employee.employmentStart), anniversary = annualDate(employmentStart, year), years = year - Number(employmentStart.slice(0, 4));
-      if (anniversary && years >= 0) add({ key:`anniversary:${employeeId}:${year}`, date:anniversary, subject:years ? `${years}. Eintrittsjahrestag · ${employeeName}` : `Eintritt · ${employeeName}`, kind:"anniversary", showAs:"free", startTime:"07:00", endTime:"07:30" });
+      if (anniversary && years >= 0) add({ key:`anniversary:${employeeId}:${year}`, date:anniversary, subject:years ? `${years}. Eintrittsjahrestag · ${employeeName}` : `Eintritt · ${employeeName}`, kind:"anniversary", showAs:"free", allDay:true });
     }
   }
 

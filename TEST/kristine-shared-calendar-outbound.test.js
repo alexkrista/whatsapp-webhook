@@ -40,7 +40,7 @@ async function call(routes, method, route) {
     if (String(url).includes("/calendarView?")) return new Response(JSON.stringify({ value:graphEvents }), { status:200, headers:{ "Content-Type":"application/json" } });
     if (method === "POST" && String(url).endsWith("/events")) {
       const payload = JSON.parse(options.body), id = `event-${graphEvents.length + 1}`;
-      graphEvents.push({ id, subject:payload.subject, start:payload.start, end:payload.end, isAllDay:payload.isAllDay, categories:payload.categories, bodyPreview:payload.body.content });
+      graphEvents.push({ id, subject:payload.subject, start:payload.start, end:payload.end, isAllDay:payload.isAllDay, showAs:payload.showAs, categories:payload.categories, bodyPreview:payload.body.content });
       writes.push({ method, payload });
       return new Response(JSON.stringify({ id }), { status:201, headers:{ "Content-Type":"application/json" } });
     }
@@ -71,9 +71,9 @@ async function call(routes, method, route) {
   assert.equal(first.body.outboundCreated, 8, "sick leave, holiday, two birthdays, two anniversaries and two site starts must be created");
   assert.equal(writes.filter(row => row.method === "POST").length, 8);
   assert.equal(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).length, 2, "site start must be independent of assigned employee count");
-  assert.ok(graphEvents.filter(event => event.subject !== "Feiertag").every(event => event.isAllDay === false), "ordinary shared calendar entries must have a time");
-  assert.equal(graphEvents.find(event => event.subject === "Feiertag").isAllDay, true, "holidays must remain all-day events");
-  assert.ok(graphEvents.filter(event => !event.subject.startsWith("Baustellenstart") && event.subject !== "Feiertag").every(event => event.start.dateTime.endsWith("T07:00:00")), "personal notices must start at 07:00");
+  assert.ok(graphEvents.filter(event => !event.subject.startsWith("Baustellenstart")).every(event => event.isAllDay === true), "all entries except site starts must be all-day events");
+  assert.ok(graphEvents.every(event => event.showAs === "free"), "shared entries must never block the calendar");
+  assert.ok(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).every(event => event.isAllDay === false), "site starts must have a time");
   assert.deepEqual(graphEvents.filter(event => event.subject.startsWith("Baustellenstart")).map(event => event.start.dateTime.slice(11, 16)).sort(), ["06:00", "06:15"], "site starts on the same day must be staggered by 15 minutes");
   assert(graphEvents.some(event => event.subject === "Krank · Edmund Mock"));
   assert(graphEvents.some(event => event.subject === "Geburtstag · Edmund Mock"));

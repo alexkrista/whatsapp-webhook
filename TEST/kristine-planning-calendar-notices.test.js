@@ -12,7 +12,7 @@ assert.match(html, /employee\.employmentStart/);
 assert.match(html, /annualNoticesHtml\(day,employee\.id\)/);
 assert.match(html, /sharedCalendarNoticesHtml\(ds\)/);
 assert.match(html, /Persönliche Termine/);
-assert.match(html, /ohne Benutzer-Anmeldung und ohne Testtermin/);
+assert.match(html, /Alle anderen gemeinsamen Einträge sind ganztägig und als frei markiert/);
 assert.match(html, /function siteStartNotices\(date\)/);
 assert.match(html, /Baustellenstart/);
 assert.match(html, /function sharedCalendarAbsences\(date\)/);
