@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.19";
-const APP_BUILD = "0031.24-photo-assignment";
-const APP_STATUS = "Fotos und Videos einer anderen Baustelle zuordnen";
+const APP_VERSION = "3.5.20";
+const APP_BUILD = "0031.25-photo-sharing";
+const APP_STATUS = "Ausgewählte Baustellenfotos per E-Mail oder WhatsApp teilen";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI
@@ -4040,6 +4040,12 @@ console.log("âœ… KRISTINE Tagesabschluss registriert");
 registerMediaMigration(app, {
   dataDir: DATA_DIR,
   requireAdmin,
+  sendPhotoMail: async ({to,subject,text,attachments}) => {
+    if(!SMTP_HOST||!SMTP_USER||!SMTP_PASS||!MAIL_FROM)throw Error("E-Mail-Versand ist nicht eingerichtet.");
+    const info=await makeMailer().sendMail({from:MAIL_FROM,to,subject,text,attachments});
+    if(!info.accepted?.length)throw Error("E-Mail wurde vom Mailserver nicht angenommen.");
+    return info;
+  },
 });
 // ==================== KRISTINE Brain-Stundenquelle ====================
 // Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.

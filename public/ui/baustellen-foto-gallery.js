@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-12-photo-assignment-1";
+  const VERSION="2026-09-12-photo-share-1";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
   let media=[];
@@ -51,12 +51,46 @@
     const host=document.getElementById("bkProtocols");if(!host||host.querySelector(".bf-wrap"))return;
     const wrap=document.createElement("section");wrap.className="bf-wrap";
     if(!media.length){wrap.innerHTML='<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt aus der Baustellendokumentation.</p></div><span class="bf-count">0 Medien</span></div><div class="bf-empty">Für diese Baustelle sind derzeit keine einzelnen Fotos oder Videos gespeichert.</div>';host.prepend(wrap);return}
-    const groups=groupByDay(media);wrap.innerHTML=`<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt sichtbar · nach Bautag geordnet · Klick zum Vergrößern.</p></div><span class="bf-count">${media.length} Medien</span></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><button type="button" data-bf-reassign disabled>Baustelle ändern</button><span data-bf-selected>0 ausgewählt</span></div><div class="bf-days">${groups.map(([day,items])=>`<section class="bf-day" data-bf-day="${esc(day)}"><div class="bf-day-head"><strong>${fmtDate(day)}</strong><label><input type="checkbox" data-bf-select-day> Tag auswählen</label><span>${items.filter(x=>x.kind==='photo').length} Fotos · ${items.filter(x=>x.kind==='video').length} Videos</span></div><div class="bf-grid">${items.map(item=>{const index=media.indexOf(item),url=tokenUrl(item.url),meta=[item.at,item.employeeName].filter(Boolean).join(' · ');return `<article class="bf-item"><label style="display:block;padding:6px"><input type="checkbox" data-bf-select="${index}"> Auswählen</label><button type="button" class="bf-open" data-bf-index="${index}" aria-label="${item.kind==='video'?'Video':'Foto'} öffnen">${item.kind==='video'?`<video src="${esc(url)}" muted preload="metadata" playsinline></video><span class="bf-video-badge">▶ Video</span>`:`<img src="${esc(url)}" loading="lazy" alt="Baustellenfoto ${esc(day)}">`}</button><div class="bf-meta"><strong>${esc(meta||item.source||'Baustellendokumentation')}</strong>${item.content?`<p>${esc(item.content)}</p>`:''}</div></article>`}).join('')}</div></section>`).join('')}</div>`;
-    const updateSelection=()=>{const count=wrap.querySelectorAll('[data-bf-select]:checked').length;wrap.querySelector('[data-bf-selected]').textContent=count+' ausgewählt';wrap.querySelector('[data-bf-reassign]').disabled=!count};
+    const groups=groupByDay(media);wrap.innerHTML=`<div class="bf-head"><div><h3>Fotos & Videos</h3><p>Direkt sichtbar · nach Bautag geordnet · Klick zum Vergrößern.</p></div><span class="bf-count">${media.length} Medien</span></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><button type="button" data-bf-reassign disabled>Baustelle ändern</button><button type="button" data-bf-email disabled>Per E-Mail</button><button type="button" data-bf-whatsapp disabled>WhatsApp</button><span data-bf-selected>0 ausgewählt</span></div><div class="bf-days">${groups.map(([day,items])=>`<section class="bf-day" data-bf-day="${esc(day)}"><div class="bf-day-head"><strong>${fmtDate(day)}</strong><label><input type="checkbox" data-bf-select-day> Tag auswählen</label><span>${items.filter(x=>x.kind==='photo').length} Fotos · ${items.filter(x=>x.kind==='video').length} Videos</span></div><div class="bf-grid">${items.map(item=>{const index=media.indexOf(item),url=tokenUrl(item.url),meta=[item.at,item.employeeName].filter(Boolean).join(' · ');return `<article class="bf-item"><label style="display:block;padding:6px"><input type="checkbox" data-bf-select="${index}"> Auswählen</label><button type="button" class="bf-open" data-bf-index="${index}" aria-label="${item.kind==='video'?'Video':'Foto'} öffnen">${item.kind==='video'?`<video src="${esc(url)}" muted preload="metadata" playsinline></video><span class="bf-video-badge">▶ Video</span>`:`<img src="${esc(url)}" loading="lazy" alt="Baustellenfoto ${esc(day)}">`}</button><div class="bf-meta"><strong>${esc(meta||item.source||'Baustellendokumentation')}</strong>${item.content?`<p>${esc(item.content)}</p>`:''}</div></article>`}).join('')}</div></section>`).join('')}</div>`;
+    const updateSelection=()=>{const count=wrap.querySelectorAll('[data-bf-select]:checked').length;wrap.querySelector('[data-bf-selected]').textContent=count+' ausgewählt';wrap.querySelectorAll('[data-bf-reassign],[data-bf-email],[data-bf-whatsapp]').forEach(button=>button.disabled=!count)};
     wrap.querySelectorAll('[data-bf-select]').forEach(el=>el.onchange=updateSelection);
     wrap.querySelectorAll('[data-bf-select-day]').forEach(el=>el.onchange=()=>{el.closest('.bf-day').querySelectorAll('[data-bf-select]').forEach(input=>input.checked=el.checked);updateSelection()});
     wrap.querySelector('[data-bf-reassign]').onclick=()=>chooseTarget([...wrap.querySelectorAll('[data-bf-select]:checked')].map(el=>media[Number(el.dataset.bfSelect)]));
+    for(const mode of ['email','whatsapp'])wrap.querySelector('[data-bf-'+mode+']').onclick=()=>shareSelection([...wrap.querySelectorAll('[data-bf-select]:checked')].map(el=>media[Number(el.dataset.bfSelect)]),mode);
     host.prepend(wrap);wrap.querySelectorAll("[data-bf-index]").forEach(el=>el.addEventListener("click",()=>openLightbox(Number(el.dataset.bfIndex))));
+  }
+
+  async function shareSelection(items,mode){
+    const sourceJob=currentJobId;
+    if(items.length>20||items.some(item=>item.kind!=='photo')){alert('Bitte 1 bis 20 Fotos auswählen. Videos bitte separat teilen.');return}
+    const dialog=document.createElement('dialog');dialog.style.cssText='border:1px solid #ddd;border-radius:14px;padding:24px;max-width:550px;width:90%';
+    dialog.innerHTML='<h3>'+ (mode==='email'?'Fotos per E-Mail':'Fotos über WhatsApp teilen')+'</h3><p>'+items.length+' Fotos · Baustelle '+esc(sourceJob)+'</p>'+(mode==='email'?'<label>Empfänger-E-Mail<input type="email" data-to required style="display:block;width:100%;padding:8px"></label><label>Betreff<input data-subject style="display:block;width:100%;padding:8px" value="Fotos Baustelle '+esc(sourceJob)+'"></label>':'')+'<label>Nachricht<textarea data-text style="display:block;width:100%;min-height:70px">Fotos zur Baustelle '+esc(sourceJob)+'</textarea></label><p data-status></p><div data-downloads></div><button data-close>Schließen</button> <button data-send disabled>'+(mode==='email'?'E-Mail senden':'Teilen – WhatsApp wählen')+'</button>';
+    document.body.appendChild(dialog);dialog.showModal();let busy=false,prepared=[];
+    const button=dialog.querySelector('[data-send]'),status=dialog.querySelector('[data-status]'),close=dialog.querySelector('[data-close]');
+    close.onclick=()=>dialog.close();dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});
+    const urls=[];dialog.addEventListener('close',()=>{urls.forEach(url=>URL.revokeObjectURL(url));dialog.remove()});
+    if(mode==='email'){button.disabled=false;status.textContent='Die Fotos werden vor dem Versand verkleinert.'}
+    else{
+      status.textContent='Fotos werden verkleinert und zum Teilen vorbereitet …';
+      try{for(const [index,item] of items.entries()){const response=await fetch(tokenUrl('/admin/api/job/'+encodeURIComponent(sourceJob)+'/media/share-file?file='+encodeURIComponent(item.file)));if(!response.ok){const error=await response.json();throw Error(error.error||'Foto konnte nicht geladen werden.')}const blob=await response.blob(),extension=blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg';prepared.push(new File([blob],'Baustelle_'+sourceJob+'_'+(index+1)+'.'+extension,{type:blob.type}))}
+        if(!dialog.open)return;
+        if(navigator.canShare?.({files:prepared})){button.disabled=false;status.textContent='Im Teilen-Menü WhatsApp und den Empfänger wählen.'}
+        else{button.textContent='WhatsApp öffnen';button.disabled=false;status.textContent='Dieser Browser kann Fotos nicht direkt an WhatsApp übergeben. Fotos hier herunterladen und in WhatsApp anhängen.';
+          for(const file of prepared){const url=URL.createObjectURL(file);urls.push(url);const link=document.createElement('a');link.href=url;link.download=file.name;link.textContent=file.name+' herunterladen';link.style.display='block';dialog.querySelector('[data-downloads]').appendChild(link)}
+        }
+      }catch(error){status.textContent=error.message}
+    }
+    button.onclick=async()=>{
+      if(busy)return;const text=dialog.querySelector('[data-text]').value;
+      if(mode==='email'&&!dialog.querySelector('[data-to]').reportValidity())return;
+      busy=true;button.disabled=true;close.disabled=true;
+      try{
+        if(mode==='email'){status.textContent='Fotos werden versendet …';const result=await api('/admin/api/job/'+encodeURIComponent(sourceJob)+'/media/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:items.map(item=>item.file),to:dialog.querySelector('[data-to]').value,subject:dialog.querySelector('[data-subject]').value,text})});status.textContent=result.count+' Fotos wurden per E-Mail versendet.'}
+        else if(navigator.canShare?.({files:prepared})){await navigator.share({files:prepared,text,title:'Baustellenfotos'});status.textContent='Fotos an die gewählte App übergeben.';button.disabled=false}
+        else{window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank','noopener');status.textContent='Bitte die heruntergeladenen Fotos in WhatsApp anhängen.';button.disabled=false}
+      }catch(error){status.textContent=error.name==='AbortError'?'Teilen abgebrochen.':error.message;button.disabled=false}
+      finally{busy=false;close.disabled=false}
+    };
   }
 
   async function chooseTarget(items){
