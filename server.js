@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.20";
-const APP_BUILD = "0031.25-photo-sharing";
-const APP_STATUS = "Ausgewählte Baustellenfotos per E-Mail oder WhatsApp teilen";
+const APP_VERSION = "3.5.21";
+const APP_BUILD = "0031.26-photo-inbox";
+const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI
@@ -4047,6 +4047,7 @@ registerMediaMigration(app, {
     return info;
   },
 });
+require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin});
 // ==================== KRISTINE Brain-Stundenquelle ====================
 // Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
 // Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
