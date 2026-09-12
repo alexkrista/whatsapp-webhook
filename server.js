@@ -77,8 +77,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.26";
-const APP_BUILD = "0031.31-photo-confirm";
+const APP_VERSION = "3.5.27";
+const APP_BUILD = "0031.32-inbox-errors";
 const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-12";
 

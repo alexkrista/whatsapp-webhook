@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-12-dismiss";
+  const VERSION="2026-09-12-gateway";
   const PENDING_KEY="kristaInboxPendingTaskItems";
   const ROUTES={task:"Aufgabe",invoice:"Rechnung",filing:"Ablage",appointment:"Termin",order:"Bestellung"};
   let current=null;
@@ -15,13 +15,18 @@
     if(token&&u.origin===location.origin)u.searchParams.set("token",token);
     return u.origin===location.origin?u.pathname+u.search+u.hash:u.href;
   };
-  async function api(p,o={}){
-    const r=await fetch(tokenUrl(p),o);
-    const txt=await r.text();
-    let data;try{data=txt?JSON.parse(txt):null}catch{}
-    if(!r.ok)throw new Error(data?.error||txt||r.statusText);
-    return data;
-  }
+async function api(url,options={}){
+ const attempts=String(options.method||'GET').toUpperCase()==='GET'?3:1;
+ for(let attempt=0;attempt<attempts;attempt++){
+  let response;
+  try{response=await fetch(tokenUrl(url),{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}})}catch(error){if(attempt+1<attempts){await new Promise(resolve=>setTimeout(resolve,1000));continue}throw new Error('Verbindung zum Server unterbrochen. Bitte erneut versuchen.')}
+  const text=await response.text();let body;try{body=text?JSON.parse(text):{}}catch{}
+  if([502,503,504].includes(response.status)){if(attempt+1<attempts){await new Promise(resolve=>setTimeout(resolve,1000));continue}throw new Error('Der Server ist kurz nicht erreichbar. Bitte gleich erneut versuchen.')}
+  if([401,403].includes(response.status))throw new Error('Anmeldung abgelaufen. Bitte KRISTINE erneut öffnen.');
+  if(!response.ok||!body||typeof body!=='object')throw new Error(typeof body?.error==='string'&&!/<(?:!doctype|html|head|body)\b/i.test(body.error)?body.error:'Die Serverantwort konnte nicht verarbeitet werden. Bitte erneut versuchen.');
+  return body;
+ }
+}
 
   function pending(){try{return JSON.parse(sessionStorage.getItem(PENDING_KEY)||"[]")}catch{return[]}}
   function savePending(rows){sessionStorage.setItem(PENDING_KEY,JSON.stringify(rows||[]));renderPending()}
