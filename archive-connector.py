@@ -40,7 +40,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -68,7 +68,7 @@ def protect_remote_archive_access():
     # krista_token an den Brain-Rechner weitergegeben.
     supplied_query_token = str(request.args.get("krista_token") or "")
     if (
-        request.path in {"/project/address-search", "/project/address-projects", "/project/open-orders", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}
+        request.path in {"/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}
         and KRISTINE_ADMIN_TOKEN
         and hmac.compare_digest(supplied_query_token, KRISTINE_ADMIN_TOKEN)
     ):
@@ -118,7 +118,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/documents", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin

@@ -12,7 +12,7 @@ for(const filter of ["bAktiv", "bArchiv", "bIstAbgeschlossen", "AuftragErteilt"]
 }
 assert.match(brain,/@app\.get\("\/project\/search"\)/);
 assert.match(brain,/Abschlagsrechnungen bleiben offen/);
-assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-project-search-4/);
+assert.match(topbar,/baustellen-ww-import\.js\?v=20260912-project-search-5/);
 assert.match(ui,/Mit vorhandener Akte verbinden/);
 assert.match(ui,/Mit anderer Akte verbinden/);
 assert.match(ui,/data-wwi-link/);
@@ -24,6 +24,9 @@ for(const text of ["WinWorker-Aufträge übernehmen","Aus WW übernehmen","Ausge
 for(const text of ["Ganz WW durchsuchen","Offene anzeigen","/project/search?q="]){
   assert.ok(ui.includes(text),`Gesamtsuche enthält ${text}`);
 }
+assert.match(ui,/visibleRows\(\)\.length===0/);
+assert.match(ui,/setTimeout\(searchAll,450\)/);
+assert.equal((brain.match(/"\/project\/search"/g)||[]).length>=3,true,"WW-Gesamtsuche ist für KRISTINE und CORS freigegeben");
 assert.match(ui,/isExisting\(row/);
 assert.match(ui,/\/admin\/api\/jobs/);
 assert.match(server,/wwProjectIndex/);
