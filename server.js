@@ -77,8 +77,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.24";
-const APP_BUILD = "0031.29-photo-job-search";
+const APP_VERSION = "3.5.25";
+const APP_BUILD = "0031.30-photo-trash";
 const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-12";
 

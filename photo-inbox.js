@@ -43,8 +43,8 @@ function createPhotoInbox(dataDir){
   const reviewFile=path.join(root,'day-review-entries.json'),reviews=await read(reviewFile,[]);let changed=false;
   for(const row of reviews){const item=data.items[row.file];if(!item)continue;
    if(item.retrospective&&item.status==='pending')continue;
-   const assigned=item.status==='confirmed',jobId=assigned?item.jobId:null,status=assigned?'assigned':'pending_confirmation';
-   if(row.assignmentStatus!==status||String(row.jobId||'')!==String(jobId||'')){Object.assign(row,{jobId,jobName:assigned?item.jobId:'',assignmentStatus:status,needsOfficeReview:!assigned});changed=true}
+   const assigned=item.status==='confirmed',jobId=assigned?item.jobId:null,status=assigned?'assigned':item.status==='dismissed'?'dismissed':'pending_confirmation';
+   if(row.assignmentStatus!==status||String(row.jobId||'')!==String(jobId||'')){Object.assign(row,{jobId,jobName:assigned?item.jobId:'',assignmentStatus:status,needsOfficeReview:!assigned&&item.status!=='dismissed'});changed=true}
   }
   if(changed)await write(reviewFile,reviews);
  }
@@ -81,15 +81,22 @@ function createPhotoInbox(dataDir){
    }
    result.completedAt=new Date().toISOString();data.historyImport=result;await write(file,data);await syncTasks(data);return result;
   }),
+  dismiss:(files,restore=false)=>serial(async()=>{
+   const data=await synchronize();if(!Array.isArray(files)||!files.length||files.length>100)throw Error('Bitte 1 bis 100 Fotos wählen.');
+   for(const file of files){const item=data.items[file];if(!item||!['pending','dismissed'].includes(item.status))throw Error('Foto nicht mehr im offenen Eingang.');}
+   for(const file of files){const item=data.items[file];item.status=restore?'pending':'dismissed';item.dismissedAt=restore?null:new Date().toISOString();}
+   await write(file,data);await syncReviews(data);await syncTasks(data);return files.length;
+  }),
   confirm:changes=>serial(async()=>{const data=await synchronize();if(!Array.isArray(changes)||!changes.length||changes.length>100)throw Error('Bitte 1 bis 100 Fotos bestätigen.');
-   for(const change of changes){if(!data.items[change.file])throw Error('Foto nicht im Eingang.');if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(change.jobId||'')||!(await fs.stat(path.join(dataDir,change.jobId)).catch(()=>null))?.isDirectory())throw Error('Bitte für jedes Foto eine gültige Baustelle wählen.');if(data.items[change.file].status==='confirmed'&&data.items[change.file].jobId!==change.jobId)throw Error('Foto bereits bestätigt. Bitte in der Galerie ändern.')}
+   for(const change of changes){if(!data.items[change.file]||data.items[change.file].status==='dismissed')throw Error('Foto nicht im Eingang.');if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(change.jobId||'')||!(await fs.stat(path.join(dataDir,change.jobId)).catch(()=>null))?.isDirectory())throw Error('Bitte für jedes Foto eine gültige Baustelle wählen.');if(data.items[change.file].status==='confirmed'&&data.items[change.file].jobId!==change.jobId)throw Error('Foto bereits bestätigt. Bitte in der Galerie ändern.')}
    for(const change of changes)Object.assign(data.items[change.file],{status:'confirmed',jobId:change.jobId,confirmedAt:data.items[change.file].confirmedAt||new Date().toISOString()});await write(file,data);await syncAssignments(data);await syncReviews(data);await syncTasks(data);return changes.length;
   })
  };
 }
 function registerPhotoInbox(app,{dataDir,requireAdmin}){
  const inbox=createPhotoInbox(dataDir);inbox.importHistory().catch(console.error);const timer=setInterval(()=>inbox.importHistory().catch(console.error),15000);timer.unref();
- app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>i.status==='pending').map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
+ app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>i.status===(req.query.dismissed==='true'?'dismissed':'pending')).map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
+ app.post('/kristine/api/photo-inbox/dismiss',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.dismiss(req.body?.files,req.body?.restore===true)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/confirm',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.confirm(req.body?.changes)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.get('/kristine/api/photo-inbox/file',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync(),item=state.items[String(req.query.file||'')];if(!item)return res.status(404).send('Foto nicht gefunden');const full=path.resolve(dataDir,item.file),root=path.resolve(dataDir,'_kristine','media')+path.sep,originalRoot=/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(item.originalJobId||'')?path.resolve(dataDir,item.originalJobId)+path.sep:null;if(!full.startsWith(root)&&!(originalRoot&&full.startsWith(originalRoot)))return res.status(404).send('Foto nicht gefunden');res.setHeader('Cache-Control','private, no-store');res.sendFile(full)}catch(e){res.status(500).send(e.message)}});
  return inbox;
