@@ -167,9 +167,10 @@
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260909-regie-billing-5", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260912-lg-surface-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260912-remote-brain-1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260912-collection-1", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
-    loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260912-project-search-9", "data-krista-baustellen-ww-import");
+    loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260912-collection-1", "data-krista-baustellen-ww-import");
+    loadScriptOnce("/public/ui/baustellen-collection.js?v=20260912-collection-1", "data-krista-baustellen-collection");
     // Diese vorhandenen Module waren früher indirekt an KRISADMIN gekoppelt.
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260909-material-profit-40-3", "data-krista-kalkulation-v1");

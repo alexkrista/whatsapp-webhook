@@ -2452,10 +2452,37 @@ function cleanSurfaceMaterialMeta(value) {
   })).filter(row => row.key);
 }
 
+function cleanCollectionMemberJobIds(value, ownJobId = "") {
+  const own = String(ownJobId || "").trim();
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map(item => String(item || "").trim())
+    .filter(item => item && item !== own && isSafeJobId(item)))]
+    .slice(0, 50);
+}
+
+function cleanWwProjectLinks(value) {
+  const seen = new Set();
+  const rows = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const projectNumber = String(item?.projectNumber || "").trim().slice(0, 80);
+    const projectIndex = Math.max(0, Math.trunc(Number(item?.projectIndex || 0)));
+    const key = projectIndex ? `i:${projectIndex}` : `n:${projectNumber.toLowerCase()}`;
+    if ((!projectNumber && !projectIndex) || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({
+      projectNumber,
+      projectIndex,
+      title: String(item?.title || "").trim().slice(0, 180),
+      customer: String(item?.customer || "").trim().slice(0, 180),
+    });
+  }
+  return rows.slice(0, 50);
+}
+
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2487,6 +2514,8 @@ async function readJobMeta(jobId) {
       wwCustomerNumber: String(meta.wwCustomerNumber || meta.customerMaster?.wwCustomerNumber || ""),
       customerMasterStatus: String(meta.customerMasterStatus || ""),
       sourceSystem: String(meta.sourceSystem || ""),
+      collectionMemberJobIds: cleanCollectionMemberJobIds(meta.collectionMemberJobIds, jobId),
+      wwProjectLinks: cleanWwProjectLinks(meta.wwProjectLinks),
       billingRate: Math.max(0, Number(meta.billingRate || 0)),
       contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
@@ -2501,7 +2530,7 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2554,6 +2583,8 @@ async function writeJobMeta(jobId, patch) {
     wwCustomerNumber: String(patch.wwCustomerNumber ?? existing.wwCustomerNumber ?? "").trim().slice(0, 80),
     customerMasterStatus: String(patch.customerMasterStatus ?? existing.customerMasterStatus ?? "").trim().slice(0, 80),
     sourceSystem: String(patch.sourceSystem ?? existing.sourceSystem ?? "").trim().slice(0, 40),
+    collectionMemberJobIds: cleanCollectionMemberJobIds(patch.collectionMemberJobIds ?? existing.collectionMemberJobIds, jobId),
+    wwProjectLinks: cleanWwProjectLinks(patch.wwProjectLinks ?? existing.wwProjectLinks),
     projectContacts: sanitizeProjectContacts(patch.projectContacts ?? existing.projectContacts, { ...existing, ...patch }),
     startDate: cleanOperationalDate(patch.startDate ?? existing.startDate),
     createdAt: patch.createdAt ?? existing.createdAt ?? null,
@@ -2909,6 +2940,20 @@ app.get("/admin/api/jobs", async (req, res) => {
         }, 0),
         count: regieReports.length,
       };
+      const materialKeys = new Set();
+      let materialValue = 0;
+      for (const report of regieReports) {
+        const materials = Array.isArray(report?.materials) ? report.materials : [];
+        for (const material of materials) {
+          const key = String(material?.materialIndex || material?.sourceId || material?.name || "").trim().toLowerCase();
+          if (key) materialKeys.add(key);
+        }
+        materialValue += Math.max(0, documentNumber(report?.materialCost ?? report?.materialTotal));
+      }
+      for (const material of meta.surfaceMaterialMeta || []) {
+        const key = String(material?.key || material?.name || "").trim().toLowerCase();
+        if (key) materialKeys.add(key);
+      }
 
       jobs.push({
         jobId,
@@ -2931,6 +2976,8 @@ app.get("/admin/api/jobs", async (req, res) => {
         wwCustomerNumber: meta.wwCustomerNumber || "",
         customerMasterStatus: meta.customerMasterStatus || "",
         sourceSystem: meta.sourceSystem || "",
+        collectionMemberJobIds: meta.collectionMemberJobIds || [],
+        wwProjectLinks: meta.wwProjectLinks || [],
         startDate: meta.startDate || "",
         createdAt: meta.createdAt || null,
         updatedAt: meta.updatedAt || null,
@@ -2952,6 +2999,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
         calculation,
         regieSummary,
+        materialSummary: { positions: materialKeys.size, value: materialValue },
         sizeBytes,
         totalStats,
         daysCount: days.length,
@@ -2961,6 +3009,54 @@ app.get("/admin/api/jobs", async (req, res) => {
         audioLastDay: stats.audio,
         pdfsLastDay: stats.pdfs,
       });
+    }
+
+    const byId = new Map(jobs.map(job => [String(job.jobId), job]));
+    const parentIds = new Map();
+    for (const head of jobs) {
+      for (const memberId of head.collectionMemberJobIds || []) {
+        if (!byId.has(String(memberId))) continue;
+        if (!parentIds.has(String(memberId))) parentIds.set(String(memberId), []);
+        parentIds.get(String(memberId)).push(String(head.jobId));
+      }
+    }
+    const addStats = (sum, value) => {
+      for (const key of ["items", "images", "audio", "pdfs"]) sum[key] += Math.max(0, Number(value?.[key] || 0));
+      return sum;
+    };
+    for (const job of jobs) {
+      job.collectionParentJobIds = parentIds.get(String(job.jobId)) || [];
+      const members = (job.collectionMemberJobIds || []).map(id => byId.get(String(id))).filter(Boolean);
+      if (!members.length) continue;
+      const all = [job, ...members];
+      const wwSeen = new Set();
+      const wwProjects = [];
+      for (const entry of all) {
+        const links = [
+          ...(entry.wwProjectLinks || []),
+          ...(entry.wwProjectNumber || entry.wwProjectIndex ? [{ projectNumber: entry.wwProjectNumber || entry.jobId, projectIndex: entry.wwProjectIndex, title: entry.name }] : []),
+        ];
+        for (const link of links) {
+          const key = Number(link.projectIndex) > 0 ? `i:${Number(link.projectIndex)}` : `n:${String(link.projectNumber || "").toLowerCase()}`;
+          if (wwSeen.has(key)) continue;
+          wwSeen.add(key);
+          wwProjects.push(link);
+        }
+      }
+      job.collectionSummary = {
+        count: all.length,
+        jobIds: all.map(entry => String(entry.jobId)),
+        searchText: all.map(entry => [entry.jobId, entry.name, entry.contactName, entry.street, entry.postalCode, entry.city, entry.wwProjectNumber].filter(Boolean).join(" ")).join(" "),
+        contractAmount: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.contractAmount || entry.calculation?.contractAmount || 0)), 0),
+        calculatedHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.calculation?.calculatedHours || 0)), 0),
+        actualHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.calculation?.actualHours || 0)), 0),
+        regieAmount: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.regieSummary?.amount || 0)), 0),
+        regieHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.regieSummary?.hours || 0)), 0),
+        materialPositions: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.materialSummary?.positions || 0)), 0),
+        materialValue: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.materialSummary?.value || 0)), 0),
+        totalStats: all.reduce((sum, entry) => addStats(sum, entry.totalStats), { items: 0, images: 0, audio: 0, pdfs: 0 }),
+        wwProjects,
+      };
     }
 
     jobs.sort((a, b) => {
@@ -3035,6 +3131,43 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Non-destructive collection view: every member remains a complete individual job.
+app.put("/admin/api/job/:jobId/collection", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId || "").trim();
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    if (!fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(404).json({ ok: false, error: "Hauptakte nicht gefunden." });
+    const memberJobIds = cleanCollectionMemberJobIds(req.body?.memberJobIds, jobId);
+    const wwProjectLinks = cleanWwProjectLinks(req.body?.wwProjectLinks);
+    for (const memberId of memberJobIds) {
+      if (!fs.existsSync(path.join(DATA_DIR, memberId))) return res.status(404).json({ ok: false, error: `Einzelakte #${memberId} nicht gefunden.` });
+      const memberMeta = await readJobMeta(memberId);
+      if ((memberMeta.collectionMemberJobIds || []).length) return res.status(409).json({ ok: false, error: `#${memberId} ist selbst bereits eine Sammelakte.` });
+    }
+    const ids = (await fsp.readdir(DATA_DIR).catch(() => [])).filter(isSafeJobId);
+    for (const otherId of ids) {
+      if (String(otherId) === jobId) continue;
+      const other = await readJobMeta(otherId);
+      const conflict = memberJobIds.find(memberId => (other.collectionMemberJobIds || []).includes(memberId));
+      if (conflict) return res.status(409).json({ ok: false, error: `#${conflict} gehört bereits zur Sammelakte #${otherId}.` });
+      if ((other.collectionMemberJobIds || []).includes(jobId) && memberJobIds.length) return res.status(409).json({ ok: false, error: `#${jobId} ist bereits Einzelakte der Sammelakte #${otherId}.` });
+    }
+    const before = await readJobMeta(jobId);
+    const meta = await writeJobMeta(jobId, { collectionMemberJobIds: memberJobIds, wwProjectLinks });
+    await appendJobHistory(jobId, {
+      type: "collection_updated",
+      title: memberJobIds.length ? `Sammelakte mit ${memberJobIds.length + 1} Einzelakten aktualisiert` : "Sammelakte aufgelöst",
+      detail: memberJobIds.length ? `Einzelakten: ${[jobId, ...memberJobIds].join(", ")}` : "Alle Zuordnungen entfernt; die Einzelakten bleiben unverändert erhalten.",
+      source: "KRISTINE Sammelakte",
+      data: { before: before.collectionMemberJobIds || [], memberJobIds, wwProjectLinks },
+    });
+    res.json({ ok: true, jobId, collectionMemberJobIds: meta.collectionMemberJobIds, wwProjectLinks: meta.wwProjectLinks });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
   }
 });
 

@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-12-remote-brain-1";
+  const VERSION="2026-09-12-collection-1";
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
   const token=new URLSearchParams(location.search).get("token")||"";
@@ -46,19 +46,32 @@
     if(!d?.ok)throw lastError;
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
-    for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
+    for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0,sourceProjectNumber:String(jobId)};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
     // Der Brain Connector liefert bereits produktive WW-Stunden nach Pausenabzug.
     // Hier kein zweites Mal 0,25 h je Mitarbeiter/Tag abziehen.
     const rows=[...grouped.values()].map(row=>({...row,hours:Math.max(0,row.hours)})).sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")),netDays=new Map();for(const row of rows)netDays.set(row.date,num(netDays.get(row.date))+row.hours);
     return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours)};
   }
 
+  function collectionJobIds(j){const ids=Array.isArray(j?.collectionSummary?.jobIds)?j.collectionSummary.jobIds:[j?.jobId];return [...new Set(ids.map(String).filter(Boolean))]}
+  function wwProjectNumbers(j){const links=Array.isArray(j?.collectionSummary?.wwProjects)?j.collectionSummary.wwProjects:[];const values=links.map(link=>String(link?.projectNumber||"").trim()).filter(Boolean);if(!values.length)values.push(String(j?.wwProjectNumber||j?.jobId||""));return [...new Set(values.filter(Boolean))]}
+  async function loadWwHoursForJob(j){
+    const numbers=wwProjectNumbers(j),settled=await Promise.allSettled(numbers.map(loadWwHours)),failed=settled.find(x=>x.status==="rejected"),found=settled.map((x,index)=>x.status==="fulfilled"?{number:numbers[index],data:x.value}:null).filter(Boolean);
+    if(failed)throw failed.reason||new Error("Mindestens eine WinWorker-Akte ist nicht erreichbar.");
+    if(!found.length)throw new Error("WinWorker-Stunden sind nicht erreichbar.");
+    if(found.length===1)return found[0].data;
+    const days=new Map(),rows=[];let pauseDeductionHours=0;
+    for(const {number,data} of found){pauseDeductionHours+=num(data.pauseDeductionHours);for(const [date,value] of data.days||[])days.set(date,num(days.get(date))+num(value));for(const row of data.rows||[])rows.push({...row,key:`${number}|${row.key}`,sourceProjectNumber:number})}
+    rows.sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")||a.sourceProjectNumber.localeCompare(b.sourceProjectNumber,"de"));
+    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number)};
+  }
+
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
   function nowMinutes(){const d=new Date();return d.getHours()*60+d.getMinutes()+d.getSeconds()/60}
   function job(id){return jobs.find(j=>String(j.jobId)===String(id))||null}
   function calc(j){return j?.calculation||{}}
-  function targetHours(j){return num(calc(j).calculatedHours)}
-  function oldTotalHours(j){return num(calc(j).actualHours)}
+  function targetHours(j){return num(j?.collectionSummary?.calculatedHours??calc(j).calculatedHours)}
+  function oldTotalHours(j){return num(j?.collectionSummary?.actualHours??calc(j).actualHours)}
   function oldOrderHours(j){const c=calc(j);const direct=Number(c.orderHours);return Number.isFinite(direct)?Math.max(0,direct):Math.max(0,oldTotalHours(j)-num(c.actualRegieHours))}
 
   function buildLiveMaps(){
@@ -134,9 +147,11 @@
     for(const people of peopleByJob.values())for(const person of people.values())person.hours=Math.max(0,person.hours-.25*person.days.size);
   }
 
-  function liveOrderHours(j){
-    if(!j)return 0;
-    return num(liveByJob.get(String(j.jobId))?.totalHours);
+  function liveOrderHours(j){if(!j)return 0;return collectionJobIds(j).reduce((sum,id)=>sum+num(liveByJob.get(id)?.totalHours),0)}
+  function kristineFor(j){
+    const combined={totalHours:0,days:new Map(),dayPeople:new Map()};
+    for(const id of collectionJobIds(j)){const source=liveByJob.get(id);if(!source)continue;combined.totalHours+=num(source.totalHours);for(const [date,value] of source.days||[])combined.days.set(date,num(combined.days.get(date))+num(value));for(const [date,people] of source.dayPeople||[]){if(!combined.dayPeople.has(date))combined.dayPeople.set(date,new Map());const target=combined.dayPeople.get(date);for(const person of people.values()){const current=target.get(person.identity)||{...person,hours:0};current.hours+=num(person.hours);target.set(person.identity,current)}}}
+    return combined;
   }
   function matchingKristinePerson(krDayPeople,wwRow){
     if(!krDayPeople)return null;
@@ -154,7 +169,7 @@
     return suggestedExclusions(ww,kr);
   }
   function fusion(j){
-    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=liveByJob.get(jobId),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
+    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=kristineFor(j),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
     if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,detailTotal:kristineDetailTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
     const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
     const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
@@ -184,7 +199,7 @@
   }
 
   function patchTopKpis(){
-    const totalOpen=jobs.reduce((s,j)=>s+openHours(j),0);
+    const totalOpen=jobs.filter(j=>!(j.collectionParentJobIds||[]).length).reduce((s,j)=>s+openHours(j),0);
     const cap=num(bootstrap?.company?.weeklyProductiveHours||bootstrap?.company?.weeklyCapacityHours)||312;
     const h=document.getElementById("kpiHours"),b=document.getElementById("kpiBacklog"),w=document.getElementById("kpiWeeks");
     if(h)h.textContent=hours(totalOpen);
@@ -217,7 +232,7 @@
   function sourceRange(days){const dates=[...(days?.keys?.()||[])].filter(Boolean).sort();return {first:dates[0]||"",last:dates[dates.length-1]||""}}
   function renderHoursReconciliation(j){
     const host=document.getElementById("bkHours"),grid=host?.querySelector(".bk-grid");if(!grid)return;
-    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=liveByJob.get(jobId),result=fusion(j),error=wwErrors.get(jobId)||"",selected=result.excluded||new Set(),wwRange=sourceRange(ww?.days),krRange=sourceRange(kr?.days),confirmed=!!j?.hoursOverlapResolvedAt&&!j?.hoursCutoverDate,dirty=reconciliationDrafts.has(jobId);
+    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=kristineFor(j),result=fusion(j),error=wwErrors.get(jobId)||"",selected=result.excluded||new Set(),wwRange=sourceRange(ww?.days),krRange=sourceRange(kr?.days),confirmed=!!j?.hoursOverlapResolvedAt&&!j?.hoursCutoverDate,dirty=reconciliationDrafts.has(jobId);
     let card=document.getElementById("hoursReconciliation");if(!card){card=document.createElement("div");card.id="hoursReconciliation";card.className="bk-card bk-wide";grid.prepend(card)}
     const signature=JSON.stringify({jobId,error,ww:ww?.totalHours,wwRows:(ww?.rows||[]).map(row=>[row.key,row.hours]),kr:kr?.totalHours,overlaps:result.overlaps,selected:[...selected].sort(),resolved:j?.hoursOverlapResolvedAt||"",cutover:j?.hoursCutoverDate||""});if(card.dataset.signature===signature)return;card.dataset.signature=signature;
     const ranges=`<div class="hr-ranges"><div class="hr-range"><span>WinWorker-Daten</span><strong>${ww?.found?`${dateLabel(wwRange.first)} bis ${dateLabel(wwRange.last)}`:"noch nicht geladen"}</strong><small>${ww?.found?`${hours(ww.totalHours)} vorhanden · ${hours(result.ww)} zusätzlich gezählt`:"WW am PC abgleichen"}</small></div><div class="hr-range"><span>KRISTINE-Daten</span><strong>${krRange.first?`ab ${dateLabel(krRange.first)}`:"noch keine Stunden"}</strong><small>${krRange.last?`bis ${dateLabel(krRange.last)} · ${hours(kr?.totalHours)}`:""}</small></div><div class="hr-range"><span>Gesamtsumme nach Abgleich</span><strong>${hours(result.total)}</strong><small>${hours(result.total)} = ${hours(result.kristine)} KRISTINE + ${hours(result.ww)} WW</small></div></div>`;
@@ -226,7 +241,7 @@
     const legacy=j?.hoursCutoverDate?`<div class="hr-note warn">Der frühere pauschale Stichtag ${dateLabel(j.hoursCutoverDate)} ist noch gespeichert. Sobald du diese Liste speicherst, wird er durch die genaue Mitarbeiter-Auswahl ersetzt.</div>`:"";
     const saveLabel=dirty?`Auswahl speichern (${selected.size})`:confirmed?"✓ Auswahl gespeichert":"Auswahl speichern";
     card.innerHTML=`<div class="hr-head"><div><h3>WW / KRISTINE Stundenabgleich</h3><div class="bk-note">Die Daten bleiben je Quelle sichtbar. Nur angehakte WinWorker-Zeilen gelten als doppelt und werden nicht zusätzlich gezählt.</div></div><div class="hr-actions"><button type="button" id="hrRefresh">WW jetzt abgleichen</button>${result.overlaps.length?`<button type="button" class="primary" id="hrSave" ${confirmed&&!dirty?"disabled":""}>${saveLabel}</button>`:""}</div></div>${ranges}${error?`<div class="hr-note warn">WW-Abgleich nicht möglich: ${escapeHtml(error)}</div>`:""}${legacy}${days?`<details class="hr-details" ${confirmed&&!dirty?"":"open"}><summary>Abgleichdetails anzeigen (${result.overlaps.length} Tage)</summary><div class="hr-days">${days}</div></details>`:`<div class="hr-empty">${ww?.found?"Keine Tage mit Stunden in beiden Systemen gefunden.":"Mit „WW jetzt abgleichen“ werden die WinWorker-Stunden für diese Baustelle direkt vom Büro-PC geholt."}</div>`}<div id="hrStatus" class="hr-status">${escapeHtml(saved)}</div>`;
-    card.querySelector("#hrRefresh")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus");button.disabled=true;status.textContent="WinWorker wird live gelesen …";try{const fresh=await loadWwHours(jobId);if(fresh)wwByJob.set(jobId,fresh);wwErrors.delete(jobId);reconciliationDrafts.delete(jobId);patchAll()}catch(e){wwErrors.set(jobId,e.message);button.disabled=false;status.textContent="Abgleich nicht möglich: "+e.message;card.dataset.signature="";renderHoursReconciliation(j)}});
+    card.querySelector("#hrRefresh")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus");button.disabled=true;status.textContent="WinWorker wird live gelesen …";try{const fresh=await loadWwHoursForJob(j);if(fresh)wwByJob.set(jobId,fresh);wwErrors.delete(jobId);reconciliationDrafts.delete(jobId);patchAll()}catch(e){wwErrors.set(jobId,e.message);button.disabled=false;status.textContent="Abgleich nicht möglich: "+e.message;card.dataset.signature="";renderHoursReconciliation(j)}});
     card.querySelectorAll("[data-hr-key]").forEach(input=>input.addEventListener("change",()=>{const draft=new Set(reconciliationDrafts.get(jobId)||selected);if(input.checked)draft.add(input.dataset.hrKey);else draft.delete(input.dataset.hrKey);reconciliationDrafts.set(jobId,draft);const button=card.querySelector("#hrSave"),status=card.querySelector("#hrStatus");if(button){button.disabled=false;button.textContent=`Auswahl speichern (${draft.size})`}if(status)status.textContent="Auswahl geändert – bitte speichern.";patchRows();patchTopKpis();patchBaseDetail(jobId);patchCockpit(jobId)}));
     card.querySelector("#hrSave")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus"),draft=new Set(reconciliationDrafts.get(jobId)||selected),expected=[...draft].sort();button.disabled=true;status.textContent="Auswahl wird gespeichert …";try{const response=await apiWrite(`/admin/api/job/${encodeURIComponent(jobId)}/hours-overlap`,{excludedWwKeys:expected});const savedKeys=Array.isArray(response.excludedWwKeys)?response.excludedWwKeys:[];if(JSON.stringify([...savedKeys].sort())!==JSON.stringify(expected))throw new Error("Der Server hat die Auswahl nicht vollständig übernommen.");j.hoursCutoverDate="";j.hoursOverlapExcludedWwKeys=savedKeys;j.hoursOverlapResolvedAt=response.resolvedAt||new Date().toISOString();reconciliationDrafts.delete(jobId);card.dataset.signature="";patchAll()}catch(e){button.disabled=false;button.textContent=`Auswahl speichern (${draft.size})`;status.textContent="Speichern nicht möglich: "+e.message}});
   }
@@ -234,10 +249,14 @@
   function patchCockpit(id){
     const j=job(id),shell=document.getElementById("bcShell");if(!j||!shell)return;
     const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
+    const collection=j.collectionSummary||null,order=pulseItem("Auftrag"),targetCard=pulseItem("Sollstunden gesamt");
+    if(order&&collection){const strong=order.querySelector("strong"),small=order.querySelector("small");if(strong)strong.textContent=money(collection.contractAmount);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
+    if(targetCard&&collection){const strong=targetCard.querySelector("strong"),small=targetCard.querySelector("small");if(strong)strong.textContent=hours(target);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
     const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · inkl. Regie · ${fused.source}`:`inkl. Regie · ${fused.source}`}
     const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
     const reserve=pulseItem("Abrechenbar gesamt")||pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,regieHours=num(reserve.dataset.bcRegieHours),openRegie=num(reserve.dataset.bcOpenRegie),fixedActual=Math.max(0,fused.total-regieHours),billable=fixedActual*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),fixedOpen=reserve.dataset.bcSettled==="1"?0:Math.max(0,billable-billed),strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(draft>0){if(strong)strong.textContent=money(draft);if(small)small.textContent="Rechnungsentwurf gespeichert · noch nicht gedruckt/ausgestellt"}else{if(strong)strong.textContent=money(fixedOpen+openRegie);if(small)small.textContent=`${money(fixedOpen)} Auftrag nach 10 % Reserve + ${money(openRegie)} offene Regie`}}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
+    if(collection){const photos=radarButton("Fotos"),material=radarButton("Material");if(photos){const strong=photos.querySelector("strong"),small=photos.querySelector("small"),dot=photos.querySelector(".bc-source-dot");if(strong)strong.textContent=`${num(collection.totalStats?.images)} Fotos`;if(small)small.textContent=`aus ${collection.count} Einzelakten`;if(dot)dot.classList.toggle("missing",num(collection.totalStats?.images)<=0)}if(material){const strong=material.querySelector("strong"),small=material.querySelector("small"),dot=material.querySelector(".bc-source-dot");if(strong)strong.textContent=`${num(collection.materialPositions)} Pos.`;if(small)small.textContent=`${money(collection.materialValue)} erfasst`;if(dot)dot.classList.toggle("missing",num(collection.materialPositions)<=0)}}
 
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));
     const host=card?.querySelector(".bc-people-row"),people=fusedPeople(id),sub=card?.querySelector(".bc-sub");
@@ -271,7 +290,7 @@
   function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
-    const id=String(jobId||""),j=job(id),ww=wwByJob.get(id),kr=liveByJob.get(id),out=new Map(),legacyCutover=String(j?.hoursCutoverDate||""),excluded=selectedExclusions(j,ww,kr),rawKr=num(kr?.totalHours),kristineTotal=liveOrderHours(j),scale=rawKr>0?kristineTotal/rawKr:0,add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
+    const id=String(jobId||""),j=job(id),ww=wwByJob.get(id),kr=kristineFor(j),out=new Map(),legacyCutover=String(j?.hoursCutoverDate||""),excluded=selectedExclusions(j,ww,kr),rawKr=num(kr?.totalHours),kristineTotal=liveOrderHours(j),scale=rawKr>0?kristineTotal/rawKr:0,add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
     for(const [date,people] of kr?.dayPeople||[])if(!legacyCutover||date>=legacyCutover)for(const person of people.values())add(date,person.name,person.hours*scale,"KRISTINE");
     for(const row of ww?.rows||[])if(legacyCutover?row.date<legacyCutover:!excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
     return [...out.values()];
@@ -299,7 +318,7 @@
   }
 
   async function refresh(){
-    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1));if(id){try{const ww=await loadWwHours(id);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll()}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);if(current){try{const ww=await loadWwHoursForJob(current);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
   function install(){
