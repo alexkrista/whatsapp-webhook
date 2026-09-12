@@ -328,7 +328,7 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
   const knownFiles=new Set(originalReviews.map(row=>row.file));
   const reviews = [...originalReviews,...Object.values(photoInbox?.items||{}).filter(row=>!knownFiles.has(row.file))].map(review=>{
     const item=photoInbox?.items?.[review.file];
-    const waiting=(item?.status==='pending'&&!item.retrospective)||(!item&&photoInbox&&review.createdAt>=photoInbox.enabledAt&&['photo','video'].includes(review.category)&&!review.reportId&&!review.lateUpload);
+    const waiting=item?.status==='dismissed'||(item?.status==='pending'&&!item.retrospective)||(!item&&photoInbox&&review.createdAt>=photoInbox.enabledAt&&['photo','video'].includes(review.category)&&!review.reportId&&!review.lateUpload);
     return {...review,jobId:item?.status==='confirmed'?item.jobId:item?.retrospective&&item.status==='pending'?item.previousJobId:waiting?'':review.jobId,_photoPending:waiting};
   });
   const reviewByFile = new Map();
@@ -664,6 +664,7 @@ function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
       const inboxFile=inboxMatches&&((confirmedOriginalRoot&&full.startsWith(confirmedOriginalRoot))||full.startsWith(kgoRoot));
       const assignments = await readJson(path.join(dataDir,"_kristine","media-assignments.json"),{});
       const assignment = assignments[relative];
+      if(photoAssignment?.status==='dismissed')return res.status(404).send('Foto im Papierkorb');
       const reassignedMedia = assignment?.jobId === jobId && (full.startsWith(path.resolve(dataDir,assignment.originalJobId)+path.sep) || full.startsWith(kgoRoot));
       let assignedKgoMedia = false;
       if (full.startsWith(kgoRoot)) {

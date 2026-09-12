@@ -36,6 +36,12 @@ test('History includes separate copies and orphan files, preserves galleries and
  const inbox=createPhotoInbox(dataDir),result=await inbox.importHistory();assert.equal(result.added,3);assert.deepEqual(result.missing,[missing]);
  let state=await inbox.sync();assert.equal(state.items[old].previousJobId,'26091');assert.equal(state.items[orphan].employeeId,'e1');assert.equal(Object.keys(state.items).length,3);
  assert((await listJobMedia({dataDir,jobId:'26091'})).some(x=>x.file===old));assert((await listJobMedia({dataDir,jobId:'26080'})).some(x=>x.file===copy));
+ await assert.rejects(inbox.dismiss([old,'missing-file']));assert.equal((await inbox.sync()).items[old].status,'pending');
+ await inbox.dismiss([old,copy,orphan]);assert.equal((await listJobMedia({dataDir,jobId:'26091'})).length,0);assert.equal((await listJobMedia({dataDir,jobId:'26080'})).length,0);
+ assert.equal((await createPhotoInbox(dataDir).sync()).items[old].status,'dismissed');assert.equal(await fs.readFile(path.join(dataDir,old),'utf8'),'same image content');
+ assert(JSON.parse(await fs.readFile(path.join(root,'tasks.json'),'utf8')).every(task=>task.status==='done'));
+ await assert.rejects(inbox.confirm([{file:old,jobId:'26092'}]));
+ await inbox.dismiss([old,copy,orphan],true);assert((await listJobMedia({dataDir,jobId:'26091'})).some(x=>x.file===old));
  await inbox.confirm([old,copy,orphan].map(file=>({file,jobId:'26092'})));
  assert.equal((await listJobMedia({dataDir,jobId:'26092'})).length,3);assert.equal((await listJobMedia({dataDir,jobId:'26091'})).length,0);assert.equal((await listJobMedia({dataDir,jobId:'26080'})).length,0);
  const {reassignJobMedia}=require('../media-migration');await reassignJobMedia({dataDir,jobId:'26092',targetJobId:'26091',files:[old]});await inbox.sync();
