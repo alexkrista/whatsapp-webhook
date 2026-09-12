@@ -29,12 +29,20 @@ function createPhotoInbox(dataDir){
   }
   for(const item of Object.values(data.items))if(item.status==='pending') {const suggestion=suggestJob(item,events);if(JSON.stringify(suggestion)!==JSON.stringify(item.suggestion)){item.suggestion=suggestion;changed=true}}
   data.seen=[...seen];if(changed)await write(file,data);
-  await syncReviews(data);
+  await syncAssignments(data);await syncReviews(data);
   await syncTasks(data);return data;
+ }
+ async function syncAssignments(data){
+  const target=path.join(root,'media-assignments.json'),assignments=await read(target,{});let changed=false;
+  for(const [file,item] of Object.entries(data.items)){const previous=assignments[file];if(item.status!=='confirmed'||!previous||previous.inboxConfirmedAt===item.confirmedAt)continue;
+   assignments[file]={...previous,jobId:item.jobId,updatedAt:item.confirmedAt,inboxConfirmedAt:item.confirmedAt,history:[...(previous.history||[]),{from:previous.jobId,to:item.jobId,at:item.confirmedAt}]};changed=true;
+  }
+  if(changed)await write(target,assignments);
  }
  async function syncReviews(data){
   const reviewFile=path.join(root,'day-review-entries.json'),reviews=await read(reviewFile,[]);let changed=false;
   for(const row of reviews){const item=data.items[row.file];if(!item)continue;
+   if(item.retrospective&&item.status==='pending')continue;
    const assigned=item.status==='confirmed',jobId=assigned?item.jobId:null,status=assigned?'assigned':'pending_confirmation';
    if(row.assignmentStatus!==status||String(row.jobId||'')!==String(jobId||'')){Object.assign(row,{jobId,jobName:assigned?item.jobId:'',assignmentStatus:status,needsOfficeReview:!assigned});changed=true}
   }
@@ -55,15 +63,33 @@ function createPhotoInbox(dataDir){
  }
  return {
   sync:()=>serial(synchronize),
+  importHistory:()=>serial(async()=>{
+   const data=await synchronize();if(data.historyImport?.completedAt)return data.historyImport;
+   const [reviews,events,assignments]=await Promise.all([read(path.join(root,'day-review-entries.json'),[]),read(path.join(root,'time-events.json'),[]),read(path.join(root,'media-assignments.json'),{})]);
+   const candidates=new Map(reviews.filter(r=>r.file&&['photo','video'].includes(r.category)).map(r=>[String(r.file).replace(/\\/g,'/'),r]));
+   const {listJobMedia}=require('./media-migration');
+   for(const dir of await fs.readdir(dataDir,{withFileTypes:true}))if(dir.isDirectory()&&/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(dir.name))for(const row of await listJobMedia({dataDir,jobId:dir.name}))candidates.set(row.file,{...candidates.get(row.file),...row,category:row.kind});
+   const mediaRoot=path.join(root,'media');
+   async function walk(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true}).catch(e=>{if(e.code==='ENOENT')return [];throw e})){const full=path.join(dir,entry.name);if(entry.isDirectory()){await walk(full);continue}if(!entry.isFile()||! /\.(jpe?g|png|webp|gif|heic|mp4|mov|webm)$/i.test(entry.name))continue;const file=path.relative(dataDir,full).split(path.sep).join('/');if(candidates.has(file))continue;const parts=file.split('/'),stamp=Number(entry.name.match(/^(\d{10})_/)?.[1]);candidates.set(file,{file,id:'history_'+crypto.createHash('sha256').update(file).digest('hex').slice(0,20),employeeId:parts[3]||'',date:/^\d{4}-\d{2}-\d{2}$/.test(parts[2])?parts[2]:'',at:stamp?new Date(stamp*1000).toLocaleTimeString('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):'',category:/\.(mp4|mov|webm)$/i.test(entry.name)?'video':'photo',source:'Historischer Fotoordner'})}}
+   await walk(mediaRoot);
+   const employees=await read(path.join(root,'employees.json'),[]),result={added:0,reopened:0,alreadyPending:0,missing:[],scanned:candidates.size};
+   for(const [file,photo] of candidates){const existing=data.items[file];const full=path.resolve(dataDir,file);if(!full.startsWith(path.resolve(dataDir)+path.sep)||!(await fs.stat(full).catch(()=>null))?.isFile()){result.missing.push(file);continue}if(existing?.status==='pending'){result.alreadyPending++;continue}
+    const previousJobId=assignments[file]?.jobId||existing?.jobId||photo.jobId||'',first=file.split('/')[0],originalJobId=first!=='_kristine'?first:existing?.originalJobId||photo.jobId||previousJobId;
+    const groupId=crypto.createHash('sha256').update(String(photo.employeeId||'unknown')+'|'+photo.date).digest('hex').slice(0,24);
+    data.items[file]={...photo,employeeName:photo.employeeName||employees.find(e=>String(e.id)===String(photo.employeeId))?.name||'',groupId,status:'pending',retrospective:true,previousJobId,originalJobId,jobId:'',suggestion:suggestJob(photo,events),priorConfirmation:existing?.confirmedAt||null};
+    if(existing)result.reopened++;else result.added++;
+   }
+   result.completedAt=new Date().toISOString();data.historyImport=result;await write(file,data);await syncTasks(data);return result;
+  }),
   confirm:changes=>serial(async()=>{const data=await synchronize();if(!Array.isArray(changes)||!changes.length||changes.length>100)throw Error('Bitte 1 bis 100 Fotos bestätigen.');
    for(const change of changes){if(!data.items[change.file])throw Error('Foto nicht im Eingang.');if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(change.jobId||'')||!(await fs.stat(path.join(dataDir,change.jobId)).catch(()=>null))?.isDirectory())throw Error('Bitte für jedes Foto eine gültige Baustelle wählen.');if(data.items[change.file].status==='confirmed'&&data.items[change.file].jobId!==change.jobId)throw Error('Foto bereits bestätigt. Bitte in der Galerie ändern.')}
-   for(const change of changes)Object.assign(data.items[change.file],{status:'confirmed',jobId:change.jobId,confirmedAt:new Date().toISOString()});await write(file,data);await syncReviews(data);await syncTasks(data);return changes.length;
+   for(const change of changes)Object.assign(data.items[change.file],{status:'confirmed',jobId:change.jobId,confirmedAt:data.items[change.file].confirmedAt||new Date().toISOString()});await write(file,data);await syncAssignments(data);await syncReviews(data);await syncTasks(data);return changes.length;
   })
  };
 }
 function registerPhotoInbox(app,{dataDir,requireAdmin}){
- const inbox=createPhotoInbox(dataDir);inbox.sync().catch(console.error);const timer=setInterval(()=>inbox.sync().catch(console.error),15000);timer.unref();
- app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,items:Object.values(state.items).filter(i=>i.status==='pending').map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
+ const inbox=createPhotoInbox(dataDir);inbox.importHistory().catch(console.error);const timer=setInterval(()=>inbox.importHistory().catch(console.error),15000);timer.unref();
+ app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>i.status==='pending').map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/confirm',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.confirm(req.body?.changes)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.get('/kristine/api/photo-inbox/file',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync(),item=state.items[String(req.query.file||'')];if(!item)return res.status(404).send('Foto nicht gefunden');const full=path.resolve(dataDir,item.file),root=path.resolve(dataDir,'_kristine','media')+path.sep,originalRoot=/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(item.originalJobId||'')?path.resolve(dataDir,item.originalJobId)+path.sep:null;if(!full.startsWith(root)&&!(originalRoot&&full.startsWith(originalRoot)))return res.status(404).send('Foto nicht gefunden');res.setHeader('Cache-Control','private, no-store');res.sendFile(full)}catch(e){res.status(500).send(e.message)}});
  return inbox;

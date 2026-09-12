@@ -24,3 +24,21 @@ test('Photo inbox preserves existing assignments, groups new photos, confirms at
  const extra=photo(3);await fs.writeFile(path.join(dataDir,extra.file),'image');const current=JSON.parse(await fs.readFile(reviewsFile));await writeReviews([...current,extra]);await inbox.sync();assert.equal((await tasks()).length,1);assert.equal((await tasks())[0].status,'open');
  assert.equal((await listJobMedia({dataDir,jobId:'26091'})).length,2);
 });
+
+test('History includes separate copies and orphan files, preserves galleries and imports only once',async t=>{
+ const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),'photo-history-'));t.after(()=>fs.rm(dataDir,{recursive:true,force:true}));const root=path.join(dataDir,'_kristine');
+ const put=async(file,value)=>{await fs.mkdir(path.dirname(path.join(dataDir,file)),{recursive:true});await fs.writeFile(path.join(dataDir,file),typeof value==='string'?value:JSON.stringify(value))};
+ for(const job of ['26080','26091','26092'])await fs.mkdir(path.join(dataDir,job));
+ const old='26080/2026/08/21/1787310000_photo.jpg',copy='_kristine/media/2026-08-21/e1/1787310000_copy.jpg',orphan='_kristine/media/2026-08-21/e1/1787310001_orphan.jpg',missing='_kristine/media/gone.jpg';
+ for(const file of [old,copy,orphan])await put(file,'same image content');
+ await put('_kristine/day-review-entries.json',[{file:old,category:'photo',jobId:'26080',employeeId:'e1',date:'2026-08-21',at:'10:00',createdAt:'2026-08-21'},{file:copy,category:'photo',reportId:'r1',jobId:'26080',employeeId:'e1',date:'2026-08-21',createdAt:'2026-08-21'},{file:missing,category:'photo',jobId:'26080',createdAt:'2026-08-21'}]);
+ await put('_kristine/media-assignments.json',{[old]:{originalJobId:'26080',jobId:'26091',history:[{from:'26080',to:'26091'}]}});
+ const inbox=createPhotoInbox(dataDir),result=await inbox.importHistory();assert.equal(result.added,3);assert.deepEqual(result.missing,[missing]);
+ let state=await inbox.sync();assert.equal(state.items[old].previousJobId,'26091');assert.equal(state.items[orphan].employeeId,'e1');assert.equal(Object.keys(state.items).length,3);
+ assert((await listJobMedia({dataDir,jobId:'26091'})).some(x=>x.file===old));assert((await listJobMedia({dataDir,jobId:'26080'})).some(x=>x.file===copy));
+ await inbox.confirm([old,copy,orphan].map(file=>({file,jobId:'26092'})));
+ assert.equal((await listJobMedia({dataDir,jobId:'26092'})).length,3);assert.equal((await listJobMedia({dataDir,jobId:'26091'})).length,0);assert.equal((await listJobMedia({dataDir,jobId:'26080'})).length,0);
+ const {reassignJobMedia}=require('../media-migration');await reassignJobMedia({dataDir,jobId:'26092',targetJobId:'26091',files:[old]});await inbox.sync();
+ assert((await listJobMedia({dataDir,jobId:'26091'})).some(x=>x.file===old));assert.equal((await listJobMedia({dataDir,jobId:'26092'})).length,2);
+ assert.deepEqual(await createPhotoInbox(dataDir).importHistory(),result);state=await inbox.sync();assert(Object.values(state.items).every(x=>x.status==='confirmed'));
+});
