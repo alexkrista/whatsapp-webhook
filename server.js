@@ -75,9 +75,9 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.17";
-const APP_BUILD = "0031.22-mix-job-material-session";
-const APP_STATUS = "Mischmaschinen-Material mit Browser-Anmeldung in Baustellen laden";
+const APP_VERSION = "3.5.18";
+const APP_BUILD = "0031.23-lg-surface";
+const APP_STATUS = "Little Greene automatisch oberflächenrelevant";
 const APP_BUILD_DATE = "2026-09-11";
 
 // Static files for Admin UI
