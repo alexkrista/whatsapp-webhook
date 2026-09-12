@@ -85,6 +85,16 @@ async function call(routes, method, route, body = {}) {
     assert.equal(second.body.imported, 0);
     const listedAgain = await call(routes, "GET", "/kristine/api/inbox");
     assert.equal(listedAgain.body.items.length, 1, "Delta sync must not duplicate an imported mail");
+    const dismiss = routes.get("POST /kristine/api/inbox/:id/dismiss");
+    const discarded=response();await dismiss({params:{id:item.id},body:{}},discarded);assert.equal(discarded.body.item.status,"dismissed");
+    assert.equal((await call(routes,"GET","/kristine/api/inbox")).body.items.length,0);
+    await dismiss({params:{id:item.id},body:{}},response());
+    const {importInboxBuffer}=require("../kristine-inbox");
+    const duplicate=await importInboxBuffer({dataDir:temporary,buffer:Buffer.from("Subject: Rechnung 4711"),name:item.name,mimeType:item.mimeType,source:item.source,externalKey:"microsoft:kristine@krista.at:message-1"});
+    assert.equal(duplicate.item.status,"dismissed","Re-import must retain dismissal");
+    const hidden=response();await routes.get("GET /kristine/api/inbox")({query:{dismissed:"true"}},hidden);assert.equal(hidden.body.items.length,1);
+    assert.equal(await fsp.readFile(attachment,"utf8"),"PDF!");
+    await dismiss({params:{id:item.id},body:{restore:true}},response());assert.equal((await call(routes,"GET","/kristine/api/inbox")).body.items[0].status,"analyzed");
     console.log("OK: shared mailbox mail and attachment arrive once in KRISTINE Eingang");
   } finally {
     mailbox.stop();

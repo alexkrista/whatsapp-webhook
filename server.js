@@ -77,8 +77,8 @@ const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.22";
-const APP_BUILD = "0031.27-photo-history";
+const APP_VERSION = "3.5.23";
+const APP_BUILD = "0031.28-inbox-dismiss";
 const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-12";
 
