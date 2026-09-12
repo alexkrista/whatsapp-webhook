@@ -324,10 +324,12 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
   if (!/^[A-Za-z0-9_-]+$/.test(safeId)) return [];
 
   const photoInbox = await readJson(path.join(dataDir, "_kristine", "photo-inbox.json"), null);
-  const reviews = (await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), [])).map(review=>{
+  const originalReviews=await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
+  const knownFiles=new Set(originalReviews.map(row=>row.file));
+  const reviews = [...originalReviews,...Object.values(photoInbox?.items||{}).filter(row=>!knownFiles.has(row.file))].map(review=>{
     const item=photoInbox?.items?.[review.file];
-    const waiting=item?.status==='pending'||(!item&&photoInbox&&review.createdAt>=photoInbox.enabledAt&&['photo','video'].includes(review.category)&&!review.reportId&&!review.lateUpload);
-    return {...review,jobId:item?.status==='confirmed'?item.jobId:waiting?'':review.jobId,_photoPending:waiting};
+    const waiting=(item?.status==='pending'&&!item.retrospective)||(!item&&photoInbox&&review.createdAt>=photoInbox.enabledAt&&['photo','video'].includes(review.category)&&!review.reportId&&!review.lateUpload);
+    return {...review,jobId:item?.status==='confirmed'?item.jobId:item?.retrospective&&item.status==='pending'?item.previousJobId:waiting?'':review.jobId,_photoPending:waiting};
   });
   const reviewByFile = new Map();
   for (const entry of reviews) {
@@ -386,7 +388,7 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
     const mediaRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
     const inboxItem=photoInbox?.items?.[relative];
     const inboxOriginalRoot=inboxItem?.originalJobId&&/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(inboxItem.originalJobId)?path.resolve(dataDir,inboxItem.originalJobId)+path.sep:null;
-    if ((!full.startsWith(mediaRoot)&&!(inboxItem?.status==='confirmed'&&inboxOriginalRoot&&full.startsWith(inboxOriginalRoot))) || !fs.existsSync(full)) continue;
+    if ((!full.startsWith(mediaRoot)&&!((inboxItem?.status==='confirmed'||inboxItem?.retrospective)&&inboxOriginalRoot&&full.startsWith(inboxOriginalRoot))) || !fs.existsSync(full)) continue;
 
     const filename = path.basename(relative);
     const timestamp = timestampFromFilename(filename);
@@ -414,6 +416,8 @@ async function listJobMedia({ dataDir, jobId }) {
   const assignments = await readJson(path.join(dataDir, "_kristine", "media-assignments.json"), {});
   const items = (await listOriginalJobMedia({ dataDir, jobId })).filter(item => !assignments[item.file] || assignments[item.file].jobId === jobId);
   const sources = new Set(Object.values(assignments).filter(row => row.jobId === jobId && row.originalJobId !== jobId).map(row => row.originalJobId));
+  const inbox=await readJson(path.join(dataDir,"_kristine","photo-inbox.json"),null);
+  for(const [file,row] of Object.entries(assignments))if(row.jobId===jobId&&inbox?.items?.[file]?.status==='confirmed')sources.add(inbox.items[file].jobId);
   for (const originalJobId of sources) for (const item of await listOriginalJobMedia({ dataDir, jobId: originalJobId })) {
     if (assignments[item.file]?.jobId === jobId && !items.some(row => row.file === item.file)) items.push({ ...item, jobId, url: `/admin/api/job/${encodeURIComponent(jobId)}/media-file?file=${encodeURIComponent(item.file)}` });
   }
@@ -429,7 +433,7 @@ async function reassignJobMedia({ dataDir, jobId, targetJobId, files }) {
     const selected = [...new Set(files)], available = await listJobMedia({dataDir,jobId});
     if (selected.some(file => !available.some(item => item.file === file))) throw Error("Die Foto-Zuordnung hat sich geändert. Bitte neu laden.");
     const file = path.join(dataDir,"_kristine","media-assignments.json"), assignments = await readJson(file,{}), at = new Date().toISOString();
-    for (const key of selected) { const previous = assignments[key]; assignments[key] = { originalJobId: previous?.originalJobId || jobId, jobId: targetJobId, updatedAt: at, history: [...(previous?.history || []), { from: jobId, to: targetJobId, at }] }; }
+    for (const key of selected) { const previous = assignments[key]; assignments[key] = { ...previous, originalJobId: previous?.originalJobId || jobId, jobId: targetJobId, updatedAt: at, history: [...(previous?.history || []), { from: jobId, to: targetJobId, at }] }; }
     await fsp.mkdir(path.dirname(file),{recursive:true});await fsp.writeFile(file+".tmp",JSON.stringify(assignments,null,2));await fsp.rename(file+".tmp",file);
     return { count:selected.length, jobId:targetJobId };
   });
@@ -656,7 +660,8 @@ function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
       const inJobFolder = full.startsWith(jobRoot);
       const photoInbox=await readJson(path.join(dataDir,"_kristine","photo-inbox.json"),null),photoAssignment=photoInbox?.items?.[relative];
       const confirmedOriginalRoot=photoAssignment?.originalJobId&&/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(photoAssignment.originalJobId)?path.resolve(dataDir,photoAssignment.originalJobId)+path.sep:null;
-      const inboxFile=photoAssignment?.status==='confirmed'&&photoAssignment.jobId===jobId&&confirmedOriginalRoot&&full.startsWith(confirmedOriginalRoot);
+      const inboxMatches=(photoAssignment?.status==='confirmed'&&photoAssignment.jobId===jobId)||(photoAssignment?.retrospective&&photoAssignment.status==='pending'&&photoAssignment.previousJobId===jobId);
+      const inboxFile=inboxMatches&&((confirmedOriginalRoot&&full.startsWith(confirmedOriginalRoot))||full.startsWith(kgoRoot));
       const assignments = await readJson(path.join(dataDir,"_kristine","media-assignments.json"),{});
       const assignment = assignments[relative];
       const reassignedMedia = assignment?.jobId === jobId && (full.startsWith(path.resolve(dataDir,assignment.originalJobId)+path.sep) || full.startsWith(kgoRoot));
@@ -669,7 +674,7 @@ function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
           String(entry?.file || "").replace(/\\/g, "/") === relative
         );
       }
-      if (photoAssignment?.status==='pending' || (!assignment&&photoAssignment?.status==='confirmed'&&photoAssignment.jobId!==jobId) || (assignment && assignment.jobId !== jobId) || (!inJobFolder && !assignedKgoMedia && !reassignedMedia && !inboxFile) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
+      if ((photoAssignment?.status==='pending'&&!photoAssignment.retrospective) || (!assignment&&photoAssignment?.status==='confirmed'&&photoAssignment.jobId!==jobId) || (assignment && assignment.jobId !== jobId) || (!inJobFolder && !assignedKgoMedia && !reassignedMedia && !inboxFile) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
         return res.status(404).send("Datei nicht gefunden");
       }
       res.setHeader("Cache-Control", "private, max-age=3600");
