@@ -323,7 +323,12 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
   const safeId = String(jobId || "").trim();
   if (!/^[A-Za-z0-9_-]+$/.test(safeId)) return [];
 
-  const reviews = await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
+  const photoInbox = await readJson(path.join(dataDir, "_kristine", "photo-inbox.json"), null);
+  const reviews = (await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), [])).map(review=>{
+    const item=photoInbox?.items?.[review.file];
+    const waiting=item?.status==='pending'||(!item&&photoInbox&&review.createdAt>=photoInbox.enabledAt&&['photo','video'].includes(review.category)&&!review.reportId&&!review.lateUpload);
+    return {...review,jobId:item?.status==='confirmed'?item.jobId:waiting?'':review.jobId,_photoPending:waiting};
+  });
   const reviewByFile = new Map();
   for (const entry of reviews) {
     const file = String(entry?.file || "").replace(/\\/g, "/");
@@ -340,6 +345,8 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
       const full = path.join(row.dir, filename);
       const relative = path.relative(dataDir, full).split(path.sep).join("/");
       const review = reviewByFile.get(relative) || null;
+      if(review?._photoPending)continue;
+      if(photoInbox?.items?.[relative]?.status==='confirmed'&&review?.jobId!==safeId)continue;
       const ts = timestampFromFilename(filename);
       const matchingLog = logs.find((entry) => {
         const rawTs = Number(entry?.raw?.timestamp || 0);
@@ -377,7 +384,9 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
 
     const full = path.resolve(dataDir, relative);
     const mediaRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
-    if (!full.startsWith(mediaRoot) || !fs.existsSync(full)) continue;
+    const inboxItem=photoInbox?.items?.[relative];
+    const inboxOriginalRoot=inboxItem?.originalJobId&&/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(inboxItem.originalJobId)?path.resolve(dataDir,inboxItem.originalJobId)+path.sep:null;
+    if ((!full.startsWith(mediaRoot)&&!(inboxItem?.status==='confirmed'&&inboxOriginalRoot&&full.startsWith(inboxOriginalRoot))) || !fs.existsSync(full)) continue;
 
     const filename = path.basename(relative);
     const timestamp = timestampFromFilename(filename);
@@ -645,18 +654,22 @@ function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
       const jobRoot = path.resolve(dataDir, jobId) + path.sep;
       const kgoRoot = path.resolve(dataDir, "_kristine", "media") + path.sep;
       const inJobFolder = full.startsWith(jobRoot);
+      const photoInbox=await readJson(path.join(dataDir,"_kristine","photo-inbox.json"),null),photoAssignment=photoInbox?.items?.[relative];
+      const confirmedOriginalRoot=photoAssignment?.originalJobId&&/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(photoAssignment.originalJobId)?path.resolve(dataDir,photoAssignment.originalJobId)+path.sep:null;
+      const inboxFile=photoAssignment?.status==='confirmed'&&photoAssignment.jobId===jobId&&confirmedOriginalRoot&&full.startsWith(confirmedOriginalRoot);
       const assignments = await readJson(path.join(dataDir,"_kristine","media-assignments.json"),{});
       const assignment = assignments[relative];
       const reassignedMedia = assignment?.jobId === jobId && (full.startsWith(path.resolve(dataDir,assignment.originalJobId)+path.sep) || full.startsWith(kgoRoot));
       let assignedKgoMedia = false;
       if (full.startsWith(kgoRoot)) {
         const reviews = await readJson(path.join(dataDir, "_kristine", "day-review-entries.json"), []);
+        const inbox = await readJson(path.join(dataDir,"_kristine","photo-inbox.json"),null);
         assignedKgoMedia = reviews.some((entry) =>
-          String(entry?.jobId || "").trim() === jobId &&
+          (inbox?.items?.[entry.file]?.status==='confirmed' ? inbox.items[entry.file].jobId===jobId : !inbox?.items?.[entry.file] && !(inbox&&entry.createdAt>=inbox.enabledAt&&!entry.reportId&&!entry.lateUpload) && String(entry?.jobId || "").trim() === jobId) &&
           String(entry?.file || "").replace(/\\/g, "/") === relative
         );
       }
-      if ((assignment && assignment.jobId !== jobId) || (!inJobFolder && !assignedKgoMedia && !reassignedMedia) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
+      if (photoAssignment?.status==='pending' || (!assignment&&photoAssignment?.status==='confirmed'&&photoAssignment.jobId!==jobId) || (assignment && assignment.jobId !== jobId) || (!inJobFolder && !assignedKgoMedia && !reassignedMedia && !inboxFile) || !mediaKind(path.basename(full)) || !fs.existsSync(full)) {
         return res.status(404).send("Datei nicht gefunden");
       }
       res.setHeader("Cache-Control", "private, max-age=3600");

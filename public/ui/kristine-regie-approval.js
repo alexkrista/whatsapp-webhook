@@ -13,6 +13,7 @@
 
   function meta(task) {
     const reminder = String(task?.reminder || "");
+    if(reminder.includes('[PHOTO_INBOX]'))return {reportId:'photo:'+reminder.split('groupId=')[1],photo:true};
     if (!reminder.includes(MARKER)) return null;
     const result = {};
     (reminder.split(MARKER, 2)[1] || "").split(";").forEach(part => {
@@ -33,7 +34,7 @@
 
   function reportUrl(reportId, taskId) {
     const url = new URL("/kristine/eingang", location.origin);
-    url.searchParams.set("reportId", reportId);
+    if(reportId.startsWith('photo:'))url.searchParams.set('photoGroup',reportId.slice(6));else url.searchParams.set('reportId', reportId);
     if (taskId) url.searchParams.set("taskId", taskId);
     const token = new URLSearchParams(location.search).get("token");
     if (token) url.searchParams.set("token", token);
@@ -43,7 +44,7 @@
   function openButton(task, cssClass) {
     const details = meta(task);
     if (!details || task.status === "done") return "";
-    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId, task.id))}&quot;">Regiebericht prüfen</button>`;
+    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId, task.id))}&quot;">${details.photo?'Fotos zuordnen':'Regiebericht prüfen'}</button>`;
   }
 
   function decorateRows() {
@@ -52,7 +53,7 @@
       if (!task || !meta(task)) return;
       row.classList.add("krista-regie-task-row");
       const sub = row.querySelector(".krista-task-sub");
-      if (sub) sub.textContent = "Von Bettina / Büro · wartet auf deine Prüfung";
+      if (sub) sub.textContent = meta(task).photo?'Fotoeingang · Zuordnung bestätigen':'Von Bettina / Büro · wartet auf deine Prüfung';
       const actions = row.querySelector(".krista-task-actions");
       if (!actions) return;
       actions.querySelectorAll('button[onclick*="markTaskDone"]').forEach(button => button.remove());
@@ -66,7 +67,7 @@
     const host = document.querySelector("#taskModalList .task-modal-item");
     const actions = host?.querySelector(":scope > .actions");
     if (!actions) return;
-    host.querySelectorAll(".task-detail-grid strong").forEach(value => { if (String(value.textContent || "").includes(MARKER)) value.textContent = "Bitte Regiebericht prüfen"; });
+    host.querySelectorAll(".task-detail-grid strong").forEach(value => { if (String(value.textContent || "").includes(MARKER)||String(value.textContent||"").includes("[PHOTO_INBOX]")) value.textContent = meta(task).photo?'Bitte Fotos zuordnen':'Bitte Regiebericht prüfen'; });
     actions.querySelectorAll('button[onclick*="markTaskDone"]').forEach(button => button.remove());
     if (task.status !== "done" && !actions.querySelector(".krista-regie-open")) actions.insertAdjacentHTML("beforeend", openButton(task, "krista-regie-open"));
   }
