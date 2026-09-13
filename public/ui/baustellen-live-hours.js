@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-collection-data-1";
+  const VERSION="2026-09-13-hours-balance-2";
   const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
@@ -73,7 +73,7 @@
   function nowMinutes(){const d=new Date();return d.getHours()*60+d.getMinutes()+d.getSeconds()/60}
   function job(id){return jobs.find(j=>String(j.jobId)===String(id))||null}
   function calc(j){return j?.calculation||{}}
-  function targetHours(j){return D.members(j,jobs).reduce((sum,row)=>sum+D.fixedTarget(row),0)}
+  function targetHours(j){return D.members(j,jobs).reduce((sum,row)=>sum+D.totalTarget(row),0)}
   function oldTotalHours(j){return num(j?.collectionSummary?.actualHours??calc(j).actualHours)}
   function oldOrderHours(j){const c=calc(j);const direct=Number(c.orderHours);return Number.isFinite(direct)?Math.max(0,direct):Math.max(0,oldTotalHours(j)-num(c.actualRegieHours))}
 
@@ -191,8 +191,9 @@
     return out;
   }
   function openHours(j){
-    return D.members(j,jobs).filter(member=>["Auftrag","Laufend"].includes(member.status)).reduce((sum,member)=>sum+memberHourSummary(member,j).remaining,0);
+    return D.members(j,jobs).some(member=>["Auftrag","Laufend"].includes(member.status))?hoursSummary(j.jobId).remaining:0;
   }
+  function balanceNote(summary){return summary.overrun>0?`${hours(summary.overrun)} über Soll · keine offenen Stunden`:`${hours(summary.target)} Soll − ${hours(summary.total)} Ist = ${hours(summary.remaining)}`}
 
   function patchRows(){
     document.querySelectorAll(".job-row[data-job]").forEach(row=>{
@@ -216,12 +217,13 @@
 
   function patchBaseDetail(id){
     const j=job(id);if(!j)return;
-    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=hoursSummary(id).remaining,pct=target>0?actual/target*100:0;
+    const fused=hoursSummary(id),actual=fused.total,target=fused.target,remaining=fused.remaining,pct=target>0?actual/target*100:0;
     const dh=document.getElementById("detailHours"),dn=document.getElementById("detailHoursNote"),op=document.getElementById("detailOpen"),bar=document.getElementById("detailProgress"),note=document.getElementById("detailProgressNote");
     if(dh)dh.textContent=`${hours(actual)} / ${hours(target)}`;
     const split=fused.source==="WW + KRISTINE"?`${hours(actual)} = ${hours(fused.kristine)} KRISTINE + ${hours(fused.ww)} WW`:fused.source;
     if(dn)dn.textContent=target>0?`${Math.round(pct)} % verbraucht · IST inkl. Regie · ${split}`:`IST inkl. Regie · ${split} · keine Sollstunden hinterlegt`;
     if(op)op.textContent=hours(remaining);
+    const openNote=document.getElementById("detailOpenNote");if(openNote)openNote.textContent=balanceNote(fused);
     if(bar){bar.style.width=Math.min(100,Math.max(0,pct))+"%";bar.style.background=pct>100?"var(--red)":"var(--green)"}
     if(note)note.textContent=target>0?`${hours(actual)} von ${hours(target)} · ${Math.round(pct)} % · live gebucht`:"Noch keine Stundenkalkulation hinterlegt.";
     const info=document.getElementById("detailInfo");
@@ -255,12 +257,12 @@
 
   function patchCockpit(id){
     const j=job(id),shell=document.getElementById("bcShell");if(!j||!shell)return;
-    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=hoursSummary(id).remaining;
+    const fused=hoursSummary(id),actual=fused.total,target=fused.target,remaining=fused.remaining;
     const collection=j.collectionSummary||null,order=pulseItem("Auftrag"),targetCard=pulseItem("Sollstunden gesamt");
     if(order&&collection){const strong=order.querySelector("strong"),small=order.querySelector("small");if(strong)strong.textContent=money(collection.contractAmount);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
-    if(targetCard&&collection){const strong=targetCard.querySelector("strong"),small=targetCard.querySelector("small");if(strong)strong.textContent=hours(target);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
+    if(targetCard){const strong=targetCard.querySelector("strong"),small=targetCard.querySelector("small");if(strong)strong.textContent=hours(target);if(small&&collection)small.textContent=`Summe aus ${collection.count} Einzelakten`}
     const ist=pulseItem("Iststunden");if(ist){const strong=ist.querySelector("strong"),small=ist.querySelector("small");if(strong)strong.textContent=hours(actual);if(small)small.textContent=target?`${Math.round(actual/target*100)} % · inkl. Regie · ${fused.source}`:`inkl. Regie · ${fused.source}`}
-    const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong");if(strong)strong.textContent=hours(remaining)}
+    const rest=pulseItem("Reststunden");if(rest){const strong=rest.querySelector("strong"),small=rest.querySelector("small");if(strong)strong.textContent=hours(remaining);if(small)small.textContent=balanceNote(fused)}
     const reserve=pulseItem("Abrechenbar gesamt")||pulseItem("Abrechenbar nach Reserve");if(reserve){const c=calc(j),rate=num(c.billingRate??j.billingRate),fixedTarget=num(c.fixedCalculatedHours??Math.max(0,target-num(c.plannedRegieHours))),materialPerHour=fixedTarget>0?num(c.materialAmount)/fixedTarget:0,regieHours=num(reserve.dataset.bcRegieHours),openRegie=num(reserve.dataset.bcOpenRegie),fixedActual=Math.max(0,fused.total-regieHours),billable=fixedActual*(rate+materialPerHour)*.9,billed=num(reserve.dataset.bcBilled),draft=num(reserve.dataset.bcDraft),fixedOpen=reserve.dataset.bcSettled==="1"?0:Math.max(0,billable-billed),strong=reserve.querySelector("strong"),small=reserve.querySelector("small");if(draft>0){if(strong)strong.textContent=money(draft);if(small)small.textContent="Rechnungsentwurf gespeichert · noch nicht gedruckt/ausgestellt"}else{if(strong)strong.textContent=money(fixedOpen+openRegie);if(small)small.textContent=`${money(fixedOpen)} Auftrag nach 10 % Reserve + ${money(openRegie)} offene Regie`}}
     const rb=radarButton("Stunden");if(rb){const strong=rb.querySelector("strong"),small=rb.querySelector("small"),dot=rb.querySelector(".bc-source-dot");if(strong)strong.textContent=hours(actual);if(small)small.textContent=actual>0?"live zugeordnet":"noch keine Buchung";if(dot)dot.classList.toggle("missing",actual<=0)}
     if(collection){const photos=radarButton("Fotos"),material=radarButton("Material");if(photos){const strong=photos.querySelector("strong"),small=photos.querySelector("small"),dot=photos.querySelector(".bc-source-dot");if(strong)strong.textContent=`${num(collection.totalStats?.images)} Fotos`;if(small)small.textContent=`aus ${collection.count} Einzelakten`;if(dot)dot.classList.toggle("missing",num(collection.totalStats?.images)<=0)}if(material){const strong=material.querySelector("strong"),small=material.querySelector("small"),dot=material.querySelector(".bc-source-dot");if(strong)strong.textContent=`${num(collection.materialPositions)} Pos.`;if(small)small.textContent=`${money(collection.materialValue)} erfasst`;if(dot)dot.classList.toggle("missing",num(collection.materialPositions)<=0)}}
@@ -272,23 +274,25 @@
   }
 
   function memberHourSummary(j,head=j){
-    const fused=singleFusion(j,head),regie=Math.max(num(calc(j).actualRegieHours),num(reportHoursByJob.get(String(j.jobId)))),order=Math.max(0,fused.total-regie),target=D.fixedTarget(j);
-    return {...fused,order,regie,target,remaining:Math.max(0,target-order),overrun:Math.max(0,order-target)};
+    const fused=singleFusion(j,head),regie=Math.max(num(calc(j).actualRegieHours),num(reportHoursByJob.get(String(j?.jobId)))),order=Math.max(0,fused.total-regie),target=D.totalTarget(j),fixedTarget=D.fixedTarget(j),orderBalance=D.hourBalance(fixedTarget,order);
+    return {...fused,order,regie,target,fixedTarget,...D.hourBalance(target,fused.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
   }
   function hoursSummary(id){
-    const j=job(id);if(!j)return {total:0,order:0,regie:0,remaining:0,source:""};
-    const summaries=D.members(j,jobs).map(member=>memberHourSummary(member,j)),out={...fusion(j),order:0,regie:0,target:0,remaining:0,overrun:0,complete:!(wwByJob.get(String(id))?.missing||[]).length,missing:wwByJob.get(String(id))?.missing||[]};
-    for(const row of summaries)for(const key of ["order","regie","target","remaining","overrun"])out[key]+=num(row[key]);
-    return out;
+    const j=job(id);if(!j)return {total:0,order:0,regie:0,target:0,fixedTarget:0,remaining:0,overrun:0,remainingOrder:0,orderOverrun:0,source:""};
+    const summaries=D.members(j,jobs).map(member=>memberHourSummary(member,j)),out={...fusion(j),order:0,regie:0,target:0,fixedTarget:0,complete:!(wwByJob.get(String(id))?.missing||[]).length,missing:wwByJob.get(String(id))?.missing||[]};
+    for(const row of summaries)for(const key of ["order","regie","target","fixedTarget"])out[key]+=num(row[key]);
+    const orderBalance=D.hourBalance(out.fixedTarget,out.order);
+    return {...out,...D.hourBalance(out.target,out.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
   }
   function patchEconomy(id){
     const j=job(id),host=document.getElementById("bkEconomy");if(!j||!host)return;
-    const live=hoursSummary(id),target=targetHours(j),progress=target?live.order/target*100:0;
+    const live=hoursSummary(id),target=live.target,progress=target?live.total/target*100:0;
     const setText=(element,value)=>{if(element&&element.textContent!==value)element.textContent=value};
     const card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label);
-    const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden"),performanceCard=card("Abrechenbare Leistung"),amountToInvoiceCard=card("Noch abzurechnen"),grossProfitCard=card("Ertrag");
-    if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
-    if(remainingCard){setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));setText(remainingCard.querySelector(".bk-note"),`${live.overrun>0?hours(live.overrun)+" Überschreitung separat · ":""}${D.memberIds(j).length>1?"Summe der offenen Stunden je Einzelakte":"Soll minus Ist Auftrag"}`)}
+    const targetCard=card("Kalkulierte Sollstunden"),actualCard=card("Iststunden gesamt"),remainingCard=card("Noch offene Stunden"),performanceCard=card("Abrechenbare Leistung"),amountToInvoiceCard=card("Noch abzurechnen"),grossProfitCard=card("Ertrag");
+    if(targetCard)setText(targetCard.querySelector(".bk-value"),hours(target));
+    if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.total));value.classList.toggle("bk-bad",target>0&&live.total>target)}setText(note,`${hours(live.order)} Auftrag + ${hours(live.regie)} Regie · ${live.source}`)}
+    if(remainingCard){setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));setText(remainingCard.querySelector(".bk-note"),balanceNote(live))}
     const performance=window.BaustellenSources.performance(id)||window.KristaRegieBilling?.calculatePerformance?.({actualHours:live.total,regieHours:num(host.dataset.regieHours)||live.regie,hourlyRate:num(host.dataset.hourlyRate),contractAmount:num(host.dataset.contractAmount),plannedRegieAmount:num(host.dataset.plannedRegieAmount),actualRegieAmount:num(host.dataset.actualRegieAmount),partialInvoiceNet:num(host.dataset.partialInvoiceNet),hasClosingInvoice:host.dataset.hasClosingInvoice==="1"});
     if(performanceCard&&performance){setText(performanceCard.querySelector(".bk-value"),money2(performance.billablePerformance));setText(performanceCard.querySelector(".bk-note"),`${hours(performance.orderHours)} × ${money2(performance.hourlyRate)} × 90 % + ${money2(performance.actualRegieAmount)} Regie · Deckel ${money2(performance.performanceLimit)}`)}
     if(amountToInvoiceCard&&performance){setText(amountToInvoiceCard.querySelector(".bk-value"),money2(performance.amountToInvoice));setText(amountToInvoiceCard.querySelector(".bk-note"),`${money2(performance.billablePerformance)} Leistung − ${money2(performance.partialInvoiceNet)} geschriebene Teilrechnungen`)}
@@ -296,7 +300,7 @@
     const materialEk=num(host.dataset.totalMaterialEk),wage=laborCost(id),grossProfit=documentNet-wage.total-materialEk;if(grossProfitCard){const value=grossProfitCard.querySelector(".bk-value");setText(value,documentNet>0?money2(grossProfit):"–");value?.classList.toggle("bk-bad",grossProfit<0);value?.classList.toggle("bk-good",grossProfit>=0);setText(grossProfitCard.querySelector(".bk-note"),documentNet>0?`${money2(documentNet)} Rechnungen netto − ${money2(wage.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(materialEk)} Material-EK`:"Noch keine Rechnung vorhanden");const details=grossProfitCard.querySelector("[data-bk-gross-profit-details]"),detailsHtml=profitDetailsHtml(wage,documentNet,materialEk,grossProfit);if(details&&details.innerHTML!==detailsHtml)details.innerHTML=detailsHtml;host._bkGrossProfitPdfData={rows:wage.rows,documentNet,materialEk}}
     if(host.dataset.billingPartial==="1"){for(const el of [performanceCard,amountToInvoiceCard,grossProfitCard]){setText(el?.querySelector(".bk-value"),"–");setText(el?.querySelector(".bk-note"),"Abgleich unvollständig · siehe Datenstand je Akte")}}
     const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
-    if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
+    if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der gesamten Sollstunden verbraucht · Ist inkl. Regie.`)}
   }
 
   function patchAll(){patching=true;try{patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);patchHoursTab(id);if(current)renderHoursReconciliation(current)}}finally{queueMicrotask(()=>{patching=false})}}
