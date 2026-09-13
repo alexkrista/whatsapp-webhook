@@ -4298,6 +4298,7 @@ console.log("KRISTINE Archivsuche registriert");
 // ==================== KRISTINE Ausgangsrechnungen je Baustelle ====================
 registerOutgoingBillingBridge(app, { requireAdmin });
 registerJobSourceCache(app, { dataDir: DATA_DIR, requireAdmin, readJobMeta });
+require("./collection-view-cache").registerCollectionViewCache(app, { dataDir: DATA_DIR, requireAdmin, collectionStore });
 console.log("KRISTINE Baustellen-Rechnungsstand registriert");
 
 // ===================== Tagesreport PDF + automatische Tageszusammenfassung =====================

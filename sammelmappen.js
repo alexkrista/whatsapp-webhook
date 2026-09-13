@@ -164,7 +164,7 @@ function collectionCatalog(jobs, definitions) {
       collectionMainJobId: definition.mainJobId, collectionMemberJobIds: definition.memberJobIds,
       status: rows.some(row => row.status === "Laufend") ? "Laufend" : rows.some(row => row.status === "Auftrag") ? "Auftrag" : main?.status || "Angebot",
       favorite: !!main?.favorite, latestDay: rows.map(row => row.latestDay || "").sort().at(-1) || null,
-      createdAt: definition.createdAt, calculation: {}, wwProjectLinks: [],
+      createdAt: definition.createdAt, registryUpdatedAt: definition.updatedAt, calculation: {}, wwProjectLinks: [],
       collectionSummary: { searchText: rows.map(row => [row.jobId, row.name, row.street, row.city].filter(Boolean).join(" ")).join(" "),
         missingMemberJobIds: definition.memberJobIds.filter(id => !byId.has(id)),
         totalStats: Object.fromEntries(["items", "images", "audio", "pdfs"].map(key => [key, rows.reduce((sum, row) => sum + D.num(row.totalStats?.[key]), 0)])),

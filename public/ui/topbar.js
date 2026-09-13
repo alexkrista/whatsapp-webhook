@@ -169,11 +169,11 @@
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
     loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260913-sammelmappe-1", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
-    loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-sammelmappe-1", "data-krista-baustellen-ww-import");
+    loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-sammelmappe-2", "data-krista-baustellen-ww-import");
     loadScriptOnce("/public/ui/baustellen-collection.js?v=20260913-sammelmappe-1", "data-krista-baustellen-collection");
     // Diese vorhandenen Module waren früher indirekt an KRISADMIN gekoppelt.
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.
-    loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260913-sammelmappe-1", "data-krista-kalkulation-v1");
+    loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260913-sammelmappe-2", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-parser-fix.js?v=20260826-flatpos1", "data-krista-kalkulation-parser-fix");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-sammelmappe-1", "data-krista-kalkulation-grid-v2");
     loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260902-offer7", "data-krista-angebot-v7");
