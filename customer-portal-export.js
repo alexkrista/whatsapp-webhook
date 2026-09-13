@@ -1,6 +1,6 @@
 "use strict";
 
-const fs=require("node:fs"),fsp=require("node:fs/promises"),path=require("node:path"),crypto=require("node:crypto"),archiver=require("archiver");
+const fs=require("node:fs"),fsp=require("node:fs/promises"),path=require("node:path"),crypto=require("node:crypto");
 const {readCustomerInvoices,invoiceView}=require("./customer-portal-invoices");
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const safeName=value=>String(value||"Datei").replace(/[^\p{L}\p{N}_.-]/gu,"_").slice(0,100);
@@ -65,7 +65,7 @@ function registerCustomerExports(app,{dataDir,context,catalog,readJobMeta,pointR
       if(scopeKey(await context(req))!==job.scope)throw fail(409,"Die Freigabe hat sich geändert. Bitte erneut herunterladen.");
       const data={name:ctx.meta.name,number:ctx.label,exportedAt:new Date(now()).toISOString(),modules:ctx.portal.modules,projects:source.projects,files,materials:source.materials,invoices,
         reports:source.reports.map(row=>({...row,url:row.url?urlMap.get(row.url)||null:null})),points:pointRows(ctx)};
-      const temporary=zipPath(job.id)+".tmp",output=fs.createWriteStream(temporary,{mode:0o600}),archive=archiver("zip",{zlib:{level:1}});
+      const temporary=zipPath(job.id)+".tmp",output=fs.createWriteStream(temporary,{mode:0o600}),archive=require("archiver")("zip",{zlib:{level:1}});
       await new Promise((resolve,reject)=>{
         const stop=error=>{archive.abort();output.destroy();reject(error);};
         output.once("close",resolve);output.once("error",stop);archive.once("error",stop);archive.once("warning",stop);archive.pipe(output);
