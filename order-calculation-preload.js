@@ -76,11 +76,16 @@ function sanitizePosition(row, index) {
     title: cleanText(source.title, 220),
     shortText: cleanText(source.shortText || source.title || source.description, 220),
     description: cleanText(source.description, 1800),
+    quantity: cleanNumber(source.quantity),
+    unit: cleanText(source.unit, 24),
+    unitPrice: cleanNumber(source.unitPrice),
     amount: cleanNumber(source.amount),
     plannedHours: cleanNumber(source.plannedHours),
     kind,
     suggestedKind,
     needsReview: !!source.needsReview,
+    alternative: !!source.alternative,
+    calcIncluded: source.calcIncluded !== false,
     employeeVisible: source.employeeVisible !== false,
     addToContract: !!source.addToContract,
     source: cleanText(source.source || "pdf", 30),
@@ -111,9 +116,12 @@ function sanitizeCalculation(value, existing = null) {
   };
 }
 function deriveCalculation(calc, fallbackRate = 0) {
-  const rows = Array.isArray(calc?.positions) ? calc.positions : [];
+  const allRows = Array.isArray(calc?.positions) ? calc.positions : [];
+  const rows = allRows.filter(row => row.calcIncluded !== false);
   const sum = predicate => rows.reduce((total, row) => total + (predicate(row) ? cleanNumber(row.amount) : 0), 0);
-  const baseNet = cleanNumber(calc?.netTotal);
+  const original = allRows.filter(row => !row.addToContract);
+  const baseNet = original.some(row => row.alternative || row.calcIncluded === false)
+    ? sum(row => !row.addToContract) : cleanNumber(calc?.netTotal);
   const added = sum(row => row.addToContract);
   const contractAmount = baseNet + added;
   const regieAmount = sum(row => row.kind === "regie" || row.kind === "nachtrag_regie");
@@ -159,7 +167,7 @@ async function writeCalculation(jobId, value) {
 }
 function employeeScope(calc) {
   const rows = (calc?.positions || [])
-    .filter(row => row.employeeVisible !== false)
+    .filter(row => row.employeeVisible !== false && row.calcIncluded !== false)
     .filter(row => ["auftrag", "regie", "nachtrag_auftrag", "nachtrag_regie"].includes(row.kind))
     .map(row => ({
       id: row.id,

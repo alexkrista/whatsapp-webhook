@@ -4,6 +4,20 @@ const path = require("path");
 const PORTAL_STATUSES = new Set(["off", "prepared", "active"]);
 const PORTAL_MODULES = ["projectFile", "regie", "communication", "projectPoints"];
 
+function customerContactDefaults(meta = {}) {
+  const master = meta.customerMaster || {}, owner = meta.projectContacts?.owner || {};
+  const clean = value => String(value || "").trim();
+  const unique = values => [...new Set(values.map(clean).filter(Boolean))];
+  const emails = unique([meta.contactEmail, master.email, owner.womanEmail, owner.manEmail, owner.email]);
+  const phones = unique([meta.contactPhone, master.phone, owner.phoneOwnerWoman, owner.phoneOwnerMan]);
+  return {
+    customerName: clean(meta.contactName || master.name || owner.customer || meta.name),
+    customerEmail: clean(meta.contactEmail || master.email) || (emails.length === 1 ? emails[0] : ""),
+    customerPhone: clean(meta.contactPhone || master.phone) || (phones.length === 1 ? phones[0] : ""),
+    emails, phones,
+  };
+}
+
 function sanitizeCustomerPortal(value = {}, existing = {}) {
   const source = value && typeof value === "object" ? value : {};
   const old = existing && typeof existing === "object" ? existing : {};
@@ -40,7 +54,7 @@ function registerCustomerPortal(app, options) {
       const jobId = String(req.params.jobId || "");
       if (!isSafeJobId(jobId) || !jobExists(jobId)) return res.status(404).json({ ok: false, error: "Baustelle nicht gefunden." });
       const meta = await readJobMeta(jobId);
-      res.json({ ok: true, jobId, portal: sanitizeCustomerPortal(meta.customerPortal), portalUrl: portalUrl(jobId) });
+      res.json({ ok: true, jobId, portal: sanitizeCustomerPortal(meta.customerPortal), contactDefaults: customerContactDefaults(meta), portalUrl: portalUrl(jobId) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
@@ -75,4 +89,4 @@ function registerCustomerPortal(app, options) {
   });
 }
 
-module.exports = { PORTAL_MODULES, sanitizeCustomerPortal, registerCustomerPortal };
+module.exports = { PORTAL_MODULES, sanitizeCustomerPortal, customerContactDefaults, registerCustomerPortal };

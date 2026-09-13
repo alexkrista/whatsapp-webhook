@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-09-material-profit-40-3";
+  const VERSION="2026-09-13-offer-positions-1";
   const LOCAL_BRAIN="http://127.0.0.1:5051";
   const token=new URLSearchParams(location.search).get("token")||"";
   const KINDS={
@@ -67,9 +67,9 @@
     return {version:1,parseVersion:1,sourceType:"pdf",sourceDocument:null,orderNo:"",projectNo:"",documentDate:"",customer:"",subject:job?.name||"",netTotal:num(job?.contractAmount??c.contractAmount),vatAmount:0,grossTotal:0,materialPercent:num(job?.materialPercent??c.materialPercent),billingRate:num(job?.billingRate??c.billingRate),rawText:"",positions:[],updatedAt:null};
   }
   function derive(calc){
-    const rows=Array.isArray(calc?.positions)?calc.positions:[];
+    const allRows=Array.isArray(calc?.positions)?calc.positions:[],rows=allRows.filter(row=>row.calcIncluded!==false);
     const sum=fn=>rows.reduce((s,r)=>s+(fn(r)?num(r.amount):0),0);
-    const baseNet=num(calc?.netTotal),added=sum(r=>r.addToContract),legacyNachtragRegie=num(calc?.legacyNachtragRegieAmount),contract=baseNet+added+legacyNachtragRegie;
+    const original=allRows.filter(row=>!row.addToContract),baseNet=original.some(row=>row.alternative||row.calcIncluded===false)?rows.filter(row=>!row.addToContract).reduce((sum,row)=>sum+num(row.amount),0):num(calc?.netTotal),added=sum(r=>r.addToContract),legacyNachtragRegie=num(calc?.legacyNachtragRegieAmount),contract=baseNet+added+legacyNachtragRegie;
     const regie=sum(r=>r.kind==="regie"||r.kind==="nachtrag_regie")+legacyNachtragRegie;
     const external=sum(r=>r.kind==="fremdleistung");
     const other=sum(r=>r.kind==="sonstiges");
@@ -144,10 +144,10 @@
   function options(kind){return Object.entries(KINDS).map(([key,label])=>`<option value="${key}" ${key===kind?'selected':''}>${esc(label)}</option>`).join('')}
   function positionRows(){
     const rows=calculation?.positions||[];if(!rows.length)return '<div class="kcv2-empty">Noch keine Positionen. Auftrag oben hineinziehen oder einen Nachtrag anlegen.</div>';
-    return `<div class="kcv2-table-wrap"><table class="kcv2-table"><thead><tr><th>Pos.</th><th style="width:160px">Art</th><th>Kurztext für Team</th><th style="width:120px" class="num">Betrag</th><th style="width:90px" class="num">Regie h</th><th style="width:70px">MA</th><th style="width:35px"></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-index="${i}"><td><div class="kcv2-pos">${esc(r.number||r.titleNo||('P'+(i+1)))}</div>${r.needsReview?'<span class="kcv2-review">prüfen</span>':''}</td><td><select data-field="kind">${options(r.kind)}</select></td><td><input data-field="shortText" value="${esc(r.shortText||r.title||'')}" title="${esc(r.description||'')}"></td><td><input data-field="amount" type="number" step="0.01" min="0" value="${num(r.amount)}"></td><td><input data-field="plannedHours" type="number" step="0.25" min="0" value="${num(r.plannedHours)}"></td><td style="text-align:center"><input data-field="employeeVisible" type="checkbox" ${r.employeeVisible!==false?'checked':''}></td><td><button class="kcv2-delete" data-delete type="button" title="Position entfernen">×</button></td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="kcv2-table-wrap"><table class="kcv2-table"><thead><tr><th>Pos.</th><th style="width:160px">Art</th><th>Kurztext für Team</th><th style="width:120px" class="num">Betrag</th><th style="width:90px" class="num">Regie h</th><th style="width:70px">MA</th><th style="width:35px"></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-index="${i}"><td><div class="kcv2-pos">${esc(r.number||r.titleNo||('P'+(i+1)))}</div>${r.needsReview?'<span class="kcv2-review">prüfen</span>':''}${r.alternative?'<span class="kcv2-review">Alternative</span>':''}</td><td><select data-field="kind">${options(r.kind)}</select></td><td><input data-field="shortText" value="${esc(r.shortText||r.title||'')}" title="${esc(r.description||'')}"></td><td><input data-field="amount" type="number" step="0.01" min="0" value="${num(r.amount)}"></td><td><input data-field="plannedHours" type="number" step="0.25" min="0" value="${num(r.plannedHours)}"></td><td style="text-align:center"><input data-field="employeeVisible" type="checkbox" ${r.employeeVisible!==false?'checked':''}></td><td><button class="kcv2-delete" data-delete type="button" title="Position entfernen">×</button></td></tr>`).join('')}</tbody></table></div>`;
   }
   function teamGroup(title,klass,kind){
-    const rows=(calculation?.positions||[]).filter(r=>r.employeeVisible!==false&&r.kind===kind);
+    const rows=(calculation?.positions||[]).filter(r=>r.employeeVisible!==false&&r.calcIncluded!==false&&r.kind===kind);
     return `<div class="kcv2-team-group ${klass}"><h4>${esc(title)}</h4>${rows.length?`<ul>${rows.map(r=>`<li>${esc(r.shortText||r.title||r.description||'Position')}${num(r.plannedHours)&&["regie","nachtrag_regie"].includes(kind)?` · <strong>${esc(hours(r.plannedHours))}</strong>`:''}</li>`).join('')}</ul>`:'<div class="kcv2-team-empty">–</div>'}</div>`;
   }
   function teamHtml(){return `${teamGroup('Auftrag','', 'auftrag')}${teamGroup('Regie','regie','regie')}${teamGroup('Nachtrag Auftrag','nachtrag','nachtrag_auftrag')}${teamGroup('Nachtrag Regie','nachtrag-regie','nachtrag_regie')}`}
@@ -219,29 +219,43 @@
   }
   function cleanLead(value){return String(value||"").replace(/\s+/g," ").replace(/\s+\d[\d.]*,\d{2}(?:\s+\d[\d.]*,\d{2})*\s*$/," ").trim().slice(0,220)}
   function parseText(text,file){
-    const lines=String(text||"").split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
-    const whole=lines.join("\n");
-    const moneyMatch=re=>{const m=whole.match(re);return m?euroValue(m[1]):0};
-    const orderNo=(whole.match(/Auftragssteuerung[\s\S]{0,90}?(?:Nr\.?\s*:?)?\s*(\d{6,})/i)||[])[1]||"";
+    const lines=String(text||"").split(/\r?\n/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean),whole=lines.join("\n");
+    const lastAmount=line=>{const m=String(line||"").match(/(\d[\d.]*,\d{2})\s*$/);return m?euroValue(m[1]):0};
+    const totalLine=re=>lastAmount(lines.find(line=>re.test(line)));
+    const orderNo=(whole.match(/^Nr\.?\s*:\s*([A-Za-z0-9_-]+)/m)||whole.match(/Auftragssteuerung[\s\S]{0,90}?(?:Nr\.?\s*:?)?\s*(\d{6,})/i)||[])[1]||"";
     const projectNo=(whole.match(/Projekt\s*:\s*([A-Za-z0-9_-]+)/i)||[])[1]||"";
-    const netTotal=moneyMatch(/Nettosumme\s*=?\s*(?:EUR)?\s*([\d.]+,\d{2})/i);
-    const vatAmount=moneyMatch(/(?:USt|MwSt)[^\n]{0,30}(?:EUR)?\s*([\d.]+,\d{2})/i);
-    const grossTotal=moneyMatch(/Bruttosumme\s*=?\s*(?:EUR)?\s*([\d.]+,\d{2})/i);
-    let currentTitleNo="",currentTitle="",current=null,positions=[];
-    const finalize=()=>{if(!current)return;const description=current.parts.join(" ").replace(/\s+/g," ").trim();const values=description.match(/\d[\d.]*,\d{2}/g)||[];const amount=values.length?euroValue(values[values.length-1]):0;const hm=description.match(/(\d+(?:[.,]\d+)?)\s*Std\b/i);const plannedHours=hm?Number(hm[1].replace(",","."))||0:0;const cls=classify(currentTitle,description);positions.push({id:`pdf_${current.number.replace(/[^A-Za-z0-9]/g,'_')}_${positions.length+1}`,number:current.number,titleNo:currentTitleNo,title:currentTitle,shortText:cleanLead(current.parts[0]||currentTitle||description),description,amount,plannedHours,kind:cls.kind,suggestedKind:cls.suggestedKind,needsReview:cls.needsReview,employeeVisible:true,addToContract:false,source:"pdf"});current=null};
+    const netTotal=totalLine(/^Nettosumme\b/i),vatAmount=totalLine(/^(?:\d+(?:[.,]\d+)?\s*%\s*)?(?:USt|MwSt|Umsatzsteuer)\b/i),grossTotal=totalLine(/^Bruttosumme\b/i);
+    const pricePair=line=>String(line||"").match(/\s(\d[\d.]*,\d{2})\s+(\(?\s*\d[\d.]*,\d{2}\s*\)?)\s*$/);
+    const flatStart=/^(\d{1,4}(?:\.\d{1,4}){0,3}\.?)\s+(\d[\d.]*(?:,\d+)?)\s+(m²|m2|m³|m3|m|lfm|Std\.?|h|VE|Stk\.?|Stück|Stueck|PA|Psch\.?|Pausch\.?|pauschal|Monat(?:e)?|Tag(?:e)?|Woche(?:n)?|kg|l)\s+(.+)$/i;
+    let currentTitleNo="",currentTitle="",current=null;const positions=[];
+    const finalize=()=>{
+      if(!current)return;
+      const description=current.parts.join(" ").replace(/\s+/g," ").trim(),priced=current.parts.map(pricePair).find(Boolean);
+      const values=description.match(/\d[\d.]*,\d{2}/g)||[],amount=priced?euroValue(priced[2].replace(/[()\s]/g,"")):values.length?euroValue(values[values.length-1]):0;
+      const quantity=current.quantity??0,unit=current.unit||"",unitPrice=priced?euroValue(priced[1]):quantity>0?amount/quantity:0;
+      const alternative=/\bAlternativ(?:position|e)?\b|\bEventualposition\b/i.test(description)||!!priced?.[2].includes("(");
+      const hm=description.match(/(\d+(?:[.,]\d+)?)\s*Std\b/i),plannedHours=/^(Std\.?|h)$/i.test(unit)?quantity:hm?Number(hm[1].replace(",","."))||0:0,cls=classify(currentTitle,description);
+      const cleanPart=part=>cleanLead(String(part||"").replace(pricePair(part)?.[0]||/$^/,""));
+      let shortText=cleanPart(current.lead||current.parts[0]||currentTitle);
+      if(/^Alternativ(?:e)?\b.*:\s*$/i.test(shortText))shortText=cleanPart(current.parts.slice(1).find(part=>!/^\d/.test(part))||shortText);
+      positions.push({id:`pdf_${orderNo?orderNo+"_":""}${current.number.replace(/[^A-Za-z0-9]/g,"_")}_${positions.length+1}`,number:current.number,titleNo:currentTitleNo,title:currentTitle,shortText,description,quantity,unit,unitPrice,amount,plannedHours,kind:cls.kind,suggestedKind:cls.suggestedKind,needsReview:cls.needsReview,alternative,calcIncluded:!alternative,employeeVisible:true,addToContract:false,source:"pdf"});
+      current=null;
+    };
     for(const line of lines){
-      if(/^Titelzusammenstellung\s*:?/i.test(line)){finalize();break}
-      const tm=line.match(/^Titel\s+(\d+)\s+(.+)$/i);if(tm){finalize();currentTitleNo=tm[1];currentTitle=tm[2].replace(/\s+\d[\d.]*,\d{2}\s*$/," ").trim();continue}
-      const pm=line.match(/^(\d{1,2}\.\d{2})\s+(.+)$/);if(pm){finalize();current={number:pm[1],parts:[pm[2]]};continue}
+      if(/^(Titelzusammenstellung\s*:?|Nettosumme\b|Bruttosumme\b)/i.test(line)){finalize();break}
+      const title=line.match(/^Titel\s+(\d+)\s+(.+)$/i);if(title){finalize();currentTitleNo=title[1];currentTitle=title[2].replace(/\s+\d[\d.]*,\d{2}\s*$/," ").trim();continue}
+      const flat=line.match(flatStart),nested=line.match(/^(\d{1,4}(?:\.\d{1,4}){1,3})\s+(.+)$/);
+      if(flat){finalize();current={number:flat[1],quantity:euroValue(flat[2]),unit:flat[3].replace(/\.$/,""),lead:flat[4],parts:[`${flat[2]} ${flat[3]} ${flat[4]}`]};continue}
+      if(nested){finalize();current={number:nested[1],parts:[nested[2]]};continue}
       if(current&&/^Summe\b/i.test(line)){finalize();continue}
-      if(current&&!/^Pos\s+Menge\b/i.test(line)&&!/^Sparkasse\b/i.test(line)&&!/^Farben Krista\b/i.test(line)&&!/^Feldkircherstraße\b/i.test(line)&&!/^\[?Auftragssteuerung\b/i.test(line)&&!/^[-–]\s*\d+\s*[-–]$/.test(line))current.parts.push(line);
+      if(current&&!/^(Pos\s+Menge\b|Sparkasse\b|Farben Krista\b|Feldkircherstraße\b|\[?(?:Auftragssteuerung|Angebot|Auftragsbestätigung)\b|[-–]\s*\d+\s*[-–]$)/i.test(line))current.parts.push(line);
     }
     finalize();
     if(!positions.length){
       const start=lines.findIndex(x=>/^Titelzusammenstellung/i.test(x));if(start>=0){for(const line of lines.slice(start+1)){if(/^Nettosumme/i.test(line))break;const m=line.match(/^(\d{1,2})\s+(.+?)\s+(\d[\d.]*,\d{2})$/);if(!m)continue;const cls=classify(m[2],m[2]);positions.push({id:`title_${m[1]}`,number:m[1],titleNo:m[1],title:m[2],shortText:cleanLead(m[2]),description:m[2],amount:euroValue(m[3]),plannedHours:0,kind:cls.kind,suggestedKind:cls.suggestedKind,needsReview:cls.needsReview||/gerüst|geruest/i.test(m[2]),employeeVisible:true,addToContract:false,source:"pdf-title"})}}
     }
     const basename=String(file?.name||"").replace(/\.pdf$/i,"").replace(/^Auftragssteuerung\s*/i,"").trim();
-    return {...blankCalculation(currentJob),orderNo,projectNo,subject:currentJob?.name||basename,netTotal:netTotal||positions.reduce((s,r)=>s+num(r.amount),0),vatAmount,grossTotal,rawText:whole.slice(0,60000),positions,sourceDocument:calculation?.sourceDocument||null,billingRate:num(calculation?.billingRate||currentJob?.calculation?.billingRate),materialPercent:num(calculation?.materialPercent||currentJob?.materialPercent),legacyNachtragRegieAmount:num(calculation?.legacyNachtragRegieAmount||currentJob?.calculation?.legacyNachtragRegieAmount),parseVersion:1};
+    return {...blankCalculation(currentJob),orderNo,projectNo,subject:currentJob?.name||basename,netTotal:netTotal||positions.filter(row=>row.calcIncluded!==false).reduce((sum,row)=>sum+num(row.amount),0),vatAmount,grossTotal,rawText:whole.slice(0,60000),positions,sourceDocument:calculation?.sourceDocument||null,billingRate:num(calculation?.billingRate||currentJob?.calculation?.billingRate),materialPercent:num(calculation?.materialPercent||currentJob?.materialPercent),legacyNachtragRegieAmount:num(calculation?.legacyNachtragRegieAmount||currentJob?.calculation?.legacyNachtragRegieAmount),parseVersion:2};
   }
 
   function loadPdfJs(){
@@ -262,18 +276,35 @@
   }
   async function handlePdf(file){
     const status=document.getElementById("kcv2ParseStatus");if(!/\.pdf$/i.test(file.name)){status.textContent="Bitte ein PDF verwenden.";status.className="kcv2-status error";return}
-    pendingFile=file;status.textContent="PDF wird gelesen …";status.className="kcv2-status";
-    try{const text=await extractPdf(file);calculation=parseText(text,file);status.textContent=`✓ ${calculation.positions.length} Positionen erkannt · bitte Vorschläge kurz prüfen`;render();const nextStatus=document.getElementById("kcv2ParseStatus");if(nextStatus)nextStatus.textContent=`✓ ${calculation.positions.length} Positionen erkannt aus ${file.name}`}
-    catch(error){status.textContent="PDF konnte nicht automatisch gelesen werden: "+error.message;status.className="kcv2-status error"}
+    const jobId=currentJobId,generation=loadSerial;
+    status.textContent="PDF wird gelesen …";status.className="kcv2-status";
+    try{
+      const text=await extractPdf(file),parsed=parseText(text,file);
+      if(jobId!==currentJobId||generation!==loadSerial)return;
+      if(!parsed.positions.length)throw new Error("Keine Positionen erkannt. Die bisherige Kalkulation bleibt erhalten.");
+      calculation=parsed;pendingFile=file;
+      document.dispatchEvent(new CustomEvent("krista:order-pdf-parsed",{detail:{jobId:currentJobId,positions:calculation.positions}}));
+      render();
+      const alternatives=parsed.positions.filter(row=>row.alternative).length,nextStatus=document.getElementById("kcv2ParseStatus");
+      if(nextStatus)nextStatus.textContent=`✓ ${parsed.positions.length} Positionen erkannt aus ${file.name}${alternatives?` · ${alternatives} Alternativen zunächst nicht eingerechnet`:""} · Mit „Kalkulation übernehmen“ speichern`;
+    }catch(error){if(jobId!==currentJobId||generation!==loadSerial)return;status.textContent="PDF konnte nicht übernommen werden: "+error.message;status.className="kcv2-status error"}
   }
+
   function fileBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||"").split(",")[1]||"");reader.onerror=()=>reject(reader.error||new Error("Datei konnte nicht gelesen werden."));reader.readAsDataURL(file)})}
 
   async function save(){
-    const button=document.getElementById("kcv2Save"),msg=document.getElementById("kcv2SaveMsg");button.disabled=true;msg.textContent="Speichert …";
+    const button=document.getElementById("kcv2Save"),msg=document.getElementById("kcv2SaveMsg"),id=currentJobId,generation=loadSerial,grid=window.KristaCalculationGridV2,snapshot=grid?.snapshotForSave?.(id),next=JSON.parse(JSON.stringify(calculation)),file=pendingFile;button.disabled=true;msg.textContent="Speichert …";
+    if(snapshot)next.positions=next.positions.map((row,index)=>{const meta=snapshot[index];return meta&&(!meta.positionId||meta.positionId===row.id)?{...row,quantity:num(meta.quantity),unit:String(meta.unit||""),unitPrice:num(meta.unitPrice),calcIncluded:meta.calcIncluded!==false}:row});
     try{
-      if(pendingFile){const dataBase64=await fileBase64(pendingFile);const upload=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-document`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fileName:pendingFile.name,dataBase64})});calculation.sourceDocument=upload.sourceDocument||calculation.sourceDocument}
-      const legacyNachtragRegieAmount=num(calculation.legacyNachtragRegieAmount);const result=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-calculation`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({calculation})});calculation=result.calculation||calculation;calculation.legacyNachtragRegieAmount=legacyNachtragRegieAmount;pendingFile=null;msg.textContent="✓ Gespeichert · Wirtschaft und Mitarbeiteransicht sind aktualisiert";render();setTimeout(()=>{window.BaustellenKnowledgeHub?.load?.(currentJobId);loadJob(currentJobId)},450);
-    }catch(error){msg.textContent="Fehler: "+error.message;msg.style.color="#a84540"}finally{button.disabled=false}
+      if(file){const dataBase64=await fileBase64(file);const upload=await api(`/admin/api/job/${encodeURIComponent(id)}/order-document`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fileName:file.name,dataBase64})});next.sourceDocument=upload.sourceDocument||next.sourceDocument}
+      const result=await api(`/admin/api/job/${encodeURIComponent(id)}/order-calculation`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({calculation:next})});
+      const saved=result.calculation||next;
+      await grid?.persistForJob?.(id,saved.positions||[],snapshot);
+      if(id!==currentJobId||generation!==loadSerial)return;
+      calculation=saved;calculation.legacyNachtragRegieAmount=num(next.legacyNachtragRegieAmount);pendingFile=null;render();
+      const savedMsg=document.getElementById("kcv2SaveMsg");if(savedMsg)savedMsg.textContent="✓ Gespeichert · Positionen, Mengen und Auswahl übernommen · Mitarbeiteransicht aktualisiert";
+      setTimeout(()=>{if(id!==currentJobId)return;window.BaustellenKnowledgeHub?.load?.(id);loadJob(id)},450);
+    }catch(error){if(id!==currentJobId)return;msg.textContent="Speichern nicht vollständig: "+error.message;msg.style.color="#a84540"}finally{button.disabled=false}
   }
 
   function patchEconomy(){
@@ -289,5 +320,5 @@
   function hookRows(){document.addEventListener("click",e=>{const row=e.target.closest?.(".job-row[data-job]");if(row)setTimeout(()=>loadJob(row.dataset.job),20)},true);window.addEventListener("hashchange",()=>{const id=decodeURIComponent(location.hash.slice(1));if(id)loadJob(id)})}
   function init(){installCss();const wait=()=>{if(!installTab())return setTimeout(wait,150);hookRows();const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),180)};wait()}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
-  window.KristaOrderCalculation={version:VERSION,load:loadJob,tab:selectTab};
+  window.KristaOrderCalculation={version:VERSION,load:loadJob,tab:selectTab,setPositionIncluded(id,included){const row=calculation?.positions?.find(row=>row.id===id);if(row){row.calcIncluded=!!included;refreshNumbers()}}};
 })();
