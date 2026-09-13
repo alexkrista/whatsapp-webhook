@@ -43,10 +43,10 @@ function sanitizeCustomerPortal(value = {}, existing = {}) {
 
 function registerCustomerPortal(app, options) {
   const { dataDir, requireAdmin, readJobMeta, writeJobMeta, appendJobHistory } = options;
-  const portalBaseUrl = String(options.portalBaseUrl || "https://kristine-kundenportal.krista-alex.chatgpt.site").replace(/\/$/, "");
+  const portalBaseUrl = String(options.portalBaseUrl || "https://protokoll.krista.at/kundenportal").replace(/\/$/, "");
   const jobExists = jobId => fs.existsSync(path.join(dataDir, jobId));
   const isSafeJobId = jobId => /^[A-Za-z0-9_-]+$/.test(jobId);
-  const portalUrl = jobId => `${portalBaseUrl}/?project=${encodeURIComponent(jobId)}`;
+  const portalUrl = () => portalBaseUrl;
 
   app.get("/admin/api/job/:jobId/customer-portal", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -75,6 +75,7 @@ function registerCustomerPortal(app, options) {
       portal.includedJobIds = portal.mode === "collection" ? collectionMemberJobIds : [];
       portal.updatedAt = new Date().toISOString();
       await writeJobMeta(jobId, { customerPortal: portal });
+      if(portal.status === "off" || ["customerName","customerPhone","customerEmail"].some(key => portal[key] !== sanitizeCustomerPortal(beforeMeta.customerPortal)[key])) await options.revokeAccess?.(jobId);
       await appendJobHistory(jobId, {
         type: "customer_portal_updated",
         title: "Kundenportal aktualisiert",

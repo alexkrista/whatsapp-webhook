@@ -77,6 +77,7 @@ const { createRegieComparisonPdf } = require("./regie-comparison-pdf");
 const { createGrossProfitPdf } = require("./gross-profit-pdf");
 const { registerNfonIntegration } = require("./nfon-integration");
 const { sanitizeCustomerPortal, registerCustomerPortal } = require("./customer-portal");
+const { registerCustomerAccess } = require("./customer-portal-access");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -124,7 +125,7 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
-const CUSTOMER_PORTAL_URL = String(process.env.CUSTOMER_PORTAL_URL || "https://kristine-kundenportal.krista-alex.chatgpt.site").replace(/\/$/, "");
+const CUSTOMER_PORTAL_URL = PUBLIC_BASE_URL + "/kundenportal";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_TRANSCRIBE_MODEL =
@@ -4242,6 +4243,11 @@ registerRegieAssistant(app, {
   writeDocumentation,
   sendRegieMail: sendMailWithAttachment,
 });
+const customerAccess = registerCustomerAccess(app, {
+  dataDir: DATA_DIR, requireAdmin, readJobMeta, readDocumentation, listJobMedia, readEmployees,
+  publicDir: path.join(process.cwd(), "public"), publicBaseUrl: PUBLIC_BASE_URL,
+  collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
+});
 registerCustomerPortal(app, {
   dataDir: DATA_DIR,
   requireAdmin,
@@ -4250,6 +4256,7 @@ registerCustomerPortal(app, {
   appendJobHistory,
   collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
   portalBaseUrl: CUSTOMER_PORTAL_URL,
+  revokeAccess: jobId => customerAccess.revoke(jobId),
 });
 console.log("âœ… KRISTINE Materialsystem registriert");
 
