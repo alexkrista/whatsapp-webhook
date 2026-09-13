@@ -4405,8 +4405,15 @@ console.log("TRANSCRIBE_MODEL:", OPENAI_TRANSCRIBE_MODEL);
 console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
-app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
-
-require("./job-merge-audit").auditJobMerge({ dataDir: DATA_DIR, sourceJobId: "keckeis_gabi_harry", targetJobId: "25018" })
-  .then(report => console.info("JOB_MERGE_AUDIT", JSON.stringify(report)))
-  .catch(error => console.error("JOB_MERGE_AUDIT failed:", error.message));
+async function startServer() {
+  try {
+    const result = await require("./legacy-collection-repair").repairLegacyCollection({ dataDir: DATA_DIR });
+    if (result.status === "repaired" || result.status === "already_repaired") {
+      const media = await listJobMedia({ dataDir: DATA_DIR, jobId: "25018" });
+      result.visiblePhotos = media.filter(item => item.kind === "photo").length;
+    }
+    console.info("LEGACY_COLLECTION_REPAIR", JSON.stringify(result));
+  } catch (error) { console.error("LEGACY_COLLECTION_REPAIR failed:", error.message); }
+  app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
+}
+startServer();

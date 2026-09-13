@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-collection-2";
+  const VERSION="2026-09-13-collection-3";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
   let jobsById=new Map(),groupsByJobId=new Map(),refreshSerial=0;
@@ -66,7 +66,7 @@
     `;document.head.appendChild(style);
   }
   function groupMarkup(groups,id){
-    return groups.map(group=>`${groups.length>1?`<h3 class="collection-union-group-title">Sammelakte #${esc(group.head.jobId)} · ${esc(group.head.name||"Ohne Bezeichnung")}</h3>`:""}<ul class="collection-members">${group.members.map(entry=>{
+    return groups.map(group=>`${groups.length>1?`<h3 class="collection-union-group-title">Sammelmappe #${esc(group.head.jobId)} · ${esc(group.head.name||"Ohne Bezeichnung")}</h3>`:""}<ul class="collection-members">${group.members.map(entry=>{
       const current=String(entry.jobId)===String(id);
       return `<li><a class="collection-member" href="${esc(jobUrl(entry.jobId))}" data-collection-link="${esc(entry.jobId)}"${current?' aria-current="page"':""}><span class="collection-member-number">#${esc(entry.jobId)}</span><span class="collection-member-name">${esc(entry.name||"Ohne Bezeichnung")}</span>${current?'<span class="collection-member-state">Aktuell geöffnet</span>':""}</a></li>`;
     }).join("")}</ul>`).join("");
@@ -77,7 +77,7 @@
     previous?.remove();
     const header=document.querySelector("#detail .detail-top");if(!header||!groups.length)return;
     const details=document.createElement("details");details.id="collectionUnion";details.className="collection-union";details.dataset.jobId=id;details.open=!!wasOpen;
-    details.innerHTML=`<summary><span aria-hidden="true">🔗</span><span>${groupLabel(groups)}</span></summary><nav class="collection-union-content" aria-label="Vereinte Baustellen"><p class="collection-union-note">Diese Baustellen gehören zusammen. Jede Einzelakte bleibt vollständig erhalten.</p>${groupMarkup(groups,id)}</nav>`;
+    details.innerHTML=`<summary><span aria-hidden="true">📁</span><span>Sammelmappe · ${groupLabel(groups)}</span></summary><nav class="collection-union-content" aria-label="Vereinte Baustellen"><p class="collection-union-note">Diese Baustellen gehören zur selben Sammelmappe. Jede Einzelakte ist unten erreichbar.</p>${groupMarkup(groups,id)}</nav>`;
     details.querySelectorAll("[data-collection-link]").forEach(link=>link.addEventListener("click",event=>{
       if(event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
       event.preventDefault();openJob(link.dataset.collectionLink);
@@ -89,7 +89,7 @@
       const groups=groupsFor(row.dataset.job),name=row.querySelector(".job-name"),badge=name?.querySelector(".collection-badge");
       if(!groups.length){badge?.remove();return;}
       if(!name)return;
-      const label=`🔗 ${groupLabel(groups)}`;
+      const label=`📁 Sammelmappe · ${groupLabel(groups)}`;
       if(badge){if(badge.textContent!==label)badge.textContent=label;return;}
       const el=document.createElement("span");el.className="collection-badge";el.textContent=label;name.appendChild(el);
     });
@@ -98,15 +98,28 @@
   function summary(job){const all=memberRows(job),server=job.collectionSummary||{},stats=server.totalStats||{};return {all,hours:liveHours(job),contract:num(server.contractAmount),photos:num(stats.images),materialPositions:num(server.materialPositions),materialValue:num(server.materialValue),regieAmount:num(server.regieAmount)}}
 
   function renderPanel(job,panel){
-    const s=summary(job),rows=s.all.map((entry,index)=>{const ownHours=num(entry.calculation?.actualHours),amount=num(entry.contractAmount||entry.calculation?.contractAmount),photos=num(entry.totalStats?.images),materials=num(entry.materialSummary?.positions);return `<div class="collection-row ${index===0?'main':''}"><strong>#${esc(entry.jobId)}</strong><div><strong>${esc(entry.name||"Ohne Bezeichnung")}</strong><small>${index===0?'Hauptakte · gemeinsame Sicht':'vollständige Einzelakte'}</small></div><span>${hours(ownHours)}</span><span>${money(amount)}</span><span>${photos} Fotos · ${materials} Mat.</span><div><button type="button" data-collection-open="${esc(entry.jobId)}">Öffnen</button>${index?` <button type="button" class="remove" data-collection-remove="${esc(entry.jobId)}">Lösen</button>`:""}</div></div>`}).join("");
-    panel.innerHTML=`<div class="bk-grid"><div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Sammelakte · gemeinsame Summen</h3><div class="bk-note">Die Einzelakten bleiben vollständig und getrennt. Hier wird nur gemeinsam ausgewertet.</div></div><span class="bk-source">${s.all.length} Einzelakten</span></div><div class="collection-grid"><div class="collection-kpi"><span>Iststunden gesamt</span><strong data-collection-hours>${hours(s.hours)}</strong></div><div class="collection-kpi"><span>Auftragsvolumen</span><strong>${money(s.contract)}</strong></div><div class="collection-kpi"><span>Fotos gesamt</span><strong>${s.photos}</strong></div><div class="collection-kpi"><span>Material</span><strong>${s.materialPositions} Pos.</strong><small>${money(s.materialValue)} erfasster Materialwert</small></div></div><div class="collection-grid"><div class="collection-kpi"><span>Regie gesamt</span><strong>${money(s.regieAmount)}</strong></div></div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Einzelakten</h3><button type="button" id="collectionDissolve" class="remove">Sammelakte auflösen</button></div><div class="collection-list">${rows}</div><div class="collection-note">Auflösen entfernt nur die gemeinsame Zuordnung. Keine Akte, kein Foto und kein Dokument wird gelöscht.</div></div></div>`;
+    const s=summary(job),rows=s.all.map((entry,index)=>{const ownHours=num(entry.calculation?.actualHours),amount=num(entry.contractAmount||entry.calculation?.contractAmount),photos=num(entry.totalStats?.images),materials=num(entry.materialSummary?.positions);return `<div class="collection-row ${index===0?'main':''}"><strong>#${esc(entry.jobId)}</strong><div><strong>${esc(entry.name||"Ohne Bezeichnung")}</strong><small>${index===0?'Hauptakte · gemeinsame Sicht':'vollständige Einzelakte'}</small></div><span>${hours(ownHours)}</span><span>${money(amount)}</span><span><span data-collection-photo-count="${esc(entry.jobId)}">…</span> Fotos · ${materials} Mat.</span><div><button type="button" data-collection-open="${esc(entry.jobId)}">Öffnen</button>${index?` <button type="button" class="remove" data-collection-remove="${esc(entry.jobId)}">Lösen</button>`:""}</div></div>`}).join("");
+    panel.innerHTML=`<div class="bk-grid"><div class="bk-card bk-wide"><div class="bk-section-title"><div><h3>Sammelmappe · gemeinsame Summen</h3><div class="bk-note">Die Einzelakten bleiben vollständig und getrennt. Hier wird nur gemeinsam ausgewertet.</div></div><span class="bk-source">${s.all.length} Einzelakten</span></div><div class="collection-grid"><div class="collection-kpi"><span>Iststunden gesamt</span><strong data-collection-hours>${hours(s.hours)}</strong></div><div class="collection-kpi"><span>Auftragsvolumen</span><strong>${money(s.contract)}</strong></div><div class="collection-kpi"><span>Fotos gesamt</span><strong data-collection-photo-total>…</strong></div><div class="collection-kpi"><span>Material</span><strong>${s.materialPositions} Pos.</strong><small>${money(s.materialValue)} erfasster Materialwert</small></div></div><div class="collection-grid"><div class="collection-kpi"><span>Regie gesamt</span><strong>${money(s.regieAmount)}</strong></div></div></div><div class="bk-card bk-wide"><div class="bk-section-title"><h3>Einzelakten</h3><button type="button" id="collectionDissolve" class="remove">Sammelmappe auflösen</button></div><div class="collection-list">${rows}</div><div class="collection-note">Auflösen entfernt nur die gemeinsame Zuordnung. Keine Akte, kein Foto und kein Dokument wird gelöscht.</div></div></div>`;
     panel.querySelectorAll("[data-collection-open]").forEach(button=>button.onclick=()=>openJob(button.dataset.collectionOpen));
     panel.querySelectorAll("[data-collection-remove]").forEach(button=>button.onclick=()=>removeMember(job,button.dataset.collectionRemove));
     panel.querySelector("#collectionDissolve")?.addEventListener("click",()=>saveMembers(job,[]));
+    Promise.all(s.all.map(async entry=>{
+      const result=await api(`/admin/api/job/${encodeURIComponent(entry.jobId)}/media?scope=single`);
+      return {id:String(entry.jobId),media:(result.media||[]).filter(item=>item.kind==="photo")};
+    })).then(results=>{
+      if(!panel.isConnected)return;
+      const byId=new Map(results.map(result=>[result.id,result.media.length]));
+      panel.querySelectorAll("[data-collection-photo-count]").forEach(el=>el.textContent=String(byId.get(el.dataset.collectionPhotoCount)||0));
+      const total=panel.querySelector("[data-collection-photo-total]");
+      if(total)total.textContent=String(new Set(results.flatMap(result=>result.media.map(item=>item.file))).size);
+    }).catch(()=>{
+      if(!panel.isConnected)return;
+      panel.querySelectorAll("[data-collection-photo-count],[data-collection-photo-total]").forEach(el=>el.textContent="–");
+    });
   }
 
   async function saveMembers(job,memberJobIds){
-    const action=memberJobIds.length?"Diese Einzelakte aus der Sammelakte lösen?":"Sammelakte auflösen? Alle Einzelakten bleiben erhalten.";if(!confirm(action))return;
+    const action=memberJobIds.length?"Diese Einzelakte aus der Sammelmappe lösen?":"Sammelmappe auflösen? Alle Einzelakten bleiben erhalten.";if(!confirm(action))return;
     const kept=new Set([String(job.jobId),...memberJobIds.map(String)]),keptProjects=new Set();for(const id of kept){const entry=byId(id);if(entry?.wwProjectNumber)keptProjects.add(String(entry.wwProjectNumber));if(entry?.wwProjectIndex)keptProjects.add(`i:${Number(entry.wwProjectIndex)}`)}const links=memberJobIds.length?(job.wwProjectLinks||[]).filter(link=>keptProjects.has(String(link.projectNumber||""))||keptProjects.has(`i:${Number(link.projectIndex||0)}`)):[];
     try{await api(`/admin/api/job/${encodeURIComponent(job.jobId)}/collection`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({memberJobIds,wwProjectLinks:links})});location.reload()}catch(error){alert("Nicht gespeichert: "+error.message)}
   }
@@ -128,7 +141,7 @@
     }
   }
 
-  async function refresh(){const serial=++refreshSerial;try{const data=await api("/admin/api/jobs");if(serial!==refreshSerial)return;setJobs(data.jobs||[]);render()}catch(error){console.warn("Sammelakte",error)}}
+  async function refresh(){const serial=++refreshSerial;try{const data=await api("/admin/api/jobs");if(serial!==refreshSerial)return;setJobs(data.jobs||[]);render()}catch(error){console.warn("Sammelmappe",error)}}
   function install(){
     installCss();installUnionCss();
     document.addEventListener("krista:baustellen-rendered",event=>{++refreshSerial;setJobs(event.detail?.jobs||[]);render()});

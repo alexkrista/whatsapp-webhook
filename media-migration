@@ -412,7 +412,7 @@ async function listOriginalJobMedia({ dataDir, jobId }) {
   return items.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")) || a.filename.localeCompare(b.filename, "de"));
 }
 
-async function listJobMedia({ dataDir, jobId }) {
+async function listSingleJobMedia({ dataDir, jobId }) {
   const assignments = await readJson(path.join(dataDir, "_kristine", "media-assignments.json"), {});
   const items = (await listOriginalJobMedia({ dataDir, jobId })).filter(item => !assignments[item.file] || assignments[item.file].jobId === jobId);
   const sources = new Set(Object.values(assignments).filter(row => row.jobId === jobId && row.originalJobId !== jobId).map(row => row.originalJobId));
@@ -424,6 +424,22 @@ async function listJobMedia({ dataDir, jobId }) {
   return items.sort((a,b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")));
 }
 
+async function listJobMedia({ dataDir, jobId, includeCollection = true }) {
+  const id = String(jobId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return [];
+  const meta = includeCollection ? await readJson(path.join(dataDir, id, ".meta.json"), {}) : {};
+  const ids = [...new Set([id, ...(Array.isArray(meta.collectionMemberJobIds) ? meta.collectionMemberJobIds : [])])]
+    .filter(value => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(value)));
+  const byFile = new Map();
+  for (const memberId of ids) {
+    for (const item of await listSingleJobMedia({ dataDir, jobId: String(memberId) })) {
+      if (!byFile.has(item.file)) byFile.set(item.file, item);
+    }
+  }
+  // Keep each photo's real owner and authorized file URL, even in the shared gallery.
+  return [...byFile.values()].sort((a,b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")));
+}
+
 let mediaAssignmentQueue = Promise.resolve();
 async function reassignJobMedia({ dataDir, jobId, targetJobId, files }) {
   const run = mediaAssignmentQueue.then(async () => {
@@ -433,7 +449,7 @@ async function reassignJobMedia({ dataDir, jobId, targetJobId, files }) {
     const selected = [...new Set(files)], available = await listJobMedia({dataDir,jobId});
     if (selected.some(file => !available.some(item => item.file === file))) throw Error("Die Foto-Zuordnung hat sich geändert. Bitte neu laden.");
     const file = path.join(dataDir,"_kristine","media-assignments.json"), assignments = await readJson(file,{}), at = new Date().toISOString();
-    for (const key of selected) { const previous = assignments[key]; assignments[key] = { ...previous, originalJobId: previous?.originalJobId || jobId, jobId: targetJobId, updatedAt: at, history: [...(previous?.history || []), { from: jobId, to: targetJobId, at }] }; }
+    for (const key of selected) { const previous = assignments[key], owner = available.find(item => item.file === key).jobId, physicalJobId = key.startsWith("_kristine/media/") ? owner : key.split("/")[0]; assignments[key] = { ...previous, originalJobId: previous?.originalJobId || physicalJobId, jobId: targetJobId, updatedAt: at, history: [...(previous?.history || []), { from: owner, to: targetJobId, at }] }; }
     await fsp.mkdir(path.dirname(file),{recursive:true});await fsp.writeFile(file+".tmp",JSON.stringify(assignments,null,2));await fsp.rename(file+".tmp",file);
     return { count:selected.length, jobId:targetJobId };
   });
@@ -598,7 +614,7 @@ function registerMediaMigration(app, { dataDir, requireAdmin, sendPhotoMail }) {
     try {
       const jobId = String(req.params.jobId || "").trim();
       if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return res.status(400).json({ ok: false, error: "Ungültige Baustelle" });
-      const media = await listJobMedia({ dataDir, jobId });
+      const media = await listJobMedia({ dataDir, jobId, includeCollection: req.query?.scope !== "single" });
       res.json({ ok: true, jobId, count: media.length, media });
     } catch (error) {
       console.error("Baustellen media list failed:", error);
