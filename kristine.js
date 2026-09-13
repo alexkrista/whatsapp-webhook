@@ -43,8 +43,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function writeJson(file, value) {
     await ensureRoot();
+    const previousPortalTasks = file === TASKS ? await readJson(TASKS, []) : null;
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+    if (file === TASKS) require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value);
   }
 
 

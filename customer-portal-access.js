@@ -4,6 +4,10 @@ const fs = require("node:fs"), path = require("node:path"), crypto = require("no
 const { sanitizeCustomerPortal } = require("./customer-portal");
 const { createAliasResolver } = require("./job-renumber");
 const { dedupeReports } = require("./public/ui/regie-billing-state");
+const { readMaterialSources, collectCustomerMaterials } = require("./customer-portal-materials");
+const { readCustomerInvoices, invoiceView } = require("./customer-portal-invoices");
+const { registerCustomerExports } = require("./customer-portal-export");
+const { pointTitle, customerPointView } = require("./customer-portal-points");
 const safeId = id => /^[A-Za-z0-9_-]{1,80}$/.test(String(id || ""));
 const hash = text => crypto.createHash("sha256").update(String(text)).digest("hex");
 const random = () => crypto.randomBytes(32).toString("base64url");
@@ -115,8 +119,11 @@ function registerCustomerAccess(app, options) {
     const actual=fs.realpathSync(file),actualBase=fs.realpathSync(path.join(dataDir,jobId))+path.sep;
     return actual.startsWith(actualBase)&&fs.statSync(actual).isFile()?actual:null;
   }
-  async function catalog(ctx) {
+  async function catalog(ctx, includeMaterials = true) {
     const files=new Map(),projects=[],reports=[],materials=[];
+    const materialSources = ctx.portal.modules.projectFile && includeMaterials
+      ? await readMaterialSources({ dataDir, jobIds:ctx.jobIds, canonicalId:id=>aliases.canonical(id), listDaysForJob:options.listDaysForJob, regiePathForDay:options.regiePathForDay })
+      : null;
     const add=(jobId,type,name,physical,group,date="")=>{
       if(!physical)return null;const id=hash(jobId+"|"+type+"|"+physical).slice(0,32),url="/kundenportal/api/file/"+encodeURIComponent(jobId)+"/"+id;
       if(!files.has(id))files.set(id,{id,jobId,name:clean(name,180),type,group,date,url,physical});return url;
@@ -140,7 +147,7 @@ function registerCustomerAccess(app, options) {
           }
           add(jobId,/\.(mp4|mov|webm)$/i.test(normalized)?"video":"photo",row.content||row.filename||"Baustellenfoto",physical,"photos",row.date||"");
         }
-        for(const row of meta.surfaceMaterialMeta||[])if(row.relevant)materials.push({jobId,name:clean(row.name),quantity:Number(row.quantity)||0,unit:clean(row.unit,30),use:clean(row.use)});
+        if (materialSources) materials.push(...collectCustomerMaterials({ jobId, metaRows:meta.surfaceMaterialMeta, documents, days:materialSources.days.get(jobId), bookings:materialSources.bookings.get(jobId) }));
       }
       if(ctx.portal.modules.regie)for(const row of dedupeReports(documents.filter(row=>row.type==="regie_report"))) {
         const physical=row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName)?secureFile(jobId,"_documentation/"+row.storedName):null;
@@ -148,35 +155,54 @@ function registerCustomerAccess(app, options) {
         reports.push({jobId,id:clean(row.id,100),number:clean(row.reportNumber||row.name,120),date:clean(row.reportDate,10),hours:Number(row.totalHours)||0,net:Number(row.totalNet)||0,description:clean(row.description,12000),employees:clean(row.employees,1000),materials:(row.materials||[]).map(m=>({name:clean(m.name),quantity:Number(m.quantity)||0,unit:clean(m.unit,30)})),url});
       }
     }
-    return {files,projects,reports,materials};
+    return {files,projects,reports,materials,materialStatus:{complete:!materialSources?.unavailable.length,unavailable:materialSources?.unavailable||[]}};
   }
   function pointRows(ctx) {
     const folder=path.join(dataDir,ctx.jobId,"_customer-portal"),rows=fs.existsSync(folder)?fs.readdirSync(folder).filter(name=>/^[a-f0-9-]+\.json$/.test(name)).map(name=>read(path.join(folder,name),null)).filter(Boolean):[];
-    const tasks=read(path.join(dataDir,"_kristine/tasks.json"),[]);
-    return rows.filter(row=>row.contact===ctx.grant.contact&&ctx.portal.modules[row.module]).map(row=>({id:row.id,module:row.module,text:row.text,area:row.area,date:row.date,status:tasks.find(task=>task.id===row.taskId)?.status==="done"?"done":"open"}));
+    const tasks=new Map(mergePortalTasks(dataDir,read(path.join(dataDir,"_kristine/tasks.json"),[])).map(task=>[task.id,task]));
+    return rows.filter(row=>row.contact===ctx.grant.contact&&ctx.portal.modules[row.module]).map(row=>customerPointView(row,tasks.get(row.taskId))).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
     const ctx=await context(req),data=await catalog(ctx);
-    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,projects:data.projects,reports:data.reports,materials:data.materials,files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+    const billing = ctx.portal.modules.projectFile ? await readCustomerInvoices(dataDir, await Promise.all(ctx.jobIds.map(async jobId=>({...await readJobMeta(jobId),jobId})))) : {entries:[],complete:true,unavailable:[],syncedAt:null};
+    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,projects:data.projects,reports:data.reports,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+  }));
+  app.get("/kundenportal/api/invoice/:jobId/:id",guard(async(req,res)=>{
+    const ctx=await context(req),jobId=req.params.jobId;
+    if(!ctx.portal.modules.projectFile||!ctx.jobIds.includes(jobId)||!options.readInvoicePdf)throw fail(404,"Rechnung nicht freigegeben.");
+    const billing=await readCustomerInvoices(dataDir,[{...await readJobMeta(jobId),jobId}]),entry=billing.entries.find(row=>row.id===req.params.id);
+    if(!entry)throw fail(404,"Rechnung nicht freigegeben.");
+    const pdf=await options.readInvoicePdf(entry);
+    const current=await context(req); // Recheck after a potentially slow archive request.
+    if(!current.portal.modules.projectFile||!current.jobIds.includes(jobId))throw fail(404,"Rechnung nicht freigegeben.");
+    res.type("application/pdf").setHeader("Content-Disposition",'inline; filename="Rechnung.pdf"');res.send(pdf);
   }));
   app.get("/kundenportal/api/file/:jobId/:id",guard(async(req,res)=>{
     const ctx=await context(req);
     if(!ctx.jobIds.includes(req.params.jobId))throw fail(404,"Datei nicht freigegeben.");
-    const data=await catalog({...ctx,jobIds:[req.params.jobId]}),file=data.files.get(req.params.id);
+    const data=await catalog({...ctx,jobIds:[req.params.jobId]},false),file=data.files.get(req.params.id);
     if(!file)throw fail(404,"Datei nicht freigegeben.");
     res.sendFile(file.physical,{headers:{"Cache-Control":"private, no-store"}});
   }));
   app.post("/kundenportal/api/point",guard(async(req,res)=>{
     sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
     const module=req.body?.module;if(!["communication","projectPoints"].includes(module)||!ctx.portal.modules[module])throw fail(403,"Dieser Bereich ist nicht freigegeben.");
-    const text=clean(req.body?.text,5000),area=clean(req.body?.area,140);if(!text)throw fail(400,"Bitte eine Nachricht eingeben.");
+    const text=clean(req.body?.text,5000),area=clean(req.body?.area,140),title=pointTitle({title:clean(req.body?.title,140),text,area});if(!text)throw fail(400,"Bitte eine Nachricht eingeben.");
     const id=crypto.randomUUID(),taskId="customer_"+id,date=new Date(now()).toISOString();
     const employees=typeof readEmployees==="function"?await readEmployees():[],owner=employees.find(row=>/^alexander krista$/i.test(row.name||""));
-    const task={id:taskId,title:(module==="communication"?"Kundennachricht":"Kundenpunkt prüfen")+" · "+ctx.meta.name+" · "+(area||text).slice(0,70),jobId:ctx.jobId,jobName:ctx.meta.name,assigneeId:owner?.id||"admin",assigneeName:owner?.name||"Alexander Krista",taskType:"Sonstiges",priority:"normal",creatorId:"customer-portal",creatorName:ctx.portal.customerName||ctx.meta.name,contactName:ctx.portal.customerName,contactPhone:ctx.portal.customerPhone,contactEmail:ctx.portal.customerEmail,reminder:text.slice(0,500),status:"open",createdAt:date,completedAt:null};
-    write(path.join(dataDir,ctx.jobId,"_customer-portal",id+".json"),{id,taskId,module,text,area,date,contact:ctx.grant.contact});
+    const task={id:taskId,title:(module==="communication"?"Kundennachricht":"Kundenpunkt prüfen")+" · "+ctx.meta.name+" · "+title.slice(0,70),jobId:ctx.jobId,jobName:ctx.meta.name,assigneeId:owner?.id||"admin",assigneeName:owner?.name||"Alexander Krista",taskType:"Sonstiges",priority:"normal",creatorId:"customer-portal",creatorName:ctx.portal.customerName||ctx.meta.name,contactName:ctx.portal.customerName,contactPhone:ctx.portal.customerPhone,contactEmail:ctx.portal.customerEmail,reminder:text.slice(0,500),status:"open",createdAt:date,completedAt:null};
+    write(path.join(dataDir,ctx.jobId,"_customer-portal",id+".json"),{id,taskId,module,title,text,area,date,contact:ctx.grant.contact,history:[{kind:"submitted",status:"open",date}]});
     write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
     res.status(201).json({ok:true,id});
   }));
+  registerCustomerExports(app,{dataDir,context,catalog,readJobMeta,pointRows,readInvoicePdf:options.readInvoicePdf,origin,now,
+    closePortal:options.writeJobMeta?async ctx=>{
+      const current=sanitizeCustomerPortal((await readJobMeta(ctx.jobId)).customerPortal);
+      if(fingerprint(current)!==ctx.grant.contact)throw fail(409,"Die Freigabe hat sich geändert. Bitte erneut öffnen.");
+      await options.writeJobMeta(ctx.jobId,{customerPortal:{...current,status:"off",updatedAt:new Date(now()).toISOString()}});
+      resetJob(ctx.jobId);
+      try{await options.appendJobHistory?.(ctx.jobId,{type:"customer_portal_closed",title:"Kunde hat seinen Portalzugang geschlossen",detail:"Online-Zugang beendet; interne Projektunterlagen bleiben erhalten.",source:"Kundenportal"});}catch{console.error("Kundenzugang geschlossen; Chronikeintrag konnte nicht gespeichert werden.");}
+    }:null});
   return {revoke:resetJob,scope};
 }
 
