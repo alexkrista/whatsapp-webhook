@@ -103,7 +103,7 @@ function installOfficeRoutes(app, deps = {}) {
     return (Array.isArray(events) ? events : []).filter(row =>
       String(row?.employeeId || "") === String(id) &&
       String(row?.date || "") === String(date) &&
-      ["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())
+      ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())
     ).sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
   }
 
@@ -112,12 +112,12 @@ function installOfficeRoutes(app, deps = {}) {
     const rows = dayEvents(events, id, date);
     const last = rows.at(-1) || null;
     const type = String(last?.type || "").toLowerCase();
-    const mode = ["start","weiter"].includes(type) ? "working"
+    const mode = ["start","weiter","up"].includes(type) ? "working"
       : type === "pause" ? "pause"
       : type === "mittag" ? "lunch"
       : ["ende","fertig","stop","stopp"].includes(type) ? "finished_day"
       : "idle";
-    const start = [...rows].reverse().find(row => ["start","weiter"].includes(String(row?.type || "").toLowerCase())) || null;
+    const start = [...rows].reverse().find(row => ["start","weiter","up"].includes(String(row?.type || "").toLowerCase())) || null;
     const end = [...rows].reverse().find(row => ["ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())) || null;
     return {
       ok:true, office:true, employeeId:id, employeeName:employeeName(employee), date,

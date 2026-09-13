@@ -1,6 +1,7 @@
 
 "use strict";
 const { upFromJobId } = require("./up-reasons");
+const { normalizeOfficeTimeRow, normalizeOfficeTimeData } = require("./office-time");
 
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -31,7 +32,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function readJson(file, fallback) {
     try {
-      return JSON.parse(await fsp.readFile(file, "utf8"));
+      const value = JSON.parse(await fsp.readFile(file, "utf8"));
+      return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
     } catch {
       return fallback;
     }
@@ -39,6 +41,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function writeJson(file, value) {
     await ensureRoot();
+    if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
   }
 
@@ -2124,11 +2127,13 @@ const open = taskId
 
   function employeeTimeKind(segment) {
     if(segment?.type !== "up") return productiveKind(segment);
-    return unproductiveDetails(segment).category ? "unproductive" : "productive";
+    const detail = unproductiveDetails(segment);
+    return detail.category || detail.code === "022" ? "unproductive" : "productive";
   }
 
   function employeeEventType(segment) {
-    return segment?.type === "up" && !unproductiveDetails(segment).category ? "start" : eventTypeForSegment(segment);
+    const detail = unproductiveDetails(segment);
+    return segment?.type === "up" && !detail.category && detail.code !== "022" ? "start" : eventTypeForSegment(segment);
   }
 
   function segmentsAtRelease({ release, correction, currentSegments }) {
@@ -2192,7 +2197,7 @@ const open = taskId
       employeeId, employeeName, date, type:employeeEventType(segment), at:segment.from,
       jobId:null, jobName:"", reason:segment.type === "up" ? String(segment.reason || "") : "",
       activityMode:employeeTimeKind(segment), segmentId:segment.id, source:"released_employee_time",
-      ...(segment.type === "up" && unproductiveDetails(segment).category ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:String(segment.absenceType || "")} : {}),
+      ...(segment.type === "up" && (unproductiveDetails(segment).category || unproductiveDetails(segment).code === "022") ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:String(segment.absenceType || "")} : {}),
       manual:true, detachedFromProject:true, createdAt,
     }));
     const last=(segments || []).at(-1);
@@ -2214,7 +2219,7 @@ const open = taskId
       events=events.map(event=>{
         if(String(event.employeeId)!==employeeId||String(event.date)!==date)return event;
         const detail=unproductiveDetails(event),operationalUp=event.type==="up"&&!detail.category;
-        return {...event,type:operationalUp?"start":event.type,jobId:null,jobName:"",activityMode:operationalUp||["start","weiter"].includes(event.type)?"productive":event.type==="up"?"unproductive":event.activityMode||"boundary",...(event.type==="up"&&detail.category?{unproductiveCategory:detail.category,unproductiveCode:detail.code}:{}),detachedFromProject:true};
+        return normalizeOfficeTimeRow({...event,type:operationalUp?"start":event.type,jobId:null,jobName:"",activityMode:operationalUp||["start","weiter"].includes(event.type)?"productive":event.type==="up"?"unproductive":event.activityMode||"boundary",...(event.type==="up"&&detail.category?{unproductiveCategory:detail.category,unproductiveCode:detail.code}:{}),detachedFromProject:true});
       });
     }
     if(releasedRows.length) await writeJson(TIME_EVENTS,events.slice(-20000));
@@ -2644,7 +2649,7 @@ const open = taskId
         absenceType: String(segment.absenceType || "").trim().slice(0, 40),
         unproductiveCategory: String(segment.unproductiveCategory || "").trim().slice(0, 40),
         unproductiveCode: String(segment.unproductiveCode || "").trim().slice(0, 12),
-      })).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
+      })).map(normalizeOfficeTimeRow).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
       for (let index = 0; index < segments.length; index += 1) {

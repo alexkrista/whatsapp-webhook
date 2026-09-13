@@ -54,6 +54,7 @@ const nodemailer = require("nodemailer");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
+const { isInternalJobId, isOfficeJobId } = require("./office-time");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration, listJobMedia } = require("./media-migration");
@@ -2795,6 +2796,7 @@ async function readLogStats(dayDir) {
 }
 
 async function summarizeJobHours(jobId) {
+  if (isOfficeJobId(jobId)) return { actualHours: 0, actualRegieHours: 0 };
   const days = await listDaysForJob(jobId);
   let actualHours = 0;
   let actualRegieHours = 0;
@@ -2899,8 +2901,8 @@ app.get("/admin/api/jobs", async (req, res) => {
     const company = companySummary.company;
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
-      .filter((j) => j && j !== "unknown" && j !== "_unassigned" && isSafeJobId(j))
-      .filter((j) => fs.existsSync(path.join(DATA_DIR, j)));
+      .filter((j) => j && j !== "unknown" && !isInternalJobId(j) && isSafeJobId(j))
+      .filter((j) => fs.statSync(path.join(DATA_DIR, j), { throwIfNoEntry: false })?.isDirectory());
 
     const jobs = [];
     for (const jobId of filtered) {
@@ -4404,3 +4406,7 @@ console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
 app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
+
+require("./job-merge-audit").auditJobMerge({ dataDir: DATA_DIR, sourceJobId: "keckeis_gabi_harry", targetJobId: "25018" })
+  .then(report => console.info("JOB_MERGE_AUDIT", JSON.stringify(report)))
+  .catch(error => console.error("JOB_MERGE_AUDIT failed:", error.message));

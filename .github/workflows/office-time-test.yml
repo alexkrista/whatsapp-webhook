@@ -1,0 +1,19 @@
+name: Office time classification
+on:
+  pull_request:
+    paths: ['office-time.js', 'job-merge-audit.js', 'kristine.js', 'server.js', 'kgo-office-core.js', 'TEST/office-time.test.js', '.github/workflows/office-time-test.yml']
+  push:
+    branches: [main]
+    paths: ['office-time.js', 'job-merge-audit.js', 'kristine.js', 'server.js', 'kgo-office-core.js', 'TEST/office-time.test.js', '.github/workflows/office-time-test.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --check server.js && node --check kristine.js && node --check kgo-office-core.js && node --check job-merge-audit.js
+      - run: node TEST/office-time.test.js && node TEST/released-time-separation.test.js
