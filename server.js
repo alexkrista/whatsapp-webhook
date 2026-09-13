@@ -54,7 +54,7 @@ const nodemailer = require("nodemailer");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
-const { isInternalJobId, isOfficeJobId } = require("./office-time");
+const { isInternalJobId, isOfficeJobId, normalizeOfficeTimeData } = require("./office-time");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration, listJobMedia } = require("./media-migration");
@@ -4255,7 +4255,9 @@ registerMediaMigration(app, {
     return info;
   },
 });
-require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin});
+let resumePhotoInboxImport;
+const photoInboxImportReady = new Promise(resolve => { resumePhotoInboxImport = resolve; });
+require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin,ready:photoInboxImportReady});
 // ==================== KRISTINE Brain-Stundenquelle ====================
 // Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
 // Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
@@ -4270,7 +4272,7 @@ app.get("/kristine/api/brain-hours-source", async (req, res) => {
 
     res.json({
       ok: true,
-      events: Array.isArray(events) ? events : [],
+      events: Array.isArray(events) ? normalizeOfficeTimeData(events) : [],
       employees: Array.isArray(employees) ? employees : [],
       source: "KRISTINE_RENDER",
       generatedAt: new Date().toISOString()
@@ -4414,6 +4416,7 @@ async function startServer() {
     }
     console.info("LEGACY_COLLECTION_REPAIR", JSON.stringify(result));
   } catch (error) { console.error("LEGACY_COLLECTION_REPAIR failed:", error.message); }
+  resumePhotoInboxImport();
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }
 startServer();

@@ -93,8 +93,10 @@ function createPhotoInbox(dataDir){
   })
  };
 }
-function registerPhotoInbox(app,{dataDir,requireAdmin}){
- const inbox=createPhotoInbox(dataDir);inbox.importHistory().catch(console.error);const timer=setInterval(()=>inbox.importHistory().catch(console.error),15000);timer.unref();
+function registerPhotoInbox(app,{dataDir,requireAdmin,ready}){
+ const inbox=createPhotoInbox(dataDir);
+ const startImport=()=>{inbox.importHistory().catch(console.error);const timer=setInterval(()=>inbox.importHistory().catch(console.error),15000);timer.unref();};
+ if(ready)Promise.resolve(ready).then(startImport).catch(console.error);else startImport();
  app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>i.status===(req.query.dismissed==='true'?'dismissed':'pending')).map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/dismiss',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.dismiss(req.body?.files,req.body?.restore===true)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/confirm',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.confirm(req.body?.changes)})}catch(e){res.status(400).json({ok:false,error:e.message})}});

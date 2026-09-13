@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { repairLegacyCollection } = require("../legacy-collection-repair");
 const { listJobMedia, registerMediaMigration, reassignJobMedia } = require("../media-migration");
+const { registerPhotoInbox } = require("../photo-inbox");
 const SOURCE = "keckeis_gabi_harry", TARGET = "25018";
 
 async function fixture(t) {
@@ -67,6 +68,24 @@ test("repair moved photo paths, restore member, keep confirmed owners and serve 
   assert.deepEqual((await json(`${TARGET}/.meta.json`)).collectionMemberJobIds,[],"Do not reattach after user dissolves collection");
   for(const [index,name] of files.entries())assert.equal(await fsp.readFile(path.join(dataDir,`${TARGET}/2026/07/10/${name}`),"utf8"),`original-${index}`);
   assert.equal(await fsp.readFile(path.join(dataDir,central),"utf8"),"central-original");
+});
+
+test("background photo import waits for startup repair and preserves recovered confirmations",async t=>{
+  const {dataDir,write,json}=await fixture(t);
+  const central="_kristine/media/2026-07-10/office/photo.jpg";
+  await fsp.mkdir(path.dirname(path.join(dataDir,central)),{recursive:true});await fsp.writeFile(path.join(dataDir,central),"photo");
+  await write("_kristine/photo-inbox.json",{seen:[],enabledAt:"2026-09-01",historyImport:{completedAt:"2026-09-12"},items:{[central]:{file:central,jobId:SOURCE,jobName:"Keckeis",status:"confirmed",date:"2026-07-10",category:"photo"}}});
+  let release;
+  const ready=new Promise(resolve=>{release=resolve;});
+  const inbox=registerPhotoInbox({get(){},post(){}},{dataDir,requireAdmin:()=>true,ready});
+  let imports=0;
+  const original=inbox.importHistory;inbox.importHistory=async()=>{imports++;return original();};
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(imports,0);
+  assert.equal((await repairLegacyCollection({dataDir})).status,"repaired");
+  release();await new Promise(resolve=>setImmediate(resolve));
+  await inbox.sync();assert.equal(imports,1);
+  assert.equal((await json("_kristine/photo-inbox.json")).items[central].status,"confirmed");
+  assert.equal((await listJobMedia({dataDir,jobId:TARGET})).length,1);
 });
 
 test("missing evidence or an existing source never causes a guessed reassignment",async t=>{
