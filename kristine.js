@@ -1213,7 +1213,12 @@ const open = taskId
   // Dieselbe Baustellen-Oberfläche und Datenlogik, jetzt unter KRISTINE.
   app.get(["/kristine/baustellen", "/kristine/baustellen/"], (req, res) => {
     if (!requireAdmin(req, res)) return;
-    res.sendFile(path.join(publicDir, "baustellen.html"));
+    res.sendFile(path.join(publicDir, "baustellen.html"), { headers: { "Cache-Control": "no-store" } });
+  });
+
+  app.get(["/kristine/sammelmappe", "/kristine/sammelmappe/"], (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.sendFile(path.join(publicDir, "sammelmappe.html"), { headers: { "Cache-Control": "no-store" } });
   });
 
   app.get("/kontrollzentrum", (req, res) => {

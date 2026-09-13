@@ -8,7 +8,9 @@
   const num=value=>Number.isFinite(Number(value))?Number(value):0;
   const positive=value=>Math.max(0,num(value));
   const unique=values=>[...new Set(values.filter(value=>value!=null&&String(value)!=="").map(String))];
-  function memberIds(job){return unique([job?.jobId,...(job?.collectionMemberJobIds||[]),...(job?.collectionSummary?.jobIds||[])])}
+  const isCollection=job=>job?.kind==="collection";
+  function catalog(payload){return [...(payload?.jobs||[]),...(payload?.collections||[])].filter((job,index,rows)=>rows.findIndex(row=>String(row.jobId)===String(job.jobId))===index)}
+  function memberIds(job){return unique([...(isCollection(job)?[]:[job?.jobId]),...(job?.collectionMemberJobIds||[]),...(job?.collectionSummary?.jobIds||[])])}
   function members(job,jobs){const byId=new Map((jobs||[]).map(row=>[String(row.jobId),row]));return memberIds(job).map(id=>byId.get(id)||(id===String(job?.jobId)?job:null)).filter(Boolean)}
   function single(job){return {...job,collectionSummary:undefined,collectionMemberJobIds:[]}}
   function fixedTarget(job){const c=job?.calculation||{};return positive(c.fixedCalculatedHours??num(c.calculatedHours)-num(c.plannedRegieHours))}
@@ -54,9 +56,9 @@
   }
   function recalculateCollections(payload){
     if(!Array.isArray(payload?.jobs))return payload;
-    const jobs=payload.jobs;
+    const jobs=catalog(payload);
     for(const job of jobs){
-      const rows=members(job,jobs);if(rows.length<2)continue;
+      const rows=members(job,jobs);if(rows.length<2&&!isCollection(job))continue;
       const calculation=aggregateCalculation(rows);
       job.collectionSummary={...job.collectionSummary,count:rows.length,jobIds:rows.map(row=>String(row.jobId)),calculation,
         contractAmount:calculation.contractAmount,calculatedHours:calculation.calculatedHours,fixedCalculatedHours:calculation.fixedCalculatedHours,
@@ -68,7 +70,7 @@
     return payload;
   }
   function view(job,jobs){
-    if(memberIds(job).length<2)return job;
+    if(memberIds(job).length<2&&!isCollection(job))return job;
     const calculation=aggregateCalculation(members(job,jobs));
     return {...job,contractAmount:calculation.contractAmount,calculation};
   }
@@ -96,5 +98,5 @@
       paidGross:payments.reduce((s,r)=>s+num(r.gross),0),openGross:runs.reduce((s,r)=>s+num(r.openGross),0)});
     return {found:results.some(row=>row.billing?.found),summary,invoices,payments,runs};
   }
-  return {num,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
+  return {num,isCollection,catalog,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
 });

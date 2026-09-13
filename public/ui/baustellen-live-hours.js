@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-hours-balance-2";
+  const VERSION="2026-09-13-sammelmappe-1";
   const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
@@ -177,7 +177,7 @@
     if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,detailTotal:kristineDetailTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
     const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
     const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
-    const owner=reconciliationDrafts.has(String(head.jobId))||head.hoursOverlapResolvedAt||head.hoursCutoverDate?head:j;
+    const owner=!D.isCollection(head)&&(reconciliationDrafts.has(String(head.jobId))||head.hoursOverlapResolvedAt||head.hoursCutoverDate)?head:j;
     const rawExcluded=selectedExclusions(owner,ww,kr),excluded=new Set((ww.rows||[]).filter(row=>rawExcluded.has(row.key)||rawExcluded.has(row.key.slice(row.key.indexOf("|")+1))).map(row=>row.key)),legacyCutover=String(owner?.hoursCutoverDate||"");
     let wwHours=0,kristineHours=0;
     if(legacyCutover&&!reconciliationDrafts.has(jobId)){for(const [day,value] of ww.days)if(day<legacyCutover)wwHours+=num(value);for(const [day,value] of krDays)if(day>=legacyCutover)kristineHours+=num(value)*scale}
@@ -278,9 +278,15 @@
     return {...fused,order,regie,target,fixedTarget,...D.hourBalance(target,fused.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
   }
   function hoursSummary(id){
-    const j=job(id);if(!j)return {total:0,order:0,regie:0,target:0,fixedTarget:0,remaining:0,overrun:0,remainingOrder:0,orderOverrun:0,source:""};
-    const summaries=D.members(j,jobs).map(member=>memberHourSummary(member,j)),out={...fusion(j),order:0,regie:0,target:0,fixedTarget:0,complete:!(wwByJob.get(String(id))?.missing||[]).length,missing:wwByJob.get(String(id))?.missing||[]};
-    for(const row of summaries)for(const key of ["order","regie","target","fixedTarget"])out[key]+=num(row[key]);
+    const j=job(id);if(!j)return {total:0,order:0,regie:0,target:0,fixedTarget:0,remaining:0,overrun:0,remainingOrder:0,orderOverrun:0,source:"",memberHours:[],complete:false};
+    const memberHours=D.members(j,jobs).map(member=>({jobId:String(member.jobId),...memberHourSummary(member,j)}));
+    // Einzelzeilen und Gesamtkacheln verwenden denselben Stand. Die Hauptakte
+    // steuert hier nur ihre eigenen Stunden zur Summe bei.
+    const out={total:0,ww:0,kristine:0,detailTotal:0,order:0,regie:0,target:0,fixedTarget:0,overlaps:[],excluded:new Set(),source:"KRISTINE",memberHours,complete:sourceStatus(id).complete,missing:wwByJob.get(String(id))?.missing||[]};
+    for(const row of memberHours){
+      for(const key of ["total","ww","kristine","detailTotal","order","regie","target","fixedTarget"])out[key]+=num(row[key]);
+      out.overlaps.push(...row.overlaps);for(const key of row.excluded)out.excluded.add(key);if(row.source!=="KRISTINE")out.source=row.source;
+    }
     const orderBalance=D.hourBalance(out.fixedTarget,out.order);
     return {...out,...D.hourBalance(out.target,out.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
   }
@@ -340,13 +346,13 @@
   let refreshSerial=0;
   async function refresh(){
     const serial=++refreshSerial;
-    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=D.catalog(j);bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
-  function sourceStatus(id){const j=job(id),refs=D.projects(j,jobs),data=wwByJob.get(String(id))||wwByMember.get(String(id));return {label:!refs.length?"KRISTINE":!data?"WW-Abgleich ausstehend":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:data.cached?"WW: gespeicherter Stand":"WW aktuell",complete:!refs.length||!!data&&!data.cached&&!data.missing?.length}}
+  function sourceStatus(id,{single=false}={}){const j=job(id),refs=D.projects(j,jobs).filter(ref=>!single||ref.jobId===String(id)),data=single?wwByMember.get(String(id)):wwByJob.get(String(id))||wwByMember.get(String(id));return {label:!j?"Stunden werden geladen":!refs.length?"KRISTINE":!data?"WW-Abgleich ausstehend":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:data.cached?"WW: gespeicherter Stand":"WW aktuell",complete:!!j&&(!refs.length||!!data&&!data.cached&&!data.missing?.length)}}
 
   function install(){
-    if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen"))return;installReconciliationCss();
+    if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen")&&!location.pathname.toLowerCase().includes("sammelmappe"))return;installReconciliationCss();
     const list=document.getElementById("jobList"),detail=document.getElementById("detail");
     if(list)new MutationObserver(queuePatch).observe(list,{subtree:true,childList:true});
     if(detail)new MutationObserver(queuePatch).observe(detail,{subtree:true,childList:true});

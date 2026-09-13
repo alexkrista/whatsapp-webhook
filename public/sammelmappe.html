@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KRISTINE · Sammelmappe</title>
+  <link rel="stylesheet" href="/public/ui/sammelmappe.css?v=20260913-sammelmappe-1">
+  <script src="/public/ui/baustellen-data.js?v=20260913-sammelmappe-1" defer></script>
+  <script src="/public/ui/regie-billing-state.js?v=20260913-sammelmappe-1" defer></script>
+  <script src="/public/ui/baustellen-sources.js?v=20260913-sammelmappe-1" defer></script>
+  <script src="/public/ui/baustellen-live-hours.js?v=20260913-sammelmappe-1" defer></script>
+  <script src="/public/ui/sammelmappe.js?v=20260913-sammelmappe-1" defer></script>
+</head>
+<body>
+  <header class="page-head">
+    <div class="head-inner">
+      <a id="backToJobs" class="back" href="/kristine/baustellen">← Baustellen</a>
+      <div class="heading"><span class="badge">📁 SAMMELMAPPE</span><h1 id="collectionTitle">Wird geladen …</h1><p id="collectionReference"></p></div>
+      <button id="refreshCollection" type="button">Aktualisieren</button>
+    </div>
+  </header>
+  <main>
+    <p class="intro">Gemeinsame Übersicht der Einzelprojekte. Stunden, Kalkulationen, Fotos und Belege bleiben in der jeweiligen Akte.</p>
+    <p id="collectionStatus" class="notice" role="status" aria-live="polite">Einzelakten werden geladen …</p>
+    <section class="kpis" aria-label="Gesamtsummen">
+      <div class="card"><span class="label">Sollstunden gesamt</span><strong id="collectionTarget">–</strong><small>Summe der Einzelkalkulationen</small></div>
+      <div class="card"><span class="label">Iststunden gesamt</span><strong id="collectionActual">–</strong><small id="collectionActualNote">WW + KRISTINE, inklusive Regie</small></div>
+      <div class="card"><span class="label">Offene Stunden</span><strong id="collectionOpen">–</strong><small id="collectionBalance">Soll gesamt − Ist gesamt</small></div>
+      <div class="card"><span class="label">Über Soll</span><strong id="collectionOverrun">–</strong><small>Mehrstunden der gesamten Sammelmappe</small></div>
+    </section>
+    <section class="panel">
+      <div class="section-head"><h2>Einzelakten und Summe</h2><span id="collectionCount"></span></div>
+      <p class="muted">Jede Einzelakte zählt genau einmal. Ein negativer Saldo gleicht die offenen Stunden der anderen Akten aus.</p>
+      <div class="table-scroll"><table><thead><tr><th>Akte</th><th class="num">Soll</th><th class="num">Ist</th><th class="num">Soll − Ist</th><th class="num">Regieberichte</th><th class="num">Rechnungen</th><th>Datenstand</th><th></th></tr></thead><tbody id="collectionMembers"></tbody><tfoot id="collectionTotals"></tfoot></table></div>
+    </section>
+    <section class="kpis finance" aria-label="Aufträge und Rechnungen">
+      <div class="card"><span class="label">Auftragsvolumen</span><strong id="collectionContract">–</strong><small>Summe der Projektwerte</small></div>
+      <div class="card"><span class="label">Rechnungen netto</span><strong id="collectionInvoiced">–</strong><small>Ausgestellte Rechnungen der Einzelakten</small></div>
+      <div class="card"><span class="label">Bezahlt brutto</span><strong id="collectionPaid">–</strong><small>Erfasste Zahlungen</small></div>
+      <div class="card"><span class="label">Noch abzurechnen</span><strong id="collectionToInvoice">–</strong><small>Summe der Einzelprojekt-Berechnungen</small></div>
+    </section>
+    <section class="panel"><details open><summary>Regieberichte <span id="reportCount"></span></summary><p class="muted">Regiestunden sind ein Anteil der Iststunden und werden nicht nochmals addiert.</p><div class="table-scroll"><table><thead><tr><th>Akte</th><th>Datum</th><th>Bericht</th><th class="num">Stunden</th><th class="num">Betrag netto</th></tr></thead><tbody id="collectionReports"></tbody><tfoot id="collectionReportTotals"></tfoot></table></div></details></section>
+    <section class="panel"><details><summary>Rechnungen <span id="invoiceCount"></span></summary><div class="table-scroll"><table><thead><tr><th>Akte</th><th>Datum</th><th>Beleg</th><th>Status</th><th class="num">Netto</th><th class="num">Brutto</th></tr></thead><tbody id="collectionInvoices"></tbody></table></div></details></section>
+    <section class="panel"><details id="mediaDetails"><summary>Fotos <span id="photoCount"></span></summary><div id="collectionPhotos" class="photos"><p>Fotos werden beim Öffnen geladen …</p></div></details></section>
+    <section class="panel"><details><summary>Weitere Dokumente <span id="documentCount"></span></summary><ul id="collectionDocuments" class="document-list"></ul></details></section>
+    <footer><span>Sammelmappe · Stand <span id="updatedAt">–</span></span><button id="dissolveCollection" class="quiet" type="button">Sammelmappe auflösen</button></footer>
+  </main>
+</body>
+</html>

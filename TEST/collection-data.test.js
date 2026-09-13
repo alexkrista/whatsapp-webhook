@@ -28,6 +28,11 @@ test("the final preload rebuilds collection summary from saved V2 calculation",a
   let data=await load("order-calculation-preload.js").enrichJobsPayload({jobs:[head,job("old",0,0)]});
   data=await load("order-calculation-v2-preload.js").enrichJobsPayload(data);
   assert.equal(data.jobs[0].collectionSummary.calculatedHours.toFixed(2),"1323.53");assert.equal(data.jobs[0].collectionSummary.remainingOrderHours.toFixed(2),"30.33");
+  const own=[job("25018",0,1293.2),job("old",0,0)],collections=require("../sammelmappen").collectionCatalog(own,[{id:"S25018",mainJobId:"25018",memberJobIds:["25018","old"]}]);
+  data=await load("order-calculation-preload.js").enrichJobsPayload({jobs:own,collections});
+  data=await load("order-calculation-v2-preload.js").enrichJobsPayload(data);
+  assert.equal(data.collections[0].collectionSummary.calculatedHours.toFixed(2),"1323.53","the independent container uses final enriched project targets");
+  assert.equal(data.collections[0].collectionSummary.remainingHours.toFixed(2),"30.33");assert.equal(data.jobs[0].collectionSummary,undefined);
 });
 
 test("39 member sources include every project exactly once and retain report identities",()=>{
@@ -119,6 +124,73 @@ test("saving a calculation refreshes total actual, current target and open hours
   const context={window:{BaustellenData:D,BaustellenLiveHours:{summary:()=>({total:494,order:470,target:500,remaining:42})}},document:{readyState:"loading",addEventListener(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[]},location:{search:"",origin:"https://protokoll.krista.at"},fetch:async()=>({ok:true,text:async()=>JSON.stringify({jobs:[head,member]})}),URL,URLSearchParams,Intl,Map,Set,console};
   vm.runInNewContext(source,context);await context.window.testGrid(head.jobId);
   assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");assert.equal(elements.detailOpenNote.textContent,"510 h Soll − 494 h Ist = 16 h");
+});
+
+for(const standalone of [false,true])test(`39-source load ${standalone?"S24177":"legacy"}: individual rows and total cards use one sum`,async()=>{
+  const ids=["24177","26018","25047",...Array.from({length:36},(_,i)=>String(27000+i))];
+  const jobs=ids.map(id=>job(id,0,0)),head=jobs[0];if(!standalone)head.collectionMemberJobIds=ids.slice(1);
+  head.calculation={...job(head.jobId,1323.53,27.75).calculation};
+  const collections=standalone?require("../sammelmappen").collectionCatalog(jobs,[{id:"S24177",mainJobId:"24177",memberJobIds:ids}]):[],selected=standalone?collections[0]:head,catalog=D.catalog({jobs,collections});
+  // The old head row showed 1293.22: it already included 348.62 + 616.14.
+  const wwHours={24177:300.71,26018:348.62,25047:616.14},reportCounts={24177:1,26018:24,25047:11},stored=new Map(),requests=[];
+  const listeners=new Map(),elements=Object.fromEntries(["detailHours","detailHoursNote","detailOpen","detailOpenNote"].map(id=>[id,{textContent:""}]));
+  const status={innerHTML:"",querySelector:()=>({open:true})};elements.bkSourceStatus=status;
+  const window={BaustellenData:D,KristaRegieBilling:B,addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn)},dispatchEvent(event){for(const fn of listeners.get(event.type)||[])fn(event)}};
+  const document={readyState:"loading",addEventListener(){},dispatchEvent(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[],querySelector:()=>null};
+  const response=value=>({ok:true,status:200,json:async()=>value,text:async()=>JSON.stringify(value)});
+  const fetch=async(raw,init={})=>{
+    const url=new URL(raw,"https://protokoll.krista.at"),body=init.body?JSON.parse(init.body):{};requests.push({path:url.pathname,body});
+    if(url.hostname==="127.0.0.1"){
+      const id=body.projectNumber,n=wwHours[id]||0;
+      if(url.pathname.endsWith("project-hours"))return response({ok:true,hours:{found:true,projectNumber:id,totalHours:n,rows:n?[{date:"2026-09-01",employeeName:"Max",hours:n}]:[],days:n?[{date:"2026-09-01",hours:n}]:[]}});
+      if(url.pathname.endsWith("project-regie-reports"))return response({ok:true,reports:Array.from({length:reportCounts[id]||0},(_,i)=>({source:"WW",sourceId:id+"-"+i,reportNumber:String(i+1),reportDate:"2026-09-01",totalHours:0}))});
+      if(url.pathname.endsWith("project-billing"))return response({ok:true,billing:{found:true,projectNumber:id,invoices:[],payments:[],runs:[],summary:{}}});
+    }
+    if(url.pathname==="/admin/api/jobs")return response({jobs,collections});
+    if(url.pathname==="/kristine/api/bootstrap")return response({timeEvents:[],employees:[],states:{}});
+    if(url.pathname==="/admin/api/employees")return response({employees:[]});
+    const id=url.pathname.split("/")[4];
+    if(url.pathname.includes("ww-cache"))return response({ok:true,syncedAt:"2026-09-13"});
+    if(url.pathname.endsWith("/days"))return response({detailed:[]});
+    if(url.pathname.endsWith("/regie-report-sync")){stored.set(id,body.reports);return response({ok:true,count:body.reports.length})}
+    if(url.pathname.endsWith("/documentation"))return response({items:(stored.get(id)||[]).map(row=>({...row,type:"regie_report"}))});
+    throw new Error("Unexpected request: "+url.pathname);
+  };
+  const context={window,document,fetch,location:{search:"",origin:"https://protokoll.krista.at",pathname:standalone?"/kristine/sammelmappe":"/kristine/baustellen",hash:"#"+selected.jobId},URL,URLSearchParams,Map,Set,Date,Intl,AbortSignal,CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},console,setTimeout,clearTimeout,queueMicrotask};
+  for(const file of ["public/ui/baustellen-sources.js","public/ui/baustellen-live-hours.js","public/ui/baustellen-knowledge-hub.js"]){
+    let source=fs.readFileSync(path.join(root,file),"utf8");
+    if(file.endsWith("baustellen-knowledge-hub.js"))source=source.replace("  window.BaustellenKnowledgeHub=",`  window.testCollectionStatus=data=>{loadedCollection=data;currentJobId=data.jobId;renderCollectionStatus()};\n  window.BaustellenKnowledgeHub=`);
+    vm.runInNewContext(source,context);
+  }
+  const [data]=await Promise.all([window.BaustellenSources.load(selected,catalog),window.BaustellenLiveHours.refresh()]);
+  window.testCollectionStatus(data);
+  const h=new Intl.NumberFormat("de-AT",{maximumFractionDigits:2}),single=id=>status.innerHTML.match(new RegExp('data-source-job="'+id+'"[\\s\\S]*?data-member-hours>([^<]+)'))?.[1];
+  assert.equal(single("24177"),h.format(328.46)+" h");
+  assert.equal(single("26018"),h.format(348.62)+" h");assert.equal(single("25047"),h.format(616.14)+" h");
+  assert(status.innerHTML.includes('data-collection-hours>'+h.format(1293.22)+" h"));
+  assert(status.innerHTML.includes("Summe aus 39 Akten"));assert(status.innerHTML.includes("36 Berichte"));assert(status.innerHTML.includes("<details open>"));
+  const summary=window.BaustellenLiveHours.summary(selected.jobId);
+  assert.equal(summary.memberHours.length,39);assert.equal(summary.memberHours.reduce((sum,row)=>sum+row.total,0),summary.total);
+  assert.equal(summary.total.toFixed(2),"1293.22");assert.equal(summary.remaining.toFixed(2),"30.31");
+  assert.equal(elements.detailHours.textContent,"1 293,2 h / 1 323,5 h");assert.equal(elements.detailOpen.textContent,"30,3 h");
+  assert.equal(new Set(requests.filter(row=>row.path.endsWith("project-hours")).map(row=>row.body.projectNumber)).size,39);
+  if(standalone){
+    assert.equal(window.BaustellenLiveHours.summary("24177").total.toFixed(2),"328.46");
+    assert(!requests.some(row=>row.path.includes("/job/S24177/")||row.body.projectNumber==="S24177"));
+    for(const match of fs.readFileSync(path.join(root,"public/sammelmappe.html"),"utf8").matchAll(/id="([^"]+)"/g))elements[match[1]]={textContent:"",innerHTML:"",classList:{toggle(){}}};
+    const pageSource=fs.readFileSync(path.join(root,"public/ui/sammelmappe.js"),"utf8").replace("  function boot() {", "  window.testSammelmappe={renderHours,renderDocuments,set(j,c,d){jobs=j;collection=c;data=d}};\n  function boot() {");
+    vm.runInNewContext(pageSource,context);window.testSammelmappe.set(catalog,selected,data);window.testSammelmappe.renderDocuments();window.testSammelmappe.renderHours();
+    assert.equal(elements.collectionActual.textContent,h.format(1293.22)+" h");assert.equal(elements.collectionOpen.textContent,"30,31 h");
+    assert.equal(elements.reportCount.textContent,"(36)");assert(elements.collectionTotals.innerHTML.includes('data-collection-hours>'+elements.collectionActual.textContent));
+    assert(!elements.collectionMembers.innerHTML.includes('data-source-job="S24177"'));
+    window.addEventListener("krista:live-hours-updated",window.testSammelmappe.renderHours);
+  }
+  // A refreshed import updates the footer and cards together, keeping the list open.
+  wwHours["26018"]+=1;window.BaustellenSources.clear();await window.BaustellenLiveHours.refresh();
+  assert.equal(single("26018"),h.format(349.62)+" h");
+  assert(status.innerHTML.includes('data-collection-hours>'+h.format(1294.22)+" h"));
+  assert.equal(elements.detailOpen.textContent,"29,3 h");assert(status.innerHTML.includes("<details open>"));
+  if(standalone){assert.equal(elements.collectionActual.textContent,h.format(1294.22)+" h");assert.equal(elements.collectionOpen.textContent,"29,31 h")}
 });
 
 test("collection loader reads all 39 document, regie and invoice sources without moving them",async()=>{

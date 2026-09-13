@@ -53,9 +53,8 @@ function registerCustomerPortal(app, options) {
       if (!isSafeJobId(jobId) || !jobExists(jobId)) return res.status(404).json({ ok: false, error: "Baustelle nicht gefunden." });
       const beforeMeta = await readJobMeta(jobId);
       const portal = sanitizeCustomerPortal(req.body, beforeMeta.customerPortal);
-      const collectionMemberJobIds = Array.isArray(beforeMeta.collectionMemberJobIds)
-        ? beforeMeta.collectionMemberJobIds.filter(id => id !== jobId && jobExists(id))
-        : [];
+      const members = await options.collectionMembers?.(jobId) || beforeMeta.collectionMemberJobIds || [];
+      const collectionMemberJobIds = members.filter(id => id !== jobId && jobExists(id));
       if (portal.mode === "collection" && !collectionMemberJobIds.length) {
         return res.status(400).json({ ok: false, error: "Diese Baustelle ist keine Sammelmappe." });
       }
