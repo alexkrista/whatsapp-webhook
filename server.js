@@ -70,7 +70,7 @@ const { installKristineSharedCalendar } = require("./kristine-shared-calendar");
 const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 const { registerJobSourceCache } = require("./job-source-cache");
 const { recalculateCollections } = require("./public/ui/baustellen-data");
-const { createCollectionStore, collectionCatalog } = require("./sammelmappen");
+const { createCollectionStore, collectionCatalog, collectionWriteGuard } = require("./sammelmappen");
 const { parseMsg, getMsgAttachment } = require("./kristine-msg-reader");
 const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
 const { createRegieComparisonPdf } = require("./regie-comparison-pdf");
@@ -345,16 +345,7 @@ function requireAdmin(req, res) {
   return true;
 }
 
-app.use("/admin/api/job/:jobId", async (req, res, next) => {
-  if (!requireAdmin(req, res)) return;
-  try {
-    const id = String(req.params.jobId || "");
-    if (req.path === "/collection") return next();
-    if (await collectionStore.reserved(id)) return res.status(409).json({ ok: false, error: "Die Sammelmappe hat keine eigenen Buchungen. Bitte die Einzelakte öffnen." });
-    if (req.method === "DELETE" && (req.path === "/" || req.path === "") && (await collectionStore.forMember(id)).length) return res.status(409).json({ ok: false, error: "Diese Einzelakte gehört zu einer Sammelmappe. Bitte zuerst die Zuordnung lösen." });
-    next();
-  } catch (error) { res.status(500).json({ ok: false, error: error.message }); }
-});
+app.use("/admin/api/job/:jobId", collectionWriteGuard(collectionStore, requireAdmin));
 
 const BRAIN_PERMIT_PATHS = new Set([
   "/api/outgoing/project-hours",

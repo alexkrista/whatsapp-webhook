@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
-const { createCollectionStore, collectionCatalog, MIGRATION } = require("../sammelmappen");
+const { createCollectionStore, collectionCatalog, collectionWriteGuard, MIGRATION } = require("../sammelmappen");
 const D = require("../public/ui/baustellen-data");
 
 async function fixture(t) {
@@ -107,4 +107,19 @@ test("S25018 sums independent projects while 25018 keeps its own balance", () =>
   jobs[1].calculation.actualHours = 60; D.recalculateCollections({ jobs, collections });
   assert.equal(collections[0].collectionSummary.remainingHours, 0);
   assert.equal(collections[0].collectionSummary.overrunHours, 18);
+});
+
+test("collection write protection preserves signed photo reads and normal project edits", async () => {
+  let authChecks = 0;
+  const guard = collectionWriteGuard({ reserved: async id => id === "S24177", forMember: async id => id === "24177" ? [{ id: "S24177" }] : [] }, () => { authChecks++; return true; });
+  async function request(method, jobId, route) {
+    const result = { next: false, status: 200 }, response = { status(value){ result.status = value; return this; }, json(value){ result.body = value; } };
+    await guard({ method, params: { jobId }, path: route }, response, () => { result.next = true; }); return result;
+  }
+  assert.equal((await request("GET", "24177", "/media/share-file")).next, true);
+  assert.equal(authChecks, 0, "signed reads continue to their own token verification");
+  assert.equal((await request("PUT", "S24177", "/meta")).status, 409);
+  assert.equal((await request("PUT", "24177", "/meta")).next, true);
+  assert.equal((await request("PUT", "S24177", "/collection")).next, true);
+  assert.equal((await request("DELETE", "24177", "/")).status, 409);
 });

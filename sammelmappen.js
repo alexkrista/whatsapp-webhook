@@ -39,7 +39,7 @@ function createCollectionStore({ dataDir }) {
   const get = async id => (await list()).find(row => row.id === String(id)) || null;
   const forMain = async id => (await list()).find(row => row.mainJobId === String(id)) || null;
   const forMember = async id => (await list()).filter(row => row.memberJobIds.includes(String(id)));
-  const reserved = async id => !!(await readRegistry()).collections[String(id)];
+  const reserved = async id => Object.hasOwn((await readRegistry()).collections, String(id));
   const readMeta = async id => readJson(path.join(dataDir, id, ".meta.json"), {});
   async function jobExists(id) {
     return validJobId(id) && (await fs.stat(path.join(dataDir, id)).catch(() => null))?.isDirectory();
@@ -59,7 +59,7 @@ function createCollectionStore({ dataDir }) {
   const save = args => exclusive(async () => {
     const registry = await readRegistry();
     const requestedId = String(args.jobId || "").trim();
-    const existing = registry.collections[requestedId] || Object.values(registry.collections).find(row => row.mainJobId === requestedId);
+    const existing = (Object.hasOwn(registry.collections, requestedId) ? registry.collections[requestedId] : null) || Object.values(registry.collections).find(row => row.mainJobId === requestedId);
     const mainJobId = existing?.mainJobId || requestedId;
     const id = "S" + mainJobId;
     if (!Array.isArray(args.memberJobIds)) throw fail("Einzelakten fehlen.", 400);
@@ -179,4 +179,19 @@ function collectionCatalog(jobs, definitions) {
   return collections;
 }
 
-module.exports = { createCollectionStore, collectionCatalog, MIGRATION };
+function collectionWriteGuard(store, requireAdmin) {
+  return async (req, res, next) => {
+    // Reads retain their existing authentication, including signed photo links.
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+    if (!requireAdmin(req, res)) return;
+    try {
+      const id = String(req.params.jobId || "");
+      if (req.path === "/collection") return next();
+      if (await store.reserved(id)) return res.status(409).json({ ok: false, error: "Die Sammelmappe hat keine eigenen Buchungen. Bitte die Einzelakte öffnen." });
+      if (req.method === "DELETE" && (req.path === "/" || req.path === "") && (await store.forMember(id)).length) return res.status(409).json({ ok: false, error: "Diese Einzelakte gehört zu einer Sammelmappe. Bitte zuerst die Zuordnung lösen." });
+      next();
+    } catch (error) { res.status(500).json({ ok: false, error: error.message }); }
+  };
+}
+
+module.exports = { createCollectionStore, collectionCatalog, collectionWriteGuard, MIGRATION };
