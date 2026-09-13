@@ -1,0 +1,35 @@
+name: Baustellen collection visibility
+
+on:
+  pull_request:
+    paths:
+      - "public/baustellen.html"
+      - "public/ui/baustellen-collection.js"
+      - "public/ui/topbar.js"
+      - "TEST/baustellen-collection.test.js"
+      - ".github/workflows/baustellen-collection-test.yml"
+  push:
+    branches: [main]
+    paths:
+      - "public/baustellen.html"
+      - "public/ui/baustellen-collection.js"
+      - "public/ui/topbar.js"
+      - "TEST/baustellen-collection.test.js"
+      - ".github/workflows/baustellen-collection-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check syntax and collection behavior
+        run: |
+          node --check public/ui/baustellen-collection.js
+          node --check public/ui/topbar.js
+          node TEST/baustellen-collection.test.js
