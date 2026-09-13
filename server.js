@@ -98,6 +98,18 @@ app.get("/public/krista-logo.png", (_req, res) => res.sendFile(path.join(process
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const jobRenumber = require("./job-renumber");
+const jobRenumberResult = jobRenumber.renumberJansen({ dataDir: DATA_DIR });
+console.info("JOB_RENUMBER_RESULT", JSON.stringify(jobRenumberResult));
+const jobAliases = jobRenumber.createAliasResolver(DATA_DIR);
+app.use((req, _res, next) => {
+  for (const [oldId, newId] of Object.entries(jobAliases.aliases)) {
+    if (req.body && !Buffer.isBuffer(req.body)) req.body = jobRenumber.rewriteReferences(req.body, oldId, newId);
+    if (req.query.jobId === oldId) req.query.jobId = newId;
+    if (!["GET", "HEAD"].includes(req.method) && req.url.startsWith(`/admin/api/job/${oldId}/`)) req.url = `/admin/api/job/${newId}/` + req.url.slice(`/admin/api/job/${oldId}/`.length);
+  }
+  next();
+});
 const collectionStore = createCollectionStore({ dataDir: DATA_DIR });
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
@@ -191,12 +203,12 @@ function jobIdFromName(name) {
     .slice(0, 80) || `Baustelle_${Date.now()}`;
 }
 async function findProtocolJobs(query) {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = jobAliases.canonical(String(query || "").trim()).toLowerCase();
   if (!needle) return [];
   const entries = await fsp.readdir(DATA_DIR).catch(() => []);
   const jobs = [];
   for (const jobId of entries) {
-    if (!jobId || ["unknown", "_unassigned", "_kristine"].includes(jobId) || !isSafeJobId(jobId)) continue;
+    if (!jobId || jobAliases.isAlias(jobId) || ["unknown", "_unassigned", "_kristine"].includes(jobId) || !isSafeJobId(jobId)) continue;
     if (!fs.existsSync(path.join(DATA_DIR, jobId))) continue;
     const meta = await readJobMeta(jobId);
     const name = String(meta.name || "");
@@ -2098,7 +2110,7 @@ app.post("/webhook", async (req, res) => {
 
       // Im Chef-Protokollmodus gilt ausschlieÃŸlich die aktiv ausgewÃ¤hlte Baustelle.
       // AuÃŸerhalb bleibt die alte #/@-KompatibilitÃ¤t nur fÃ¼r unbekannte Absender erhalten.
-      let siteCode = protocolSite || parseSiteCodeFromText(textOrCaption) || "unknown";
+      let siteCode = jobAliases.canonical(protocolSite || parseSiteCodeFromText(textOrCaption) || "unknown");
 
       const dayDir = resolveDayDirForWrite(siteCode, date);
       ensureDirSync(dayDir);
@@ -2305,13 +2317,13 @@ app.get("/admin/run-daily", async (req, res) => {
     const to = req.query.to || MAIL_TO_DEFAULT;
     if (!to) return res.status(400).send("MAIL_TO_DEFAULT missing (or pass ?to=...)");
 
-    const onlyJob = req.query.jobId ? String(req.query.jobId) : null;
+    const onlyJob = req.query.jobId ? jobAliases.canonical(req.query.jobId) : null;
 
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const results = [];
 
     for (const jobId of jobIds) {
-      if (onlyJob && jobId !== onlyJob) continue;
+      if (jobAliases.isAlias(jobId) || (onlyJob && jobId !== onlyJob)) continue;
       if (PDF_IGNORE_UNKNOWN && (jobId === "unknown" || jobId === "_unassigned")) continue;
 
       const dayDir = resolveExistingDayDir(jobId, date);
@@ -2525,6 +2537,7 @@ async function readJobMeta(jobId) {
       projectContacts: sanitizeProjectContacts(meta.projectContacts, meta),
       wwProjectIndex: Math.max(0, Math.trunc(Number(meta.wwProjectIndex || 0))),
       wwProjectNumber: String(meta.wwProjectNumber || ""),
+      previousJobIds: Array.isArray(meta.previousJobIds) ? meta.previousJobIds.map(String) : [],
       wwAddressId: String(meta.wwAddressId || meta.customerMaster?.wwAddressId || ""),
       wwCustomerNumber: String(meta.wwCustomerNumber || meta.customerMaster?.wwCustomerNumber || ""),
       customerMasterStatus: String(meta.customerMasterStatus || ""),
@@ -2918,7 +2931,7 @@ app.get("/admin/api/jobs", async (req, res) => {
     const company = companySummary.company;
     const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
     const filtered = jobIds
-      .filter((j) => j && j !== "unknown" && !isInternalJobId(j) && isSafeJobId(j))
+      .filter((j) => j && j !== "unknown" && !jobAliases.isAlias(j) && !isInternalJobId(j) && isSafeJobId(j))
       .filter((j) => fs.statSync(path.join(DATA_DIR, j), { throwIfNoEntry: false })?.isDirectory());
 
     const jobs = [];
@@ -2991,6 +3004,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
         wwProjectIndex: Number(meta.wwProjectIndex || 0),
         wwProjectNumber: meta.wwProjectNumber || "",
+        previousJobIds: meta.previousJobIds || [],
         wwAddressId: meta.wwAddressId || "",
         wwCustomerNumber: meta.wwCustomerNumber || "",
         customerMasterStatus: meta.customerMasterStatus || "",
