@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-sammelmappe-1";
+  const VERSION="2026-09-13-hours-cache-1";
   const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
@@ -12,6 +12,8 @@
   let peopleByJob=new Map();
   let wwByJob=new Map();
   let wwByMember=new Map();
+  const wwByProject=new Map();
+  let savedHoursLoaded=false;
   const reportHoursByJob=new Map();
   let costEmployees=[];
   const reconciliationDrafts=new Map();
@@ -34,13 +36,43 @@
   async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function loadWwHours(jobId,ownerId=jobId){
     const d=await window.BaustellenSources.ww("hours",{jobId:String(ownerId),projectNumber:String(jobId)});
+    return parseWwHours(d,jobId);
+  }
+  function parseWwHours(d,jobId){
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
     for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0,sourceProjectNumber:String(jobId)};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
     // Der Brain Connector liefert bereits produktive WW-Stunden nach Pausenabzug.
     // Hier kein zweites Mal 0,25 h je Mitarbeiter/Tag abziehen.
     const rows=[...grouped.values()].map(row=>({...row,hours:Math.max(0,row.hours)})).sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")),netDays=new Map();for(const row of rows)netDays.set(row.date,num(netDays.get(row.date))+row.hours);
-    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours),cached:d.cached,syncedAt:d.syncedAt};
+    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours),cached:d.cached,syncedAt:d.syncedAt,saved:d.saved!==false};
+  }
+
+  function combineRefs(refs){
+    const found=refs.flatMap(ref=>wwByProject.has(ref.projectNumber)?[{number:ref.projectNumber,data:wwByProject.get(ref.projectNumber)}]:[]);
+    return {...combineWw(found),expected:refs.length,loaded:found.length,
+      missing:refs.filter(ref=>!wwByProject.has(ref.projectNumber)||wwByProject.get(ref.projectNumber).cached).map(ref=>ref.projectNumber)};
+  }
+  function rebuildSavedHours(){
+    const refs=D.projects({kind:"collection",collectionMemberJobIds:jobs.filter(j=>!D.isCollection(j)).map(j=>j.jobId)},jobs);
+    for(const j of jobs)wwByMember.set(String(j.jobId),combineRefs(refs.filter(ref=>ref.jobId===String(j.jobId))));
+    for(const j of jobs)wwByJob.set(String(j.jobId),combineRefs(D.projects(j,jobs)));
+  }
+  async function loadSavedHours(generation){
+    const refs=D.projects({kind:"collection",collectionMemberJobIds:jobs.filter(j=>!D.isCollection(j)).map(j=>j.jobId)},jobs);
+    const batches=[];for(let i=0;i<refs.length;i+=100)batches.push(refs.slice(i,i+100));
+    await D.mapLimit(batches,3,async batch=>{
+      const response=await api("/admin/api/ww-cache/hours?projectNumbers="+encodeURIComponent(batch.map(ref=>ref.projectNumber).join(",")));
+      if(generation!==refreshSerial)return;
+      const wanted=new Set(batch.map(ref=>ref.projectNumber));
+      for(const snapshot of response.snapshots||[]){
+        if(!wanted.has(snapshot.projectNumber))continue;
+        const previous=wwByProject.get(snapshot.projectNumber);
+        if(previous&&(!previous.cached||String(previous.syncedAt||"")>=String(snapshot.syncedAt||"")))continue;
+        wwByProject.set(snapshot.projectNumber,parseWwHours({hours:snapshot.data,cached:true,syncedAt:snapshot.syncedAt,saved:true},snapshot.projectNumber));
+      }
+    });
+    if(generation===refreshSerial){savedHoursLoaded=true;rebuildSavedHours();}
   }
 
   function collectionJobIds(j){const ids=Array.isArray(j?.collectionSummary?.jobIds)?j.collectionSummary.jobIds:[j?.jobId];return [...new Set(ids.map(String).filter(Boolean))]}
@@ -48,16 +80,14 @@
   async function loadWwHoursForJob(j){
     const generation=refreshSerial;
     const refs=D.projects(j,jobs),settled=await D.mapLimit(refs,4,ref=>loadWwHours(ref.projectNumber,ref.jobId));
-    const found=settled.flatMap((result,index)=>result.status==="fulfilled"?[{...refs[index],number:refs[index].projectNumber,data:result.value}]:[]);
-    const missing=settled.flatMap((result,index)=>result.status==="rejected"||result.value?.cached?[refs[index].projectNumber]:[]);
-    for(const member of D.members(j,jobs)){
-      const own=found.filter(source=>source.jobId===String(member.jobId));
-      if(generation!==refreshSerial)continue;
-      const ownRefs=refs.filter(ref=>ref.jobId===String(member.jobId)),ownMissing=ownRefs.filter(ref=>missing.includes(ref.projectNumber));
-      const data=own.length||!ownRefs.length?combineWw(own):{...(wwByMember.get(String(member.jobId))||combineWw([])),cached:true};
-      Object.assign(data,{expected:ownRefs.length,loaded:own.length,missing:ownMissing.map(ref=>ref.projectNumber)});wwByMember.set(String(member.jobId),data);
-    }
-    const result=combineWw(found);result.expected=refs.length;result.loaded=found.length;result.missing=missing;
+    if(generation!==refreshSerial)return combineRefs(refs);
+    settled.forEach((result,index)=>{
+      const number=refs[index].projectNumber;
+      if(result.status==="fulfilled")wwByProject.set(number,result.value);
+      else if(wwByProject.has(number))wwByProject.set(number,{...wwByProject.get(number),cached:true});
+    });
+    rebuildSavedHours();
+    const result=combineRefs(refs),missing=result.missing;
     if(generation===refreshSerial){if(missing.length)wwErrors.set(String(j.jobId),`${refs.length-missing.length}/${refs.length} WW-Akten aktuell. Abgleich fehlt: ${missing.join(", ")}. Gespeicherte Stunden bleiben sichtbar.`);
     else wwErrors.delete(String(j.jobId))}
     return result;
@@ -66,7 +96,8 @@
     const days=new Map(),rows=[];let pauseDeductionHours=0;
     for(const {number,data} of found){pauseDeductionHours+=num(data.pauseDeductionHours);for(const [date,value] of data.days||[])days.set(date,num(days.get(date))+num(value));for(const row of data.rows||[])rows.push({...row,key:`${number}|${row.key}`,sourceProjectNumber:number})}
     rows.sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")||a.sourceProjectNumber.localeCompare(b.sourceProjectNumber,"de"));
-    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number),cached:found.some(x=>x.data.cached)};
+    const stamps=found.map(x=>x.data.syncedAt).filter(Boolean).sort();
+    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number),cached:found.some(x=>x.data.cached),syncedAt:stamps[0]||"",saved:found.every(x=>x.data.saved!==false)};
   }
 
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
@@ -198,9 +229,14 @@
   function patchRows(){
     document.querySelectorAll(".job-row[data-job]").forEach(row=>{
       const j=job(row.dataset.job);if(!j)return;
-      const actual=fusion(j).total,target=targetHours(j);
+      const actual=fusion(j).total,target=targetHours(j),state=sourceStatus(j.jobId);
       const el=row.querySelector(".hours");
-      if(el){el.textContent=`${hours(actual)} / ${hours(target)}`;el.classList.toggle("over",target>0&&actual>target)}
+      if(el){
+        const value=`${!state.available&&D.projects(j,jobs).length?(savedHoursLoaded?"–":"…"):hours(actual)} / ${hours(target)}`;
+        const note=!state.available&&savedHoursLoaded?state.label:state.syncedAt?`${state.complete?"Stand":"Gespeicherter Stand"}: ${new Date(state.syncedAt).toLocaleString("de-AT",{dateStyle:"short",timeStyle:"short"})}${state.saved===false?" · Speichern fehlgeschlagen":""}`:D.projects(j,jobs).length?"WW-Stundenabgleich ausstehend":"";
+        const html=escapeHtml(value)+(note?`<small style="display:block;font-size:10px;font-weight:400;line-height:1.35;color:#71756f">${escapeHtml(note)}</small>`:"");
+        if(el.innerHTML!==html)el.innerHTML=html;el.title=state.label;el.classList.toggle("over",target>0&&actual>target);
+      }
       const sub=row.querySelector(".job-sub");
       if(sub){const planned=(sub.textContent.match(/eingeplant\s+(.+)$/i)||[])[1]||"";sub.textContent=`${j.status||""} · ${hours(actual)} / ${hours(target)}${planned?" · eingeplant "+planned:""}`}
     });
@@ -282,7 +318,8 @@
     const memberHours=D.members(j,jobs).map(member=>({jobId:String(member.jobId),...memberHourSummary(member,j)}));
     // Einzelzeilen und Gesamtkacheln verwenden denselben Stand. Die Hauptakte
     // steuert hier nur ihre eigenen Stunden zur Summe bei.
-    const out={total:0,ww:0,kristine:0,detailTotal:0,order:0,regie:0,target:0,fixedTarget:0,overlaps:[],excluded:new Set(),source:"KRISTINE",memberHours,complete:sourceStatus(id).complete,missing:wwByJob.get(String(id))?.missing||[]};
+    const state=sourceStatus(id);
+    const out={total:0,ww:0,kristine:0,detailTotal:0,order:0,regie:0,target:0,fixedTarget:0,overlaps:[],excluded:new Set(),source:"KRISTINE",memberHours,complete:state.complete,available:state.available,syncedAt:state.syncedAt,saved:state.saved,missing:wwByJob.get(String(id))?.missing||[]};
     for(const row of memberHours){
       for(const key of ["total","ww","kristine","detailTotal","order","regie","target","fixedTarget"])out[key]+=num(row[key]);
       out.overlaps.push(...row.overlaps);for(const key of row.excluded)out.excluded.add(key);if(row.source!=="KRISTINE")out.source=row.source;
@@ -346,10 +383,10 @@
   let refreshSerial=0;
   async function refresh(){
     const serial=++refreshSerial;
-    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=D.catalog(j);bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=D.catalog(j);bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();await loadSavedHours(serial);if(serial!==refreshSerial)return;patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"));if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
-  function sourceStatus(id,{single=false}={}){const j=job(id),refs=D.projects(j,jobs).filter(ref=>!single||ref.jobId===String(id)),data=single?wwByMember.get(String(id)):wwByJob.get(String(id))||wwByMember.get(String(id));return {label:!j?"Stunden werden geladen":!refs.length?"KRISTINE":!data?"WW-Abgleich ausstehend":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:data.cached?"WW: gespeicherter Stand":"WW aktuell",complete:!!j&&(!refs.length||!!data&&!data.cached&&!data.missing?.length)}}
+  function sourceStatus(id,{single=false}={}){const j=job(id),refs=D.projects(j,jobs).filter(ref=>!single||ref.jobId===String(id)),data=single?wwByMember.get(String(id)):wwByJob.get(String(id))||wwByMember.get(String(id)),available=!!j&&(!refs.length||!!data&&data.loaded===refs.length);return {label:!j?"Stunden werden geladen":!refs.length?"KRISTINE":!data||!data.loaded?"WW-Abgleich ausstehend":data.saved===false?"WW aktuell · Stand nicht gespeichert":data.cached&&available?"WW: gespeicherter Stand":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:"WW aktuell",complete:!!j&&(!refs.length||!!data&&!data.cached&&!data.missing?.length),available,syncedAt:data?.syncedAt||"",saved:data?.saved!==false}}
 
   function install(){
     if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen")&&!location.pathname.toLowerCase().includes("sammelmappe"))return;installReconciliationCss();
