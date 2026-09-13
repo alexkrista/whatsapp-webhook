@@ -175,6 +175,7 @@ for(const standalone of [false,true])test(`39-source load ${standalone?"S24177":
   assert.equal(elements.detailHours.textContent,"1 293,2 h / 1 323,5 h");assert.equal(elements.detailOpen.textContent,"30,3 h");
   assert.equal(new Set(requests.filter(row=>row.path.endsWith("project-hours")).map(row=>row.body.projectNumber)).size,39);
   if(standalone){
+    window.SammelmappeInsights=require("../public/ui/sammelmappe-insights");
     assert.equal(window.BaustellenLiveHours.summary("24177").total.toFixed(2),"328.46");
     assert(!requests.some(row=>row.path.includes("/job/S24177/")||row.body.projectNumber==="S24177"));
     for(const match of fs.readFileSync(path.join(root,"public/sammelmappe.html"),"utf8").matchAll(/id="([^"]+)"/g))elements[match[1]]={textContent:"",innerHTML:"",classList:{toggle(){}}};
@@ -182,6 +183,9 @@ for(const standalone of [false,true])test(`39-source load ${standalone?"S24177":
     vm.runInNewContext(pageSource,context);window.testSammelmappe.set(catalog,selected,data);window.testSammelmappe.renderDocuments();window.testSammelmappe.renderHours();
     assert.equal(elements.collectionActual.textContent,h.format(1293.22)+" h");assert.equal(elements.collectionOpen.textContent,"30,31 h");
     assert.equal(elements.reportCount.textContent,"(36)");assert(elements.collectionTotals.innerHTML.includes('data-collection-hours>'+elements.collectionActual.textContent));
+    assert.equal((elements.collectionReports.innerHTML.match(/data-report-preview=/g)||[]).length,36);
+    assert(elements.hoursMonths.innerHTML.includes("Ohne Monatszuordnung"));
+    assert(elements.hoursMonthsTotal.innerHTML.includes(elements.collectionActual.textContent));
     assert(!elements.collectionMembers.innerHTML.includes('data-source-job="S24177"'));
     window.addEventListener("krista:live-hours-updated",window.testSammelmappe.renderHours);
   }
@@ -201,7 +205,7 @@ test("collection loader reads all 39 document, regie and invoice sources without
     const url=new URL(raw,"https://protokoll.krista.at"),body=init.body?JSON.parse(init.body):{};calls.push({path:url.pathname,method:init.method||"GET",body});
     if(url.hostname==="127.0.0.1"){
       const id=body.projectNumber;
-      if(url.pathname.endsWith("project-regie-reports"))return response({ok:true,reports:[{sourceId:id,reportNumber:"1",reportDate:"2026-09-01",totalHours:2,source:"WW"}]});
+      if(url.pathname.endsWith("project-regie-reports"))return response({ok:true,reports:[{sourceId:id,reportNumber:"1",reportDate:"2026-09-01",totalHours:2,source:"WW",materials:[{sourceId:id+"-material",name:"Farbe "+id,quantity:2,unit:"l",cost:30,purchaseCost:20}],materialCost:30}]});
       return response({ok:true,billing:{found:true,projectNumber:id,invoices:[{id:Number(id),kind:id==="24177"?"SR":"TR",status:"issued",net:100}],payments:[],runs:[],summary:{}}});
     }
     const id=url.pathname.split("/")[4];
@@ -216,6 +220,9 @@ test("collection loader reads all 39 document, regie and invoice sources without
   assert.equal(result.rows.length,39);assert.equal(result.documents.length,39);assert.equal(result.regies.length,39);assert.equal(result.billing.invoices.length,39);assert.equal(result.billing.partial,false);
   assert.equal(saved.size,39);assert(calls.every(call=>!call.path.includes("/merge")&&call.method!=="DELETE"));
   assert.equal(B.dedupeReports(result.documents).length,39);
+  assert.equal(result.documents.reduce((sum,report)=>sum+report.materials.length,0),39);
+  assert(result.rows.every(row=>row.documents[0].materials[0].name==="Farbe "+row.jobId));
+  assert.equal(require("../public/ui/sammelmappe-insights").reportMaterials(B.dedupeReports(result.documents)).purchase,780);
   const performance=context.window.BaustellenSources.performance("24177");
   assert.equal(performance.hasClosingInvoice,false,"One closing invoice does not settle 39 projects");
 });

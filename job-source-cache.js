@@ -43,8 +43,10 @@ async function auditStoredCollection({dataDir,jobId,collection,readJobMeta,readD
     if(!exists){rows.push({jobId:id,missing:true});continue}
     const meta={...await readJobMeta(id),jobId:id},docs=await readDocumentation(id);
     const hasCalculation=await fs.access(path.join(dataDir,id,".order-calculation.json")).then(()=>true).catch(()=>false);
-    rows.push({jobId:id,documents:docs.length,regieReports:docs.filter(doc=>doc.type==="regie_report").length,hasCalculation,wwProjects:projects(meta,[meta]).map(ref=>ref.projectNumber)});
+    const reports=require("./public/ui/regie-billing-state").dedupeReports(docs.filter(doc=>doc.type==="regie_report"));
+    const materials=reports.flatMap(report=>Array.isArray(report.materials)?report.materials:[]);
+    rows.push({jobId:id,documents:docs.length,regieReports:reports.length,regieMaterialPositions:materials.length,reportsWithMaterial:reports.filter(report=>report.materials?.length).length,materialPositionsWithPurchasePrice:materials.filter(material=>Number(material.purchaseCost)>0||Number(material.purchaseUnitPrice)>0).length,hasCalculation,wwProjects:projects(meta,[meta]).map(ref=>ref.projectNumber)});
   }
-  return {jobId:collection?.id||jobId,mainJobId:collection?.mainJobId||jobId,memberCount:ids.length,missingMembers:rows.filter(row=>row.missing).map(row=>row.jobId),storedRegieReports:rows.reduce((sum,row)=>sum+(row.regieReports||0),0),membersWithCalculation:rows.filter(row=>row.hasCalculation).length,rows};
+  return {jobId:collection?.id||jobId,mainJobId:collection?.mainJobId||jobId,memberCount:ids.length,missingMembers:rows.filter(row=>row.missing).map(row=>row.jobId),storedRegieReports:rows.reduce((sum,row)=>sum+(row.regieReports||0),0),storedRegieMaterialPositions:rows.reduce((sum,row)=>sum+(row.regieMaterialPositions||0),0),materialPositionsWithPurchasePrice:rows.reduce((sum,row)=>sum+(row.materialPositionsWithPurchasePrice||0),0),membersWithCalculation:rows.filter(row=>row.hasCalculation).length,rows};
 }
 module.exports={registerJobSourceCache,auditStoredCollection};

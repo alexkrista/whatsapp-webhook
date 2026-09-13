@@ -29,7 +29,21 @@
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.origin===location.origin?u.pathname+u.search+u.hash:u.href};
   async function api(p,o={}){const r=await fetch(tokenUrl(p),o);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d||{}}
-  async function brainJson(path,options={}){const headers={Accept:"application/json",...(options.headers||{})};if(token)headers["X-Krista-Token"]=token;const r=await fetch(LOCAL_BRAIN+path,{...options,headers,cache:"no-store"});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d||{}}
+  async function brainResponse(path,options={}){
+    let lastError;
+    for(const host of [LOCAL_BRAIN,"https://pc-alex02.tail610122.ts.net"]){
+      try{
+        const headers={...(options.headers||{})};
+        if(host===LOCAL_BRAIN){if(token)headers["X-Krista-Token"]=token}
+        else{const auth=await api('/admin/api/brain-permit?path='+encodeURIComponent(new URL(path,location.origin).pathname));headers["X-Krista-Brain-Permit"]=auth.permit}
+        const response=await fetch(host+path,{...options,headers,cache:"no-store",signal:AbortSignal.timeout(host===LOCAL_BRAIN?3500:15000)});
+        if(!response.ok)throw new Error(`Büro-Verbindung antwortet mit HTTP ${response.status}`);
+        return response;
+      }catch(error){lastError=error}
+    }
+    throw new Error("Büro-Verbindung für WW-Angebote nicht erreichbar. "+(lastError?.message||"Bitte erneut versuchen."));
+  }
+  async function brainJson(path,options={}){const r=await brainResponse(path,{...options,headers:{Accept:"application/json",...(options.headers||{})}});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!d||d.ok===false)throw new Error(d?.error||"WinWorker liefert keine gültigen Angebotsdaten.");return d}
 
   function installCss(){
     if(document.getElementById("kcv2Css"))return;
@@ -114,7 +128,7 @@
     return `<div class="kcv2-ww"><div class="kcv2-ww-head"><strong>✓ Angebot in WinWorker gefunden</strong>${wwOffers.length>1?`<select id="kcv2WwSelect">${wwOffers.map((x,i)=>`<option value="${i}" ${i===wwOfferIndex?'selected':''}>${esc(offerLabel(x))}</option>`).join('')}</select>`:''}<button id="kcv2WwShow" type="button">PDF anzeigen</button><button id="kcv2WwImport" class="primary" type="button">Positionen übernehmen</button></div><div class="kcv2-muted" style="margin-top:6px">${esc(offerLabel(selected))}</div><div id="kcv2WwPreview"></div></div>`;
   }
   async function loadWwOffers(serial){
-    if(!/^\d+$/.test(currentJobId)||!token){wwOfferError="Anmeldung fehlt";render();return}
+    if(!/^\d+$/.test(currentJobId)){wwOfferError="Dieser Akte ist keine numerische WinWorker-Nummer zugeordnet";render();return}
     try{
       const bill=await brainJson('/api/outgoing/project-billing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectNumber:currentJobId})});
       const projectIndex=Number(bill?.billing?.projectIndex||0);if(!projectIndex)throw new Error('Projekt in WinWorker nicht eindeutig gefunden');
@@ -126,8 +140,7 @@
     }catch(error){if(serial!==loadSerial)return;wwOfferError=error.message}
     render();
   }
-  function wwPdfUrl(item){return LOCAL_BRAIN+'/pdf?path='+encodeURIComponent(item?.path||'')}
-  async function fetchWwOfferFile(item){const headers={};if(token)headers['X-Krista-Token']=token;const r=await fetch(wwPdfUrl(item),{headers,cache:'no-store'});if(!r.ok)throw new Error('WW-Angebot konnte nicht geladen werden');const blob=await r.blob();return new File([blob],item?.filename||'WinWorker-Angebot.pdf',{type:'application/pdf',lastModified:Date.now()})}
+  async function fetchWwOfferFile(item){const r=await brainResponse('/pdf?path='+encodeURIComponent(item?.path||''));const blob=await r.blob();return new File([blob],item?.filename||'WinWorker-Angebot.pdf',{type:'application/pdf',lastModified:Date.now()})}
   function options(kind){return Object.entries(KINDS).map(([key,label])=>`<option value="${key}" ${key===kind?'selected':''}>${esc(label)}</option>`).join('')}
   function positionRows(){
     const rows=calculation?.positions||[];if(!rows.length)return '<div class="kcv2-empty">Noch keine Positionen. Auftrag oben hineinziehen oder einen Nachtrag anlegen.</div>';
