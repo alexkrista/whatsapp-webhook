@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@kenjiuno/msgreader": "^1.28.0",
+    "archiver": "^7.0.1",
     "express": "^4.19.2",
     "node-cron": "^3.0.2",
     "nodemailer": "^6.9.14",
