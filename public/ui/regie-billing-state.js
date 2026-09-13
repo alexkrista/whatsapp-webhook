@@ -27,9 +27,10 @@
   };
   const reportDedupeKey=report=>{
     const date=String(report?.reportDate||"").slice(0,10),sequence=reportSequence(report);
-    if(date&&sequence)return `report:${date}|${sequence}`;
+    const scope=String(report?.projectNumber||report?.jobId||"");
+    if(date&&sequence)return `report:${scope}|${date}|${sequence}`;
     const sourceId=documentKey(report?.sourceId??report?.source_id);
-    return sourceId?`source:${sourceId}`:`row:${date}|${String(report?.reportNumber||report?.name||"").trim().toLowerCase()}`;
+    return sourceId?`source:${sourceId}`:`row:${scope}|${date}|${String(report?.reportNumber||report?.name||"").trim().toLowerCase()}`;
   };
 
   function dedupeReports(reports){

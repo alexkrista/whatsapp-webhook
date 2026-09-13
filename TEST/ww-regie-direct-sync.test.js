@@ -28,8 +28,8 @@ assert.match(ui,/LOCAL_BRAIN_REGIE/);
 assert.match(ui,/WW-Rapporte synchronisieren/);
 assert.match(ui,/WW direkt \+ PDFs/);
 assert.match(ui,/Tätigkeit/);
-assert.match(ui,/removedPdfDuplicates/);
+assert.match(ui,/dedupeReports/);
 assert.match(ui,/2026-09-09-regie-dedupe-1/);
-assert.match(topbar,/20260909-regie-dedupe-1/);
+assert.match(topbar,/20260913-collection-data-1/);
 
 console.log("ww regie direct sync test: ok");

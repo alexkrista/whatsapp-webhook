@@ -71,7 +71,7 @@ def protect_remote_archive_access():
     # Tailscale Serve reicht HTTPS intern über 127.0.0.1 weiter. Darum muss ein
     # vorhandener, kurzlebiger Browser-Permit vor der Lokal-Erkennung geprüft
     # und für die nachgelagerte Stundenroute markiert werden.
-    if request.path in {"/api/outgoing/project-hours", "/project/open-orders", "/project/search", "/project/documents", "/pdf"}:
+    if request.path in {"/api/outgoing/project-hours", "/api/outgoing/project-regie-reports", "/api/outgoing/project-billing", "/project/open-orders", "/project/search", "/project/documents", "/pdf"}:
         if request.method == "OPTIONS":
             return None
         if _valid_brain_permit(request.path):

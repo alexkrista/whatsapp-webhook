@@ -311,11 +311,12 @@
       const data = await api("/admin/api/jobs");
       const j = (data.jobs || []).find(row => String(row.jobId) === String(currentJobId));
       if (!j) return;
-      const c = j.calculation || {};
-      const actual = num(c.orderHours ?? c.actualHours), target = num(c.calculatedHours);
-      const open = j.status === "Auftrag" ? Math.max(0, target) : j.status === "Laufend" ? Math.max(0, target - actual) : 0;
+      const view = window.BaustellenData.view(j,data.jobs),c = view.calculation || {};
+      const live = window.BaustellenLiveHours?.summary?.(currentJobId);
+      const actual = num(live?.order ?? c.orderHours ?? c.actualHours), target = num(c.fixedCalculatedHours ?? c.calculatedHours);
+      const open = num(live?.remaining ?? c.remainingOrderHours ?? Math.max(0,target-actual));
       const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-      set("detailAmount", money(j.contractAmount ?? c.contractAmount));
+      set("detailAmount", money(view.contractAmount ?? c.contractAmount));
       set("detailHours", `${hours(actual)} / ${hours(target)}`);
       set("detailHoursNote", target > 0 ? `${Math.round(actual / target * 100)} % verbraucht` : "keine Sollstunden hinterlegt");
       set("detailOpen", hours(open));
@@ -326,7 +327,7 @@
         if (String(row.dataset.job) !== String(currentJobId)) return;
         const cells = [...row.children];
         if (cells[3]) cells[3].textContent = `${hours(actual)} / ${hours(target)}`;
-        if (cells[5]) cells[5].textContent = money(j.contractAmount ?? c.contractAmount);
+        if (cells[5]) cells[5].textContent = money(view.contractAmount ?? c.contractAmount);
       });
     } catch {}
   }

@@ -103,7 +103,15 @@
     statusMenu.querySelectorAll("[data-bc-status]").forEach(button=>button.addEventListener("click",()=>saveStatus(button.dataset.bcStatus,statusMenu)));
   }
 
-  async function loadCockpit(id){const my=++serial;currentJobId=String(id||"");if(!currentJobId)return;try{const [jobsRes,b,daysRes,documentation,billingResult]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap").catch(()=>({})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/days`).catch(()=>({detailed:[]})),api(`/admin/api/job/${encodeURIComponent(currentJobId)}/documentation`).catch(()=>({items:[]})),billingApi(currentJobId).catch(()=>({billing:{found:false}}))]);if(my!==serial)return;currentJob=(jobsRes.jobs||[]).find(x=>String(x.jobId)===currentJobId)||null;if(!currentJob)return;const days=daysRes.detailed||[];const regies=await mapLimit(days,5,async d=>{const r=await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/day/${encodeURIComponent(d.day)}/regie`);return{day:d.day,regie:r.regie||r}});if(my!==serial)return;renderCockpit(currentJob,b,days,regies,documentation.items||[],billingResult?.billing||{})}catch(e){console.warn("Baustellen-Cockpit",e)}}
+  async function loadCockpit(id){
+    const my=++serial;currentJobId=String(id||"");if(!currentJobId)return;
+    try{
+      const [jobsRes,b]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap").catch(()=>({}))]);if(my!==serial)return;
+      currentJob=(jobsRes.jobs||[]).find(x=>String(x.jobId)===currentJobId)||null;if(!currentJob)return;
+      const data=await window.BaustellenSources.load(currentJob,jobsRes.jobs);if(my!==serial)return;
+      renderCockpit(data.job,b,data.days,data.regies,data.documents,data.billing);
+    }catch(e){console.warn("Baustellen-Cockpit",e)}
+  }
 
   function openEditorFromUrl(){if(new URLSearchParams(location.search).get("edit")!=="1")return;let tries=0;const wait=()=>{if(currentJob){const u=new URL(location.href);u.searchParams.delete("edit");history.replaceState(null,"",u.pathname+u.search+u.hash);openEditor();return}if(tries++<40)setTimeout(wait,250)};wait()}
 

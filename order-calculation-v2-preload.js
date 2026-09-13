@@ -7,6 +7,7 @@
 const fsp = require("fs/promises");
 const path = require("path");
 const express = require("express");
+const { recalculateCollections } = require("./public/ui/baustellen-data");
 
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
@@ -242,7 +243,7 @@ async function enrichJobsPayload(payload) {
       },
     };
   }));
-  return { ...payload, jobs };
+  return recalculateCollections({ ...payload, jobs });
 }
 function employeeScope(calc, meta) {
   const d = derive(calc, meta, calc?.billingRate);

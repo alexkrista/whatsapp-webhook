@@ -1,0 +1,21 @@
+name: Collection source completeness
+on:
+  pull_request:
+  push:
+    branches: [main, 'build-collection-data-*']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --test TEST/collection-data.test.js TEST/job-source-cache.test.js
+      - run: node TEST/baustellen-collection.test.js && node TEST/ww-collection-link.test.js && node TEST/customer-portal.test.js && node TEST/ww-regie-direct-sync.test.js && node TEST/kristine-baustellen-calculation-modules.test.js
+      - run: node --check server.js && node --check public/ui/baustellen-knowledge-hub.js && node --check public/ui/baustellen-cockpit.js && node --check public/ui/baustellen-calculation-v2.js && node --check public/ui/baustellen-calculation-grid-v2.js
+      - run: python -m py_compile archive-connector.py brain_outgoing_invoices.py
