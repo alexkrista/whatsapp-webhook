@@ -71,13 +71,21 @@
     try {
       const data = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/customer-portal`);
       const portal = data.portal || {};
+      const contacts = data.contactDefaults || {};
       portalUrl = data.portalUrl || "";
       const job = (window.kristineCustomerPortalJobs || []).find(item => String(item.jobId) === currentJobId) || {};
       document.getElementById("cpSubtitle").textContent = `Baustelle #${currentJobId}`;
       document.getElementById("cpStatus").value = portal.status || "off";
-      document.getElementById("cpName").value = portal.customerName || job.contactName || job.name || "";
-      document.getElementById("cpEmail").value = portal.customerEmail || job.contactEmail || "";
-      document.getElementById("cpPhone").value = portal.customerPhone || job.contactPhone || "";
+      document.getElementById("cpName").value = portal.customerName || contacts.customerName || job.contactName || job.name || "";
+      document.getElementById("cpEmail").value = portal.customerEmail || contacts.customerEmail || "";
+      document.getElementById("cpPhone").value = portal.customerPhone || contacts.customerPhone || "";
+      for (const [id, values] of [["cpEmail", contacts.emails], ["cpPhone", contacts.phones]]) {
+        const input = document.getElementById(id);
+        let choices = document.getElementById(id + "Choices");
+        if (!choices) { choices = document.createElement("datalist"); choices.id = id + "Choices"; input.after(choices); input.setAttribute("list", choices.id); }
+        choices.innerHTML = (values || []).map(value => `<option value="${escapeHtml(value)}"></option>`).join("");
+        input.placeholder = (values || []).length > 1 ? "Kontakt aus Stammdaten auswählen" : "";
+      }
       modal.querySelector(`input[name="cpMode"][value="${portal.mode === "collection" ? "collection" : "single"}"]`).checked = true;
       for (const input of modal.querySelectorAll("[data-cp-module]")) input.checked = Boolean(portal.modules?.[input.dataset.cpModule]);
       renderJobs(job, portal.includedJobIds || []);

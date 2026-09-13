@@ -113,10 +113,11 @@ function inferComponent(row, parsed) {
 }
 function effectiveLine(row, stored, index) {
   const parsed = parseLineNumbers(row?.description || row?.shortText || row?.title || "");
-  const meta = sanitizeMetaRow(stored || {}, index);
-  const quantity = meta.quantity > 0 ? meta.quantity : parsed.quantity;
-  const unit = meta.unit || parsed.unit;
-  const unitPrice = meta.unitPrice > 0 ? meta.unitPrice : parsed.unitPrice;
+  const matched = stored && (!stored.positionId || stored.positionId === row?.id) ? stored : {};
+  const meta = sanitizeMetaRow(matched, index);
+  const quantity = meta.quantity > 0 ? meta.quantity : (number(row?.quantity) || parsed.quantity);
+  const unit = meta.unit || row?.unit || parsed.unit;
+  const unitPrice = meta.unitPrice > 0 ? meta.unitPrice : (number(row?.unitPrice) || parsed.unitPrice);
   const sourcePlannedHours = number(row?.plannedHours);
   const componentType = meta.componentType || inferComponent(row, { ...parsed, unit });
   const amount = quantity > 0 && unitPrice > 0 ? roundMoney(quantity * unitPrice) : number(row?.amount || parsed.total);
@@ -132,7 +133,7 @@ function effectiveLine(row, stored, index) {
     unitPrice,
     amount,
     componentType,
-    calcIncluded: meta.calcIncluded !== false,
+    calcIncluded: typeof matched.calcIncluded === "boolean" ? matched.calcIncluded : row?.calcIncluded !== false,
     plannedHours,
     index,
   };
@@ -147,7 +148,7 @@ function derive(calc, meta, fallbackRate = 0) {
   const originalSum = original.reduce((sum, row) => sum + number(row.amount), 0);
   const selectedOriginalSum = originalIncluded.reduce((sum, row) => sum + number(row.amount), 0);
   const baseNet = number(calc?.netTotal);
-  const selectedBaseAmount = anyOriginalExcluded ? selectedOriginalSum : (baseNet || originalSum);
+  const selectedBaseAmount = anyOriginalExcluded || original.some(row => row.alternative) ? selectedOriginalSum : (baseNet || originalSum);
   const addedAmount = included.filter(row => row.addToContract).reduce((sum, row) => sum + number(row.amount), 0);
   const contractAmount = selectedBaseAmount + addedAmount;
   const sumKind = predicate => included.reduce((sum, row) => sum + (predicate(row) ? number(row.amount) : 0), 0);

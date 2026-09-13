@@ -1,16 +1,16 @@
 "use strict";
 
 (() => {
-  const VERSION = "2026-09-13-hours-balance-2";
+  const VERSION = "2026-09-13-offer-positions-1";
   const token = new URLSearchParams(location.search).get("token") || "";
   let currentJobId = "";
   let metaRows = [];
   let calcRows = [];
   let loaded = false;
+  let loadSerial = 0;
   let observer = null;
   let enhanceQueued = false;
   let nextRegieMaterial = false;
-  let saveBusy = false;
 
   const COMPONENT_LABELS = {
     arbeit: "Arbeit",
@@ -86,19 +86,21 @@
     delete input.dataset.kgridSync;
   }
   function metaForRow(tr, index) {
-    const saved = metaRows[index] || {};
+    const row = calcRows[index] || {};
+    const candidate = metaRows[index];
+    const saved = candidate && (!candidate.positionId || !row.id || candidate.positionId === row.id) ? candidate : {};
     const description = tr.querySelector('[data-field="shortText"]')?.getAttribute("title") || tr.querySelector('[data-field="shortText"]')?.value || "";
     const inferred = parseDescription(description);
     const baseHours = num(tr.querySelector('[data-field="plannedHours"]')?.value);
     const componentType = saved.componentType || (baseHours > 0 ? "arbeit" : inferred.componentType);
-    const meta = {
-      positionId: saved.positionId || calcRows[index]?.id || "",
-      quantity: saved.quantity > 0 ? num(saved.quantity) : inferred.quantity,
-      unit: saved.unit || inferred.unit,
-      unitPrice: saved.unitPrice > 0 ? num(saved.unitPrice) : inferred.unitPrice,
+    const meta = Object.assign(saved, {
+      positionId: row.id || saved.positionId || "",
+      quantity: saved.quantity > 0 ? num(saved.quantity) : (num(row.quantity) || inferred.quantity),
+      unit: saved.unit || row.unit || inferred.unit,
+      unitPrice: saved.unitPrice > 0 ? num(saved.unitPrice) : (num(row.unitPrice) || inferred.unitPrice),
       componentType,
-      calcIncluded: saved.calcIncluded !== false,
-    };
+      calcIncluded: typeof saved.calcIncluded === "boolean" ? saved.calcIncluded : row.calcIncluded !== false,
+    });
     metaRows[index] = meta;
     return meta;
   }
@@ -108,7 +110,7 @@
     const plannedHours = num(tr.querySelector('[data-field="plannedHours"]')?.value);
     const number = String(tr.querySelector(".kcv2-pos")?.textContent || "").trim();
     const addToContract = calcRows[index]?.addToContract === true || (/^N\d+/i.test(number) && /^nachtrag_/.test(kind));
-    return { kind, amount, plannedHours, number, addToContract, meta: metaForRow(tr, index) };
+    return { kind, amount, plannedHours, number, addToContract, alternative: !!calcRows[index]?.alternative, meta: metaForRow(tr, index) };
   }
   function componentOptions(selected) {
     return Object.entries(COMPONENT_LABELS).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
@@ -174,6 +176,7 @@
     const included = tr.querySelector('[data-kgrid-field="calcIncluded"]');
     included?.addEventListener("change", () => {
       meta.calcIncluded = !!included.checked;
+      window.KristaOrderCalculation?.setPositionIncluded?.(meta.positionId, meta.calcIncluded);
       const note = included.parentElement.querySelector(".kgridv2-calcnote");
       if (note) { note.textContent = meta.calcIncluded ? "Σ" : "aus"; note.classList.toggle("off", !meta.calcIncluded); }
       refreshSummary();
@@ -260,7 +263,7 @@
     const anyExcluded = original.some(row => row.meta.calcIncluded === false);
     const originalIncluded = original.filter(row => row.meta.calcIncluded !== false);
     const net = num(document.getElementById("kcv2Net")?.value);
-    const selectedBase = anyExcluded ? originalIncluded.reduce((s, row) => s + row.amount, 0) : (net || originalIncluded.reduce((s, row) => s + row.amount, 0));
+    const selectedBase = anyExcluded || original.some(row => row.alternative) ? originalIncluded.reduce((s, row) => s + row.amount, 0) : (net || originalIncluded.reduce((s, row) => s + row.amount, 0));
     const added = infos.filter(row => row.addToContract && row.meta.calcIncluded !== false).reduce((s, row) => s + row.amount, 0);
     const included = infos.filter(row => row.meta.calcIncluded !== false);
     const contract = selectedBase + added;
@@ -332,37 +335,22 @@
       });
     } catch {}
   }
-  async function persistAfterBaseSave(snapshot) {
-    if (saveBusy || !currentJobId) return;
-    saveBusy = true;
-    try {
-      const before = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-calculation`).catch(() => ({}));
-      const beforeAt = before.calculation?.updatedAt || "";
-      let latest = before;
-      for (let attempt = 0; attempt < 16; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        latest = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-calculation`).catch(() => latest);
-        if (!beforeAt || latest.calculation?.updatedAt !== beforeAt) break;
-      }
-      calcRows = Array.isArray(latest.calculation?.positions) ? latest.calculation.positions : calcRows;
-      const rows = snapshot.map((meta, index) => ({ ...meta, positionId: calcRows[index]?.id || meta.positionId || "" }));
-      const result = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/order-lines-v2`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      metaRows = Array.isArray(result.meta?.rows) ? result.meta.rows : rows;
-      const msg = document.getElementById("kcv2SaveMsg");
-      if (msg) msg.textContent = "✓ Gespeichert · Mengen, Preise, Auswahl, Baustelle & Tower aktualisiert";
-      await refreshOuterNumbers();
-      window.BaustellenKnowledgeHub?.load?.(currentJobId);
-      setTimeout(() => { window.KristaOrderCalculation?.load?.(currentJobId); window.KristaOrderCalculation?.tab?.(); }, 250);
-    } catch (error) {
-      const msg = document.getElementById("kcv2SaveMsg");
-      if (msg) { msg.textContent = "Zusatzdaten konnten nicht gespeichert werden: " + error.message; msg.style.color = "#a84540"; }
-    } finally {
-      saveBusy = false;
-    }
+  function snapshotForSave(id) {
+    if (id !== currentJobId || id !== jobId()) return null;
+    const rows = [...document.querySelectorAll("#kcv2Rows tr[data-index]")];
+    if (!rows.length || rows.some(row => !row.dataset.kgridV2)) return null;
+    return collectMeta();
+  }
+  async function persistForJob(id, positions, snapshot) {
+    if (!snapshot) return;
+    const rows = positions.map((row, index) => ({ ...snapshot[index], positionId: row.id }));
+    const result = await api(`/admin/api/job/${encodeURIComponent(id)}/order-lines-v2`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }),
+    });
+    if (id !== currentJobId || id !== jobId()) return;
+    calcRows = positions;
+    metaRows = Array.isArray(result.meta?.rows) ? result.meta.rows : rows;
+    await refreshOuterNumbers();
   }
   function enhance() {
     enhanceQueued = false;
@@ -388,14 +376,17 @@
     if (!force && loaded && id === currentJobId) { queueEnhance(); return; }
     currentJobId = id;
     loaded = true;
+    const serial = ++loadSerial;
     try {
       const [calc, meta] = await Promise.all([
         api(`/admin/api/job/${encodeURIComponent(id)}/order-calculation`).catch(() => ({})),
         api(`/admin/api/job/${encodeURIComponent(id)}/order-lines-v2`).catch(() => ({ rows: [] })),
       ]);
+      if (serial !== loadSerial || id !== jobId()) return;
       calcRows = Array.isArray(calc.calculation?.positions) ? calc.calculation.positions : [];
       metaRows = Array.isArray(meta.rows) ? meta.rows : [];
     } catch {
+      if (serial !== loadSerial || id !== jobId()) return;
       calcRows = [];
       metaRows = [];
     }
@@ -403,12 +394,15 @@
   }
   function install() {
     installCss();
-    document.addEventListener("click", event => {
-      if (event.target?.id === "kcv2Save") {
-        const snapshot = collectMeta();
-        setTimeout(() => persistAfterBaseSave(snapshot), 0);
-      }
-    }, true);
+    document.addEventListener("krista:order-pdf-parsed", event => {
+      if (event.detail?.jobId !== jobId()) return;
+      ++loadSerial;
+      currentJobId = event.detail.jobId;
+      calcRows = event.detail.positions || [];
+      metaRows = [];
+      loaded = true;
+      queueEnhance();
+    });
     window.addEventListener("hashchange", () => { loaded = false; setTimeout(() => load(true), 200); });
     observer = new MutationObserver(() => queueEnhance());
     observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -421,5 +415,5 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
   else install();
-  window.KristaCalculationGridV2 = { version: VERSION, reload: () => load(true) };
+  window.KristaCalculationGridV2 = { version: VERSION, reload: () => load(true), snapshotForSave, persistForJob };
 })();
