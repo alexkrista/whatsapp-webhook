@@ -64,7 +64,7 @@ function page(responder) {
   const listeners = new Map(), document = { readyState: "loading", getElementById: id => elements[id], addEventListener: (type, fn) => listeners.set(type, fn) };
   const snapshot = { total: 63, target: 100, ww: 63, kristine: 0, remaining: 37, overrun: 0, complete: true, memberHours: ["25047", "26018"].map(jobId => ({ jobId, total: 31.5, target: 50 })) };
   const window = { BaustellenData: D, KristaRegieBilling: B, SammelmappeInsights: I, BaustellenLiveHours: { summary: () => snapshot, sourceStatus: () => ({ label: "aktuell" }) }, BaustellenSources: { performance: () => null } };
-  const source = fs.readFileSync(path.join(root, "public/ui/sammelmappe.js"), "utf8").replace("  function boot() {", "  window.previewTest={openReport,renderDocuments,renderHours,loadMaterialBookings,openAddMember,addMember,set(j,c,d){jobs=j;collection=c;data=d},setSaved(view,at){savedView=view;savedAt=at}};\n  function boot() {");
+  const source = fs.readFileSync(path.join(root, "public/ui/sammelmappe.js"), "utf8").replace("  function boot() {", "  window.previewTest={openReport,renderDocuments,renderHours,loadSavedView,loadMaterialBookings,openAddMember,addMember,set(j,c,d,g=0){jobs=j;collection=c;data=d;dataGeneration=g},setSaved(view,at){savedView=view;savedAt=at}};\n  function boot() {");
   const requests = [];
   const fetch = async (raw, init = {}) => { const url = new URL(raw, "https://protokoll.krista.at"); requests.push(url); return { ok: true, json: async () => responder ? responder(url, init) : ({ items: [{ product: "Wandfarbe", liters: 5 }] }) }; };
   elements.memberSearch.focus = () => {};
@@ -119,4 +119,15 @@ test("a closed KRISTINE-only job can join a collection and existing members are 
   elements.memberChoice.value = "christian_lutz"; await window.previewTest.addMember();
   assert.deepEqual(written.memberJobIds, ["24177", "26018", "25047", "christian_lutz"]);
   assert.deepEqual(Object.keys(written), ["memberJobIds"]); assert.equal(jobs[2].status, "Geschlossen"); assert.equal(window.reloaded, true);
+});
+
+test("a saved view arriving after document data is still used while the hours refresh is pending",async()=>{
+  const jobs=["25047","26018"].map(jobId=>({jobId,name:jobId})),collection={jobId:"S24177",kind:"collection",name:"Test",collectionMainJobId:"25047",collectionMemberJobIds:jobs.map(row=>row.jobId),registryUpdatedAt:"2026-09-13T12:00:00Z"};
+  const data={rows:jobs.map(job=>({job,jobId:job.jobId,documents:[],errors:[],regies:[],regieSources:[],billingSources:[]})),billing:{invoices:[],summary:{},partial:false},documents:[]};
+  let saved;
+  const {window,elements,snapshot}=page(()=>({snapshot:saved}));
+  saved={version:1,savedAt:"2026-09-13T14:00:00Z",view:{jobs,collection,data,hours:structuredClone(snapshot),bookings:[],bookingsReady:true,bookingFailures:0,performance:null}};
+  snapshot.total=0;snapshot.complete=false;
+  window.previewTest.set(jobs,collection,data,1);
+  await window.previewTest.loadSavedView();assert.equal(elements.collectionActual.textContent,"63 h");assert.match(elements.collectionStatus.textContent,/Gespeicherter Stand/);
 });

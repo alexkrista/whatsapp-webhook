@@ -128,13 +128,14 @@
   async function loadSavedView() {
     try {
       const result = await api(`/admin/api/sammelmappe/${encodeURIComponent(id)}/view-cache`);
-      if (!result.snapshot || result.snapshot.version !== 1 || dataGeneration > 0 || result.snapshot.view?.collection?.jobId !== id) return;
+      if (!result.snapshot || result.snapshot.version !== 1 || result.snapshot.view?.collection?.jobId !== id) return;
+      if (collection && (collection.registryUpdatedAt !== result.snapshot.view.collection.registryUpdatedAt || D.memberIds(collection).join("|") !== D.memberIds(result.snapshot.view.collection).join("|"))) return;
       savedView = result.snapshot.view; savedAt = result.snapshot.savedAt; renderHours();
     } catch { /* The normal source load remains available without a saved view. */ }
   }
 
   async function saveSnapshot(snapshot) {
-    if (usingSaved || savingSnapshot || !startedAt || !bookingsReady || bookingFailures || data.rows.some(row => [...row.regieSources, ...row.billingSources].some(source => source.error || source.data?.cached || source.data?.saved === false))) return;
+    if (usingSaved || savingSnapshot || snapshot.saved === false || !startedAt || !bookingsReady || bookingFailures || data.rows.some(row => [...row.regieSources, ...row.billingSources].some(source => source.error || source.data?.cached || source.data?.saved === false))) return;
     const cacheKey = JSON.stringify([serial, snapshot.total, snapshot.target, snapshot.memberHours, bookings.length]);
     if (cacheKey === lastSavedSignature) return;
     const generation = serial;
@@ -156,12 +157,13 @@
   function renderCurrentHours() {
     if (!collection) return;
     const snapshot = usingSaved ? savedView.hours : window.BaustellenLiveHours.summary(id), byId = new Map(snapshot.memberHours.map(row => [row.jobId, row]));
-    const expected = D.memberIds(collection), ready = expected.length > 0 && expected.every(jobId => byId.has(jobId));
+    const expected = D.memberIds(collection), ready = expected.length > 0 && snapshot.available !== false && expected.every(jobId => byId.has(jobId));
     const sourceRows = new Map((data?.rows || []).map(row => [row.jobId, row]));
     const main = collection.collectionMainJobId;
     text("collectionTarget", ready ? hours(snapshot.target) : "–");
     text("collectionActual", ready ? hours(snapshot.total) : "–");
-    text("collectionActualNote", ready ? `${hours(snapshot.kristine)} KRISTINE + ${hours(snapshot.ww)} WW` : "Stunden werden geladen …");
+    const hoursStamp = snapshot.syncedAt ? new Date(snapshot.syncedAt).toLocaleString("de-AT") : "";
+    text("collectionActualNote", ready ? `${hours(snapshot.kristine)} KRISTINE + ${hours(snapshot.ww)} WW${hoursStamp ? ` · ${snapshot.complete ? "Stand" : "Gespeicherter WW-Stand"}: ${hoursStamp}` : ""}${snapshot.saved === false ? " · Stand konnte nicht gespeichert werden" : ""}` : "Stunden werden geladen …");
     text("collectionOpen", ready ? hours(snapshot.remaining) : "–");
     text("collectionOverrun", ready ? hours(snapshot.overrun) : "–");
     text("collectionBalance", ready ? `${hours(snapshot.target)} Soll − ${hours(snapshot.total)} Ist = ${hours(snapshot.target - snapshot.total)}` : "Soll gesamt − Ist gesamt");
