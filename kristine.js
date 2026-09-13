@@ -33,8 +33,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   async function readJson(file, fallback) {
     try {
       const value = JSON.parse(await fsp.readFile(file, "utf8"));
+      if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []);
       return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
     } catch {
+      if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, []);
       return fallback;
     }
   }

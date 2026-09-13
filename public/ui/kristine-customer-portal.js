@@ -6,6 +6,7 @@
     projectPoints: "4 · Projektpunkte / Wünsche",
   };
   let currentJobId = "";
+  let readyJobId = "";
   let portalUrl = "";
 
   const style = document.createElement("style");
@@ -36,11 +37,10 @@
     element.textContent = text;
     element.classList.toggle("error", error);
   };
-  const invitationText = () => `Guten Tag ${document.getElementById("cpName").value || ""},\n\nIhre Unterlagen zur Baustelle #${currentJobId} stehen im KRISTINE Kundenportal bereit:\n${portalUrl}\n\nDer Link führt zur sicheren Anmeldung.`;
+  const invitationText = () => `Guten Tag ${document.getElementById("cpName").value || ""},\n\nhier ist Ihr persönlicher Zugang zur Projektakte #${currentJobId}:\n${portalUrl}\n\nBitte den Link öffnen und „Projektakte öffnen“ wählen. Der Einladungslink gilt 7 Tage.\n\nFreundliche Grüße\nFarben Krista`;
   function updateInvitationLinks() {
-    const email = document.getElementById("cpEmail").value.trim();
-    document.getElementById("cpEmailInvite").href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent("Ihre KRISTINE Projektakte")}&body=${encodeURIComponent(invitationText())}`;
-    document.getElementById("cpOpen").href = portalUrl || "#";
+    document.getElementById("cpEmailInvite").href = "#";
+    document.getElementById("cpOpen").href = "#";
   }
   function updateButton(status = "off") {
     for (const element of document.querySelectorAll(".customer-portal-button")) {
@@ -66,10 +66,14 @@
   async function openSettings() {
     currentJobId = String(location.hash.slice(1) || document.getElementById("detailNumber")?.textContent.replace(/^#/, "") || "");
     if (!currentJobId) return;
+    const jobId = currentJobId;
+    readyJobId = "";
+    document.getElementById("cpSave").disabled = true;
     modal.classList.add("open");
     setMessage("Wird geladen …");
     try {
-      const data = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/customer-portal`);
+      const data = await api(`/admin/api/job/${encodeURIComponent(jobId)}/customer-portal`);
+      if (currentJobId !== jobId) return;
       const portal = data.portal || {};
       const contacts = data.contactDefaults || {};
       portalUrl = data.portalUrl || "";
@@ -92,12 +96,16 @@
       document.getElementById("cpJobs").classList.toggle("open", selectedMode() === "collection");
       updateButton(portal.status);
       updateInvitationLinks();
+      readyJobId = jobId;
+      document.getElementById("cpSave").disabled = false;
       setMessage("");
     } catch (error) {
       setMessage(error.message, true);
     }
   }
   async function save() {
+    const jobId = currentJobId;
+    if (!jobId || readyJobId !== jobId) { setMessage("Bitte die Kundenfreigabe zuerst vollständig laden.", true); return null; }
     const button = document.getElementById("cpSave");
     button.disabled = true;
     setMessage("Wird gespeichert …");
@@ -113,15 +121,18 @@
       includedJobIds: [...modal.querySelectorAll("[data-cp-job]:checked")].map(input => input.dataset.cpJob),
     };
     try {
-      const data = await api(`/admin/api/job/${encodeURIComponent(currentJobId)}/customer-portal`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await api(`/admin/api/job/${encodeURIComponent(jobId)}/customer-portal`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if(currentJobId!==jobId)throw new Error("Die geöffnete Akte hat sich geändert. Bitte nochmals öffnen.");
       portalUrl = data.portalUrl;
       updateButton(data.portal.status);
       const job = (window.kristineCustomerPortalJobs || []).find(item => String(item.jobId) === currentJobId);
       if (job) job.customerPortal = data.portal;
       updateInvitationLinks();
       setMessage("Gespeichert · direkt bei der Baustelle abgelegt.");
+      return data;
     } catch (error) {
       setMessage(error.message, true);
+      return null;
     } finally {
       button.disabled = false;
     }
@@ -152,11 +163,32 @@
   modal.addEventListener("click", event => { if (event.target === modal) modal.classList.remove("open"); });
   modal.querySelectorAll('input[name="cpMode"]').forEach(input => input.addEventListener("change", () => document.getElementById("cpJobs").classList.toggle("open", selectedMode() === "collection")));
   document.getElementById("cpSave").addEventListener("click", save);
-  document.getElementById("cpWhatsApp").addEventListener("click", () => {
-    const phone = document.getElementById("cpPhone").value.replace(/\D/g, "");
-    if (!phone) return setMessage("Bitte zuerst eine WhatsApp-Nummer eintragen.", true);
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(invitationText())}`, "_blank", "noopener");
-  });
+  let inviting=false;
+  async function invite(channel,event){
+    event?.preventDefault();if(inviting)return;
+    if (!currentJobId || readyJobId !== currentJobId) return setMessage("Bitte die Kundenfreigabe zuerst vollständig laden.", true);
+    let phone=document.getElementById("cpPhone").value.replace(/\D/g,"");
+    if(phone.startsWith("00"))phone=phone.slice(2);
+    else if(phone.startsWith("0"))phone="43"+phone.slice(1);
+    if(channel==="whatsapp"&&!/^[1-9]\d{6,14}$/.test(phone))return setMessage("Bitte eine gültige WhatsApp-Nummer eintragen.",true);
+    const email=document.getElementById("cpEmail").value.trim();
+    if(channel==="email"&&(!document.getElementById("cpEmail").validity.valid||!email))return setMessage("Bitte eine E-Mail-Adresse eintragen.",true);
+    const jobId=currentJobId,popup=channel!=="email"?window.open("about:blank","_blank"):null;
+    if(popup)popup.opener=null;
+    inviting=true;
+    try{
+      const saved=await save();if(!saved){popup?.close();return}
+      const result=await api(`/admin/api/job/${encodeURIComponent(jobId)}/customer-portal/invitation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({preview:channel==="preview"})});
+      if(currentJobId!==jobId)throw new Error("Die geöffnete Akte hat sich geändert. Bitte nochmals öffnen.");
+      portalUrl=result.portalUrl;
+      const url=channel==="whatsapp"?`https://wa.me/${phone}?text=${encodeURIComponent(invitationText())}`:channel==="email"?`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent("Ihre KRISTINE Projektakte")}&body=${encodeURIComponent(invitationText())}`:portalUrl;
+      if(channel==="email")location.href=url;else if(popup)popup.location.replace(url);else location.href=url;
+      setMessage(channel==="preview"?"Kundenansicht geöffnet.":"Persönlicher Link erstellt. Die Einladung ist zum Versenden geöffnet.");
+    }catch(error){popup?.close();setMessage(error.message,true)}finally{inviting=false}
+  }
+  document.getElementById("cpWhatsApp").addEventListener("click",event=>invite("whatsapp",event));
+  document.getElementById("cpEmailInvite").addEventListener("click",event=>invite("email",event));
+  document.getElementById("cpOpen").addEventListener("click",event=>invite("preview",event));
   ["cpName", "cpEmail"].forEach(id => document.getElementById(id).addEventListener("input", updateInvitationLinks));
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount); else mount();
 })();
