@@ -73,6 +73,7 @@ const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
 const { createRegieComparisonPdf } = require("./regie-comparison-pdf");
 const { createGrossProfitPdf } = require("./gross-profit-pdf");
 const { registerNfonIntegration } = require("./nfon-integration");
+const { sanitizeCustomerPortal, registerCustomerPortal } = require("./customer-portal");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -103,6 +104,7 @@ const SMTP_PASS = process.env.SMTP_PASS || "";
 const MAIL_FROM = process.env.MAIL_FROM || "";
 const MAIL_TO_DEFAULT = process.env.MAIL_TO_DEFAULT || "";
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
+const CUSTOMER_PORTAL_URL = String(process.env.CUSTOMER_PORTAL_URL || "https://kristine-kundenportal.krista-alex.chatgpt.site").replace(/\/$/, "");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_TRANSCRIBE_MODEL =
@@ -2528,6 +2530,7 @@ async function readJobMeta(jobId) {
       hoursCutoverDate: cleanOperationalDate(meta.hoursCutoverDate),
       hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(meta.hoursOverlapExcludedWwKeys),
       hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
+      customerPortal: sanitizeCustomerPortal(meta.customerPortal),
       updatedAt: meta.updatedAt || null,
     };
   } catch {
@@ -2605,6 +2608,7 @@ async function writeJobMeta(jobId, patch) {
     hoursCutoverDate: cleanOperationalDate(patch.hoursCutoverDate ?? existing.hoursCutoverDate),
     hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
     hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
+    customerPortal: sanitizeCustomerPortal(patch.customerPortal, existing.customerPortal),
     updatedAt: new Date().toISOString(),
   };
   await ensureDir(path.join(DATA_DIR, String(jobId)));
@@ -2999,6 +3003,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         hoursCutoverDate: meta.hoursCutoverDate || "",
         hoursOverlapExcludedWwKeys: meta.hoursOverlapExcludedWwKeys || [],
         hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
+        customerPortal: sanitizeCustomerPortal(meta.customerPortal),
         calculation,
         regieSummary,
         materialSummary: { positions: materialKeys.size, value: materialValue },
@@ -4228,6 +4233,14 @@ registerRegieAssistant(app, {
   readDocumentation,
   writeDocumentation,
   sendRegieMail: sendMailWithAttachment,
+});
+registerCustomerPortal(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  readJobMeta,
+  writeJobMeta,
+  appendJobHistory,
+  portalBaseUrl: CUSTOMER_PORTAL_URL,
 });
 console.log("âœ… KRISTINE Materialsystem registriert");
 
