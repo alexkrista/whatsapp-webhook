@@ -54,7 +54,7 @@ const nodemailer = require("nodemailer");
 const sharp = require("sharp");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
-const { isInternalJobId, isOfficeJobId } = require("./office-time");
+const { isInternalJobId, isOfficeJobId, normalizeOfficeTimeData } = require("./office-time");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration, listJobMedia } = require("./media-migration");
@@ -4255,7 +4255,9 @@ registerMediaMigration(app, {
     return info;
   },
 });
-require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin});
+let resumePhotoInboxImport;
+const photoInboxImportReady = new Promise(resolve => { resumePhotoInboxImport = resolve; });
+require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin,ready:photoInboxImportReady});
 // ==================== KRISTINE Brain-Stundenquelle ====================
 // Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
 // Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
@@ -4270,7 +4272,7 @@ app.get("/kristine/api/brain-hours-source", async (req, res) => {
 
     res.json({
       ok: true,
-      events: Array.isArray(events) ? events : [],
+      events: Array.isArray(events) ? normalizeOfficeTimeData(events) : [],
       employees: Array.isArray(employees) ? employees : [],
       source: "KRISTINE_RENDER",
       generatedAt: new Date().toISOString()
@@ -4405,8 +4407,16 @@ console.log("TRANSCRIBE_MODEL:", OPENAI_TRANSCRIBE_MODEL);
 console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
-app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
-
-require("./job-merge-audit").auditJobMerge({ dataDir: DATA_DIR, sourceJobId: "keckeis_gabi_harry", targetJobId: "25018" })
-  .then(report => console.info("JOB_MERGE_AUDIT", JSON.stringify(report)))
-  .catch(error => console.error("JOB_MERGE_AUDIT failed:", error.message));
+async function startServer() {
+  try {
+    const result = await require("./legacy-collection-repair").repairLegacyCollection({ dataDir: DATA_DIR });
+    if (result.status === "repaired" || result.status === "already_repaired") {
+      const media = await listJobMedia({ dataDir: DATA_DIR, jobId: "25018" });
+      result.visiblePhotos = media.filter(item => item.kind === "photo").length;
+    }
+    console.info("LEGACY_COLLECTION_REPAIR", JSON.stringify(result));
+  } catch (error) { console.error("LEGACY_COLLECTION_REPAIR failed:", error.message); }
+  resumePhotoInboxImport();
+  app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
+}
+startServer();

@@ -1,0 +1,22 @@
+name: Collection recovery and photos
+on:
+  pull_request:
+    paths: ['legacy-collection-repair.js', 'media-migration', 'photo-inbox.js', 'server.js', 'public/ui/baustellen-ww-import.js', 'TEST/collection-recovery.test.js', 'TEST/ww-collection-link.test.js', '.github/workflows/collection-recovery-test.yml']
+  push:
+    branches: [main]
+    paths: ['legacy-collection-repair.js', 'media-migration', 'photo-inbox.js', 'server.js', 'public/ui/baustellen-ww-import.js', 'TEST/collection-recovery.test.js', 'TEST/ww-collection-link.test.js', '.github/workflows/collection-recovery-test.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --check server.js && node --check media-migration && node --check photo-inbox.js && node --check legacy-collection-repair.js
+      - run: node --test TEST/collection-recovery.test.js TEST/media-migration.test.js TEST/media-reassignment.test.js
+      - run: node TEST/ww-collection-link.test.js && node TEST/baustellen-collection.test.js
