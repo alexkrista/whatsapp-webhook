@@ -59,7 +59,9 @@
   </div>
 </section>
 
-<script src="/public/ui/topbar.js?v=20260913-collection-3"></script>
+<script src="/public/ui/baustellen-data.js?v=20260913-collection-data-1"></script>
+<script src="/public/ui/baustellen-sources.js?v=20260913-collection-data-1"></script>
+<script src="/public/ui/topbar.js?v=20260913-collection-data-1"></script>
 <script src="/public/ui/safety-sdb.js?v=20260901-krisadmin1"></script>
 <script src="/public/ui/safety-sdb-review.js?v=20260901-review1"></script>
 <script src="/public/ui/krista-photo-followup.js?v=20260909-2"></script>
@@ -81,7 +83,7 @@ function statusKey(s){return s==='Fertig – nicht abgerechnet'?'Fertig':String(
 function calc(j){return j?.calculation||{}}
 function actualHours(j){return num(j?.collectionSummary?.actualHours ?? calc(j).actualHours ?? calc(j).orderHours)}
 function targetHours(j){return num(j?.collectionSummary?.calculatedHours ?? calc(j).calculatedHours)}
-function openOrderHours(j){const s=String(j.status||'');const target=targetHours(j);if(s==='Auftrag')return Math.max(0,target);if(s==='Laufend')return Math.max(0,target-actualHours(j));return 0}
+function openOrderHours(j){return BaustellenData.members(j,jobs).filter(row=>['Auftrag','Laufend'].includes(row.status)).reduce((sum,row)=>sum+BaustellenData.remaining(row),0)}
 function contractAmount(j){return num(j?.collectionSummary?.contractAmount ?? j.contractAmount ?? calc(j).contractAmount)}
 function fullAddress(j){return [j.street,j.houseNumber,[j.postalCode,j.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
 function mapsUrl(j){const a=fullAddress(j);return a?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a):'#'}

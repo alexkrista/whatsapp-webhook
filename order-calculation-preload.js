@@ -9,6 +9,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const express = require("express");
+const { recalculateCollections } = require("./public/ui/baustellen-data");
 
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
@@ -228,7 +229,7 @@ function enrichJobsPayload(data) {
         remainingRegieHours: derived.plannedRegieHours - actualRegieHours,
       },
     };
-  })).then(jobs => ({ ...data, jobs }));
+  })).then(jobs => recalculateCollections({ ...data, jobs }));
 }
 
 function registerRoutes(app) {

@@ -1,7 +1,8 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-12-collection-1";
+  const VERSION="2026-09-13-collection-data-1";
+  const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
   const token=new URLSearchParams(location.search).get("token")||"";
@@ -10,11 +11,14 @@
   let liveByJob=new Map();
   let peopleByJob=new Map();
   let wwByJob=new Map();
+  let wwByMember=new Map();
+  const reportHoursByJob=new Map();
   let costEmployees=[];
   const reconciliationDrafts=new Map();
   const wwErrors=new Map();
   let timer=null;
   let patchQueued=false;
+  let patching=false;
 
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
@@ -28,49 +32,48 @@
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
-  async function loadWwHours(jobId){
-    let d,lastError=new Error("WinWorker-Stunden sind nicht erreichbar.");
-    for(const host of BRAIN_HOURS_HOSTS){
-      try{
-        const headers={Accept:"application/json","Content-Type":"application/json"};
-        if(host.includes("127.0.0.1")){if(token)headers["X-Krista-Token"]=token}
-        else{
-          const auth=await api(`/admin/api/brain-permit?path=${encodeURIComponent(BRAIN_HOURS_PATH)}`);
-          headers["X-Krista-Brain-Permit"]=auth.permit;
-        }
-        const r=await fetch(host+BRAIN_HOURS_PATH,{method:"POST",headers,body:JSON.stringify({projectNumber:String(jobId)})});
-        const t=await r.text();try{d=JSON.parse(t)}catch{d=null}if(!r.ok||!d?.ok)throw new Error(d?.error||t||r.statusText);
-        break;
-      }catch(error){lastError=error;d=null}
-    }
-    if(!d?.ok)throw lastError;
+  async function loadWwHours(jobId,ownerId=jobId){
+    const d=await window.BaustellenSources.ww("hours",{jobId:String(ownerId),projectNumber:String(jobId)});
     const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
     const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
     for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0,sourceProjectNumber:String(jobId)};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
     // Der Brain Connector liefert bereits produktive WW-Stunden nach Pausenabzug.
     // Hier kein zweites Mal 0,25 h je Mitarbeiter/Tag abziehen.
     const rows=[...grouped.values()].map(row=>({...row,hours:Math.max(0,row.hours)})).sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")),netDays=new Map();for(const row of rows)netDays.set(row.date,num(netDays.get(row.date))+row.hours);
-    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours)};
+    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours),cached:d.cached,syncedAt:d.syncedAt};
   }
 
   function collectionJobIds(j){const ids=Array.isArray(j?.collectionSummary?.jobIds)?j.collectionSummary.jobIds:[j?.jobId];return [...new Set(ids.map(String).filter(Boolean))]}
   function wwProjectNumbers(j){const links=Array.isArray(j?.collectionSummary?.wwProjects)?j.collectionSummary.wwProjects:[];const values=links.map(link=>String(link?.projectNumber||"").trim()).filter(Boolean);if(!values.length)values.push(String(j?.wwProjectNumber||j?.jobId||""));return [...new Set(values.filter(Boolean))]}
   async function loadWwHoursForJob(j){
-    const numbers=wwProjectNumbers(j),settled=await Promise.allSettled(numbers.map(loadWwHours)),failed=settled.find(x=>x.status==="rejected"),found=settled.map((x,index)=>x.status==="fulfilled"?{number:numbers[index],data:x.value}:null).filter(Boolean);
-    if(failed)throw failed.reason||new Error("Mindestens eine WinWorker-Akte ist nicht erreichbar.");
-    if(!found.length)throw new Error("WinWorker-Stunden sind nicht erreichbar.");
-    if(found.length===1)return found[0].data;
+    const generation=refreshSerial;
+    const refs=D.projects(j,jobs),settled=await D.mapLimit(refs,4,ref=>loadWwHours(ref.projectNumber,ref.jobId));
+    const found=settled.flatMap((result,index)=>result.status==="fulfilled"?[{...refs[index],number:refs[index].projectNumber,data:result.value}]:[]);
+    const missing=settled.flatMap((result,index)=>result.status==="rejected"||result.value?.cached?[refs[index].projectNumber]:[]);
+    for(const member of D.members(j,jobs)){
+      const own=found.filter(source=>source.jobId===String(member.jobId));
+      if(generation!==refreshSerial)continue;
+      const ownRefs=refs.filter(ref=>ref.jobId===String(member.jobId)),ownMissing=ownRefs.filter(ref=>missing.includes(ref.projectNumber));
+      const data=own.length||!ownRefs.length?combineWw(own):{...(wwByMember.get(String(member.jobId))||combineWw([])),cached:true};
+      Object.assign(data,{expected:ownRefs.length,loaded:own.length,missing:ownMissing.map(ref=>ref.projectNumber)});wwByMember.set(String(member.jobId),data);
+    }
+    const result=combineWw(found);result.expected=refs.length;result.loaded=found.length;result.missing=missing;
+    if(generation===refreshSerial){if(missing.length)wwErrors.set(String(j.jobId),`${refs.length-missing.length}/${refs.length} WW-Akten aktuell. Abgleich fehlt: ${missing.join(", ")}. Gespeicherte Stunden bleiben sichtbar.`);
+    else wwErrors.delete(String(j.jobId))}
+    return result;
+  }
+  function combineWw(found){
     const days=new Map(),rows=[];let pauseDeductionHours=0;
     for(const {number,data} of found){pauseDeductionHours+=num(data.pauseDeductionHours);for(const [date,value] of data.days||[])days.set(date,num(days.get(date))+num(value));for(const row of data.rows||[])rows.push({...row,key:`${number}|${row.key}`,sourceProjectNumber:number})}
     rows.sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")||a.sourceProjectNumber.localeCompare(b.sourceProjectNumber,"de"));
-    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number)};
+    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number),cached:found.some(x=>x.data.cached)};
   }
 
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
   function nowMinutes(){const d=new Date();return d.getHours()*60+d.getMinutes()+d.getSeconds()/60}
   function job(id){return jobs.find(j=>String(j.jobId)===String(id))||null}
   function calc(j){return j?.calculation||{}}
-  function targetHours(j){return num(j?.collectionSummary?.calculatedHours??calc(j).calculatedHours)}
+  function targetHours(j){return D.members(j,jobs).reduce((sum,row)=>sum+D.fixedTarget(row),0)}
   function oldTotalHours(j){return num(j?.collectionSummary?.actualHours??calc(j).actualHours)}
   function oldOrderHours(j){const c=calc(j);const direct=Number(c.orderHours);return Number.isFinite(direct)?Math.max(0,direct):Math.max(0,oldTotalHours(j)-num(c.actualRegieHours))}
 
@@ -168,23 +171,27 @@
     if(j?.hoursOverlapResolvedAt)return new Set(Array.isArray(j.hoursOverlapExcludedWwKeys)?j.hoursOverlapExcludedWwKeys:[]);
     return suggestedExclusions(ww,kr);
   }
-  function fusion(j){
-    const jobId=String(j?.jobId||""),ww=wwByJob.get(jobId),kr=kristineFor(j),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
+  function singleFusion(j,head=j){
+    j=D.single(j);
+    const jobId=String(j?.jobId||""),ww=wwByMember.get(jobId)||wwByJob.get(jobId),kr=kristineFor(j),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
     if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,detailTotal:kristineDetailTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
     const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
     const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
-    const excluded=selectedExclusions(j,ww,kr),legacyCutover=String(j?.hoursCutoverDate||"");
+    const owner=reconciliationDrafts.has(String(head.jobId))||head.hoursOverlapResolvedAt||head.hoursCutoverDate?head:j;
+    const rawExcluded=selectedExclusions(owner,ww,kr),excluded=new Set((ww.rows||[]).filter(row=>rawExcluded.has(row.key)||rawExcluded.has(row.key.slice(row.key.indexOf("|")+1))).map(row=>row.key)),legacyCutover=String(owner?.hoursCutoverDate||"");
     let wwHours=0,kristineHours=0;
     if(legacyCutover&&!reconciliationDrafts.has(jobId)){for(const [day,value] of ww.days)if(day<legacyCutover)wwHours+=num(value);for(const [day,value] of krDays)if(day>=legacyCutover)kristineHours+=num(value)*scale}
     else{wwHours=(ww.rows||[]).reduce((sum,row)=>sum+(excluded.has(row.key)?0:num(row.hours)),0);kristineHours=kristineTotal}
     return {total:wwHours+kristineHours,ww:wwHours,kristine:kristineHours,detailTotal:kristineDetailTotal,overlaps,excluded,source:"WW + KRISTINE",legacyCutover};
   }
+  function fusion(j){
+    const rows=D.members(j,jobs).map(member=>singleFusion(member,j));
+    const out={total:0,ww:0,kristine:0,detailTotal:0,overlaps:[],excluded:new Set(),source:"KRISTINE"};
+    for(const row of rows){for(const key of ["total","ww","kristine","detailTotal"])out[key]+=num(row[key]);out.overlaps.push(...row.overlaps);for(const key of row.excluded)out.excluded.add(key);if(row.source!=="KRISTINE")out.source=row.source}
+    return out;
+  }
   function openHours(j){
-    const status=String(j?.status||"");
-    const target=targetHours(j),actual=fusion(j).total;
-    if(status==="Auftrag")return Math.max(0,target);
-    if(status==="Laufend")return Math.max(0,target-actual);
-    return 0;
+    return D.members(j,jobs).filter(member=>["Auftrag","Laufend"].includes(member.status)).reduce((sum,member)=>sum+memberHourSummary(member,j).remaining,0);
   }
 
   function patchRows(){
@@ -209,7 +216,7 @@
 
   function patchBaseDetail(id){
     const j=job(id);if(!j)return;
-    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual),pct=target>0?actual/target*100:0;
+    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=hoursSummary(id).remaining,pct=target>0?actual/target*100:0;
     const dh=document.getElementById("detailHours"),dn=document.getElementById("detailHoursNote"),op=document.getElementById("detailOpen"),bar=document.getElementById("detailProgress"),note=document.getElementById("detailProgressNote");
     if(dh)dh.textContent=`${hours(actual)} / ${hours(target)}`;
     const split=fused.source==="WW + KRISTINE"?`${hours(actual)} = ${hours(fused.kristine)} KRISTINE + ${hours(fused.ww)} WW`:fused.source;
@@ -248,7 +255,7 @@
 
   function patchCockpit(id){
     const j=job(id),shell=document.getElementById("bcShell");if(!j||!shell)return;
-    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=Math.max(0,target-actual);
+    const fused=fusion(j),actual=fused.total,target=targetHours(j),remaining=hoursSummary(id).remaining;
     const collection=j.collectionSummary||null,order=pulseItem("Auftrag"),targetCard=pulseItem("Sollstunden gesamt");
     if(order&&collection){const strong=order.querySelector("strong"),small=order.querySelector("small");if(strong)strong.textContent=money(collection.contractAmount);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
     if(targetCard&&collection){const strong=targetCard.querySelector("strong"),small=targetCard.querySelector("small");if(strong)strong.textContent=hours(target);if(small)small.textContent=`Summe aus ${collection.count} Einzelakten`}
@@ -264,10 +271,15 @@
     if(host&&people.length)host.innerHTML=people.map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></div>`).join("");
   }
 
+  function memberHourSummary(j,head=j){
+    const fused=singleFusion(j,head),regie=Math.max(num(calc(j).actualRegieHours),num(reportHoursByJob.get(String(j.jobId)))),order=Math.max(0,fused.total-regie),target=D.fixedTarget(j);
+    return {...fused,order,regie,target,remaining:Math.max(0,target-order),overrun:Math.max(0,order-target)};
+  }
   function hoursSummary(id){
     const j=job(id);if(!j)return {total:0,order:0,regie:0,remaining:0,source:""};
-    const fused=fusion(j),regie=num(calc(j).actualRegieHours),order=Math.max(0,fused.total-regie),target=targetHours(j);
-    return {total:fused.total,order,regie,remaining:Math.max(0,target-order),source:fused.source,ww:fused.ww,kristine:fused.kristine};
+    const summaries=D.members(j,jobs).map(member=>memberHourSummary(member,j)),out={...fusion(j),order:0,regie:0,target:0,remaining:0,overrun:0,complete:!(wwByJob.get(String(id))?.missing||[]).length,missing:wwByJob.get(String(id))?.missing||[]};
+    for(const row of summaries)for(const key of ["order","regie","target","remaining","overrun"])out[key]+=num(row[key]);
+    return out;
   }
   function patchEconomy(id){
     const j=job(id),host=document.getElementById("bkEconomy");if(!j||!host)return;
@@ -276,23 +288,27 @@
     const card=label=>[...host.querySelectorAll(".bk-card")].find(el=>String(el.querySelector(".bk-label")?.textContent||"").trim()===label);
     const actualCard=card("Iststunden Auftrag"),remainingCard=card("Noch offene Stunden"),performanceCard=card("Abrechenbare Leistung"),amountToInvoiceCard=card("Noch abzurechnen"),grossProfitCard=card("Ertrag");
     if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.order));value.classList.toggle("bk-bad",target>0&&live.order>target)}setText(note,`Regie ${hours(live.regie)} getrennt · ${live.source}`)}
-    if(remainingCard)setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));
-    const performance=window.KristaRegieBilling?.calculatePerformance?.({actualHours:live.total,regieHours:num(host.dataset.regieHours)||live.regie,hourlyRate:num(host.dataset.hourlyRate),contractAmount:num(host.dataset.contractAmount),plannedRegieAmount:num(host.dataset.plannedRegieAmount),actualRegieAmount:num(host.dataset.actualRegieAmount),partialInvoiceNet:num(host.dataset.partialInvoiceNet),hasClosingInvoice:host.dataset.hasClosingInvoice==="1"});
+    if(remainingCard){setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));setText(remainingCard.querySelector(".bk-note"),`${live.overrun>0?hours(live.overrun)+" Überschreitung separat · ":""}${D.memberIds(j).length>1?"Summe der offenen Stunden je Einzelakte":"Soll minus Ist Auftrag"}`)}
+    const performance=window.BaustellenSources.performance(id)||window.KristaRegieBilling?.calculatePerformance?.({actualHours:live.total,regieHours:num(host.dataset.regieHours)||live.regie,hourlyRate:num(host.dataset.hourlyRate),contractAmount:num(host.dataset.contractAmount),plannedRegieAmount:num(host.dataset.plannedRegieAmount),actualRegieAmount:num(host.dataset.actualRegieAmount),partialInvoiceNet:num(host.dataset.partialInvoiceNet),hasClosingInvoice:host.dataset.hasClosingInvoice==="1"});
     if(performanceCard&&performance){setText(performanceCard.querySelector(".bk-value"),money2(performance.billablePerformance));setText(performanceCard.querySelector(".bk-note"),`${hours(performance.orderHours)} × ${money2(performance.hourlyRate)} × 90 % + ${money2(performance.actualRegieAmount)} Regie · Deckel ${money2(performance.performanceLimit)}`)}
     if(amountToInvoiceCard&&performance){setText(amountToInvoiceCard.querySelector(".bk-value"),money2(performance.amountToInvoice));setText(amountToInvoiceCard.querySelector(".bk-note"),`${money2(performance.billablePerformance)} Leistung − ${money2(performance.partialInvoiceNet)} geschriebene Teilrechnungen`)}
     const documentNet=num(host.dataset.billedNet)+num(host.dataset.draftNet);
     const materialEk=num(host.dataset.totalMaterialEk),wage=laborCost(id),grossProfit=documentNet-wage.total-materialEk;if(grossProfitCard){const value=grossProfitCard.querySelector(".bk-value");setText(value,documentNet>0?money2(grossProfit):"–");value?.classList.toggle("bk-bad",grossProfit<0);value?.classList.toggle("bk-good",grossProfit>=0);setText(grossProfitCard.querySelector(".bk-note"),documentNet>0?`${money2(documentNet)} Rechnungen netto − ${money2(wage.total)} MA-Gesamtkosten (Lohn + GK) − ${money2(materialEk)} Material-EK`:"Noch keine Rechnung vorhanden");const details=grossProfitCard.querySelector("[data-bk-gross-profit-details]"),detailsHtml=profitDetailsHtml(wage,documentNet,materialEk,grossProfit);if(details&&details.innerHTML!==detailsHtml)details.innerHTML=detailsHtml;host._bkGrossProfitPdfData={rows:wage.rows,documentNet,materialEk}}
+    if(host.dataset.billingPartial==="1"){for(const el of [performanceCard,amountToInvoiceCard,grossProfitCard]){setText(el?.querySelector(".bk-value"),"–");setText(el?.querySelector(".bk-note"),"Abgleich unvollständig · siehe Datenstand je Akte")}}
     const flow=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Vom Auftrag zu den Stunden/i.test(el.textContent||""));
     if(flow){const bar=flow.querySelector(".bk-progress span"),note=flow.querySelector(".bk-note");if(bar){bar.style.width=Math.min(100,Math.max(0,progress))+"%";bar.style.background=progress>100?"#a84540":"#2f7d4a"}setText(note,`${progress.toLocaleString('de-AT',{maximumFractionDigits:1})} % der fix kalkulierten Auftragsstunden verbraucht · Regie wird separat geführt.`)}
   }
 
-  function patchAll(){patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);patchHoursTab(id);if(current)renderHoursReconciliation(current)}}
-  function queuePatch(){if(patchQueued)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
+  function patchAll(){patching=true;try{patchRows();patchTopKpis();const id=decodeURIComponent(location.hash.slice(1));if(id){const current=job(id);patchBaseDetail(id);patchCockpit(id);patchEconomy(id);patchHoursTab(id);if(current)renderHoursReconciliation(current)}}finally{queueMicrotask(()=>{patching=false})}}
+  function queuePatch(){if(patchQueued||patching)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
-    const id=String(jobId||""),j=job(id),ww=wwByJob.get(id),kr=kristineFor(j),out=new Map(),legacyCutover=String(j?.hoursCutoverDate||""),excluded=selectedExclusions(j,ww,kr),rawKr=num(kr?.totalHours),kristineTotal=liveOrderHours(j),scale=rawKr>0?kristineTotal/rawKr:0,add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
-    for(const [date,people] of kr?.dayPeople||[])if(!legacyCutover||date>=legacyCutover)for(const person of people.values())add(date,person.name,person.hours*scale,"KRISTINE");
-    for(const row of ww?.rows||[])if(legacyCutover?row.date<legacyCutover:!excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
+    const j=job(jobId),out=new Map(),add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
+    for(const member of D.members(j,jobs)){
+      const single=D.single(member),fused=singleFusion(single,j),ww=wwByMember.get(String(member.jobId))||wwByJob.get(String(member.jobId)),kr=kristineFor(single),cutover=fused.legacyCutover||"";
+      for(const [date,people] of kr?.dayPeople||[])if(!cutover||date>=cutover)for(const person of people.values())add(date,person.name,person.hours,"KRISTINE");
+      for(const row of ww?.rows||[])if(cutover?row.date<cutover:!fused.excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
+    }
     return [...out.values()];
   }
 
@@ -317,9 +333,13 @@
     const peopleCard=[...host.querySelectorAll(".bk-card.bk-wide")].find(el=>/Wer hat hier gearbeitet/i.test(el.querySelector("h3")?.textContent||"")),peopleHost=peopleCard?.querySelector(".bk-people"),peopleSignature=JSON.stringify(people.map(p=>[p.name,p.hours,[...p.days].sort(),[...p.sources].sort()]));if(peopleHost&&peopleHost.dataset.fusedSignature!==peopleSignature){peopleHost.dataset.fusedSignature=peopleSignature;peopleHost.innerHTML=people.length?people.map(p=>`<div class="bk-person"><strong>${escapeHtml(p.name)}</strong><div class="big">${hours(p.hours)}</div><small>${p.days.size} Arbeitstag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></div>`).join(""):'<div class="bk-placeholder">Noch keine zugeordneten Stunden vorhanden.</div>'}
   }
 
+  let refreshSerial=0;
   async function refresh(){
-    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);if(current){try{const ww=await loadWwHoursForJob(current);if(ww)wwByJob.set(String(id),ww);wwErrors.delete(String(id))}catch(e){wwErrors.set(String(id),e.message);console.warn("WinWorker-Stunden",e)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    const serial=++refreshSerial;
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=j.jobs||[];bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
+
+  function sourceStatus(id){const j=job(id),refs=D.projects(j,jobs),data=wwByJob.get(String(id))||wwByMember.get(String(id));return {label:!refs.length?"KRISTINE":!data?"WW-Abgleich ausstehend":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:data.cached?"WW: gespeicherter Stand":"WW aktuell",complete:!refs.length||!!data&&!data.cached&&!data.missing?.length}}
 
   function install(){
     if(!location.pathname.toLowerCase().includes("baustellen.html")&&!location.pathname.toLowerCase().includes("/kristine/baustellen"))return;installReconciliationCss();
@@ -327,10 +347,13 @@
     if(list)new MutationObserver(queuePatch).observe(list,{subtree:true,childList:true});
     if(detail)new MutationObserver(queuePatch).observe(detail,{subtree:true,childList:true});
     window.addEventListener("hashchange",()=>setTimeout(refresh,120));
+    document.addEventListener("krista:baustelle-opened",()=>setTimeout(refresh,0));
+    document.addEventListener("krista:collection-data-loaded",event=>{for(const row of event.detail?.rows||[]){const reports=window.KristaRegieBilling?.dedupeReports?.(row.documents.filter(doc=>doc.type==="regie_report"))||[];reportHoursByJob.set(String(row.jobId),reports.reduce((sum,report)=>sum+num(report.totalHours),0))}queuePatch()});
+    window.addEventListener("krista:collection-rendered",queuePatch);
     document.addEventListener("click",e=>{const row=e.target.closest?.(".job-row[data-job]");if(row)setTimeout(queuePatch,250)},true);
     refresh();timer=setInterval(refresh,60000);window.addEventListener("beforeunload",()=>timer&&clearInterval(timer),{once:true});
   }
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);else install();
-  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,summary:hoursSummary};
+  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,summary:hoursSummary,sourceStatus,summarySingle:(id,headId)=>memberHourSummary(job(id),job(headId)||job(id))};
 })();

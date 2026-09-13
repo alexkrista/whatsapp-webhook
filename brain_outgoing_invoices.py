@@ -1484,7 +1484,7 @@ def install(ns):
                 supplied = str(request.headers.get("X-Krista-Token") or "")
                 if not expected:
                     return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
-                if not hmac.compare_digest(supplied, expected):
+                if not request.environ.get("kristine.brain_permit_ok") and not hmac.compare_digest(supplied, expected):
                     return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
             data = request.get_json(silent=True) or {}
             project_number = str(data.get("projectNumber") or "").strip()
@@ -1588,7 +1588,7 @@ def install(ns):
                 supplied = str(request.headers.get("X-Krista-Token") or "")
                 if not expected:
                     return billing_response({"ok": False, "error": "Brain-Verbindung ist nicht freigegeben."}, 503)
-                if not hmac.compare_digest(supplied, expected):
+                if not request.environ.get("kristine.brain_permit_ok") and not hmac.compare_digest(supplied, expected):
                     return billing_response({"ok": False, "error": "Brain-Verbindung nicht autorisiert."}, 403)
             data = request.get_json(silent=True) or {}
             project_number = str(data.get("projectNumber") or "").strip()
