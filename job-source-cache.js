@@ -1,7 +1,7 @@
 "use strict";
 
 const fs=require("node:fs/promises"),path=require("node:path"),crypto=require("node:crypto");
-const {projects}=require("./public/ui/baustellen-data");
+const {projects,memberIds}=require("./public/ui/baustellen-data");
 
 function registerJobSourceCache(app,{dataDir,requireAdmin,readJobMeta}){
   async function location(req){
@@ -35,8 +35,8 @@ function registerJobSourceCache(app,{dataDir,requireAdmin,readJobMeta}){
 }
 // Read-only check for the collection reported by the user. No source records
 // are rewritten; missing external snapshots are explicitly counted as missing.
-async function auditStoredCollection({dataDir,jobId,readJobMeta,readDocumentation}){
-  const head={...await readJobMeta(jobId),jobId},ids=[...new Set([jobId,...(head.collectionMemberJobIds||[])])];
+async function auditStoredCollection({dataDir,jobId,collection,readJobMeta,readDocumentation}){
+  const head=collection?{jobId:collection.id,kind:"collection",collectionMemberJobIds:collection.memberJobIds}:{...await readJobMeta(jobId),jobId},ids=memberIds(head);
   const rows=[];
   for(const id of ids){
     const exists=await fs.stat(path.join(dataDir,id)).then(stat=>stat.isDirectory()).catch(()=>false);
@@ -45,6 +45,6 @@ async function auditStoredCollection({dataDir,jobId,readJobMeta,readDocumentatio
     const hasCalculation=await fs.access(path.join(dataDir,id,".order-calculation.json")).then(()=>true).catch(()=>false);
     rows.push({jobId:id,documents:docs.length,regieReports:docs.filter(doc=>doc.type==="regie_report").length,hasCalculation,wwProjects:projects(meta,[meta]).map(ref=>ref.projectNumber)});
   }
-  return {jobId,memberCount:ids.length,missingMembers:rows.filter(row=>row.missing).map(row=>row.jobId),storedRegieReports:rows.reduce((sum,row)=>sum+(row.regieReports||0),0),membersWithCalculation:rows.filter(row=>row.hasCalculation).length,rows};
+  return {jobId:collection?.id||jobId,mainJobId:collection?.mainJobId||jobId,memberCount:ids.length,missingMembers:rows.filter(row=>row.missing).map(row=>row.jobId),storedRegieReports:rows.reduce((sum,row)=>sum+(row.regieReports||0),0),membersWithCalculation:rows.filter(row=>row.hasCalculation).length,rows};
 }
 module.exports={registerJobSourceCache,auditStoredCollection};

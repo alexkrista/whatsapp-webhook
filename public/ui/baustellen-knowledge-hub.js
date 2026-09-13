@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-hours-balance-2";
+  const VERSION="2026-09-13-sammelmappe-1";
   const LOCAL_BRAIN_INVOICES="http://127.0.0.1:5051/outgoing/invoices";
   const LOCAL_BRAIN_BILLING="http://127.0.0.1:5051/api/outgoing/project-billing";
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
@@ -188,17 +188,22 @@
     const data=loadedCollection;if(!data||data.jobId!==currentJobId)return;
     let host=document.getElementById("bkSourceStatus");
     if(!host){host=document.createElement("div");host.id="bkSourceStatus";host.className="bk-card";host.style.marginBottom="12px";document.getElementById("bkHub")?.prepend(host)}
+    const expanded=!!host.querySelector("details")?.open;
+    const hoursSnapshot=window.BaustellenLiveHours?.summary?.(data.jobId),hoursById=new Map((hoursSnapshot?.memberHours||[]).map(row=>[row.jobId,row]));
+    const hoursReady=data.rows.length>0&&data.rows.length===hoursById.size&&data.rows.every(row=>hoursById.has(row.jobId));
+    const totals=data.rows.reduce((sum,row)=>{sum.reports+=regieReportsFrom(row.documents).length;sum.invoices+=row.billingSources.reduce((count,source)=>count+(source.data?.billing?.invoices||[]).length,0);return sum},{reports:0,invoices:0});
     const regie=data.rows.flatMap(row=>row.regieSources),billing=data.rows.flatMap(row=>row.billingSources);
     const current=sources=>sources.filter(source=>source.data&&!source.error&&!source.data.cached).length;
     const local=data.rows.filter(row=>!row.errors.length).length;
     const stamp=value=>value?new Date(value).toLocaleString("de-AT",{dateStyle:"short",timeStyle:"short"}):"";
     const sourceNote=sources=>sources.length?sources.map(source=>source.error?"Abgleich fehlt":source.data?.cached?"Gespeichert · "+stamp(source.data.syncedAt):source.data?.saved===false?"Aktuell · Speichern fehlgeschlagen":"Aktuell").filter((v,i,a)=>a.indexOf(v)===i).join(" · "):"KRISTINE";
     const rows=data.rows.map(row=>{
-      const live=window.BaustellenLiveHours?.summary?.(row.jobId),hs=window.BaustellenLiveHours?.sourceStatus?.(row.jobId),href=tokenUrl(location.pathname)+"#"+encodeURIComponent(row.jobId);
+      const live=hoursById.get(row.jobId),hs=window.BaustellenLiveHours?.sourceStatus?.(row.jobId,{single:true}),href=tokenUrl(location.pathname)+"#"+encodeURIComponent(row.jobId);
       const reports=regieReportsFrom(row.documents),invoices=row.billingSources.flatMap(source=>source.data?.billing?.invoices||[]);
-      return `<tr><td><a href="${esc(href)}">${esc(row.jobId)}</a><br>${esc(row.name||"")}</td><td class="num">${live?hour(live.total):"Wird geladen …"}<br><small>${esc(hs?.label||"WW-Abgleich ausstehend")}</small></td><td>${reports.length} Berichte<br><small>${esc(sourceNote(row.regieSources))}</small></td><td>${invoices.length} Belege<br><small>${esc(sourceNote(row.billingSources))}</small></td><td>${esc(row.errors.join(" · ")||"Geladen")}</td></tr>`;
+      return `<tr data-source-job="${esc(row.jobId)}"><td><a href="${esc(href)}">${esc(row.jobId)}</a><br>${esc(row.name||"")}</td><td class="num" data-member-hours>${live?hour(live.total):"Wird geladen …"}<br><small>${esc(hs?.label||"WW-Abgleich ausstehend")}</small></td><td>${reports.length} Berichte<br><small>${esc(sourceNote(row.regieSources))}</small></td><td>${invoices.length} Belege<br><small>${esc(sourceNote(row.billingSources))}</small></td><td>${esc(row.errors.join(" · ")||"Geladen")}</td></tr>`;
     }).join("");
-    host.innerHTML=`<details><summary style="cursor:pointer;font-weight:800">Daten aus ${local}/${data.rows.length} Akten geladen · Regie: ${current(regie)}/${regie.length} WW-Akten aktuell · Rechnungen: ${current(billing)}/${billing.length} aktuell</summary><div class="bk-note">Gespeicherte Daten bleiben sichtbar. Ein fehlender Abgleich bedeutet nicht, dass keine Stunden oder Belege vorhanden sind.</div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Akte</th><th>Stunden</th><th>Regieberichte</th><th>Rechnungen</th><th>Datenstand</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    const balance=hoursReady?(hoursSnapshot.overrun>0?`${hour(hoursSnapshot.overrun)} über Soll · keine offenen Stunden`:`${hour(hoursSnapshot.target)} Soll − ${hour(hoursSnapshot.total)} Ist = ${hour(hoursSnapshot.remaining)} offen`):"Stunden der Einzelakten werden geladen …";
+    host.innerHTML=`<details${expanded?" open":""}><summary style="cursor:pointer;font-weight:800">Daten aus ${local}/${data.rows.length} Akten geladen · Regie: ${current(regie)}/${regie.length} WW-Akten aktuell · Rechnungen: ${current(billing)}/${billing.length} aktuell</summary><div class="bk-note">Jede Zeile zeigt ausschließlich die Stunden dieser Einzelakte. Die Summe unten ist der Gesamt-Istwert oben. Gespeicherte Daten bleiben bei fehlendem Abgleich sichtbar.</div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Akte</th><th>Stunden</th><th>Regieberichte</th><th>Rechnungen</th><th>Datenstand</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th>Summe aus ${data.rows.length} Akten</th><th class="num" data-collection-hours>${hoursReady?hour(hoursSnapshot.total):"Wird geladen …"}</th><th>${totals.reports} Berichte</th><th>${totals.invoices} Belege</th><td>${hoursReady?esc(hoursSnapshot.complete?"Stunden aktuell":"Gespeicherter Stundenstand · Abgleich ausstehend"):"Noch nicht vollständig geladen"}</td></tr><tr><td colspan="5" class="bk-note">${esc(balance)}</td></tr></tfoot></table></div></details>`;
   }
   async function loadJob(id){
     const previous=currentJobId,active=previous===String(id)?document.querySelector("[data-bk-tab].active")?.dataset.bkTab:"overview";

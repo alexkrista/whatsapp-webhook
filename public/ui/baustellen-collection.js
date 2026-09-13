@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-collection-3";
+  const VERSION="2026-09-13-sammelmappe-1";
   const token=new URLSearchParams(location.search).get("token")||"";
   let jobs=[];
   let jobsById=new Map(),groupsByJobId=new Map(),refreshSerial=0;
@@ -13,7 +13,7 @@
   async function api(path,options={}){const response=await fetch(tokenUrl(path),options),text=await response.text();let data;try{data=JSON.parse(text)}catch{}if(!response.ok||data?.ok===false)throw new Error(data?.error||text||response.statusText);return data}
   const currentId=()=>decodeURIComponent(location.hash.slice(1));
   const byId=id=>jobsById.get(String(id));
-  function jobUrl(id){const url=new URL(location.href);url.hash=encodeURIComponent(String(id));return url.pathname+url.search+url.hash}
+  function jobUrl(id){const url=new URL(location.href);if(byId(id)?.kind==="collection")url.pathname="/kristine/sammelmappe";url.hash=encodeURIComponent(String(id));return url.pathname+url.search+url.hash}
   function openJob(id){if(String(id)===currentId())return;location.href=jobUrl(id);location.reload()}
 
   function installCss(){if(document.getElementById("collectionCss"))return;const style=document.createElement("style");style.id="collectionCss";style.textContent=`
@@ -21,7 +21,7 @@
   `;document.head.appendChild(style)}
 
   function memberRows(job){
-    const ids=[job?.jobId,...(job?.collectionSummary?.jobIds||[]),...(job?.collectionMemberJobIds||[])];
+    const ids=window.BaustellenData?.memberIds?.(job)||[job?.jobId,...(job?.collectionSummary?.jobIds||[]),...(job?.collectionMemberJobIds||[])];
     return [...new Set(ids.filter(id=>id!==undefined&&id!==null&&String(id)!=="").map(String))].map(byId).filter(Boolean);
   }
   function setJobs(rows){
@@ -29,8 +29,8 @@
     jobsById=new Map(jobs.map(job=>[String(job.jobId),job]));
     groupsByJobId=new Map();
     for(const head of jobs){
-      const members=memberRows(head);if(members.length<2)continue;
-      const group={head,members};
+      const members=memberRows(head);if(members.length<2&&head.kind!=="collection")continue;
+      const group={head,members};if(head.kind==="collection")groupsByJobId.set(String(head.jobId),[group]);
       for(const member of members){
         const id=String(member.jobId);
         if(!groupsByJobId.has(id))groupsByJobId.set(id,[]);
@@ -66,7 +66,7 @@
     `;document.head.appendChild(style);
   }
   function groupMarkup(groups,id){
-    return groups.map(group=>`${groups.length>1?`<h3 class="collection-union-group-title">Sammelmappe #${esc(group.head.jobId)} · ${esc(group.head.name||"Ohne Bezeichnung")}</h3>`:""}<ul class="collection-members">${group.members.map(entry=>{
+    return groups.map(group=>`${group.head.kind==="collection"?`<p><a href="${esc(jobUrl(group.head.jobId))}">📁 Sammelmappe ${esc(group.head.jobId)} öffnen</a> · Hauptakte #${esc(group.head.collectionMainJobId)}</p>`:groups.length>1?`<h3 class="collection-union-group-title">Sammelmappe #${esc(group.head.jobId)} · ${esc(group.head.name||"Ohne Bezeichnung")}</h3>`:""}<ul class="collection-members">${group.members.map(entry=>{
       const current=String(entry.jobId)===String(id);
       return `<li><a class="collection-member" href="${esc(jobUrl(entry.jobId))}" data-collection-link="${esc(entry.jobId)}"${current?' aria-current="page"':""}><span class="collection-member-number">#${esc(entry.jobId)}</span><span class="collection-member-name">${esc(entry.name||"Ohne Bezeichnung")}</span>${current?'<span class="collection-member-state">Aktuell geöffnet</span>':""}</a></li>`;
     }).join("")}</ul>`).join("");
@@ -77,7 +77,7 @@
     previous?.remove();
     const header=document.querySelector("#detail .detail-top");if(!header||!groups.length)return;
     const details=document.createElement("details");details.id="collectionUnion";details.className="collection-union";details.dataset.jobId=id;details.open=!!wasOpen;
-    details.innerHTML=`<summary><span aria-hidden="true">📁</span><span>Sammelmappe · ${groupLabel(groups)}</span></summary><nav class="collection-union-content" aria-label="Vereinte Baustellen"><p class="collection-union-note">Diese Baustellen gehören zur selben Sammelmappe. Jede Einzelakte ist unten erreichbar.</p>${groupMarkup(groups,id)}</nav>`;
+    details.innerHTML=`<summary><span aria-hidden="true">📁</span><span>Sammelmappe ${esc(groups.map(group=>group.head.jobId).join(", "))} · ${groupLabel(groups)}</span></summary><nav class="collection-union-content" aria-label="Vereinte Baustellen"><p class="collection-union-note">Diese Baustellen gehören zur selben Sammelmappe. Jede Einzelakte ist unten erreichbar.</p>${groupMarkup(groups,id)}</nav>`;
     details.querySelectorAll("[data-collection-link]").forEach(link=>link.addEventListener("click",event=>{
       if(event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
       event.preventDefault();openJob(link.dataset.collectionLink);
@@ -89,7 +89,7 @@
       const groups=groupsFor(row.dataset.job),name=row.querySelector(".job-name"),badge=name?.querySelector(".collection-badge");
       if(!groups.length){badge?.remove();return;}
       if(!name)return;
-      const label=`📁 Sammelmappe · ${groupLabel(groups)}`;
+      const label=`📁 ${groups.map(group=>group.head.jobId).join(", ")} · Sammelmappe · ${groupLabel(groups)}`;
       if(badge){if(badge.textContent!==label)badge.textContent=label;return;}
       const el=document.createElement("span");el.className="collection-badge";el.textContent=label;name.appendChild(el);
     });
@@ -141,7 +141,7 @@
     }
   }
 
-  async function refresh(){const serial=++refreshSerial;try{const data=await api("/admin/api/jobs");if(serial!==refreshSerial)return;setJobs(data.jobs||[]);render()}catch(error){console.warn("Sammelmappe",error)}}
+  async function refresh(){const serial=++refreshSerial;try{const data=await api("/admin/api/jobs");if(serial!==refreshSerial)return;setJobs(window.BaustellenData.catalog(data));render()}catch(error){console.warn("Sammelmappe",error)}}
   function install(){
     installCss();installUnionCss();
     document.addEventListener("krista:baustellen-rendered",event=>{++refreshSerial;setJobs(event.detail?.jobs||[]);render()});

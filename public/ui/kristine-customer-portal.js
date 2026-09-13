@@ -54,7 +54,7 @@
   function renderJobs(job, selected) {
     const host = document.getElementById("cpJobs");
     const jobs = Array.isArray(window.kristineCustomerPortalJobs) ? window.kristineCustomerPortalJobs : [];
-    const ids = [...new Set((job.collectionSummary?.jobIds || [job.jobId, ...(job.collectionMemberJobIds || [])]).map(String))].filter(id => id !== currentJobId);
+    const ids = [...new Set((job.collectionMainMemberJobIds || job.collectionSummary?.jobIds || [job.jobId, ...(job.collectionMemberJobIds || [])]).map(String))].filter(id => id !== currentJobId);
     host.innerHTML = ids.map(id => {
       const member = jobs.find(item => String(item.jobId) === id) || { jobId: id };
       return `<label class="cp-option"><input type="checkbox" data-cp-job="${escapeHtml(id)}" checked disabled><span><strong>#${escapeHtml(id)}</strong> · ${escapeHtml(member.name || "Einzelakte")}</span></label>`;

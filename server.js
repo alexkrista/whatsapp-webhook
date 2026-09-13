@@ -70,6 +70,7 @@ const { installKristineSharedCalendar } = require("./kristine-shared-calendar");
 const { registerOutgoingBillingBridge } = require("./outgoing-billing-bridge");
 const { registerJobSourceCache } = require("./job-source-cache");
 const { recalculateCollections } = require("./public/ui/baustellen-data");
+const { createCollectionStore, collectionCatalog } = require("./sammelmappen");
 const { parseMsg, getMsgAttachment } = require("./kristine-msg-reader");
 const { extractRegieReportsFromPdf } = require("./regie-summary-parser");
 const { createRegieComparisonPdf } = require("./regie-comparison-pdf");
@@ -87,12 +88,17 @@ const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
 const APP_BUILD_DATE = "2026-09-12";
 
 // Static files for Admin UI
-app.use("/public", express.static("public"));
+app.use("/public", express.static("public", {
+  setHeaders(res, filePath) {
+    if (["baustellen.html", "sammelmappe.html"].includes(path.basename(filePath))) res.setHeader("Cache-Control", "no-store");
+  },
+}));
 app.get("/public/krista-logo.png", (_req, res) => res.sendFile(path.join(process.cwd(), "krista-logo.png")));
 
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const collectionStore = createCollectionStore({ dataDir: DATA_DIR });
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
@@ -338,6 +344,17 @@ function requireAdmin(req, res) {
   }
   return true;
 }
+
+app.use("/admin/api/job/:jobId", async (req, res, next) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const id = String(req.params.jobId || "");
+    if (req.path === "/collection") return next();
+    if (await collectionStore.reserved(id)) return res.status(409).json({ ok: false, error: "Die Sammelmappe hat keine eigenen Buchungen. Bitte die Einzelakte öffnen." });
+    if (req.method === "DELETE" && (req.path === "/" || req.path === "") && (await collectionStore.forMember(id)).length) return res.status(409).json({ ok: false, error: "Diese Einzelakte gehört zu einer Sammelmappe. Bitte zuerst die Zuordnung lösen." });
+    next();
+  } catch (error) { res.status(500).json({ ok: false, error: error.message }); }
+});
 
 const BRAIN_PERMIT_PATHS = new Set([
   "/api/outgoing/project-hours",
@@ -2867,6 +2884,7 @@ app.post("/admin/api/jobs", async (req, res) => {
     if (!name) return res.status(400).json({ ok: false, error: "Baustellenname fehlt." });
 
     let jobId = String(body.jobId || "").trim() || jobIdFromName(name);
+    if (await collectionStore.reserved(jobId)) return res.status(409).json({ ok: false, error: "Diese Nummer gehört zu einer Sammelmappe." });
     if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "UngÃ¼ltige Baustellennummer. Erlaubt sind Buchstaben, Zahlen, _ und -." });
     if (fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(409).json({ ok: false, error: `Baustelle #${jobId} existiert bereits.` });
 
@@ -3074,7 +3092,8 @@ app.get("/admin/api/jobs", async (req, res) => {
       if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       return (b.latestDay || "").localeCompare(a.latestDay || "");
     });
-    res.json(recalculateCollections({ ok: true, jobs }));
+    const collections = collectionCatalog(jobs, await collectionStore.list());
+    res.json(recalculateCollections({ ok: true, jobs, collections }));
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -3145,40 +3164,20 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
   }
 });
 
-// Non-destructive collection view: every member remains a complete individual job.
+// A Sammelmappe is stored separately and refers to ordinary project records.
 app.put("/admin/api/job/:jobId/collection", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const jobId = String(req.params.jobId || "").trim();
-    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
-    if (!fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(404).json({ ok: false, error: "Hauptakte nicht gefunden." });
-    const memberJobIds = cleanCollectionMemberJobIds(req.body?.memberJobIds, jobId);
-    const wwProjectLinks = cleanWwProjectLinks(req.body?.wwProjectLinks);
-    for (const memberId of memberJobIds) {
-      if (!fs.existsSync(path.join(DATA_DIR, memberId))) return res.status(404).json({ ok: false, error: `Einzelakte #${memberId} nicht gefunden.` });
-      const memberMeta = await readJobMeta(memberId);
-      if ((memberMeta.collectionMemberJobIds || []).length) return res.status(409).json({ ok: false, error: `#${memberId} ist selbst bereits eine Sammelakte.` });
-    }
-    const ids = (await fsp.readdir(DATA_DIR).catch(() => [])).filter(isSafeJobId);
-    for (const otherId of ids) {
-      if (String(otherId) === jobId) continue;
-      const other = await readJobMeta(otherId);
-      const conflict = memberJobIds.find(memberId => (other.collectionMemberJobIds || []).includes(memberId));
-      if (conflict) return res.status(409).json({ ok: false, error: `#${conflict} gehört bereits zur Sammelakte #${otherId}.` });
-      if ((other.collectionMemberJobIds || []).includes(jobId) && memberJobIds.length) return res.status(409).json({ ok: false, error: `#${jobId} ist bereits Einzelakte der Sammelakte #${otherId}.` });
-    }
-    const before = await readJobMeta(jobId);
-    const meta = await writeJobMeta(jobId, { collectionMemberJobIds: memberJobIds, wwProjectLinks });
-    await appendJobHistory(jobId, {
+    const collection = await collectionStore.save({ jobId: req.params.jobId, memberJobIds: req.body?.memberJobIds });
+    await appendJobHistory(collection.mainJobId, {
       type: "collection_updated",
-      title: memberJobIds.length ? `Sammelakte mit ${memberJobIds.length + 1} Einzelakten aktualisiert` : "Sammelakte aufgelöst",
-      detail: memberJobIds.length ? `Einzelakten: ${[jobId, ...memberJobIds].join(", ")}` : "Alle Zuordnungen entfernt; die Einzelakten bleiben unverändert erhalten.",
-      source: "KRISTINE Sammelakte",
-      data: { before: before.collectionMemberJobIds || [], memberJobIds, wwProjectLinks },
-    });
-    res.json({ ok: true, jobId, collectionMemberJobIds: meta.collectionMemberJobIds, wwProjectLinks: meta.wwProjectLinks });
+      title: collection.active ? `Sammelmappe ${collection.id} aktualisiert` : `Sammelmappe ${collection.id} aufgelöst`,
+      detail: `Hauptakte: ${collection.mainJobId} · Einzelakten: ${collection.memberJobIds.join(", ")}`,
+      source: "KRISTINE Sammelmappe", data: collection,
+    }).catch(error => console.error("COLLECTION_HISTORY failed:", error.message));
+    res.json({ ok: true, jobId: collection.mainJobId, collectionId: collection.id, collectionMemberJobIds: collection.memberJobIds, collection });
   } catch (error) {
-    res.status(500).json({ ok: false, error: String(error?.message || error) });
+    res.status(error.status || 500).json({ ok: false, error: String(error?.message || error) });
   }
 });
 
@@ -4244,6 +4243,7 @@ registerCustomerPortal(app, {
   readJobMeta,
   writeJobMeta,
   appendJobHistory,
+  collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
   portalBaseUrl: CUSTOMER_PORTAL_URL,
 });
 console.log("âœ… KRISTINE Materialsystem registriert");
@@ -4434,8 +4434,23 @@ async function startServer() {
     }
     console.info("LEGACY_COLLECTION_REPAIR", JSON.stringify(result));
   } catch (error) { console.error("LEGACY_COLLECTION_REPAIR failed:", error.message); }
+  try { console.info("SAMMELMAPPEN_MIGRATION", JSON.stringify(await collectionStore.migrateLegacy())); }
+  catch (error) { console.error("SAMMELMAPPEN_MIGRATION failed:", error.message); throw error; }
   resumePhotoInboxImport();
-  try { console.info("COLLECTION_SOURCE_AUDIT", JSON.stringify(await require("./job-source-cache").auditStoredCollection({ dataDir: DATA_DIR, jobId: "24177", readJobMeta, readDocumentation }))); }
+  try {
+    for (const id of ["S24177", "S25018"]) {
+      const collection = await collectionStore.get(id);
+      if (!collection) { console.info("COLLECTION_SOURCE_AUDIT", JSON.stringify({ jobId: id, active: false })); continue; }
+      const audit = await require("./job-source-cache").auditStoredCollection({ dataDir: DATA_DIR, collection, readJobMeta, readDocumentation });
+      const photoAudit = {};
+      if (id === "S25018") {
+        const photos = new Set();
+        for (const memberId of collection.memberJobIds) for (const item of await listJobMedia({ dataDir: DATA_DIR, jobId: memberId, includeCollection: false })) if (item.kind === "photo") photos.add(item.file);
+        photoAudit.photos = photos.size;
+      }
+      console.info("COLLECTION_SOURCE_AUDIT", JSON.stringify({ ...audit, ...photoAudit }));
+    }
+  }
   catch (error) { console.error("COLLECTION_SOURCE_AUDIT failed:", error.message); }
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }

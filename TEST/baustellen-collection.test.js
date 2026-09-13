@@ -97,6 +97,19 @@ assert.equal(reloads, 1);
 assert.equal(context.location.hash, "#26002");
 assert.equal(context.location.searchParams.get("token"), "test-token");
 
+context.window.BaustellenData = require("../public/ui/baustellen-data");
+collections.setJobs([
+  { jobId: "S24177", kind: "collection", name: "Allgäuer", collectionMainJobId: "24177", collectionMemberJobIds: ["24177", "26018"] },
+  { jobId: "24177", name: "Hauptakte" }, { jobId: "26018", name: "Einzelakte" },
+]);
+for (const id of ["S24177", "24177", "26018"]) {
+  assert.deepEqual(ids(collections.groupsFor(id)[0]), ["24177", "26018"]);
+  assert.equal(collections.groupLabel(collections.groupsFor(id)), "Vereint · 2 Baustellen");
+}
+assert.match(collections.jobUrl("S24177"), /^\/kristine\/sammelmappe\?token=test-token&view=all#S24177$/);
+assert.match(collections.groupMarkup(collections.groupsFor("24177"), "24177"), /Sammelmappe S24177 öffnen/);
+assert.equal((collections.groupMarkup(collections.groupsFor("24177"), "24177").match(/aria-current="page"/g) || []).length, 1);
+
 // replaceState does not emit hashchange: the page must explicitly notify the UI.
 for (const event of ["krista:baustellen-rendered", "krista:baustelle-opened", "krista:baustelle-closed"]) {
   assert.ok(page.includes(`new CustomEvent('${event}'`));
@@ -105,8 +118,8 @@ for (const event of ["krista:baustellen-rendered", "krista:baustelle-opened", "k
 assert.match(page, /Keine Baustellen gefunden\.<\/div>';notifyCollections\(\);return/);
 assert.match(source, /#detail \.detail-top/);
 assert.doesNotMatch(source, /getElementById\("detailNumber"\)/, "legacy ID formatting must not erase the badge");
-assert.match(page, /topbar\.js\?v=20260913-hours-balance-2/);
-assert.match(topbar, /baustellen-collection\.js\?v=20260913-collection-3/);
+assert.match(page, /topbar\.js\?v=20260913-sammelmappe-1/);
+assert.match(topbar, /baustellen-collection\.js\?v=20260913-sammelmappe-1/);
 for (const match of page.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
   if (match[1].trim()) new vm.Script(match[1]);
 }
