@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const VERSION = "2026-09-09-regie-hours";
+  const VERSION = "2026-09-13-hours-balance-2";
   const token = new URLSearchParams(location.search).get("token") || "";
   let currentJobId = "";
   let metaRows = [];
@@ -313,13 +313,14 @@
       if (!j) return;
       const view = window.BaustellenData.view(j,data.jobs),c = view.calculation || {};
       const live = window.BaustellenLiveHours?.summary?.(currentJobId);
-      const actual = num(live?.order ?? c.orderHours ?? c.actualHours), target = num(c.fixedCalculatedHours ?? c.calculatedHours);
-      const open = num(live?.remaining ?? c.remainingOrderHours ?? Math.max(0,target-actual));
+      const actual = num(live?.total ?? window.BaustellenData.actualHours(view)), target = window.BaustellenData.totalTarget(view);
+      const open = window.BaustellenData.hourBalance(target,actual).remaining;
       const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
       set("detailAmount", money(view.contractAmount ?? c.contractAmount));
       set("detailHours", `${hours(actual)} / ${hours(target)}`);
       set("detailHoursNote", target > 0 ? `${Math.round(actual / target * 100)} % verbraucht` : "keine Sollstunden hinterlegt");
       set("detailOpen", hours(open));
+      set("detailOpenNote", actual>target?`${hours(actual-target)} über Soll · keine offenen Stunden`:`${hours(target)} Soll − ${hours(actual)} Ist = ${hours(open)}`);
       const progress = target > 0 ? Math.min(100, actual / target * 100) : 0;
       const bar = document.getElementById("detailProgress"); if (bar) bar.style.width = progress + "%";
       const note = document.getElementById("detailProgressNote"); if (note) note.textContent = target > 0 ? `${hours(actual)} von ${hours(target)} · ${Math.round(progress)} %` : "Noch keine Stundenkalkulation hinterlegt.";

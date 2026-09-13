@@ -11,9 +11,13 @@
   function memberIds(job){return unique([job?.jobId,...(job?.collectionMemberJobIds||[]),...(job?.collectionSummary?.jobIds||[])])}
   function members(job,jobs){const byId=new Map((jobs||[]).map(row=>[String(row.jobId),row]));return memberIds(job).map(id=>byId.get(id)||(id===String(job?.jobId)?job:null)).filter(Boolean)}
   function single(job){return {...job,collectionSummary:undefined,collectionMemberJobIds:[]}}
-  function fixedTarget(job){const c=job?.calculation||{};return positive(c.fixedCalculatedHours??c.calculatedHours)}
+  function fixedTarget(job){const c=job?.calculation||{};return positive(c.fixedCalculatedHours??num(c.calculatedHours)-num(c.plannedRegieHours))}
+  function totalTarget(job){const c=job?.calculation||{};return positive(c.calculatedHours??fixedTarget(job)+positive(c.plannedRegieHours))}
+  function actualHours(job){const c=job?.calculation||{};return positive(c.actualHours??num(c.orderHours)+num(c.actualRegieHours))}
+  function hourBalance(target,actual){const difference=num(target)-num(actual);return {remaining:Math.max(0,difference),overrun:Math.max(0,-difference)}}
   function orderHours(job){const c=job?.calculation||{};return positive(c.orderHours??positive(num(c.actualHours)-num(c.actualRegieHours)))}
-  function remaining(job,actual=orderHours(job)){return Math.max(0,fixedTarget(job)-positive(actual))}
+  function remaining(job,actual=orderHours(job)){return hourBalance(fixedTarget(job),positive(actual)).remaining}
+  function openHours(job,jobs){const rows=members(job,jobs);return rows.some(row=>["Auftrag","Laufend"].includes(row.status))?hourBalance(rows.reduce((sum,row)=>sum+totalTarget(row),0),rows.reduce((sum,row)=>sum+actualHours(row),0)).remaining:0}
   function projects(job,jobs){
     const result=[],seen=new Set(),rows=members(job,jobs);
     for(const member of rows){
@@ -34,8 +38,15 @@
       out[key]=rows.reduce((sum,row)=>sum+num(row.calculation?.[key]??row[key]),0);
     }
     out.fixedCalculatedHours=rows.reduce((sum,row)=>sum+fixedTarget(row),0);
-    out.remainingOrderHours=rows.reduce((sum,row)=>sum+remaining(row),0);
-    out.overrunHours=rows.reduce((sum,row)=>sum+Math.max(0,orderHours(row)-fixedTarget(row)),0);
+    out.calculatedHours=rows.reduce((sum,row)=>sum+totalTarget(row),0);
+    out.actualHours=rows.reduce((sum,row)=>sum+actualHours(row),0);
+    out.orderHours=rows.reduce((sum,row)=>sum+orderHours(row),0);
+    // Eine Sammelmappe hat einen gemeinsamen Rest: erst summieren, dann begrenzen.
+    const totalBalance=hourBalance(out.calculatedHours,out.actualHours),orderBalance=hourBalance(out.fixedCalculatedHours,out.orderHours);
+    out.remainingHours=totalBalance.remaining;
+    out.overrunHours=totalBalance.overrun;
+    out.remainingOrderHours=orderBalance.remaining;
+    out.orderOverrunHours=orderBalance.overrun;
     out.materialPercent=out.kristaAmount>0?out.materialAmount/out.kristaAmount*100:0;
     out.billingRate=out.fixedCalculatedHours>0?out.laborAmount/out.fixedCalculatedHours:0;
     out.progressPercent=out.fixedCalculatedHours>0?out.orderHours/out.fixedCalculatedHours*100:0;
@@ -50,8 +61,8 @@
       job.collectionSummary={...job.collectionSummary,count:rows.length,jobIds:rows.map(row=>String(row.jobId)),calculation,
         contractAmount:calculation.contractAmount,calculatedHours:calculation.calculatedHours,fixedCalculatedHours:calculation.fixedCalculatedHours,
         actualHours:calculation.actualHours,actualRegieHours:calculation.actualRegieHours,orderHours:calculation.orderHours,
-        remainingOrderHours:calculation.remainingOrderHours,overrunHours:calculation.overrunHours,
-        openOrderHours:rows.filter(row=>["Auftrag","Laufend"].includes(row.status)).reduce((sum,row)=>sum+remaining(row),0),
+        remainingHours:calculation.remainingHours,remainingOrderHours:calculation.remainingOrderHours,overrunHours:calculation.overrunHours,orderOverrunHours:calculation.orderOverrunHours,
+        openOrderHours:openHours(job,jobs),
         wwProjects:projects(job,jobs)};
     }
     return payload;
@@ -85,5 +96,5 @@
       paidGross:payments.reduce((s,r)=>s+num(r.gross),0),openGross:runs.reduce((s,r)=>s+num(r.openGross),0)});
     return {found:results.some(row=>row.billing?.found),summary,invoices,payments,runs};
   }
-  return {num,memberIds,members,single,fixedTarget,orderHours,remaining,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
+  return {num,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
 });

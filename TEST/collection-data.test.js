@@ -10,11 +10,11 @@ function frontend(name,extra={}){
   vm.runInNewContext(fs.readFileSync(path.join(root,name),"utf8")+(extra.append||""),context);return context;
 }
 
-test("collection totals use enriched calculation and keep overruns separate",()=>{
+test("collection totals subtract all actual hours from all target hours",()=>{
   const a=job("24177",100,120),b=job("24178",100,50);a.collectionMemberJobIds=[b.jobId,b.jobId];
   a.collectionSummary={jobIds:[a.jobId,b.jobId],calculatedHours:0};
   D.recalculateCollections({jobs:[a,b]});
-  assert.equal(a.collectionSummary.calculatedHours,200);assert.equal(a.collectionSummary.remainingOrderHours,50);assert.equal(a.collectionSummary.overrunHours,20);
+  assert.equal(a.collectionSummary.calculatedHours,200);assert.equal(a.collectionSummary.remainingOrderHours,30);assert.equal(a.collectionSummary.remainingHours,30);assert.equal(a.collectionSummary.overrunHours,0);
   a.calculation.calculatedHours=150;a.calculation.fixedCalculatedHours=150;D.recalculateCollections({jobs:[a,b]});assert.equal(a.collectionSummary.calculatedHours,250);
   assert.equal(D.remaining(job("25018",1323.53,1293.2)).toFixed(2),"30.33");
   const regie=job("25019",100,110);regie.calculation.actualRegieHours=20;regie.calculation.orderHours=90;assert.equal(D.remaining(regie),10);
@@ -49,7 +49,76 @@ test("live hours do not reconcile the same employee across different member jobs
   const kr={totalHours:2,days:new Map([["2026-09-01",2]]),dayPeople:new Map([["2026-09-01",new Map([[person.identity,person]])]])};
   context.window.testHours.set([a,b],[[b.jobId,ww]],[[a.jobId,kr]]);
   assert.equal(context.window.testHours.fusion(a).total,4);assert.equal(context.window.testHours.hoursSummary(a.jobId).remaining,196);
-  a.calculation.fixedCalculatedHours=1;assert.equal(context.window.testHours.hoursSummary(a.jobId).remaining,98);
+  a.calculation.fixedCalculatedHours=1;a.calculation.calculatedHours=1;assert.equal(context.window.testHours.hoursSummary(a.jobId).remaining,97);
+});
+
+function hoursFrontend(rows,extra={}){
+  const source=fs.readFileSync(path.join(root,"public/ui/baustellen-live-hours.js"),"utf8");
+  const injected=source.replace('  if(document.readyState===',`  window.testHours={set(rows){jobs=rows},hoursSummary,openHours,patchBaseDetail,patchCockpit,patchEconomy};\n  if(document.readyState===`);
+  const context={window:{BaustellenData:D,BaustellenSources:{performance(){return null}}},document:{readyState:"loading",addEventListener(){},...extra},location:{search:""},URLSearchParams,Map,Set,Date,Intl,console};
+  vm.runInNewContext(injected,context);context.window.testHours.set(rows);return context.window.testHours;
+}
+
+test("25018: 510 target minus 494 actual leaves 16, including an overrun member",()=>{
+  const head=job("25018",510,468),member=job("keckeis_gabi_harry",0,26);head.collectionMemberJobIds=[member.jobId];
+  const jobs=[head,member];D.recalculateCollections({jobs});
+  assert.equal(head.collectionSummary.remainingHours,16);assert.equal(head.collectionSummary.remainingOrderHours,16);
+  assert.equal(D.openHours(head,jobs),16);
+  const live=hoursFrontend(jobs);assert.equal(live.hoursSummary(head.jobId).remaining,16);assert.equal(live.openHours(head),16);
+  member.status="Geschlossen";
+  assert.equal(D.openHours(head,jobs),16,"The detail and list use the same members, including a closed member of an active collection");
+  assert.equal(live.openHours(head),16);
+  head.status="Geschlossen";assert.equal(D.openHours(head,jobs),0);assert.equal(live.openHours(head),0);
+});
+
+test("24177: all 39 members share the same 1323.53 minus 1293.2 balance",()=>{
+  const jobs=Array.from({length:39},(_,i)=>job(String(24177+i),0,0)),head=jobs[0];
+  head.calculation={...job(head.jobId,1323.53,322.43).calculation};jobs[1].calculation.actualHours=970.77;jobs[1].calculation.orderHours=970.77;
+  head.collectionMemberJobIds=jobs.slice(1).map(row=>row.jobId);D.recalculateCollections({jobs});
+  const live=hoursFrontend(jobs).hoursSummary(head.jobId);
+  assert.equal(head.collectionSummary.remainingHours.toFixed(2),"30.33");assert.equal(live.remaining.toFixed(2),"30.33");
+  assert.equal(live.remaining.toFixed(1),"30.3");assert.equal(live.overrun,0);
+  assert.equal(live.target.toFixed(2),"1323.53");assert.equal(live.total.toFixed(1),"1293.2");
+});
+
+test("total hours include regie on both sides; a total overrun leaves zero open",()=>{
+  const head=job("25018",100,95),member=job("25019",50,30);head.collectionMemberJobIds=[member.jobId];
+  head.calculation.fixedCalculatedHours=80;head.calculation.plannedRegieHours=20;head.calculation.actualRegieHours=15;head.calculation.orderHours=80;
+  const jobs=[head,member];let live=hoursFrontend(jobs).hoursSummary(head.jobId),stored=D.aggregateCalculation(jobs);
+  assert.equal(live.target,150);assert.equal(live.total,125);assert.equal(live.remaining,25);assert.equal(stored.remainingHours,25);
+  assert.equal(live.remainingOrder,20);assert.equal(stored.remainingOrderHours,20);
+  member.calculation.actualHours=70;member.calculation.orderHours=70;
+  live=hoursFrontend(jobs).hoursSummary(head.jobId);stored=D.aggregateCalculation(jobs);
+  assert.equal(live.remaining,0);assert.equal(live.overrun,15);assert.equal(stored.overrunHours,15);
+  assert.equal(live.remaining-live.overrun,live.target-live.total);
+});
+
+test("detail, cockpit and economy render the same total balance",()=>{
+  const head=job("25018",510,468),member=job("keckeis_gabi_harry",0,26);head.collectionMemberJobIds=[member.jobId];
+  const text=()=>({textContent:"",classList:{toggle(){}}});
+  const card=label=>{const nodes={".bk-label":{textContent:label},".bk-value":text(),".bk-note":text()};return {nodes,querySelector:s=>nodes[s]||null}};
+  const cards=[card("Kalkulierte Sollstunden"),card("Iststunden gesamt"),card("Noch offene Stunden")];
+  const pulse=label=>{const nodes={span:{textContent:label},strong:text(),small:text()};return {textContent:label,nodes,querySelector:s=>nodes[s]||null}};
+  const pulses=[pulse("Sollstunden gesamt"),pulse("Iststunden"),pulse("Reststunden")];
+  const elements={detailHours:text(),detailHoursNote:text(),detailOpen:text(),detailOpenNote:text(),bcShell:{querySelectorAll(){return []}},bkEconomy:{dataset:{},querySelectorAll:s=>s===".bk-card"?cards:[]}};
+  const live=hoursFrontend([head,member],{getElementById:id=>elements[id]||null,querySelectorAll:s=>s==="#bcShell .bc-pulse-item"?pulses:[]});
+  live.patchBaseDetail(head.jobId);live.patchCockpit(head.jobId);live.patchEconomy(head.jobId);
+  assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");
+  assert.equal(elements.detailOpenNote.textContent,"510 h Soll − 494 h Ist = 16 h");
+  assert.equal(pulses[2].nodes.strong.textContent,"16 h");assert.equal(pulses[2].nodes.small.textContent,elements.detailOpenNote.textContent);
+  assert.equal(cards[0].nodes[".bk-value"].textContent,"510 h");assert.equal(cards[1].nodes[".bk-value"].textContent,"494 h");assert.equal(cards[2].nodes[".bk-value"].textContent,"16 h");
+  assert.equal(cards[2].nodes[".bk-note"].textContent,elements.detailOpenNote.textContent);
+  member.calculation.actualHours=60;member.calculation.orderHours=60;
+  live.patchBaseDetail(head.jobId);assert.equal(elements.detailOpen.textContent,"0 h");assert.equal(elements.detailOpenNote.textContent,"18 h über Soll · keine offenen Stunden");
+});
+
+test("saving a calculation refreshes total actual, current target and open hours together",async()=>{
+  const head=job("25018",510,468),member=job("keckeis_gabi_harry",0,26);head.collectionMemberJobIds=[member.jobId];
+  const elements=Object.fromEntries(["detailAmount","detailHours","detailHoursNote","detailOpen","detailOpenNote","detailProgress","detailProgressNote"].map(id=>[id,{textContent:"",style:{}}]));
+  const source=fs.readFileSync(path.join(root,"public/ui/baustellen-calculation-grid-v2.js"),"utf8").replace('  if (document.readyState ===',`  window.testGrid=async id=>{currentJobId=id;await refreshOuterNumbers()};\n  if (document.readyState ===`);
+  const context={window:{BaustellenData:D,BaustellenLiveHours:{summary:()=>({total:494,order:470,target:500,remaining:42})}},document:{readyState:"loading",addEventListener(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[]},location:{search:"",origin:"https://protokoll.krista.at"},fetch:async()=>({ok:true,text:async()=>JSON.stringify({jobs:[head,member]})}),URL,URLSearchParams,Intl,Map,Set,console};
+  vm.runInNewContext(source,context);await context.window.testGrid(head.jobId);
+  assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");assert.equal(elements.detailOpenNote.textContent,"510 h Soll − 494 h Ist = 16 h");
 });
 
 test("collection loader reads all 39 document, regie and invoice sources without moving them",async()=>{
