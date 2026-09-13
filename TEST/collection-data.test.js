@@ -112,6 +112,15 @@ test("detail, cockpit and economy render the same total balance",()=>{
   live.patchBaseDetail(head.jobId);assert.equal(elements.detailOpen.textContent,"0 h");assert.equal(elements.detailOpenNote.textContent,"18 h über Soll · keine offenen Stunden");
 });
 
+test("saving a calculation refreshes total actual, current target and open hours together",async()=>{
+  const head=job("25018",510,468),member=job("keckeis_gabi_harry",0,26);head.collectionMemberJobIds=[member.jobId];
+  const elements=Object.fromEntries(["detailAmount","detailHours","detailHoursNote","detailOpen","detailOpenNote","detailProgress","detailProgressNote"].map(id=>[id,{textContent:"",style:{}}]));
+  const source=fs.readFileSync(path.join(root,"public/ui/baustellen-calculation-grid-v2.js"),"utf8").replace('  if (document.readyState ===',`  window.testGrid=async id=>{currentJobId=id;await refreshOuterNumbers()};\n  if (document.readyState ===`);
+  const context={window:{BaustellenData:D,BaustellenLiveHours:{summary:()=>({total:494,order:470,target:500,remaining:42})}},document:{readyState:"loading",addEventListener(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[]},location:{search:"",origin:"https://protokoll.krista.at"},fetch:async()=>({ok:true,text:async()=>JSON.stringify({jobs:[head,member]})}),URL,URLSearchParams,Intl,Map,Set,console};
+  vm.runInNewContext(source,context);await context.window.testGrid(head.jobId);
+  assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");assert.equal(elements.detailOpenNote.textContent,"510 h Soll − 494 h Ist = 16 h");
+});
+
 test("collection loader reads all 39 document, regie and invoice sources without moving them",async()=>{
   const jobs=Array.from({length:39},(_,i)=>job(String(24177+i)));jobs[0].collectionMemberJobIds=jobs.slice(1).map(row=>row.jobId);
   jobs[1].calculation.actualHours=2;jobs[1].calculation.orderHours=2;
