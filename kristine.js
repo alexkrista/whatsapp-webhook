@@ -7,6 +7,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
+const { financeTaskWhatsAppDetail } = require("./finance-task-whatsapp");
 
 function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta }) {
   const ROOT = path.join(dataDir, "_kristine");
@@ -2952,7 +2953,7 @@ const open = taskId
           task.address ? `📍 ${task.address}` : "",
           task.dueDate ? `📅 Fällig: ${task.dueDate.split("-").reverse().join(".")}` : "",
           `Priorität: ${priorityLabel}`,
-          task.reminder ? `ℹ️ ${task.reminder}` : "",
+          task.reminder ? financeTaskWhatsAppDetail(task.reminder) || `ℹ️ ${task.reminder}` : "",
           task.contactPhone ? `📞 ${task.contactName ? task.contactName + ": " : ""}${task.contactPhone}` : "",
           task.contactEmail ? `✉️ ${task.contactEmail}` : "",
         ].filter(Boolean);
