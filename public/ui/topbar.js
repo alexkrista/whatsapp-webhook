@@ -175,7 +175,7 @@
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260914-position-sum-1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-offer-positions-1", "data-krista-kalkulation-grid-v2");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260902-offer7", "data-krista-angebot-v7");
+    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260914-notepad-1", "data-krista-angebot-v7");
   }
 
   function loadTowerSignals() {
@@ -314,3 +314,4 @@
     if (mount) buildTopbar(mount);
   });
 })();
+
