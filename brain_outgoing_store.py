@@ -668,6 +668,62 @@ class OutgoingStore:
             sql += " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, id DESC"
             return [self._run_public(con, row) for row in con.execute(sql, params)]
 
+    def billing_documents_by_project_numbers(self, project_numbers):
+        """Return the lightweight invoice facts the Tower needs in one DB query."""
+        numbers = []
+        for value in project_numbers or []:
+            number = str(value or "").strip()
+            if number.isdigit() and len(number) <= 12 and number not in numbers:
+                numbers.append(number)
+            if len(numbers) >= 100:
+                break
+        result = {
+            number: {
+                "found": True,
+                "projectNumber": number,
+                "summary": {"invoiceCount": 0, "billedNet": 0},
+                "invoices": [],
+                "payments": [],
+                "runs": [],
+            }
+            for number in numbers
+        }
+        if not numbers:
+            return result
+        placeholders = ",".join("?" for _ in numbers)
+        with self.connect() as con:
+            rows = con.execute(f"""
+                SELECT r.project_number,i.id,i.kind,i.status,i.invoice_number,
+                       i.issue_date,i.increment_net,i.source,i.source_id
+                FROM outgoing_runs AS r
+                JOIN outgoing_invoices AS i ON i.run_id=r.id
+                WHERE r.project_number IN ({placeholders})
+                  AND i.status<>'cancelled'
+                ORDER BY i.issue_date,i.id
+            """, numbers).fetchall()
+        for row in rows:
+            number = str(row["project_number"] or "").strip()
+            target = result.get(number)
+            if target is None:
+                continue
+            invoice = {
+                "id": int(row["id"] or 0),
+                "kind": str(row["kind"] or "RE"),
+                "status": str(row["status"] or "draft"),
+                "invoiceNumber": str(row["invoice_number"] or ""),
+                "issueDate": str(row["issue_date"] or "")[:10],
+                "net": _num(_money(row["increment_net"])),
+                "source": str(row["source"] or "KRISTINE"),
+                "sourceId": str(row["source_id"] or ""),
+            }
+            target["invoices"].append(invoice)
+            if invoice["status"] == "issued":
+                target["summary"]["invoiceCount"] += 1
+                target["summary"]["billedNet"] = round(
+                    target["summary"]["billedNet"] + invoice["net"], 2
+                )
+        return result
+
     def run(self, run_id):
         with self.connect() as con:
             row = con.execute("SELECT * FROM outgoing_runs WHERE id=?", (int(run_id),)).fetchone()

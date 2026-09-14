@@ -1,13 +1,13 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-14-open-regie-only-1";
+  const VERSION="2026-09-14-billing-reliable-1";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
   async function timedFetch(url,options={},timeoutMs=12000){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),timeoutMs);try{return await fetch(url,{...options,signal:controller.signal})}finally{clearTimeout(timeout)}}
   async function api(p){const r=await timedFetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
-  async function brainApi(p){const r=await timedFetch(BRAIN_URL+p,{cache:"no-store",headers:token?{"X-Krista-Token":token}:{}});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d}
+  async function brainApi(p,timeoutMs=12000){const r=await timedFetch(BRAIN_URL+p,{cache:"no-store",headers:token?{"X-Krista-Token":token}:{}},timeoutMs);const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok||d?.ok===false)throw new Error(d?.error||t||r.statusText);return d}
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
@@ -15,6 +15,7 @@
   let liveByJob=new Map();
   let billingByJob={};
   let billingReady=false;
+  let billingPending=true;
   let timer=null;
   let retryTimer=null;
   let loading=false;
@@ -106,9 +107,10 @@
 
   function renderBillable(jobs){
     const dash=document.querySelector('.dashboard'),main=document.querySelector('body>main');if(!main)return;
-    let button=document.getElementById('towerBillable');if(!button){button=document.createElement('button');button.type='button';button.id='towerBillable';button.className='ts-billable';if(dash)main.insertBefore(button,dash);else main.appendChild(button)}
+    let button=document.getElementById('towerBillable');if(!button){button=document.createElement('button');button.type='button';button.id='towerBillable';button.className='ts-billable';const signals=document.getElementById('towerSignals');if(signals)main.insertBefore(button,signals);else if(dash)main.insertBefore(button,dash);else main.appendChild(button)}
     const rows=billableRows(jobs),total=rows.reduce((sum,row)=>sum+row.amountToInvoice,0);
-    button.innerHTML=`<div><span>Noch abzurechnen</span><small>${billingReady?`${rows.length} Baustelle(n) ohne Schlussrechnung · Teilrechnungen bereits abgezogen`:'Rechnungsdaten derzeit nicht erreichbar'}</small></div><strong>${billingReady?money(total):'–'}</strong>`;
+    const billingNote=billingReady?`${rows.length} Baustelle(n) ohne Schlussrechnung · Teilrechnungen bereits abgezogen`:billingPending?'Rechnungsdaten werden geladen …':'Rechnungsdaten derzeit nicht erreichbar';
+    button.innerHTML=`<div><span>Noch abzurechnen</span><small>${billingNote}</small></div><strong>${billingReady?money(total):billingPending?'…':'–'}</strong>`;
     let dialog=document.getElementById('towerBillableDialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='towerBillableDialog';dialog.className='ts-billable-dialog';document.body.appendChild(dialog)}
     dialog.innerHTML=`<div class="ts-billable-head"><div><h2>Noch abzurechnen</h2><small>Abrechenbare Leistung minus geschriebene Teilrechnungen</small></div><button type="button" data-ts-close>Schließen</button></div><div class="ts-billable-list"><div class="ts-billable-row head"><span>Baustelle</span><b>Leistung</b><b>Teilrechnungen</b><b>Noch abzurechnen</b></div>${rows.length?rows.map(row=>`<a class="ts-billable-row" href="${tokenUrl('/kristine/baustellen')}#${encodeURIComponent(row.job.jobId)}"><span><strong>${esc(row.job.name||row.job.jobId)}</strong><small>#${esc(row.job.jobId)} · ${hours(row.orderHours)} Auftrag + ${money(row.actualRegieAmount)} offene Regie</small></span><b>${money(row.billablePerformance)}</b><b>− ${money(row.partialInvoiceNet)}</b><b>${money(row.amountToInvoice)}</b></a>`).join(''):'<div class="ts-empty">Derzeit ist keine abrechenbare Leistung ohne Schlussrechnung offen.</div>'}</div>`;
     button.onclick=()=>dialog.showModal();dialog.querySelector('[data-ts-close]').onclick=()=>dialog.close();dialog.onclick=event=>{if(event.target===dialog)dialog.close()};
@@ -148,7 +150,7 @@
     wrap.innerHTML=`<div class="ts-head"><div><h2>Heute wichtig</h2><p>Aufgaben, Angebote, Abrechnungen und Auftragsfreigaben auf einen Blick.</p></div><span class="ts-count">${openTasks.length+offers.length+orders.length+rows.length} Signale</span></div><div class="ts-grid">${pane('Aufgaben','tasks',openTasks.map(taskItem))}${pane('Angebote','offers',[...offers.map(workflowItem),...offerSignals.map(signalItem)])}${pane('Abrechnungen','billing',billing.map(signalItem))}${pane('Aufträge','orders',[...orders.map(workflowItem),...orderSignals.map(signalItem)])}</div><div class="ts-footer"><a href="${tokenUrl('/kristine/baustellen')}">Alle Baustellen öffnen →</a></div>`;wrap.dataset.ready='1'
   }
 
-  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};buildLiveMap(boot);const kpi=patchKpis(jobs,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}const legacy=jobs.reduce((sum,row)=>{const c=calc(row);const oldActual=num(c.actualHours??c.orderHours);if(row.status==='Auftrag')return sum+Math.max(0,target(row));if(row.status==='Laufend')return sum+Math.max(0,target(row)-oldActual);return sum},0);window.__kristaTowerHours={live:kpi.totalOpen,legacy,difference:legacy-kpi.totalOpen,updatedAt:new Date().toISOString()};const projectNumbers=jobs.filter(row=>['Auftrag','Laufend','Fertig – nicht abgerechnet'].includes(String(row.status||''))).map(row=>String(row.jobId||'')).filter(value=>/^\d{1,12}$/.test(value)).slice(0,100),tower=await brainApi('/tower/live-summary?year='+new Date().getFullYear()+'&projects='+encodeURIComponent(projectNumbers.join(','))).catch(()=>null);billingReady=!!tower;billingByJob=tower?.billingByProject||{};renderBillable(jobs)}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false}}
-  function init(){installCss();renderPending();load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
+  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};buildLiveMap(boot);const kpi=patchKpis(jobs,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}const legacy=jobs.reduce((sum,row)=>{const c=calc(row);const oldActual=num(c.actualHours??c.orderHours);if(row.status==='Auftrag')return sum+Math.max(0,target(row));if(row.status==='Laufend')return sum+Math.max(0,target(row)-oldActual);return sum},0);window.__kristaTowerHours={live:kpi.totalOpen,legacy,difference:legacy-kpi.totalOpen,updatedAt:new Date().toISOString()};const projectNumbers=jobs.filter(row=>['Auftrag','Laufend','Fertig – nicht abgerechnet'].includes(String(row.status||''))).map(row=>String(row.jobId||'')).filter(value=>/^\d{1,12}$/.test(value)).slice(0,100);billingPending=!billingReady;renderBillable(jobs);try{const tower=await brainApi('/tower/live-summary?year='+new Date().getFullYear()+'&projects='+encodeURIComponent(projectNumbers.join(',')),60000);billingReady=true;billingByJob=tower?.billingByProject||{}}catch(error){console.warn('Tower Rechnungsdaten',error)}finally{billingPending=false;renderBillable(jobs)}}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');billingPending=false;if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false}}
+  function init(){installCss();renderPending();renderBillable([]);load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

@@ -8198,12 +8198,17 @@ def tower_live_summary_api():
         with app.test_client() as client:
             debtors = client.get("/api/outgoing/open-items").get_json(silent=True) or {}
             creditors = client.get("/incoming/payment-open-items").get_json(silent=True) or {}
+        outgoing_store = app.extensions.get("kristine_outgoing_store")
+        if outgoing_store and hasattr(outgoing_store, "billing_documents_by_project_numbers"):
+            billing_by_project = outgoing_store.billing_documents_by_project_numbers(project_numbers)
+        else:
             billing_by_project = {}
-            for project_number in project_numbers:
-                response = client.post("/api/outgoing/project-billing", json={"projectNumber": project_number})
-                payload = response.get_json(silent=True) or {}
-                if response.status_code < 400 and payload.get("billing") is not None:
-                    billing_by_project[project_number] = payload["billing"]
+            with app.test_client() as client:
+                for project_number in project_numbers:
+                    response = client.post("/api/outgoing/project-billing", json={"projectNumber": project_number})
+                    payload = response.get_json(silent=True) or {}
+                    if response.status_code < 400 and payload.get("billing") is not None:
+                        billing_by_project[project_number] = payload["billing"]
         if debtors.get("ok") is False or creditors.get("ok") is False:
             raise RuntimeError(debtors.get("error") or creditors.get("error") or "OP-Summen nicht verfügbar")
         planning = company_planning_year(request.args.get("year", 2026))

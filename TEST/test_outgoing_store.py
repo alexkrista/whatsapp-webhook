@@ -64,6 +64,15 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertNotEqual(self.run["id"], second["id"])
         self.assertEqual(len(self.store.runs(2602119)), 2)
 
+    def test_tower_billing_documents_are_loaded_for_many_projects_at_once(self):
+        issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="2500"))["id"])
+        summaries = self.store.billing_documents_by_project_numbers(["26025", "26026"])
+        self.assertEqual(set(summaries), {"26025", "26026"})
+        self.assertEqual(summaries["26025"]["summary"]["invoiceCount"], 1)
+        self.assertEqual(summaries["26025"]["summary"]["billedNet"], 2500.0)
+        self.assertEqual(summaries["26025"]["invoices"][0]["id"], issued["id"])
+        self.assertEqual(summaries["26026"]["invoices"], [])
+
     def test_standalone_sale_run_needs_no_project_number(self):
         sale = self.store.create_run({
             "label": "Materialverkauf", "company": "Direktkunde GmbH",
