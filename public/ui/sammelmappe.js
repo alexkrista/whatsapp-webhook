@@ -7,6 +7,7 @@
   let allReports = [], previewIndex = -1, bookings = [], bookingFailures = 0, bookingsReady = false;
   let savedView = null, savedAt = "", usingSaved = false, dataGeneration = 0, startedAt = "", lastSavedSignature = "", savingSnapshot = false;
   let memberCandidates = [];
+  let savingStage = false, loadingCollection = false;
   const esc = value => String(value ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const hours = value => new Intl.NumberFormat("de-AT", { maximumFractionDigits: 2 }).format(D.num(value)) + " h";
   const money = value => new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR" }).format(D.num(value));
@@ -20,6 +21,26 @@
   const projectLink = jobId => `<a href="${esc(projectUrl(jobId))}">${esc(jobId)}</a>`;
   async function api(path, options = {}) { const response = await fetch(url(path), { signal: AbortSignal.timeout(20000), ...options }), result = await response.json(); if (!response.ok || result.ok === false) throw new Error(result.error || `HTTP ${response.status}`); return result; }
   function notice(message, warning = false) { text("collectionStatus", message); el("collectionStatus").classList.toggle("warning", warning); }
+  function renderStage() {
+    if (!collection || savingStage) return;
+    el("collectionStage").value = collection.statusOverride || "";
+    el("collectionStage").disabled = false;
+    text("collectionStageNote", `${collection.statusOverride ? "Manuell" : "Automatisch"}: ${collection.status} · Die Status der Einzelakten bleiben unverändert.`);
+  }
+  async function saveStage() {
+    if (!collection || savingStage) return;
+    savingStage = true; el("collectionStage").disabled = true;
+    el("refreshCollection").disabled = true;
+    text("collectionStageNote", "Status wird gespeichert …");
+    try {
+      const result = await api(`/admin/api/sammelmappe/${encodeURIComponent(id)}/status`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: el("collectionStage").value }) });
+      Object.assign(collection, { status: result.status, statusOverride: result.statusOverride, automaticStatus: result.automaticStatus, statusUpdatedAt: result.statusUpdatedAt });
+      if (savedView?.collection) Object.assign(savedView.collection, { status: result.status, statusOverride: result.statusOverride, automaticStatus: result.automaticStatus, statusUpdatedAt: result.statusUpdatedAt });
+      savingStage = false; renderStage();
+      text("collectionStageNote", `Gespeichert: ${result.status}${result.statusOverride ? " · Manuell für diese Sammelmappe" : " · Automatisch aus Einzelakten"}`);
+    } catch (error) { savingStage = false; renderStage(); text("collectionStageNote", "Status nicht gespeichert: " + error.message); }
+    finally { savingStage = false; el("refreshCollection").disabled = loadingCollection; }
+  }
   const reports = row => B.dedupeReports(row.documents.filter(doc => doc.type === "regie_report"));
   function rowBilling(row) { return D.combineBilling(row.billingSources.filter(source => source.data).map(source => ({ ...source, billing: source.data.billing }))); }
   function documentLink(doc) { const href = doc.url ? url(doc.url) : ""; return href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(doc.reportNumber || doc.name || "Dokument")}</a>` : `${esc(doc.reportNumber || doc.name || "Bericht")} · ${projectLink(doc.jobId)}`; }
@@ -285,13 +306,16 @@
 
   async function load(force = false) {
     const generation = ++serial;
+    loadingCollection = true;
     startedAt = new Date().toISOString(); bookingsReady = false;
     el("refreshCollection").disabled = true;
+    el("collectionStage").disabled = true;
     try {
       const payload = await api("/admin/api/jobs");
       if (generation !== serial) return;
       jobs = D.catalog(payload); collection = jobs.find(row => row.jobId === id && D.isCollection(row));
       if (!collection) { savedView = null; throw new Error("Sammelmappe nicht gefunden. Bitte über die Baustellenliste öffnen."); }
+      renderStage();
       if (savedView && (collection.registryUpdatedAt !== savedView.collection.registryUpdatedAt || D.memberIds(collection).join("|") !== D.memberIds(savedView.collection).join("|"))) savedView = null;
       renderHours();
       const loaded = await window.BaustellenSources.load(collection, jobs, { force });
@@ -301,9 +325,10 @@
       text("updatedAt", new Date().toLocaleString("de-AT"));
       mediaLoaded = false; await loadPhotos();
     } catch (error) { if (generation === serial) notice(error.message, true); }
-    finally { if (generation === serial) { el("refreshCollection").disabled = false; renderHours(); } }
+    finally { if (generation === serial) { loadingCollection = false; el("refreshCollection").disabled = savingStage; renderHours(); } }
   }
   function boot() {
+    el("collectionStage").onchange = saveStage;
     el("addCollectionMember").onclick = openAddMember;
     el("closeAddMember").onclick = () => el("addMemberDialog").close();
     el("memberSearch").addEventListener("input", filterMemberChoices);

@@ -3187,6 +3187,17 @@ app.put("/admin/api/job/:jobId/collection", async (req, res) => {
   }
 });
 
+app.put("/admin/api/sammelmappe/:id/status", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const definition = await collectionStore.setStatus(req.params.id, req.body?.status);
+    const members = await Promise.all(definition.memberJobIds.map(async jobId => ({ ...await readJobMeta(jobId), jobId })));
+    const [collection] = collectionCatalog(members, [definition]);
+    await appendJobHistory(definition.mainJobId, { type: "collection_status_updated", title: `Status der Sammelmappe ${definition.id} geändert`, detail: definition.statusOverride || `Automatisch aus Einzelakten: ${collection.status}`, source: "KRISTINE Sammelmappe" }).catch(error => console.error("COLLECTION_HISTORY failed:", error.message));
+    res.json({ ok: true, status: collection.status, statusOverride: collection.statusOverride, automaticStatus: collection.automaticStatus, statusUpdatedAt: collection.statusUpdatedAt });
+  } catch (error) { res.status(error.status || 500).json({ ok: false, error: String(error?.message || error) }); }
+});
+
 function offerDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".offer-draft.json"); }
 function sanitizeOfferCalculationNote(value) {
   const note = value && typeof value === "object" ? value : {};

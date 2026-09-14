@@ -7,6 +7,26 @@ const os = require("node:os");
 const { createCollectionStore, collectionCatalog, collectionWriteGuard, MIGRATION } = require("../sammelmappen");
 const D = require("../public/ui/baustellen-data");
 
+test("manual collection status survives restart and membership edits, leaves individual records and saved hours valid, and can return to automatic", async t => {
+  const f = await fixture(t); await f.store.migrateLegacy();
+  const before = await f.store.get("S24177"), originals = await Promise.all(f.ids.map(id => f.meta(id)));
+  const manual = await f.store.setStatus("S24177", "Geschlossen");
+  assert.equal(manual.updatedAt, before.updatedAt); // Status must not discard the saved hour snapshot.
+  const reopenedStore = createCollectionStore({ dataDir: f.dir });
+  let definition = await reopenedStore.get("S24177");
+  const jobs = originals.map((meta, i) => ({ ...meta, jobId: f.ids[i] }));
+  let [view] = collectionCatalog(jobs, [definition]);
+  assert.equal(view.status, "Geschlossen"); assert.equal(view.automaticStatus, "Laufend");
+  await reopenedStore.save({ jobId: "S24177", memberJobIds: ["24177", "26018"] });
+  assert.equal((await reopenedStore.get("S24177")).statusOverride, "Geschlossen");
+  await assert.rejects(reopenedStore.setStatus("S24177", "unknown"), { status: 400 });
+  await assert.rejects(reopenedStore.setStatus("S24177", undefined), { status: 400 });
+  await assert.rejects(reopenedStore.setStatus("24177", "Auftrag"), { status: 404 });
+  definition = await reopenedStore.setStatus("S24177", "");
+  [view] = collectionCatalog(jobs, [definition]); assert.equal(view.status, "Laufend"); assert.equal(view.statusOverride, "");
+  assert.deepEqual(await Promise.all(f.ids.map(id => f.meta(id))), originals);
+});
+
 async function fixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sammelmappen-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));

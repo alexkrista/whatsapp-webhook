@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const D = require("./public/ui/baustellen-data");
 const MIGRATION = "20260913-sammelmappen-v1";
+const COLLECTION_STATUSES = ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"];
 const validJobId = id => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id) && id !== "unknown";
 const unique = ids => [...new Set(ids.map(String))];
 const fail = (message, status = 409) => Object.assign(new Error(message), { status });
@@ -77,10 +78,20 @@ function createCollectionStore({ dataDir }) {
       if ((await readMeta(memberId)).collectionMemberJobIds?.length) throw fail(`#${memberId} ist noch eine bisherige Sammelakte und muss zuerst umgestellt werden.`);
     }
     const meta = await readMeta(mainJobId), now = new Date().toISOString();
-    const collection = { id, mainJobId, memberJobIds, name: existing?.name || meta.name || mainJobId, active: true, createdAt: existing?.createdAt || now, updatedAt: now };
+    const collection = { ...existing, id, mainJobId, memberJobIds, name: existing?.name || meta.name || mainJobId, active: true, createdAt: existing?.createdAt || now, updatedAt: now };
     registry.collections[id] = collection;
     await atomicText(registryFile, jsonText(registry));
     return collection;
+  });
+
+  const setStatus = (id, value) => exclusive(async () => {
+    if (value !== "" && !COLLECTION_STATUSES.includes(value)) throw fail("Ungültiger Status der Sammelmappe.", 400);
+    const registry = await readRegistry(), collection = Object.hasOwn(registry.collections, id) ? registry.collections[id] : null;
+    if (!collection || collection.active === false) throw fail("Sammelmappe nicht gefunden.", 404);
+    // Status changes must not invalidate the saved hours or alter member records.
+    registry.collections[id] = { ...collection, statusOverride: value, statusUpdatedAt: new Date().toISOString() };
+    await atomicText(registryFile, jsonText(registry));
+    return registry.collections[id];
   });
 
   // Prepare both conversions before the first write. The journal contains the
@@ -153,16 +164,18 @@ function createCollectionStore({ dataDir }) {
     await atomicText(completedFile, jsonText(result));
     return { status: "migrated", ...result };
   });
-  return { list, get, forMain, forMember, reserved, save, migrateLegacy };
+  return { list, get, forMain, forMember, reserved, save, setStatus, migrateLegacy };
 }
 
 function collectionCatalog(jobs, definitions) {
   const byId = new Map(jobs.map(job => [String(job.jobId), job]));
   const collections = definitions.map(definition => {
     const main = byId.get(definition.mainJobId), rows = definition.memberJobIds.map(id => byId.get(id)).filter(Boolean);
+    const automaticStatus = rows.some(row => row.status === "Laufend") ? "Laufend" : rows.some(row => row.status === "Auftrag") ? "Auftrag" : main?.status || "Angebot";
+    const statusOverride = COLLECTION_STATUSES.includes(definition.statusOverride) ? definition.statusOverride : "";
     const collection = { jobId: definition.id, kind: "collection", name: definition.name || main?.name || definition.id,
       collectionMainJobId: definition.mainJobId, collectionMemberJobIds: definition.memberJobIds,
-      status: rows.some(row => row.status === "Laufend") ? "Laufend" : rows.some(row => row.status === "Auftrag") ? "Auftrag" : main?.status || "Angebot",
+      status: statusOverride || automaticStatus, statusOverride, automaticStatus, statusUpdatedAt: definition.statusUpdatedAt || null,
       favorite: !!main?.favorite, latestDay: rows.map(row => row.latestDay || "").sort().at(-1) || null,
       createdAt: definition.createdAt, registryUpdatedAt: definition.updatedAt, calculation: {}, wwProjectLinks: [],
       collectionSummary: { searchText: rows.map(row => [row.jobId, row.name, row.street, row.city].filter(Boolean).join(" ")).join(" "),
