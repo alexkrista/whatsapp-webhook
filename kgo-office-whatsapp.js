@@ -64,7 +64,7 @@ function dayEvents(events, id, date) {
   return (Array.isArray(events) ? events : []).filter(row =>
     String(row?.employeeId || "") === String(id) &&
     String(row?.date || "") === String(date) &&
-    ["start","weiter","pause","mittag","ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())
+    ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())
   ).sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
 }
 
@@ -72,12 +72,12 @@ function status(events, employee, date) {
   const rows = dayEvents(events, employeeId(employee), date);
   const last = rows.at(-1) || null;
   const type = String(last?.type || "").toLowerCase();
-  const mode = ["start","weiter"].includes(type) ? "working"
+  const mode = ["start","weiter","up"].includes(type) ? "working"
     : type === "pause" ? "pause"
     : type === "mittag" ? "lunch"
     : ["ende","fertig","stop","stopp"].includes(type) ? "finished_day"
     : "idle";
-  const firstStart = rows.find(row => ["start","weiter"].includes(String(row?.type || "").toLowerCase())) || null;
+  const firstStart = rows.find(row => ["start","weiter","up"].includes(String(row?.type || "").toLowerCase())) || null;
   const lastEnd = [...rows].reverse().find(row => ["ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())) || null;
   return { mode, startAt:firstStart?.at || "", endAt:lastEnd?.at || "" };
 }
