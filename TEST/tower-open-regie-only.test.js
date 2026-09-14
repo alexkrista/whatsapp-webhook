@@ -15,6 +15,9 @@ assert.match(server, /source === "WW" \|\| \(source === "KGO" && manualStatus ==
 assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state === "open"\)/);
 assert.match(tower, /actualRegieAmount:openRegieAmount/);
 assert.match(tower, /offene Regie/);
+assert.match(tower, /closedCollectionMembers=new Set/);
+assert.match(tower, /collection\?\.status\|\|''\)===['"]Geschlossen['"]/);
+assert.match(tower, /if\(closedCollectionMembers\.has\(String\(j\?\.jobId\|\|''\)\)\)continue/);
 
 const data = require(path.join(root, "public", "ui", "baustellen-data.js"));
 const closed = { status: "Geschlossen", calculation: { calculatedHours: 100, actualHours: 20 } };
