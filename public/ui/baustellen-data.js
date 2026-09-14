@@ -9,6 +9,7 @@
   const positive=value=>Math.max(0,num(value));
   const unique=values=>[...new Set(values.filter(value=>value!=null&&String(value)!=="").map(String))];
   const isCollection=job=>job?.kind==="collection";
+  const isSettled=job=>["geschlossen","abgerechnet"].includes(String(job?.status||"").trim().toLowerCase());
   function catalog(payload){return [...(payload?.jobs||[]),...(payload?.collections||[])].filter((job,index,rows)=>rows.findIndex(row=>String(row.jobId)===String(job.jobId))===index)}
   function memberIds(job){return unique([...(isCollection(job)?[]:[job?.jobId]),...(job?.collectionMemberJobIds||[]),...(job?.collectionSummary?.jobIds||[])])}
   function members(job,jobs){const byId=new Map((jobs||[]).map(row=>[String(row.jobId),row]));return memberIds(job).map(id=>byId.get(id)||(id===String(job?.jobId)?job:null)).filter(Boolean)}
@@ -19,7 +20,7 @@
   function hourBalance(target,actual){const difference=num(target)-num(actual);return {remaining:Math.max(0,difference),overrun:Math.max(0,-difference)}}
   function orderHours(job){const c=job?.calculation||{};return positive(c.orderHours??positive(num(c.actualHours)-num(c.actualRegieHours)))}
   function remaining(job,actual=orderHours(job)){return hourBalance(fixedTarget(job),positive(actual)).remaining}
-  function openHours(job,jobs){const rows=members(job,jobs);return rows.some(row=>["Auftrag","Laufend"].includes(row.status))?hourBalance(rows.reduce((sum,row)=>sum+totalTarget(row),0),rows.reduce((sum,row)=>sum+actualHours(row),0)).remaining:0}
+  function openHours(job,jobs){if(isSettled(job))return 0;const rows=members(job,jobs);return rows.some(row=>["Auftrag","Laufend"].includes(row.status))?hourBalance(rows.reduce((sum,row)=>sum+totalTarget(row),0),rows.reduce((sum,row)=>sum+actualHours(row),0)).remaining:0}
   function projects(job,jobs){
     const result=[],seen=new Set(),rows=members(job,jobs);
     for(const member of rows){
@@ -98,5 +99,5 @@
       paidGross:payments.reduce((s,r)=>s+num(r.gross),0),openGross:runs.reduce((s,r)=>s+num(r.openGross),0)});
     return {found:results.some(row=>row.billing?.found),summary,invoices,payments,runs};
   }
-  return {num,isCollection,catalog,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
+  return {num,isCollection,isSettled,catalog,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
 });

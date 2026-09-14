@@ -311,7 +311,8 @@
 
   function memberHourSummary(j,head=j){
     const fused=singleFusion(j,head),regie=Math.max(num(calc(j).actualRegieHours),num(reportHoursByJob.get(String(j?.jobId)))),order=Math.max(0,fused.total-regie),target=D.totalTarget(j),fixedTarget=D.fixedTarget(j),orderBalance=D.hourBalance(fixedTarget,order);
-    return {...fused,order,regie,target,fixedTarget,...D.hourBalance(target,fused.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
+    const settled=D.isSettled(j)||D.isSettled(head),balance=D.hourBalance(target,fused.total);
+    return {...fused,order,regie,target,fixedTarget,...balance,remaining:settled?0:balance.remaining,remainingOrder:settled?0:orderBalance.remaining,orderOverrun:orderBalance.overrun,status:j?.status||"",settled};
   }
   function hoursSummary(id){
     const j=job(id);if(!j)return {total:0,order:0,regie:0,target:0,fixedTarget:0,remaining:0,overrun:0,remainingOrder:0,orderOverrun:0,source:"",memberHours:[],complete:false};
@@ -324,8 +325,8 @@
       for(const key of ["total","ww","kristine","detailTotal","order","regie","target","fixedTarget"])out[key]+=num(row[key]);
       out.overlaps.push(...row.overlaps);for(const key of row.excluded)out.excluded.add(key);if(row.source!=="KRISTINE")out.source=row.source;
     }
-    const orderBalance=D.hourBalance(out.fixedTarget,out.order);
-    return {...out,...D.hourBalance(out.target,out.total),remainingOrder:orderBalance.remaining,orderOverrun:orderBalance.overrun};
+    const totalBalance=D.hourBalance(out.target,out.total),orderBalance=D.hourBalance(out.fixedTarget,out.order),settled=D.isSettled(j);
+    return {...out,...totalBalance,remaining:settled?0:totalBalance.remaining,remainingOrder:settled?0:orderBalance.remaining,orderOverrun:orderBalance.overrun};
   }
   function patchEconomy(id){
     const j=job(id),host=document.getElementById("bkEconomy");if(!j||!host)return;
@@ -336,7 +337,7 @@
     if(targetCard)setText(targetCard.querySelector(".bk-value"),hours(target));
     if(actualCard){const value=actualCard.querySelector(".bk-value"),note=actualCard.querySelector(".bk-note");if(value){setText(value,hours(live.total));value.classList.toggle("bk-bad",target>0&&live.total>target)}setText(note,`${hours(live.order)} Auftrag + ${hours(live.regie)} Regie · ${live.source}`)}
     if(remainingCard){setText(remainingCard.querySelector(".bk-value"),hours(live.remaining));setText(remainingCard.querySelector(".bk-note"),balanceNote(live))}
-    const performance=window.BaustellenSources.performance(id)||window.KristaRegieBilling?.calculatePerformance?.({actualHours:live.total,regieHours:num(host.dataset.regieHours)||live.regie,hourlyRate:num(host.dataset.hourlyRate),contractAmount:num(host.dataset.contractAmount),plannedRegieAmount:num(host.dataset.plannedRegieAmount),actualRegieAmount:num(host.dataset.actualRegieAmount),partialInvoiceNet:num(host.dataset.partialInvoiceNet),hasClosingInvoice:host.dataset.hasClosingInvoice==="1"});
+    const performance=window.BaustellenSources.performance(id)||window.KristaRegieBilling?.calculatePerformance?.({actualHours:live.total,regieHours:num(host.dataset.regieHours)||live.regie,hourlyRate:num(host.dataset.hourlyRate),contractAmount:num(host.dataset.contractAmount),plannedRegieAmount:num(host.dataset.plannedRegieAmount),actualRegieAmount:D.isSettled(j)?0:num(host.dataset.actualRegieAmount),partialInvoiceNet:num(host.dataset.partialInvoiceNet),hasClosingInvoice:D.isSettled(j)||host.dataset.hasClosingInvoice==="1"});
     if(performanceCard&&performance){setText(performanceCard.querySelector(".bk-value"),money2(performance.billablePerformance));setText(performanceCard.querySelector(".bk-note"),`${hours(performance.orderHours)} × ${money2(performance.hourlyRate)} × 90 % + ${money2(performance.actualRegieAmount)} Regie · Deckel ${money2(performance.performanceLimit)}`)}
     if(amountToInvoiceCard&&performance){setText(amountToInvoiceCard.querySelector(".bk-value"),money2(performance.amountToInvoice));setText(amountToInvoiceCard.querySelector(".bk-note"),`${money2(performance.billablePerformance)} Leistung − ${money2(performance.partialInvoiceNet)} geschriebene Teilrechnungen`)}
     const documentNet=num(host.dataset.billedNet)+num(host.dataset.draftNet);

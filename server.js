@@ -2965,13 +2965,31 @@ app.get("/admin/api/jobs", async (req, res) => {
         const parsed = Number(normalized);
         return Number.isFinite(parsed) ? parsed : 0;
       };
+      const regieAmount = (row) => {
+        const total = Math.max(0, documentNumber(row?.totalNet));
+        return total || Math.max(0, documentNumber(row?.laborCost)) + Math.max(0, documentNumber(row?.materialCost ?? row?.materialTotal));
+      };
+      const jobIsSettled = ["geschlossen", "abgerechnet"].includes(String(meta.status || "").trim().toLowerCase());
+      const regieBillingState = (row) => {
+        if (jobIsSettled) return "billed";
+        const source = String(row?.source || "").toUpperCase();
+        const manualStatus = String(row?.billingStatus || "").toLowerCase();
+        const billed = Boolean(String(row?.billedDocumentId || "").trim()) || (source === "KGO" && manualStatus === "billed");
+        const open = !billed && (source === "WW" || (source === "KGO" && manualStatus === "open"));
+        return billed ? "billed" : open ? "open" : "unknown";
+      };
+      const regieRows = regieReports.map((row) => ({ row, state: regieBillingState(row), hours: Math.max(0, documentNumber(row?.totalHours)), amount: regieAmount(row) }));
       const regieSummary = {
-        hours: regieReports.reduce((sum, row) => sum + Math.max(0, documentNumber(row.totalHours)), 0),
-        amount: regieReports.reduce((sum, row) => {
-          const total = Math.max(0, documentNumber(row.totalNet));
-          return sum + (total || Math.max(0, documentNumber(row.laborCost)) + Math.max(0, documentNumber(row.materialCost ?? row.materialTotal)));
-        }, 0),
-        count: regieReports.length,
+        hours: regieRows.reduce((sum, entry) => sum + entry.hours, 0),
+        amount: regieRows.reduce((sum, entry) => sum + entry.amount, 0),
+        count: regieRows.length,
+        openHours: regieRows.filter((entry) => entry.state === "open").reduce((sum, entry) => sum + entry.hours, 0),
+        openAmount: regieRows.filter((entry) => entry.state === "open").reduce((sum, entry) => sum + entry.amount, 0),
+        openCount: regieRows.filter((entry) => entry.state === "open").length,
+        billedHours: regieRows.filter((entry) => entry.state === "billed").reduce((sum, entry) => sum + entry.hours, 0),
+        billedAmount: regieRows.filter((entry) => entry.state === "billed").reduce((sum, entry) => sum + entry.amount, 0),
+        billedCount: regieRows.filter((entry) => entry.state === "billed").length,
+        unknownCount: regieRows.filter((entry) => entry.state === "unknown").length,
       };
       const materialKeys = new Set();
       let materialValue = 0;

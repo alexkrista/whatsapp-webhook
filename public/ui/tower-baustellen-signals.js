@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-14-fast-signals-1";
+  const VERSION="2026-09-14-open-regie-only-1";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -97,8 +97,8 @@
       const invoices=Array.isArray(billing.invoices)?billing.invoices:[];
       const hasClosingInvoice=invoices.some(invoice=>String(invoice?.kind||'').toUpperCase()==='SR');
       if(hasClosingInvoice)continue;
-      const regieHours=num(j.regieSummary?.hours),orderHours=actual(j),partialInvoiceNet=invoices.filter(invoice=>String(invoice?.kind||'').toUpperCase()==='TR').reduce((sum,invoice)=>sum+Math.max(0,num(invoice?.net)),0);
-      const performance=window.KristaRegieBilling.calculatePerformance({actualHours:orderHours+regieHours,regieHours,hourlyRate:num(calc(j).billingRate??j.billingRate)||85,contractAmount:contract(j),plannedRegieAmount:num(calc(j).regieBudgetAmount),actualRegieAmount:num(j.regieSummary?.amount),partialInvoiceNet,hasClosingInvoice:false});
+      const regieHours=num(j.regieSummary?.hours),openRegieAmount=Number.isFinite(Number(j.regieSummary?.openAmount))?Math.max(0,Number(j.regieSummary.openAmount)):num(j.regieSummary?.amount),orderHours=actual(j),partialInvoiceNet=invoices.filter(invoice=>String(invoice?.kind||'').toUpperCase()==='TR').reduce((sum,invoice)=>sum+Math.max(0,num(invoice?.net)),0);
+      const performance=window.KristaRegieBilling.calculatePerformance({actualHours:orderHours+regieHours,regieHours,hourlyRate:num(calc(j).billingRate??j.billingRate)||85,contractAmount:contract(j),plannedRegieAmount:num(calc(j).regieBudgetAmount),actualRegieAmount:openRegieAmount,partialInvoiceNet,hasClosingInvoice:false});
       if(performance.amountToInvoice>.005)rows.push({job:j,...performance});
     }
     return rows.sort((a,b)=>b.amountToInvoice-a.amountToInvoice);
@@ -110,7 +110,7 @@
     const rows=billableRows(jobs),total=rows.reduce((sum,row)=>sum+row.amountToInvoice,0);
     button.innerHTML=`<div><span>Noch abzurechnen</span><small>${billingReady?`${rows.length} Baustelle(n) ohne Schlussrechnung · Teilrechnungen bereits abgezogen`:'Rechnungsdaten derzeit nicht erreichbar'}</small></div><strong>${billingReady?money(total):'–'}</strong>`;
     let dialog=document.getElementById('towerBillableDialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='towerBillableDialog';dialog.className='ts-billable-dialog';document.body.appendChild(dialog)}
-    dialog.innerHTML=`<div class="ts-billable-head"><div><h2>Noch abzurechnen</h2><small>Abrechenbare Leistung minus geschriebene Teilrechnungen</small></div><button type="button" data-ts-close>Schließen</button></div><div class="ts-billable-list"><div class="ts-billable-row head"><span>Baustelle</span><b>Leistung</b><b>Teilrechnungen</b><b>Noch abzurechnen</b></div>${rows.length?rows.map(row=>`<a class="ts-billable-row" href="${tokenUrl('/kristine/baustellen')}#${encodeURIComponent(row.job.jobId)}"><span><strong>${esc(row.job.name||row.job.jobId)}</strong><small>#${esc(row.job.jobId)} · ${hours(row.orderHours)} Auftrag + ${money(row.actualRegieAmount)} Regie</small></span><b>${money(row.billablePerformance)}</b><b>− ${money(row.partialInvoiceNet)}</b><b>${money(row.amountToInvoice)}</b></a>`).join(''):'<div class="ts-empty">Derzeit ist keine abrechenbare Leistung ohne Schlussrechnung offen.</div>'}</div>`;
+    dialog.innerHTML=`<div class="ts-billable-head"><div><h2>Noch abzurechnen</h2><small>Abrechenbare Leistung minus geschriebene Teilrechnungen</small></div><button type="button" data-ts-close>Schließen</button></div><div class="ts-billable-list"><div class="ts-billable-row head"><span>Baustelle</span><b>Leistung</b><b>Teilrechnungen</b><b>Noch abzurechnen</b></div>${rows.length?rows.map(row=>`<a class="ts-billable-row" href="${tokenUrl('/kristine/baustellen')}#${encodeURIComponent(row.job.jobId)}"><span><strong>${esc(row.job.name||row.job.jobId)}</strong><small>#${esc(row.job.jobId)} · ${hours(row.orderHours)} Auftrag + ${money(row.actualRegieAmount)} offene Regie</small></span><b>${money(row.billablePerformance)}</b><b>− ${money(row.partialInvoiceNet)}</b><b>${money(row.amountToInvoice)}</b></a>`).join(''):'<div class="ts-empty">Derzeit ist keine abrechenbare Leistung ohne Schlussrechnung offen.</div>'}</div>`;
     button.onclick=()=>dialog.showModal();dialog.querySelector('[data-ts-close]').onclick=()=>dialog.close();dialog.onclick=event=>{if(event.target===dialog)dialog.close()};
   }
 
