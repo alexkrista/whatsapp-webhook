@@ -6,11 +6,11 @@
   <title>KRISTINE · Sammelmappe</title>
   <link rel="stylesheet" href="/public/ui/sammelmappe.css?v=20260914-status-1">
   <script src="/public/ui/baustellen-data.js?v=20260914-settled-zero-1" defer></script>
-  <script src="/public/ui/regie-billing-state.js?v=20260913-sammelmappe-1" defer></script>
-  <script src="/public/ui/baustellen-sources.js?v=20260914-settled-zero-1" defer></script>
-  <script src="/public/ui/baustellen-live-hours.js?v=20260914-settled-zero-1" defer></script>
+  <script src="/public/ui/regie-billing-state.js?v=20260914-progress-1" defer></script>
+  <script src="/public/ui/baustellen-sources.js?v=20260914-progress-1" defer></script>
+  <script src="/public/ui/baustellen-live-hours.js?v=20260914-progress-1" defer></script>
   <script src="/public/ui/sammelmappe-insights.js?v=20260913-sammelmappe-2" defer></script>
-  <script src="/public/ui/sammelmappe.js?v=20260914-status-1" defer></script>
+  <script src="/public/ui/sammelmappe.js?v=20260914-progress-1" defer></script>
 </head>
 <body>
   <header class="page-head">
@@ -53,8 +53,9 @@
       <div class="card"><span class="label">Auftragsvolumen</span><strong id="collectionContract">–</strong><small>Summe der Projektwerte</small></div>
       <div class="card"><span class="label">Rechnungen netto</span><strong id="collectionInvoiced">–</strong><small>Ausgestellte Rechnungen der Einzelakten</small></div>
       <div class="card"><span class="label">Bezahlt brutto</span><strong id="collectionPaid">–</strong><small>Erfasste Zahlungen</small></div>
-      <div class="card"><span class="label">Noch abzurechnen</span><strong id="collectionToInvoice">–</strong><small>Summe der Einzelprojekt-Berechnungen</small></div>
+      <div class="card"><span class="label">Noch abzurechnen</span><strong id="collectionToInvoice">–</strong><small id="collectionInvoiceFormula">Summe der Einzelprojekt-Berechnungen</small></div>
     </section>
+    <section class="panel" id="collectionBillingCalculation" aria-label="Rechenweg der Abrechnung"></section>
     <section class="panel" aria-labelledby="economyTitle">
       <div class="section-head"><h2 id="economyTitle">Gemeinsame Nachkalkulation</h2><span id="economyState">Wird geladen …</span></div>
       <p id="economyNote" class="muted"></p>
@@ -93,3 +94,4 @@
   </dialog>
 </body>
 </html>
+

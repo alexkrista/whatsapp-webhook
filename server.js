@@ -2980,6 +2980,15 @@ app.get("/admin/api/jobs", async (req, res) => {
       };
       const regieRows = regieReports.map((row) => ({ row, state: regieBillingState(row), hours: Math.max(0, documentNumber(row?.totalHours)), amount: regieAmount(row) }));
       const regieSummary = {
+        // Minimal report references let the Tower allocate written TR amounts
+        // to Regie exactly once, without transferring descriptions or materials.
+        reports: regieRows.map(({ row, hours, amount }) => ({
+          jobId, projectNumber: String(row.projectNumber || jobId), source: String(row.source || ""),
+          sourceId: String(row.sourceId || ""), reportNumber: String(row.reportNumber || row.name || ""),
+          sheetNumber: String(row.sheetNumber || ""), reportDate: String(row.reportDate || ""),
+          billedDocumentId: String(row.billedDocumentId || ""), billingStatus: String(row.billingStatus || ""),
+          totalHours: hours, totalNet: amount,
+        })),
         hours: regieRows.reduce((sum, entry) => sum + entry.hours, 0),
         amount: regieRows.reduce((sum, entry) => sum + entry.amount, 0),
         count: regieRows.length,
@@ -4499,4 +4508,5 @@ async function startServer() {
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }
 startServer();
+
 

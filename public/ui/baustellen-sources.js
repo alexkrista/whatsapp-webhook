@@ -92,22 +92,22 @@
     })().finally(()=>{entry.pending=false});
     return entry.promise;
   }
-  function performance(jobId){
-    const data=loaded.get(String(jobId)),B=window.KristaRegieBilling;if(!data||!B?.calculatePerformance)return null;
-    const collectionSettled=D.isSettled(data.job);
+  function performance(jobId,options={}){
+    const data=options.data||loaded.get(String(jobId)),B=window.KristaRegieBilling;if(!data||!B?.performanceForJob)return null;
+    const collectionSettled=D.isSettled(data.job),savedHours=new Map((options.memberHours||[]).map(row=>[String(row.jobId),row]));
     const values=data.rows.map(row=>{
-      const c=row.job.calculation||{},reports=B.dedupeReports(row.documents.filter(doc=>doc.type==="regie_report"));
-      const billing=D.combineBilling(row.billingSources.filter(source=>source.data).map(source=>({...source,billing:source.data.billing}))),invoices=billing.invoices.filter(invoice=>invoice.status==="issued");
-      const live=window.BaustellenLiveHours?.summarySingle?.(row.jobId,jobId);
-      const settled=collectionSettled||D.isSettled(row.job),regieState=B.summarize(reports,billing);
-      return {...B.calculatePerformance({actualHours:live?.total??c.actualHours,regieHours:Math.max(D.num(c.actualRegieHours),reports.reduce((sum,r)=>sum+D.num(r.totalHours),0)),
-        contractAmount:c.contractAmount??row.job.contractAmount,plannedRegieAmount:c.regieBudgetAmount,actualRegieAmount:settled?0:regieState.openAmount,
-        partialInvoiceNet:invoices.filter(invoice=>invoice.kind==="TR").reduce((sum,r)=>sum+D.num(r.net),0),hasClosingInvoice:settled||invoices.some(invoice=>invoice.kind==="SR")}),closed:settled||invoices.some(invoice=>invoice.kind==="SR")};
+      const reports=row.documents.filter(doc=>doc.type==="regie_report");
+      const billing=D.combineBilling(row.billingSources.filter(source=>source.data).map(source=>({...source,billing:source.data.billing})));
+      const hourState=options.memberHours?null:window.BaustellenLiveHours?.sourceStatus?.(row.jobId,{single:true});
+      billing.partial=data.billing.partial||hourState?.available===false;
+      const live=savedHours.get(String(row.jobId))||window.BaustellenLiveHours?.summarySingle?.(row.jobId,jobId);
+      const stamps=[...row.regieSources,...row.billingSources].map(source=>source.data?.syncedAt).filter(Boolean).sort();
+      return B.performanceForJob(row.job,{reports,billing,actualHours:live?.total??row.job.calculation?.actualHours,settled:collectionSettled||D.isSettled(row.job),dataUpdatedAt:options.updatedAt||stamps[0]});
     });
-    const sum={hourlyRate:85,hasClosingInvoice:values.length>0&&values.every(value=>value.closed),partial:data.billing.partial};
-    for(const key of ["actualHours","regieHours","orderHours","contractAmount","plannedRegieAmount","actualRegieAmount","orderPerformance","performanceLimit","billablePerformance","partialInvoiceNet","amountToInvoice"])sum[key]=values.reduce((total,value)=>total+D.num(value[key]),0);
-    return sum;
+    if(values.length===1&&!D.isCollection(data.job))return values[0];
+    return B.aggregatePerformance(values,{jobId,jobName:data.job.name,partial:data.billing.partial,dataUpdatedAt:options.updatedAt});
   }
   function clear(){requests.clear();collections.clear();unavailable.clear()}
   window.BaustellenSources={ww,load:loadCollection,clear,performance};
 })();
+

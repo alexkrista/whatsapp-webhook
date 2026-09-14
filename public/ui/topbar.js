@@ -162,12 +162,12 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/regie-billing-state.js?v=20260913-sammelmappe-1", "data-krista-regie-billing-state");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260914-invoice-actions-1", "data-krista-baustellen-knowledge");
-    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260913-sammelmappe-1", "data-krista-baustellen-cockpit");
+    loadScriptOnce("/public/ui/regie-billing-state.js?v=20260914-progress-1", "data-krista-regie-billing-state");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260914-progress-1", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260914-progress-1", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260912-lg-surface-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260914-settled-zero-1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260914-progress-1", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
     loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-hours-cache-1", "data-krista-baustellen-ww-import");
     loadScriptOnce("/public/ui/baustellen-collection.js?v=20260913-sammelmappe-1", "data-krista-baustellen-collection");
@@ -180,8 +180,8 @@
 
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
-      loadScriptOnce("/public/ui/regie-billing-state.js?v=20260909-performance-2", "data-krista-regie-billing-state");
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260914-closed-collections-1", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/regie-billing-state.js?v=20260914-progress-1", "data-krista-regie-billing-state");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260914-progress-1", "data-krista-tower-signals");
     }
   }
 
@@ -314,4 +314,5 @@
     if (mount) buildTopbar(mount);
   });
 })();
+
 
