@@ -55,6 +55,7 @@ function buildBillingSummary(project, runDetails) {
           issueDate: String(invoice.issue_date || "").slice(0, 10),
           dueDate: String(invoice.due_date || "").slice(0, 10),
           net: roundMoney(invoice.increment_net),
+          ...(invoice.regieNet == null ? {} : { regieNet: roundMoney(invoice.regieNet) }),
           vat: roundMoney(invoice.increment_vat),
           gross,
           paidGross,
@@ -177,3 +178,4 @@ function registerOutgoingBillingBridge(app, options = {}) {
 }
 
 module.exports = { buildBillingSummary, registerOutgoingBillingBridge };
+

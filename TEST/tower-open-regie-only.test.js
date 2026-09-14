@@ -13,8 +13,9 @@ assert.match(server, /if \(jobIsSettled\) return "billed"/);
 assert.match(server, /source === "KGO" && manualStatus === "billed"/);
 assert.match(server, /source === "WW" \|\| \(source === "KGO" && manualStatus === "open"\)/);
 assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state === "open"\)/);
-assert.match(tower, /actualRegieAmount:openRegieAmount/);
-assert.match(tower, /offene Regie/);
+assert.match(tower, /performanceForJob\(j,\{billing,actualHours:totalHours\}\)/);
+assert.doesNotMatch(tower, /orderHours\+regieHours/);
+assert.match(tower, /TR \/ verrechnete Regie/);
 assert.match(tower, /closedCollectionMembers=new Set/);
 assert.match(tower, /collection\?\.status\|\|''\)===['"]Geschlossen['"]/);
 assert.match(tower, /if\(closedCollectionMembers\.has\(String\(j\?\.jobId\|\|''\)\)\)continue/);
@@ -25,3 +26,4 @@ assert.strictEqual(data.isSettled(closed), true);
 assert.strictEqual(data.openHours(closed, [closed]), 0);
 
 console.log("OK: Im Tower wird nur ausdrücklich offene Regie als noch abzurechnen gezählt.");
+

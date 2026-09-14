@@ -162,6 +162,7 @@ def calculate_totals(lines, *, tax_mode="AT20", retention_percent=0, discount_pe
             "unitPrice": _money(unit_price),
             "discountPercent": line_discount,
             "net": line_net,
+            "billingComponent": str(raw.get("billingComponent") or raw.get("billing_component") or "") if str(raw.get("billingComponent") or raw.get("billing_component") or "") in {"prior", "fixed", "regie"} else "",
         })
     if not normalized_lines:
         raise ValueError("Mindestens eine Rechnungsposition ist erforderlich.")
@@ -404,6 +405,10 @@ class OutgoingStore:
             created_at TEXT NOT NULL
         );
         """)
+        if "progress_billing_json" not in {row[1] for row in con.execute("PRAGMA table_info(outgoing_invoices)")}:
+            con.execute("ALTER TABLE outgoing_invoices ADD COLUMN progress_billing_json TEXT NOT NULL DEFAULT '{}'")
+        if "billing_component" not in {row[1] for row in con.execute("PRAGMA table_info(outgoing_lines)")}:
+            con.execute("ALTER TABLE outgoing_lines ADD COLUMN billing_component TEXT NOT NULL DEFAULT ''")
         run_columns = {row[1] for row in con.execute("PRAGMA table_info(outgoing_runs)")}
         for column, definition in (
             ("billing_rate", "TEXT NOT NULL DEFAULT '75'"),
@@ -694,7 +699,9 @@ class OutgoingStore:
         with self.connect() as con:
             rows = con.execute(f"""
                 SELECT r.project_number,i.id,i.kind,i.status,i.invoice_number,
-                       i.issue_date,i.increment_net,i.source,i.source_id
+                       i.issue_date,i.increment_net,i.source,i.source_id,i.run_id,
+                       i.progress_billing_json,i.retention_percent,i.discount_percent,
+                       (SELECT COALESCE(SUM(CAST(l.net AS REAL)),0) FROM outgoing_lines l WHERE l.invoice_id=i.id AND l.billing_component='regie') AS regie_net
                 FROM outgoing_runs AS r
                 JOIN outgoing_invoices AS i ON i.run_id=r.id
                 WHERE r.project_number IN ({placeholders})
@@ -716,6 +723,10 @@ class OutgoingStore:
                 "source": str(row["source"] or "KRISTINE"),
                 "sourceId": str(row["source_id"] or ""),
             }
+            if row["progress_billing_json"] != "{}":
+                factor = (1 - _d(row["retention_percent"]) / 100) * (1 - _d(row["discount_percent"]) / 100)
+                invoice["regieNet"] = _num(_money(_d(row["regie_net"]) * factor))
+            invoice["runId"] = int(row["run_id"])
             target["invoices"].append(invoice)
             if invoice["status"] == "issued":
                 target["summary"]["invoiceCount"] += 1
@@ -1009,6 +1020,19 @@ class OutgoingStore:
             "SELECT * FROM outgoing_payments WHERE run_id=? AND reversed_at IS NULL ORDER BY payment_date,id", (int(run_id),)
         ))
 
+    def progress_preset(self, run_id, proposal):
+        from brain_progress_billing import prepare_preset
+        with self.connect() as con:
+            run = _row(con.execute("SELECT * FROM outgoing_runs WHERE id=?", (int(run_id),)).fetchone())
+            if not run:
+                raise ValueError("Rechnungslauf fehlt.")
+            if con.execute("SELECT 1 FROM outgoing_invoices WHERE run_id=? AND status='draft'", (int(run_id),)).fetchone():
+                raise ValueError("Ein Entwurf ist bereits vorhanden. Diesen zuerst fertigstellen oder löschen.")
+            invoices = [dict(row) for row in con.execute(
+                "SELECT i.* FROM outgoing_invoices i JOIN outgoing_runs r ON r.id=i.run_id WHERE r.project_number=?",
+                (run["project_number"],))]
+            return prepare_preset(proposal, run, invoices)
+
     def save_draft(self, data, invoice_id=None):
         run_id = int(data.get("runId") or 0)
         kind = str(data.get("kind") or "TR").upper()
@@ -1049,6 +1073,17 @@ class OutgoingStore:
             if kind == "RE" and self._previous_invoices(con, run_id, invoice_id):
                 raise ValueError("Eine normale Rechnung ist nur in einem neuen, leeren Rechnungslauf möglich.")
 
+            progress = data.get("progressBilling") or (json.loads(existing["progress_billing_json"] or "{}") if existing else {})
+            if progress:
+                from brain_progress_billing import check_snapshot
+                if not isinstance(progress, dict) or len(_json(progress)) > 60000 or str(progress.get("jobId")) != run["project_number"]:
+                    raise ValueError("Abrechnungsvorschlag passt nicht zu dieser Baustelle.")
+                if progress.get("kind") != kind:
+                    raise ValueError("Für eine andere Rechnungsart den TR-/SR-Vorschlag in der Akte neu öffnen.")
+                issued = [dict(row) for row in con.execute(
+                    "SELECT i.* FROM outgoing_invoices i JOIN outgoing_runs r ON r.id=i.run_id WHERE r.project_number=? AND i.id!=?",
+                    (run["project_number"], int(invoice_id or 0)))]
+                check_snapshot(progress, issued)
             prior = self._prior_sum(con, run_id, invoice_id)
             payment_rows = self._active_payments(con, run_id)
             paid = self._payment_sum(payment_rows)
@@ -1136,11 +1171,12 @@ class OutgoingStore:
                 target_id = cur.lastrowid
             for line in totals["lines"]:
                 con.execute("""
-                    INSERT INTO outgoing_lines(invoice_id,line_no,description,quantity,unit,unit_price,discount_percent,net)
-                    VALUES(?,?,?,?,?,?,?,?)
+                    INSERT INTO outgoing_lines(invoice_id,line_no,description,quantity,unit,unit_price,discount_percent,net,billing_component)
+                    VALUES(?,?,?,?,?,?,?,?,?)
                 """, (target_id, line["lineNo"], line["description"], str(line["quantity"]), line["unit"],
-                      str(line["unitPrice"]), str(line["discountPercent"]), str(line["net"])))
-            self._audit(con, "invoice", target_id, "save_draft", {"kind": kind, "runId": run_id})
+                      str(line["unitPrice"]), str(line["discountPercent"]), str(line["net"]), line["billingComponent"]))
+            con.execute("UPDATE outgoing_invoices SET progress_billing_json=? WHERE id=?", (_json(progress), target_id))
+            self._audit(con, "invoice", target_id, "save_draft", {"kind": kind, "runId": run_id, "progressBilling": progress})
             con.commit()
         return self.invoice(target_id, live=True)
 
@@ -1248,6 +1284,11 @@ class OutgoingStore:
         data["lines"] = [dict(x) for x in con.execute("SELECT * FROM outgoing_lines WHERE invoice_id=? ORDER BY line_no", (row["id"],))]
         run = con.execute("SELECT * FROM outgoing_runs WHERE id=?", (row["run_id"],)).fetchone()
         data["run"] = _row(run)
+        data["progressBilling"] = json.loads(data.pop("progress_billing_json", "{}") or "{}")
+        if data["progressBilling"]:
+            regie = sum((_d(line["net"]) for line in data["lines"] if line.get("billing_component") == "regie"), Decimal("0"))
+            factor = (1 - _d(data["retention_percent"]) / 100) * (1 - _d(data["discount_percent"]) / 100)
+            data["regieNet"] = _num(_money(regie * factor))
         data["revisionNo"] = int(con.execute(
             "SELECT COUNT(*) FROM outgoing_revisions WHERE invoice_id=?", (row["id"],)
         ).fetchone()[0])
@@ -1870,6 +1911,13 @@ class OutgoingStore:
             if TAX_MODES[row["tax_mode"]]["requires_uid"] and not row["recipient_uid"]:
                 raise ValueError("UID des Leistungsempfängers fehlt.")
             previous = self._previous_invoices(con, row["run_id"], row["id"])
+            progress = json.loads(row["progress_billing_json"] or "{}")
+            if progress:
+                from brain_progress_billing import check_snapshot
+                project_invoices = [dict(item) for item in con.execute(
+                    "SELECT i.* FROM outgoing_invoices i JOIN outgoing_runs r ON r.id=i.run_id WHERE r.project_number=? AND i.id!=?",
+                    (run["project_number"], row["id"]))]
+                check_snapshot(progress, project_invoices)
             payments = self._active_payments(con, row["run_id"])
             paid = self._payment_sum(payments)
             lines = list(con.execute("SELECT * FROM outgoing_lines WHERE invoice_id=? ORDER BY line_no", (row["id"],)))

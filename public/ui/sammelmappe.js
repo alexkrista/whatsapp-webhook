@@ -205,8 +205,10 @@
       const failed = sources.filter(source => source.error || source.data?.cached || source.data?.saved === false).length;
       const missing = data.rows.some(row => row.errors.length) || data.rows.length !== expected.length;
       notice(`${data.rows.length}/${expected.length} Einzelakten geladen · ${failed ? failed + " Beleg-Abgleich(e) ausstehend" : "Regie und Rechnungen abgeglichen"} · ${snapshot.complete && ready ? "Stunden aktuell" : "Stundenabgleich ausstehend; vorhandener Stand bleibt sichtbar"}`, !!failed || missing || !ready || !snapshot.complete);
-      const performance = usingSaved ? savedView.performance : window.BaustellenSources.performance(id);
-      text("collectionToInvoice", performance && !data.billing.partial && snapshot.complete && ready ? money(performance.amountToInvoice) : "–");
+      const performance = usingSaved ? window.BaustellenSources.performance(id, { data, memberHours: snapshot.memberHours, updatedAt: savedAt }) : window.BaustellenSources.performance(id);
+      text("collectionToInvoice", performance && performance.complete && !data.billing.partial && snapshot.complete && ready ? money(performance.amountToInvoice) : "–");
+      text("collectionInvoiceFormula", B.compactCalculation(performance));
+      B.refreshCalculation(el("collectionBillingCalculation"), performance);
     }
     renderInsights(snapshot, ready);
     if (usingSaved) {
@@ -350,3 +352,4 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();
+

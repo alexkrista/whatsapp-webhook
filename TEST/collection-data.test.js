@@ -105,7 +105,7 @@ test("detail, cockpit and economy render the same total balance",()=>{
   const cards=[card("Kalkulierte Sollstunden"),card("Iststunden gesamt"),card("Noch offene Stunden")];
   const pulse=label=>{const nodes={span:{textContent:label},strong:text(),small:text()};return {textContent:label,nodes,querySelector:s=>nodes[s]||null}};
   const pulses=[pulse("Sollstunden gesamt"),pulse("Iststunden"),pulse("Reststunden")];
-  const elements={detailHours:text(),detailHoursNote:text(),detailOpen:text(),detailOpenNote:text(),bcShell:{querySelectorAll(){return []}},bkEconomy:{dataset:{},querySelectorAll:s=>s===".bk-card"?cards:[]}};
+  const elements={detailHours:text(),detailHoursNote:text(),detailOpen:text(),detailOpenNote:text(),bcShell:{querySelector(){return null},querySelectorAll(){return []}},bkEconomy:{dataset:{},querySelector(){return null},querySelectorAll:s=>s===".bk-card"?cards:[]}};
   const live=hoursFrontend([head,member],{getElementById:id=>elements[id]||null,querySelectorAll:s=>s==="#bcShell .bc-pulse-item"?pulses:[]});
   live.patchBaseDetail(head.jobId);live.patchCockpit(head.jobId);live.patchEconomy(head.jobId);
   assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");
@@ -178,7 +178,7 @@ for(const standalone of [false,true])test(`39-source load ${standalone?"S24177":
     window.SammelmappeInsights=require("../public/ui/sammelmappe-insights");
     assert.equal(window.BaustellenLiveHours.summary("24177").total.toFixed(2),"328.46");
     assert(!requests.some(row=>row.path.includes("/job/S24177/")||row.body.projectNumber==="S24177"));
-    for(const match of fs.readFileSync(path.join(root,"public/sammelmappe.html"),"utf8").matchAll(/id="([^"]+)"/g))elements[match[1]]={textContent:"",innerHTML:"",classList:{toggle(){}}};
+    for(const match of fs.readFileSync(path.join(root,"public/sammelmappe.html"),"utf8").matchAll(/id="([^"]+)"/g))elements[match[1]]={textContent:"",innerHTML:"",dataset:{},querySelector(){return null},classList:{toggle(){}}};
     const pageSource=fs.readFileSync(path.join(root,"public/ui/sammelmappe.js"),"utf8").replace("  function boot() {", "  window.testSammelmappe={renderHours,renderDocuments,set(j,c,d){jobs=j;collection=c;data=d}};\n  function boot() {");
     vm.runInNewContext(pageSource,context);window.testSammelmappe.set(catalog,selected,data);window.testSammelmappe.renderDocuments();window.testSammelmappe.renderHours();
     assert.equal(elements.collectionActual.textContent,h.format(1293.22)+" h");assert.equal(elements.collectionOpen.textContent,"30,31 h");
@@ -254,3 +254,4 @@ test("unreachable WW uses persisted hours and marks the stand as cached",async()
   const result=await context.window.BaustellenSources.ww("hours",{jobId:"24177",projectNumber:"24177"});
   assert.equal(result.hours.totalHours,25);assert.equal(result.cached,true);assert.equal(result.syncedAt,snapshot.syncedAt);
 });
+
