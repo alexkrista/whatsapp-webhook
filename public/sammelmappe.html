@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>KRISTINE · Sammelmappe</title>
-  <link rel="stylesheet" href="/public/ui/sammelmappe.css?v=20260913-sammelmappe-2">
+  <link rel="stylesheet" href="/public/ui/sammelmappe.css?v=20260914-status-1">
   <script src="/public/ui/baustellen-data.js?v=20260913-sammelmappe-1" defer></script>
   <script src="/public/ui/regie-billing-state.js?v=20260913-sammelmappe-1" defer></script>
   <script src="/public/ui/baustellen-sources.js?v=20260913-sammelmappe-1" defer></script>
   <script src="/public/ui/baustellen-live-hours.js?v=20260913-hours-cache-1" defer></script>
   <script src="/public/ui/sammelmappe-insights.js?v=20260913-sammelmappe-2" defer></script>
-  <script src="/public/ui/sammelmappe.js?v=20260913-hours-cache-1" defer></script>
+  <script src="/public/ui/sammelmappe.js?v=20260914-status-1" defer></script>
 </head>
 <body>
   <header class="page-head">
@@ -21,6 +21,14 @@
     </div>
   </header>
   <main>
+    <section class="panel member-field" aria-label="Status der Sammelmappe">
+      <label for="collectionStage"><strong>Status der Sammelmappe</strong></label>
+      <select id="collectionStage" disabled>
+        <option value="">Automatisch aus Einzelakten</option>
+        <option>Angebot</option><option>Angebot – abgelehnt</option><option>Auftrag</option><option>Laufend</option><option>Fertig – nicht abgerechnet</option><option>Geschlossen</option>
+      </select>
+      <p id="collectionStageNote" class="muted" role="status">Status wird geladen …</p>
+    </section>
     <p class="intro">Gemeinsame Übersicht der Einzelprojekte. Stunden, Kalkulationen, Fotos und Belege bleiben in der jeweiligen Akte.</p>
     <p class="intro"><a id="collectionCustomerPortal" href="/kristine/baustellen">Kundenfreigabe in der Hauptakte öffnen</a> · dort „Kundenportal“ → Umfang „Sammelmappe“ wählen.</p>
     <p id="collectionStatus" class="notice" role="status" aria-live="polite">Einzelakten werden geladen …</p>
