@@ -2512,13 +2512,14 @@ function cleanWwProjectLinks(value) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
       favorite: !!meta.favorite,
       notes: String(meta.notes || "").trim(),
       status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(meta.status) ? meta.status : "Angebot",
+      towerBillingHidden: !!meta.towerBillingHidden,
       offerFollowUpAt: cleanOperationalDate(meta.offerFollowUpAt),
       offerRejectedAt: cleanOperationalDate(meta.offerRejectedAt),
       street: String(meta.street || "").trim(),
@@ -2562,7 +2563,7 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2599,6 +2600,7 @@ async function writeJobMeta(jobId, patch) {
     notes: String(patch.notes ?? existing.notes ?? "").trim().slice(0, 1000),
     favorite: !!(patch.favorite ?? existing.favorite),
     status: ["Angebot", "Angebot – abgelehnt", "Auftrag", "Laufend", "Fertig – nicht abgerechnet", "Geschlossen"].includes(patch.status ?? existing.status) ? (patch.status ?? existing.status) : "Angebot",
+    towerBillingHidden: !!(patch.towerBillingHidden ?? existing.towerBillingHidden),
     offerFollowUpAt: cleanOperationalDate(patch.offerFollowUpAt ?? existing.offerFollowUpAt),
     offerRejectedAt: cleanOperationalDate(patch.offerRejectedAt ?? existing.offerRejectedAt),
     street: String(patch.street ?? existing.street ?? "").trim().slice(0, 140),
@@ -3027,6 +3029,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         notes: meta.notes || "",
         favorite: !!meta.favorite,
         status: meta.status || "Angebot",
+        towerBillingHidden: !!meta.towerBillingHidden,
         street: meta.street || "",
         houseNumber: meta.houseNumber || "",
         postalCode: meta.postalCode || "",
@@ -3161,6 +3164,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       notes: req.body?.notes,
       favorite: req.body?.favorite,
       status: req.body?.status,
+      towerBillingHidden: req.body?.towerBillingHidden,
       offerFollowUpAt: req.body?.offerFollowUpAt,
       offerRejectedAt: req.body?.offerRejectedAt,
       street: req.body?.street,
@@ -3183,7 +3187,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
+    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
     if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
@@ -4540,5 +4544,4 @@ async function startServer() {
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }
 startServer();
-
 
