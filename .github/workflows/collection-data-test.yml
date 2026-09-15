@@ -18,7 +18,7 @@ jobs:
       - run: node --test TEST/collection-data.test.js TEST/job-source-cache.test.js TEST/sammelmappen.test.js TEST/sammelmappe-insights.test.js TEST/collection-view-cache.test.js TEST/ww-offer-connection.test.js TEST/hours-persistence.test.js TEST/ww-mixed-collection.test.js TEST/order-pdf-import.test.js TEST/job-renumber.test.js TEST/customer-access.test.js TEST/customer-invitation-ui.test.js TEST/customer-materials.test.js TEST/customer-invoices.test.js TEST/offer-notepad.test.js
       - run: node TEST/baustellen-offer-builder.test.js && node TEST/baustellen-collection.test.js && node TEST/ww-collection-link.test.js && node TEST/customer-portal.test.js && node TEST/ww-regie-direct-sync.test.js && node TEST/kristine-baustellen-calculation-modules.test.js
       - run: node --check server.js && node --check public/ui/baustellen-knowledge-hub.js && node --check public/ui/baustellen-cockpit.js && node --check public/ui/baustellen-calculation-v2.js && node --check public/ui/baustellen-calculation-grid-v2.js
-      - run: node --test TEST/regie-billing-state.test.js TEST/progress-billing.test.js TEST/outgoing-billing-bridge.test.js
+      - run: node --test TEST/regie-billing-state.test.js TEST/progress-billing.test.js TEST/outgoing-billing-bridge.test.js TEST/kgo-regie-date.test.js
       - run: node TEST/baustellen-economy-values.test.js && node TEST/tower-open-regie-only.test.js
       - run: python -m unittest TEST.test_progress_billing TEST.test_outgoing_store
       - run: python -m py_compile archive-connector.py brain_outgoing_invoices.py brain_outgoing_store.py brain_progress_billing.py
