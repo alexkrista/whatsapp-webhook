@@ -15,6 +15,7 @@ assert.match(server, /const open = !billed/);
 assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state !== "billed"\)/);
 assert.match(tower, /performanceForJob\(sourceJob,\{billing,reports,actualHours:totalHours,regieHours/);
 assert.match(tower, /!performance\.complete\|\|performance\.amountToInvoice>\.005/);
+assert.match(tower, /hasBusinessData=totalHours>\.005\|\|reports\.length>0\|\|contract\(sourceJob\)>\.005\|\|invoices\.length>0/);
 assert.doesNotMatch(tower, /orderHours\+regieHours/);
 assert.match(tower, /billing-snapshot/);
 assert.match(tower, /recordedHoursNet/);
