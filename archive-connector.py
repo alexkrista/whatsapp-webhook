@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 105079)
-Total output lines: 9246
-
 from flask import Flask, request, jsonify, send_file, render_template_string
 import sqlite3
 from pathlib import Path
@@ -3113,7 +3110,3903 @@ def _negative_match(item, address_id, supplier_map):
     if not bucket:
         return False
     fp=_extract_supplier_fingerprint(str(item.get("_raw_text") or ""))
-    return bool(bucket.intersect…45079 tokens truncated…  };
+    return bool(bucket.intersection(_fingerprint_signature(fp)))
+
+
+def reject_invoice_for_address(address_id, invoice_id):
+    address_id = str(address_id or "").strip()
+    invoice_id = str(invoice_id or "").strip()
+    if not address_id or not invoice_id:
+        raise ValueError("Adresse oder Rechnung fehlt.")
+
+    data = _load_brain_supplier_map()
+    bucket = data.setdefault("rejections", {}).setdefault(address_id, [])
+    if invoice_id not in bucket:
+        bucket.append(invoice_id)
+
+    learned_negative=[]
+    for item in _incoming_catalog():
+        if _invoice_identity(item) != invoice_id:
+            continue
+        fp=_extract_supplier_fingerprint(str(item.get("_raw_text") or ""))
+        learned_negative=_fingerprint_signature(fp)
+        neg=data.setdefault("negativeFingerprints", {}).setdefault(address_id, [])
+        for sig in learned_negative:
+            if sig not in neg:
+                neg.append(sig)
+        break
+
+    _save_brain_supplier_map(data)
+    return data, learned_negative
+
+
+def _stable_fingerprint_matches(item, address_id, supplier_map=None):
+    supplier_map = supplier_map or _load_brain_supplier_map()
+    bucket = supplier_map.get("fingerprints", {}).get(str(address_id), {})
+    raw_norm = _norm_supplier(str(item.get("_raw_text") or ""))
+    matches = []
+
+    for value in bucket.get("customerNumbers", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("customerNumber", value, 100))
+    for value in bucket.get("uids", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("uid", value, 95))
+    for value in bucket.get("ibans", []):
+        nv = _norm_supplier(value)
+        if nv and nv in raw_norm:
+            matches.append(("iban", value, 90))
+    return matches
+
+
+def auto_link_by_fingerprint(address_id):
+    """
+    Re-scan the COMPLETE invoice catalogue after every positive learning click.
+    Strong stable fingerprints are auto-married. Explicit rejections always win.
+    """
+    address_id = str(address_id or "").strip()
+    data = _load_brain_supplier_map()
+    rejected = set(data.get("rejections", {}).get(address_id, []))
+    linked = 0
+
+    for item in _incoming_catalog():
+        iid = _invoice_identity(item)
+        if not iid or iid in rejected:
+            continue
+        current = _invoice_linked_address_id(item, data)
+        if current and current != address_id:
+            continue
+        if current == address_id:
+            continue
+
+        matches = _stable_fingerprint_matches(item, address_id, data)
+        if matches:
+            data.setdefault("invoiceLinks", {})[iid] = address_id
+            linked += 1
+
+    if linked:
+        _save_brain_supplier_map(data)
+    return linked
+
+
+def get_sql_driver():
+    drivers = pyodbc.drivers()
+    for name in (
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+        "SQL Server Native Client 11.0",
+        "SQL Server",
+    ):
+        if name in drivers:
+            return name
+    raise RuntimeError("Kein geeigneter SQL-Server-ODBC-Treiber gefunden")
+
+
+def sql_connection(database=SQL_DATABASE):
+    password = os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()
+    if not password:
+        raise RuntimeError("KRISTINE_SQL_PASSWORD fehlt")
+
+    driver = get_sql_driver()
+    return pyodbc.connect(
+        f"DRIVER={{{driver}}};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={database};"
+        f"UID={SQL_USER};"
+        f"PWD={password};"
+        "TrustServerCertificate=yes;",
+        timeout=5,
+    )
+
+
+def clean_date(value):
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return str(value)
+
+
+def ww_material_master_rows():
+    """Liest den aktiven WW-Materialstamm samt bevorzugtem Lieferanten und Preisen."""
+    con = sql_connection("WinWorker_Stammdaten_Standard")
+    try:
+        rows = con.cursor().execute("""
+            SELECT
+                m.StammIndex AS SourceId,
+                m.sKurztext AS Product,
+                m.sGruppe AS MaterialGroup,
+                m.sHersteller AS Manufacturer,
+                m.sEinheit AS UnitName,
+                COALESCE(NULLIF(li.EK, 0), NULLIF(m.gewEK, 0), NULLIF(m.EKFestpreis, 0), 0) AS PurchasePrice,
+                COALESCE(NULLIF(m.VK, 0), NULLIF(m.gewVK, 0), NULLIF(m.cCalcVK, 0), 0) AS SalePrice,
+                COALESCE(NULLIF(li.sFirma, ''), '') AS Supplier,
+                COALESCE(NULLIF(li.sDNArtikelNr, ''), NULLIF(li.sBestellNr, ''), '') AS SupplierArticleNumber,
+                COALESCE(NULLIF(li.sBestellNr, ''), '') AS OrderNumber,
+                COALESCE(NULLIF(m.sCalcDNMatchCode, ''), NULLIF(li.sDNMatchCode, ''), '') AS MatchCode,
+                COALESCE(NULLIF(v.sName, ''), '') AS DirectoryName,
+                COALESCE(li.dzPreisStand, li.dzLetztePreisaenderung, m.dzLetztePreisaenderung, m.[Geändert], m.Aufgenommen) AS PriceCheckedAt,
+                COALESCE(m.[Geändert], m.Aufgenommen) AS SourceUpdatedAt
+            FROM dbo.Material AS m
+            OUTER APPLY (
+                SELECT TOP (1) info.*
+                FROM dbo.MatLieferInfo_MIdx AS info
+                WHERE info.MaterialIndex = m.StammIndex
+                ORDER BY
+                    CASE WHEN info.nLieferant = m.Lieferant THEN 0 ELSE 1 END,
+                    COALESCE(info.dzPreisStand, info.dzLetztePreisaenderung, info.dzGeaendert, info.dzAufgenommen) DESC,
+                    info.nLieferant
+            ) AS li
+            LEFT JOIN dbo.Verzeichnisse AS v ON v.gID = m.gVerzeichnis
+            WHERE ISNULL(m.bIstMusterdatensatz, 0) = 0
+              AND (m.dzAuslaufArtikel IS NULL OR m.dzAuslaufArtikel > GETDATE())
+              AND NULLIF(LTRIM(RTRIM(m.sKurztext)), '') IS NOT NULL
+            ORDER BY m.StammIndex
+        """).fetchall()
+    finally:
+        con.close()
+
+    materials = []
+    for row in rows:
+        source_id = str(int(row.SourceId))
+        supplier_article = str(row.SupplierArticleNumber or "").strip()
+        order_number = str(row.OrderNumber or "").strip()
+        match_code = str(row.MatchCode or "").strip()
+        materials.append({
+            "sourceId": source_id,
+            "materialId": source_id,
+            "articleNumber": source_id,
+            "product": str(row.Product or "").strip(),
+            "group": str(row.MaterialGroup or "").strip(),
+            "manufacturer": str(row.Manufacturer or "").strip(),
+            "unit": str(row.UnitName or "").strip(),
+            "purchasePrice": float(row.PurchasePrice or 0),
+            "salePrice": float(row.SalePrice or 0),
+            "supplier": str(row.Supplier or "").strip(),
+            "supplierArticleNumber": supplier_article or order_number,
+            "orderNumber": order_number,
+            "matchCode": match_code,
+            "directory": str(row.DirectoryName or "").strip(),
+            "priceCheckedAt": clean_date(row.PriceCheckedAt),
+            "sourceUpdatedAt": clean_date(row.SourceUpdatedAt),
+            "active": True,
+        })
+    return materials
+
+
+
+
+def _schema_safe_name(value):
+    value = str(value or "")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", value):
+        raise ValueError(f"Unsicherer SQL-Name: {value}")
+    return value
+
+
+def build_winworker_schema_index():
+    """
+    Baut einen reinen STRUKTURINDEX der WinWorker-SQL-Landschaft.
+    Keine Geschäftsdaten werden kopiert.
+
+    Erfasst – soweit der Reader darauf zugreifen darf:
+    - Datenbanken WinWorker_*
+    - Tabellen und Views
+    - Spalten + Datentyp + NULL
+    - Primärschlüssel
+    - Fremdschlüssel
+    - normale/unique Indizes
+
+    Nicht erreichbare Datenbanken werden protokolliert und übersprungen.
+    """
+    master = sql_connection("master")
+    cur = master.cursor()
+    db_rows = cur.execute("""
+        SELECT name
+        FROM sys.databases
+        WHERE name LIKE 'WinWorker[_]%'
+          AND state_desc = 'ONLINE'
+        ORDER BY name
+    """).fetchall()
+    master.close()
+
+    db_names = [str(row.name) for row in db_rows]
+    result = {
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "server": SQL_SERVER,
+        "databaseCount": len(db_names),
+        "databases": [],
+        "errors": [],
+    }
+
+    for db_name in db_names:
+        db_name = _schema_safe_name(db_name)
+        db_item = {
+            "name": db_name,
+            "objects": [],
+            "foreignKeys": [],
+            "indexes": [],
+        }
+        try:
+            con = sql_connection(db_name)
+            cur = con.cursor()
+
+            # Tables + views + columns + PK flag.
+            rows = cur.execute("""
+                SELECT
+                    s.name AS schema_name,
+                    o.name AS object_name,
+                    CASE o.type WHEN 'U' THEN 'TABLE' WHEN 'V' THEN 'VIEW' ELSE o.type_desc END AS object_type,
+                    c.column_id,
+                    c.name AS column_name,
+                    t.name AS data_type,
+                    c.max_length,
+                    c.precision,
+                    c.scale,
+                    c.is_nullable,
+                    CASE WHEN pk.column_id IS NULL THEN 0 ELSE 1 END AS is_primary_key
+                FROM sys.objects o
+                JOIN sys.schemas s ON s.schema_id = o.schema_id
+                JOIN sys.columns c ON c.object_id = o.object_id
+                JOIN sys.types t ON t.user_type_id = c.user_type_id
+                LEFT JOIN (
+                    SELECT ic.object_id, ic.column_id
+                    FROM sys.indexes i
+                    JOIN sys.index_columns ic
+                      ON ic.object_id = i.object_id
+                     AND ic.index_id = i.index_id
+                    WHERE i.is_primary_key = 1
+                ) pk
+                  ON pk.object_id = c.object_id
+                 AND pk.column_id = c.column_id
+                WHERE o.type IN ('U','V')
+                  AND o.is_ms_shipped = 0
+                ORDER BY s.name, o.name, c.column_id
+            """).fetchall()
+
+            object_map = {}
+            for row in rows:
+                key = (str(row.schema_name), str(row.object_name), str(row.object_type))
+                if key not in object_map:
+                    object_map[key] = {
+                        "schema": key[0],
+                        "name": key[1],
+                        "type": key[2],
+                        "columns": [],
+                    }
+                object_map[key]["columns"].append({
+                    "ordinal": int(row.column_id),
+                    "name": str(row.column_name),
+                    "dataType": str(row.data_type),
+                    "maxLength": int(row.max_length) if row.max_length is not None else None,
+                    "precision": int(row.precision) if row.precision is not None else None,
+                    "scale": int(row.scale) if row.scale is not None else None,
+                    "nullable": bool(row.is_nullable),
+                    "primaryKey": bool(row.is_primary_key),
+                })
+            db_item["objects"] = list(object_map.values())
+
+            # Foreign keys.
+            fk_rows = cur.execute("""
+                SELECT
+                    fk.name AS fk_name,
+                    ps.name AS parent_schema,
+                    pt.name AS parent_table,
+                    pc.name AS parent_column,
+                    rs.name AS ref_schema,
+                    rt.name AS ref_table,
+                    rc.name AS ref_column
+                FROM sys.foreign_keys fk
+                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
+                JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+                JOIN sys.columns pc
+                  ON pc.object_id = fkc.parent_object_id
+                 AND pc.column_id = fkc.parent_column_id
+                JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+                JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+                JOIN sys.columns rc
+                  ON rc.object_id = fkc.referenced_object_id
+                 AND rc.column_id = fkc.referenced_column_id
+                ORDER BY fk.name, fkc.constraint_column_id
+            """).fetchall()
+            db_item["foreignKeys"] = [{
+                "name": str(r.fk_name),
+                "from": f"{r.parent_schema}.{r.parent_table}.{r.parent_column}",
+                "to": f"{r.ref_schema}.{r.ref_table}.{r.ref_column}",
+            } for r in fk_rows]
+
+            # Indexes: useful for identifying stable keys even where no FK exists.
+            idx_rows = cur.execute("""
+                SELECT
+                    s.name AS schema_name,
+                    t.name AS table_name,
+                    i.name AS index_name,
+                    i.is_unique,
+                    i.is_primary_key,
+                    c.name AS column_name,
+                    ic.key_ordinal
+                FROM sys.indexes i
+                JOIN sys.tables t ON t.object_id = i.object_id
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                JOIN sys.index_columns ic
+                  ON ic.object_id = i.object_id
+                 AND ic.index_id = i.index_id
+                JOIN sys.columns c
+                  ON c.object_id = ic.object_id
+                 AND c.column_id = ic.column_id
+                WHERE i.name IS NOT NULL
+                  AND i.is_hypothetical = 0
+                ORDER BY s.name, t.name, i.name, ic.key_ordinal, c.column_id
+            """).fetchall()
+            idx_map = {}
+            for r in idx_rows:
+                key = (str(r.schema_name), str(r.table_name), str(r.index_name))
+                idx_map.setdefault(key, {
+                    "schema": key[0],
+                    "table": key[1],
+                    "name": key[2],
+                    "unique": bool(r.is_unique),
+                    "primaryKey": bool(r.is_primary_key),
+                    "columns": [],
+                })
+                idx_map[key]["columns"].append(str(r.column_name))
+            db_item["indexes"] = list(idx_map.values())
+
+            con.close()
+        except Exception as e:
+            db_item["error"] = str(e)
+            result["errors"].append({"database": db_name, "error": str(e)})
+
+        db_item["objectCount"] = len(db_item["objects"])
+        db_item["columnCount"] = sum(len(obj["columns"]) for obj in db_item["objects"])
+        result["databases"].append(db_item)
+
+    SCHEMA_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SCHEMA_INDEX_FILE.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    return result
+
+
+def load_winworker_schema_index():
+    if not SCHEMA_INDEX_FILE.exists():
+        return None
+    try:
+        return json.loads(SCHEMA_INDEX_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def search_winworker_schema_index(query, limit=100):
+    index = load_winworker_schema_index()
+    if not index:
+        return {"ok": False, "error": "SQL-Strukturindex fehlt. Zuerst /schema-index/rebuild aufrufen."}
+
+    terms = [t for t in re.split(r"\\s+", str(query or "").strip().lower()) if t]
+    if not terms:
+        return {"ok": True, "query": query, "hits": [], "generatedAt": index.get("generatedAt")}
+
+    hits = []
+    for db in index.get("databases", []):
+        db_name = str(db.get("name") or "")
+        for obj in db.get("objects", []):
+            schema = str(obj.get("schema") or "")
+            name = str(obj.get("name") or "")
+            for col in obj.get("columns", []):
+                col_name = str(col.get("name") or "")
+                hay = f"{db_name} {schema} {name} {col_name} {col.get('dataType','')}".lower()
+                if all(term in hay for term in terms):
+                    hits.append({
+                        "database": db_name,
+                        "schema": schema,
+                        "object": name,
+                        "objectType": obj.get("type"),
+                        "column": col_name,
+                        "dataType": col.get("dataType"),
+                        "nullable": col.get("nullable"),
+                        "primaryKey": col.get("primaryKey"),
+                    })
+                    if len(hits) >= max(1, min(int(limit or 100), 500)):
+                        return {"ok": True, "query": query, "hits": hits, "generatedAt": index.get("generatedAt")}
+
+    return {"ok": True, "query": query, "hits": hits, "generatedAt": index.get("generatedAt")}
+
+
+
+
+def ww_hours_fusion_source(project_indices):
+    """
+    Liefert WinWorker-Stunden als Rohmaterial für die Fusion mit KRISTINE.
+
+    Regel:
+    - relevante Mitarbeiter/Tage werden über die angefragten Projekte bestimmt
+    - für diese Mitarbeiter/Tage werden ALLE produktiven Projektstunden des Tages
+      berücksichtigt, damit die 15 Minuten korrekt proportional verteilt werden
+    - pro MA + Tag werden maximal 0,25 h abgezogen
+    - die Mitarbeiteridentität kommt über
+      Stundenmitschreibung.MAIndex = LohnEmpfaenger.StammIndex
+      und LohnEmpfaenger.sMANr = Fink-Personalnummer
+    """
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return []
+
+    placeholders = ",".join("?" for _ in ids)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+
+    sql = f"""
+        WITH RelevantDays AS (
+            SELECT DISTINCT
+                sm.MAIndex,
+                CAST(sm.Tag AS date) AS Arbeitstag
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            WHERE sm.ProjektIndex IN ({placeholders})
+              AND sm.MAIndex IS NOT NULL
+              AND sm.Tag IS NOT NULL
+              AND ISNULL(sm.bNichtAuswerten, 0) = 0
+        ),
+        DayProject AS (
+            SELECT
+                sm.MAIndex,
+                CAST(sm.Tag AS date) AS Arbeitstag,
+                sm.ProjektIndex,
+                SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,6))) AS RawHours
+            FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+            INNER JOIN RelevantDays AS rd
+                ON rd.MAIndex = sm.MAIndex
+               AND rd.Arbeitstag = CAST(sm.Tag AS date)
+            WHERE sm.ProjektIndex IS NOT NULL
+              AND ISNULL(sm.bNichtAuswerten, 0) = 0
+              AND ISNULL(sm.bUnproduktiv, 0) = 0
+            GROUP BY
+                sm.MAIndex,
+                CAST(sm.Tag AS date),
+                sm.ProjektIndex
+        ),
+        DayTotals AS (
+            SELECT
+                MAIndex,
+                Arbeitstag,
+                SUM(RawHours) AS TotalRawHours
+            FROM DayProject
+            GROUP BY MAIndex, Arbeitstag
+        )
+        SELECT
+            dp.MAIndex,
+            LTRIM(RTRIM(ISNULL(le.sMANr, ''))) AS FinkNumber,
+            LTRIM(RTRIM(ISNULL(le.sVorname, ''))) AS FirstName,
+            LTRIM(RTRIM(ISNULL(le.sName, ''))) AS LastName,
+            dp.Arbeitstag,
+            dp.ProjektIndex,
+            p.sProjektNummer,
+            CAST(dp.RawHours AS decimal(18,6)) AS RawHours,
+            CAST(dt.TotalRawHours AS decimal(18,6)) AS TotalDayHours,
+            CAST(
+                CASE
+                    WHEN dt.TotalRawHours <= 0 THEN dp.RawHours
+                    ELSE dp.RawHours
+                       - (
+                           CASE
+                               WHEN dt.TotalRawHours < CAST(0.25 AS decimal(18,6))
+                                   THEN dt.TotalRawHours
+                               ELSE CAST(0.25 AS decimal(18,6))
+                           END
+                           * (dp.RawHours / dt.TotalRawHours)
+                         )
+                END
+                AS decimal(18,6)
+            ) AS NetHours,
+            CAST(
+                CASE
+                    WHEN dt.TotalRawHours <= 0 THEN 0
+                    ELSE (
+                        CASE
+                            WHEN dt.TotalRawHours < CAST(0.25 AS decimal(18,6))
+                                THEN dt.TotalRawHours
+                            ELSE CAST(0.25 AS decimal(18,6))
+                        END
+                        * (dp.RawHours / dt.TotalRawHours)
+                    )
+                END
+                AS decimal(18,6)
+            ) AS BreakHours
+        FROM DayProject AS dp
+        INNER JOIN DayTotals AS dt
+            ON dt.MAIndex = dp.MAIndex
+           AND dt.Arbeitstag = dp.Arbeitstag
+        LEFT JOIN WinWorker_Personal_Standard.dbo.LohnEmpfaenger AS le
+            ON le.StammIndex = dp.MAIndex
+        LEFT JOIN dbo.Projekte AS p
+            ON p.ProjektIndex = dp.ProjektIndex
+        WHERE dp.ProjektIndex IN ({placeholders})
+        ORDER BY
+            dp.Arbeitstag,
+            dp.MAIndex,
+            dp.ProjektIndex
+    """
+
+    rows = cur.execute(sql, *(ids + ids)).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "maIndex": int(row.MAIndex) if row.MAIndex is not None else None,
+            "finkNumber": row.FinkNumber or "",
+            "employeeName": " ".join(
+                x for x in [row.FirstName or "", row.LastName or ""] if x
+            ).strip(),
+            "date": clean_date(row.Arbeitstag),
+            "projectIndex": int(row.ProjektIndex) if row.ProjektIndex is not None else None,
+            "projectNumber": row.sProjektNummer or "",
+            "rawHours": float(row.RawHours or 0),
+            "totalDayHours": float(row.TotalDayHours or 0),
+            "netHours": float(row.NetHours or 0),
+            "breakHours": float(row.BreakHours or 0),
+        })
+
+    return result
+
+
+
+def project_metrics(project_indices):
+    """
+    Projektkennzahlen für The Brain.
+
+    STUNDEN
+    -------
+    Produktive WinWorker-Stunden. Pro Mitarbeiter und Arbeitstag wird die
+    unbezahlte 15-Minuten-Pause einmal proportional auf alle produktiven
+    Projekte dieses Tages verteilt. Damit entspricht die Kennzahl der
+    Nachkalkulationslogik von KRISTINE.
+
+    UMSATZ
+    ------
+    Pro Projekt + Rechnungsnummer zählt nur die jüngste, nicht stornierte
+    WinWorker-Version. Erst danach wird cUmsatzNetto summiert.
+    """
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in ids)
+    result = {
+        pid: {
+            "hoursTotal": None,
+            "hoursProductive": None,
+            "hoursRecorded": None,
+            "breakHours": None,
+            "netInvoiced": None,
+            "revenuePerHour": None,
+            "hoursSource": None,
+        }
+        for pid in ids
+    }
+
+    # 1) Produktive Stunden inkl. proportionalem 15-Minuten-Abzug.
+    try:
+        rows = ww_hours_fusion_source(ids)
+        sums = {
+            pid: {"net": 0.0, "raw": 0.0, "break": 0.0, "seen": False}
+            for pid in ids
+        }
+        for row in rows:
+            pid = row.get("projectIndex")
+            if pid not in sums:
+                continue
+            sums[pid]["net"] += float(row.get("netHours") or 0)
+            sums[pid]["raw"] += float(row.get("rawHours") or 0)
+            sums[pid]["break"] += float(row.get("breakHours") or 0)
+            sums[pid]["seen"] = True
+
+        for pid, values in sums.items():
+            if not values["seen"]:
+                continue
+            productive = round(values["net"], 4)
+            result[pid]["hoursTotal"] = productive
+            result[pid]["hoursProductive"] = productive
+            result[pid]["hoursRecorded"] = round(values["raw"], 4)
+            result[pid]["breakHours"] = round(values["break"], 4)
+            result[pid]["hoursSource"] = "WinWorker produktiv · 15 Min anteilig abgezogen"
+    except Exception as e:
+        print("SQL produktive Stunden-Metrik FEHLER:", repr(e))
+
+        # Rückfall: wenigstens produktive Rohstunden liefern, falls die
+        # tageweise Fusion auf einer älteren WW-Struktur nicht möglich ist.
+        try:
+            con = sql_connection("WinWorker_Projekte_Standard")
+            cur = con.cursor()
+            sql = f"""
+                SELECT
+                    sm.ProjektIndex,
+                    SUM(CAST(ISNULL(sm.dStundenErfasst, 0) AS decimal(18,4))) AS IstStunden
+                FROM WinWorker_Mitschreibung_Standard.dbo.Stundenmitschreibung AS sm
+                WHERE sm.ProjektIndex IN ({placeholders})
+                  AND ISNULL(sm.bNichtAuswerten, 0) = 0
+                  AND ISNULL(sm.bUnproduktiv, 0) = 0
+                GROUP BY sm.ProjektIndex
+            """
+            rows = cur.execute(sql, *ids).fetchall()
+            con.close()
+            for row in rows:
+                pid = int(row.ProjektIndex)
+                if pid not in result:
+                    continue
+                hours = float(row.IstStunden) if row.IstStunden is not None else None
+                result[pid]["hoursTotal"] = hours
+                result[pid]["hoursProductive"] = hours
+                result[pid]["hoursRecorded"] = hours
+                result[pid]["breakHours"] = None
+                result[pid]["hoursSource"] = "WinWorker produktive Rohstunden · Pause nicht abziehbar"
+        except Exception as fallback_error:
+            print("SQL Stunden-Fallback FEHLER:", repr(fallback_error))
+
+    # 2) Aktueller Netto-Abrechnungsstand.
+    try:
+        con = sql_connection("WinWorker_Projekte_Standard")
+        cur = con.cursor()
+        sql = f"""
+            WITH InvoiceRows AS (
+                SELECT
+                    b.ProjektIndex,
+                    LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
+                    r.cUmsatzNetto,
+                    COALESCE(
+                        b.Geändert,
+                        b.dzInhaltGeaendert,
+                        b.dzDocDatum,
+                        b.Aufgenommen
+                    ) AS VersionZeit,
+                    b.gID
+                FROM dbo.[Bücher] AS b
+                INNER JOIN dbo.Rechnung AS r
+                    ON r.gBuchID = b.gID
+                WHERE b.ProjektIndex IN ({placeholders})
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+                  AND ISNULL(b.Storno, 0) = 0
+                  AND r.cUmsatzNetto IS NOT NULL
+            ),
+            LatestPerInvoiceNumber AS (
+                SELECT
+                    ProjektIndex,
+                    sBuchNummer,
+                    cUmsatzNetto,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ProjektIndex, sBuchNummer
+                        ORDER BY VersionZeit DESC, gID DESC
+                    ) AS rn
+                FROM InvoiceRows
+            )
+            SELECT
+                ProjektIndex,
+                SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoAbgerechnet
+            FROM LatestPerInvoiceNumber
+            WHERE rn = 1
+            GROUP BY ProjektIndex
+        """
+        rows = cur.execute(sql, *ids).fetchall()
+        con.close()
+
+        for row in rows:
+            pid = int(row.ProjektIndex)
+            if pid in result:
+                result[pid]["netInvoiced"] = (
+                    float(row.NettoAbgerechnet)
+                    if row.NettoAbgerechnet is not None
+                    else None
+                )
+    except Exception as e:
+        print("SQL Rechnungs-Metrik FEHLER:", repr(e))
+
+    for metric in result.values():
+        hours = metric.get("hoursProductive")
+        revenue = metric.get("netInvoiced")
+        if hours is not None and hours > 0 and revenue is not None:
+            metric["revenuePerHour"] = round(float(revenue) / float(hours), 2)
+
+    return result
+
+
+def _project_row_to_dict(row):
+    street = row.sStrasse or ""
+    postal = row.sPLZ or ""
+    city = row.sOrt or ""
+    address = " ".join(x for x in [street, postal, city] if x).strip()
+    customer = " ".join(
+        x for x in [row.sVorname or "", row.sName or ""] if x
+    ).strip()
+
+    return {
+        "projectIndex": int(row.ProjektIndex) if row.ProjektIndex is not None else None,
+        "projectNumber": row.sProjektNummer or "",
+        "title": row.sProjekt or row.sBaustelle or row.sBauvorhaben or "",
+        "site": row.sBaustelle or "",
+        "projectDescription": row.sBauvorhaben or "",
+        "customerIndex": int(row.KundenIndex) if row.KundenIndex is not None else None,
+        "customerNumber": row.lKundenNr,
+        "company": row.sFirma or "",
+        "firstName": row.sVorname or "",
+        "lastName": row.sName or "",
+        "customer": customer,
+        "street": street,
+        "postalCode": postal,
+        "city": city,
+        "address": address,
+        "firstDate": clean_date(row.ErstesDatum),
+        "lastDate": clean_date(row.LetztesDatum),
+    }
+
+
+def _attach_project_metrics(projects):
+    metrics = project_metrics([item.get("projectIndex") for item in projects])
+    for item in projects:
+        project_index = item.get("projectIndex")
+        metric = metrics.get(int(project_index)) if project_index is not None else None
+        metric = metric or {}
+        item["hoursTotal"] = metric.get("hoursTotal")
+        item["hoursProductive"] = metric.get("hoursProductive")
+        item["hoursRecorded"] = metric.get("hoursRecorded")
+        item["breakHours"] = metric.get("breakHours")
+        item["hoursSource"] = metric.get("hoursSource")
+        item["netInvoiced"] = metric.get("netInvoiced")
+        item["revenuePerHour"] = metric.get("revenuePerHour")
+    return projects
+
+
+def search_projects(terms, include_metrics=True, limit=100):
+    if not terms:
+        return []
+
+    limit = max(1, min(int(limit or 100), 500))
+    con = sql_connection()
+    cur = con.cursor()
+
+    conditions = []
+    params = []
+
+    # Alle Suchbegriffe müssen irgendwo im Projekt, Kundenstamm oder in einer
+    # WW-Belegnummer vorkommen. Dadurch funktioniert auch die Eingabe einer
+    # Angebots-, Auftrags- oder Rechnungsnummer.
+    for term in terms:
+        like = f"%{term}%"
+        conditions.append(
+            """
+            (
+                ISNULL(p.sProjektNummer, '') LIKE ?
+                OR ISNULL(p.sProjekt, '') LIKE ?
+                OR ISNULL(p.sBaustelle, '') LIKE ?
+                OR ISNULL(p.sBauvorhaben, '') LIKE ?
+                OR ISNULL(k.sFirma, '') LIKE ?
+                OR ISNULL(k.sName, '') LIKE ?
+                OR ISNULL(k.sVorname, '') LIKE ?
+                OR ISNULL(k.sStrasse, '') LIKE ?
+                OR ISNULL(k.sPLZ, '') LIKE ?
+                OR ISNULL(k.sOrt, '') LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM dbo.[Bücher] AS sb
+                    WHERE sb.ProjektIndex = p.ProjektIndex
+                      AND ISNULL(sb.sBuchNummer, '') LIKE ?
+                )
+            )
+            """
+        )
+        params.extend([like] * 11)
+
+    numeric_terms = [t for t in terms if re.fullmatch(r"\d+", t)]
+    order_params = []
+    order_parts = []
+    if numeric_terms:
+        placeholders = ",".join("?" for _ in numeric_terms)
+        order_parts.append(
+            f"CASE WHEN p.sProjektNummer IN ({placeholders}) THEN 0 ELSE 1 END"
+        )
+        order_params.extend(numeric_terms)
+
+    order_parts.extend([
+        "CASE WHEN k.lKundenNr IS NULL THEN 1 ELSE 0 END",
+        "k.lKundenNr ASC",
+        "MAX(b.dzDocDatum) DESC",
+        "p.ProjektIndex DESC",
+    ])
+    order_by = ",\n            ".join(order_parts)
+
+    sql = f"""
+        SELECT TOP {limit}
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            p.bAktiv,
+            p.bArchiv,
+            p.bIstAbgeschlossen,
+            p.sPrjStatus,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE {" AND ".join(conditions)}
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            p.bAktiv,
+            p.bArchiv,
+            p.bIstAbgeschlossen,
+            p.sPrjStatus,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+        ORDER BY {order_by}
+    """
+
+    cur.execute(sql, params + order_params)
+    rows = cur.fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        item = _project_row_to_dict(row)
+        is_hidden = bool(row.bArchiv) or (row.bAktiv is not None and not bool(row.bAktiv))
+        is_completed = bool(row.bIstAbgeschlossen)
+        status_parts = []
+        if is_hidden:
+            status_parts.append("ausgeblendet")
+        if is_completed:
+            status_parts.append("abgeschlossen")
+        ww_status = str(row.sPrjStatus or "").strip()
+        if ww_status and ww_status.lower() not in status_parts:
+            status_parts.append(ww_status)
+        item.update({
+            "hidden": is_hidden,
+            "completed": is_completed,
+            "wwStatus": " · ".join(status_parts),
+        })
+        result.append(item)
+    if include_metrics:
+        _attach_project_metrics(result)
+    return result
+
+
+def open_order_projects(query="", limit=500):
+    """Aktive, noch nicht abgeschlossene WW-Aufträge für die KRISTINE-Auswahl.
+
+    bAbgerechnet ist hier bewusst kein Ausschlusskriterium: WinWorker setzt das
+    Feld auch bei Abschlagsrechnungen. Ein solcher Auftrag bleibt bis zum
+    tatsächlichen Abschluss für die Baustellenübernahme sichtbar.
+    """
+    limit = max(1, min(int(limit or 500), 1000))
+    needle = str(query or "").strip()
+    conditions = [
+        "ISNULL(p.bAktiv, 1) = 1",
+        "ISNULL(p.bArchiv, 0) = 0",
+        "ISNULL(p.bIstAbgeschlossen, 0) = 0",
+        "(ISNULL(p.AuftragErteilt, 0) = 1 OR p.dzAuftragErteilt IS NOT NULL OR ISNULL(p.bInArbeit, 0) = 1)",
+        "NULLIF(LTRIM(RTRIM(ISNULL(p.sProjektNummer, ''))), '') IS NOT NULL",
+    ]
+    params = []
+    if needle:
+        like = f"%{needle}%"
+        conditions.append("""
+            (
+                ISNULL(p.sProjektNummer, '') LIKE ?
+                OR ISNULL(p.sProjekt, '') LIKE ?
+                OR ISNULL(p.sBaustelle, '') LIKE ?
+                OR ISNULL(p.sBauvorhaben, '') LIKE ?
+                OR ISNULL(k.sFirma, '') LIKE ?
+                OR ISNULL(k.sName, '') LIKE ?
+                OR ISNULL(k.sVorname, '') LIKE ?
+                OR ISNULL(k.sStrasse, '') LIKE ?
+                OR ISNULL(k.sOrt, '') LIKE ?
+            )
+        """)
+        params.extend([like] * 9)
+
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute(f"""
+        SELECT TOP {limit}
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum,
+            p.sPrjStatus,
+            p.AuftragErteilt,
+            p.bInArbeit,
+            COALESCE(p.dzAuftragErteilt, p.dzStart, p.Geändert, p.Aufgenommen) AS Auftragsdatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE {" AND ".join(conditions)}
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            p.sPrjStatus,
+            p.AuftragErteilt,
+            p.bInArbeit,
+            p.dzAuftragErteilt,
+            p.dzStart,
+            p.Geändert,
+            p.Aufgenommen
+        ORDER BY
+            COALESCE(p.dzAuftragErteilt, p.dzStart, p.Geändert, p.Aufgenommen) DESC,
+            p.ProjektIndex DESC
+    """, params).fetchall()
+    con.close()
+
+    # Projektzweige können dieselbe sichtbare Projektnummer tragen. In der
+    # Auswahlliste erscheint jede WW-Auftragsnummer bewusst nur einmal.
+    result = []
+    seen_numbers = set()
+    for row in rows:
+        item = _project_row_to_dict(row)
+        number_key = str(item.get("projectNumber") or "").strip().lower()
+        if not number_key or number_key in seen_numbers:
+            continue
+        seen_numbers.add(number_key)
+        item.update({
+            "wwStatus": str(row.sPrjStatus or "").strip(),
+            "orderGranted": bool(row.AuftragErteilt),
+            "inProgress": bool(row.bInArbeit),
+            "orderDate": clean_date(row.Auftragsdatum),
+        })
+        result.append(item)
+    return result
+
+
+def projects_for_customer(customer_index):
+    customer_index = int(customer_index)
+    con = sql_connection()
+    cur = con.cursor()
+    rows = cur.execute("""
+        SELECT TOP 500
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE p.KundenIndex = ?
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+        ORDER BY
+            MAX(b.dzDocDatum) DESC,
+            p.ProjektIndex DESC
+    """, customer_index).fetchall()
+    con.close()
+
+    result = [_project_row_to_dict(row) for row in rows]
+    return _attach_project_metrics(result)
+
+
+def _customer_revenue_by_year(project_indices):
+    ids = sorted({int(x) for x in project_indices if x is not None})
+    if not ids:
+        return []
+
+    placeholders = ",".join("?" for _ in ids)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute(f"""
+        WITH InvoiceRows AS (
+            SELECT
+                b.ProjektIndex,
+                LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
+                r.cUmsatzNetto,
+                COALESCE(
+                    r.dzRechnungsdatum,
+                    b.dzDocDatum,
+                    b.Geändert,
+                    b.dzInhaltGeaendert,
+                    b.Aufgenommen
+                ) AS Rechnungsdatum,
+                COALESCE(
+                    b.Geändert,
+                    b.dzInhaltGeaendert,
+                    b.dzDocDatum,
+                    b.Aufgenommen
+                ) AS VersionZeit,
+                b.gID
+            FROM dbo.[Bücher] AS b
+            INNER JOIN dbo.Rechnung AS r
+                ON r.gBuchID = b.gID
+            WHERE b.ProjektIndex IN ({placeholders})
+              AND NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+              AND ISNULL(b.Storno, 0) = 0
+              AND r.cUmsatzNetto IS NOT NULL
+        ),
+        LatestPerInvoiceNumber AS (
+            SELECT
+                ProjektIndex,
+                sBuchNummer,
+                cUmsatzNetto,
+                Rechnungsdatum,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ProjektIndex, sBuchNummer
+                    ORDER BY VersionZeit DESC, gID DESC
+                ) AS rn
+            FROM InvoiceRows
+        )
+        SELECT
+            YEAR(Rechnungsdatum) AS UmsatzJahr,
+            SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoUmsatz,
+            COUNT(*) AS BelegAnzahl
+        FROM LatestPerInvoiceNumber
+        WHERE rn = 1
+        GROUP BY YEAR(Rechnungsdatum)
+        ORDER BY UmsatzJahr DESC
+    """, *ids).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "year": int(row.UmsatzJahr) if row.UmsatzJahr is not None else None,
+            "netRevenue": float(row.NettoUmsatz or 0),
+            "invoiceCount": int(row.BelegAnzahl or 0),
+        })
+    return result
+
+
+def company_planning_year(year):
+    """Monatliche, deduplizierte Rechnungsumsätze aus WW und KRISTINE."""
+    year = int(year)
+    combined = globals().get("combined_outgoing_revenue_year")
+    if callable(combined):
+        return combined(year)
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute("""
+        WITH InvoiceRows AS (
+            SELECT
+                b.ProjektIndex,
+                LTRIM(RTRIM(b.sBuchNummer)) AS sBuchNummer,
+                r.cUmsatzNetto,
+                COALESCE(r.dzRechnungsdatum,b.dzDocDatum,b.Geändert,b.dzInhaltGeaendert,b.Aufgenommen) AS Rechnungsdatum,
+                COALESCE(b.Geändert,b.dzInhaltGeaendert,b.dzDocDatum,b.Aufgenommen) AS VersionZeit,
+                b.gID
+            FROM dbo.[Bücher] AS b
+            INNER JOIN dbo.Rechnung AS r ON r.gBuchID = b.gID
+            WHERE NULLIF(LTRIM(RTRIM(ISNULL(b.sBuchNummer, ''))), '') IS NOT NULL
+              AND ISNULL(b.Storno, 0) = 0
+              AND r.cUmsatzNetto IS NOT NULL
+        ), LatestPerInvoiceNumber AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY ProjektIndex, sBuchNummer
+                ORDER BY VersionZeit DESC, gID DESC
+            ) AS rn
+            FROM InvoiceRows
+        )
+        SELECT MONTH(Rechnungsdatum) AS UmsatzMonat,
+               SUM(CAST(cUmsatzNetto AS decimal(18,2))) AS NettoUmsatz,
+               COUNT(*) AS BelegAnzahl
+        FROM LatestPerInvoiceNumber
+        WHERE rn = 1 AND YEAR(Rechnungsdatum) = ?
+        GROUP BY MONTH(Rechnungsdatum)
+        ORDER BY UmsatzMonat
+    """, year).fetchall()
+    con.close()
+    monthly = [{"month": i, "netRevenue": 0.0, "invoiceCount": 0} for i in range(1, 13)]
+    for row in rows:
+        month = int(row.UmsatzMonat)
+        monthly[month - 1] = {
+            "month": month,
+            "netRevenue": float(row.NettoUmsatz or 0),
+            "invoiceCount": int(row.BelegAnzahl or 0),
+        }
+    return {
+        "year": year,
+        "monthlyRevenue": monthly,
+        "netRevenue": round(sum(x["netRevenue"] for x in monthly), 2),
+        "invoiceCount": sum(x["invoiceCount"] for x in monthly),
+        "revenueSource": "WinWorker Rechnungen netto · je Rechnungsnummer nur jüngste Version",
+    }
+
+
+def project_address_candidates(query, limit=30):
+    terms = [x.strip() for x in str(query or "").split() if x.strip()]
+    if not terms:
+        return []
+
+    projects = search_projects(
+        terms,
+        include_metrics=False,
+        limit=max(100, min(int(limit or 30) * 8, 400)),
+    )
+    grouped = {}
+    for project in projects:
+        customer_index = project.get("customerIndex")
+        if customer_index is not None:
+            key = f"customer:{customer_index}"
+        else:
+            key = "address:" + hashlib.sha1(
+                "|".join([
+                    str(project.get("company") or ""),
+                    str(project.get("customer") or ""),
+                    str(project.get("address") or ""),
+                ]).encode("utf-8", errors="ignore")
+            ).hexdigest()[:16]
+
+        if key not in grouped:
+            display_name = project.get("company") or project.get("customer") or "Adresse"
+            grouped[key] = {
+                "key": key,
+                "customerIndex": customer_index,
+                "customerNumber": project.get("customerNumber"),
+                "name": display_name,
+                "company": project.get("company") or "",
+                "person": project.get("customer") or "",
+                "street": project.get("street") or "",
+                "postalCode": project.get("postalCode") or "",
+                "city": project.get("city") or "",
+                "address": project.get("address") or "",
+                "matchingProjectCount": 0,
+                "sampleProjects": [],
+                "lastDate": project.get("lastDate"),
+            }
+
+        candidate = grouped[key]
+        candidate["matchingProjectCount"] += 1
+        number = str(project.get("projectNumber") or "").strip()
+        title = str(project.get("title") or "").strip()
+        label = " · ".join(x for x in [number, title] if x)
+        if label and label not in candidate["sampleProjects"] and len(candidate["sampleProjects"]) < 4:
+            candidate["sampleProjects"].append(label)
+        if str(project.get("lastDate") or "") > str(candidate.get("lastDate") or ""):
+            candidate["lastDate"] = project.get("lastDate")
+
+    qnorm = _norm_supplier(query)
+    qcompact = re.sub(r"\s+", "", qnorm)
+
+    def score(candidate):
+        name = _norm_supplier(candidate.get("name"))
+        address = _norm_supplier(candidate.get("address"))
+        customer_no = _norm_supplier(candidate.get("customerNumber"))
+        hay = " ".join([name, address, customer_no])
+        value = 0
+        if qnorm and name == qnorm:
+            value += 1000
+        elif qnorm and name.startswith(qnorm):
+            value += 700
+        if qnorm and qnorm in address:
+            value += 350
+        if qcompact and qcompact == re.sub(r"\s+", "", customer_no):
+            value += 900
+        value += min(int(candidate.get("matchingProjectCount") or 0), 50)
+        return (-value, -int(candidate.get("matchingProjectCount") or 0), hay)
+
+    rows = sorted(grouped.values(), key=score)
+    return rows[:max(1, min(int(limit or 30), 100))]
+
+
+def customer_project_overview(customer_index):
+    projects = projects_for_customer(customer_index)
+    ids = [p.get("projectIndex") for p in projects]
+    try:
+        yearly = _customer_revenue_by_year(ids)
+    except Exception as e:
+        print("SQL Jahresumsatz FEHLER:", repr(e))
+        yearly = []
+
+    revenue_values = [
+        float(p["netInvoiced"])
+        for p in projects
+        if p.get("netInvoiced") is not None
+    ]
+    hour_values = [
+        float(p["hoursProductive"])
+        for p in projects
+        if p.get("hoursProductive") is not None
+    ]
+    total_revenue = round(sum(revenue_values), 2) if revenue_values else None
+    total_hours = round(sum(hour_values), 2) if hour_values else None
+
+    comparable_projects = [
+        project for project in projects
+        if project.get("netInvoiced") is not None
+        and project.get("hoursProductive") is not None
+        and float(project.get("hoursProductive") or 0) > 0
+    ]
+    comparable_revenue = sum(float(project["netInvoiced"]) for project in comparable_projects)
+    comparable_hours = sum(float(project["hoursProductive"]) for project in comparable_projects)
+    revenue_per_hour = (
+        round(comparable_revenue / comparable_hours, 2)
+        if comparable_hours > 0
+        else None
+    )
+
+    first = projects[0] if projects else {}
+    overview = {
+        "customerIndex": int(customer_index),
+        "customerNumber": first.get("customerNumber"),
+        "name": first.get("company") or first.get("customer") or "Adresse",
+        "company": first.get("company") or "",
+        "person": first.get("customer") or "",
+        "address": first.get("address") or "",
+        "projectCount": len(projects),
+        "projectsWithRevenue": len(revenue_values),
+        "projectsWithHours": len(hour_values),
+        "projectsComparable": len(comparable_projects),
+        "totalRevenue": total_revenue,
+        "totalProductiveHours": total_hours,
+        "revenuePerHour": revenue_per_hour,
+        "revenueByYear": yearly,
+        "revenueSource": "WinWorker Rechnungen netto · je Rechnungsnummer nur jüngste Version",
+        "hoursSource": "WinWorker produktive Stunden · 15 Minuten pro MA/Tag anteilig abgezogen",
+        "ratioSource": "Umsatz/Std. nur aus Projekten mit vollständig vorhandenem Umsatz und Stunden",
+    }
+    return overview, projects
+
+
+def _normalize_project_identifier(value):
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def canonical_project_document_type(*values, is_invoice=False, ww_book_art=None):
+    text = _norm_supplier(" ".join(str(v or "") for v in values))
+
+    if re.search(r"\b(auftragssteuerung|auftrag steuerung|projektsteuerung)\b", text):
+        return "Auftragssteuerung"
+    if re.search(r"\b(nachkalkulation|vorkalkulation|kalkulation|kalkulationsblatt)\b", text):
+        return "Kalkulation"
+    if re.search(r"\b(schlussrechnung|schluss rechnung|endabrechnung|end abrechnung)\b", text):
+        return "Schlussrechnung"
+    if re.search(r"\b(teilrechnung|teil rechnung|abschlagsrechnung|akontorechnung|acontorechnung)\b", text):
+        return "Teilrechnung"
+    if re.search(r"\b(gutschrift|storno|stornorechnung)\b", text):
+        return "Gutschrift / Storno"
+    if re.search(r"\b(auftragsbestätigung|auftragsbestatigung|auftragsbestaetigung|auftrag bestätigung|auftrag bestatigung|auftrag bestaetigung)\b", text):
+        return "Auftrag / Auftragsbestätigung"
+    if re.search(r"\b(angebot|offerte|kostenvoranschlag)\b", text):
+        return "Angebot"
+    if re.search(r"\b(auftrag|bestellung)\b", text):
+        return "Auftrag / Auftragsbestätigung"
+    if re.search(r"\b(aufmass|aufmaß|massenermittlung)\b", text):
+        return "Aufmaß"
+    if re.search(r"\b(regiebericht|regie bericht|regiezettel)\b", text):
+        return "Regiebericht"
+    if re.search(r"\b(lieferschein)\b", text):
+        return "Lieferschein"
+    if re.search(r"\b(rechnung|faktura|invoice)\b", text) or is_invoice:
+        return "Rechnung"
+    if ww_book_art not in (None, ""):
+        return "Weitere WW-Belege"
+    return "Sonstige Dokumente"
+
+
+def _project_pdf_rows(project_number, book_numbers=None, limit=600):
+    project_number = str(project_number or "").strip()
+    needles = []
+    for value in [project_number] + list(book_numbers or []):
+        value = str(value or "").strip()
+        if len(value) >= 3 and value not in needles:
+            needles.append(value)
+    if not needles or not DB.exists():
+        return []
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        select = ["filename", "path", "dokumenttyp", "modified", "text"]
+        for optional in ("source", "doc_year", "logical_id"):
+            if optional in cols:
+                select.append(optional)
+
+        or_parts = []
+        params = []
+        for needle in needles[:80]:
+            like = f"%{needle}%"
+            or_parts.append("(text LIKE ? OR filename LIKE ? OR path LIKE ?)")
+            params.extend([like, like, like])
+
+        sql = "SELECT " + ",".join(select) + " FROM pdf_index WHERE (" + " OR ".join(or_parts) + ")"
+        if "source" in cols:
+            sql += " AND (source IS NULL OR source <> 'EINGANG')"
+        else:
+            sql += r" AND path NOT LIKE '%\Dokman\%'"
+        sql += " ORDER BY modified DESC LIMIT ?"
+        params.append(max(1, min(int(limit or 600), 1000)))
+        rows = con.execute(sql, params).fetchall()
+    finally:
+        con.close()
+
+    result = []
+    seen = set()
+    for row in rows:
+        item = dict(row)
+        path = str(item.get("path") or "")
+        key = path.lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        dt = parse_print_time(item.get("filename"), item.get("modified"))
+        item["printDate"] = dt.date().isoformat() if dt else None
+        item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+        item["year"] = dt.year if dt else item.get("doc_year")
+        item["_raw_text"] = item.pop("text", "") or ""
+        item["pdfFound"] = True
+        item["sourceOfTruth"] = "PDF-Archiv"
+        result.append(item)
+    return result
+
+
+def _project_pdf_reference_state(pdf, project_number):
+    """Return True/False/None for a PDF's project reference.
+
+    A project number in the filename/path or an explicit ``Projekt:`` line is
+    strong evidence. ``None`` means that the PDF contains no usable project
+    reference; this is only acceptable for an exact WW document-ID match.
+    """
+    wanted = _normalize_project_identifier(project_number)
+    if not wanted:
+        return None
+
+    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
+    references = {
+        _normalize_project_identifier(value)
+        for value in re.findall(
+            r"(?im)\bprojekt(?:nummer|\s*nr\.?)?\s*[:#]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",
+            raw_text,
+        )
+    }
+    references.discard("")
+    if references:
+        return wanted in references
+
+    filename = _normalize_project_identifier(pdf.get("filename"))
+    path_value = _normalize_project_identifier(pdf.get("path"))
+    if wanted in filename or wanted in path_value:
+        return True
+    return None
+
+
+def _project_pdf_primary_book_number(pdf):
+    """Read the document's own number, not referenced previous invoices."""
+    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
+    patterns = (
+        r"(?im)^\s*(?:belegnummer|rechnungsnummer)\s*:?\s*([0-9][A-Z0-9./_-]{2,})",
+        r"(?im)^\s*nr\.?\s*:?\s*([0-9][A-Z0-9./_-]{2,})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw_text)
+        if match:
+            return _normalize_project_identifier(match.group(1))
+    return ""
+
+
+def _project_pdf_fallback_score(pdf, book, project_number, all_book_numbers=()):
+    """Score a fallback PDF only inside the requested project and document."""
+    if _project_pdf_reference_state(pdf, project_number) is not True:
+        return None
+
+    number_norm = _normalize_project_identifier(book.get("bookNumber"))
+    if len(number_norm) < 3:
+        return None
+
+    filename_norm = _normalize_project_identifier(pdf.get("filename"))
+    path_norm = _normalize_project_identifier(pdf.get("path"))
+    text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
+    primary_number = _project_pdf_primary_book_number(pdf)
+
+    # A PDF naming or declaring another known document number must never be
+    # attached merely because an earlier invoice is mentioned in its body.
+    other_numbers = {
+        _normalize_project_identifier(value)
+        for value in all_book_numbers
+        if _normalize_project_identifier(value) not in {"", number_norm}
+    }
+    if primary_number and primary_number != number_norm:
+        return None
+    if any(other in filename_norm or other in path_norm for other in other_numbers):
+        return None
+
+    book_type = str(book.get("documentType") or "")
+    pdf_type = canonical_project_document_type(
+        pdf.get("dokumenttyp"),
+        pdf.get("filename"),
+        pdf.get("path"),
+        pdf.get("_raw_text"),
+    )
+    generic_types = {"Sonstige Dokumente", "Weitere WW-Belege"}
+    if (
+        book_type not in generic_types
+        and pdf_type not in generic_types
+        and book_type != pdf_type
+    ):
+        return None
+
+    score = 0
+    if number_norm in filename_norm:
+        score += 200
+    if number_norm in path_norm:
+        score += 120
+    if primary_number == number_norm:
+        score += 100
+    elif number_norm in text_norm:
+        score += 15
+    return score or None
+
+
+
+def _project_sql_ident(value):
+    """SQL-Identifier ausschließlich aus gelesenen SQL-Metadaten quoten."""
+    return "[" + str(value or "").replace("]", "]]" ) + "]"
+
+
+def _project_type_priority(label):
+    order = {
+        "Angebot": 10,
+        "Kalkulation": 20,
+        "Auftrag / Auftragsbestätigung": 30,
+        "Auftragssteuerung": 40,
+        "Aufmaß": 50,
+        "Teilrechnung": 60,
+        "Schlussrechnung": 70,
+        "Rechnung": 80,
+        "Gutschrift / Storno": 90,
+        "Regiebericht": 100,
+        "Lieferschein": 110,
+        "Weitere WW-Belege": 900,
+        "Sonstige Dokumente": 999,
+    }
+    return order.get(label, 950)
+
+
+def _ww_project_book_types(con, book_ids):
+    """
+    Erkennt Belegarten anhand der in dieser WW-Installation tatsächlich
+    vorhandenen Tabellen mit gBuchID. Dadurch bleiben wir unabhängig von einer
+    geratenen numerischen Buchart-Zuordnung.
+    """
+    original = [value for value in book_ids if value is not None]
+    result = {str(value).lower(): set() for value in original}
+    if not original:
+        return result
+
+    cur = con.cursor()
+    try:
+        candidates = cur.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE LOWER(COLUMN_NAME) = 'gbuchid'
+              AND (
+                    LOWER(TABLE_NAME) LIKE '%angebot%'
+                 OR LOWER(TABLE_NAME) LIKE '%auftrag%'
+                 OR LOWER(TABLE_NAME) LIKE '%steuerung%'
+                 OR LOWER(TABLE_NAME) LIKE '%kalk%'
+                 OR LOWER(TABLE_NAME) LIKE '%rechnung%'
+                 OR LOWER(TABLE_NAME) LIKE '%gutschrift%'
+                 OR LOWER(TABLE_NAME) LIKE '%lieferschein%'
+                 OR LOWER(TABLE_NAME) LIKE '%aufmass%'
+                 OR LOWER(TABLE_NAME) LIKE '%aufmaß%'
+                 OR LOWER(TABLE_NAME) LIKE '%regie%'
+              )
+            GROUP BY TABLE_SCHEMA, TABLE_NAME
+        """).fetchall()
+    except Exception as e:
+        print("WW Belegart-Metadaten FEHLER:", repr(e))
+        return result
+
+    for table in candidates:
+        # Gemeinsame Summen-/Preis-Tabelle für alle Belegarten, kein eigener Belegtyp.
+        if str(table.TABLE_NAME).casefold() == "bücher kalkulation":
+            continue
+        label = canonical_project_document_type(table.TABLE_NAME)
+        if label in {"Sonstige Dokumente", "Weitere WW-Belege"}:
+            continue
+        for pos in range(0, len(original), 350):
+            chunk = original[pos:pos + 350]
+            placeholders = ",".join("?" for _ in chunk)
+            try:
+                rows = cur.execute(
+                    f"SELECT DISTINCT gBuchID FROM "
+                    f"{_project_sql_ident(table.TABLE_SCHEMA)}.{_project_sql_ident(table.TABLE_NAME)} "
+                    f"WHERE gBuchID IN ({placeholders})",
+                    *chunk,
+                ).fetchall()
+            except Exception:
+                continue
+            for row in rows:
+                result.setdefault(str(row.gBuchID).lower(), set()).add(label)
+    return result
+
+
+def _ww_project_document_links(con, project_index):
+    """
+    Liefert je Bücher.gID die exakten DokumentenManagement.sDocID-Werte.
+
+    Reihenfolge:
+    1. direkte deklarierte Fremdschlüssel,
+    2. eindeutig benannte ID-Spalten direkt in Bücher/DokumentenManagement,
+    3. WW-Zwischentabellen mit Buch- und Dokument-ID.
+
+    Es werden ausschließlich gelesene SQL-Metadaten verwendet. Ist in einer
+    älteren WW-Struktur keine eindeutige Beziehung auffindbar, bleibt die
+    Belegnummern-/Archivsuche als sicherer Rückfall aktiv.
+    """
+    cur = con.cursor()
+    direct_relations = []
+
+    try:
+        rows = cur.execute("""
+            SELECT
+                ps.name AS parent_schema,
+                pt.name AS parent_table,
+                pc.name AS parent_column,
+                rs.name AS ref_schema,
+                rt.name AS ref_table,
+                rc.name AS ref_column
+            FROM sys.foreign_key_columns AS fkc
+            JOIN sys.tables AS pt ON pt.object_id = fkc.parent_object_id
+            JOIN sys.schemas AS ps ON ps.schema_id = pt.schema_id
+            JOIN sys.columns AS pc
+              ON pc.object_id = fkc.parent_object_id
+             AND pc.column_id = fkc.parent_column_id
+            JOIN sys.tables AS rt ON rt.object_id = fkc.referenced_object_id
+            JOIN sys.schemas AS rs ON rs.schema_id = rt.schema_id
+            JOIN sys.columns AS rc
+              ON rc.object_id = fkc.referenced_object_id
+             AND rc.column_id = fkc.referenced_column_id
+            WHERE (pt.name = N'Bücher' AND rt.name = N'DokumentenManagement')
+               OR (pt.name = N'DokumentenManagement' AND rt.name = N'Bücher')
+        """).fetchall()
+        for row in rows:
+            if row.parent_table == "Bücher":
+                direct_relations.append(
+                    (row.parent_schema, row.parent_column, row.ref_schema, row.ref_column)
+                )
+            else:
+                direct_relations.append(
+                    (row.ref_schema, row.ref_column, row.parent_schema, row.parent_column)
+                )
+    except Exception as exc:
+        print("WW Dokument-FK Diagnose FEHLER:", repr(exc))
+
+    try:
+        book_columns = {
+            str(row.COLUMN_NAME).lower(): str(row.COLUMN_NAME)
+            for row in cur.execute("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=N'Bücher'
+            """).fetchall()
+        }
+        dm_columns = {
+            str(row.COLUMN_NAME).lower(): str(row.COLUMN_NAME)
+            for row in cur.execute("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=N'DokumentenManagement'
+            """).fetchall()
+        }
+        for candidate in ("gdmid", "gdokumentid", "dokumentid", "dmid"):
+            if candidate in book_columns and "gid" in dm_columns:
+                direct_relations.append(
+                    ("dbo", book_columns[candidate], "dbo", dm_columns["gid"])
+                )
+        for candidate in ("gbuchid", "buchid", "gbelegid", "belegid"):
+            if candidate in dm_columns and "gid" in book_columns:
+                direct_relations.append(
+                    ("dbo", book_columns["gid"], "dbo", dm_columns[candidate])
+                )
+    except Exception as exc:
+        print("WW Dokument-ID Diagnose FEHLER:", repr(exc))
+
+    unique_relations = []
+    seen_relations = set()
+    for relation in direct_relations:
+        key = tuple(str(value).lower() for value in relation)
+        if key in seen_relations:
+            continue
+        seen_relations.add(key)
+        unique_relations.append(relation)
+
+    links = {}
+
+    def add_link(book_id, doc_id):
+        book_key = str(book_id or "").strip().lower()
+        doc_value = str(doc_id or "").strip()
+        if not book_key or not doc_value:
+            return
+        bucket = links.setdefault(book_key, [])
+        if doc_value not in bucket:
+            bucket.append(doc_value)
+
+    for book_schema, book_column, dm_schema, dm_column in unique_relations:
+        try:
+            rows = cur.execute(f"""
+                SELECT
+                    CONVERT(varchar(80), b.gID) AS BookGID,
+                    LTRIM(RTRIM(dm.sDocID)) AS DocID
+                FROM {_project_sql_ident(book_schema)}.[Bücher] AS b
+                INNER JOIN {_project_sql_ident(dm_schema)}.[DokumentenManagement] AS dm
+                    ON b.{_project_sql_ident(book_column)} = dm.{_project_sql_ident(dm_column)}
+                WHERE b.ProjektIndex = ?
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(dm.sDocID,''))), '') IS NOT NULL
+            """, int(project_index)).fetchall()
+        except Exception:
+            continue
+        for row in rows:
+            add_link(row.BookGID, row.DocID)
+
+    # Manche WW-Versionen verwenden eine Zwischentabelle statt einer direkten
+    # Beziehung. Nur Tabellen mit klar benannter Buch- UND Dokument-ID werden
+    # berücksichtigt, damit keine zufälligen GUID-Gleichheiten entstehen.
+    book_id_names = {"gbuchid", "buchid", "gbelegid", "belegid"}
+    document_id_names = {"gdmid", "gdokumentid", "dokumentid", "dmid"}
+    try:
+        metadata_rows = cur.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE LOWER(COLUMN_NAME) IN (
+                'gbuchid','buchid','gbelegid','belegid',
+                'gdmid','gdokumentid','dokumentid','dmid'
+            )
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        """).fetchall()
+        tables = {}
+        for row in metadata_rows:
+            table_key = (str(row.TABLE_SCHEMA), str(row.TABLE_NAME))
+            tables.setdefault(table_key, {})[str(row.COLUMN_NAME).lower()] = str(row.COLUMN_NAME)
+
+        for (schema, table_name), columns in tables.items():
+            if table_name in {"Bücher", "DokumentenManagement"}:
+                continue
+            book_column = next((columns[name] for name in book_id_names if name in columns), None)
+            dm_column = next((columns[name] for name in document_id_names if name in columns), None)
+            if not book_column or not dm_column:
+                continue
+            try:
+                rows = cur.execute(f"""
+                    SELECT DISTINCT
+                        CONVERT(varchar(80), b.gID) AS BookGID,
+                        LTRIM(RTRIM(dm.sDocID)) AS DocID
+                    FROM dbo.[Bücher] AS b
+                    INNER JOIN {_project_sql_ident(schema)}.{_project_sql_ident(table_name)} AS bridge
+                        ON bridge.{_project_sql_ident(book_column)} = b.gID
+                    INNER JOIN dbo.[DokumentenManagement] AS dm
+                        ON dm.gID = bridge.{_project_sql_ident(dm_column)}
+                    WHERE b.ProjektIndex = ?
+                      AND NULLIF(LTRIM(RTRIM(ISNULL(dm.sDocID,''))), '') IS NOT NULL
+                """, int(project_index)).fetchall()
+            except Exception:
+                continue
+            for row in rows:
+                add_link(row.BookGID, row.DocID)
+    except Exception as exc:
+        print("WW Dokument-Zwischentabellen Diagnose FEHLER:", repr(exc))
+
+    return links
+
+
+def _project_pdf_rows_by_docids(doc_ids):
+    """
+    Exakte PDF-Treffer:
+    DokumentenManagement.sDocID == Dateiname ohne .pdf/_Original.pdf.
+
+    Pro Dokument-ID wird die normale Arbeits-PDF bevorzugt. Ist nur das
+    unveränderte Original indexiert, wird dieses angezeigt. Doppelte
+    Indexpfade werden nicht mehrfach ausgegeben.
+    """
+    def normalize_doc_id(value):
+        raw = Path(str(value or "").strip()).name
+        raw = re.sub(r"_Original\.pdf$", "", raw, flags=re.I)
+        raw = re.sub(r"\.pdf$", "", raw, flags=re.I)
+        return raw.strip()
+
+    normalized = {}
+    for value in doc_ids:
+        doc_id = normalize_doc_id(value)
+        if doc_id:
+            normalized.setdefault(doc_id.lower(), doc_id)
+    if not normalized or not DB.exists():
+        return {}
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    buckets = {}
+    try:
+        cols = {row[1] for row in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        select = ["filename", "path", "dokumenttyp", "modified", "text"]
+        for optional in ("source", "doc_year", "logical_id"):
+            if optional in cols:
+                select.append(optional)
+
+        ids = sorted(normalized.values(), key=str.lower)
+        for pos in range(0, len(ids), 300):
+            chunk = ids[pos:pos + 300]
+            conditions = []
+            params = []
+            filename_map = {}
+            for doc_id in chunk:
+                work = f"{doc_id}.pdf"
+                original = f"{doc_id}_Original.pdf"
+                conditions.append("(LOWER(filename)=LOWER(?) OR LOWER(filename)=LOWER(?))")
+                params.extend([work, original])
+                filename_map[work.lower()] = doc_id.lower()
+                filename_map[original.lower()] = doc_id.lower()
+
+            sql = (
+                "SELECT " + ",".join(select) +
+                " FROM pdf_index WHERE (" + " OR ".join(conditions) + ")"
+            )
+            if "source" in cols:
+                sql += " AND (source IS NULL OR source <> 'EINGANG')"
+            else:
+                sql += r" AND path NOT LIKE '%\Dokman\%'"
+            sql += " ORDER BY modified DESC"
+
+            rows = con.execute(sql, params).fetchall()
+            for row in rows:
+                item = dict(row)
+                item["_raw_text"] = item.pop("text", "") or ""
+                filename = str(item.get("filename") or "")
+                doc_key = filename_map.get(filename.lower())
+                if not doc_key:
+                    continue
+                path_value = str(item.get("path") or "")
+                if not path_value:
+                    continue
+                dt = parse_print_time(filename, item.get("modified"))
+                item["printDate"] = dt.date().isoformat() if dt else None
+                item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+                item["year"] = dt.year if dt else item.get("doc_year")
+                item["pdfFound"] = True
+                item["sourceOfTruth"] = "WinWorker-Dokument-ID + PDF-Archiv"
+                bucket = buckets.setdefault(doc_key, {"work": [], "original": []})
+                target = "original" if re.search(r"_Original\.pdf$", filename, re.I) else "work"
+                if not any(str(x.get("path") or "").lower() == path_value.lower() for x in bucket[target]):
+                    bucket[target].append(item)
+    finally:
+        con.close()
+
+    result = {}
+    for doc_key, bucket in buckets.items():
+        work_rows = bucket["work"]
+        original_rows = bucket["original"]
+        chosen = dict(work_rows[0] if work_rows else original_rows[0])
+        if original_rows:
+            chosen["originalPath"] = original_rows[0].get("path") or ""
+        else:
+            chosen["originalPath"] = ""
+        chosen["wwDocId"] = normalized.get(doc_key, doc_key)
+        result[doc_key] = [chosen]
+    return result
+
+
+def _merged_project_document_type(book, pdf=None):
+    pdf = pdf or {}
+    book_type = str(book.get("documentType") or "Weitere WW-Belege")
+    pdf_type = canonical_project_document_type(
+        pdf.get("dokumenttyp"),
+        pdf.get("filename"),
+        pdf.get("path"),
+        book.get("bookNumber"),
+        is_invoice=book.get("isInvoice", False),
+        ww_book_art=book.get("wwBookArt"),
+    )
+    generic = {"Sonstige Dokumente", "Weitere WW-Belege"}
+    if pdf_type in generic:
+        return book_type
+    if book_type not in generic and pdf_type not in generic and book_type != pdf_type:
+        return book_type
+    if book_type in {"Teilrechnung", "Schlussrechnung", "Gutschrift / Storno"} and pdf_type == "Rechnung":
+        return book_type
+    return pdf_type
+
+
+def _ww_project_books(project_index):
+    con = sql_connection("WinWorker_Projekte_Standard")
+    cur = con.cursor()
+    rows = cur.execute("""
+        SELECT
+            b.gID,
+            b.sBuchNummer,
+            b.Buchart,
+            b.dzDocDatum,
+            b.Geändert,
+            b.dzInhaltGeaendert,
+            b.Aufgenommen,
+            b.Storno,
+            r.cUmsatzNetto,
+            r.dzRechnungsdatum
+        FROM dbo.[Bücher] AS b
+        LEFT JOIN dbo.Rechnung AS r
+            ON r.gBuchID = b.gID
+        WHERE b.ProjektIndex = ?
+          AND ISNULL(b.Storno, 0) = 0
+        ORDER BY
+            COALESCE(b.Geändert, b.dzInhaltGeaendert, b.dzDocDatum, b.Aufgenommen) DESC,
+            b.gID DESC
+    """, int(project_index)).fetchall()
+
+    book_ids = [row.gID for row in rows if row.gID is not None]
+    try:
+        type_map = _ww_project_book_types(con, book_ids)
+    except Exception as exc:
+        print("WW Projekt-Belegarten FEHLER:", repr(exc))
+        type_map = {}
+    try:
+        document_links = _ww_project_document_links(con, project_index)
+    except Exception as exc:
+        print("WW Projekt-Dokumentlinks FEHLER:", repr(exc))
+        document_links = {}
+    con.close()
+
+    def select_type(labels, fallback):
+        labels = {str(label) for label in labels if str(label)}
+        # Spezifische Typen schlagen allgemeine Oberbegriffe.
+        specificity = {
+            "Schlussrechnung": 10,
+            "Teilrechnung": 20,
+            "Gutschrift / Storno": 30,
+            "Auftragssteuerung": 40,
+            "Kalkulation": 50,
+            "Aufmaß": 60,
+            "Regiebericht": 70,
+            "Lieferschein": 80,
+            "Angebot": 90,
+            "Auftrag / Auftragsbestätigung": 100,
+            "Rechnung": 110,
+            "Weitere WW-Belege": 900,
+            "Sonstige Dokumente": 999,
+        }
+        if labels:
+            return min(labels, key=lambda label: specificity.get(label, 950))
+        return fallback
+
+    # Dieselbe WW-Belegnummer kann als Druck-/Buchversion mehrfach vorkommen.
+    # Die jüngste Version liefert Datum/Betrag; exakte Dokument-IDs älterer
+    # Versionen bleiben dennoch erhalten, damit kein auffindbares PDF verloren
+    # geht. Buchart ist Teil des Schlüssels, weil unterschiedliche Belegarten
+    # in WW dieselbe sichtbare Nummer tragen können.
+    latest = {}
+    for row in rows:
+        number = str(row.sBuchNummer or "").strip()
+        gid = str(row.gID or "").strip()
+        gid_key = gid.lower()
+        art_key = _normalize_project_identifier(row.Buchart)
+        number_key = _normalize_project_identifier(number)
+        key = f"{art_key}|{number_key}" if number_key else f"GID:{gid_key}"
+
+        amount = float(row.cUmsatzNetto) if row.cUmsatzNetto is not None else None
+        doc_date = clean_date(
+            row.dzRechnungsdatum or row.dzDocDatum or row.Geändert or row.Aufgenommen
+        )
+        labels = set(type_map.get(gid_key, set()))
+        fallback_type = canonical_project_document_type(
+            number,
+            is_invoice=amount is not None,
+            ww_book_art=row.Buchart,
+        )
+
+        if key not in latest:
+            latest[key] = {
+                "wwBookId": gid,
+                "wwBookIds": [gid] if gid else [],
+                "bookNumber": number,
+                "wwBookArt": row.Buchart,
+                "documentDate": doc_date,
+                "netAmount": amount,
+                "isInvoice": amount is not None,
+                "documentType": select_type(labels, fallback_type),
+                "docIds": [],
+                "_typeCandidates": set(labels),
+            }
+        else:
+            item = latest[key]
+            if gid and gid not in item["wwBookIds"]:
+                item["wwBookIds"].append(gid)
+            item["_typeCandidates"].update(labels)
+            if amount is not None:
+                item["isInvoice"] = True
+                if item.get("netAmount") is None:
+                    item["netAmount"] = amount
+            if not item.get("documentDate") and doc_date:
+                item["documentDate"] = doc_date
+
+        item = latest[key]
+        for doc_id in document_links.get(gid_key, []):
+            if doc_id not in item["docIds"]:
+                item["docIds"].append(doc_id)
+
+    for item in latest.values():
+        fallback_type = canonical_project_document_type(
+            item.get("bookNumber"),
+            is_invoice=item.get("isInvoice", False),
+            ww_book_art=item.get("wwBookArt"),
+        )
+        item["documentType"] = select_type(item.pop("_typeCandidates", set()), fallback_type)
+
+    return list(latest.values())
+
+
+def _project_by_index(project_index):
+    con = sql_connection()
+    cur = con.cursor()
+    row = cur.execute("""
+        SELECT
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt,
+            MIN(b.dzDocDatum) AS ErstesDatum,
+            MAX(b.dzDocDatum) AS LetztesDatum
+        FROM dbo.Projekte AS p
+        LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden AS k
+            ON p.KundenIndex = k.StammIndex
+        LEFT JOIN dbo.[Bücher] AS b
+            ON b.ProjektIndex = p.ProjektIndex
+        WHERE p.ProjektIndex = ?
+        GROUP BY
+            p.ProjektIndex,
+            p.sProjektNummer,
+            p.sProjekt,
+            p.sBaustelle,
+            p.sBauvorhaben,
+            p.KundenIndex,
+            k.lKundenNr,
+            k.sFirma,
+            k.sName,
+            k.sVorname,
+            k.sStrasse,
+            k.sPLZ,
+            k.sOrt
+    """, int(project_index)).fetchone()
+    con.close()
+    if not row:
+        return None
+    project = _project_row_to_dict(row)
+    _attach_project_metrics([project])
+    return project
+
+
+def project_document_catalog(project_index):
+    project = _project_by_index(project_index)
+    if not project:
+        raise ValueError("Projekt wurde in WinWorker nicht gefunden.")
+
+    books = _ww_project_books(project_index)
+    all_doc_ids = [doc_id for book in books for doc_id in book.get("docIds", [])]
+    exact_by_doc_id = _project_pdf_rows_by_docids(all_doc_ids)
+
+    book_numbers = [book.get("bookNumber") for book in books if book.get("bookNumber")]
+    fallback_pdfs = _project_pdf_rows(project.get("projectNumber"), book_numbers)
+
+    # Rückfall-Zuordnung über sichtbare Belegnummer. Eine PDF wird dabei
+    # höchstens einem WW-Beleg zugeordnet; Dateiname ist stärker als Pfad,
+    # OCR-Text ist nur die letzte Stufe.
+    fallback_assignments = {}
+    for pdf_index, pdf in enumerate(fallback_pdfs):
+        best = None
+        for book_index, book in enumerate(books):
+            number_norm = _normalize_project_identifier(book.get("bookNumber"))
+            score = _project_pdf_fallback_score(
+                pdf,
+                book,
+                project.get("projectNumber"),
+                book_numbers,
+            )
+            if score is None:
+                continue
+            rank = (score, len(number_norm))
+            if score and (best is None or rank > best[:2]):
+                best = (score, len(number_norm), book_index)
+        if best is not None:
+            fallback_assignments.setdefault(best[2], []).append(pdf_index)
+
+    documents = []
+    used_paths = set()
+    used_fallback_indices = set()
+
+    def append_book_pdf(book, pdf, exact=False):
+        project_state = _project_pdf_reference_state(pdf, project.get("projectNumber"))
+        if exact and project_state is False:
+            return False
+        item = dict(pdf)
+        path_key = str(item.get("path") or "").strip().lower()
+        if not path_key or path_key in used_paths:
+            return False
+        used_paths.add(path_key)
+        doc_type = _merged_project_document_type(book, item)
+        item.update({
+            "documentType": doc_type,
+            "dokumenttyp": doc_type,
+            "bookNumber": book.get("bookNumber") or "",
+            "documentDate": book.get("documentDate") or item.get("printDate"),
+            "netAmount": book.get("netAmount"),
+            "wwBookArt": book.get("wwBookArt"),
+            "wwBookId": book.get("wwBookId"),
+            "wwBookIds": book.get("wwBookIds") or [],
+            "wwDocIds": book.get("docIds") or [],
+            "sourceOfTruth": (
+                "WinWorker-Dokument-ID + PDF-Archiv"
+                if exact
+                else "WinWorker-Belegnummer + PDF-Archiv"
+            ),
+            "pdfFound": True,
+        })
+        item.pop("_raw_text", None)
+        documents.append(item)
+        return True
+
+    for book_index, book in enumerate(books):
+        found_for_book = False
+
+        # 1. exakte WW-Dokument-ID
+        for doc_id in book.get("docIds", []):
+            for pdf in exact_by_doc_id.get(str(doc_id).strip().lower(), []):
+                found_for_book = append_book_pdf(book, pdf, exact=True) or found_for_book
+
+        # 2. Rückfall über Belegnummer/Projektindex
+        for pdf_index in fallback_assignments.get(book_index, []):
+            if pdf_index in used_fallback_indices:
+                continue
+            pdf = fallback_pdfs[pdf_index]
+            if append_book_pdf(book, pdf, exact=False):
+                used_fallback_indices.add(pdf_index)
+                found_for_book = True
+
+        # WW-Beleg bleibt sichtbar, auch wenn kein PDF im Index auffindbar ist.
+        if not found_for_book:
+            doc_type = book.get("documentType") or canonical_project_document_type(
+                book.get("bookNumber"),
+                is_invoice=book.get("isInvoice", False),
+                ww_book_art=book.get("wwBookArt"),
+            )
+            documents.append({
+                "filename": book.get("bookNumber") or f"WinWorker-Beleg {book.get('wwBookArt') or ''}".strip(),
+                "path": "",
+                "documentType": doc_type,
+                "dokumenttyp": doc_type,
+                "bookNumber": book.get("bookNumber") or "",
+                "documentDate": book.get("documentDate"),
+                "printDate": book.get("documentDate"),
+                "netAmount": book.get("netAmount"),
+                "wwBookArt": book.get("wwBookArt"),
+                "wwBookId": book.get("wwBookId"),
+                "wwBookIds": book.get("wwBookIds") or [],
+                "wwDocIds": book.get("docIds") or [],
+                "sourceOfTruth": "WinWorker · PDF nicht gefunden",
+                "pdfFound": False,
+            })
+
+    # Projekt-PDFs, die nicht eindeutig an einen WW-Beleg gekoppelt werden
+    # konnten, bleiben unter ihrem erkannten Dokumenttyp auffindbar.
+    for pdf_index, pdf in enumerate(fallback_pdfs):
+        path_key = str(pdf.get("path") or "").strip().lower()
+        if pdf_index in used_fallback_indices or not path_key or path_key in used_paths:
+            continue
+        used_paths.add(path_key)
+        item = dict(pdf)
+        doc_type = canonical_project_document_type(
+            item.get("dokumenttyp"), item.get("filename"), item.get("path")
+        )
+        item.update({
+            "documentType": doc_type,
+            "dokumenttyp": doc_type,
+            "documentDate": item.get("printDate"),
+            "sourceOfTruth": "PDF-Archiv · kein eindeutiger WW-Beleg",
+            "pdfFound": True,
+        })
+        item.pop("_raw_text", None)
+        documents.append(item)
+
+    # Erst fachliche Reihenfolge, innerhalb einer Gruppe neueste Dokumente oben.
+    documents.sort(key=lambda d: str(d.get("filename") or "").lower())
+    documents.sort(key=lambda d: 0 if d.get("pdfFound") else 1)
+    documents.sort(
+        key=lambda d: str(d.get("documentDate") or d.get("printDate") or ""),
+        reverse=True,
+    )
+    documents.sort(key=lambda d: _project_type_priority(d.get("documentType")))
+
+    counts = {}
+    for document in documents:
+        kind = document.get("documentType") or "Sonstige Dokumente"
+        counts[kind] = counts.get(kind, 0) + 1
+
+    return {
+        "project": project,
+        "documents": documents,
+        "documentTypeCounts": counts,
+        "wwBookCount": len(books),
+        "pdfCount": sum(1 for document in documents if document.get("pdfFound")),
+        "missingPdfCount": sum(1 for document in documents if not document.get("pdfFound")),
+    }
+
+
+# ---------------------------------------------------------------------------
+def discover_metric_columns():
+    """
+    Findet nur Kandidaten für Stunden-/Rechnungsfelder.
+    Es wird noch NICHT automatisch auf unbekannte Tabellen summiert.
+    """
+    con = sql_connection()
+    cur = con.cursor()
+
+    sql = """
+        SELECT
+            TABLE_SCHEMA,
+            TABLE_NAME,
+            COLUMN_NAME,
+            DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE
+            LOWER(COLUMN_NAME) LIKE '%stund%'
+            OR LOWER(COLUMN_NAME) LIKE '%hour%'
+            OR LOWER(COLUMN_NAME) LIKE '%zeit%'
+            OR LOWER(COLUMN_NAME) LIKE '%netto%'
+            OR LOWER(COLUMN_NAME) LIKE '%rechnung%'
+            OR LOWER(COLUMN_NAME) LIKE '%betrag%'
+            OR LOWER(COLUMN_NAME) LIKE '%summe%'
+            OR LOWER(COLUMN_NAME) LIKE '%umsatz%'
+        ORDER BY TABLE_NAME, ORDINAL_POSITION
+    """
+
+    rows = cur.execute(sql).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "schema": row.TABLE_SCHEMA,
+            "table": row.TABLE_NAME,
+            "column": row.COLUMN_NAME,
+            "dataType": row.DATA_TYPE,
+        })
+    return result
+
+
+def parse_print_time(filename, modified):
+    # WinWorker benennt Kundenexemplare z.B.
+    # 2205110 (2022-05-10 11.36.47).pdf
+    match = re.search(
+        r"\((\d{4}-\d{2}-\d{2})\s+(\d{2})\.(\d{2})\.(\d{2})\)",
+        filename or "",
+    )
+    if match:
+        iso = f"{match.group(1)}T{match.group(2)}:{match.group(3)}:{match.group(4)}"
+        try:
+            dt = datetime.fromisoformat(iso)
+            return dt
+        except ValueError:
+            pass
+
+    try:
+        return datetime.fromtimestamp(float(modified))
+    except Exception:
+        return None
+
+
+def search_pdf(terms):
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+
+    sql = """
+        SELECT
+            filename,
+            path,
+            dokumenttyp,
+            modified
+        FROM pdf_index
+        WHERE 1=1
+    """
+    params = []
+
+    for term in terms:
+        sql += """
+            AND (
+                text LIKE ?
+                OR filename LIKE ?
+                OR path LIKE ?
+            )
+        """
+        like = f"%{term}%"
+        params.extend([like, like, like])
+
+    sql += " ORDER BY modified DESC LIMIT 300"
+    rows = con.execute(sql, params).fetchall()
+    con.close()
+
+    result = []
+    for row in rows:
+        item = dict(row)
+        dt = parse_print_time(item.get("filename"), item.get("modified"))
+        item["printDate"] = dt.date().isoformat() if dt else None
+        item["printDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+        item["year"] = dt.year if dt else None
+        result.append(item)
+
+    # Letzter Druck zuerst. Filename-Zeit ist zuverlässiger als Netzwerk-mtime.
+    result.sort(key=lambda x: x.get("printDateTime") or "", reverse=True)
+    return result
+
+
+
+
+_INCOMING_CACHE = {"stamp": None, "rows": []}
+
+MONTH_NAMES_DE = {
+    1:"Januar", 2:"Februar", 3:"März", 4:"April", 5:"Mai", 6:"Juni",
+    7:"Juli", 8:"August", 9:"September", 10:"Oktober", 11:"November", 12:"Dezember"
+}
+
+
+def _norm_supplier(value):
+    value = str(value or "").lower()
+    value = value.replace("ß", "ss")
+    value = re.sub(r"[^a-z0-9äöü]+", " ", value)
+    return " ".join(value.split())
+
+
+def _money_to_float(raw):
+    s = str(raw or "").strip().replace("€", "").replace("EUR", "").replace(" ", "")
+    if not s:
+        return None
+    # Österreich/DE: 12.345,67
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # Englische/technische Schreibweise nur dann als Dezimalpunkt interpretieren,
+        # wenn genau 1 Punkt und max. 2 Nachkommastellen vorhanden sind.
+        if s.count(".") > 1:
+            s = s.replace(".", "")
+    try:
+        value = float(s)
+        return value if value >= 0 else None
+    except Exception:
+        return None
+
+
+def _extract_invoice_amount(text):
+    """
+    Best-effort Rechnungsbetrag aus dem PDF-Text.
+    Bevorzugt eindeutige Endsumme-Bezeichnungen.
+    """
+    raw = str(text or "")
+    patterns = [
+        r"(?i)(?:rechnungsbetrag|zahlbetrag|endbetrag|gesamtbetrag|bruttobetrag|zu\s+zahlen)"
+        r"[^\d]{0,35}(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})",
+        r"(?i)(?:gesamt|summe)\s*(?:brutto)?[^\d]{0,30}"
+        r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})",
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, raw)
+        if matches:
+            # Bei wiederholten Summen steht die Endsumme meist zuletzt.
+            for candidate in reversed(matches):
+                value = _money_to_float(candidate)
+                if value is not None:
+                    return value
+    return None
+
+
+def _extract_invoice_date(text, modified=None, doc_year=None):
+    raw = str(text or "")
+    patterns = [
+        r"(?i)(?:rechnungsdatum|belegdatum|datum)\s*[:\-]?\s*"
+        r"(\d{1,2})[./-](\d{1,2})[./-](20\d{2})",
+        r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, raw[:7000])
+        if m:
+            try:
+                day, month, year = map(int, m.groups())
+                return datetime(year, month, day)
+            except Exception:
+                pass
+
+    try:
+        dt = datetime.fromtimestamp(float(modified))
+        # doc_year aus Dokman ist verlässlicher als mtime-Jahr, wenn vorhanden.
+        if doc_year and int(doc_year) != dt.year:
+            return datetime(int(doc_year), dt.month, min(dt.day, 28))
+        return dt
+    except Exception:
+        if doc_year:
+            try:
+                return datetime(int(doc_year), 1, 1)
+            except Exception:
+                pass
+    return None
+
+
+def _extract_supplier_identity(text, query=""):
+    """
+    Lieferant aus dem RECHNUNGSKOPF erkennen.
+    Wichtig: nicht im ganzen Rechnungstext suchen, sonst findet "Sto"
+    z.B. auch andere Lieferanten, die irgendwo einen Sto-Artikel erwähnen.
+    """
+    raw = str(text or "")
+    lines = [re.sub(r"\s+", " ", x).strip() for x in raw[:2200].splitlines()]
+    lines = [x for x in lines if x]
+
+    # Eigene Firma ist auf Eingangsrechnungen typischerweise Empfänger,
+    # niemals Lieferant.
+    own_company = re.compile(
+        r"(?i)\b(farben\s+krista|malerische\s+wohnideen)\b"
+    )
+
+    bad_meta = re.compile(
+        r"(?i)\b(iban|bic|uid|ust[- ]?id|firmenbuch|handelsgericht|gericht|"
+        r"dvr|konto|bank|telefon|tel\.|fax|e-?mail|www\.|seite\s+\d|"
+        r"rechnungsnr|rechnungsnummer|kundennr|kunden-?ust)\b"
+    )
+
+    legal = re.compile(
+        r"(?i)\b(gmbh|ges\.?\s*m\.?\s*b\.?\s*h\.?|ag|kg|ohg|"
+        r"gmbh\s*&\s*co|sarl|sa|limited|ltd)\b"
+    )
+
+    # 1) Lieferantenname: möglichst frühe plausible Firmenzeile.
+    candidates = []
+    for i, line in enumerate(lines[:28]):
+        if own_company.search(line):
+            continue
+        if bad_meta.search(line):
+            continue
+        if len(line) < 3 or len(line) > 160:
+            continue
+
+        score = 0
+        if legal.search(line):
+            score += 5
+        if i < 8:
+            score += 3
+        elif i < 15:
+            score += 1
+        if re.search(r"[A-Za-zÄÖÜäöü]{3}", line):
+            score += 1
+        # reine Adresse / Zahl nicht als Name
+        if re.search(r"\b\d{4}\b", line) and not legal.search(line):
+            score -= 2
+
+        if score > 0:
+            candidates.append((score, -i, i, line))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    name_idx = candidates[0][2]
+    name = candidates[0][3][:180]
+
+    # 2) Adresse: nur Zeilen im direkten Umfeld NACH dem Firmennamen.
+    #    Finanz-/Firmenbuchdaten ausdrücklich ausschließen.
+    address_lines = []
+    postal_line = ""
+    street_line = ""
+
+    for j in range(name_idx + 1, min(len(lines), name_idx + 9)):
+        line = lines[j]
+        if own_company.search(line) or bad_meta.search(line):
+            continue
+
+        # PLZ + Ort
+        if re.search(r"\b(?:A-|AT-|CH-|FL-)?\d{4}\s+[A-Za-zÄÖÜäöü]", line, re.I):
+            postal_line = line
+            # direkte Zeile davor als Straße, wenn sie plausibel ist
+            for k in range(j - 1, name_idx, -1):
+                prev = lines[k]
+                if own_company.search(prev) or bad_meta.search(prev):
+                    continue
+                if re.search(r"\d", prev) and len(prev) <= 120:
+                    street_line = prev
+                    break
+            break
+
+    if street_line:
+        address_lines.append(street_line)
+    if postal_line:
+        address_lines.append(postal_line)
+
+    address = ", ".join(address_lines)[:220]
+
+    # 3) Nummer im Kopf - nur echte Nummernfelder, keine IBAN/FN etc.
+    supplier_no = ""
+    header = "\n".join(lines[:45])
+    m = re.search(
+        r"(?i)(?:lieferanten?(?:nummer|nr\.?)|kreditor(?:ennummer|nr\.?)|"
+        r"kundennummer|kunden-?nr\.?)\s*[:#\-]?\s*([A-Z0-9./\-]{2,30})",
+        header
+    )
+    if m:
+        supplier_no = m.group(1).strip()
+
+    # 4) Stabile Identität: Name normalisiert + PLZ/Ort.
+    #    Rechtsformen und Schreibweisen wie "Straße/Strasse" sollen nicht
+    #    zu künstlichen Dubletten führen.
+    name_norm = _norm_supplier(name)
+    for token in (
+        "gesellschaft mit beschrankter haftung",
+        "gesellschaft mbh", "ges mbh", "gmbh", "ag", "kg", "ohg",
+        "ges m b h", "co"
+    ):
+        name_norm = re.sub(rf"\b{re.escape(token)}\b", " ", name_norm)
+    name_norm = " ".join(name_norm.split())
+
+    address_norm = _norm_supplier(address)
+    postal = ""
+    city = ""
+    m = re.search(r"\b(?:a|at|ch|fl)?\s*(\d{4})\s+([a-zäöü][a-zäöü \-]+)", address_norm)
+    if m:
+        postal = m.group(1)
+        city = m.group(2).strip()
+
+    key_raw = "|".join([name_norm, postal, city])
+    supplier_key = hashlib.sha1(key_raw.encode("utf-8", errors="ignore")).hexdigest()[:18]
+
+    return {
+        "key": supplier_key,
+        "name": name,
+        "address": address,
+        "supplierNumber": supplier_no,
+        "nameNorm": name_norm,
+        "addressNorm": address_norm,
+    }
+
+
+def _incoming_catalog():
+    """
+    Cache der 6.000+ Eingangsrechnungen, damit Lieferantenauswahl,
+    Jahresansicht und Textsuche flott bleiben.
+    """
+    try:
+        stamp = DB.stat().st_mtime_ns
+    except Exception:
+        stamp = None
+
+    if _INCOMING_CACHE["stamp"] == stamp and _INCOMING_CACHE["rows"]:
+        return _INCOMING_CACHE["rows"]
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
+        has_source = "source" in cols
+        has_year = "doc_year" in cols
+        has_logical = "logical_id" in cols
+
+        select = ["filename","path","dokumenttyp","modified","text"]
+        if has_source:
+            select.append("source")
+        if has_year:
+            select.append("doc_year")
+        if has_logical:
+            select.append("logical_id")
+
+        sql = "SELECT " + ",".join(select) + " FROM pdf_index WHERE 1=1 "
+        if has_source:
+            sql += " AND source='EINGANG' "
+        else:
+            sql += r" AND path LIKE '%\Dokman\%' "
+        sql += " ORDER BY modified DESC"
+
+        dbrows = con.execute(sql).fetchall()
+    finally:
+        con.close()
+
+    result = []
+    seen = set()
+    for row in dbrows:
+        item = dict(row)
+        logical = str(item.get("logical_id") or "").strip()
+        unique = logical or str(item.get("path") or "")
+        if unique in seen:
+            continue
+        seen.add(unique)
+
+        raw = str(item.get("text") or "")
+        doc_year = item.get("doc_year")
+        dt = _extract_invoice_date(raw, item.get("modified"), doc_year)
+        amount = _extract_invoice_amount(raw)
+
+        item["_raw_text"] = raw
+        item["_header_norm"] = _norm_supplier(raw[:2200])
+        item["_supplier"] = _extract_supplier_identity(raw)
+        item["invoiceDate"] = dt.date().isoformat() if dt else None
+        item["invoiceDateTime"] = dt.isoformat(timespec="seconds") if dt else None
+        item["year"] = dt.year if dt else (int(doc_year) if doc_year else None)
+        item["month"] = dt.month if dt else None
+        item["monthName"] = MONTH_NAMES_DE.get(dt.month, "") if dt else ""
+        item["day"] = dt.day if dt else None
+        item["amount"] = amount
+        result.append(item)
+
+    _INCOMING_CACHE["stamp"] = stamp
+    _INCOMING_CACHE["rows"] = result
+    return result
+
+
+def global_material_search(query, limit=80):
+    """Lieferantenübergreifende Materialsuche für The Brain.
+
+    Exakte Material-/Artikel-Treffer kommen vor ähnlichen Vorschlägen. Innerhalb
+    derselben Qualität steht die neueste Rechnung zuerst.
+    """
+    query = str(query or "").strip()
+    if len(query) < 2:
+        return {"query": query, "results": [], "exactCount": 0, "similarCount": 0, "scanned": 0}
+    try:
+        limit = max(10, min(200, int(limit)))
+    except Exception:
+        limit = 80
+
+    qnorm = _norm_supplier(query)
+    qtokens = [x for x in qnorm.split() if len(x) >= 2]
+    exact, similar = [], []
+    scanned = 0
+    for row in _incoming_catalog():
+        raw = str(row.get("_raw_text") or "")
+        if not raw.strip():
+            continue
+        scanned += 1
+        hit = _material_search_result(raw, query)
+        supplier = dict(row.get("_supplier") or {})
+        base = {
+            "filename": row.get("filename") or "",
+            "path": row.get("path") or "",
+            "invoiceDate": row.get("invoiceDate"),
+            "invoiceDateTime": row.get("invoiceDateTime"),
+            "amount": row.get("amount"),
+            "supplierName": supplier.get("name") or "Lieferant nicht sicher erkannt",
+            "supplierAddress": supplier.get("address") or "",
+            "supplierNumber": supplier.get("supplierNumber") or "",
+            "materialMatches": [],
+            "matchScore": 0,
+            "matchType": "",
+        }
+        if hit.get("matched"):
+            base.update({
+                "materialMatches": list(hit.get("matches") or []),
+                "matchScore": int(hit.get("score") or 0),
+                "matchType": "exact" if hit.get("ideal") else "good",
+                "matchCount": int(hit.get("matchCount") or 1),
+            })
+            exact.append(base)
+            continue
+
+        # Ähnliche Vorschläge nur aus erkannten Materialzeilen, niemals aus dem
+        # Rechnungskopf. Dadurch bleibt "ähnlich" nützlich statt beliebig.
+        idx = _material_search_index(raw)
+        best_ratio, best_line = 0.0, ""
+        for line in idx.get("lines") or []:
+            lnorm = _norm_supplier(line)
+            if not lnorm:
+                continue
+            ratio = difflib.SequenceMatcher(None, qnorm, lnorm[:max(len(qnorm)*3, 40)]).ratio()
+            if qtokens:
+                token_ratio = max((difflib.SequenceMatcher(None, token, word).ratio() for token in qtokens for word in lnorm.split()), default=0.0)
+                ratio = max(ratio, token_ratio * 0.88)
+            if ratio > best_ratio:
+                best_ratio, best_line = ratio, line
+        if best_ratio >= 0.62 and best_line:
+            base.update({
+                "materialMatches": [_focus_material_snippet(best_line, query)],
+                "matchScore": int(best_ratio * 1000),
+                "matchType": "similar",
+                "matchCount": 1,
+            })
+            similar.append(base)
+
+    date_key = lambda x: str(x.get("invoiceDateTime") or "")
+    exact.sort(key=lambda x: (2 if x.get("matchType") == "exact" else 1, int(x.get("matchScore") or 0), date_key(x)), reverse=True)
+    similar.sort(key=lambda x: (int(x.get("matchScore") or 0), date_key(x)), reverse=True)
+    results = (exact + similar)[:limit]
+    return {
+        "query": query, "results": results, "exactCount": len(exact),
+        "similarCount": len(similar), "scanned": scanned,
+    }
+
+
+def incoming_supplier_candidates(query, limit=20):
+    """
+    Schritt 1: nur Lieferant/Adresse.
+    Kein Treffer mehr, nur weil 'Sto' irgendwo im Artikeltext einer Hilti-Rechnung steht.
+    """
+    q = str(query or "").strip()
+    nq = _norm_supplier(q)
+    if len(nq) < 2:
+        return []
+
+    tokens = [x for x in nq.split() if len(x) >= 2]
+    grouped = {}
+
+    for item in _incoming_catalog():
+        ident = item.get("_supplier")
+        if not ident:
+            continue
+
+        searchable = " ".join([
+            ident.get("nameNorm") or "",
+            ident.get("addressNorm") or "",
+            _norm_supplier(ident.get("supplierNumber") or ""),
+        ])
+
+        if not all(t in searchable for t in tokens):
+            continue
+
+        g = grouped.setdefault(ident["key"], {
+            "key": ident["key"],
+            "name": ident.get("name") or "",
+            "address": ident.get("address") or "",
+            "supplierNumber": ident.get("supplierNumber") or "",
+            "count": 0,
+            "years": set(),
+        })
+        g["count"] += 1
+        if item.get("year"):
+            g["years"].add(int(item["year"]))
+
+        # Wenn spätere Rechnung eine bessere Adresse/Nummer liefert, nachziehen.
+        if not g["address"] and ident.get("address"):
+            g["address"] = ident["address"]
+        if not g["supplierNumber"] and ident.get("supplierNumber"):
+            g["supplierNumber"] = ident["supplierNumber"]
+
+    rows = []
+    for g in grouped.values():
+        g["years"] = sorted(g["years"], reverse=True)
+        rows.append(g)
+
+    rows.sort(key=lambda x: (-x["count"], x["name"].lower(), x["address"].lower()))
+    return rows[:max(1, min(int(limit or 20), 50))]
+
+
+def incoming_supplier_invoices(supplier_key, text_query=""):
+    """
+    Direkte Auswahl über den erkannten Supplier-Key.
+    Bei Suchbegriff werden ausschließlich OCR-Materialzeilen durchsucht.
+    """
+    supplier_key = str(supplier_key or "").strip()
+    text_query = str(text_query or "").strip()
+
+    if not supplier_key:
+        return []
+
+    result = []
+    for item in _incoming_catalog():
+        ident = item.get("_supplier")
+        if not ident or ident.get("key") != supplier_key:
+            continue
+
+        raw = str(item.get("_raw_text") or "")
+        material = _material_search_result(raw, text_query) if text_query else None
+        if text_query and not material.get("matched"):
+            continue
+
+        result.append({
+            "filename": item.get("filename"),
+            "path": item.get("path"),
+            "dokumenttyp": item.get("dokumenttyp") or "Eingangsrechnung",
+            "modified": item.get("modified"),
+            "logical_id": item.get("logical_id"),
+            "invoiceDate": item.get("invoiceDate"),
+            "printDate": item.get("invoiceDate"),
+            "invoiceDateTime": item.get("invoiceDateTime"),
+            "year": item.get("year"),
+            "month": item.get("month"),
+            "monthName": item.get("monthName"),
+            "day": item.get("day"),
+            "amount": item.get("amount"),
+            "snippet": "" if text_query else " ".join(raw.split())[:420],
+            "materialMatched": bool(material and material.get("matched")),
+            "materialMatchCount": int((material or {}).get("matchCount") or 0),
+            "materialMatchIdeal": bool((material or {}).get("ideal")),
+            "materialMatchScore": int((material or {}).get("score") or 0),
+            "materialMatches": list((material or {}).get("matches") or []),
+        })
+
+    if text_query:
+        result.sort(key=lambda x: (
+            1 if x.get("materialMatchIdeal") else 0,
+            int(x.get("materialMatchScore") or 0),
+            int(x.get("materialMatchCount") or 0),
+            x.get("invoiceDateTime") or "",
+        ), reverse=True)
+    else:
+        result.sort(
+            key=lambda x: (x.get("invoiceDateTime") or "", x.get("filename") or ""),
+            reverse=True,
+        )
+    return result
+
+
+def incoming_year_summary(documents):
+    summary = {}
+    for d in documents:
+        year = str(d.get("year") or "ohne Jahr")
+        row = summary.setdefault(year, {
+            "count": 0,
+            "amount": 0.0,
+            "amountCount": 0,
+            "openCount": 0,
+            "openSum": 0.0,
+        })
+        row["count"] += 1
+        if d.get("amount") is not None:
+            row["amount"] += float(d["amount"])
+            row["amountCount"] += 1
+        if d.get("paymentState") == "open":
+            row["openCount"] += 1
+            if d.get("amount") is not None:
+                row["openSum"] += float(d["amount"])
+
+    for row in summary.values():
+        row["amount"] = round(row["amount"], 2)
+        row["openSum"] = round(row["openSum"], 2)
+    return summary
+
+
+def validate_pdf_path(raw_path):
+    path = Path(str(raw_path or "").strip())
+    if not str(path):
+        raise ValueError("PDF-Pfad fehlt")
+    if path.suffix.lower() != ".pdf":
+        raise ValueError("Keine PDF-Datei")
+    if not path.is_file():
+        raise FileNotFoundError("Datei nicht gefunden")
+    return path
+
+
+def validate_indexed_pdf_path(raw_path):
+    """
+    Remote-Ausgabe nur für PDFs, die tatsächlich im KRISTINE-PDF-Index stehen.
+    Dadurch kann ein Client nicht einfach irgendeinen anderen PDF-Pfad des PCs
+    erraten und abrufen.
+    """
+    path = validate_pdf_path(raw_path)
+
+    con = sqlite3.connect(DB)
+    try:
+        row = con.execute(
+            "SELECT 1 FROM pdf_index WHERE path = ? LIMIT 1",
+            (str(path),)
+        ).fetchone()
+    finally:
+        con.close()
+
+    if not row and not _capture_path_is_allowed(path):
+        raise PermissionError("PDF ist weder im KRISTINE-Archivindex noch in der Eingangsrechnungserfassung")
+    return path
+
+
+
+MOBILE_PAGE = r"""
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>KRISTINE · The Brain</title>
+<style>
+:root{
+  --bg:#0e0f11;--panel:#17191d;--panel2:#20232a;--text:#f5f7fa;
+  --muted:#aab0bb;--line:#2c313a;--accent:#fff;--good:#9fe0b4;
+  --warn:#ffd38a;--blue:#7bb7ff
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+body{min-height:100vh}
+.wrap{max-width:820px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px calc(34px + env(safe-area-inset-bottom))}
+.brand{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:18px}
+.brand h1{margin:0;font-size:28px;letter-spacing:-.7px}
+.brand small{color:var(--muted);font-weight:600}
+.hero{background:linear-gradient(180deg,var(--panel),#131519);border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 14px 40px rgba(0,0,0,.22)}
+.mode-switch{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.mode{background:#20232a;color:#dfe3e8;border:1px solid var(--line);min-height:40px;padding:8px 13px}
+.mode.active{background:#fff;color:#111}
+.searchrow{display:flex;gap:10px}
+input[type=search],input[type=text],select{width:100%;border:1px solid var(--line);background:#0d0f12;color:var(--text);border-radius:14px;padding:13px 14px;font-size:16px;outline:none}
+input:focus,select:focus{border-color:#5f6774}
+button{border:0;border-radius:14px;padding:0 18px;background:var(--accent);color:#111;font-size:15px;font-weight:800;cursor:pointer}
+button.dark{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+button.plus{background:#fff;color:#111}
+.meta{margin-top:10px;color:var(--muted);font-size:13px;min-height:18px}
+.loader{display:none;margin-top:12px;color:var(--muted)}
+.error{color:#ffb3b3}
+.section{margin-top:18px;scroll-margin-top:14px}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.section h2{font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:#d7dbe1;margin:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:10px}
+.project-card{cursor:pointer}
+.project-card.selected{border-color:#8d98a8;box-shadow:0 0 0 2px rgba(255,255,255,.06)}
+.project-title{font-size:18px;font-weight:800;line-height:1.2}
+.project-no{display:inline-block;margin-top:5px;font-size:12px;font-weight:800;background:var(--panel2);padding:5px 8px;border-radius:999px;color:#dfe3e8}
+.sub{color:var(--muted);margin-top:8px;font-size:14px;line-height:1.45}
+.metrics,.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pill,.chip{background:#111318;border:1px solid var(--line);border-radius:999px;padding:7px 10px;font-size:12px;color:#dfe3e8;text-decoration:none}
+.pill.metric-missing{color:var(--warn);border-color:#69562c}
+.chip{cursor:pointer}
+.chip.active,.chip:hover{background:#f5f5f5;color:#111}
+.addressbar{margin-top:14px}
+.addressbar-title{font-size:12px;color:var(--muted);font-weight:750;margin-bottom:8px}
+.summary{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.summary .chip strong{margin-left:4px}
+.source-block{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.type-list{display:flex;gap:8px;flex-wrap:wrap}
+.doc-list{margin-top:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.doc{display:flex;flex-direction:column;gap:12px;align-items:stretch;margin-bottom:0;min-width:0}
+.thumb{width:100%;height:auto;aspect-ratio:210/297;border-radius:12px;object-fit:contain;background:#fff;border:1px solid var(--line)}
+.docname{font-weight:750;line-height:1.3;word-break:break-word}
+.doctype{margin-top:4px;color:#c8cdd5;font-size:13px}
+.docmeta{margin-top:6px;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+a.action{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#f5f5f5;color:#111;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:800}
+.empty{color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:16px;padding:18px}
+.footer{margin-top:24px;text-align:center;color:#6f7681;font-size:12px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;z-index:50;padding:16px}
+.modal.open{display:flex}
+.modal-card{width:min(720px,100%);max-height:88vh;overflow:auto;background:#17191d;border:1px solid #343a44;border-radius:22px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+.modal-head{display:flex;justify-content:space-between;gap:14px;align-items:center}
+.modal-head h3{margin:0;font-size:20px}
+.close{background:#2a2e35;color:#fff;width:40px;height:40px;padding:0}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.formgrid .full{grid-column:1/-1}
+.formlabel{font-size:11px;color:var(--muted);margin:0 0 5px 3px}
+.save-row{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.save-row button{height:48px}
+.notice{font-size:12px;color:var(--warn)}
+.success{color:var(--good)}
+
+.supplier-card{margin-bottom:14px}
+.supplier-choice{cursor:pointer}
+.supplier-choice:hover{border-color:#788292}
+.supplier-choice .project-title{font-size:17px}
+.ww-address-card{cursor:pointer}
+.ww-address-card:hover{border-color:#8994a5}
+.ww-address-card.selected{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.10)}
+.review-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.review-card{background:#17191d;border:1px solid var(--line);border-radius:18px;padding:12px}
+.review-thumb{width:100%;aspect-ratio:210/297;object-fit:contain;background:#fff;border-radius:11px}
+.review-title{font-weight:850;margin-top:9px}
+.review-match{color:var(--good);font-size:12px;margin-top:5px}
+.review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.brain-watch{margin:12px 0;padding:14px 16px;border:1px solid #7c652a;border-radius:16px;background:#241f13}
+.brain-watch-title{font-weight:900;font-size:16px;margin-bottom:6px}
+.brain-watch-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.brain-watch-value{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#17191d}
+.brain-watch-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.ww-truth{font-size:12px;color:var(--good);font-weight:750}
+.payment-ok{color:var(--good);font-weight:750}
+@media(max-width:700px){.brain-watch-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.review-grid{grid-template-columns:1fr}}
+.supplier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.invoice-text-search{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.year-block{margin-top:20px}
+.year-header{display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px}
+.year-name{font-size:24px;font-weight:900}
+.year-total{text-align:right}
+.year-total strong{font-size:18px}
+.year-total small{display:block;color:var(--muted);margin-top:2px}
+.month-block{margin-top:17px}
+.month-title{font-size:14px;text-transform:uppercase;letter-spacing:.1em;color:#cbd1d9;margin:0 0 9px}
+.day-date{font-weight:850;font-size:14px;margin-bottom:4px}
+.invoice-amount{font-size:15px;font-weight:850;margin-top:7px}
+.invoice-snippet{font-size:12px;color:var(--muted);line-height:1.35;margin-top:7px;max-height:4.1em;overflow:hidden}
+
+.material-search-note{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.4}
+.material-search-status{margin-top:10px;padding:11px 12px;border:1px solid #48556a;border-radius:13px;background:#121820;color:#dfe7f2;line-height:1.45}
+.material-search-status strong{color:#fff}
+.material-search-status .subline{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.material-search-clear{margin-top:9px;background:#252a32;color:#fff;border:1px solid #444c58;padding:7px 10px;height:auto}
+.doc.material-search-hit{border-color:#617b9d;box-shadow:0 0 0 1px rgba(129,166,214,.13)}
+.material-hit-head{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 7px}
+.material-hit-badge{display:inline-flex;align-items:center;border:1px solid #526986;border-radius:999px;padding:5px 8px;background:#172131;color:#d9e9ff;font-size:11px;font-weight:900}
+.material-hit-badge.ideal{border-color:#9b7d27;background:#2a2412;color:#ffe393}
+.material-hit-box{margin-top:10px;padding:10px;border-radius:12px;background:#10151d;border:1px solid #354359}
+.material-hit-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#9fb5d3;font-weight:900;margin-bottom:6px}
+.material-hit-line{font-size:12px;line-height:1.45;color:#dfe6ef;padding:5px 0;border-top:1px solid rgba(255,255,255,.06)}
+.material-hit-line:first-of-type{border-top:0}
+mark.material-hit-mark{background:#ffe86b;color:#111;border-radius:3px;padding:0 2px;font-weight:900}
+.material-no-hit{padding:18px;border:1px dashed #4d5663;border-radius:16px;background:#15181d;color:#c8ced8}
+.material-no-hit strong{display:block;color:#fff;font-size:17px;margin-bottom:6px}
+
+@media (max-width:900px){
+  .doc-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:520px){
+  .brand h1{font-size:25px}
+  .mode-switch{display:grid;grid-template-columns:1fr}
+  .mode{width:100%}
+  .searchrow{display:grid;grid-template-columns:1fr}
+  .searchrow button{height:50px}
+  .formgrid{grid-template-columns:1fr}
+  .formgrid .full{grid-column:auto}
+  .doc-list{grid-template-columns:1fr}
+  .doc{padding:12px}
+  .thumb{width:100%;aspect-ratio:210/297}
+}
+
+/* 0.12.6: Jahresübersicht lesbar – keine überlappenden Pills */
+#incomingYears{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+  margin-top:10px;
+  overflow:visible !important;
+}
+#incomingYears .year-pill,
+#incomingYears button,
+#incomingYears > *{
+  width:100%;
+  min-width:0;
+  height:auto !important;
+  min-height:42px;
+  margin:0 !important;
+  padding:9px 12px;
+  white-space:normal !important;
+  overflow:visible !important;
+  line-height:1.25;
+  text-align:left;
+  box-sizing:border-box;
+}
+@media(max-width:700px){
+  #incomingYears{
+    grid-template-columns:1fr;
+  }
+}
+
+
+.year-summary-grid{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+  margin-top:10px;
+  overflow:visible !important;
+}
+.year-summary-grid .year-summary-pill{
+  display:block;
+  width:100%;
+  min-width:0;
+  margin:0 !important;
+  padding:9px 12px;
+  white-space:normal !important;
+  line-height:1.3;
+  box-sizing:border-box;
+}
+@media(max-width:700px){
+  .year-summary-grid{
+    grid-template-columns:1fr;
+  }
+}
+
+
+.payment-open{color:#ff7777;font-weight:850}
+.payment-paid{color:var(--good);font-weight:850}
+.payment-unknown{color:var(--warn);font-weight:850}
+.open-total{color:#ff7777;font-weight:850}
+.open-total-zero{color:var(--good);font-weight:850}
+
+
+/* 0.13.3 · Projektsuche wie Eingangsrechnungen */
+.project-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.project-address-card{cursor:pointer;margin:0}
+.project-address-card:hover{border-color:#8994a5}
+.project-address-card .project-title{font-size:17px}
+.project-address-samples{margin-top:9px;color:var(--muted);font-size:12px;line-height:1.45}
+.customer-overview{margin-bottom:14px}
+.customer-overview-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+.customer-overview-name{font-size:21px;font-weight:900}
+.overview-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.overview-kpi{background:#111318;border:1px solid var(--line);border-radius:14px;padding:11px;min-width:0}
+.overview-kpi small{display:block;color:var(--muted);margin-bottom:5px;line-height:1.3}
+.overview-kpi strong{display:block;font-size:17px;overflow-wrap:anywhere}
+.year-revenue-title{font-size:12px;color:var(--muted);font-weight:800;margin:14px 0 7px}
+.year-revenue-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.year-revenue{background:#111318;border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+.year-revenue strong{display:block;margin-top:3px}
+.overview-note{color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+.project-open-hint{font-size:12px;color:var(--blue);font-weight:750;margin-top:10px}
+.ww-placeholder{display:flex;align-items:center;justify-content:center;text-align:center;color:#20242a;font-weight:900;line-height:1.35}
+.doc-source{margin-top:6px;color:var(--good);font-size:11px;font-weight:750;line-height:1.35}
+.doc-missing{margin-top:9px;color:var(--warn);font-size:12px;font-weight:800}
+@media(max-width:700px){
+  .project-address-grid{grid-template-columns:1fr}
+  .overview-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .year-revenue-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:440px){
+  .overview-kpis,.year-revenue-grid{grid-template-columns:1fr}
+}
+
+/* KRISTINE Eingangsrechnungen · Dunja */
+.capture-dashboard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.capture-kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:13px}
+.capture-kpi small{display:block;color:var(--muted);margin-bottom:5px}.capture-kpi strong{font-size:20px}
+.capture-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.capture-grid .span-2{grid-column:span 2}.capture-grid .span-4{grid-column:1/-1}
+.capture-drop{border:1px dashed #5f6774;border-radius:16px;padding:18px;text-align:center;background:#111318}
+.capture-drop.has-file{border-color:var(--good);background:#102017}
+.capture-drop input{width:100%;margin-top:10px}
+.capture-supplier-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.capture-supplier-choice{cursor:pointer;margin:0}.capture-supplier-choice:hover{border-color:#8994a5}
+.capture-selected{border-color:var(--good)!important;box-shadow:0 0 0 2px rgba(159,224,180,.09)}
+.capture-allocation{display:grid;grid-template-columns:110px 1.25fr 1fr 1fr 1fr 120px 90px 44px;gap:7px;align-items:end;margin-bottom:8px}
+.capture-allocation input,.capture-allocation select{padding:10px 9px;font-size:14px;border-radius:10px}
+.capture-allocation .remove{height:42px;padding:0;background:#351b1b;color:#ffb3b3;border:1px solid #653232}
+.capture-total{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+.capture-total.bad{color:#ff7777}.capture-total.good{color:var(--good)}
+.capture-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.capture-actions button{min-height:48px}.capture-message{font-size:13px;color:var(--muted)}
+.capture-message.error{color:#ffb3b3}.capture-message.success{color:var(--good)}
+.capture-recent{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.capture-recent .card{margin:0}.capture-badge{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:850;background:#242831;border:1px solid var(--line)}
+.capture-badge.review{color:var(--warn)}.capture-badge.done{color:var(--good)}
+.capture-costs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.capture-cost-card{background:#111318;border:1px solid var(--line);border-radius:13px;padding:11px}
+.capture-cost-card strong{display:block;font-size:16px;margin-top:5px}
+.capture-bank-warning{margin-top:10px;padding:10px 12px;border-radius:12px;background:#2a2011;border:1px solid #765d24;color:var(--warn)}
+@media(max-width:900px){.capture-dashboard{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-grid .span-4{grid-column:1/-1}.capture-allocation{grid-template-columns:1fr 1fr}.capture-allocation .remove{grid-column:2}.capture-recent,.capture-costs{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.capture-dashboard,.capture-grid,.capture-supplier-results,.capture-recent,.capture-costs{grid-template-columns:1fr}.capture-grid .span-2,.capture-grid .span-4{grid-column:auto}.capture-allocation{grid-template-columns:1fr}.capture-allocation .remove{grid-column:auto}}
+
+
+/* 0.13.1 · Dunja-Kontierung: breiter Arbeitsbereich und saubere Spalten */
+body.capture-wide .wrap{
+  max-width:1480px;
+}
+
+.capture-allocation{
+  width:100%;
+  max-width:100%;
+  grid-template-columns:
+    minmax(100px,.75fr)
+    minmax(155px,1.15fr)
+    minmax(145px,1fr)
+    minmax(115px,.8fr)
+    minmax(170px,1.25fr)
+    minmax(110px,.75fr)
+    minmax(82px,.55fr)
+    44px;
+}
+
+.capture-allocation > *{
+  min-width:0;
+}
+
+.capture-allocation input,
+.capture-allocation select{
+  display:block;
+  width:100%;
+  min-width:0;
+}
+
+@media(max-width:1250px){
+  body.capture-wide .wrap{
+    max-width:1040px;
+  }
+
+  .capture-allocation{
+    grid-template-columns:repeat(12,minmax(0,1fr));
+  }
+
+  .capture-allocation > div:nth-child(1){grid-column:span 2}
+  .capture-allocation > div:nth-child(2){grid-column:span 3}
+  .capture-allocation > div:nth-child(3){grid-column:span 3}
+  .capture-allocation > div:nth-child(4){grid-column:span 3}
+  .capture-allocation > div:nth-child(5){grid-column:span 6}
+  .capture-allocation > div:nth-child(6){grid-column:span 3}
+  .capture-allocation > div:nth-child(7){grid-column:span 3}
+  .capture-allocation .remove{
+    grid-column:12;
+    grid-row:1;
+  }
+}
+
+@media(max-width:800px){
+  body.capture-wide .wrap{
+    max-width:820px;
+  }
+
+  .capture-allocation{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .capture-allocation > div{
+    grid-column:auto!important;
+  }
+
+  .capture-allocation .remove{
+    grid-column:2;
+    grid-row:auto;
+  }
+}
+
+@media(max-width:560px){
+  .capture-allocation{
+    grid-template-columns:1fr;
+  }
+
+  .capture-allocation .remove{
+    grid-column:1;
+  }
+}
+
+
+/* 0.13.2 · Eingangsrechnungen: getrenntes Testgelände */
+.capture-area-switch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}
+.capture-area-switch button{min-height:52px;font-weight:900;border:1px solid var(--line);background:#20242c;color:#eef1f5}
+.capture-area-switch button.active.test{background:#392b10;border-color:#9a7426;color:#ffe29a;box-shadow:0 0 0 2px rgba(213,166,64,.12)}
+.capture-area-switch button.active.live{background:#173421;border-color:#4d9464;color:#b9f3ca;box-shadow:0 0 0 2px rgba(100,194,127,.12)}
+.capture-area-banner{border-radius:14px;padding:12px 14px;margin-bottom:14px;line-height:1.45;border:1px solid var(--line)}
+.capture-area-banner.test{background:#2b210f;border-color:#7d6124;color:#ffe19a}
+.capture-area-banner.live{background:#13281a;border-color:#3e7650;color:#b9efc8}
+.capture-area-banner strong{display:block;font-size:16px;margin-bottom:2px}
+body.capture-training #captureSection>.card{border-color:#5f4a1d}
+.capture-badge.training{color:#ffe19a;background:#382b12;border-color:#7d6124}
+.capture-delete,.capture-clear-test{background:#401d1d!important;border-color:#713333!important;color:#ffc0c0!important}
+@media(max-width:620px){.capture-area-switch{grid-template-columns:1fr}}
+
+
+
+/* 0.13.5 · Rechnungsprüfplatz: PDF links, Kontrolle rechts */
+.capture-workbench{display:grid;grid-template-columns:minmax(520px,1.28fr) minmax(500px,.95fr);gap:16px;align-items:start;margin-top:14px}
+.capture-preview-column{min-width:0;position:sticky;top:12px;align-self:start}
+.capture-editor-column{min-width:0;display:grid;gap:14px}
+.capture-preview-card{margin:0;padding:14px;min-height:720px}
+.capture-preview-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.capture-drop{padding:12px;transition:.18s ease}
+.capture-drop.dragover{border-color:#9fe0b4;background:#13261a;box-shadow:0 0 0 3px rgba(159,224,180,.12)}
+.capture-file-tools{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:8px}
+.capture-file-label{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 15px;border-radius:12px;background:#fff;color:#090a0c;font-weight:900;cursor:pointer}
+.capture-file-label input{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.capture-pdf-shell{margin-top:12px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0b0d10;min-height:610px;display:flex;align-items:stretch;justify-content:stretch}
+.capture-pdf-shell iframe{display:block;width:100%;height:calc(100vh - 185px);min-height:610px;border:0;background:#fff}
+.capture-pdf-empty{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;min-height:610px;padding:30px;color:var(--muted);line-height:1.55}
+.capture-form-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 12px;margin-top:12px}
+.capture-form-two .full{grid-column:1/-1}
+.capture-form-two input,.capture-form-two select,.capture-form-two textarea{width:100%;min-width:0;box-sizing:border-box}
+.capture-form-two textarea{min-height:72px;resize:vertical}
+.capture-readonly{background:#111318!important;color:#cbd1d9!important;border-color:#303640!important}
+.capture-field-note{font-size:11px;color:var(--muted);line-height:1.35;margin-top:4px}
+.capture-supplier-results{grid-template-columns:1fr}
+.capture-supplier-choice{position:relative}
+.capture-supplier-choice.best{border-color:#9fe0b4;box-shadow:0 0 0 2px rgba(159,224,180,.1)}
+.capture-match-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:#173421;border:1px solid #4d9464;color:#b9f3ca;font-size:11px;font-weight:900;margin-bottom:6px}
+.capture-match-reasons{font-size:11px;color:var(--good);margin-top:5px;line-height:1.4}
+.capture-bank-warning{padding:13px 14px}
+.capture-bank-warning.ok{background:#13281a;border-color:#3e7650;color:#b9efc8}
+.capture-bank-warning.bad{background:#321717;border-color:#753333;color:#ffb3b3}
+.capture-bank-comparison{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.capture-bank-value{background:#111318;border:1px solid var(--line);border-radius:11px;padding:9px;overflow-wrap:anywhere}
+.capture-bank-value small{display:block;color:var(--muted);margin-bottom:3px}
+.capture-accept-bank{display:flex;align-items:flex-start;gap:9px;background:#fff;color:#111;border-radius:12px;padding:11px 13px;font-weight:900;cursor:pointer}
+.capture-accept-bank input{width:auto;min-width:auto;margin-top:3px;transform:scale(1.15)}
+.capture-payment-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.capture-skonto-off{opacity:.48}
+.capture-analyze-steps{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+.capture-analyze-step{font-size:11px;padding:4px 7px;border-radius:999px;background:#242831;border:1px solid var(--line);color:var(--muted)}
+.capture-analyze-step.ok{color:var(--good);border-color:#3e7650}
+.capture-analyze-step.warn{color:var(--warn);border-color:#765d24}
+@media(max-width:1180px){
+  .capture-workbench{grid-template-columns:minmax(420px,1fr) minmax(430px,1fr)}
+  .capture-preview-column{position:static}
+  .capture-pdf-shell iframe{height:720px}
+}
+@media(max-width:920px){
+  .capture-workbench{grid-template-columns:1fr}
+  .capture-preview-column{order:0}
+  .capture-editor-column{order:1}
+  .capture-preview-card{min-height:auto}
+  .capture-pdf-shell,.capture-pdf-empty{min-height:520px}
+  .capture-pdf-shell iframe{height:620px;min-height:520px}
+}
+@media(max-width:590px){
+  .capture-form-two,.capture-payment-grid,.capture-bank-comparison{grid-template-columns:1fr}
+  .capture-form-two .full{grid-column:auto}
+  .capture-pdf-shell,.capture-pdf-empty{min-height:430px}
+  .capture-pdf-shell iframe{height:520px;min-height:430px}
+}
+
+/* Linie 2 · Kontakte + Materialsuche + PDF-Superviewer */
+.contact-button{background:#1f6f50;border:1px solid #2f8d68;color:#fff;font-weight:900;padding:9px 12px;border-radius:11px;height:auto}
+.contact-button:hover{filter:brightness(1.08)}
+.contact-summary{margin-top:10px;display:flex;gap:7px;flex-wrap:wrap}
+.contact-chip{display:inline-flex;gap:6px;align-items:center;padding:6px 9px;border:1px solid #3c4958;border-radius:999px;background:#151b22;color:#e9eef5;font-size:12px}
+.contact-modal,.pdf-super-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:18px}
+.contact-modal[hidden],.pdf-super-modal[hidden]{display:none!important}
+.contact-panel{width:min(820px,100%);max-height:92vh;overflow:auto;background:#10141a;border:1px solid #3a4552;border-radius:18px;box-shadow:0 22px 80px rgba(0,0,0,.55)}
+.contact-panel-head,.pdf-super-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:10px;align-items:center;padding:14px 16px;background:#141a22;border-bottom:1px solid #303946}
+.contact-panel-body{padding:14px 16px}
+.contact-list{display:grid;gap:9px;margin:10px 0 16px}
+.contact-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) minmax(140px,1.2fr) auto;gap:8px;align-items:center;padding:11px;border:1px solid #303946;border-radius:13px;background:#0d1117}
+.contact-row .who{font-weight:900}.contact-row .role,.contact-row .where{color:var(--muted);font-size:12px}
+.contact-call{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#1f6f50;color:#fff;border-radius:10px;padding:9px 11px;font-weight:900;white-space:nowrap}
+.contact-edit{background:#252d38;color:#fff;border:1px solid #424d5d;padding:7px 9px;height:auto}
+.contact-form{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding-top:12px;border-top:1px solid #303946}
+.contact-form .full{grid-column:1/-1}.contact-form input{width:100%}
+.material-global-results{display:grid;gap:10px}
+.material-global-card{display:grid;grid-template-columns:95px 1fr;gap:12px;border:1px solid #394655;background:#10151c;border-radius:14px;padding:11px}
+.material-global-card.exact{border-color:#5d836f}.material-global-card.similar{border-color:#665d3f}
+.material-global-card .thumb{width:95px;height:132px;object-fit:cover;border-radius:8px;background:#fff}
+.material-global-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.material-global-supplier{font-size:17px;font-weight:950}
+.pdf-super-panel{width:min(1500px,98vw);height:96vh;background:#0b0e12;border:1px solid #35404d;border-radius:18px;display:flex;flex-direction:column;overflow:hidden}
+.pdf-super-head{position:relative;flex:0 0 auto}.pdf-super-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pdf-super-tools button{height:auto;padding:7px 10px;background:#242c36;color:#fff;border:1px solid #455160}
+.pdf-super-stage{position:relative;flex:1;overflow:auto;background:#262a2f;text-align:center;padding:14px}
+.pdf-super-stage img{display:inline-block;max-width:none;box-shadow:0 4px 24px rgba(0,0,0,.42);background:#fff}
+.pdf-loupe{position:fixed;z-index:10020;width:320px;height:220px;border:3px solid #fff;border-radius:14px;box-shadow:0 10px 45px rgba(0,0,0,.65);background:#111 no-repeat;pointer-events:none;display:none;overflow:hidden}
+.pdf-super-status{font-size:12px;color:#c8d1dc;min-width:90px;text-align:center}
+@media(max-width:720px){
+  .contact-modal,.pdf-super-modal{padding:0}.contact-panel,.pdf-super-panel{width:100%;height:100%;max-height:none;border-radius:0}
+  .contact-row{grid-template-columns:1fr auto}.contact-row .where,.contact-row .role{grid-column:1/-1}.contact-form{grid-template-columns:1fr}
+  .material-global-card{grid-template-columns:72px 1fr}.material-global-card .thumb{width:72px;height:100px}
+  .pdf-loupe{width:260px;height:180px}.pdf-super-stage{padding:6px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div><small>KRISTINE</small><h1>The Brain</h1></div>
+    <small>Firmenwissen</small>
+  </div>
+
+  <div class="hero">
+    <div class="mode-switch">
+      <button id="modeProjects" class="mode active" type="button">🧠 Projekte / Firmenwissen</button>
+      <button id="modeIncoming" class="mode" type="button">🧾 Eingangsrechnungen</button>
+      <button id="modeMaterial" class="mode" type="button">🔎 Material</button>
+      <button id="modeCapture" class="mode" type="button">📥 Erfassen · Dunja</button>
+    </div>
+    <div class="searchrow" id="mainSearchRow">
+      <input id="q" type="search" placeholder="Baustelle, Kunde, Nummer, Adresse …" autocomplete="off">
+      <button id="go">Suchen</button>
+    </div>
+    <div class="meta" id="meta">WinWorker + PDF-Archiv</div>
+    <div class="loader" id="loader">Suche läuft …</div>
+
+    <div class="addressbar" id="addressBar" hidden>
+      <div class="addressbar-title">Adresse eingrenzen</div>
+      <div class="chips" id="addresses"></div>
+    </div>
+
+    <div class="summary" id="summary" hidden></div>
+  </div>
+
+  <div class="section" id="projectAddressSection" hidden>
+    <div class="section-head"><h2>Kunde / Adresse auswählen</h2></div>
+    <div class="meta">Die erste Eingabe grenzt nur den richtigen WinWorker-Kunden über seine Adresse ein.</div>
+    <div id="projectAddresses" class="project-address-grid" style="margin-top:10px"></div>
+  </div>
+
+  <div class="section" id="projectsSection" hidden>
+    <div class="section-head">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button id="backToProjectAddresses" class="dark" type="button" hidden>← Adresse wechseln</button>
+        <button id="backToProjects" class="dark" type="button" hidden>← Projekte</button>
+        <h2 id="projectsTitle">Projekte auswählen</h2>
+      </div>
+      <button id="newFromSelection" class="plus" type="button">＋ Neue Baustelle</button>
+    </div>
+    <div id="projectCustomerOverview" class="card customer-overview" hidden></div>
+    <div id="projects"></div>
+  </div>
+
+  <div class="section" id="docsSection" hidden>
+    <div class="section-head"><h2>Dokumente & Quellen</h2></div>
+    <div id="sourceTypes"></div>
+    <div id="docs"></div>
+  </div>
+  <div class="section" id="materialSection" hidden>
+    <div class="section-head"><h2>Material finden · lieferantenübergreifend</h2></div>
+    <div class="card">
+      <div class="project-title">Materialname, Artikel oder Artikelnummer</div>
+      <div class="sub">The Brain durchsucht die Materialblöcke aller Eingangsrechnungen. Beste Treffer zuerst, bei gleicher Qualität die neuesten.</div>
+      <div class="searchrow" style="margin-top:10px">
+        <input id="materialQ" type="search" placeholder="z. B. StoPrim Plex, Unistar, 180 g Vlies …" autocomplete="off">
+        <button id="materialGo" type="button">Material suchen</button>
+      </div>
+      <div id="materialMeta" class="meta"></div>
+    </div>
+    <div id="materialResults" class="material-global-results"></div>
+  </div>
+
+  <div class="section" id="incomingSupplierSection" hidden>
+    <div class="section-head"><h2>Adresse auswählen</h2></div>
+    <div id="incomingSuppliers"></div>
+  </div>
+
+  <div class="section" id="incomingSection" hidden>
+    <div class="section-head">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button id="backToSuppliers" class="dark" type="button">← Adresse wechseln</button>
+        <h2>Eingangsrechnungen</h2>
+      </div>
+    </div>
+
+    <div class="card supplier-card">
+      <div class="project-title" id="incomingTitle">Lieferant</div>
+      <div class="sub" id="incomingSupplierAddress"></div>
+      <div class="sub" id="incomingSupplierNumber"></div>
+      <div class="sub" id="incomingSub"></div>
+      <div style="margin-top:10px"><button id="incomingCall" class="contact-button" type="button">📞 Anrufen / Kontakte</button></div>
+
+      <div class="invoice-text-search">
+        <div class="formlabel">Welches Material suche ich?</div>
+        <div class="searchrow">
+          <input id="incomingTextQ" type="search"
+                 placeholder="Material, Artikelname oder Artikelnummer …" autocomplete="off">
+          <button id="incomingTextGo" type="button">Alle Rechnungen durchsuchen</button>
+        </div>
+        <div class="material-search-note" id="incomingTextHint">Durchsucht alle Rechnungen des ausgewählten Lieferanten – ausschließlich die OCR-Materialzeilen.</div>
+        <div class="meta" id="incomingTextMeta"></div>
+      </div>
+    </div>
+
+    <div id="incomingWatch"></div>
+    <div id="incomingGrouped"></div>
+
+    <div class="section" id="incomingReviewSection" hidden>
+      <div class="section-head"><h2>Noch nicht zugeordnet · einmal prüfen</h2></div>
+      <div class="meta">Unsichere Rechnung einmal anklicken → danach dauerhaft mit dieser WW-Adresse verheiratet.</div>
+      <div id="incomingReview"></div>
+    </div>
+  </div>
+
+
+
+  <div id="contactModal" class="contact-modal" hidden>
+    <div class="contact-panel">
+      <div class="contact-panel-head"><div><strong id="contactTitle">Kontakte</strong><div class="sub" id="contactSub"></div></div><button id="contactClose" class="dark" type="button">✕</button></div>
+      <div class="contact-panel-body">
+        <div id="contactList" class="contact-list"></div>
+        <form id="contactForm" class="contact-form">
+          <input id="contactId" type="hidden">
+          <div><div class="formlabel">Standort</div><input id="contactLocation" placeholder="z. B. Rankweil"></div>
+          <div><div class="formlabel">Name</div><input id="contactName" placeholder="z. B. Stefan Walser"></div>
+          <div><div class="formlabel">Funktion</div><input id="contactRole" placeholder="Außendienst, Bauleiter, Zentrale …"></div>
+          <div><div class="formlabel">Telefonnummer *</div><input id="contactPhone" type="tel" required placeholder="+43 …"></div>
+          <div><div class="formlabel">E-Mail</div><input id="contactEmail" type="email"></div>
+          <div><div class="formlabel">Notiz</div><input id="contactNote" placeholder="z. B. Schlüssel, nur vormittags …"></div>
+          <div class="full" style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Kontakt speichern</button><button id="contactReset" class="dark" type="button">Neu / leeren</button><button id="contactDelete" class="danger" type="button" hidden>Kontakt löschen</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="pdfSuperModal" class="pdf-super-modal" hidden>
+    <div class="pdf-super-panel">
+      <div class="pdf-super-head">
+        <div><strong id="pdfSuperTitle">PDF</strong><div class="sub">Breite · Zoom · Superlupe</div></div>
+        <div class="pdf-super-tools">
+          <button id="pdfPrev" type="button">←</button><span id="pdfStatus" class="pdf-super-status">1 / 1</span><button id="pdfNext" type="button">→</button>
+          <button id="pdfMinus" type="button">−</button><button id="pdf100" type="button">100 %</button><button id="pdfWidth" type="button">Breite</button><button id="pdfPlus" type="button">＋</button>
+          <button id="pdfLoupeToggle" type="button">🔎 Lupe</button><a id="pdfOriginal" class="action" href="#" target="_blank" rel="noopener">Original</a><button id="pdfClose" class="dark" type="button">✕</button>
+        </div>
+      </div>
+      <div id="pdfStage" class="pdf-super-stage"><img id="pdfImage" alt="PDF Seite"></div>
+    </div>
+  </div>
+  <div id="pdfLoupe" class="pdf-loupe"></div>
+
+  <div class="section" id="captureSection" hidden>
+    <div class="section-head">
+      <div>
+        <h2>📥 Eingangsrechnung erfassen · Dunja</h2>
+        <div class="sub">Rechnung links ablesen · rechts Lieferant, Zahlungsbedingungen, Beträge und Kontierung kontrollieren.</div>
+      </div>
+      <span class="pill" id="captureNextNumber">Nächste Nummer wird geladen …</span>
+    </div>
+
+    <div class="capture-area-switch" aria-label="Arbeitsbereich auswählen">
+      <button id="captureAreaTest" class="test" type="button">🧪 Testgelände / Training</button>
+      <button id="captureAreaLive" class="live" type="button">🔒 Echtbetrieb</button>
+    </div>
+    <div id="captureAreaBanner" class="capture-area-banner test"></div>
+    <div class="capture-dashboard" id="captureDashboard"></div>
+
+    <div class="capture-workbench">
+      <aside class="capture-preview-column">
+        <div class="card capture-preview-card">
+          <div class="capture-preview-head">
+            <div><div class="project-title">1 · Rechnung</div><div class="sub">PDF bleibt beim Prüfen immer sichtbar.</div></div>
+            <a id="captureOpenPdf" class="action secondary" href="#" target="_blank" rel="noopener" hidden>PDF groß öffnen</a>
+          </div>
+          <div class="capture-drop" id="captureDrop">
+            <strong>PDF hier hineinziehen</strong>
+            <div class="sub">oder Datei auswählen · Text wird gelesen, Scan-Seiten erhalten automatisch OCR.</div>
+            <div class="capture-file-tools">
+              <label class="capture-file-label">PDF auswählen<input id="captureFile" type="file" accept="application/pdf,.pdf"></label>
+            </div>
+            <div class="capture-analyze-steps" id="captureAnalyzeSteps"></div>
+            <div class="meta" id="captureAnalyzeMeta"></div>
+          </div>
+          <div class="capture-pdf-shell">
+            <div id="capturePdfEmpty" class="capture-pdf-empty">Noch keine Rechnung ausgewählt.<br>Nach dem Reinziehen erscheint sie hier direkt neben der Kontrolle.</div>
+            <iframe id="capturePdfPreview" title="Vorschau der Eingangsrechnung" hidden></iframe>
+          </div>
+        </div>
+      </aside>
+
+      <div class="capture-editor-column">
+        <div class="card">
+          <div class="project-title">2 · Lieferant aus WinWorker</div>
+          <div class="sub">KRISTINE schlägt nach PDF-Text, UID, Kundennummer und Adresse vor. Dunja wählt bewusst aus.</div>
+          <div class="searchrow" style="margin-top:10px">
+            <input id="captureSupplierQ" type="search" placeholder="Lieferant händisch suchen …" autocomplete="off">
+            <button id="captureSupplierGo" type="button">Suchen</button>
+          </div>
+          <div id="captureSelectedSupplier" class="meta">Noch kein Lieferant ausgewählt.</div>
+          <div id="captureSupplierResults" class="capture-supplier-results"></div>
+        </div>
+
+        <div class="card">
+          <div class="project-title">3 · Rechnungsdaten</div>
+          <div class="capture-form-two">
+            <div><div class="formlabel">Belegart</div><select id="captureDocumentType"><option>Rechnung</option><option>Gutschrift</option></select></div>
+            <div><div class="formlabel">Lieferanten-Rechnungsnummer</div><input id="captureInvoiceNumber" type="text"></div>
+
+            <div><div class="formlabel">Rechnungsdatum</div><input id="captureInvoiceDate" type="date"></div>
+            <div><div class="formlabel">Nettofällig am</div><input id="captureNetDueDate" type="date"></div>
+
+            <div><div class="formlabel">Skonto</div><select id="captureSkontoEnabled"><option value="0">Nein</option><option value="1">Ja</option></select></div>
+            <div id="captureSkontoPercentWrap"><div class="formlabel">Skonto %</div><input id="captureSkontoPercent" type="number" min="0" max="100" step="0.01"></div>
+            <div id="captureSkontoDueWrap"><div class="formlabel">Skonto fällig am</div><input id="captureSkontoDueDate" type="date"></div>
+            <div><div class="formlabel">Währung</div><select id="captureCurrency"><option>EUR</option><option>CHF</option></select></div>
+
+            <div><div class="formlabel">Netto</div><input id="captureNet" type="number" step="0.01"></div>
+            <div><div class="formlabel">USt</div><input id="captureVat" type="number" step="0.01"></div>
+            <div><div class="formlabel">Brutto</div><input id="captureGross" type="number" step="0.01"></div>
+            <div><div class="formlabel">Unsere KundenNr. dort</div><input id="captureExternalCustomerNo" type="text"><div class="capture-field-note">Nach Lieferantenauswahl aus WinWorker; falls dort leer, händisch ergänzbar.</div></div>
+
+            <div class="full"><div class="formlabel">Zahlungsbedingungen laut Rechnung</div><input id="capturePaymentTerms" type="text" placeholder="z. B. sofort ohne Abzug"></div>
+            <div class="full"><div class="formlabel">IBAN laut Stammdaten</div><input id="captureMasterIban" class="capture-readonly" type="text" readonly placeholder="wird nach Lieferantenauswahl geladen"></div>
+            <div class="full"><div class="formlabel">IBAN auf dieser Rechnung</div><input id="captureInvoiceIban" type="text" placeholder="nur zur Gegenprüfung"></div>
+            <div id="captureBankWarning" class="full"></div>
+
+            <div class="full"><div class="formlabel">Buchungstext / Betreff</div><input id="captureBookingText" type="text" placeholder="wird nur bei eindeutigem Betreff vorgeschlagen"></div>
+            <div class="full"><div class="formlabel">Interne Notiz</div><textarea id="captureNote"></textarea></div>
+            <div><div class="formlabel">Bearbeiter</div><input id="captureCreatedBy" type="text" value="Dunja"></div>
+            <div><div class="formlabel">Arbeitsstatus</div><select id="captureWorkflow"><option value="zu_pruefen">Zu prüfen</option><option value="geprueft">Geprüft</option></select></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <div><div class="project-title">4 · Kontierung</div><div class="sub">Summe der Kontierungszeilen muss dem Rechnungs-Netto entsprechen.</div></div>
+            <button id="captureAddAllocation" type="button" class="dark">＋ Kontierungszeile</button>
+          </div>
+          <div id="captureAllocations"></div>
+          <div id="captureAllocationTotal" class="capture-total"></div>
+          <div class="capture-actions">
+            <button id="captureSave" type="button">Rechnung verbindlich erfassen</button>
+            <span id="captureSaveMessage" class="capture-message"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2><span id="captureCostTitle">Kostenentwicklung</span> <span id="captureCostYear"></span></h2></div>
+      <div id="captureCostSummary" class="capture-costs"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2 id="captureRecentTitle">Zuletzt erfasst</h2><div class="actions"><button id="captureClearTest" class="capture-clear-test" type="button" hidden>Testgelände leeren</button><button id="captureReload" class="dark" type="button">↻ Aktualisieren</button></div></div>
+      <div id="captureRecent" class="capture-recent"></div>
+    </div>
+  </div>
+
+  <div class="footer">Privater Zugriff über Tailscale</div>
+</div>
+
+<div id="newJobModal" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>＋ Neue Baustelle in KRISTINE</h3>
+      <button id="closeModal" class="close" type="button">×</button>
+    </div>
+    <div class="formgrid">
+      <div>
+        <div class="formlabel">Baustellennummer</div>
+        <input id="newJobId" type="text" placeholder="z. B. 26086">
+      </div>
+      <div>
+        <div class="formlabel">Status</div>
+        <select id="newJobStatus"><option>Auftrag</option><option>Angebot</option></select>
+      </div>
+      <div class="full">
+        <div class="formlabel">Baustellenname</div>
+        <input id="newJobName" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Straße</div>
+        <input id="newJobStreet" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Hausnummer</div>
+        <input id="newJobHouse" type="text">
+      </div>
+      <div>
+        <div class="formlabel">PLZ</div>
+        <input id="newJobPostal" type="text">
+      </div>
+      <div>
+        <div class="formlabel">Ort</div>
+        <input id="newJobCity" type="text">
+      </div>
+    </div>
+    <div class="save-row">
+      <button id="saveNewJob" type="button">Baustelle anlegen</button>
+      <span id="newJobMsg" class="notice"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const q=document.getElementById('q'),go=document.getElementById('go'),meta=document.getElementById('meta');
+const loader=document.getElementById('loader'),projects=document.getElementById('projects'),docs=document.getElementById('docs');
+const ps=document.getElementById('projectsSection'),ds=document.getElementById('docsSection');
+const projectAddressSection=document.getElementById('projectAddressSection'),projectAddresses=document.getElementById('projectAddresses');
+const projectCustomerOverview=document.getElementById('projectCustomerOverview'),backToProjectAddresses=document.getElementById('backToProjectAddresses');
+const addressBar=document.getElementById('addressBar'),addresses=document.getElementById('addresses');
+const summary=document.getElementById('summary'),sourceTypes=document.getElementById('sourceTypes');
+const newFromSelection=document.getElementById('newFromSelection');
+const modeProjects=document.getElementById('modeProjects'),modeIncoming=document.getElementById('modeIncoming'),modeMaterial=document.getElementById('modeMaterial'),modeCapture=document.getElementById('modeCapture');
+const materialSection=document.getElementById('materialSection'),materialQ=document.getElementById('materialQ'),materialGo=document.getElementById('materialGo'),materialMeta=document.getElementById('materialMeta'),materialResults=document.getElementById('materialResults');
+const mainSearchRow=document.getElementById('mainSearchRow');
+const incomingSupplierSection=document.getElementById('incomingSupplierSection'),incomingSuppliers=document.getElementById('incomingSuppliers');
+const incomingSection=document.getElementById('incomingSection'),incomingGrouped=document.getElementById('incomingGrouped');
+const incomingTitle=document.getElementById('incomingTitle'),incomingSub=document.getElementById('incomingSub');
+const incomingSupplierAddress=document.getElementById('incomingSupplierAddress'),incomingSupplierNumber=document.getElementById('incomingSupplierNumber');
+const incomingTextQ=document.getElementById('incomingTextQ'),incomingTextGo=document.getElementById('incomingTextGo'),incomingTextHint=document.getElementById('incomingTextHint'),incomingTextMeta=document.getElementById('incomingTextMeta');
+const backToSuppliers=document.getElementById('backToSuppliers');
+const incomingWatch=document.getElementById('incomingWatch');
+const incomingReviewSection=document.getElementById('incomingReviewSection'),incomingReview=document.getElementById('incomingReview');
+const backToProjects=document.getElementById('backToProjects'),projectsTitle=document.getElementById('projectsTitle');
+const modal=document.getElementById('newJobModal'),closeModal=document.getElementById('closeModal');
+const saveNewJob=document.getElementById('saveNewJob'),newJobMsg=document.getElementById('newJobMsg');
+
+const captureSection=document.getElementById('captureSection'),captureDashboard=document.getElementById('captureDashboard');
+const captureAreaTest=document.getElementById('captureAreaTest'),captureAreaLive=document.getElementById('captureAreaLive'),captureAreaBanner=document.getElementById('captureAreaBanner');
+const captureNextNumber=document.getElementById('captureNextNumber'),captureFile=document.getElementById('captureFile'),captureDrop=document.getElementById('captureDrop'),captureAnalyzeMeta=document.getElementById('captureAnalyzeMeta'),captureAnalyzeSteps=document.getElementById('captureAnalyzeSteps');
+const capturePdfPreview=document.getElementById('capturePdfPreview'),capturePdfEmpty=document.getElementById('capturePdfEmpty'),captureOpenPdf=document.getElementById('captureOpenPdf');
+const captureSupplierQ=document.getElementById('captureSupplierQ'),captureSupplierGo=document.getElementById('captureSupplierGo'),captureSupplierResults=document.getElementById('captureSupplierResults'),captureSelectedSupplierBox=document.getElementById('captureSelectedSupplier'),captureBankWarning=document.getElementById('captureBankWarning');
+const captureDocumentType=document.getElementById('captureDocumentType'),captureInvoiceNumber=document.getElementById('captureInvoiceNumber'),captureInvoiceDate=document.getElementById('captureInvoiceDate'),captureNetDueDate=document.getElementById('captureNetDueDate');
+const captureSkontoEnabled=document.getElementById('captureSkontoEnabled'),captureSkontoPercent=document.getElementById('captureSkontoPercent'),captureSkontoDueDate=document.getElementById('captureSkontoDueDate'),captureSkontoPercentWrap=document.getElementById('captureSkontoPercentWrap'),captureSkontoDueWrap=document.getElementById('captureSkontoDueWrap'),capturePaymentTerms=document.getElementById('capturePaymentTerms');
+const captureNet=document.getElementById('captureNet'),captureVat=document.getElementById('captureVat'),captureGross=document.getElementById('captureGross'),captureCurrency=document.getElementById('captureCurrency');
+const captureMasterIban=document.getElementById('captureMasterIban'),captureInvoiceIban=document.getElementById('captureInvoiceIban'),captureExternalCustomerNo=document.getElementById('captureExternalCustomerNo'),captureBookingText=document.getElementById('captureBookingText'),captureNote=document.getElementById('captureNote'),captureCreatedBy=document.getElementById('captureCreatedBy'),captureWorkflow=document.getElementById('captureWorkflow');
+const captureAllocations=document.getElementById('captureAllocations'),captureAllocationTotal=document.getElementById('captureAllocationTotal'),captureAddAllocation=document.getElementById('captureAddAllocation'),captureSave=document.getElementById('captureSave'),captureSaveMessage=document.getElementById('captureSaveMessage');
+const captureCostSummary=document.getElementById('captureCostSummary'),captureCostYear=document.getElementById('captureCostYear'),captureCostTitle=document.getElementById('captureCostTitle');
+const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
+
+
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,incomingMaterialQuery='',captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[],capturePdfObjectUrl='',captureAcceptNewIban=false;
+let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function money(v){if(v===null||v===undefined||v==='')return null;try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(v))}catch{return v}}
+function num(v){if(v===null||v===undefined||v==='')return null;return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v))}
+function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
+
+let activeContactContext=null;
+const contactModal=document.getElementById('contactModal'),contactTitle=document.getElementById('contactTitle'),contactSub=document.getElementById('contactSub'),contactList=document.getElementById('contactList'),contactForm=document.getElementById('contactForm');
+const contactId=document.getElementById('contactId'),contactLocation=document.getElementById('contactLocation'),contactName=document.getElementById('contactName'),contactRole=document.getElementById('contactRole'),contactPhone=document.getElementById('contactPhone'),contactEmail=document.getElementById('contactEmail'),contactNote=document.getElementById('contactNote'),contactDelete=document.getElementById('contactDelete');
+function phoneHref(value){const raw=String(value||'').trim();return 'tel:'+raw.replace(/[^+\d]/g,'')}
+function resetContactForm(){contactForm?.reset();if(contactId)contactId.value='';if(contactDelete)contactDelete.hidden=true}
+async function loadContacts(){
+  if(!activeContactContext)return;
+  const p=new URLSearchParams({entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});
+  const r=await fetch('/contacts?'+p.toString(),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Kontakte konnten nicht geladen werden');
+  const rows=d.contacts||[];
+  contactList.innerHTML=rows.length?rows.map(c=>`<div class="contact-row">
+    <div><div class="who">${esc(c.name||c.role||'Kontakt')}</div><div class="where">${esc(c.location||'')}</div></div>
+    <div class="role">${esc(c.role||'')}</div>
+    <a class="contact-call" href="${phoneHref(c.phone)}">📞 ${esc(c.phone)}</a>
+    <button class="contact-edit" type="button" data-contact='${esc(JSON.stringify(c))}'>Bearbeiten</button>
+  </div>`).join(''):'<div class="empty">Noch keine Telefonnummer gespeichert.</div>';
+  contactList.querySelectorAll('[data-contact]').forEach(btn=>btn.onclick=()=>{const c=JSON.parse(btn.dataset.contact);contactId.value=c.id||'';contactLocation.value=c.location||'';contactName.value=c.name||'';contactRole.value=c.role||'';contactPhone.value=c.phone||'';contactEmail.value=c.email||'';contactNote.value=c.note||'';contactDelete.hidden=false;});
+}
+async function openContacts(ctx){activeContactContext=ctx;contactTitle.textContent='📞 '+(ctx.title||'Kontakte');contactSub.textContent=ctx.subtitle||'';resetContactForm();contactModal.hidden=false;await loadContacts();}
+document.getElementById('contactClose')?.addEventListener('click',()=>contactModal.hidden=true);document.getElementById('contactReset')?.addEventListener('click',resetContactForm);
+contactForm?.addEventListener('submit',async e=>{e.preventDefault();if(!activeContactContext)return;const payload={id:Number(contactId.value||0)||undefined,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId,location:contactLocation.value,name:contactName.value,role:contactRole.value,phone:contactPhone.value,email:contactEmail.value,note:contactNote.value};const r=await fetch('/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Speichern fehlgeschlagen');resetContactForm();await loadContacts();});
+contactDelete?.addEventListener('click',async()=>{if(!activeContactContext||!contactId.value||!confirm('Kontakt wirklich löschen?'))return;const p=new URLSearchParams({id:contactId.value,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});const r=await fetch('/contacts?'+p.toString(),{method:'DELETE'}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Löschen fehlgeschlagen');resetContactForm();await loadContacts();});
+
+let pdfState={path:'',page:1,pages:1,scale:1.45,loupe:false,baseWidth:0};
+const pdfModal=document.getElementById('pdfSuperModal'),pdfImage=document.getElementById('pdfImage'),pdfStage=document.getElementById('pdfStage'),pdfStatus=document.getElementById('pdfStatus'),pdfLoupe=document.getElementById('pdfLoupe');
+function pdfPageUrl(){return '/pdf-page?path='+encodeURIComponent(pdfState.path)+'&page='+pdfState.page+'&scale='+pdfState.scale.toFixed(2)}
+function renderPdfPage(){pdfStatus.textContent=pdfState.page+' / '+pdfState.pages;pdfImage.src=pdfPageUrl();document.getElementById('pdfPrev').disabled=pdfState.page<=1;document.getElementById('pdfNext').disabled=pdfState.page>=pdfState.pages;}
+async function openBrainPdf(path,title='PDF'){if(!path)return;pdfState={path,page:1,pages:1,scale:1.45,loupe:false,baseWidth:0};document.getElementById('pdfSuperTitle').textContent=title||'PDF';document.getElementById('pdfOriginal').href=urlFor('/pdf',path);pdfModal.hidden=false;const r=await fetch('/pdf-info?path='+encodeURIComponent(path),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok){pdfModal.hidden=true;return window.open(urlFor('/pdf',path),'_blank')}pdfState.pages=Number(d.pages||1);pdfState.baseWidth=Number(d.width||0);fitPdfWidth();}
+function fitPdfWidth(){if(!pdfState.baseWidth)return renderPdfPage();const usable=Math.max(320,pdfStage.clientWidth-34);pdfState.scale=Math.max(.55,Math.min(4.5,usable/pdfState.baseWidth));renderPdfPage();}
+document.getElementById('pdfClose')?.addEventListener('click',()=>{pdfModal.hidden=true;pdfLoupe.style.display='none'});document.getElementById('pdfPrev')?.addEventListener('click',()=>{if(pdfState.page>1){pdfState.page--;renderPdfPage()}});document.getElementById('pdfNext')?.addEventListener('click',()=>{if(pdfState.page<pdfState.pages){pdfState.page++;renderPdfPage()}});document.getElementById('pdfMinus')?.addEventListener('click',()=>{pdfState.scale=Math.max(.45,pdfState.scale-.2);renderPdfPage()});document.getElementById('pdfPlus')?.addEventListener('click',()=>{pdfState.scale=Math.min(5,pdfState.scale+.2);renderPdfPage()});document.getElementById('pdf100')?.addEventListener('click',()=>{pdfState.scale=1;renderPdfPage()});document.getElementById('pdfWidth')?.addEventListener('click',fitPdfWidth);document.getElementById('pdfLoupeToggle')?.addEventListener('click',()=>{pdfState.loupe=!pdfState.loupe;if(!pdfState.loupe)pdfLoupe.style.display='none'});
+pdfStage?.addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();pdfState.scale=Math.max(.45,Math.min(5,pdfState.scale+(e.deltaY<0?.18:-.18)));renderPdfPage()},{passive:false});
+pdfImage?.addEventListener('mousemove',e=>{if(!pdfState.loupe)return;const r=pdfImage.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(x<0||y<0||x>r.width||y>r.height)return;const zoom=2.6;pdfLoupe.style.display='block';pdfLoupe.style.left=Math.min(window.innerWidth-335,e.clientX+24)+'px';pdfLoupe.style.top=Math.max(8,Math.min(window.innerHeight-235,e.clientY-110))+'px';pdfLoupe.style.backgroundImage=`url("${pdfImage.src}")`;pdfLoupe.style.backgroundSize=(r.width*zoom)+'px '+(r.height*zoom)+'px';pdfLoupe.style.backgroundPosition=(-x*zoom+160)+'px '+(-y*zoom+110)+'px';});pdfImage?.addEventListener('mouseleave',()=>pdfLoupe.style.display='none');
+document.addEventListener('click',e=>{const a=e.target.closest('a.action[href*="/pdf?path="]');if(!a)return;try{const u=new URL(a.href,location.href),path=u.searchParams.get('path');if(path){e.preventDefault();openBrainPdf(path,a.closest('.doc')?.querySelector('.docname')?.textContent||a.textContent||'PDF')}}catch(_){}});
+
+function norm(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ')}
+function addressLabel(p){return [p.street,[p.postalCode,p.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+function addressKey(p){return norm([p.street,p.postalCode,p.city].filter(Boolean).join('|'))}
+
+function regexEscape(v){return String(v||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+function highlightMaterialText(value,query){
+  const terms=String(query||'').trim().split(/[^0-9A-Za-zÄÖÜäöüß]+/).filter(Boolean).sort((a,b)=>b.length-a.length);
+  if(!terms.length)return esc(value);
+  const pattern=new RegExp('('+terms.map(regexEscape).join('|')+')','gi');
+  return String(value??'').split(pattern).map((part,index)=>index%2
+    ?`<mark class="material-hit-mark">${esc(part)}</mark>`
+    :esc(part)).join('');
+}
+function supplierSearchLabel(){
+  const name=String(selectedWwAddress?.name||'').trim();
+  return name||'diesem Lieferanten';
+}
+function updateIncomingMaterialScope(){
+  const name=supplierSearchLabel();
+  incomingTextGo.textContent='Alle Rechnungen durchsuchen';
+  incomingTextHint.textContent=`Durchsucht alle Rechnungen von ${name} – ausschließlich die OCR-Materialzeilen, nicht Datum, Rechnungsnummer oder Rechnungskopf.`;
+}
+function clearIncomingMaterialSearch(){
+  incomingTextQ.value='';
+  loadSupplierInvoices('');
+}
+
+function docSource(d){
+  const s=norm([d.path,d.filename,d.dokumenttyp].filter(Boolean).join(' '));
+  if(s.includes('moser'))return 'MOSER';
+  if(/eingangs?rechnung|kreditor|kredi/.test(s))return 'Eingangsrechnungen';
+  if(/archiv|altarchiv|scanarchiv/.test(s))return 'Archiv';
+  return 'Dokumente';
+}
+function docType(d){return String(d.documentType||d.dokumenttyp||'Sonstige Dokumente').trim()||'Sonstige Dokumente'}
+
+function groupCounts(list,fn){
+  const m=new Map(); list.forEach(x=>{const k=fn(x);m.set(k,(m.get(k)||0)+1)}); return [...m.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'de'));
+}
+
+function renderProjectAddressCandidates(){
+  projectAddressSection.hidden=false;
+  projectAddresses.innerHTML=projectAddressCandidates.length
+    ? projectAddressCandidates.map((a,i)=>`<div class="card project-address-card" data-project-address="${i}">
+        <div class="project-title">${esc(a.name||a.person||'Adresse')}</div>
+        ${a.person&&a.person!==a.name?`<div class="sub">${esc(a.person)}</div>`:''}
+        ${a.address?`<div class="sub">${esc(a.address)}</div>`:''}
+        <div class="metrics">
+          <span class="pill">${Number(a.matchingProjectCount||0)} passende Projekt${Number(a.matchingProjectCount||0)===1?'':'e'}</span>
+          ${a.customerNumber!==null&&a.customerNumber!==undefined&&a.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(a.customerNumber)}</span>`:''}
+        </div>
+        ${Array.isArray(a.sampleProjects)&&a.sampleProjects.length?`<div class="project-address-samples">${a.sampleProjects.map(esc).join('<br>')}</div>`:''}
+        <div class="actions"><button type="button" data-choose-project-address="${i}">Diese Adresse auswählen</button></div>
+      </div>`).join('')
+    : '<div class="empty">Keine passende WinWorker-Adresse gefunden.</div>';
+
+  projectAddresses.querySelectorAll('[data-choose-project-address]').forEach(btn=>{
+    btn.onclick=e=>{e.stopPropagation();selectProjectAddress(projectAddressCandidates[Number(btn.dataset.chooseProjectAddress)]||null)};
+  });
+  projectAddresses.querySelectorAll('[data-project-address]').forEach(card=>{
+    card.onclick=()=>selectProjectAddress(projectAddressCandidates[Number(card.dataset.projectAddress)]||null);
+  });
+}
+
+function renderProjectCustomerOverview(o){
+  projectCustomerOverview.hidden=false;
+  const years=Array.isArray(o?.revenueByYear)?o.revenueByYear.filter(x=>x.year):[];
+  projectCustomerOverview.innerHTML=`
+    <div class="customer-overview-head">
+      <div>
+        <div class="customer-overview-name">${esc(o?.name||selectedProjectAddress?.name||'Kunde')}</div>
+        ${o?.person&&o.person!==o.name?`<div class="sub">${esc(o.person)}</div>`:''}
+        ${o?.address?`<div class="sub">${esc(o.address)}</div>`:''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${o?.customerNumber!==null&&o?.customerNumber!==undefined&&o?.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(o.customerNumber)}</span>`:''}
+        <button id="customerContactBtn" class="contact-button" type="button">📞 Kunde / Kontakte</button>
+      </div>
+    </div>
+    <div class="overview-kpis">
+      <div class="overview-kpi"><small>Umsatz gesamt · netto</small><strong>${esc(money(o?.totalRevenue)||'–')}</strong></div>
+      <div class="overview-kpi"><small>Produktive Stunden gesamt</small><strong>${o?.totalProductiveHours!==null&&o?.totalProductiveHours!==undefined?esc(num(o.totalProductiveHours))+' h':'–'}</strong></div>
+      <div class="overview-kpi"><small>Umsatz je produktiver Stunde</small><strong>${esc(money(o?.revenuePerHour)||'–')}</strong></div>
+      <div class="overview-kpi"><small>Projekte</small><strong>${Number(o?.projectCount||0)}</strong></div>
+    </div>
+    <div class="year-revenue-title">Umsatz netto pro Jahr</div>
+    <div class="year-revenue-grid">${years.length?years.map(y=>`<div class="year-revenue"><span>${esc(y.year)}</span><strong>${esc(money(y.netRevenue)||'–')}</strong><small>${Number(y.invoiceCount||0)} Rechnung${Number(y.invoiceCount||0)===1?'':'en'}</small></div>`).join(''):'<div class="empty">Noch kein Jahresumsatz gefunden.</div>'}</div>
+    <div class="overview-note">Datenabdeckung: ${Number(o?.projectsWithRevenue||0)}/${Number(o?.projectCount||0)} Projekte mit Umsatz · ${Number(o?.projectsWithHours||0)}/${Number(o?.projectCount||0)} mit Stunden · ${Number(o?.projectsComparable||0)}/${Number(o?.projectCount||0)} für Umsatz/Std.<br>${esc(o?.revenueSource||'')}<br>${esc(o?.hoursSource||'')}<br>${esc(o?.ratioSource||'')}</div>`;
+  document.getElementById('customerContactBtn')?.addEventListener('click',()=>openContacts({entityType:'customer',entityId:String(o?.customerIndex??selectedProjectAddress?.customerIndex??''),title:o?.name||selectedProjectAddress?.name||'Kunde',subtitle:o?.address||selectedProjectAddress?.address||''}));
+}
+
+async function selectProjectAddress(address){
+  if(!address)return;
+  if(address.customerIndex===null||address.customerIndex===undefined||address.customerIndex===''){
+    meta.innerHTML='<span class="error">Diese Adresse hat keinen eindeutigen WinWorker-Kundenindex.</span>';
+    return;
+  }
+  selectedProjectAddress=address;
+  selectedProject=null;projectOverview=null;projectDetailMode=false;previousView=null;
+  loader.style.display='block';meta.textContent='Lade Projekte, Umsatz und Stunden aus WinWorker …';
+  projectAddressSection.hidden=true;ps.hidden=true;ds.hidden=true;summary.hidden=true;addressBar.hidden=true;
+  try{
+    const r=await fetch('/project/address-projects?customerIndex='+encodeURIComponent(address.customerIndex),{cache:'no-store'});
+    const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Fehler');
+    currentProjects=data.projects||[];currentDocs=[];projectOverview=data.overview||{};currentDocType='';
+    projectsTitle.textContent='Projekte auswählen';
+    backToProjectAddresses.hidden=false;backToProjects.hidden=true;
+    ps.hidden=false;ds.hidden=true;summary.hidden=true;
+    renderProjectCustomerOverview(projectOverview);renderProjects();
+    meta.textContent=`${address.name||'Adresse'} · ${currentProjects.length} Projekte · bitte Projekt auswählen`;
+    ps.scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){
+    projectAddressSection.hidden=false;
+    meta.innerHTML='<span class="error">Projekte konnten nicht geladen werden: '+esc(e.message)+'</span>';
+  }finally{loader.style.display='none'}
+}
+
+function showProjectAddressSelection(){
+  selectedProjectAddress=null;selectedProject=null;projectOverview=null;projectDetailMode=false;previousView=null;
+  currentProjects=[];currentDocs=[];currentDocType='';
+  ps.hidden=true;ds.hidden=true;summary.hidden=true;projectCustomerOverview.hidden=true;
+  backToProjectAddresses.hidden=true;backToProjects.hidden=true;
+  projectsTitle.textContent='Projekte auswählen';
+  renderProjectAddressCandidates();
+  meta.textContent=`${projectAddressCandidates.length} WinWorker-Adresse(n) · bitte die richtige Adresse auswählen`;
+  projectAddressSection.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+backToProjectAddresses.onclick=showProjectAddressSelection;
+
+function renderSummary(pp,dd){
+  const sourceCounts=groupCounts(dd,docSource);
+  const pdfCount=dd.filter(d=>Boolean(d.path)).length;
+  const missingCount=dd.length-pdfCount;
+  summary.hidden=false;
+  summary.innerHTML=
+    `<a class="chip" href="#docsSection">Dokumente <strong>${dd.length}</strong></a>`+
+    `<a class="chip" href="#docsSection">PDF <strong>${pdfCount}</strong></a>`+
+    (missingCount?`<a class="chip" href="#docsSection">ohne PDF <strong>${missingCount}</strong></a>`:'')+
+    sourceCounts.filter(([s])=>s!=='Dokumente').map(([s,c])=>`<a class="chip" href="#docsSection" data-source="${esc(s)}">${esc(s)} <strong>${c}</strong></a>`).join('');
+  summary.querySelectorAll('[data-source]').forEach(a=>a.onclick=e=>{e.preventDefault();renderDocumentTypes(a.dataset.source);ds.scrollIntoView({behavior:'smooth'})});
+}
+
+function renderProject(p,index){
+  const title=p.title||p.site||p.projectDescription||p.customer||'Projekt';
+  const customer=[p.company,p.customer].filter(Boolean).join(' · ');
+  const addr=p.address||addressLabel(p);
+  const hours=p.hoursProductive??p.hoursTotal;
+  const hoursText=num(hours),netText=money(p.netInvoiced),perHourText=money(p.revenuePerHour);
+  let metrics='';
+  if(hours!==null&&hours!==undefined)metrics+=`<span class="pill">${esc(hoursText)} h produktiv</span>`;
+  else metrics+='<span class="pill metric-missing">Stunden nicht gefunden</span>';
+  if(p.netInvoiced!==null&&p.netInvoiced!==undefined)metrics+=`<span class="pill">${esc(netText)} Umsatz netto</span>`;
+  else metrics+='<span class="pill metric-missing">Umsatz nicht gefunden</span>';
+  if(p.revenuePerHour!==null&&p.revenuePerHour!==undefined)metrics+=`<span class="pill">${esc(perHourText)} / Std.</span>`;
+  else metrics+='<span class="pill metric-missing">Umsatz/Std. nicht berechenbar</span>';
+  return `<div class="card project-card ${selectedProject===p?'selected':''}" data-project="${index}">
+    <div class="project-title">${esc(title)}</div>
+    ${p.projectNumber?`<span class="project-no">${esc(p.projectNumber)}</span>`:''}
+    ${customer?`<div class="sub">${esc(customer)}</div>`:''}
+    ${addr?`<div class="sub">${esc(addr)}</div>`:''}
+    ${metrics?`<div class="metrics">${metrics}</div>`:''}
+    ${!projectDetailMode?'<div class="project-open-hint">Projekt anklicken → WW-Dokumente und PDFs</div>':''}
+    <div class="actions"><button class="dark create-from-project" type="button" data-project="${index}">＋ Neue Baustelle daraus</button></div>
+  </div>`;
+}
+
+function renderProjects(){
+  projects.innerHTML=currentProjects.length?currentProjects.map(renderProject).join(''):'<div class="empty">Keine Projekte gefunden.</div>';
+  projects.querySelectorAll('.project-card').forEach(card=>card.onclick=e=>{
+    if(e.target.closest('.create-from-project')||projectDetailMode)return;
+    const p=currentProjects[Number(card.dataset.project)]||null;
+    if(p)openProjectDetail(p);
+  });
+  projects.querySelectorAll('.create-from-project').forEach(btn=>btn.onclick=e=>{e.stopPropagation();openNewJob(currentProjects[Number(btn.dataset.project)]||null)});
+}
+
+async function openProjectDetail(p){
+  if(!p)return;
+  previousView={
+    projects:[...currentProjects],
+    overview:projectOverview,
+    selectedProjectAddress:selectedProjectAddress,
+    meta:meta.textContent,
+    baseQuery:baseQuery
+  };
   projectDetailMode=true;selectedProject=p;currentDocs=[];currentDocType='';
   const no=String(p.projectNumber||'').trim();
   loader.style.display='block';addressBar.hidden=true;summary.hidden=true;ds.hidden=true;
