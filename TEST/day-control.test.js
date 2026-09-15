@@ -22,9 +22,16 @@ Module._load = originalLoad;
     { id:"1", name:"Anna Arbeit" },
     { id:"2", name:"Uwe Urlaub" },
     { id:"3", name:"Bernd Schule" },
+    { id:"4", name:"Judith Krista", worktimeModelId:"krista-standard" },
+    { id:"5", name:"Alexander Krista", worktimeModelId:"office-alex" },
   ];
   try {
     await fsp.mkdir(dataRoot);
+    await fsp.mkdir(path.join(root,"_system"));
+    await fsp.writeFile(path.join(root,"_system","worktime-models.json"),JSON.stringify([
+      {id:"office-judith",name:"Judith",blocks:{finkFixed:{enabled:true,rows:[{days:[2],from:"07:00",to:"13:48",activityCode:"022",activityLabel:"Baustelle < 120 km"}]}}},
+      {id:"office-alex",name:"Alex",blocks:{finkFixed:{enabled:true,rows:[{days:[2],from:"07:00",to:"13:48",activityCode:"022",activityLabel:"Baustelle < 120 km"}]}}}
+    ]));
     await fsp.writeFile(path.join(dataRoot, "time-events.json"), JSON.stringify([
       {employeeId:"1",employeeName:"Anna Arbeit",date,type:"start",at:"07:00",jobId:"25018",jobName:"Baustelle"},
       {employeeId:"1",employeeName:"Anna Arbeit",date,type:"up",at:"12:00",reason:"Werkstatt",unproductiveCode:"913"},
@@ -33,6 +40,10 @@ Module._load = originalLoad;
       {employeeId:"2",employeeName:"Uwe Urlaub",date,type:"ende",at:"14:48"},
       {employeeId:"3",employeeName:"Bernd Schule",date,type:"up",at:"07:00",reason:"Berufsschule",unproductiveCode:"903"},
       {employeeId:"3",employeeName:"Bernd Schule",date,type:"ende",at:"14:48"},
+      {employeeId:"5",employeeName:"Alexander Krista",date,type:"start",at:"07:00",jobId:"25018",jobName:"Baustelle"},
+      {employeeId:"5",employeeName:"Alexander Krista",date,type:"mittag",at:"12:00"},
+      {employeeId:"5",employeeName:"Alexander Krista",date,type:"weiter",at:"12:29",jobId:"25018",jobName:"Baustelle"},
+      {employeeId:"5",employeeName:"Alexander Krista",date,type:"ende",at:"13:48"},
     ]));
     await fsp.writeFile(path.join(dataRoot, "day-releases.json"), JSON.stringify(employees.map(employee=>({
       id:`release_${employee.id}_${date}`,employeeId:employee.id,employeeName:employee.name,date,released:true,reviewer:"Bettina",releasedAt:"2026-09-15T15:00:00Z"
@@ -50,10 +61,19 @@ Module._load = originalLoad;
     let response=await call("get","/kristine/api/day-control/:date",{date});
     assert.equal(response.statusCode,200);
     assert.equal(response.body.allReleased,true);
-    assert.equal(response.body.items.length,3);
+    assert.equal(response.body.items.length,5);
     assert.equal(response.body.items.find(item=>item.employeeId==="1").totals.work,420,"Werkstatt zählt im Überblick als Arbeit");
     assert.equal(response.body.items.find(item=>item.employeeId==="2").totals.absence,468,"Urlaub zählt als Abwesenheit");
     assert.equal(response.body.items.find(item=>item.employeeId==="3").totals.work,468,"Berufsschule zählt im Überblick als Arbeit");
+    const judith=response.body.items.find(item=>item.employeeId==="4");
+    assert.equal(judith.totals.work,0,"Automatische Zeit darf noch nicht als Ist gerechnet werden");
+    assert.equal(judith.automatic.from,"07:00");
+    assert.equal(judith.automatic.to,"13:48");
+    assert.equal(judith.automatic.pauseMinutes,15,"Fixe Pause wird separat angezeigt");
+    assert.equal(judith.automatic.counted,false);
+    const alex=response.body.items.find(item=>item.employeeId==="5");
+    assert.equal(alex.automatic.lunchMinutes,29,"Mittag wird aus der tatsächlichen Stempelung angezeigt");
+    assert.equal(alex.totals.work,379,"Die automatische Modellzeit wird nicht zusätzlich zu den Ist-Stunden gerechnet");
 
     response=await call("put","/kristine/api/day-control/:date",{date},{reviewer:"Bettina / Büro"});
     assert.equal(response.statusCode,200);
