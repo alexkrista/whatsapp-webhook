@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-13-hours-cache-1";
+  const VERSION="2026-09-15-billing-cutoff-1";
   const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
@@ -365,6 +365,29 @@
     return [...out.values()];
   }
 
+  function localIsoDay(value){
+    const stored=String(value||"").trim().slice(0,10);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(stored))return stored;
+    const d=new Date(),pad=n=>String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  function previousIsoDay(value){
+    const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return "";
+    const d=new Date(Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3])-1));
+    return d.toISOString().slice(0,10);
+  }
+  function completedSummarySingle(id,headId){
+    const member=job(id),head=job(headId)||member;if(!member)return null;
+    const live=memberHourSummary(member,head),cutoffDate=localIsoDay(bootstrap?.today);
+    // Abrechnung und Leistungsstand verwenden immer nur abgeschlossene Tage.
+    // Die operative Stundenanzeige bleibt davon unberührt und weiterhin live.
+    const excludedTodayHours=personDayHours(member.jobId).reduce((sum,row)=>{
+      const day=String(row?.date||"").slice(0,10);
+      return day&&day>=cutoffDate?sum+num(row.hours):sum;
+    },0);
+    return {...live,total:Math.max(0,live.total-excludedTodayHours),excludedTodayHours,cutoffDate,throughDate:previousIsoDay(cutoffDate),cutoffApplied:true};
+  }
+
   function fusedPeople(jobId){
     const map=new Map();for(const row of personDayHours(jobId)){const key=nameKey(canonicalPersonName(row.name)),person=map.get(key)||{name:canonicalPersonName(row.name)||"Unbekannt",hours:0,days:new Set(),sources:new Set()};person.hours+=num(row.hours);person.days.add(row.date);for(const source of String(row.source||"").split(" + ").filter(Boolean))person.sources.add(source);map.set(key,person)}return [...map.values()].sort((a,b)=>b.hours-a.hours||a.name.localeCompare(b.name,"de"));
   }
@@ -408,6 +431,5 @@
   }
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);else install();
-  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,laborCost,summary:hoursSummary,sourceStatus,summarySingle:(id,headId)=>memberHourSummary(job(id),job(headId)||job(id))};
+  window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,laborCost,summary:hoursSummary,sourceStatus,summarySingle:(id,headId)=>memberHourSummary(job(id),job(headId)||job(id)),completedSummarySingle};
 })();
-
