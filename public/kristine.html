@@ -65,6 +65,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
 .time-editor-row-up{background:#eef6ff}
 .time-editor-time{width:78px!important;max-width:78px!important;text-align:center;font-variant-numeric:tabular-nums;font-weight:750}
 .time-editor-up-reason{min-width:180px}
+.time-editor-job-picker{width:min(560px,62vw)}
+.time-editor-job-statusbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;margin-bottom:6px;padding:3px;border-radius:10px;background:#e6e4dc}
+.time-editor-job-statusbar button{min-height:32px;padding:5px 6px;border:0;border-radius:7px;background:transparent;color:#555;font:800 11px/1.1 system-ui;cursor:pointer;white-space:nowrap}
+.time-editor-job-statusbar button:hover{background:#fff}
+.time-editor-job-statusbar button.active{background:#27713d;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.16)}
+.time-editor-job-picker>select{width:100%}
 .time-editor-site-divider td{padding:12px 8px!important;border-bottom:0!important;background:#edf4ff;color:#245b8f;font-weight:900}
 .time-editor-site-divider-line{display:flex;align-items:center;gap:10px}
 .time-editor-site-divider-line:before,.time-editor-site-divider-line:after{content:"";height:1px;background:#9db9d6;flex:1}
@@ -1080,11 +1086,29 @@ let selectedControlEmployeeId='';
 let timeEditorSegments=[];
 let timeEditorCopiedFrom=null;
 let timeEditorReleased=false;
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorReleased=false;}
+const timeEditorJobGroups=new Map();
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorReleased=false;timeEditorJobGroups.clear();}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
-function jobOptions(selected=''){
-  const jobs=[...masterJobs].filter(j=>j.active!==false).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
-  return '<option value="">– Baustelle wählen –</option>'+jobs.map(j=>{const jid=String(j.jobId||j.id||'');const name=String(j.name||j.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===String(selected)?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`}).join('');
+const JOB_OPTION_GROUPS=[
+  {key:'running',label:'1. Laufend'},
+  {key:'order',label:'2. Auftrag'},
+  {key:'finished',label:'3. Fertig'},
+  {key:'offer',label:'4. Angebot'},
+  {key:'closed',label:'5. Geschlossen'}
+];
+function jobOptionGroup(job){
+  const status=normalizedJobStatus(job);
+  if(job?.active===false||status.includes('geschlossen'))return 'closed';
+  if(status.includes('angebot'))return 'offer';
+  if(status.includes('fertig'))return 'finished';
+  if(status.includes('auftrag')||status==='neu')return 'order';
+  return 'running';
+}
+function jobOptions(selected='',groupKey='running'){
+  const selectedId=String(selected);
+  const jobs=[...masterJobs].filter(job=>jobOptionGroup(job)===groupKey).sort((a,b)=>String(a.name||a.jobName||'').localeCompare(String(b.name||b.jobName||''),'de'));
+  const options=job=>{const jid=String(job.jobId||job.id||'');const name=String(job.name||job.jobName||jid);return `<option value="${esc(jid)}" data-name="${esc(name)}" ${jid===selectedId?'selected':''}>${esc(jid?jid+' · '+name:name)}</option>`};
+  return '<option value="">– Baustelle wählen –</option>'+jobs.map(options).join('');
 }
 function segmentTypeLabel(type){return type==='work'?'Arbeit':type==='lunch'?'Mittag':type==='pause'?'Pause':type==='up'?'Unproduktiv':'Abschnitt'}
 const UP_REASONS=['Werkstatt','Material holen','Besprechung','Schulung','Arzt','Fahrzeugpflege','Lager','Sonstiges'];
@@ -1116,7 +1140,11 @@ function upReasonOptions(selected=''){
 }
 function timeEditorContextCell(seg,index){
   if(timeEditorReleased&&seg.type==='work')return '<span class="fink-code-badge">Produktiv · ohne Baustellenbezug</span>';
-  if(seg.type==='work')return `<select onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId)}</select>`;
+  if(seg.type==='work'){
+    const selectedJob=masterJobs.find(job=>String(job.jobId||job.id||'')===String(seg.jobId||''));
+    const groupKey=timeEditorJobGroups.get(seg)||jobOptionGroup(selectedJob);
+    return `<div class="time-editor-job-picker"><div class="time-editor-job-statusbar" role="group" aria-label="Baustellenstatus">${JOB_OPTION_GROUPS.map(group=>`<button type="button" class="${group.key===groupKey?'active':''}" onclick="setTimeEditorJobGroup(${index},'${group.key}')">${esc(group.label)}</button>`).join('')}</div><select data-time-job-select="${index}" onchange="setTimeEditorJob(${index},this)">${jobOptions(seg.jobId,groupKey)}</select></div>`;
+  }
   if(seg.type==='up')return `<select class="time-editor-up-reason" onchange="updateTimeEditorRow(${index},'reason',this.value)">${upReasonOptions(seg.reason||'Werkstatt')}</select>`;
   return '<span class="small">–</span>';
 }
@@ -1179,7 +1207,8 @@ function updateTimeEditorRow(index,key,value){
   if(key==='to'&&value&&timeEditorSegments[index+1])timeEditorSegments[index+1].from=addMinuteToHM(value);
   renderTimeEditor();
 }
-function setTimeEditorJob(index,select){const row=timeEditorSegments[index];if(!row)return;row.jobId=select.value;row.jobName=select.selectedOptions[0]?.dataset.name||'';renderTimeEditor()}
+function setTimeEditorJobGroup(index,groupKey){const row=timeEditorSegments[index];if(!row||!JOB_OPTION_GROUPS.some(group=>group.key===groupKey))return;timeEditorJobGroups.set(row,groupKey);renderTimeEditor();document.querySelector(`[data-time-job-select="${index}"]`)?.focus()}
+function setTimeEditorJob(index,select){const row=timeEditorSegments[index];if(!row)return;row.jobId=select.value;row.jobName=select.selectedOptions[0]?.dataset.name||'';const job=masterJobs.find(item=>String(item.jobId||item.id||'')===String(row.jobId||''));if(job)timeEditorJobGroups.set(row,jobOptionGroup(job));renderTimeEditor()}
 function addTimeEditorRow(type='work'){
   const last=timeEditorSegments.at(-1);
   const now=currentViennaHM();
@@ -1214,7 +1243,7 @@ async function copyTimeEditorFromEmployee(){
   try{
     const result=await api(`/kristine/api/segments/${encodeURIComponent(sourceId)}/${encodeURIComponent(selectedWorkDate())}`);
     if(!(result.segments||[]).length){employeeActionNote.textContent=`Bei ${source?.name||sourceId} sind für diesen Tag keine Zeitabschnitte vorhanden.`;return}
-    timeEditorSegments=(result.segments||[]).map((x,index)=>({...x,id:`copy_${Date.now()}_${index}`}));
+    timeEditorSegments=(result.segments||[]).map((x,index)=>({...x,id:`copy_${Date.now()}_${index}`}));timeEditorJobGroups.clear();
     timeEditorCopiedFrom={employeeId:sourceId,employeeName:source?.name||sourceId};
     renderTimeEditor();
     const hint=document.getElementById('timeCopyHint');if(hint)hint.innerHTML=`<span class="time-copy-source">Von ${esc(source?.name||sourceId)} übernommen.</span> Bitte kontrollieren und anschließend speichern.`;
@@ -1228,7 +1257,7 @@ async function openEmployeeActionModal(employeeId){
   try{
     const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
     timeEditorReleased=Boolean(result.released);
-    timeEditorSegments=(result.segments||[]).map(x=>({...x}));
+    timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorJobGroups.clear();
     const state=data.states?.[employeeId]||{mode:'idle'};
     employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">${timeEditorReleased?'Zeit oder arbeitsrechtliche Art ändern und anschließend speichern.':'Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.'}</span>`;
     if(timeEditorReleased)employeeActionInfo.innerHTML+=`<br><span class="small"><strong>Freigegeben:</strong> unabhängige KRISZEIT-Kopie – nur Zeit sowie Produktiv/Unproduktiv, ohne Baustellenverbindung.</span>`;
@@ -1261,7 +1290,7 @@ async function saveTimeEditor(){
   employeeActionNote.textContent='Speichert …';
   try{
     const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
-    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
+    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorJobGroups.clear();timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
     if(continues){
       employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert · ${employee?.name||'Mitarbeiter'} arbeitet weiter. Kein Tagesabschluss ausgelöst.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
       return;
