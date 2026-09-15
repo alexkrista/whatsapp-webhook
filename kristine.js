@@ -22,6 +22,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
   const DAY_CONTROLS = path.join(ROOT, "day-controls.json");
+  const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
   const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
@@ -2430,11 +2431,38 @@ const open = taskId
     return detail?`Arbeit · ${detail}`:"Arbeit";
   }
 
+  function dayControlAutomaticTime(models, employee, date, segments, plannedAbsence) {
+    if(plannedAbsence)return null;
+    const normalizedName=String(employee?.nickname||employee?.name||employee?.employeeName||"")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+    const inferredId=/\balex(?:ander)?\b/.test(normalizedName)?"office-alex":
+      /\bjudith\b/.test(normalizedName)?"office-judith":
+      /\bgeri\b|\bgerry\b/.test(normalizedName)?"office-geri":"";
+    const modelId=String(inferredId||employee?.worktimeModelId||"").trim();
+    const model=(models||[]).find(row=>String(row?.id||"")===modelId)||null;
+    const block=model?.blocks?.finkFixed;
+    if(!model||block?.enabled!==true)return null;
+    const parsed=new Date(`${date}T12:00:00`);
+    if(Number.isNaN(parsed.getTime()))return null;
+    const weekday=parsed.getDay()===0?7:parsed.getDay();
+    const row=(block.rows||[]).find(candidate=>(candidate?.days||[]).map(Number).includes(weekday)&&candidate?.from&&candidate?.to)||null;
+    if(!row)return null;
+    const lunchMinutes=(segments||[]).filter(segment=>segment?.type==="lunch").reduce((sum,segment)=>sum+dayControlMinutes(segment),0);
+    return {
+      modelName:String(model.name||"Zeitmodell"),
+      from:String(row.from),to:String(row.to),
+      activityLabel:String(row.activityLabel||row.activityCode||"Automatische Zeit"),
+      pauseMinutes:15,
+      lunchMinutes,
+      counted:false
+    };
+  }
+
   async function buildDayControl(date) {
-    const [employees,events,states,releases,assignments,controls]=await Promise.all([
+    const [employees,events,states,releases,assignments,controls,worktimeModels]=await Promise.all([
       typeof readEmployees==="function"?readEmployees().catch(()=>[]):[],
       readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_RELEASES,[]),
-      readJson(ASSIGNMENTS,[]),readJson(DAY_CONTROLS,[])
+      readJson(ASSIGNMENTS,[]),readJson(DAY_CONTROLS,[]),readJson(WORKTIME_MODELS,[])
     ]);
     const activeEmployees=(employees||[]).filter(employee=>employee&&employee.active!==false&&employee.archived!==true);
     const items=activeEmployees.map(employee=>{
@@ -2454,13 +2482,14 @@ const open = taskId
       }).filter(segment=>segment.from&&segment.to&&segment.minutes>0);
       const release=dayControlReleaseForEmployee(releases,employee,date);
       const totals=cleanSegments.reduce((sum,segment)=>{sum[segment.kind]+=segment.minutes;return sum;},{work:0,absence:0,break:0});
+      const automatic=dayControlAutomaticTime(worktimeModels,employee,date,segments,plannedAbsence);
       return {
         employeeId,employeeName,
         released:Boolean(release?.released===true&&release?.returned!==true),
         returned:Boolean(release?.returned===true),
         returnedReason:String(release?.returnedReason||""),
         releasedAt:release?.releasedAt||null,
-        segments:cleanSegments,totals
+        segments:cleanSegments,automatic,totals
       };
     }).filter(item=>item.employeeId).sort((a,b)=>a.employeeName.localeCompare(b.employeeName,"de"));
     const control=(controls||[]).find(row=>String(row.date)===date)||null;

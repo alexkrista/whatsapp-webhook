@@ -839,7 +839,7 @@ async function openQueueEmployee(employeeId,driverKey=""){
 }
 
 function dayControlBounds(items){
-  const values=(items||[]).flatMap(item=>(item.segments||[]).flatMap(segment=>[minutes(segment.from),minutes(segment.to)])).filter(value=>value!==null);
+  const values=(items||[]).flatMap(item=>[...(item.segments||[]),...(item.automatic?[item.automatic]:[])].flatMap(segment=>[minutes(segment.from),minutes(segment.to)])).filter(value=>value!==null);
   return {from:Math.min(6*60,...values),to:Math.max(18*60,...values)};
 }
 function dayControlTrack(segments,bounds){
@@ -862,7 +862,7 @@ function renderDayControlOverview(payload){
   $("dayControlSubtitle").textContent="Ohne Baustellenaufteilung · Anwesenheit, Abwesenheit und Pausen aus den gespeicherten Mitarbeiterzeiten.";
   $("dayControlSummary").innerHTML=`
     <div class="day-control-metric"><span>Mitarbeiter</span><strong>${items.length}</strong></div>
-    <div class="day-control-metric"><span>Arbeit / anwesend</span><strong>${durationLabel(totals.work)}</strong></div>
+    <div class="day-control-metric"><span>Arbeit / anwesend · Ist</span><strong>${durationLabel(totals.work)}</strong></div>
     <div class="day-control-metric"><span>Abwesenheit</span><strong>${durationLabel(totals.absence)}</strong></div>
     <div class="day-control-metric"><span>Noch offen</span><strong>${open}</strong></div>`;
   $("dayControlList").innerHTML=items.length?items.map(item=>{
@@ -871,10 +871,13 @@ function renderDayControlOverview(payload){
     const action=item.released
       ? `<button class="btn secondary day-control-return" data-employee-id="${esc(item.employeeId)}" type="button">↩ Zurück an MA</button>`
       : `<button class="btn secondary day-control-person-open" data-employee-id="${esc(item.employeeId)}" type="button">Mitarbeiter öffnen</button>`;
+    const automatic=item.automatic||null;
+    const visualSegments=[...(automatic?[{...automatic,kind:"automatic",label:`Zeitmodell · ${automatic.activityLabel||"automatisch"}`}]:[]),...(item.segments||[])];
+    const automaticLine=automatic?`<div class="day-control-automatic"><span>Zeitmodell · nur Anzeige</span><strong>${esc(automatic.from)}–${esc(automatic.to)}</strong><small>${esc(automatic.activityLabel||automatic.modelName||"Automatische Zeit")} · Pause ${durationLabel(automatic.pauseMinutes||15)} fix · ${automatic.lunchMinutes>0?`Mittag ${durationLabel(automatic.lunchMinutes)} lt. Stempelung`:"Mittag noch nicht gestempelt"} · noch nicht als Ist gerechnet</small></div>`:"";
     return `<article class="day-control-person ${stateClass}">
       <div class="day-control-person-head"><div><h3>${esc(item.employeeName)}</h3><small>${item.returnedReason?esc(item.returnedReason):"Gespeicherte Tageszeiten ohne Baustellenaufteilung"}</small></div><div class="day-control-person-actions"><span class="day-control-badge ${stateClass}">${esc(badge)}</span>${action}</div></div>
-      <div class="day-control-track-wrap"><div class="day-control-axis"><span>${esc(hmFromMinutes(bounds.from))}</span><span>${esc(hmFromMinutes(Math.round((bounds.from+bounds.to)/2)))}</span><span>${esc(hmFromMinutes(bounds.to))}</span></div><div class="day-control-track">${dayControlTrack(item.segments,bounds)}</div></div>
-      <div class="day-control-totals"><span>Arbeit <strong>${durationLabel(item.totals.work)}</strong></span><span>Urlaub/Krank/Sonderurlaub <strong>${durationLabel(item.totals.absence)}</strong></span><span>Pause <strong>${durationLabel(item.totals.break)}</strong></span></div>
+      <div class="day-control-track-wrap"><div class="day-control-axis"><span>${esc(hmFromMinutes(bounds.from))}</span><span>${esc(hmFromMinutes(Math.round((bounds.from+bounds.to)/2)))}</span><span>${esc(hmFromMinutes(bounds.to))}</span></div><div class="day-control-track">${dayControlTrack(visualSegments,bounds)}</div></div>
+      <div class="day-control-totals"><span>Ist Arbeit <strong>${durationLabel(item.totals.work)}</strong></span><span>Urlaub/Krank/Sonderurlaub <strong>${durationLabel(item.totals.absence)}</strong></span><span>Ist Pause <strong>${durationLabel(item.totals.break)}</strong></span></div>${automaticLine}
     </article>`;
   }).join(""):'<div class="fink-preview">Für diesen Tag wurden keine Mitarbeiter gefunden.</div>';
   const status=$("dayControlStatus"),button=$("confirmDayControl");
