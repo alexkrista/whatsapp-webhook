@@ -1,0 +1,15 @@
+"use strict";
+const assert=require("assert"),fs=require("fs"),path=require("path"),root=path.join(__dirname,"..");
+const ui=fs.readFileSync(path.join(root,"public","ui","baustellen-knowledge-hub.js"),"utf8"),server=fs.readFileSync(path.join(root,"server.js"),"utf8");
+assert.match(ui,/id="bkDownloadRegieExcel"/);
+assert.match(ui,/Excel herunterladen/);
+assert.match(ui,/Nr\./);
+assert.match(ui,/Abgerechnet/);
+assert.match(ui,/Noch offen/);
+assert.match(ui,/Über PDF nicht prüfbar/);
+assert.match(ui,/Zwischensumme abgerechnet/);
+assert.match(ui,/Zwischensumme offen/);
+assert.match(server,/documentation\/regie\.xlsx/);
+for(const heading of ["Nr.","Datum","Wer","Std.","Materialwert","Status"])assert.ok(server.includes(`"${heading}"`),`Excel-Spalte fehlt: ${heading}`);
+assert.match(server,/application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
+console.log("regie excel export test: ok");

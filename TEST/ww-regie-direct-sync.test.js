@@ -29,7 +29,7 @@ assert.match(ui,/WW-Rapporte synchronisieren/);
 assert.match(ui,/WW direkt \+ PDFs/);
 assert.match(ui,/Tätigkeit/);
 assert.match(ui,/dedupeReports/);
-assert.match(ui,/2026-09-13-sammelmappe-1/);
-assert.match(topbar,/20260913-sammelmappe-1/);
+assert.match(ui,/2026-09-15-regie-excel-1/);
+assert.match(topbar,/20260915-regie-excel-1/);
 
 console.log("ww regie direct sync test: ok");
