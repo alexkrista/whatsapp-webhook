@@ -59,7 +59,7 @@
   }
 
   const cents=value=>Math.round((number(value)+Number.EPSILON)*100)/100;
-  const CALCULATION_VERSION="20260915-progress-3";
+  const CALCULATION_VERSION="20260915-progress-4";
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours)),regieHours=Math.max(0,number(input.regieHours));
     const orderHours=Math.max(0,actualHours-regieHours),fixedTargetHours=Math.max(0,number(input.fixedTargetHours));
@@ -93,7 +93,7 @@
       orderPerformance,fixedBalance,regieBalance,fixedToInvoice:hasClosingInvoice?0:fixedToInvoice,regieToInvoice:hasClosingInvoice?0:regieToInvoice,
       billablePerformance:orderPerformance===null?null:cents(orderPerformance+actualRegieAmount),
       performanceLimit:cents(fixedContractAmount+actualRegieAmount),amountToInvoice,hasClosingInvoice,complete,partial:!!input.partial,issues:[...new Set(issues)],
-      jobId:String(input.jobId||""),jobName:String(input.jobName||""),dataUpdatedAt:String(input.dataUpdatedAt||""),calculatedAt:new Date().toISOString()};
+      jobId:String(input.jobId||""),jobName:String(input.jobName||""),dataUpdatedAt:String(input.dataUpdatedAt||""),hoursThroughDate:String(input.hoursThroughDate||""),calculatedAt:new Date().toISOString()};
     result.warnings=[];
     if(!hasClosingInvoice&&orderProgressPercent!==null&&orderProgressPercent>=90-1e-8)
       result.warnings.push({kind:"fixed",jobId:result.jobId,title:"Fixauftrag: mindestens 90 % der Sollstunden verbraucht",text:"Stand plausibel? Dauern die Arbeiten länger als geplant? Nachauftrag nötig?"});
@@ -142,11 +142,11 @@
     if(!options.reports&&!job.regieSummary?.reports&&number(job.regieSummary?.count)>0)issues.push("Regieberichte für die Abrechnung werden noch geladen.");
     if(state.unknownRows.length)issues.push(`${state.unknownRows.length} Regiebericht(e) haben noch keinen eindeutigen Abrechnungsstatus.`);
     const result=calculatePerformance({...allocation,jobId:job.jobId,jobName:job.name||job.jobName,
-      actualHours:options.actualHours??c.actualHours,regieHours:Math.max(number(c.actualRegieHours),reportHours),
+      actualHours:options.actualHours??c.actualHours,regieHours:options.regieHours??Math.max(number(c.actualRegieHours),reportHours),
       fixedTargetHours,plannedRegieHours,
       contractAmount:c.contractAmount??job.contractAmount,fixedContractAmount:c.kristaAmount,plannedRegieAmount:c.regieBudgetAmount,
       actualRegieAmount:state.totalAmount,billedRegieAmount:state.billedAmount,
-      hasClosingInvoice:!!options.settled||allocation.hasClosingInvoice,partial:!!billing.partial,issues,dataUpdatedAt:options.dataUpdatedAt});
+      hasClosingInvoice:!!options.settled||allocation.hasClosingInvoice,partial:!!billing.partial,issues,dataUpdatedAt:options.dataUpdatedAt,hoursThroughDate:options.hoursThroughDate});
     result.invoiceSnapshot=invoiceSnapshot(billing.invoices);
     const visibleOpenRows=state.rows.filter(row=>!row.billed);
     result.billedRegieRange=reportRange(state.billedRows);result.openRegieRange=reportRange(visibleOpenRows);
@@ -196,10 +196,11 @@
   const formatMoney=value=>value===null||value===undefined?"–":Number(value).toLocaleString("de-AT",{style:"currency",currency:"EUR"});
   const formatHours=value=>Number(value||0).toLocaleString("de-AT",{maximumFractionDigits:2});
   const formatPercent=value=>value===null||value===undefined?"–":Number(value).toLocaleString("de-AT",{maximumFractionDigits:2})+" %";
+  const formatDate=value=>{const m=String(value||"").slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:""};
   function calculationLines(p){
     const label=p.jobId?`${p.jobId}${p.jobName?` · ${p.jobName}`:""}`:"Baustelle";
     if(p.aggregated)return [label,"Summe der Einzelprojekt-Abrechnungen",...p.rows.flatMap(row=>["",...calculationLines(row)]),"",`Gesamt noch abzurechnen: ${formatMoney(p.amountToInvoice)} netto`];
-    return [label,`Fixstunden: ${formatHours(p.actualHours)} h gesamt − ${formatHours(p.regieHours)} h Regie = ${formatHours(p.orderHours)} h`,
+    return [label,...(p.hoursThroughDate?[`Abrechnungsstand: Stunden und Regieberichte bis ${formatDate(p.hoursThroughDate)} (abgeschlossener Vortag)`]:[]),`Fixstunden: ${formatHours(p.actualHours)} h gesamt − ${formatHours(p.regieHours)} h Regie = ${formatHours(p.orderHours)} h`,
       `Fertigstellung: ${formatHours(p.orderHours)} h ÷ ${formatHours(p.fixedTargetHours)} h Soll ohne Regie = ${formatPercent(p.orderProgressPercent)} (für den Fixpreis höchstens 100 %)`,
       `Fixleistung: ${formatPercent(p.completionPercent)} × ${formatMoney(p.fixedContractAmount)} Auftrag ohne Regie = ${formatMoney(p.orderPerformance)}`,
       `Fixauftrag: ${formatMoney(p.orderPerformance)} − ${formatMoney(p.fixedPartialInvoiceNet)} geschriebene TR (Fixanteil) = ${formatMoney(p.fixedBalance)} Saldo; jetzt abrechenbar ${formatMoney(p.fixedToInvoice)}`,
@@ -225,7 +226,7 @@
   function renderCalculation(p){
     if(!p)return "";installCalculationUi();
     const range=(value,count)=>value?` ${escape(value)}`:count?` · ${count} Bericht(e)`:"";
-    const summary=p.aggregated?"":`<div class="krb-summary"><div><span>Leistungsstand lt. Auftrag</span><small>${escape(p.completionPercent===null||p.completionPercent===undefined?"–":Math.round(p.completionPercent)+" %")} von ${escape(formatMoney(p.fixedContractAmount))}</small><strong>${escape(formatMoney(p.orderPerformance))}</strong></div><div><span>Regie abgerechnet${range(p.billedRegieRange,p.billedRegieCount)}</span><strong>${escape(formatMoney(p.billedRegieAmount))}</strong></div><div><span>Regie offen${range(p.openRegieRange,p.openRegieCount)}</span><strong>${escape(formatMoney(p.regieToInvoice))}</strong></div><div class="total"><span>Leistungssumme gesamt</span><strong>${escape(formatMoney(p.billablePerformance))}</strong></div><div><span>Bereits geschrieben</span><strong>− ${escape(formatMoney(p.partialInvoiceNet))}</strong></div><div class="pay"><span>Jetzt abzurechnen</span><strong>${escape(formatMoney(p.amountToInvoice))} netto</strong></div></div>`;
+    const summary=p.aggregated?"":`<div class="krb-summary"><div><span>Leistungsstand lt. Auftrag</span><small>${escape(p.completionPercent===null||p.completionPercent===undefined?"–":Math.round(p.completionPercent)+" %")} von ${escape(formatMoney(p.fixedContractAmount))}${p.hoursThroughDate?` · bis ${escape(formatDate(p.hoursThroughDate))}`:""}</small><strong>${escape(formatMoney(p.orderPerformance))}</strong></div><div><span>Regie abgerechnet${range(p.billedRegieRange,p.billedRegieCount)}</span><strong>${escape(formatMoney(p.billedRegieAmount))}</strong></div><div><span>Regie offen${range(p.openRegieRange,p.openRegieCount)}</span><strong>${escape(formatMoney(p.regieToInvoice))}</strong></div><div class="total"><span>Leistungssumme gesamt</span><strong>${escape(formatMoney(p.billablePerformance))}</strong></div><div><span>Bereits geschrieben</span><strong>− ${escape(formatMoney(p.partialInvoiceNet))}</strong></div><div class="pay"><span>Jetzt abzurechnen</span><strong>${escape(formatMoney(p.amountToInvoice))} netto</strong></div></div>`;
     const actions=p.complete&&!p.hasClosingInvoice?(p.aggregated?`<button type="button" data-krb-review="${escape(JSON.stringify(p))}">Einzelakte zur Abrechnung wählen</button>`:`<div class="krb-actions"><button type="button" class="primary" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="TR">Teilrechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="RE">Rechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}">Prüfen / Schlussrechnung</button></div>`):"";
     return `<div class="krb-calculation">${summary}<small>${escape(compactCalculation(p))}</small><details><summary>Rechenweg · Fixauftrag und Regie</summary><div class="krb-lines">${calculationLines(p).map(line=>`<div>${escape(line)||"&nbsp;"}</div>`).join("")}</div><button type="button" data-krb-download="${escape(JSON.stringify(p))}">Rechenweg herunterladen (.txt)</button><small>Berechnet: ${escape(new Date(p.calculatedAt).toLocaleString("de-AT"))}${p.dataUpdatedAt?` · Datenstand: ${escape(new Date(p.dataUpdatedAt).toLocaleString("de-AT"))}`:""}</small></details>${renderWarnings(p)}${actions}</div>`;
   }
