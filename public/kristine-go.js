@@ -81,6 +81,22 @@ function authenticatedUrl(url) {
     return value.toISOString().slice(0, 10);
   }
 
+  function previousISODate(date = todayISO()) {
+    const [year, month, day] = String(date).split("-").map(Number);
+    if (!year || !month || !day) return date;
+    const value = new Date(Date.UTC(year, month - 1, day - 1, 12));
+    return value.toISOString().slice(0, 10);
+  }
+
+  function shortDate(date) {
+    return new Intl.DateTimeFormat("de-AT", {
+      timeZone: "Europe/Vienna",
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+    }).format(new Date(`${date}T12:00:00Z`));
+  }
+
   function currentViennaHour() {
     return Number(new Intl.DateTimeFormat("de-AT", {
       timeZone: "Europe/Vienna", hour: "2-digit", hourCycle: "h23"
@@ -739,7 +755,23 @@ if (contactPhone) {
       },
       regie: {
         title:"Regie",
-        external: `/public/regie-assistant.html?employeeId=${encodeURIComponent(employeeId(state.employee))}&jobId=${encodeURIComponent(a?.jobId || "")}&date=${encodeURIComponent(state.bootstrap?.today || todayISO())}`,
+        steps:[{
+          question:"Für welchen Tag ist der Regiebericht?",
+          type:"options",
+          options:(() => {
+            const today = state.bootstrap?.today || todayISO();
+            const yesterday = previousISODate(today);
+            return [
+              {id:today, title:`Heute · ${shortDate(today)}`},
+              {id:yesterday, title:`Gestern · ${shortDate(yesterday)}`},
+            ];
+          })(),
+        }],
+        save(values) {
+          const selectedDate = String(values[0] || state.bootstrap?.today || todayISO());
+          const url = `/public/regie-assistant.html?employeeId=${encodeURIComponent(employeeId(state.employee))}&jobId=${encodeURIComponent(a?.jobId || "")}&date=${encodeURIComponent(selectedDate)}`;
+          location.href = authenticatedUrl(url);
+        },
       },
       order: {
         title:"Material",
