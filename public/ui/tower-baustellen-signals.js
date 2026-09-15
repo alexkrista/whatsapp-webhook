@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="20260915-billing-snapshot-3";
+  const VERSION="20260915-billing-snapshot-4";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -145,7 +145,9 @@
       );
       const regieHours=reports.reduce((sum,report)=>sum+num(report?.totalHours),0);
       const performance=window.KristaRegieBilling.performanceForJob(sourceJob,{billing,reports,actualHours:totalHours,regieHours,dataUpdatedAt:billingSnapshotAt,hoursThroughDate:billingThroughDate});
-      if(!performance.hasClosingInvoice&&(!performance.complete||performance.amountToInvoice>.005))rows.push({job:j,...performance});
+      const invoices=Array.isArray(billing?.invoices)?billing.invoices:[];
+      const hasBusinessData=totalHours>.005||reports.length>0||contract(sourceJob)>.005||invoices.length>0;
+      if(!performance.hasClosingInvoice&&(performance.amountToInvoice>.005||!performance.complete&&hasBusinessData))rows.push({job:j,...performance});
     }
     return rows.sort((a,b)=>num(b.amountToInvoice)-num(a.amountToInvoice));
   }
