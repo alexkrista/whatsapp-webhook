@@ -145,8 +145,7 @@
       );
       const regieHours=reports.reduce((sum,report)=>sum+num(report?.totalHours),0);
       const performance=window.KristaRegieBilling.performanceForJob(sourceJob,{billing,reports,actualHours:totalHours,regieHours,dataUpdatedAt:billingSnapshotAt,hoursThroughDate:billingThroughDate});
-      const hasBillableBasis=num(performance.regieToInvoice)>.005||num(performance.orderHours)>.005;
-      if(!performance.hasClosingInvoice&&(performance.amountToInvoice>.005||!performance.complete&&hasBillableBasis))rows.push({job:j,...performance});
+      if(!performance.hasClosingInvoice&&(!performance.complete||performance.amountToInvoice>.005))rows.push({job:j,...performance});
     }
     return rows.sort((a,b)=>num(b.amountToInvoice)-num(a.amountToInvoice));
   }

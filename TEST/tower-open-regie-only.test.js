@@ -14,8 +14,7 @@ assert.match(server, /manualStatus === "billed" \|\| \(manualStatus !== "open" &
 assert.match(server, /const open = !billed/);
 assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state !== "billed"\)/);
 assert.match(tower, /performanceForJob\(sourceJob,\{billing,reports,actualHours:totalHours,regieHours/);
-assert.match(tower, /hasBillableBasis=num\(performance\.regieToInvoice\)>\.005\|\|num\(performance\.orderHours\)>\.005/);
-assert.doesNotMatch(tower, /!performance\.complete\|\|performance\.amountToInvoice>/);
+assert.match(tower, /!performance\.complete\|\|performance\.amountToInvoice>\.005/);
 assert.doesNotMatch(tower, /orderHours\+regieHours/);
 assert.match(tower, /billing-snapshot/);
 assert.match(tower, /recordedHoursNet/);
@@ -36,4 +35,3 @@ assert.strictEqual(data.isSettled(closed), true);
 assert.strictEqual(data.openHours(closed, [closed]), 0);
 
 console.log("OK: Tower liest den gespeicherten Vortagsstand und verlinkt zur Baustelle.");
-
