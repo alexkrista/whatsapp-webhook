@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="20260915-billing-snapshot-2";
+  const VERSION="20260915-billing-snapshot-3";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -229,4 +229,3 @@
   function init(){installCss();renderPending();renderBillable([]);load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
-
