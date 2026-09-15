@@ -8218,6 +8218,11 @@ def tower_live_summary_api():
             "customers": {
                 "total": float(debtors.get("totalOpen") or 0),
                 "count": len(debtors.get("items") or []),
+                "forecast": debtors.get("forecast") or {
+                    "within14": 0, "within30": 0, "over30": 0,
+                    "total": 0, "ratedCount": 0,
+                    "unratedCount": len(debtors.get("items") or []),
+                },
             },
             "suppliers": {
                 "total": float(creditors.get("total") or 0),

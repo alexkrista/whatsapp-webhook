@@ -1,6 +1,7 @@
 # coding: utf-8
 import tempfile
 import unittest
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -196,6 +197,21 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(item["opNote"], "Kunde prüft die Schlussaufstellung.")
         with self.assertRaisesRegex(ValueError, "Mahnsperre"):
             self.store.prepare_dunning(issued["id"], "2026-09-21")
+
+    def test_open_item_rating_stores_a_fixed_expected_date_and_builds_tower_buckets(self):
+        issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="5000"))["id"])
+        item = self.store.update_debtor_meta(issued["id"], {"expectedDays": 14, "expectedPercent": 80})
+        self.assertEqual(item["expectedDate"], (date.today() + timedelta(days=14)).isoformat())
+        self.assertEqual(item["expectedDays"], 14)
+        self.assertEqual(item["expectedPercent"], 80)
+        self.assertEqual(item["expectedAmount"], 4800.0)
+        forecast = self.store.debtor_forecast([item, {"openGross":1000,"expectedDays":30,"expectedPercent":50,"ratingManual":True}, {"openGross":2000,"expectedDays":31,"expectedPercent":25,"ratingManual":True}, {"openGross":999,"expectedDays":0,"expectedPercent":100,"ratingManual":False}])
+        self.assertEqual(forecast, {"within14":5799.0,"within30":500.0,"over30":500.0,"total":6799.0,"ratedCount":3,"unratedCount":1})
+        with self.assertRaisesRegex(ValueError, "zwischen 0 und 100"):
+            self.store.update_debtor_meta(issued["id"], {"expectedPercent": 101})
+        cleared = self.store.update_debtor_meta(issued["id"], {"expectedDays":"", "expectedPercent":""})
+        self.assertFalse(cleared["ratingManual"])
+        self.assertEqual(cleared["expectedPercent"], 100)
 
     def test_zero_vat_requires_uid_and_note(self):
         payload = self.payload()

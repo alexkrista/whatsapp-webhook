@@ -130,9 +130,12 @@ class OutgoingApiTests(unittest.TestCase):
         dunning_pdf.close()
         meta = self.client.put(f"/api/outgoing/invoices/{invoice_id}/debtor-meta", json={
             "note": "Kunde hat Rückruf zugesagt.", "dunningBlocked": True,
+            "expectedDays": 14, "expectedPercent": 75,
         })
         self.assertEqual(meta.status_code, 200, meta.get_data(as_text=True))
         self.assertTrue(meta.get_json()["item"]["dunningBlocked"])
+        self.assertEqual(meta.get_json()["item"]["expectedPercent"], 75)
+        self.assertEqual(self.client.get("/api/outgoing/open-items").get_json()["forecast"]["within14"], 7951.5)
         payment = self.client.post(f"/api/outgoing/runs/{run_id}/payments", json={
             "invoiceId": invoice_id, "paymentDate": "2026-09-01", "gross": 1000, "reference": "Bank",
         })

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 from datetime import date, datetime, timedelta
@@ -375,6 +376,8 @@ class OutgoingStore:
             invoice_id INTEGER PRIMARY KEY REFERENCES outgoing_invoices(id) ON DELETE CASCADE,
             dunning_blocked INTEGER NOT NULL DEFAULT 0,
             note TEXT NOT NULL DEFAULT '',
+            expected_date TEXT,
+            expected_percent REAL,
             ww_dunning_level INTEGER NOT NULL DEFAULT 0,
             ww_last_dunning TEXT NOT NULL DEFAULT '',
             ww_blocked_until TEXT NOT NULL DEFAULT '',
@@ -409,6 +412,11 @@ class OutgoingStore:
             con.execute("ALTER TABLE outgoing_invoices ADD COLUMN progress_billing_json TEXT NOT NULL DEFAULT '{}'")
         if "billing_component" not in {row[1] for row in con.execute("PRAGMA table_info(outgoing_lines)")}:
             con.execute("ALTER TABLE outgoing_lines ADD COLUMN billing_component TEXT NOT NULL DEFAULT ''")
+        debtor_columns = {row[1] for row in con.execute("PRAGMA table_info(outgoing_debtor_meta)")}
+        if "expected_date" not in debtor_columns:
+            con.execute("ALTER TABLE outgoing_debtor_meta ADD COLUMN expected_date TEXT")
+        if "expected_percent" not in debtor_columns:
+            con.execute("ALTER TABLE outgoing_debtor_meta ADD COLUMN expected_percent REAL")
         run_columns = {row[1] for row in con.execute("PRAGMA table_info(outgoing_runs)")}
         for column, definition in (
             ("billing_rate", "TEXT NOT NULL DEFAULT '75'"),
@@ -816,6 +824,18 @@ class OutgoingStore:
                     blocked_until = str(meta["ww_blocked_until"] or "") if meta else ""
                     locally_blocked = bool(meta and meta["dunning_blocked"])
                     ww_blocked = bool(blocked_until and blocked_until >= today.isoformat())
+                    expected_date = str(meta["expected_date"] or "") if meta else ""
+                    expected_percent = float(meta["expected_percent"]) if meta and meta["expected_percent"] is not None else None
+                    rating_manual = bool(expected_date and expected_percent is not None)
+                    try:
+                        if rating_manual:
+                            expected_days = max(0, (date.fromisoformat(expected_date) - today).days)
+                        else:
+                            due_days = (date.fromisoformat(str(inv["due_date"])[:10]) - today).days
+                            expected_days, expected_percent = max(0, due_days), 100.0
+                            expected_date = (today + timedelta(days=expected_days)).isoformat()
+                    except ValueError:
+                        expected_days, expected_percent, expected_date, rating_manual = 14, 100.0, (today + timedelta(days=14)).isoformat(), False
                     result.append({
                         "runId": int(run["id"]), "invoiceId": int(inv["id"]),
                         "source": inv["source"], "invoiceNumber": inv["invoice_number"], "kind": inv["kind"],
@@ -834,6 +854,11 @@ class OutgoingStore:
                         "dunningBlockedLocal": locally_blocked,
                         "wwDunningBlockedUntil": blocked_until,
                         "opNote": str(meta["note"] or "") if meta else "",
+                        "expectedDate": expected_date,
+                        "expectedDays": expected_days,
+                        "expectedPercent": expected_percent,
+                        "expectedAmount": _num(_money(open_gross * _d(expected_percent) / 100)),
+                        "ratingManual": rating_manual,
                         "dunningHistory": [{
                             "id": int(row["id"]), "level": int(row["level"]),
                             "date": row["dunning_date"],
@@ -858,23 +883,59 @@ class OutgoingStore:
             ).fetchone()
             blocked = int(bool(data.get("dunningBlocked"))) if "dunningBlocked" in data else int(current["dunning_blocked"] if current else 0)
             note = str(data.get("note") or "").strip()[:2000] if "note" in data else str(current["note"] if current else "")
+            expected_date = str(current["expected_date"] or "") if current else ""
+            expected_percent = float(current["expected_percent"]) if current and current["expected_percent"] is not None else None
+            if "expectedDays" in data:
+                raw_days = data.get("expectedDays")
+                if raw_days in (None, ""):
+                    expected_date = ""
+                else:
+                    days = int(raw_days)
+                    if days < 0 or days > 3650:
+                        raise ValueError("Erwartete Zahlungstage müssen zwischen 0 und 3650 liegen.")
+                    expected_date = (date.today() + timedelta(days=days)).isoformat()
+            if "expectedPercent" in data:
+                raw_percent = data.get("expectedPercent")
+                if raw_percent in (None, ""):
+                    expected_percent = None
+                else:
+                    expected_percent = float(raw_percent)
+                    if not math.isfinite(expected_percent) or expected_percent < 0 or expected_percent > 100:
+                        raise ValueError("Die OP-Bewertung muss zwischen 0 und 100 Prozent liegen.")
             now = _now()
             con.execute("""
-                INSERT INTO outgoing_debtor_meta(invoice_id,dunning_blocked,note,updated_at)
-                VALUES(?,?,?,?)
+                INSERT INTO outgoing_debtor_meta(invoice_id,dunning_blocked,note,expected_date,expected_percent,updated_at)
+                VALUES(?,?,?,?,?,?)
                 ON CONFLICT(invoice_id) DO UPDATE SET
                     dunning_blocked=excluded.dunning_blocked,
                     note=excluded.note,
+                    expected_date=excluded.expected_date,
+                    expected_percent=excluded.expected_percent,
                     updated_at=excluded.updated_at
-            """, (invoice_id, blocked, note, now))
+            """, (invoice_id, blocked, note, expected_date or None, expected_percent, now))
             self._audit(con, "invoice", invoice_id, "debtor_meta", {
                 "dunningBlocked": bool(blocked), "noteChanged": "note" in data,
+                "ratingChanged": "expectedDays" in data or "expectedPercent" in data,
             })
             con.commit()
         return next(
             (row for row in self.debtor_open_items() if row["invoiceId"] == invoice_id),
-            {"invoiceId": invoice_id, "dunningBlocked": bool(blocked), "opNote": note},
+            {"invoiceId": invoice_id, "dunningBlocked": bool(blocked), "opNote": note, "expectedDate":expected_date, "expectedPercent":expected_percent},
         )
+
+    @staticmethod
+    def debtor_forecast(items):
+        buckets = {"within14": 0.0, "within30": 0.0, "over30": 0.0}
+        rated_count = 0
+        for item in items or []:
+            days, percent = item.get("expectedDays"), item.get("expectedPercent")
+            if days is None or percent is None:
+                continue
+            amount = round(float(item.get("openGross") or 0) * float(percent) / 100, 2)
+            key = "within14" if int(days) <= 14 else "within30" if int(days) <= 30 else "over30"
+            buckets[key] = round(buckets[key] + amount, 2)
+            rated_count += int(bool(item.get("ratingManual")))
+        return {**buckets, "total":round(sum(buckets.values()), 2), "ratedCount":rated_count, "unratedCount":max(0, len(items or []) - rated_count)}
 
     def dunning(self, dunning_id):
         with self.connect() as con:
