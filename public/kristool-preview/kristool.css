@@ -781,3 +781,19 @@
 .diet-range-grid input{height:40px;border:1px solid #d1d8d2;border-radius:9px;padding:0 9px}
 .diet-presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 @media(max-width:700px){.logic-row{grid-template-columns:1fr}.diet-range-grid{grid-template-columns:1fr}}
+/* 0023.53 · Bettinas gemeinsame Tageskontrolle */
+.day-control-open{font-weight:850;border-color:#b9cdbd!important;background:#f4faf5!important;color:#234c2d!important}
+.day-control-dialog{width:min(1180px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
+.day-control-summary{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin:18px 0 12px}
+.day-control-metric{padding:12px 14px;border:1px solid #e0e3de;border-radius:12px;background:#f7f9f6}
+.day-control-metric span{display:block;font-size:11px;font-weight:850;letter-spacing:.04em;text-transform:uppercase;color:#6d756f}
+.day-control-metric strong{display:block;margin-top:4px;font-size:20px;color:#1f2821}
+.day-control-legend{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:8px 0 14px;color:#59635b;font-size:12px;font-weight:750}
+.day-control-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}.day-control-legend .work,.day-control-segment.work{background:#2e8b57}.day-control-legend .absence,.day-control-segment.absence{background:#c84a45}.day-control-legend .break,.day-control-segment.break{background:#e2a11e}
+.day-control-list{display:grid;gap:10px}.day-control-person{border:1px solid #dfe3dd;border-radius:13px;padding:12px 14px;background:#fff}.day-control-person.returned{border-color:#d8a24a;background:#fffaf0}.day-control-person.open{border-color:#dfd6c4}
+.day-control-person-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.day-control-person-head h3{margin:0;font-size:16px}.day-control-person-head small{display:block;margin-top:3px;color:#6c746e}.day-control-person-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.day-control-badge{display:inline-flex;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:850;background:#ecefea;color:#536057}.day-control-badge.done{background:#dff1e3;color:#216034}.day-control-badge.returned{background:#fff0c9;color:#7d5700}
+.day-control-track-wrap{margin-top:12px}.day-control-axis{display:flex;justify-content:space-between;color:#7a817c;font-size:10px;margin-bottom:3px}.day-control-track{height:20px;border-radius:999px;background:#e5e5e1;position:relative;overflow:hidden}.day-control-segment{position:absolute;top:0;height:100%;min-width:2px;border-right:1px solid rgba(255,255,255,.7)}
+.day-control-totals{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#626b64}.day-control-totals strong{color:#263028}
+.day-control-footer{position:sticky;bottom:-1px;display:grid;grid-template-columns:minmax(220px,.7fr) minmax(220px,1fr) auto;gap:12px;align-items:end;margin-top:16px;padding:14px;border:1px solid #d9ded7;border-radius:13px;background:rgba(249,251,248,.97);backdrop-filter:blur(8px)}.day-control-footer label span{display:block;margin-bottom:5px;font-size:11px;font-weight:850;text-transform:uppercase;color:#687069}.day-control-footer input{width:100%}.day-control-status{font-size:13px;color:#6c746e;padding-bottom:10px}.day-control-status.done{color:#216034;font-weight:800}.day-control-status.warn{color:#855d05;font-weight:800}
+@media(max-width:760px){.day-control-summary{grid-template-columns:repeat(2,1fr)}.day-control-footer{grid-template-columns:1fr}.day-control-person-head{display:grid}.day-control-person-actions{justify-content:flex-start}}

@@ -96,14 +96,21 @@
     const data=options.data||loaded.get(String(jobId)),B=window.KristaRegieBilling;if(!data||!B?.performanceForJob)return null;
     const collectionSettled=D.isSettled(data.job),savedHours=new Map((options.memberHours||[]).map(row=>[String(row.jobId),row]));
     const values=data.rows.map(row=>{
-      const reports=row.documents.filter(doc=>doc.type==="regie_report");
+      const completed=options.memberHours?null:window.BaustellenLiveHours?.completedSummarySingle?.(row.jobId,jobId);
+      const cutoffDate=completed?.cutoffDate||(()=>{const d=new Date(),pad=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`})();
+      const allReports=row.documents.filter(doc=>doc.type==="regie_report");
+      const reports=allReports.filter(doc=>{
+        const day=String(doc.reportDate||doc.date||"").slice(0,10);
+        return !day||day<cutoffDate;
+      });
       const billing=D.combineBilling(row.billingSources.filter(source=>source.data).map(source=>({...source,billing:source.data.billing})));
       const hourState=options.memberHours?null:window.BaustellenLiveHours?.sourceStatus?.(row.jobId,{single:true});
       billing.partial=data.billing.partial||hourState?.available===false;
-      const live=savedHours.get(String(row.jobId))||window.BaustellenLiveHours?.summarySingle?.(row.jobId,jobId);
+      const live=savedHours.get(String(row.jobId))||completed||window.BaustellenLiveHours?.summarySingle?.(row.jobId,jobId);
       const stamps=[...row.regieSources,...row.billingSources].map(source=>source.data?.syncedAt).filter(Boolean).sort();
-      const actualHours=Math.max(D.num(live?.total),D.num(billing.summary?.recordedHoursNet),D.actualHours(row.job));
-      return B.performanceForJob(row.job,{reports,billing,actualHours,settled:collectionSettled||D.isSettled(row.job),dataUpdatedAt:options.updatedAt||stamps[0]});
+      const actualHours=completed?.cutoffApplied?D.num(completed.total):Math.max(D.num(live?.total),D.num(billing.summary?.recordedHoursNet),D.actualHours(row.job));
+      const regieHours=completed?.cutoffApplied&&allReports.length?reports.reduce((sum,report)=>sum+D.num(report.totalHours),0):undefined;
+      return B.performanceForJob(row.job,{reports,billing,actualHours,regieHours,settled:collectionSettled||D.isSettled(row.job),dataUpdatedAt:options.updatedAt||stamps[0],hoursThroughDate:completed?.throughDate||""});
     });
     if(values.length===1&&!D.isCollection(data.job))return values[0];
     return B.aggregatePerformance(values,{jobId,jobName:data.job.name,partial:data.billing.partial,dataUpdatedAt:options.updatedAt});
@@ -111,4 +118,3 @@
   function clear(){requests.clear();collections.clear();unavailable.clear()}
   window.BaustellenSources={ww,load:loadCollection,clear,performance};
 })();
-
