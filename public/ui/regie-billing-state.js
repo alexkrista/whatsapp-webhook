@@ -59,7 +59,7 @@
   }
 
   const cents=value=>Math.round((number(value)+Number.EPSILON)*100)/100;
-  const CALCULATION_VERSION="20260915-progress-5";
+  const CALCULATION_VERSION="20260915-progress-6";
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours)),regieHours=Math.max(0,number(input.regieHours));
     const orderHours=Math.max(0,actualHours-regieHours),fixedTargetHours=Math.max(0,number(input.fixedTargetHours));
@@ -244,6 +244,7 @@
 
   function summarize(reports,billing={}){
     const invoices=Array.isArray(billing?.invoices)?billing.invoices:[];
+    const hasIssuedInvoice=invoices.some(invoice=>String(invoice?.status||"").toLowerCase()==="issued");
     const invoiceBySourceId=new Map();
     for(const invoice of invoices){
       const key=documentKey(invoice?.sourceId??invoice?.source_id);
@@ -252,8 +253,12 @@
     const rows=dedupeReports(reports).map(report=>{
       const billedDocumentId=String(report?.billedDocumentId||"").trim(),billedKey=documentKey(billedDocumentId);
       const invoice=invoiceBySourceId.get(billedKey)||null,manualStatus=String(report?.billingStatus||"").toLowerCase();
-      const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase()),automaticBilled=!invoiceUnissued&&Boolean(billedKey);
-      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=!billed;
+      const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase());
+      // Eine technische Bericht-Markierung allein ist kein Abrechnungsbeleg.
+      // Erst eine tatsächlich ausgestellte Rechnung im Projekt bestätigt sie.
+      const automaticBilled=hasIssuedInvoice&&!invoiceUnissued&&Boolean(billedKey);
+      const manualBilled=manualStatus==="billed"&&hasIssuedInvoice;
+      const billed=manualBilled||(manualStatus!=="open"&&automaticBilled),open=!billed;
       return {report,billed,open,unknown:!billed&&!open,billedDocumentId,invoice,amount:reportAmount(report),hours:number(report?.totalHours)};
     });
     const openRows=rows.filter(row=>row.open),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);
