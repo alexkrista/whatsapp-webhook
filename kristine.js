@@ -3140,4 +3140,3 @@ const open = taskId
 }
 
 module.exports = { registerKristine };
-
