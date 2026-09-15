@@ -17,6 +17,8 @@ assert.match(tower, /performanceForJob\(sourceJob,\{billing,reports,actualHours:
 assert.doesNotMatch(tower, /orderHours\+regieHours/);
 assert.match(tower, /billing-snapshot/);
 assert.match(tower, /recordedHoursNet/);
+assert.match(tower, /projectTimeArchive/);
+assert.match(tower, /wwHours\+kristineHours/);
 assert.match(tower, /Math\.max\([\s\S]*calc\(sourceJob\)\.actualHours[\s\S]*calc\(j\)\.actualHours/);
 assert.match(tower, /reportsByProject/);
 assert.match(tower, /Jetzt neu berechnen/);
