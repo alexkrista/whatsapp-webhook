@@ -10,6 +10,8 @@ import hmac
 import html
 import json
 import smtplib
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timedelta
 from email import policy
 from email.message import EmailMessage
@@ -1737,6 +1739,24 @@ def install(ns):
         }
         return invoice
 
+    def notify_cloud_regie_billed(invoice):
+        progress = invoice.get("progressBilling") or {}
+        report_ids = [str(value).strip() for value in progress.get("reportIdsToBill") or [] if str(value).strip()]
+        job_id = str(progress.get("jobId") or (invoice.get("run") or {}).get("project_number") or "").strip()
+        token = str(os.environ.get("KRISTINE_ADMIN_TOKEN") or os.environ.get("ADMIN_TOKEN") or "").strip()
+        if not report_ids or not job_id.isdigit() or not token:
+            return {"notified": False, "reason": "Keine verknüpften Regieberichte oder keine Cloud-Anmeldung."}
+        base = str(os.environ.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
+        url = f"{base}/admin/api/job/{job_id}/documentation/regie-reports-billed"
+        payload = json.dumps({"reportIds":report_ids,"invoiceId":invoice.get("id"),"invoiceNumber":invoice.get("invoice_number"),"kind":invoice.get("kind"),"issueDate":invoice.get("issue_date")}).encode("utf-8")
+        request_cloud = urllib.request.Request(url, data=payload, headers={"Content-Type":"application/json","Accept":"application/json","X-Admin-Token":token,"User-Agent":"KRISTINE-Brain/1.0"}, method="POST")
+        try:
+            with urllib.request.urlopen(request_cloud, timeout=5) as response:
+                result = json.loads(response.read().decode("utf-8") or "{}")
+            return {"notified": bool(result.get("ok")), "changed": int(result.get("changed") or 0)}
+        except Exception as error:
+            return {"notified": False, "warning": str(error)}
+
     @app.post("/api/outgoing/invoices/<int:invoice_id>/issue")
     def outgoing_invoice_issue(invoice_id):
         try:
@@ -1751,10 +1771,12 @@ def install(ns):
                 project_closure = close_finished_project_after_invoice(invoice)
             except Exception as close_error:
                 project_closure = {"closed": False, "warning": str(close_error)}
+            regie_status = notify_cloud_regie_billed(invoice)
             return jsonify({
                 "ok": True, "invoice": invoice,
                 "pdfUrl": f"/api/outgoing/invoices/{invoice_id}/pdf",
                 "projectClosure": project_closure,
+                "regieStatus": regie_status,
             })
         except Exception as exc:
             return _json_error(jsonify, exc)
@@ -2134,7 +2156,7 @@ function linkedInvoiceAction(){const value=String(new URLSearchParams(location.s
 async function ensureRunForLinkedAction(){if(selectedRun)return true;if(!selectedProject)return false;const d=await api('/api/outgoing/runs?projectIndex='+encodeURIComponent(selectedProject.projectIndex)),runs=d.runs||[];if(runs.length){await loadRun(Number(runs[0].id));return true}showRun();msg('Bitte den vorausgefüllten Rechnungslauf einmal anlegen. Danach öffnet sich der Rechnungsbereich.');return false}
 function openCorrectionDraft(invoice){if(!invoice||invoice.status!=='issued'||!['TR','SR','RE'].includes(String(invoice.kind||'').toUpperCase())){msg('Für eine Gutschrift wird zuerst eine ausgestellte Rechnung benötigt.',true);return false}correctionTarget=Number(invoice.id);$('correctionKind').value='GS';$('correctionDate').value=today();$('creditGross').value='';$('correctionReason').value='';$('creditGrossLabel').classList.remove('hide');$('correctionTargetText').textContent=`Gutschrift zu ${invoice.invoice_number||'Rechnung'} · ${money(invoice.increment_gross)}`;open('correctionModal');return true}
 function linkedProgressProposal(){if(!location.hash.startsWith('#krb='))return null;try{return JSON.parse(decodeURIComponent(location.hash.slice(5)))}catch{throw new Error('Abrechnungsvorschlag ist nicht lesbar. Bitte neu öffnen.')}}
-async function openProgressProposal(){const proposal=linkedProgressProposal();if(!proposal)return false;if(!selectedRun||String(selectedRun.project_number)!==String(proposal.jobId))throw new Error('Bitte den Rechnungslauf der verlinkten Baustelle auswählen.');const result=await api('/api/outgoing/progress-preview',{method:'POST',body:JSON.stringify({runId:selectedRun.id,proposal})});editInvoice(null,result.preset);msg('Geprüfter Vorschlag übernommen. Bitte Positionen prüfen und den Entwurf speichern.');return true}
+async function openProgressProposal(){const proposal=linkedProgressProposal();if(!proposal)return false;if(!selectedRun||String(selectedRun.project_number)!==String(proposal.jobId))throw new Error('Bitte den Rechnungslauf der verlinkten Baustelle auswählen.');await ensureRunForKind(String(proposal.kind||'TR').toUpperCase());const result=await api('/api/outgoing/progress-preview',{method:'POST',body:JSON.stringify({runId:selectedRun.id,proposal})});editInvoice(null,result.preset);if(result.preset?.notes&&$('notes'))$('notes').value=result.preset.notes;msg('Geprüfter Vorschlag übernommen. Bitte Positionen prüfen und den Entwurf speichern.');return true}
 async function startLinkedInvoiceAction(action,invoiceId=0){if(!await ensureRunForLinkedAction())return;if(linkedProgressProposal()){await openProgressProposal();return}if(action==='GS'){const issued=(selectedRun.invoices||[]).filter(row=>row.status==='issued'&&['TR','SR','RE'].includes(String(row.kind||'').toUpperCase())).sort((a,b)=>String(a.issue_date||'').localeCompare(String(b.issue_date||''))||Number(a.id)-Number(b.id)),target=issued.find(row=>Number(row.id)===Number(invoiceId))||issued.at(-1);openCorrectionDraft(target);return}const draft=(selectedRun.invoices||[]).find(row=>row.status==='draft');if(draft){editInvoice(draft);msg('Der vorhandene Entwurf wurde geöffnet. Bitte diesen zuerst fertigstellen oder löschen.');requestAnimationFrame(()=>$('editorTitle')?.scrollIntoView({behavior:'smooth',block:'start'}));return}await startInvoiceKind(action);requestAnimationFrame(()=>$('editorTitle')?.scrollIntoView({behavior:'smooth',block:'start'}))}
 async function ensureRunForKind(kind){if(kind!=='RE'||!(selectedRun?.invoices||[]).some(x=>x.status==='issued'))return selectedRun;const source=selectedRun,d=await api('/api/outgoing/runs',{method:'POST',body:JSON.stringify({projectIndex:source.project_index,projectNumber:source.project_number,customerIndex:source.customer_index,projectTitle:source.project_title,label:`${source.project_title||source.label} · Extra-Rechnung`,customerUid:source.customer_uid,company:source.customer_company,customerName:source.customer_name,street:source.customer_street,postalCode:source.customer_postal_code,city:source.customer_city,country:source.customer_country})});await loadRun(d.run.id);return selectedRun}
 async function createLinkedRegieDraft(kind){const isExtra=kind==='RE'&&(selectedRun?.invoices||[]).some(x=>x.status==='issued');await ensureRunForKind(kind);const p=linkedRegiePreset(),due=new Date(today()+'T12:00:00');due.setDate(due.getDate()+Number(settings.default_due_days||14));const lines=[];for(const [dayIndex,day] of p.days.entries()){const labor=(day.employees||[]).reduce((s,x)=>s+Number(x.cost||0),0),material=(day.materials||[]).reduce((s,x)=>s+Number(x.cost||0),0),label=new Intl.DateTimeFormat('de-AT').format(new Date(day.date+'T12:00:00')),reportNo=dayIndex+1,work=String(day.component||'').trim(),hasWork=work&&!/^Raum\s*\/\s*Bauteil$/i.test(work);lines.push({description:`${reportNo}. Bericht - ${label}`,quantity:0,unit:'TAG',unitPrice:0,discountPercent:0},{description:'Arbeit',quantity:0,unit:'ARBEIT',unitPrice:0,discountPercent:0});if(hasWork)lines.push({description:work,quantity:0,unit:'BAUTEIL',unitPrice:0,discountPercent:0});for(const x of day.employees||[])lines.push({description:x.name||'Mitarbeiter',quantity:Number(x.hours||0),unit:'Std.',unitPrice:Number(x.hours||0)?Number(x.cost||0)/Number(x.hours):0,discountPercent:0});if((day.materials||[]).length)lines.push({description:'Material',quantity:0,unit:'MATERIAL',unitPrice:0,discountPercent:0});for(const x of day.materials||[])lines.push({description:x.name||'Material',quantity:Number(x.quantity||1),unit:x.unit||'PA',unitPrice:Number(x.unitPrice||0)||(Number(x.cost||0)/Number(x.quantity||1)),discountPercent:0});lines.push({description:`Summe Bericht ${reportNo}`,quantity:0,unit:'SUMME',unitPrice:0,discountPercent:0})}if(!lines.length){if(p.labor>0)lines.push({description:'Regiearbeit lt. Berichten',quantity:p.hours||1,unit:p.hours?'Std.':'PA',unitPrice:p.hours?p.labor/p.hours:p.labor,discountPercent:0});if(p.material>0)lines.push({description:'Material lt. Berichten',quantity:1,unit:'PA',unitPrice:p.material,discountPercent:20})}const dates=p.days.map(x=>x.date).filter(Boolean).sort(),runId=selectedRun.id,subject=(isExtra?'Extra-Rechnung · ':'')+'Regiearbeiten · '+selectedRun.label,d=await api('/api/outgoing/invoices',{method:'POST',body:JSON.stringify({runId,kind,issueDate:today(),dueDate:due.toISOString().slice(0,10),serviceFrom:dates[0]||today(),serviceTo:dates[dates.length-1]||today(),taxMode:'AT20',retentionPercent:0,discountPercent:0,cashDiscountPercent:0,subject,notes:'',lines})});await loadRun(runId);editInvoice(d.invoice)}

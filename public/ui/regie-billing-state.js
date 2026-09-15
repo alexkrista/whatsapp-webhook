@@ -11,9 +11,9 @@
     return key&&!/^0+$/.test(key)?key:"";
   };
   const reportAmount=report=>{
-    const total=number(report?.totalNet);
-    if(total>0)return total;
-    return number(report?.laborCost)+number(report?.materialCost??report?.materialTotal);
+    const material=report?.materialCost??report?.materialTotal;
+    if(report?.laborCost!==undefined&&material!==undefined)return number(report?.laborCost)+number(material);
+    return number(report?.totalNet)||number(report?.laborCost)+number(material);
   };
   const reportSort=(a,b)=>String(a?.reportDate||"").localeCompare(String(b?.reportDate||""),"de",{numeric:true})||String(a?.sheetNumber||a?.reportNumber||"").localeCompare(String(b?.sheetNumber||b?.reportNumber||""),"de",{numeric:true});
   const reportSequence=report=>{
@@ -53,7 +53,7 @@
   }
 
   const cents=value=>Math.round((number(value)+Number.EPSILON)*100)/100;
-  const CALCULATION_VERSION="20260914-progress-1";
+  const CALCULATION_VERSION="20260915-progress-2";
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours)),regieHours=Math.max(0,number(input.regieHours));
     const orderHours=Math.max(0,actualHours-regieHours),fixedTargetHours=Math.max(0,number(input.fixedTargetHours));
@@ -116,7 +116,13 @@
       if(regie<0||regie>net+.02){issues.push(`Regieanteil der Teilrechnung ${invoice.invoiceNumber||""} ist nicht plausibel.`);continue;}
       partialInvoiceNet+=net;regiePartialInvoiceNet+=regie;linkedRegiePartialNet+=Math.min(regie,reports);
     }
-    if(partials.length&&state.billedRows.some(row=>!row.invoice))issues.push("Verrechnete Regieberichte haben noch keine zugeordnete Rechnung. Die Aufteilung der Teilrechnungen prüfen.");
+    const unlinkedBilled=state.billedRows.filter(row=>!row.invoice).reduce((sum,row)=>sum+row.amount,0);
+    const fallbackRegie=Math.min(Math.max(0,partialInvoiceNet-regiePartialInvoiceNet),unlinkedBilled);
+    // Alte WW-Teilrechnungen enthalten nicht immer die technische Bericht-ID.
+    // In diesem Fall wird der bereits abgerechnete Berichtswert gegen den
+    // vorhandenen TR-Gesamtbetrag verrechnet, statt ihn fälschlich dem Fixteil
+    // zuzuschlagen oder ein zweites Mal offen zu lassen.
+    regiePartialInvoiceNet+=fallbackRegie;linkedRegiePartialNet+=fallbackRegie;
     const hasClosingInvoice=issued.some(invoice=>String(invoice.kind||"").toUpperCase()==="SR"||String(invoice.kind||"").toUpperCase()==="RE"&&number(invoice.net)>Math.max(covered(invoice),number(invoice.regieNet))+.02);
     return {partialInvoiceNet:cents(partialInvoiceNet),regiePartialInvoiceNet:cents(regiePartialInvoiceNet),linkedRegiePartialNet:cents(linkedRegiePartialNet),
       fixedPartialInvoiceNet:cents(partialInvoiceNet-regiePartialInvoiceNet),hasClosingInvoice,issues};
@@ -124,16 +130,20 @@
   function performanceForJob(job={},options={}){
     const c=job.calculation||{},reports=options.reports||job.regieSummary?.reports||[],billing=options.billing||{},state=summarize(reports,billing);
     const allocation=allocatePartialInvoices(billing.invoices,state),plannedRegieHours=Math.max(0,number(c.plannedRegieHours??job.plannedRegieHours));
-    const reportHours=state.rows.reduce((sum,row)=>sum+row.hours,0),issues=[...allocation.issues];
+    const reportHours=state.rows.reduce((sum,row)=>sum+row.hours,0),rawFixedTargetHours=c.fixedCalculatedHours??Math.max(0,number(c.calculatedHours)-plannedRegieHours),fixedTargetHours=number(rawFixedTargetHours)>0?Math.round(number(rawFixedTargetHours)):0,issues=[...allocation.issues];
     if(!options.reports&&!job.regieSummary?.reports&&number(job.regieSummary?.count)>0)issues.push("Regieberichte für die Abrechnung werden noch geladen.");
     if(state.unknownRows.length)issues.push(`${state.unknownRows.length} Regiebericht(e) haben noch keinen eindeutigen Abrechnungsstatus.`);
     const result=calculatePerformance({...allocation,jobId:job.jobId,jobName:job.name||job.jobName,
       actualHours:options.actualHours??c.actualHours,regieHours:Math.max(number(c.actualRegieHours),reportHours),
-      fixedTargetHours:c.fixedCalculatedHours??Math.max(0,number(c.calculatedHours)-plannedRegieHours),plannedRegieHours,
+      fixedTargetHours,plannedRegieHours,
       contractAmount:c.contractAmount??job.contractAmount,plannedRegieAmount:c.regieBudgetAmount,
       actualRegieAmount:state.totalAmount,billedRegieAmount:state.billedAmount,
       hasClosingInvoice:!!options.settled||allocation.hasClosingInvoice,partial:!!billing.partial,issues,dataUpdatedAt:options.dataUpdatedAt});
     result.invoiceSnapshot=invoiceSnapshot(billing.invoices);
+    const visibleOpenRows=state.rows.filter(row=>!row.billed);
+    result.billedRegieRange=reportRange(state.billedRows);result.openRegieRange=reportRange(visibleOpenRows);
+    result.billedRegieCount=state.billedRows.length;result.openRegieCount=visibleOpenRows.length;
+    result.openRegieReportIds=visibleOpenRows.map(row=>String(row.report?.id||"").trim()).filter(Boolean);
     return result;
   }
   function invoiceSnapshot(invoices){
@@ -142,7 +152,7 @@
   function prepareInvoiceProposal(p,options={}){
     if(!p||p.aggregated||!p.complete||p.hasClosingInvoice)throw new Error('Bitte zuerst den vollständigen Abrechnungsstand der Einzelakte laden.');
     const kind=String(options.kind||'TR').toUpperCase();
-    if(!['TR','SR'].includes(kind))throw new Error('TR oder SR auswählen.');
+    if(!['TR','RE','SR'].includes(kind))throw new Error('TR, Rechnung oder SR auswählen.');
     const completionPercent=kind==='SR'?100:Number(options.completionPercent??p.completionPercent);
     const regieToInvoice=Number(options.regieToInvoice??p.regieToInvoice);
     if(!Number.isFinite(completionPercent)||completionPercent<0||completionPercent>100)throw new Error('Fertigstellung zwischen 0 und 100 % eingeben.');
@@ -151,7 +161,9 @@
     if(fixedBalance<-.01)throw new Error('Der korrigierte Fixstand liegt unter den bereits geschriebenen TR. Die Rechnungskorrektur bitte gesondert prüfen.');
     const fixedToInvoice=Math.max(0,fixedBalance),amountToInvoice=cents(fixedToInvoice+regieToInvoice);
     const changed=Math.abs(completionPercent-number(p.completionPercent))>.0001||Math.abs(regieToInvoice-number(p.regieToInvoice))>.005;
-    return {version:CALCULATION_VERSION,kind,jobId:p.jobId,jobName:p.jobName,completionPercent,fixedPerformance,fixedToInvoice,regieToInvoice:cents(regieToInvoice),amountToInvoice,changed,reason:String(options.reason||'').trim().slice(0,2000),reviewedAt:new Date().toISOString(),baseline:p};
+    const billsAllOpenRegie=regieToInvoice>0&&Math.abs(regieToInvoice-number(p.regieToInvoice))<=.005;
+    const reportIdsToBill=billsAllOpenRegie?[...new Set((p.openRegieReportIds||[]).map(id=>String(id||'').trim()).filter(Boolean))]:[];
+    return {version:CALCULATION_VERSION,kind,jobId:p.jobId,jobName:p.jobName,completionPercent,fixedPerformance,fixedToInvoice,regieToInvoice:cents(regieToInvoice),amountToInvoice,changed,reportIdsToBill,reason:String(options.reason||'').trim().slice(0,2000),customerNote:'Regieberichte und detaillierte Aufstellung sind im Kundenportal einsehbar.',reviewedAt:new Date().toISOString(),baseline:p};
   }
   function proposalText(p){
     return downloadText(p.baseline)+'\r\n\r\nGeprüfter Vorschlag: '+p.kind+'\r\nFertigstellung: '+formatPercent(p.completionPercent)+(p.kind==='SR'?' · Schlussrechnung mit 100 % Fixauftrag':'')+'\r\nFixleistung: '+formatMoney(p.fixedPerformance)+' − '+formatMoney(p.baseline.fixedPartialInvoiceNet)+' TR = '+formatMoney(p.fixedToInvoice)+'\r\nRegie jetzt: '+formatMoney(p.regieToInvoice)+'\r\nNeue Rechnung netto: '+formatMoney(p.amountToInvoice)+'\r\nKorrektur / Notiz: '+(p.reason||'keine')+'\r\nGeprüft: '+p.reviewedAt;
@@ -204,15 +216,18 @@
   }
   function renderCalculation(p){
     if(!p)return "";installCalculationUi();
-    return `<div class="krb-calculation"><small>${escape(compactCalculation(p))}</small><details><summary>Rechenweg · Fixauftrag und Regie</summary><div class="krb-lines">${calculationLines(p).map(line=>`<div>${escape(line)||"&nbsp;"}</div>`).join("")}</div><button type="button" data-krb-download="${escape(JSON.stringify(p))}">Rechenweg herunterladen (.txt)</button><small>Berechnet: ${escape(new Date(p.calculatedAt).toLocaleString("de-AT"))}${p.dataUpdatedAt?` · Datenstand: ${escape(new Date(p.dataUpdatedAt).toLocaleString("de-AT"))}`:""}</small></details>${renderWarnings(p)}${p.complete&&!p.hasClosingInvoice?`<button type="button" data-krb-review="${escape(JSON.stringify(p))}">${p.aggregated?"Einzelakte zur Abrechnung wählen":"Vorschlag prüfen · TR / SR"}</button>`:""}</div>`;
+    const range=(value,count)=>value?` ${escape(value)}`:count?` · ${count} Bericht(e)`:"";
+    const summary=p.aggregated?"":`<div class="krb-summary"><div><span>Leistungsstand lt. Auftrag</span><small>${escape(formatPercent(p.completionPercent))} von ${escape(formatMoney(p.fixedContractAmount))}</small><strong>${escape(formatMoney(p.orderPerformance))}</strong></div><div><span>Regie abgerechnet${range(p.billedRegieRange,p.billedRegieCount)}</span><strong>${escape(formatMoney(p.billedRegieAmount))}</strong></div><div><span>Regie offen${range(p.openRegieRange,p.openRegieCount)}</span><strong>${escape(formatMoney(p.regieToInvoice))}</strong></div><div class="total"><span>Leistungssumme gesamt</span><strong>${escape(formatMoney(p.billablePerformance))}</strong></div><div><span>Bereits geschrieben</span><strong>− ${escape(formatMoney(p.partialInvoiceNet))}</strong></div><div class="pay"><span>Jetzt abzurechnen</span><strong>${escape(formatMoney(p.amountToInvoice))} netto</strong></div></div>`;
+    const actions=p.complete&&!p.hasClosingInvoice?(p.aggregated?`<button type="button" data-krb-review="${escape(JSON.stringify(p))}">Einzelakte zur Abrechnung wählen</button>`:`<div class="krb-actions"><button type="button" class="primary" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="TR">Teilrechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="RE">Rechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}">Prüfen / Schlussrechnung</button></div>`):"";
+    return `<div class="krb-calculation">${summary}<small>${escape(compactCalculation(p))}</small><details><summary>Rechenweg · Fixauftrag und Regie</summary><div class="krb-lines">${calculationLines(p).map(line=>`<div>${escape(line)||"&nbsp;"}</div>`).join("")}</div><button type="button" data-krb-download="${escape(JSON.stringify(p))}">Rechenweg herunterladen (.txt)</button><small>Berechnet: ${escape(new Date(p.calculatedAt).toLocaleString("de-AT"))}${p.dataUpdatedAt?` · Datenstand: ${escape(new Date(p.dataUpdatedAt).toLocaleString("de-AT"))}`:""}</small></details>${renderWarnings(p)}${actions}</div>`;
   }
   function downloadText(p){
     return ["KRISTINE · Abrechnung nach Leistungsstand (netto)",`Berechnet: ${p.calculatedAt}`,p.dataUpdatedAt?`Datenstand: ${p.dataUpdatedAt}`:"Datenstand: aktuell in der Akte angezeigte Stunden, Berichte und Rechnungen", "",...calculationLines(p),"","Geschriebene Teilrechnungen zählen unabhängig vom Zahlungseingang. Entwürfe werden nicht abgezogen.","Die Fertigstellung wird aus dem Stundenverbrauch geschätzt und muss fachlich geprüft werden."].join("\r\n");
   }
   function installCalculationUi(){
     if(typeof document==="undefined"||document.getElementById("krbCalculationCss"))return;
-    const style=document.createElement("style");style.id="krbCalculationCss";style.textContent=".krb-calculation{margin:12px 0;font-variant-numeric:tabular-nums}.krb-calculation>small,.krb-calculation details>small{display:block;color:#68736a;font-size:12px;line-height:1.5}.krb-calculation summary{cursor:pointer;font-weight:700;padding:10px 0;color:#315e3e}.krb-lines{font-size:13px;line-height:1.7;background:#f5f8f2;border:1px solid #d6dfcf;border-radius:9px;padding:14px;overflow-wrap:anywhere}.krb-warning{background:#fff5de;border:1px solid #e5c987;border-radius:8px;margin:9px 0;padding:11px 14px;font-size:13px;color:#76551b}.krb-calculation button{margin:10px 0;border:1px solid #c5d3be;border-radius:8px;padding:8px 12px;background:white;color:#315e3e;font:inherit;font-weight:700;cursor:pointer}";document.head.appendChild(style);
-    document.addEventListener("click",async event=>{const review=event.target.closest?.("[data-krb-review]");if(review){const p=JSON.parse(review.dataset.krbReview);if(!window.KristaInvoiceReview){review.disabled=true;try{await new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="/public/ui/progress-invoice-review.js?v=20260914-progress-1";script.onload=resolve;script.onerror=reject;document.head.appendChild(script)})}catch{review.disabled=false;review.textContent="Nicht geladen · erneut versuchen";return}review.disabled=false}window.KristaInvoiceReview.open(p);return}const button=event.target.closest?.("[data-krb-download]");if(!button)return;const value=JSON.parse(button.dataset.krbDownload),blob=new Blob(["\uFEFF"+downloadText(value)],{type:"text/plain;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`Rechenweg_${String(value.jobId||"Baustelle").replace(/[^a-zA-Z0-9_-]/g,"_")}.txt`;link.click();setTimeout(()=>URL.revokeObjectURL(url),10000)});
+    const style=document.createElement("style");style.id="krbCalculationCss";style.textContent=".krb-calculation{margin:12px 0;font-variant-numeric:tabular-nums}.krb-calculation>small,.krb-calculation details>small{display:block;color:#68736a;font-size:12px;line-height:1.5}.krb-calculation summary{cursor:pointer;font-weight:700;padding:10px 0;color:#315e3e}.krb-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid #d6dfcf;border-radius:12px;overflow:hidden;margin-bottom:12px}.krb-summary>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 14px;padding:11px 13px;border-bottom:1px solid #e5e9e1}.krb-summary>div:nth-child(odd){border-right:1px solid #e5e9e1}.krb-summary span{font-weight:700}.krb-summary small{grid-column:1;color:#68736a}.krb-summary strong{grid-column:2;grid-row:1/3;align-self:center}.krb-summary .total,.krb-summary .pay{background:#f1f7ee}.krb-summary .pay strong{color:#276a3b;font-size:1.08em}.krb-lines{font-size:13px;line-height:1.7;background:#f5f8f2;border:1px solid #d6dfcf;border-radius:9px;padding:14px;overflow-wrap:anywhere}.krb-warning{background:#fff5de;border:1px solid #e5c987;border-radius:8px;margin:9px 0;padding:11px 14px;font-size:13px;color:#76551b}.krb-actions{display:flex;gap:8px;flex-wrap:wrap}.krb-calculation button{margin:10px 0;border:1px solid #c5d3be;border-radius:8px;padding:8px 12px;background:white;color:#315e3e;font:inherit;font-weight:700;cursor:pointer}.krb-calculation button.primary{background:#367b49;color:white;border-color:#367b49}@media(max-width:650px){.krb-summary{grid-template-columns:1fr}.krb-summary>div:nth-child(odd){border-right:0}}";document.head.appendChild(style);
+    document.addEventListener("click",async event=>{const review=event.target.closest?.("[data-krb-review]");if(review){const p=JSON.parse(review.dataset.krbReview),kind=review.dataset.krbKind||"";if(!window.KristaInvoiceReview){review.disabled=true;try{await new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="/public/ui/progress-invoice-review.js?v=20260915-progress-2";script.onload=resolve;script.onerror=reject;document.head.appendChild(script)})}catch{review.disabled=false;review.textContent="Nicht geladen · erneut versuchen";return}review.disabled=false}window.KristaInvoiceReview.open(p,{kind});return}const button=event.target.closest?.("[data-krb-download]");if(!button)return;const value=JSON.parse(button.dataset.krbDownload),blob=new Blob(["\uFEFF"+downloadText(value)],{type:"text/plain;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`Rechenweg_${String(value.jobId||"Baustelle").replace(/[^a-zA-Z0-9_-]/g,"_")}.txt`;link.click();setTimeout(()=>URL.revokeObjectURL(url),10000)});
   }
 
   function summarize(reports,billing={}){
@@ -225,7 +240,8 @@
     const rows=dedupeReports(reports).map(report=>{
       const billedDocumentId=String(report?.billedDocumentId||"").trim(),billedKey=documentKey(billedDocumentId);
       const invoice=invoiceBySourceId.get(billedKey)||null,source=String(report?.source||"").toUpperCase(),manualStatus=String(report?.billingStatus||"").toLowerCase();
-      const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase()),billed=!invoiceUnissued&&(Boolean(billedKey)||(source==="KGO"&&manualStatus==="billed")),open=!billed&&(source==="WW"||(source==="KGO"&&manualStatus==="open"));
+      const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase()),automaticBilled=!invoiceUnissued&&Boolean(billedKey);
+      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=manualStatus==="open"||(!billed&&source==="WW");
       return {report,billed,open,unknown:!billed&&!open,billedDocumentId,invoice,amount:reportAmount(report),hours:number(report?.totalHours)};
     });
     const openRows=rows.filter(row=>row.open),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);
@@ -246,5 +262,13 @@
     };
   }
 
-  return {formatMoney,invoiceSnapshot,prepareInvoiceProposal,proposalText,refreshCalculation,summarize,calculatePerformance,performanceForJob,aggregatePerformance,allocatePartialInvoices,issuedInvoices,renderCalculation,renderWarnings,compactCalculation,calculationLines,downloadText,CALCULATION_VERSION,dedupeReports,reportDedupeKey,documentKey,reportAmount};
+  function reportRange(rows){
+    const values=[...new Set((rows||[]).map(row=>Number(reportSequence(row.report||row))).filter(Number.isFinite))].sort((a,b)=>a-b);
+    if(!values.length)return "";
+    const parts=[];let start=values[0],last=values[0];
+    for(const value of values.slice(1)){if(value===last+1){last=value;continue}parts.push(start===last?String(start):`${start}–${last}`);start=last=value}
+    parts.push(start===last?String(start):`${start}–${last}`);return parts.join(", ");
+  }
+
+  return {formatMoney,invoiceSnapshot,prepareInvoiceProposal,proposalText,refreshCalculation,summarize,calculatePerformance,performanceForJob,aggregatePerformance,allocatePartialInvoices,issuedInvoices,renderCalculation,renderWarnings,compactCalculation,calculationLines,downloadText,CALCULATION_VERSION,dedupeReports,reportDedupeKey,documentKey,reportAmount,reportRange};
 });

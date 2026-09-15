@@ -14,6 +14,7 @@ const random = () => crypto.randomBytes(32).toString("base64url");
 const read = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch(e) { if(e.code === "ENOENT") return fallback; throw e; } };
 const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive:true }); const tmp=file+"."+crypto.randomUUID()+".tmp"; try { fs.writeFileSync(tmp,JSON.stringify(value,null,2),{mode:0o600}); fs.renameSync(tmp,file); } finally { fs.rmSync(tmp,{force:true}); } };
 const clean = (value, max=500) => String(value || "").trim().slice(0,max);
+const documentNumber = value => { if(typeof value==="number")return Number.isFinite(value)?value:0;const parsed=Number(String(value||"").replace(/\s/g,"").replace(/\.(?=\d{3}(?:\D|$))/g,"").replace(",","."));return Number.isFinite(parsed)?parsed:0; };
 const fail = (status, message) => Object.assign(new Error(message),{status});
 const cookieName = "krista_kundenportal";
 const cookieOptions = {httpOnly:true,secure:true,sameSite:"lax",path:"/kundenportal"};
@@ -120,7 +121,7 @@ function registerCustomerAccess(app, options) {
     return actual.startsWith(actualBase)&&fs.statSync(actual).isFile()?actual:null;
   }
   async function catalog(ctx, includeMaterials = true) {
-    const files=new Map(),projects=[],reports=[],materials=[];
+    const files=new Map(),projects=[],reports=[],materials=[],emptyRegie=()=>({hours:0,labor:0,material:0,total:0,count:0}),regieSummary={billed:emptyRegie(),open:emptyRegie(),total:emptyRegie()};
     const materialSources = ctx.portal.modules.projectFile && includeMaterials
       ? await readMaterialSources({ dataDir, jobIds:ctx.jobIds, canonicalId:id=>aliases.canonical(id), listDaysForJob:options.listDaysForJob, regiePathForDay:options.regiePathForDay })
       : null;
@@ -152,10 +153,14 @@ function registerCustomerAccess(app, options) {
       if(ctx.portal.modules.regie)for(const row of dedupeReports(documents.filter(row=>row.type==="regie_report"))) {
         const physical=row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName)?secureFile(jobId,"_documentation/"+row.storedName):null;
         const url=add(jobId,"pdf",row.reportNumber||row.name||"Regiebericht",physical,"regie",row.reportDate||"");
-        reports.push({jobId,id:clean(row.id,100),number:clean(row.reportNumber||row.name,120),date:clean(row.reportDate,10),hours:Number(row.totalHours)||0,net:Number(row.totalNet)||0,description:clean(row.description,12000),employees:clean(row.employees,1000),materials:(row.materials||[]).map(m=>({name:clean(m.name),quantity:Number(m.quantity)||0,unit:clean(m.unit,30)})),url});
+        const hours=Math.max(0,documentNumber(row.totalHours)),labor=Math.max(0,documentNumber(row.laborCost)),materialValue=row.materialCost??row.materialTotal,material=Math.max(0,documentNumber(materialValue)),hasDetails=row.laborCost!==undefined&&materialValue!==undefined,totalNet=Math.max(0,documentNumber(row.totalNet)),net=hasDetails?labor+material:totalNet||labor+material;
+        const manual=String(row.billingStatus||"").toLowerCase(),settled=["geschlossen","abgerechnet"].includes(String(meta.status||"").trim().toLowerCase()),automatic=Boolean(String(row.billedDocumentId||"").trim());
+        const status=settled||manual==="billed"||(manual!=="open"&&automatic)?"billed":"open",target=regieSummary[status];
+        for(const bucket of [target,regieSummary.total]){bucket.hours+=hours;bucket.labor+=labor;bucket.material+=material;bucket.total+=net;bucket.count++}
+        reports.push({jobId,id:clean(row.id,100),number:clean(row.reportNumber||row.name,120),date:clean(row.reportDate,10),hours,labor,material,net,status,description:clean(row.description,12000),employees:clean(row.employees,1000),materials:(row.materials||[]).map(m=>({name:clean(m.name),quantity:Number(m.quantity)||0,unit:clean(m.unit,30)})),url});
       }
     }
-    return {files,projects,reports,materials,materialStatus:{complete:!materialSources?.unavailable.length,unavailable:materialSources?.unavailable||[]}};
+    return {files,projects,reports,regieSummary,materials,materialStatus:{complete:!materialSources?.unavailable.length,unavailable:materialSources?.unavailable||[]}};
   }
   function pointRows(ctx) {
     const folder=path.join(dataDir,ctx.jobId,"_customer-portal"),rows=fs.existsSync(folder)?fs.readdirSync(folder).filter(name=>/^[a-f0-9-]+\.json$/.test(name)).map(name=>read(path.join(folder,name),null)).filter(Boolean):[];
@@ -165,7 +170,7 @@ function registerCustomerAccess(app, options) {
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
     const ctx=await context(req),data=await catalog(ctx);
     const billing = ctx.portal.modules.projectFile ? await readCustomerInvoices(dataDir, await Promise.all(ctx.jobIds.map(async jobId=>({...await readJobMeta(jobId),jobId})))) : {entries:[],complete:true,unavailable:[],syncedAt:null};
-    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,projects:data.projects,reports:data.reports,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
   }));
   app.get("/kundenportal/api/invoice/:jobId/:id",guard(async(req,res)=>{
     const ctx=await context(req),jobId=req.params.jobId;

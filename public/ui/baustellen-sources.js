@@ -102,7 +102,8 @@
       billing.partial=data.billing.partial||hourState?.available===false;
       const live=savedHours.get(String(row.jobId))||window.BaustellenLiveHours?.summarySingle?.(row.jobId,jobId);
       const stamps=[...row.regieSources,...row.billingSources].map(source=>source.data?.syncedAt).filter(Boolean).sort();
-      return B.performanceForJob(row.job,{reports,billing,actualHours:live?.total??row.job.calculation?.actualHours,settled:collectionSettled||D.isSettled(row.job),dataUpdatedAt:options.updatedAt||stamps[0]});
+      const actualHours=Math.max(D.num(live?.total),D.num(billing.summary?.recordedHoursNet),D.actualHours(row.job));
+      return B.performanceForJob(row.job,{reports,billing,actualHours,settled:collectionSettled||D.isSettled(row.job),dataUpdatedAt:options.updatedAt||stamps[0]});
     });
     if(values.length===1&&!D.isCollection(data.job))return values[0];
     return B.aggregatePerformance(values,{jobId,jobName:data.job.name,partial:data.billing.partial,dataUpdatedAt:options.updatedAt});

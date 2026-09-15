@@ -255,3 +255,24 @@ test("unreachable WW uses persisted hours and marks the stand as cached",async()
   assert.equal(result.hours.totalHours,25);assert.equal(result.cached,true);assert.equal(result.syncedAt,snapshot.syncedAt);
 });
 
+test("billing performance falls back to WinWorker recorded hours when live hours are zero",async()=>{
+  const halter=job("25001",1001,0);Object.assign(halter.calculation,{fixedCalculatedHours:570.95,plannedRegieHours:430,contractAmount:92379.94,regieBudgetAmount:40850});
+  let saved=[];const response=data=>({ok:true,json:async()=>data});
+  const context=frontend("public/ui/baustellen-sources.js",{window:{BaustellenLiveHours:{summarySingle:()=>({total:0}),sourceStatus:()=>({available:true})}},fetch:async(raw,init={})=>{
+    const url=new URL(raw,"https://protokoll.krista.at"),body=init.body?JSON.parse(init.body):{};
+    if(url.hostname==="127.0.0.1"){
+      if(url.pathname.endsWith("project-regie-reports"))return response({ok:true,reports:[{source:"WW",reportNumber:"1",reportDate:"2026-09-01",totalHours:392.6,totalNet:37003.09}]});
+      return response({ok:true,billing:{found:true,invoices:[],payments:[],runs:[],summary:{recordedHoursNet:478}}});
+    }
+    if(url.pathname.endsWith("/days"))return response({detailed:[]});
+    if(url.pathname.endsWith("/documentation/regie-report-sync")){saved=body.reports;return response({ok:true,count:saved.length})}
+    if(url.pathname.endsWith("/documentation"))return response({items:saved.map(row=>({...row,type:"regie_report"}))});
+    throw new Error("Unexpected path "+url.pathname);
+  }});
+  const loaded=await context.window.BaustellenSources.load(halter,[halter]);
+  assert.equal(loaded.billing.summary.recordedHoursNet,478);
+  const performance=context.window.BaustellenSources.performance(halter.jobId);
+  assert.equal(performance.actualHours,478);assert.equal(performance.regieHours,392.6);assert(Math.abs(performance.orderHours-85.4)<1e-9);
+  assert(Math.abs(performance.completionPercent-((478-392.6)/571*100))<1e-9);
+});
+

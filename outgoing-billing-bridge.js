@@ -15,6 +15,16 @@ function cleanConnector(value) {
   return String(value || DEFAULT_CONNECTOR).trim().replace(/\/+$/, "");
 }
 
+function cleanProgressBilling(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const reportIdsToBill = [...new Set((Array.isArray(value.reportIdsToBill) ? value.reportIdsToBill : [])
+    .map((id) => String(id || "").trim()).filter((id) => id && id.length <= 160))].slice(0, 2000);
+  return {
+    jobId: String(value.jobId || "").trim().slice(0, 40),
+    reportIdsToBill,
+  };
+}
+
 function buildBillingSummary(project, runDetails) {
   const runs = [];
   const invoices = [];
@@ -44,6 +54,7 @@ function buildBillingSummary(project, runDetails) {
         const status = String(invoice.status || "draft").toLowerCase();
         const gross = roundMoney(invoice.increment_gross);
         const paidGross = roundMoney(paidByInvoice.get(id) || 0);
+        const progressBilling = cleanProgressBilling(invoice.progressBilling);
         return {
           id,
           runId: number(run.id),
@@ -62,6 +73,7 @@ function buildBillingSummary(project, runDetails) {
           openGross: status === "issued" ? roundMoney(Math.max(0, gross - paidGross)) : 0,
           source: String(invoice.source || "KRISTINE").toUpperCase() === "WW" ? "WW" : "KRISTINE",
           sourceId: String(invoice.source_id || invoice.sourceId || ""),
+          ...(progressBilling ? { progressBilling } : {}),
         };
       });
 
@@ -166,7 +178,14 @@ function registerOutgoingBillingBridge(app, options = {}) {
       const runDetails = await Promise.all((runList.runs || []).map((run) =>
         brainJson(`/api/outgoing/runs/${number(run.id)}`)
       ));
-      return res.json({ ok: true, billing: buildBillingSummary(project, runDetails) });
+      const billing = buildBillingSummary(project, runDetails);
+      if (typeof options.onIssuedProgressInvoices === "function") {
+        await options.onIssuedProgressInvoices({
+          jobId,
+          invoices: billing.invoices.filter((invoice) => invoice.status === "issued" && invoice.progressBilling?.reportIdsToBill?.length),
+        });
+      }
+      return res.json({ ok: true, billing });
     } catch (error) {
       console.error("Ausgangsrechnungen für Baustelle:", String(error?.message || error));
       return res.status(502).json({
@@ -177,5 +196,5 @@ function registerOutgoingBillingBridge(app, options = {}) {
   });
 }
 
-module.exports = { buildBillingSummary, registerOutgoingBillingBridge };
+module.exports = { buildBillingSummary, cleanProgressBilling, registerOutgoingBillingBridge };
 

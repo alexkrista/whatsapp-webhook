@@ -18,7 +18,7 @@ test('Halter target example: both warnings start at 90 percent; 4 offered Regie 
   assert.equal(B.calculatePerformance({...base,actualHours:179.9+35.9,regieHours:35.9}).warnings.length,0);
 });
 const job={jobId:'26082',name:'Testprojekt',calculation:{actualHours:120,actualRegieHours:20,fixedCalculatedHours:200,plannedRegieHours:40,contractAmount:22000,regieBudgetAmount:2000}};
-const reports=[{source:'WW',sourceId:'r1',reportNumber:'1',totalHours:8,totalNet:700,billedDocumentId:'doc1'},{source:'WW',sourceId:'r2',reportNumber:'2',totalHours:12,totalNet:1100}];
+const reports=[{id:'r1',source:'WW',sourceId:'r1',reportNumber:'1',totalHours:8,totalNet:700,billedDocumentId:'doc1'},{id:'r2',source:'WW',sourceId:'r2',reportNumber:'2',totalHours:12,totalNet:1100}];
 const invoices=[{sourceId:'doc1',invoiceNumber:'TR1',kind:'TR',status:'issued',net:4000,paidGross:0},{invoiceNumber:'draft',kind:'TR',status:'draft',net:5000}];
 test('mixed TR deducts its Regie reports exactly once; unpaid issued counts, draft does not',()=>{
   const p=B.performanceForJob(job,{reports,billing:{invoices}});
@@ -66,4 +66,35 @@ test('TR correction and SR100 preserve baseline; download carries the corrected 
 });
 test('invoice snapshot excludes drafts and payments, so unchanged unpaid TR does not become stale',()=>{
   const a=B.invoiceSnapshot(invoices),b=B.invoiceSnapshot(invoices.map(x=>({...x,paidGross:9999})));assert.deepEqual(a,b);assert.equal(a.length,1);
+});
+test('visible labor and material breakdown is the Regie amount, not a differing PDF total',()=>{
+  assert.equal(B.reportAmount({laborCost:24543.75,materialCost:6469,totalNet:31012.62}),31012.75);
+  assert.equal(B.reportAmount({totalNet:929}),929);
+});
+test('manual report status overrides automatic WW/PDF status and stays calculable',()=>{
+  const state=B.summarize([
+    {id:'a',source:'WW',reportNumber:'1',totalNet:100,billedDocumentId:'doc',billingStatus:'open'},
+    {id:'b',source:'PDF',reportNumber:'2',totalNet:200,billingStatus:'billed'},
+  ],{invoices:[]});
+  assert.equal(state.openRows[0].report.id,'a');assert.equal(state.billedRows[0].report.id,'b');assert.equal(state.unknownRows.length,0);
+});
+test('old TR without report IDs allocates billed Regie first and leaves the correct fixed balance',()=>{
+  const halter={jobId:'25001',name:'Halter',calculation:{actualHours:478,actualRegieHours:392.6,fixedCalculatedHours:570.95,plannedRegieHours:430,contractAmount:92379.94,regieBudgetAmount:40850}};
+  const halterReports=[
+    {id:'r1',source:'WW',reportNumber:'1',sheetNumber:'1',totalHours:327.25,laborCost:24543.75,materialCost:6469,billedDocumentId:'old-ww-tr'},
+    {id:'r14',source:'WW',reportNumber:'14',sheetNumber:'14',totalHours:65.35,laborCost:4901.25,materialCost:1089},
+  ];
+  const p=B.performanceForJob(halter,{reports:halterReports,billing:{invoices:[{invoiceNumber:'TR1',kind:'TR',status:'issued',net:34569}]}});
+  assert.equal(p.billedRegieAmount,31012.75);assert.equal(p.regieToInvoice,5990.25);
+  assert.equal(p.regiePartialInvoiceNet,31012.75);assert.equal(p.fixedPartialInvoiceNet,3556.25);assert.equal(p.complete,true);
+  assert.equal(p.fixedTargetHours,571);assert.equal(p.orderPerformance,7706.93);
+  assert.equal(p.billablePerformance,44709.93);assert.equal(p.fixedToInvoice,4150.68);assert.equal(p.amountToInvoice,10140.93);
+  assert.equal(p.billedRegieRange,'1');assert.equal(p.openRegieRange,'14');
+  assert.match(B.renderCalculation(p),/Leistungssumme gesamt/);assert.match(B.renderCalculation(p),/Teilrechnung vorbereiten/);
+});
+test('a direct Rechnung proposal carries the customer-portal note',()=>{
+  const p=B.performanceForJob(job,{reports,billing:{invoices}}),proposal=B.prepareInvoiceProposal(p,{kind:'RE'});
+  assert.equal(proposal.kind,'RE');assert.match(proposal.customerNote,/Kundenportal/);
+  assert.deepEqual(proposal.reportIdsToBill,['r2']);
+  assert.deepEqual(B.prepareInvoiceProposal(p,{kind:'RE',regieToInvoice:500}).reportIdsToBill,[]);
 });

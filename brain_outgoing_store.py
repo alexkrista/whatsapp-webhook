@@ -1921,6 +1921,10 @@ class OutgoingStore:
             payments = self._active_payments(con, row["run_id"])
             paid = self._payment_sum(payments)
             lines = list(con.execute("SELECT * FROM outgoing_lines WHERE invoice_id=? ORDER BY line_no", (row["id"],)))
+            if progress and progress.get("reportIdsToBill"):
+                regie_in_invoice = sum((_d(line["net"]) for line in lines if line["billing_component"] == "regie"), Decimal("0"))
+                if _money(regie_in_invoice) != _money(progress.get("regieToInvoice")):
+                    raise ValueError("Die Regieposition wurde nach dem Vorschlag geändert. Bitte den Abrechnungsvorschlag in der Baustelle neu öffnen.")
             if row["kind"] in {"ST", "GS"}:
                 totals = {
                     "vatRate": _d(row["vat_rate"]), "lineSubtotalNet": _d(row["line_subtotal_net"]),

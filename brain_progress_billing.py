@@ -42,8 +42,8 @@ def prepare_preset(proposal, run, invoices):
     check_snapshot(proposal, invoices)
     baseline = proposal.get("baseline") or {}
     kind = str(proposal.get("kind") or "")
-    if kind not in {"TR", "SR"} or not baseline.get("complete") or baseline.get("hasClosingInvoice"):
-        raise ValueError("Kein vollständiger, offener TR-/SR-Vorschlag.")
+    if kind not in {"TR", "RE", "SR"} or not baseline.get("complete") or baseline.get("hasClosingInvoice"):
+        raise ValueError("Kein vollständiger, offener Abrechnungsvorschlag.")
     percent = Decimal("100") if kind == "SR" else Decimal(str(proposal.get("completionPercent")))
     if not percent.is_finite() or not 0 <= percent <= 100:
         raise ValueError("Fertigstellung muss zwischen 0 und 100 % liegen.")
@@ -67,5 +67,6 @@ def prepare_preset(proposal, run, invoices):
                           "unitPrice": float(net), "discountPercent": 0, "billingComponent": component})
     if not lines:
         raise ValueError("Es ist noch keine Leistung zum Abrechnen vorhanden.")
-    return {"kind": kind, "lines": lines, "progressBilling": proposal,
+    notes = str(proposal.get("customerNote") or "Regieberichte und detaillierte Aufstellung sind im Kundenportal einsehbar.").strip()[:2000]
+    return {"kind": kind, "lines": lines, "progressBilling": proposal, "notes": notes,
             "incrementNet": float(money(fixed + regie)), "cumulativeNet": float(money(prior + fixed + regie))}

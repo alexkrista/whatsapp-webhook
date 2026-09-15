@@ -8,11 +8,11 @@ const root = path.join(__dirname, "..");
 const server = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const tower = fs.readFileSync(path.join(root, "public", "ui", "tower-baustellen-signals.js"), "utf8");
 
-assert.match(server, /const billed = Boolean\(String\(row\?\.billedDocumentId/);
+assert.match(server, /const automaticBilled = Boolean\(String\(row\?\.billedDocumentId/);
 assert.match(server, /if \(jobIsSettled\) return "billed"/);
-assert.match(server, /source === "KGO" && manualStatus === "billed"/);
-assert.match(server, /source === "WW" \|\| \(source === "KGO" && manualStatus === "open"\)/);
-assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state === "open"\)/);
+assert.match(server, /manualStatus === "billed" \|\| \(manualStatus !== "open" && automaticBilled\)/);
+assert.match(server, /manualStatus === "open" \|\| \(!billed && source === "WW"\)/);
+assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state !== "billed"\)/);
 assert.match(tower, /performanceForJob\(j,\{billing,actualHours:totalHours\}\)/);
 assert.doesNotMatch(tower, /orderHours\+regieHours/);
 assert.match(tower, /TR \/ verrechnete Regie/);

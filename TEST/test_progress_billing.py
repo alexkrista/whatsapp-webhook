@@ -37,7 +37,7 @@ class ProgressBillingTests(unittest.TestCase):
         self.assertEqual(draft["increment_net"], 9800)
         self.assertEqual(draft["regieNet"], 1100)
         self.assertEqual(draft["progressBilling"]["reason"], "Stand vor Ort")
-        self.assertEqual(draft["notes"], "")
+        self.assertIn("Kundenportal", draft["notes"])
         self.assertEqual(self.store.run(self.run["id"])["status"], "open")
         self.assertEqual(draft["lines"][2]["billing_component"], "regie")
         # Editing a report line changes the allocation; the internal audit survives reopening.
@@ -61,6 +61,14 @@ class ProgressBillingTests(unittest.TestCase):
         self.assertEqual(self.store.run(self.run["id"])["status"], "open")
         self.store.prepare_issue(draft["id"])
         self.assertEqual(self.store.run(self.run["id"])["status"], "closed")
+
+    def test_direct_rechnung_uses_the_same_checked_calculation_and_portal_note(self):
+        p = copy.deepcopy(self.proposal)
+        p["kind"] = "RE"
+        preset = self.store.progress_preset(self.run["id"], p)
+        self.assertEqual(preset["kind"], "RE")
+        self.assertEqual(preset["incrementNet"], 9800)
+        self.assertIn("Regieberichte", preset["notes"])
 
     def test_zero_remaining_sr_can_finish_an_order_already_paid_by_tr(self):
         p = copy.deepcopy(self.proposal)

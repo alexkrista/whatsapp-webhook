@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildBillingSummary } = require("../outgoing-billing-bridge");
+const { buildBillingSummary, registerOutgoingBillingBridge } = require("../outgoing-billing-bridge");
 
 test("summarizes booked WinWorker invoice and payment for a job", () => {
   const billing = buildBillingSummary(
@@ -21,6 +21,7 @@ test("summarizes booked WinWorker invoice and payment for a job", () => {
         id: 34, status: "draft", kind: "RE", source: "KRISTINE",
         issue_date: "2026-08-31", due_date: "2026-09-14",
         increment_net: 1200, increment_vat: 240, increment_gross: 1440,
+        progressBilling: { jobId: "26082", reportIdsToBill: ["r14", "r15", "r14", ""] },
       }],
       payments: [{
         id: 1, invoiceId: 33, paymentDate: "2026-08-03",
@@ -45,4 +46,29 @@ test("summarizes booked WinWorker invoice and payment for a job", () => {
   assert.equal(billing.invoices[0].sourceId, "9f9c-ww-document");
   assert.equal(billing.invoices[1].status, "draft");
   assert.equal(billing.invoices[1].openGross, 0);
+  assert.deepEqual(billing.invoices[1].progressBilling, { jobId: "26082", reportIdsToBill: ["r14", "r15"] });
+});
+
+test("only an issued KRISTINE invoice hands its linked reports back as billed", async () => {
+  let route;
+  const calls = [];
+  const app = { post(path, handler) { if (path.includes("outgoing-sync")) route = handler; } };
+  const payloads = [
+    { ok: true, projects: [{ projectNumber: "26082", projectIndex: 77 }] },
+    { ok: true },
+    { ok: true, runs: [{ id: 9 }] },
+    { ok: true, run: { id: 9, invoices: [
+      { id: 1, status: "draft", kind: "TR", progressBilling: { jobId: "26082", reportIdsToBill: ["draft-report"] } },
+      { id: 2, status: "issued", kind: "TR", invoice_number: "202609001", progressBilling: { jobId: "26082", reportIdsToBill: ["issued-report"] } },
+    ] } },
+  ];
+  registerOutgoingBillingBridge(app, {
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => payloads.shift() }),
+    onIssuedProgressInvoices: async (value) => calls.push(value),
+  });
+  let body;
+  await route({ params: { jobId: "26082" } }, { json(value) { body = value; return value; }, status() { return this; } });
+  assert.equal(body.ok, true);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].invoices.map((invoice) => invoice.progressBilling.reportIdsToBill), [["issued-report"]]);
 });
