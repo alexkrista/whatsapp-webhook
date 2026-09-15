@@ -103,7 +103,16 @@
       if(closedCollectionMembers.has(String(j?.jobId||'')))continue;
       if(!['Auftrag','Laufend','Fertig – nicht abgerechnet'].includes(String(j.status||'')))continue;
       const id=String(j.jobId),sourceJob=snapshotJobsByJob[id]||j,billing=billingByJob[id]||{partial:true},reports=reportsByJob[id]||[];
-      const recorded=Number(billing?.summary?.recordedHoursNet),totalHours=Number.isFinite(recorded)?Math.max(0,recorded):num(calc(sourceJob).actualHours);
+      // Der Brain-Snapshot liefert hier die reinen WinWorker-Stunden. Die
+      // Baustellenakte ergänzt dazu die in KRISTINE gebuchten Stunden. Für die
+      // Abrechnung muss der Tower denselben Gesamtstand verwenden; sonst wirken
+      // Regiestunden bei Mischakten fälschlich höher als die Gesamtstunden.
+      const recorded=Number(billing?.summary?.recordedHoursNet);
+      const totalHours=Math.max(
+        Number.isFinite(recorded)?Math.max(0,recorded):0,
+        num(calc(sourceJob).actualHours),
+        num(calc(j).actualHours)
+      );
       const regieHours=reports.reduce((sum,report)=>sum+num(report?.totalHours),0);
       const performance=window.KristaRegieBilling.performanceForJob(sourceJob,{billing,reports,actualHours:totalHours,regieHours,dataUpdatedAt:billingSnapshotAt,hoursThroughDate:billingThroughDate});
       if(!performance.hasClosingInvoice&&(!performance.complete||performance.amountToInvoice>.005))rows.push({job:j,...performance});
