@@ -44,14 +44,15 @@ test("does not claim a through-boundary when billed reports have a gap",()=>{
   assert.equal(result.openAmount,200);
 });
 
-test("treats PDF-only and WW reports without a real invoice link as open",()=>{
+test("treats every report without a real invoice link as open",()=>{
   const result=summarize([
     {reportNumber:"PDF",source:"PDF",totalNet:400},
     {reportNumber:"WW",source:"WW",totalNet:250,billedDocumentId:"00000000-0000-0000-0000-000000000000"},
+    {reportNumber:"Alt",source:"OTHER",totalNet:100},
   ]);
   assert.equal(result.unknownRows.length,0);
-  assert.equal(result.openRows.length,2);
-  assert.equal(result.openAmount,650);
+  assert.equal(result.openRows.length,3);
+  assert.equal(result.openAmount,750);
   assert.equal(result.billedRows.length,0);
 });
 

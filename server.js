@@ -2975,11 +2975,10 @@ app.get("/admin/api/jobs", async (req, res) => {
       const jobIsSettled = ["geschlossen", "abgerechnet"].includes(String(meta.status || "").trim().toLowerCase());
       const regieBillingState = (row) => {
         if (jobIsSettled) return "billed";
-        const source = String(row?.source || "").toUpperCase();
         const manualStatus = String(row?.billingStatus || "").toLowerCase();
         const automaticBilled = Boolean(String(row?.billedDocumentId || "").trim());
         const billed = manualStatus === "billed" || (manualStatus !== "open" && automaticBilled);
-        const open = manualStatus === "open" || (!billed && ["WW", "PDF"].includes(source));
+        const open = !billed;
         return billed ? "billed" : open ? "open" : "unknown";
       };
       const regieRows = regieReports.map((row) => ({ row, state: regieBillingState(row), hours: Math.max(0, documentNumber(row?.totalHours)), amount: regieAmount(row) }));

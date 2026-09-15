@@ -11,7 +11,7 @@ const tower = fs.readFileSync(path.join(root, "public", "ui", "tower-baustellen-
 assert.match(server, /const automaticBilled = Boolean\(String\(row\?\.billedDocumentId/);
 assert.match(server, /if \(jobIsSettled\) return "billed"/);
 assert.match(server, /manualStatus === "billed" \|\| \(manualStatus !== "open" && automaticBilled\)/);
-assert.match(server, /manualStatus === "open" \|\| \(!billed && \["WW", "PDF"\]\.includes\(source\)\)/);
+assert.match(server, /const open = !billed/);
 assert.match(server, /openAmount: regieRows\.filter\(\(entry\) => entry\.state !== "billed"\)/);
 assert.match(tower, /performanceForJob\(j,\{billing,actualHours:totalHours\}\)/);
 assert.doesNotMatch(tower, /orderHours\+regieHours/);

@@ -247,9 +247,9 @@
     }
     const rows=dedupeReports(reports).map(report=>{
       const billedDocumentId=String(report?.billedDocumentId||"").trim(),billedKey=documentKey(billedDocumentId);
-      const invoice=invoiceBySourceId.get(billedKey)||null,source=String(report?.source||"").toUpperCase(),manualStatus=String(report?.billingStatus||"").toLowerCase();
+      const invoice=invoiceBySourceId.get(billedKey)||null,manualStatus=String(report?.billingStatus||"").toLowerCase();
       const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase()),automaticBilled=!invoiceUnissued&&Boolean(billedKey);
-      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=manualStatus==="open"||(!billed&&(source==="WW"||source==="PDF"));
+      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=!billed;
       return {report,billed,open,unknown:!billed&&!open,billedDocumentId,invoice,amount:reportAmount(report),hours:number(report?.totalHours)};
     });
     const openRows=rows.filter(row=>row.open),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);

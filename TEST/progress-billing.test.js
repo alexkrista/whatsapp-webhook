@@ -38,8 +38,8 @@ test('pure Regie RE does not settle the fixed order',()=>{
   assert.equal(p.hasClosingInvoice,false);assert.equal(p.fixedPartialInvoiceNet,0);assert.equal(p.amountToInvoice,11100);
   assert.equal(B.performanceForJob(job,{reports,billing:{invoices:[{...invoices[0],kind:'SR'}]}}).amountToInvoice,0);
 });
-test('unknown reports, missing target and partial invoice sources produce unknown instead of a false zero',()=>{
-  for(const p of [B.calculatePerformance({...base,fixedTargetHours:0}),B.calculatePerformance({...base,partial:true}),B.performanceForJob(job,{reports:[{source:'OTHER',totalNet:300}],billing:{invoices:[]}})]){
+test('missing target and partial invoice sources produce unknown instead of a false zero',()=>{
+  for(const p of [B.calculatePerformance({...base,fixedTargetHours:0}),B.calculatePerformance({...base,partial:true})]){
     assert.equal(p.complete,false);assert.equal(p.amountToInvoice,null);assert(p.issues.length);
   }
 });
