@@ -43,6 +43,10 @@ test('missing target and partial invoice sources produce unknown instead of a fa
     assert.equal(p.complete,false);assert.equal(p.amountToInvoice,null);assert(p.issues.length);
   }
 });
+test('pure Regie remains billable when report hours exceed missing time-clock hours',()=>{
+  const p=B.calculatePerformance({actualHours:0,regieHours:18,fixedTargetHours:0,contractAmount:0,fixedContractAmount:0,actualRegieAmount:2581});
+  assert.equal(p.complete,true);assert.equal(p.amountToInvoice,2581);assert.deepEqual(p.issues,[]);
+});
 test('signed balances and clamped payable amounts are explained separately',()=>{
   const p=B.calculatePerformance({...base,partialInvoiceNet:12000});
   assert.equal(p.fixedBalance,-2000);assert.equal(p.fixedToInvoice,0);assert.equal(p.amountToInvoice,1800);
