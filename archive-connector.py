@@ -4524,6 +4524,103 @@ def _project_pdf_rows(project_number, book_numbers=None, limit=600):
     return result
 
 
+def _project_pdf_reference_state(pdf, project_number):
+    """Return True/False/None for a PDF's project reference.
+
+    A project number in the filename/path or an explicit ``Projekt:`` line is
+    strong evidence. ``None`` means that the PDF contains no usable project
+    reference; this is only acceptable for an exact WW document-ID match.
+    """
+    wanted = _normalize_project_identifier(project_number)
+    if not wanted:
+        return None
+
+    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
+    references = {
+        _normalize_project_identifier(value)
+        for value in re.findall(
+            r"(?im)\bprojekt(?:nummer|\s*nr\.?)?\s*[:#]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",
+            raw_text,
+        )
+    }
+    references.discard("")
+    if references:
+        return wanted in references
+
+    filename = _normalize_project_identifier(pdf.get("filename"))
+    path_value = _normalize_project_identifier(pdf.get("path"))
+    if wanted in filename or wanted in path_value:
+        return True
+    return None
+
+
+def _project_pdf_primary_book_number(pdf):
+    """Read the document's own number, not referenced previous invoices."""
+    raw_text = str(pdf.get("_raw_text") or pdf.get("text") or "")
+    patterns = (
+        r"(?im)^\s*(?:belegnummer|rechnungsnummer)\s*:?\s*([0-9][A-Z0-9./_-]{2,})",
+        r"(?im)^\s*nr\.?\s*:?\s*([0-9][A-Z0-9./_-]{2,})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw_text)
+        if match:
+            return _normalize_project_identifier(match.group(1))
+    return ""
+
+
+def _project_pdf_fallback_score(pdf, book, project_number, all_book_numbers=()):
+    """Score a fallback PDF only inside the requested project and document."""
+    if _project_pdf_reference_state(pdf, project_number) is not True:
+        return None
+
+    number_norm = _normalize_project_identifier(book.get("bookNumber"))
+    if len(number_norm) < 3:
+        return None
+
+    filename_norm = _normalize_project_identifier(pdf.get("filename"))
+    path_norm = _normalize_project_identifier(pdf.get("path"))
+    text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
+    primary_number = _project_pdf_primary_book_number(pdf)
+
+    # A PDF naming or declaring another known document number must never be
+    # attached merely because an earlier invoice is mentioned in its body.
+    other_numbers = {
+        _normalize_project_identifier(value)
+        for value in all_book_numbers
+        if _normalize_project_identifier(value) not in {"", number_norm}
+    }
+    if primary_number and primary_number != number_norm:
+        return None
+    if any(other in filename_norm or other in path_norm for other in other_numbers):
+        return None
+
+    book_type = str(book.get("documentType") or "")
+    pdf_type = canonical_project_document_type(
+        pdf.get("dokumenttyp"),
+        pdf.get("filename"),
+        pdf.get("path"),
+        pdf.get("_raw_text"),
+    )
+    generic_types = {"Sonstige Dokumente", "Weitere WW-Belege"}
+    if (
+        book_type not in generic_types
+        and pdf_type not in generic_types
+        and book_type != pdf_type
+    ):
+        return None
+
+    score = 0
+    if number_norm in filename_norm:
+        score += 200
+    if number_norm in path_norm:
+        score += 120
+    if primary_number == number_norm:
+        score += 100
+    elif number_norm in text_norm:
+        score += 15
+    return score or None
+
+
 
 def _project_sql_ident(value):
     """SQL-Identifier ausschließlich aus gelesenen SQL-Metadaten quoten."""
@@ -4804,7 +4901,7 @@ def _project_pdf_rows_by_docids(doc_ids):
     buckets = {}
     try:
         cols = {row[1] for row in con.execute("PRAGMA table_info(pdf_index)").fetchall()}
-        select = ["filename", "path", "dokumenttyp", "modified"]
+        select = ["filename", "path", "dokumenttyp", "modified", "text"]
         for optional in ("source", "doc_year", "logical_id"):
             if optional in cols:
                 select.append(optional)
@@ -4836,6 +4933,7 @@ def _project_pdf_rows_by_docids(doc_ids):
             rows = con.execute(sql, params).fetchall()
             for row in rows:
                 item = dict(row)
+                item["_raw_text"] = item.pop("text", "") or ""
                 filename = str(item.get("filename") or "")
                 doc_key = filename_map.get(filename.lower())
                 if not doc_key:
@@ -5083,32 +5181,17 @@ def project_document_catalog(project_index):
     # OCR-Text ist nur die letzte Stufe.
     fallback_assignments = {}
     for pdf_index, pdf in enumerate(fallback_pdfs):
-        filename_norm = _normalize_project_identifier(pdf.get("filename"))
-        path_norm = _normalize_project_identifier(pdf.get("path"))
-        text_norm = _normalize_project_identifier(pdf.get("_raw_text"))
         best = None
         for book_index, book in enumerate(books):
             number_norm = _normalize_project_identifier(book.get("bookNumber"))
-            if len(number_norm) < 3:
-                continue
-            book_type = str(book.get("documentType") or "")
-            pdf_type = canonical_project_document_type(
-                pdf.get("dokumenttyp"), pdf.get("filename"), pdf.get("path")
+            score = _project_pdf_fallback_score(
+                pdf,
+                book,
+                project.get("projectNumber"),
+                book_numbers,
             )
-            generic_types = {"Sonstige Dokumente", "Weitere WW-Belege"}
-            if (
-                book_type not in generic_types
-                and pdf_type not in generic_types
-                and book_type != pdf_type
-            ):
+            if score is None:
                 continue
-            score = 0
-            if number_norm in filename_norm:
-                score += 100
-            if number_norm in path_norm:
-                score += 60
-            if number_norm in text_norm:
-                score += 15
             rank = (score, len(number_norm))
             if score and (best is None or rank > best[:2]):
                 best = (score, len(number_norm), book_index)
@@ -5120,6 +5203,9 @@ def project_document_catalog(project_index):
     used_fallback_indices = set()
 
     def append_book_pdf(book, pdf, exact=False):
+        project_state = _project_pdf_reference_state(pdf, project.get("projectNumber"))
+        if exact and project_state is False:
+            return False
         item = dict(pdf)
         path_key = str(item.get("path") or "").strip().lower()
         if not path_key or path_key in used_paths:
@@ -7788,7 +7874,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.14.62",
+        "version": "0.14.63",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -9133,7 +9219,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.14.62 - Abrechnung mit Vortag und sichtbare Connector-Version")
+    print("Version: 0.14.63 - WW-PDFs sicher nach Projekt und Beleg zuordnen")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
