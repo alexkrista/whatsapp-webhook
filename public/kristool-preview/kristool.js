@@ -2038,4 +2038,3 @@ document.addEventListener("keydown",event=>{
   if($("employeeLogicModal")&&!$("employeeLogicModal").hidden)closeEmployeeLogic();
   if($("dietReportModal")&&!$("dietReportModal").hidden)closeDietReport();
 });
-
