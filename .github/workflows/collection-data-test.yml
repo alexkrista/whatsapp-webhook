@@ -21,6 +21,7 @@ jobs:
       - run: node --test TEST/regie-billing-state.test.js TEST/progress-billing.test.js TEST/outgoing-billing-bridge.test.js TEST/kgo-regie-date.test.js
       - run: node TEST/baustellen-economy-values.test.js && node TEST/tower-open-regie-only.test.js
       - run: python -m unittest TEST.test_progress_billing TEST.test_outgoing_store
+      - run: python TEST/test_project_document_catalog.py
       - run: python -m py_compile archive-connector.py brain_outgoing_invoices.py brain_outgoing_store.py brain_progress_billing.py
 
 
