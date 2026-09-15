@@ -2979,7 +2979,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         const manualStatus = String(row?.billingStatus || "").toLowerCase();
         const automaticBilled = Boolean(String(row?.billedDocumentId || "").trim());
         const billed = manualStatus === "billed" || (manualStatus !== "open" && automaticBilled);
-        const open = manualStatus === "open" || (!billed && source === "WW");
+        const open = manualStatus === "open" || (!billed && ["WW", "PDF"].includes(source));
         return billed ? "billed" : open ? "open" : "unknown";
       };
       const regieRows = regieReports.map((row) => ({ row, state: regieBillingState(row), hours: Math.max(0, documentNumber(row?.totalHours)), amount: regieAmount(row) }));
@@ -2991,7 +2991,10 @@ app.get("/admin/api/jobs", async (req, res) => {
           sourceId: String(row.sourceId || ""), reportNumber: String(row.reportNumber || row.name || ""),
           sheetNumber: String(row.sheetNumber || ""), reportDate: String(row.reportDate || ""),
           billedDocumentId: String(row.billedDocumentId || ""), billingStatus: String(row.billingStatus || ""),
-          totalHours: hours, totalNet: amount,
+          totalHours: hours,
+          laborCost: row.laborCost === undefined ? undefined : Math.max(0, documentNumber(row.laborCost)),
+          materialCost: (row.materialCost ?? row.materialTotal) === undefined ? undefined : Math.max(0, documentNumber(row.materialCost ?? row.materialTotal)),
+          totalNet: amount,
         })),
         hours: regieRows.reduce((sum, entry) => sum + entry.hours, 0),
         amount: regieRows.reduce((sum, entry) => sum + entry.amount, 0),

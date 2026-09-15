@@ -44,14 +44,30 @@ test("does not claim a through-boundary when billed reports have a gap",()=>{
   assert.equal(result.openAmount,200);
 });
 
-test("does not mark PDF-only reports or a zero GUID as billed",()=>{
+test("treats PDF-only and WW reports without a real invoice link as open",()=>{
   const result=summarize([
     {reportNumber:"PDF",source:"PDF",totalNet:400},
     {reportNumber:"WW",source:"WW",totalNet:250,billedDocumentId:"00000000-0000-0000-0000-000000000000"},
   ]);
-  assert.equal(result.unknownRows.length,1);
-  assert.equal(result.openRows.length,1);
-  assert.equal(result.openAmount,250);
+  assert.equal(result.unknownRows.length,0);
+  assert.equal(result.openRows.length,2);
+  assert.equal(result.openAmount,650);
   assert.equal(result.billedRows.length,0);
+});
+
+test("recognizes compact project report numbers and never displays an empty report as zero",()=>{
+  const B=require("../public/ui/regie-billing-state");
+  assert.equal(B.reportRange([{projectNumber:"26082",reportNumber:"26082014"},{projectNumber:"26082",reportNumber:"26082015"}]),"14–15");
+  assert.equal(B.reportRange([{reportNumber:"PDF"}]),"");
+});
+
+test("uses whole-euro material subtotals for the reviewed Regie statement",()=>{
+  const result=summarize([
+    {source:"WW",reportNumber:"1",laborCost:24543.75,materialCost:6468.87,billedDocumentId:"old"},
+    {source:"PDF",projectNumber:"26082",reportNumber:"26082014",laborCost:4901.25,materialCost:1089.22},
+  ]);
+  assert.equal(result.billedAmount,31012.75);
+  assert.equal(result.openAmount,5990.25);
+  assert.equal(result.totalAmount,37003);
 });
 

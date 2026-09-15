@@ -39,7 +39,7 @@ test('pure Regie RE does not settle the fixed order',()=>{
   assert.equal(B.performanceForJob(job,{reports,billing:{invoices:[{...invoices[0],kind:'SR'}]}}).amountToInvoice,0);
 });
 test('unknown reports, missing target and partial invoice sources produce unknown instead of a false zero',()=>{
-  for(const p of [B.calculatePerformance({...base,fixedTargetHours:0}),B.calculatePerformance({...base,partial:true}),B.performanceForJob(job,{reports:[{source:'PDF',totalNet:300}],billing:{invoices:[]}})]){
+  for(const p of [B.calculatePerformance({...base,fixedTargetHours:0}),B.calculatePerformance({...base,partial:true}),B.performanceForJob(job,{reports:[{source:'OTHER',totalNet:300}],billing:{invoices:[]}})]){
     assert.equal(p.complete,false);assert.equal(p.amountToInvoice,null);assert(p.issues.length);
   }
 });
@@ -91,6 +91,21 @@ test('old TR without report IDs allocates billed Regie first and leaves the corr
   assert.equal(p.billablePerformance,44709.93);assert.equal(p.fixedToInvoice,4150.68);assert.equal(p.amountToInvoice,10140.93);
   assert.equal(p.billedRegieRange,'1');assert.equal(p.openRegieRange,'14');
   assert.match(B.renderCalculation(p),/Leistungssumme gesamt/);assert.match(B.renderCalculation(p),/Teilrechnung vorbereiten/);
+});
+test('Halter live stand keeps the reviewed whole-percent progress and legacy invoice rounding',()=>{
+  const halter={jobId:'26082',name:'Halter',calculation:{actualHours:480.3,actualRegieHours:392.6,fixedCalculatedHours:570.95,plannedRegieHours:430,contractAmount:92379.94,kristaAmount:51529.94,regieBudgetAmount:40850}};
+  const reports=[
+    {id:'r1',source:'WW',projectNumber:'26082',reportNumber:'M 01',sheetNumber:'1',totalHours:327.25,laborCost:24543.75,materialCost:6468.87,billedDocumentId:'old-ww-tr'},
+    {id:'r14',source:'PDF',projectNumber:'26082',reportNumber:'26082014',totalHours:19.1,laborCost:1432.5,materialCost:130.58},
+    {id:'r15',source:'PDF',projectNumber:'26082',reportNumber:'26082015',totalHours:46.25,laborCost:3468.75,materialCost:958.64,billingStatus:'open'},
+  ];
+  const p=B.performanceForJob(halter,{reports,billing:{invoices:[{invoiceNumber:'TR alt',kind:'TR',status:'issued',net:34568.85}]}});
+  assert.equal(p.fixedContractAmount,51529.94);assert.equal(p.plannedRegieAmount,40850);assert.equal(p.fixedTargetHours,571);
+  assert(Math.abs(p.completionPercent-((480.3-392.6)/571*100))<1e-9);assert.equal(p.orderPerformance,7914.49);
+  assert.equal(p.billedRegieAmount,31012.75);assert.equal(p.regieToInvoice,5990.25);
+  assert.equal(p.billablePerformance,44917.49);assert.equal(p.partialInvoiceNet,34569);assert.equal(p.amountToInvoice,10348.49);
+  assert.equal(p.openRegieRange,'14–15');assert.equal(p.complete,true);
+  assert.match(B.renderCalculation(p),/15 % von/);
 });
 test('a direct Rechnung proposal carries the customer-portal note',()=>{
   const p=B.performanceForJob(job,{reports,billing:{invoices}}),proposal=B.prepareInvoiceProposal(p,{kind:'RE'});

@@ -20,6 +20,12 @@
     const sheet=String(report?.sheetNumber||"").match(/(\d+)\D*$/);
     if(sheet)return String(Number(sheet[1]));
     const label=String(report?.reportNumber||report?.name||"").trim();
+    const projectNumber=String(report?.projectNumber||report?.jobId||"").replace(/\D/g,"");
+    const compact=label.replace(/\D/g,"");
+    if(/^\d+$/.test(label)&&projectNumber&&compact.startsWith(projectNumber)){
+      const suffix=compact.slice(projectNumber.length);
+      if(/^\d{1,3}$/.test(suffix))return String(Number(suffix));
+    }
     const slash=label.match(/\/(\d+)\D*$/);
     if(slash)return String(Number(slash[1]));
     const match=label.match(/(?:^|\D)(\d{1,3})\D*$/);
@@ -53,7 +59,7 @@
   }
 
   const cents=value=>Math.round((number(value)+Number.EPSILON)*100)/100;
-  const CALCULATION_VERSION="20260915-progress-2";
+  const CALCULATION_VERSION="20260915-progress-3";
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours)),regieHours=Math.max(0,number(input.regieHours));
     const orderHours=Math.max(0,actualHours-regieHours),fixedTargetHours=Math.max(0,number(input.fixedTargetHours));
@@ -108,15 +114,17 @@
   function allocatePartialInvoices(invoices,state){
     const issued=issuedInvoices(invoices),partials=issued.filter(invoice=>String(invoice.kind||"").toUpperCase()==="TR");
     let partialInvoiceNet=0,regiePartialInvoiceNet=0,linkedRegiePartialNet=0;const issues=[];
-    const covered=invoice=>state.billedRows.filter(row=>documentKey(invoice.sourceId)&&documentKey(invoice.sourceId)===documentKey(row.billedDocumentId)).reduce((sum,row)=>sum+row.amount,0);
+    const covered=invoice=>reportSubtotal(state.billedRows.filter(row=>documentKey(invoice.sourceId)&&documentKey(invoice.sourceId)===documentKey(row.billedDocumentId)));
     for(const invoice of partials){
-      const net=number(invoice.net),reports=covered(invoice),explicit=invoice.regieNet;
+      // Legacy transition invoices were written and reviewed in whole euros.
+      // New invoices carry progressBilling and retain their exact cent value.
+      const rawNet=number(invoice.net),net=invoice.progressBilling?rawNet:Math.round(rawNet),reports=covered(invoice),explicit=invoice.regieNet;
       if(net<0){issues.push("Eine negative Teilrechnung muss dem Fix- oder Regieanteil zugeordnet werden.");continue;}
       const regie=explicit===undefined||explicit===null?Math.min(net,reports):number(explicit);
       if(regie<0||regie>net+.02){issues.push(`Regieanteil der Teilrechnung ${invoice.invoiceNumber||""} ist nicht plausibel.`);continue;}
       partialInvoiceNet+=net;regiePartialInvoiceNet+=regie;linkedRegiePartialNet+=Math.min(regie,reports);
     }
-    const unlinkedBilled=state.billedRows.filter(row=>!row.invoice).reduce((sum,row)=>sum+row.amount,0);
+    const unlinkedBilled=reportSubtotal(state.billedRows.filter(row=>!row.invoice));
     const fallbackRegie=Math.min(Math.max(0,partialInvoiceNet-regiePartialInvoiceNet),unlinkedBilled);
     // Alte WW-Teilrechnungen enthalten nicht immer die technische Bericht-ID.
     // In diesem Fall wird der bereits abgerechnete Berichtswert gegen den
@@ -136,7 +144,7 @@
     const result=calculatePerformance({...allocation,jobId:job.jobId,jobName:job.name||job.jobName,
       actualHours:options.actualHours??c.actualHours,regieHours:Math.max(number(c.actualRegieHours),reportHours),
       fixedTargetHours,plannedRegieHours,
-      contractAmount:c.contractAmount??job.contractAmount,plannedRegieAmount:c.regieBudgetAmount,
+      contractAmount:c.contractAmount??job.contractAmount,fixedContractAmount:c.kristaAmount,plannedRegieAmount:c.regieBudgetAmount,
       actualRegieAmount:state.totalAmount,billedRegieAmount:state.billedAmount,
       hasClosingInvoice:!!options.settled||allocation.hasClosingInvoice,partial:!!billing.partial,issues,dataUpdatedAt:options.dataUpdatedAt});
     result.invoiceSnapshot=invoiceSnapshot(billing.invoices);
@@ -217,7 +225,7 @@
   function renderCalculation(p){
     if(!p)return "";installCalculationUi();
     const range=(value,count)=>value?` ${escape(value)}`:count?` · ${count} Bericht(e)`:"";
-    const summary=p.aggregated?"":`<div class="krb-summary"><div><span>Leistungsstand lt. Auftrag</span><small>${escape(formatPercent(p.completionPercent))} von ${escape(formatMoney(p.fixedContractAmount))}</small><strong>${escape(formatMoney(p.orderPerformance))}</strong></div><div><span>Regie abgerechnet${range(p.billedRegieRange,p.billedRegieCount)}</span><strong>${escape(formatMoney(p.billedRegieAmount))}</strong></div><div><span>Regie offen${range(p.openRegieRange,p.openRegieCount)}</span><strong>${escape(formatMoney(p.regieToInvoice))}</strong></div><div class="total"><span>Leistungssumme gesamt</span><strong>${escape(formatMoney(p.billablePerformance))}</strong></div><div><span>Bereits geschrieben</span><strong>− ${escape(formatMoney(p.partialInvoiceNet))}</strong></div><div class="pay"><span>Jetzt abzurechnen</span><strong>${escape(formatMoney(p.amountToInvoice))} netto</strong></div></div>`;
+    const summary=p.aggregated?"":`<div class="krb-summary"><div><span>Leistungsstand lt. Auftrag</span><small>${escape(p.completionPercent===null||p.completionPercent===undefined?"–":Math.round(p.completionPercent)+" %")} von ${escape(formatMoney(p.fixedContractAmount))}</small><strong>${escape(formatMoney(p.orderPerformance))}</strong></div><div><span>Regie abgerechnet${range(p.billedRegieRange,p.billedRegieCount)}</span><strong>${escape(formatMoney(p.billedRegieAmount))}</strong></div><div><span>Regie offen${range(p.openRegieRange,p.openRegieCount)}</span><strong>${escape(formatMoney(p.regieToInvoice))}</strong></div><div class="total"><span>Leistungssumme gesamt</span><strong>${escape(formatMoney(p.billablePerformance))}</strong></div><div><span>Bereits geschrieben</span><strong>− ${escape(formatMoney(p.partialInvoiceNet))}</strong></div><div class="pay"><span>Jetzt abzurechnen</span><strong>${escape(formatMoney(p.amountToInvoice))} netto</strong></div></div>`;
     const actions=p.complete&&!p.hasClosingInvoice?(p.aggregated?`<button type="button" data-krb-review="${escape(JSON.stringify(p))}">Einzelakte zur Abrechnung wählen</button>`:`<div class="krb-actions"><button type="button" class="primary" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="TR">Teilrechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}" data-krb-kind="RE">Rechnung vorbereiten</button><button type="button" data-krb-review="${escape(JSON.stringify(p))}">Prüfen / Schlussrechnung</button></div>`):"";
     return `<div class="krb-calculation">${summary}<small>${escape(compactCalculation(p))}</small><details><summary>Rechenweg · Fixauftrag und Regie</summary><div class="krb-lines">${calculationLines(p).map(line=>`<div>${escape(line)||"&nbsp;"}</div>`).join("")}</div><button type="button" data-krb-download="${escape(JSON.stringify(p))}">Rechenweg herunterladen (.txt)</button><small>Berechnet: ${escape(new Date(p.calculatedAt).toLocaleString("de-AT"))}${p.dataUpdatedAt?` · Datenstand: ${escape(new Date(p.dataUpdatedAt).toLocaleString("de-AT"))}`:""}</small></details>${renderWarnings(p)}${actions}</div>`;
   }
@@ -241,7 +249,7 @@
       const billedDocumentId=String(report?.billedDocumentId||"").trim(),billedKey=documentKey(billedDocumentId);
       const invoice=invoiceBySourceId.get(billedKey)||null,source=String(report?.source||"").toUpperCase(),manualStatus=String(report?.billingStatus||"").toLowerCase();
       const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase()),automaticBilled=!invoiceUnissued&&Boolean(billedKey);
-      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=manualStatus==="open"||(!billed&&source==="WW");
+      const billed=manualStatus==="billed"||(manualStatus!=="open"&&automaticBilled),open=manualStatus==="open"||(!billed&&(source==="WW"||source==="PDF"));
       return {report,billed,open,unknown:!billed&&!open,billedDocumentId,invoice,amount:reportAmount(report),hours:number(report?.totalHours)};
     });
     const openRows=rows.filter(row=>row.open),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);
@@ -253,17 +261,27 @@
     return {
       rows,openRows,billedRows,unknownRows,hasGap,
       billedThrough:hasGap?null:lastContinuousBilled,
-      openAmount:openRows.reduce((sum,row)=>sum+row.amount,0),
+      openAmount:reportSubtotal(openRows),
       openHours:openRows.reduce((sum,row)=>sum+row.hours,0),
-      billedAmount:billedRows.reduce((sum,row)=>sum+row.amount,0),
+      billedAmount:reportSubtotal(billedRows),
       billedHours:billedRows.reduce((sum,row)=>sum+row.hours,0),
-      unknownAmount:unknownRows.reduce((sum,row)=>sum+row.amount,0),
-      totalAmount:rows.reduce((sum,row)=>sum+row.amount,0),
+      unknownAmount:reportSubtotal(unknownRows),
+      totalAmount:reportSubtotal(rows),
     };
   }
 
+  function reportSubtotal(rows){
+    let labor=0,material=0,other=0;
+    for(const row of rows||[]){
+      const report=row.report||row,materialValue=report?.materialCost??report?.materialTotal;
+      if(report?.laborCost!==undefined&&materialValue!==undefined){labor+=number(report.laborCost);material+=number(materialValue)}
+      else other+=number(row.amount??reportAmount(report));
+    }
+    return cents(labor+Math.round(material)+other);
+  }
+
   function reportRange(rows){
-    const values=[...new Set((rows||[]).map(row=>Number(reportSequence(row.report||row))).filter(Number.isFinite))].sort((a,b)=>a-b);
+    const values=[...new Set((rows||[]).map(row=>reportSequence(row.report||row)).filter(Boolean).map(Number).filter(Number.isFinite))].sort((a,b)=>a-b);
     if(!values.length)return "";
     const parts=[];let start=values[0],last=values[0];
     for(const value of values.slice(1)){if(value===last+1){last=value;continue}parts.push(start===last?String(start):`${start}–${last}`);start=last=value}
