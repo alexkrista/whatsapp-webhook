@@ -79,8 +79,12 @@ test('manual report status overrides automatic WW/PDF status and stays calculabl
   const state=B.summarize([
     {id:'a',source:'WW',reportNumber:'1',totalNet:100,billedDocumentId:'doc',billingStatus:'open'},
     {id:'b',source:'PDF',reportNumber:'2',totalNet:200,billingStatus:'billed'},
-  ],{invoices:[]});
+  ],{invoices:[{sourceId:'doc',status:'issued',kind:'TR',net:100}]});
   assert.equal(state.openRows[0].report.id,'a');assert.equal(state.billedRows[0].report.id,'b');assert.equal(state.unknownRows.length,0);
+});
+test('a report marker without an issued invoice is not treated as billed',()=>{
+  const state=B.summarize([{id:'a',source:'WW',reportNumber:'1',totalNet:3488.04,billedDocumentId:'missing'}],{invoices:[]});
+  assert.equal(state.billedRows.length,0);assert.equal(state.openRows.length,1);assert.equal(state.openAmount,3488.04);
 });
 test('old TR without report IDs allocates billed Regie first and leaves the correct fixed balance',()=>{
   const halter={jobId:'25001',name:'Halter',calculation:{actualHours:478,actualRegieHours:392.6,fixedCalculatedHours:570.95,plannedRegieHours:430,contractAmount:92379.94,regieBudgetAmount:40850}};
