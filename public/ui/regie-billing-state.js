@@ -59,7 +59,7 @@
   }
 
   const cents=value=>Math.round((number(value)+Number.EPSILON)*100)/100;
-  const CALCULATION_VERSION="20260915-progress-4";
+  const CALCULATION_VERSION="20260915-progress-5";
   function calculatePerformance(input={}){
     const actualHours=Math.max(0,number(input.actualHours)),regieHours=Math.max(0,number(input.regieHours));
     const orderHours=Math.max(0,actualHours-regieHours),fixedTargetHours=Math.max(0,number(input.fixedTargetHours));
@@ -81,7 +81,10 @@
     const regieBalance=cents(actualRegieAmount-regieDeductions),regieToInvoice=Math.max(0,regieBalance);
     const hasClosingInvoice=!!input.hasClosingInvoice,issues=[...(input.issues||[])];
     if(fixedContractAmount>0&&fixedTargetHours<=0)issues.push("Sollstunden ohne Regie fehlen. Der Fertigstellungsgrad ist noch nicht berechenbar.");
-    if(regieHours>actualHours+.02)issues.push("Regiestunden sind höher als die Gesamtstunden. Stundenstand abgleichen.");
+    // Bei reiner Regie sind die freigegebenen Berichte selbst die
+    // Abrechnungsgrundlage. Fehlende Stempelstunden dürfen deren Betrag nicht
+    // blockieren. Bei Misch-/Fixaufträgen bleibt die Kontrolle zwingend.
+    if(fixedContractAmount>0&&regieHours>actualHours+.02)issues.push("Regiestunden sind höher als die Gesamtstunden. Stundenstand abgleichen.");
     if(input.partial)issues.push("Der Rechnungs- oder Berichtsdatenstand ist unvollständig.");
     const complete=hasClosingInvoice||issues.length===0;
     const amountToInvoice=hasClosingInvoice?0:complete?cents(fixedToInvoice+regieToInvoice):null;
