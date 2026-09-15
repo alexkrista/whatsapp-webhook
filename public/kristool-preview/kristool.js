@@ -19,6 +19,7 @@ const state = {
   activeEmployeeId: "",
   dietOverride: null,
   release: null,
+  dayControl: null,
   modelFreeConfirmed: false,
 };
 
@@ -653,6 +654,12 @@ async function loadDayQueue(){
   }
 }
 
+function updateDayControlButton(){
+  const button=$("openDayControl");if(!button)return;
+  const total=state.dayQueue.length,done=state.dayQueue.filter(item=>item.released).length;
+  button.textContent=total?`✓ Tageskontrolle Überblick · ${done}/${total}`:"✓ Tageskontrolle Überblick";
+}
+
 function activeQueueItem(){
   const id=String($("employeeSelect")?.value||state.activeEmployeeId||"");
   return (state.dayQueue||[]).find(item=>String(item.employeeId)===id)||null;
@@ -713,6 +720,7 @@ function queueStatus(item){
   const absence=String(item.absenceType||item.cardType||"").toLowerCase();
   const isAbsent=["urlaub","krank","feiertag","arzt","za"].includes(absence);
   const gpsCount=Number(item.gpsTripCount||item.tripCount||0);
+  if(item.returned)return {label:"Zurück zur Prüfung",cls:"warning"};
   if(isAbsent&&gpsCount>0)return {label:`${absence.toUpperCase()} + GPS`,cls:"warning"};
   if(isAbsent)return {
     label:absence==="urlaub"?"Urlaub":
@@ -816,6 +824,7 @@ function renderDayQueue(){
     button.addEventListener("click",()=>openQueueEmployee(button.dataset.employeeId,button.dataset.driverKey));
   });
   applyQueueSummaryStatus(drivers,team);
+  updateDayControlButton();
 }
 async function openQueueEmployee(employeeId,driverKey=""){
   if(!employeeId)return toast("Dieser Fahrer konnte keinem Mitarbeiter zugeordnet werden.",true);
@@ -827,6 +836,82 @@ async function openQueueEmployee(employeeId,driverKey=""){
   $("driverSelect").value=group?.key||"";
   renderDayQueue();
   await loadDay();
+}
+
+function dayControlBounds(items){
+  const values=(items||[]).flatMap(item=>(item.segments||[]).flatMap(segment=>[minutes(segment.from),minutes(segment.to)])).filter(value=>value!==null);
+  return {from:Math.min(6*60,...values),to:Math.max(18*60,...values)};
+}
+function dayControlTrack(segments,bounds){
+  const span=Math.max(60,bounds.to-bounds.from);
+  return (segments||[]).map(segment=>{
+    const from=minutes(segment.from),to=minutes(segment.to);
+    if(from===null||to===null||to<=from)return "";
+    const left=Math.max(0,Math.min(100,(from-bounds.from)/span*100));
+    const width=Math.max(.25,Math.min(100-left,(to-from)/span*100));
+    return `<span class="day-control-segment ${esc(segment.kind)}" style="left:${left}%;width:${width}%" title="${esc(segment.from+"–"+segment.to+" · "+segment.label)}"></span>`;
+  }).join("");
+}
+function renderDayControlOverview(payload){
+  state.dayControl=payload;
+  const items=payload.items||[],totals=payload.totals||{work:0,absence:0,break:0};
+  const open=items.filter(item=>!item.released).length,returned=items.filter(item=>item.returned).length;
+  const control=payload.control||null,confirmed=control?.confirmed===true;
+  const bounds=dayControlBounds(items);
+  $("dayControlTitle").textContent=`Tageskontrolle · ${deDate(payload.date)}`;
+  $("dayControlSubtitle").textContent="Ohne Baustellenaufteilung · Anwesenheit, Abwesenheit und Pausen aus den gespeicherten Mitarbeiterzeiten.";
+  $("dayControlSummary").innerHTML=`
+    <div class="day-control-metric"><span>Mitarbeiter</span><strong>${items.length}</strong></div>
+    <div class="day-control-metric"><span>Arbeit / anwesend</span><strong>${durationLabel(totals.work)}</strong></div>
+    <div class="day-control-metric"><span>Abwesenheit</span><strong>${durationLabel(totals.absence)}</strong></div>
+    <div class="day-control-metric"><span>Noch offen</span><strong>${open}</strong></div>`;
+  $("dayControlList").innerHTML=items.length?items.map(item=>{
+    const stateClass=item.returned?"returned":item.released?"done":"open";
+    const badge=item.returned?"Zurückgegeben":item.released?"MA abgeschlossen":"Noch offen";
+    const action=item.released
+      ? `<button class="btn secondary day-control-return" data-employee-id="${esc(item.employeeId)}" type="button">↩ Zurück an MA</button>`
+      : `<button class="btn secondary day-control-person-open" data-employee-id="${esc(item.employeeId)}" type="button">Mitarbeiter öffnen</button>`;
+    return `<article class="day-control-person ${stateClass}">
+      <div class="day-control-person-head"><div><h3>${esc(item.employeeName)}</h3><small>${item.returnedReason?esc(item.returnedReason):"Gespeicherte Tageszeiten ohne Baustellenaufteilung"}</small></div><div class="day-control-person-actions"><span class="day-control-badge ${stateClass}">${esc(badge)}</span>${action}</div></div>
+      <div class="day-control-track-wrap"><div class="day-control-axis"><span>${esc(hmFromMinutes(bounds.from))}</span><span>${esc(hmFromMinutes(Math.round((bounds.from+bounds.to)/2)))}</span><span>${esc(hmFromMinutes(bounds.to))}</span></div><div class="day-control-track">${dayControlTrack(item.segments,bounds)}</div></div>
+      <div class="day-control-totals"><span>Arbeit <strong>${durationLabel(item.totals.work)}</strong></span><span>Urlaub/Krank/Sonderurlaub <strong>${durationLabel(item.totals.absence)}</strong></span><span>Pause <strong>${durationLabel(item.totals.break)}</strong></span></div>
+    </article>`;
+  }).join(""):'<div class="fink-preview">Für diesen Tag wurden keine Mitarbeiter gefunden.</div>';
+  const status=$("dayControlStatus"),button=$("confirmDayControl");
+  if(confirmed){status.className="day-control-status done";status.textContent=`Gesamter Tag bestätigt von ${control.reviewer||"Bettina / Büro"} · ${releaseDateTime(control.confirmedAt)}`;button.disabled=true;button.textContent="✓ Ganzer Tag bestätigt"}
+  else if(payload.allReleased){status.className="day-control-status done";status.textContent="Alle Mitarbeiter sind abgeschlossen. Der gesamte Tag kann bestätigt werden.";button.disabled=false;button.textContent="✓ Gesamten Tag bestätigen"}
+  else {status.className="day-control-status warn";status.textContent=returned?`${returned} Mitarbeiter zurückgegeben · nach der Korrektur den Tag erneut bestätigen.`:`${open} Mitarbeiter noch nicht abgeschlossen.`;button.disabled=true;button.textContent="✓ Gesamten Tag bestätigen"}
+  $("dayControlList").querySelectorAll(".day-control-return").forEach(btn=>btn.addEventListener("click",()=>returnDayControlEmployee(btn.dataset.employeeId)));
+  $("dayControlList").querySelectorAll(".day-control-person-open").forEach(btn=>btn.addEventListener("click",()=>openDayControlEmployee(btn.dataset.employeeId)));
+}
+async function openDayControlOverview({auto=false}={}){
+  const modal=$("dayControlModal");if(!modal)return;
+  modal.hidden=false;
+  $("dayControlList").innerHTML='<div class="fink-preview">Tagesübersicht wird geladen …</div>';
+  try{
+    const payload=await request(`/kristine/api/day-control/${encodeURIComponent(state.activeDate)}`);
+    renderDayControlOverview(payload);
+    if(auto&&payload.control?.confirmed===true)modal.hidden=true;
+  }catch(error){$("dayControlList").innerHTML=`<div class="fink-preview">${esc(error.message)}</div>`}
+}
+function closeDayControlOverview(){if($("dayControlModal"))$("dayControlModal").hidden=true}
+async function openDayControlEmployee(employeeId){closeDayControlOverview();await openQueueEmployee(employeeId)}
+async function returnDayControlEmployee(employeeId){
+  const item=(state.dayControl?.items||[]).find(row=>String(row.employeeId)===String(employeeId));
+  const reason=prompt(`Warum soll ${item?.employeeName||"der Mitarbeiter"} den Tag nochmals prüfen?`,"Bitte Tageszeiten nochmals prüfen.");
+  if(reason===null)return;
+  try{
+    await request(`/kristine/api/day-control/${encodeURIComponent(state.activeDate)}/return`,{method:"POST",body:JSON.stringify({employeeId,reason,returnedBy:$("dayControlReviewer").value.trim()||"Bettina / Büro"})});
+    await loadDayQueue();closeDayControlOverview();await openQueueEmployee(employeeId);toast(`${item?.employeeName||"Mitarbeiter"} wurde zur Korrektur zurückgegeben.`);
+  }catch(error){toast(`Rückgabe nicht möglich: ${error.message}`,true)}
+}
+async function confirmWholeDay(){
+  const reviewer=$("dayControlReviewer").value.trim();if(!reviewer)return toast("Bitte Name der Kontrolle eintragen.",true);
+  const button=$("confirmDayControl");button.disabled=true;button.textContent="Wird bestätigt …";
+  try{
+    await request(`/kristine/api/day-control/${encodeURIComponent(state.activeDate)}`,{method:"PUT",body:JSON.stringify({reviewer})});
+    await openDayControlOverview();toast("Der gesamte Arbeitstag ist bestätigt.");
+  }catch(error){toast(`Tagesbestätigung nicht gespeichert: ${error.message}`,true);button.disabled=false;button.textContent="✓ Gesamten Tag bestätigen"}
 }
 
 function renderImport(){
@@ -1670,10 +1755,10 @@ function renderRelease(){
   const card=$("releaseCard"); if(!card)return;
   const compactControls=ensureCompactReleaseControls()||{};
   const release=state.release;
-  const released=Boolean(release?.released);
+  const released=Boolean(release?.released&&release?.returned!==true);
   card.classList.toggle("released",released);
   const pill=$("releasePill");
-  pill.textContent=released?"FREIGEGEBEN":"NICHT FREIGEGEBEN";
+  pill.textContent=release?.returned?"ZURÜCK ZUR PRÜFUNG":released?"FREIGEGEBEN":"NICHT FREIGEGEBEN";
   pill.className=`pill ${released?"released":"open"}`;
   $("releaseBy").textContent=released?(release.reviewer||"–"):"–";
   $("releaseAt").textContent=released?releaseDateTime(release.releasedAt):"wird bei Freigabe gesetzt";
@@ -1760,9 +1845,13 @@ async function saveReleaseAndNext(){
       body:JSON.stringify({employeeName,reviewer,note:$("releaseNote").value.trim(),checks:releaseChecks()})
     });
     state.release=data.release;
-    const q=state.dayQueue.find(item=>String(item.employeeId)===String(employeeId)); if(q)q.released=true;
+    const q=state.dayQueue.find(item=>String(item.employeeId)===String(employeeId)); if(q){q.released=true;q.returned=false;q.returnedReason=""}
     renderDayQueue(); renderRelease();
     toast(`${employeeName} kontrolliert und freigegeben.`);
+    if(state.dayQueue.length&&state.dayQueue.every(item=>item.released)){
+      await openDayControlOverview({auto:true});
+      return;
+    }
     await navigateRelease(1,{unreleasedOnly:true});
   }catch(error){toast(`Freigabe nicht gespeichert: ${error.message}`,true)}
 }
@@ -1773,6 +1862,10 @@ document.addEventListener("click",event=>{
   if(event.target?.id==="releaseAndNext")saveReleaseAndNext();
   if(event.target?.id==="previousEmployee")navigateRelease(-1);
   if(event.target?.id==="nextEmployee")navigateRelease(1);
+  if(event.target?.id==="openDayControl")openDayControlOverview();
+  if(event.target?.id==="closeDayControl")closeDayControlOverview();
+  if(event.target?.id==="confirmDayControl")confirmWholeDay();
+  if(event.target?.id==="dayControlModal")closeDayControlOverview();
 });
 
 function setPhase(phase){
@@ -1945,3 +2038,4 @@ document.addEventListener("keydown",event=>{
   if($("employeeLogicModal")&&!$("employeeLogicModal").hidden)closeEmployeeLogic();
   if($("dietReportModal")&&!$("dietReportModal").hidden)closeDietReport();
 });
+
