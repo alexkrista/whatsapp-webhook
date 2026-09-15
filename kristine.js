@@ -21,6 +21,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const GPS_LATEST = path.join(GPS_IMPORTS_DIR, "latest.json");
   const DAY_CORRECTIONS = path.join(ROOT, "day-corrections.json");
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
+  const DAY_CONTROLS = path.join(ROOT, "day-controls.json");
   const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
@@ -1669,6 +1670,7 @@ const open = taskId
       assignment?.jobId, assignment?.jobName, assignment?.name, assignment?.note
     ].map(v=>String(v||"").trim().toLowerCase()).join(" ");
 
+    if (/sonderurlaub/.test(raw)) return "sonderurlaub";
     if (/(^|[^a-z])urlaub([^a-z]|$)|vacation/.test(raw)) return "urlaub";
     if (/(^|[^a-z])krank([^a-z]|$)|krankenstand|(^|[^a-z])sick([^a-z]|$)/.test(raw)) return "krank";
     if (/(^|[^a-z])arzt([^a-z]|$)|arzttermin/.test(raw)) return "arzt";
@@ -1798,6 +1800,14 @@ const open = taskId
         const employeeFinkzeit=finkzeitPersonnelNumber(employee);
         const absence=employeeAbsenceForDay(assignments,employee,date);
         const employeeRule=(employeeWorkRules||{})[employeeId]||{activityMode:"productive",buak:false};
+        const release=(releases||[]).find(row =>
+          String(row.date)===date &&
+          row.released===true &&
+          (
+            (employeeFinkzeit && String(row.finkzeitPersonnelNumber||"")===employeeFinkzeit) ||
+            String(row.employeeId)===employeeId
+          )
+        );
 
         items.push({
           employeeId,
@@ -1825,14 +1835,9 @@ const open = taskId
             )
           ),
           corrected: Boolean(correction?.updatedAt),
-          released: Boolean((releases || []).find(row =>
-            String(row.date)===date &&
-            row.released===true &&
-            (
-              (employeeFinkzeit && String(row.finkzeitPersonnelNumber||"")===employeeFinkzeit) ||
-              String(row.employeeId)===employeeId
-            )
-          )),
+          released: Boolean(release&&release.returned!==true),
+          returned: Boolean(release?.returned===true),
+          returnedReason: String(release?.returnedReason||""),
           absenceType: absence?.type || "",
           absenceLabel: String(absence?.row?.jobName || absence?.row?.reason || absence?.row?.note || ""),
           gpsTripCount: ownRows.length,
@@ -2374,7 +2379,7 @@ const open = taskId
         employeeName:String(master.name||master.employeeName||employeeName),
         finkzeitPersonnelNumber:fink,
         employeeIdentityKey:fink?`fink:${fink}`:`legacy:${String(master.id||master.employeeId||employeeId)}`,
-        checks:{...checks},reviewer,note,released:true,releasedAt:now,updatedAt:now
+        checks:{...checks},reviewer,note,released:true,returned:false,returnedAt:null,returnedBy:"",returnedReason:"",releasedAt:now,updatedAt:now
       });
       const [events,states,corrections]=await Promise.all([
         readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_CORRECTIONS,[])
@@ -2391,6 +2396,130 @@ const open = taskId
     }
   });
 
+  function dayControlReleaseForEmployee(releases, employee, date) {
+    const employeeId=String(employee?.id||employee?.employeeId||"").trim();
+    const fink=finkzeitPersonnelNumber(employee);
+    return (releases||[]).find(row=>
+      String(row.date)===String(date) &&
+      (
+        (fink && String(row.finkzeitPersonnelNumber||"")===fink) ||
+        String(row.employeeId||"")===employeeId
+      )
+    )||null;
+  }
+
+  function dayControlMinutes(segment) {
+    const from=minutesFromHM(segment?.from),to=minutesFromHM(segment?.to);
+    return from===null||to===null||to<=from?0:to-from;
+  }
+
+  function dayControlSegmentKind(segment) {
+    if(["pause","lunch"].includes(String(segment?.type||"")))return "break";
+    const text=String(segment?.reason||segment?.jobName||segment?.absenceType||"")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+    const code=String(segment?.unproductiveCode||"");
+    return code==="900"||code==="901"||code==="911"||/sonderurlaub|(^|[^a-z])urlaub([^a-z]|$)|krank/.test(text)
+      ? "absence"
+      : "work";
+  }
+
+  function dayControlSegmentLabel(segment, kind) {
+    if(kind==="break")return segment?.type==="lunch"?"Mittag":"Pause";
+    if(kind==="absence")return String(segment?.reason||segment?.jobName||segment?.absenceType||"Abwesenheit");
+    const detail=String(segment?.reason||"").trim();
+    return detail?`Arbeit · ${detail}`:"Arbeit";
+  }
+
+  async function buildDayControl(date) {
+    const [employees,events,states,releases,assignments,controls]=await Promise.all([
+      typeof readEmployees==="function"?readEmployees().catch(()=>[]):[],
+      readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_RELEASES,[]),
+      readJson(ASSIGNMENTS,[]),readJson(DAY_CONTROLS,[])
+    ]);
+    const activeEmployees=(employees||[]).filter(employee=>employee&&employee.active!==false&&employee.archived!==true);
+    const items=activeEmployees.map(employee=>{
+      const employeeId=String(employee.id||employee.employeeId||"").trim();
+      const employeeName=employeeEverydayName(employee)||employeeId;
+      let segments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+      const plannedAbsence=employeeAbsenceForDay(assignments,employee,date);
+      if(!segments.length&&plannedAbsence){
+        const type=String(plannedAbsence.type||"");
+        const row=plannedAbsence.row||{};
+        const reason=String(row.jobName||row.reason||row.note||type||"Abwesenheit");
+        segments=[{type:"up",from:String(row.from||"07:00"),to:String(row.to||"14:48"),reason,absenceType:type,unproductiveCode:type==="urlaub"?"900":type==="krank"?"901":""}];
+      }
+      const cleanSegments=segments.map(segment=>{
+        const kind=dayControlSegmentKind(segment);
+        return {from:String(segment.from||""),to:String(segment.to||""),kind,label:dayControlSegmentLabel(segment,kind),minutes:dayControlMinutes(segment)};
+      }).filter(segment=>segment.from&&segment.to&&segment.minutes>0);
+      const release=dayControlReleaseForEmployee(releases,employee,date);
+      const totals=cleanSegments.reduce((sum,segment)=>{sum[segment.kind]+=segment.minutes;return sum;},{work:0,absence:0,break:0});
+      return {
+        employeeId,employeeName,
+        released:Boolean(release?.released===true&&release?.returned!==true),
+        returned:Boolean(release?.returned===true),
+        returnedReason:String(release?.returnedReason||""),
+        releasedAt:release?.releasedAt||null,
+        segments:cleanSegments,totals
+      };
+    }).filter(item=>item.employeeId).sort((a,b)=>a.employeeName.localeCompare(b.employeeName,"de"));
+    const control=(controls||[]).find(row=>String(row.date)===date)||null;
+    const totals=items.reduce((sum,item)=>{sum.work+=item.totals.work;sum.absence+=item.totals.absence;sum.break+=item.totals.break;return sum;},{work:0,absence:0,break:0});
+    return {date,items,totals,allReleased:items.length>0&&items.every(item=>item.released),control};
+  }
+
+  app.get("/kristine/api/day-control/:date", async (req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const date=String(req.params.date||localDateISO()).slice(0,10);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({ok:false,error:"Datum fehlt."});
+      res.json({ok:true,...await buildDayControl(date)});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
+  });
+
+  app.put("/kristine/api/day-control/:date", async (req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const date=String(req.params.date||localDateISO()).slice(0,10);
+      const reviewer=String(req.body?.reviewer||"Bettina / Büro").trim().slice(0,120);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!reviewer)return res.status(400).json({ok:false,error:"Datum oder Kontrolle fehlt."});
+      const overview=await buildDayControl(date);
+      if(!overview.items.length)return res.status(409).json({ok:false,error:"Für diesen Tag wurden keine Mitarbeiter gefunden."});
+      if(!overview.allReleased)return res.status(409).json({ok:false,error:"Bitte zuerst alle Mitarbeiter prüfen und freigeben."});
+      const controls=await readJson(DAY_CONTROLS,[]),now=new Date().toISOString();
+      let control=controls.find(row=>String(row.date)===date);
+      if(!control){control={id:`day_control_${date}`,date,createdAt:now};controls.push(control)}
+      Object.assign(control,{confirmed:true,reviewer,confirmedAt:now,updatedAt:now,employeeIds:overview.items.map(item=>item.employeeId),employeeCount:overview.items.length,totals:overview.totals,returnedEmployeeId:"",returnedReason:""});
+      await writeJson(DAY_CONTROLS,controls);
+      res.json({ok:true,control});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
+  });
+
+  app.post("/kristine/api/day-control/:date/return", async (req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const date=String(req.params.date||localDateISO()).slice(0,10);
+      const employeeId=String(req.body?.employeeId||"").trim();
+      const reason=String(req.body?.reason||"Bitte Tageszeiten nochmals prüfen.").trim().slice(0,300);
+      const returnedBy=String(req.body?.returnedBy||"Bettina / Büro").trim().slice(0,120);
+      if(!employeeId||!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({ok:false,error:"Mitarbeiter oder Datum fehlt."});
+      const employees=typeof readEmployees==="function"?await readEmployees().catch(()=>[]):[];
+      const employee=findEmployeeMaster(employees,{employeeId});
+      if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
+      const releases=await readJson(DAY_RELEASES,[]);
+      const release=dayControlReleaseForEmployee(releases,employee,date);
+      if(!release?.released)return res.status(409).json({ok:false,error:"Dieser Mitarbeiter ist noch nicht freigegeben."});
+      const now=new Date().toISOString();
+      Object.assign(release,{returned:true,returnedAt:now,returnedBy,returnedReason:reason,updatedAt:now});
+      const controls=await readJson(DAY_CONTROLS,[]);
+      let control=controls.find(row=>String(row.date)===date);
+      if(!control){control={id:`day_control_${date}`,date,createdAt:now};controls.push(control)}
+      Object.assign(control,{confirmed:false,updatedAt:now,returnedEmployeeId:String(employee.id||employee.employeeId||employeeId),returnedEmployeeName:employeeEverydayName(employee)||employeeId,returnedReason:reason});
+      await Promise.all([writeJson(DAY_RELEASES,releases),writeJson(DAY_CONTROLS,controls)]);
+      res.json({ok:true,release,control});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
+  });
+
   app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -2404,7 +2533,8 @@ const open = taskId
       const release = releases.find(row => row?.released === true && String(row.employeeId) === employeeId && String(row.date) === date) || null;
       res.json({
         ok: true,
-        released:Boolean(release),
+        released:Boolean(release&&release.returned!==true),
+        timeSeparated:Boolean(release),
         releasedAt:release?.releasedAt || null,
         segments,
         originalSegments: correction?.originalSegments || segments,
@@ -3010,3 +3140,4 @@ const open = taskId
 }
 
 module.exports = { registerKristine };
+
