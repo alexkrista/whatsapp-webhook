@@ -538,23 +538,30 @@ def install(ns):
     sql_connection = ns.get("sql_connection")
     ww_hours_source = ns.get("ww_hours_fusion_source")
 
-    def project_recorded_hours_net(project_number):
-        """Sum WinWorker net hours; their recorded pause is already deducted."""
+    def project_by_number(project_number):
         project_number = str(project_number or "").strip()
-        if not project_number.isdigit() or not callable(search_projects) or not callable(ww_hours_source):
-            return 0.0
+        if not project_number.isdigit() or not callable(search_projects):
+            return None
         terms = terms_fn(project_number) if callable(terms_fn) else [project_number]
         matches = [
             row for row in search_projects(terms, include_metrics=False, limit=20)
             if str(row.get("projectNumber") or "").strip() == project_number
         ]
         if len(matches) != 1:
+            return None
+        return matches[0]
+
+    def project_recorded_hours_net(project_number, before_date=None, project=None):
+        """Sum WinWorker net hours; optionally stop before an ISO date."""
+        project = project or project_by_number(project_number)
+        if not project or not callable(ww_hours_source):
             return 0.0
+        cutoff = str(before_date or "")[:10]
         grouped = {}
-        for row in ww_hours_source([int(matches[0].get("projectIndex") or 0)]):
+        for row in ww_hours_source([int(project.get("projectIndex") or 0)]):
             day = str(row.get("date") or "")[:10]
             person = str(row.get("finkNumber") or row.get("maIndex") or row.get("employeeName") or "").strip()
-            if not day or not person:
+            if not day or not person or (cutoff and day >= cutoff):
                 continue
             key = (day, person)
             grouped[key] = grouped.get(key, 0.0) + float(row.get("netHours") or 0)
@@ -868,6 +875,15 @@ def install(ns):
 
     def sync_from_ww():
         return store.sync_ww_open_items(ww_open_items())
+
+    ns["kristine_sync_outgoing_ww"] = sync_from_ww
+
+    def sync_project_history(project):
+        if not project or not callable(sql_connection):
+            return {"imported": 0, "skipped": 0}
+        return store.sync_ww_project_history(ww_project_history(int(project.get("projectIndex") or 0)))
+
+    ns["kristine_sync_outgoing_project_history"] = sync_project_history
 
     def sync_is_due(minutes=5):
         last = store.last_ww_sync().get("at")
@@ -1461,6 +1477,13 @@ def install(ns):
             report["totalNet"] = round(report["laborCost"] + report["materialCost"], 3)
             result.append(report)
         return result
+
+    # The nightly Tower snapshot reuses the exact same WinWorker sources as the
+    # Baustelle view. Keeping these helpers here prevents a second calculation
+    # implementation from drifting away from the reviewed project calculation.
+    ns["kristine_outgoing_project_by_number"] = project_by_number
+    ns["kristine_project_recorded_hours_net"] = project_recorded_hours_net
+    ns["kristine_project_regie_reports"] = project_regie_reports
 
     def billing_response(payload, status=200):
         response = make_response(jsonify(payload), status)

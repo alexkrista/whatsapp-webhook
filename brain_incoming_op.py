@@ -39,6 +39,7 @@ from brain_finance_op_tools import install as _op_tools_install
 from brain_header_dedup import install as _header_dedup_install
 from brain_finance_header import install as _finance_header_install
 from brain_outgoing_invoices import install as _outgoing_invoices_install
+from brain_tower_billing_snapshot import install as _tower_billing_snapshot_install
 
 
 def install(ns):
@@ -72,6 +73,7 @@ def install(ns):
     _home_nav_install(ns)
     _op_tools_install(ns)
     _outgoing_invoices_install(ns)
+    _tower_billing_snapshot_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
     _header_dedup_install(ns)
     _finance_header_install(ns)
