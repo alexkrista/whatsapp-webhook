@@ -181,7 +181,7 @@
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
       loadScriptOnce("/public/ui/regie-billing-state.js?v=20260915-progress-4", "data-krista-regie-billing-state");
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260915-billing-snapshot-1", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260915-billing-snapshot-2", "data-krista-tower-signals");
     }
   }
 
