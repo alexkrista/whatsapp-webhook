@@ -86,4 +86,3 @@ Module._load = originalLoad;
     await fsp.rm(root,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
-
