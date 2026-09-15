@@ -13,6 +13,7 @@
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
   const hours=v=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:1}).format(num(v))+" h";
   let liveByJob=new Map();
+  let completedLiveByJob=new Map();
   let closedCollectionMembers=new Set();
   let billingByJob={};
   let reportsByJob={};
@@ -48,8 +49,19 @@
   // tatsächliche KRISTINE-Zeitereignisse haben Vorrang vor einem älteren Kalkulationsstand.
   function buildLiveMap(b){
     liveByJob=new Map();
+    completedLiveByJob=new Map();
     const events=Array.isArray(b?.timeEvents)?b.timeEvents:[];
+    const archive=Array.isArray(b?.projectTimeArchive)?b.projectTimeArchive:[];
     const states=b?.states||{};
+    const today=String(b?.today||'').slice(0,10);
+    const usableArchive=archive.filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||'')==='work'&&String(segment?.jobId||'').trim()));
+    const archivedPersonDays=new Set(usableArchive.map(row=>String(row?.employeeId||'')+'|'+String(row?.date||'').slice(0,10)));
+    const personDays=new Map();
+    const add=(employeeId,date,jobId,duration)=>{
+      if(!employeeId||!date||!jobId||duration<=0||duration>18)return;
+      const key=jobId+'|'+employeeId+'|'+date;
+      personDays.set(key,num(personDays.get(key))+duration);
+    };
     const groups=new Map();
     events.forEach((event,index)=>{
       const employeeId=String(event?.employeeId||'');
@@ -57,6 +69,7 @@
       const minute=hm(event?.at);
       if(!employeeId||!date||minute===null)return;
       const key=employeeId+'|'+date;
+      if(archivedPersonDays.has(key))return;
       if(!groups.has(key))groups.set(key,[]);
       groups.get(key).push({...event,_index:index,_minute:minute});
     });
@@ -76,8 +89,23 @@
         if(end===null||end<=start)continue;
         const duration=(end-start)/60;
         if(duration<=0||duration>18)continue;
-        liveByJob.set(jobId,num(liveByJob.get(jobId))+duration);
+        add(employeeId,date,jobId,duration);
       }
+    }
+    for(const released of usableArchive){
+      const employeeId=String(released?.employeeId||''),date=String(released?.date||'').slice(0,10);
+      for(const segment of released?.segments||[]){
+        if(String(segment?.type||'')!=='work')continue;
+        const from=hm(segment?.from),to=hm(segment?.to),jobId=String(segment?.jobId||'').trim();
+        if(from===null||to===null||to<=from)continue;
+        add(employeeId,date,jobId,(to-from)/60);
+      }
+    }
+    for(const [key,gross] of personDays){
+      const [jobId,,date]=key.split('|');
+      const net=Math.max(0,num(gross)-.25);
+      liveByJob.set(jobId,num(liveByJob.get(jobId))+net);
+      if(!today||date<today)completedLiveByJob.set(jobId,num(completedLiveByJob.get(jobId))+net);
     }
   }
 
@@ -108,8 +136,10 @@
       // Abrechnung muss der Tower denselben Gesamtstand verwenden; sonst wirken
       // Regiestunden bei Mischakten fälschlich höher als die Gesamtstunden.
       const recorded=Number(billing?.summary?.recordedHoursNet);
+      const wwHours=Number.isFinite(recorded)?Math.max(0,recorded):0;
+      const kristineHours=num(completedLiveByJob.get(id));
       const totalHours=Math.max(
-        Number.isFinite(recorded)?Math.max(0,recorded):0,
+        wwHours+kristineHours,
         num(calc(sourceJob).actualHours),
         num(calc(j).actualHours)
       );
