@@ -6787,11 +6787,12 @@ function money(v){if(v===null||v===undefined||v==='')return null;try{return new 
 function num(v){if(v===null||v===undefined||v==='')return null;return new Intl.NumberFormat('de-AT',{maximumFractionDigits:2}).format(Number(v))}
 function urlFor(path,p){return path+'?path='+encodeURIComponent(p)}
 
-let activeContactContext=null;
+let activeContactContext=null,contactDirty=false,contactSaving=false;
 const contactModal=document.getElementById('contactModal'),contactTitle=document.getElementById('contactTitle'),contactSub=document.getElementById('contactSub'),contactList=document.getElementById('contactList'),contactForm=document.getElementById('contactForm');
 const contactId=document.getElementById('contactId'),contactLocation=document.getElementById('contactLocation'),contactName=document.getElementById('contactName'),contactRole=document.getElementById('contactRole'),contactPhone=document.getElementById('contactPhone'),contactEmail=document.getElementById('contactEmail'),contactNote=document.getElementById('contactNote'),contactDelete=document.getElementById('contactDelete');
 function phoneHref(value){const raw=String(value||'').trim();return 'tel:'+raw.replace(/[^+\d]/g,'')}
-function resetContactForm(){contactForm?.reset();if(contactId)contactId.value='';if(contactDelete)contactDelete.hidden=true}
+function resetContactForm(){contactForm?.reset();if(contactId)contactId.value='';if(contactDelete)contactDelete.hidden=true;contactDirty=false}
+function activeContactPayload(){return {id:Number(contactId.value||0)||undefined,entityType:activeContactContext?.entityType,entityId:activeContactContext?.entityId,location:contactLocation.value,name:contactName.value,role:contactRole.value,phone:contactPhone.value,email:contactEmail.value,note:contactNote.value}}
 async function loadContacts(){
   if(!activeContactContext)return;
   const p=new URLSearchParams({entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});
@@ -6803,11 +6804,30 @@ async function loadContacts(){
     <a class="contact-call" href="${phoneHref(c.phone)}">📞 ${esc(c.phone)}</a>
     <button class="contact-edit" type="button" data-contact='${esc(JSON.stringify(c))}'>Bearbeiten</button>
   </div>`).join(''):'<div class="empty">Noch keine Telefonnummer gespeichert.</div>';
-  contactList.querySelectorAll('[data-contact]').forEach(btn=>btn.onclick=()=>{const c=JSON.parse(btn.dataset.contact);contactId.value=c.id||'';contactLocation.value=c.location||'';contactName.value=c.name||'';contactRole.value=c.role||'';contactPhone.value=c.phone||'';contactEmail.value=c.email||'';contactNote.value=c.note||'';contactDelete.hidden=false;});
+  contactList.querySelectorAll('[data-contact]').forEach(btn=>btn.onclick=()=>{const c=JSON.parse(btn.dataset.contact);contactId.value=c.id||'';contactLocation.value=c.location||'';contactName.value=c.name||'';contactRole.value=c.role||'';contactPhone.value=c.phone||'';contactEmail.value=c.email||'';contactNote.value=c.note||'';contactDelete.hidden=false;contactDirty=false;});
 }
 async function openContacts(ctx){activeContactContext=ctx;contactTitle.textContent='📞 '+(ctx.title||'Kontakte');contactSub.textContent=ctx.subtitle||'';resetContactForm();contactModal.hidden=false;await loadContacts();}
-document.getElementById('contactClose')?.addEventListener('click',()=>contactModal.hidden=true);document.getElementById('contactReset')?.addEventListener('click',resetContactForm);
-contactForm?.addEventListener('submit',async e=>{e.preventDefault();if(!activeContactContext)return;const payload={id:Number(contactId.value||0)||undefined,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId,location:contactLocation.value,name:contactName.value,role:contactRole.value,phone:contactPhone.value,email:contactEmail.value,note:contactNote.value};const r=await fetch('/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Speichern fehlgeschlagen');resetContactForm();await loadContacts();});
+async function persistActiveContact({closeAfter=false}={}){
+  if(!activeContactContext||contactSaving||!String(contactPhone.value||'').trim())return false;
+  contactSaving=true;
+  const closeButton=document.getElementById('contactClose'),oldCloseText=closeButton?.textContent||'×';
+  if(closeAfter&&closeButton){closeButton.disabled=true;closeButton.textContent='Speichert …'}
+  try{
+    const r=await fetch('/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(activeContactPayload())}),d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.error||'Speichern fehlgeschlagen');
+    contactDirty=false;
+    if(closeAfter){contactModal.hidden=true;resetContactForm()}else{resetContactForm();await loadContacts()}
+    return true;
+  }catch(error){alert(error.message||'Speichern fehlgeschlagen');return false}
+  finally{contactSaving=false;if(closeButton){closeButton.disabled=false;closeButton.textContent=oldCloseText}}
+}
+async function closeContacts(){
+  if(contactDirty&&String(contactPhone.value||'').trim()){if(!await persistActiveContact({closeAfter:true}))return}
+  else{contactModal.hidden=true;resetContactForm()}
+}
+contactForm?.addEventListener('input',()=>{contactDirty=true});
+document.getElementById('contactClose')?.addEventListener('click',closeContacts);document.getElementById('contactReset')?.addEventListener('click',resetContactForm);
+contactForm?.addEventListener('submit',async e=>{e.preventDefault();await persistActiveContact()});
 contactDelete?.addEventListener('click',async()=>{if(!activeContactContext||!contactId.value||!confirm('Kontakt wirklich löschen?'))return;const p=new URLSearchParams({id:contactId.value,entityType:activeContactContext.entityType,entityId:activeContactContext.entityId});const r=await fetch('/contacts?'+p.toString(),{method:'DELETE'}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Löschen fehlgeschlagen');resetContactForm();await loadContacts();});
 
 let pdfState={path:'',page:1,pages:1,scale:1.45,loupe:false,baseWidth:0};
