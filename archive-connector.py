@@ -173,6 +173,11 @@ def kristine_api_request(path, method="GET", payload=None):
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+        # Benutzerbezogene Cloud-Schutzregeln lesen die handelnde Person aus
+        # diesem Header. Nur Aufrufer, die actorId bewusst mitsenden, erhalten
+        # ihn; gewöhnliche Connector-Aufrufe bleiben unverändert.
+        if isinstance(payload, dict) and str(payload.get("actorId") or "").strip():
+            headers["X-Krista-User-Id"] = str(payload["actorId"]).strip()
 
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:

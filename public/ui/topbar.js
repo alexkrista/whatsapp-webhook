@@ -144,7 +144,7 @@
   }
 
   function loadKristineFinanceApproval() {
-    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260822-approval", "data-krista-finance-approval");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-finance-approval.js?v=20260916-readable-amount", "data-krista-finance-approval");
   }
 
   function loadKristineRegieApproval() {
