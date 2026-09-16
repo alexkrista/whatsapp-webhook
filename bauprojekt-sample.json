@@ -1,0 +1,737 @@
+{
+  "schemaVersion": 1,
+  "name": "Balkonsanierung – Beispiel aus Baubudget",
+  "jobId": "",
+  "start": "2027-04-05",
+  "startAssumption": true,
+  "hoursPerDay": 8,
+  "vat": 0.2,
+  "workdays": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "holidays": [],
+  "positions": [
+    {
+      "id": "P01",
+      "code": "2.H02",
+      "name": "Abbrucharbeiten Blumentröge",
+      "amount": 2200,
+      "rate": 90,
+      "crew": 3,
+      "material": 0.15,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P02",
+      "code": "3.T3X",
+      "name": "Elektroarbeiten",
+      "amount": 650,
+      "rate": 110,
+      "crew": 1,
+      "material": 0.35,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P03",
+      "code": "3.T6X",
+      "name": "Installationsarbeiten",
+      "amount": 680,
+      "rate": 110,
+      "crew": 1,
+      "material": 0.35,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P04",
+      "code": "4.H14",
+      "name": "Betonsanierung",
+      "amount": 79500,
+      "rate": 105,
+      "crew": 4,
+      "material": 0.3,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P05",
+      "code": "4.H04",
+      "name": "Gerüstarbeiten",
+      "amount": 13500,
+      "rate": 95,
+      "crew": 3,
+      "material": 0.4,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P06",
+      "code": "4.H10",
+      "name": "Verputzarbeiten – Anschlüsse",
+      "amount": 2600,
+      "rate": 95,
+      "crew": 2,
+      "material": 0.2,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P07",
+      "code": "4.H19",
+      "name": "Baureinigung",
+      "amount": 1500,
+      "rate": 85,
+      "crew": 2,
+      "material": 0.1,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P08",
+      "code": "4.H23",
+      "name": "Bauspengler – Abdichtung Balkone",
+      "amount": 57500,
+      "rate": 115,
+      "crew": 3,
+      "material": 0.4,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P09",
+      "code": "4.H23",
+      "name": "Bauspengler – Garagendach",
+      "amount": 4200,
+      "rate": 115,
+      "crew": 2,
+      "material": 0.45,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P10",
+      "code": "4.H24",
+      "name": "Fliesenlegerarbeiten Balkone",
+      "amount": 77200,
+      "rate": 100,
+      "crew": 4,
+      "material": 0.45,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P11",
+      "code": "4.H31",
+      "name": "Schlosserarbeiten – Balkone",
+      "amount": 13200,
+      "rate": 120,
+      "crew": 2,
+      "material": 0.55,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P12",
+      "code": "4.H31",
+      "name": "Schlosserarbeiten – Garagendach",
+      "amount": null,
+      "rate": 120,
+      "crew": 2,
+      "material": 0.55,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P13",
+      "code": "4.H36",
+      "name": "Zimmererarbeiten – Trennwände",
+      "amount": 4000,
+      "rate": 110,
+      "crew": 2,
+      "material": 0.4,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P14",
+      "code": "4.H57",
+      "name": "Sonnenschutz – Markisen",
+      "amount": 6000,
+      "rate": 120,
+      "crew": 2,
+      "material": 0.65,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P15",
+      "code": "6.H13",
+      "name": "Traufenstreifen",
+      "amount": null,
+      "rate": 95,
+      "crew": 2,
+      "material": 0.35,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P16",
+      "code": "6.H58",
+      "name": "Gründach – Anschlussbereiche Attika",
+      "amount": null,
+      "rate": 95,
+      "crew": 2,
+      "material": 0.35,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P17",
+      "code": "6.H58",
+      "name": "Rasensanierung nach Abschluss",
+      "amount": 3000,
+      "rate": 90,
+      "crew": 2,
+      "material": 0.3,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P18",
+      "code": "7.P22",
+      "name": "Sanierungsplanung",
+      "amount": 19929.75,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P19",
+      "code": "7.P99",
+      "name": "Örtliche Bauaufsicht",
+      "amount": 13286.5,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P20",
+      "code": "7.P11",
+      "name": "Planungs- und Baustellenkoordination",
+      "amount": 2600,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P21",
+      "code": "7.P08",
+      "name": "Kaufmännische Verwaltung",
+      "amount": 9300.55,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P22",
+      "code": "8.N10",
+      "name": "Bewilligungen, Gebühren",
+      "amount": 500,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P23",
+      "code": "8.N30",
+      "name": "Vervielfältigungen, Spesen",
+      "amount": 1660.81,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P24",
+      "code": "9.R03",
+      "name": "Unvorhergesehenes",
+      "amount": 15650.38,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    },
+    {
+      "id": "P25",
+      "code": "9.R02",
+      "name": "Teuerung bis Ausführung",
+      "amount": 9390.23,
+      "rate": 100,
+      "crew": 1,
+      "material": 0,
+      "method": "mixed",
+      "forecast": null,
+      "order": null,
+      "actual": null,
+      "contractor": "",
+      "tender": [],
+      "basis": "Kosten aus bereitgestelltem Baubudget 24.03.2026. ÖNORM-Zuordnung redaktionell; Stundenansatz, Materialquote und Mannschaft sind änderbare Modellannahmen, keine Marktangebote."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T01",
+      "name": "Gerüst aufbauen / sichern",
+      "positionId": "P05",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [],
+      "delay": 0,
+      "days": 5
+    },
+    {
+      "id": "T02",
+      "name": "Blumentröge rückbauen",
+      "positionId": "P01",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T01",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T03",
+      "name": "Elektroarbeiten",
+      "positionId": "P02",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T02",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T04",
+      "name": "Installationsarbeiten",
+      "positionId": "P03",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T02",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T05",
+      "name": "Betonsanierung",
+      "positionId": "P04",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T03",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "id": "T04",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T06",
+      "name": "Nachbehandlung / Wartezeit Beton",
+      "positionId": null,
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T05",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0,
+      "days": 7,
+      "calendarDays": true
+    },
+    {
+      "id": "M01",
+      "name": "Betonsanierung zur Folgearbeit freigegeben",
+      "positionId": null,
+      "kind": "milestone",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T06",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0,
+      "gate": true,
+      "released": false
+    },
+    {
+      "id": "T07",
+      "name": "Anschlüsse verputzen",
+      "positionId": "P06",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "M01",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T08",
+      "name": "Balkone abdichten",
+      "positionId": "P08",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T07",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T09",
+      "name": "Garagendach abdichten",
+      "positionId": "P09",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T02",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "M02",
+      "name": "Abdichtung geprüft und freigegeben",
+      "positionId": null,
+      "kind": "milestone",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T08",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0,
+      "gate": true,
+      "released": false
+    },
+    {
+      "id": "T10",
+      "name": "Fliesen verlegen",
+      "positionId": "P10",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "M02",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T11",
+      "name": "Geländer / Schlosserarbeiten",
+      "positionId": "P11",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T10",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T12",
+      "name": "Trennwände montieren",
+      "positionId": "P13",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T10",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T13",
+      "name": "Markisen montieren",
+      "positionId": "P14",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T11",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T14",
+      "name": "Gerüst abbauen",
+      "positionId": null,
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T11",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "id": "T12",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "id": "T13",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "id": "T09",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0,
+      "days": 3
+    },
+    {
+      "id": "T15",
+      "name": "Rasen wiederherstellen",
+      "positionId": "P17",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T14",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "T16",
+      "name": "Baureinigung",
+      "positionId": "P07",
+      "kind": "work",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T14",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0
+    },
+    {
+      "id": "M03",
+      "name": "Übergabe",
+      "positionId": null,
+      "kind": "milestone",
+      "enabled": true,
+      "dependencies": [
+        {
+          "id": "T15",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "id": "T16",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "delay": 0,
+      "gate": true,
+      "released": false
+    }
+  ],
+  "baseline": null,
+  "notes": "Demonstrationsprojekt. Preise aus dem Baubudget; Ablauf, Personal, Mischansätze und Starttermin sind Annahmen. 7 Kalendertage Nachbehandlung dienen nur als Platzhalter: Freigabe nach verwendetem System. Gerüstkosten enthalten Vorhaltung und lassen sich nicht sinnvoll vollständig in Montagezeit umrechnen; Auf-/Abbau deshalb manuell. Keine regionale Feiertagsliste hinterlegt. Planung, Nebenkosten und Reserven erscheinen im Budget, nicht automatisch als Montagevorgänge. Rohbau-/Estrich-Meilensteine können für entsprechende Projekte ergänzt werden."
+}
