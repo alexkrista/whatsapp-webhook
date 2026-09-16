@@ -13,6 +13,42 @@ FINANCE_MARKER="[FINANCE_APPROVAL]"
 FINAL_APPROVALS={"approved","reduced"}
 
 
+def _finance_employee_identity(employee):
+    employee=employee or {}
+    return str(employee.get("id") or employee.get("employeeId") or "").strip()
+
+
+def _pick_finance_approver(boot,environ=None):
+    """Resolve the finance approver only from the current KRISTINE bootstrap."""
+    env=os.environ if environ is None else environ
+    employees=list((boot or {}).get("employees") or [])
+    if not employees:
+        raise RuntimeError("Keine Mitarbeiter im KRISTINE-Bootstrap; Freigabe-Person kann nicht geprüft werden.")
+    wanted_id=str(env.get("KRISTINE_FINANCE_APPROVER_ID") or "").strip()
+    if wanted_id:
+        hit=next((e for e in employees if _finance_employee_identity(e)==wanted_id),None)
+        if hit:
+            return wanted_id,str(hit.get("nickname") or hit.get("name") or hit.get("employeeName") or wanted_id)
+    wanted_name=str(env.get("KRISTINE_FINANCE_APPROVER_NAME") or "Alex").strip() or "Alex"
+    needle=wanted_name.casefold()
+    matches=[]
+    for employee in employees:
+        identity=_finance_employee_identity(employee)
+        name=" ".join(str(employee.get(k) or "") for k in ("nickname","name","employeeName")).strip()
+        if identity and needle in name.casefold():matches.append((identity,name or wanted_name))
+    if len(matches)==1:return matches[0]
+    if len(matches)>1:
+        raise RuntimeError(f"Freigabe-Person '{wanted_name}' ist nicht eindeutig ({len(matches)} Treffer). Bitte KRISTINE_FINANCE_APPROVER_ID setzen.")
+    suffix=f"; konfigurierte ID '{wanted_id}' wurde im Bootstrap nicht gefunden" if wanted_id else ""
+    raise RuntimeError(f"Freigabe-Person '{wanted_name}' wurde im KRISTINE-Bootstrap nicht gefunden{suffix}.")
+
+
+def _finance_tasks_payload(tasks,approver_id):
+    verified=str(approver_id or "").strip()
+    if not verified:raise RuntimeError("Geprüfte Freigabe-Person fehlt; Aufgaben werden nicht gespeichert.")
+    return {"tasks":tasks,"actorId":verified}
+
+
 def _enc(v):
     return quote(str(v or ""),safe="")
 
@@ -75,33 +111,12 @@ def install(ns):
         boot=kristine_api("/kristine/api/bootstrap") or {}
         return boot,list(boot.get("tasks") or [])
 
-    def pick_approver(boot):
-        employees=list(boot.get("employees") or [])
-        wanted_id=str(os.environ.get("KRISTINE_FINANCE_APPROVER_ID") or "").strip()
-        wanted_name=str(os.environ.get("KRISTINE_FINANCE_APPROVER_NAME") or "Alex").strip() or "Alex"
-        if wanted_id:
-            hit=next((e for e in employees if str(e.get("id") or e.get("employeeId") or "")==wanted_id),None)
-            if hit:return wanted_id,str(hit.get("nickname") or hit.get("name") or wanted_name)
-            return wanted_id,wanted_name
-        def score(e):
-            name=" ".join(str(e.get(k) or "") for k in ("nickname","name","employeeName")).strip().lower()
-            if not name:return 0
-            w=wanted_name.lower()
-            if w and w in name:return 100
-            if "alex" in name:return 90
-            if "alexander" in name:return 85
-            return 0
-        ranked=sorted(((score(e),e) for e in employees),key=lambda x:x[0],reverse=True)
-        if ranked and ranked[0][0]>0:
-            e=ranked[0][1];return str(e.get("id") or e.get("employeeId") or "admin"),str(e.get("nickname") or e.get("name") or e.get("employeeName") or wanted_name)
-        return "admin",wanted_name
-
     def sync_finance_tasks():
         boot,tasks=finance_tasks(); existing={}
         for t in tasks:
             m=_parse_finance_task(t)
             if m:existing[(m["source"],m["id"])]=t
-        approver_id,approver_name=pick_approver(boot); created=[]; now=datetime.now().isoformat(timespec="seconds"); today=datetime.now().date().isoformat()
+        approver_id,approver_name=_pick_finance_approver(boot); created=[]; now=datetime.now().isoformat(timespec="seconds"); today=datetime.now().date().isoformat()
         for x in store.items(False):
             if str(x.get("source") or "")!="KRISTINE":continue
             key=("KRISTINE",str(x.get("id") or ""))
@@ -131,7 +146,7 @@ def install(ns):
             }
             tasks.append(task);existing[key]=task;created.append(task)
         if created:
-            kristine_api("/kristine/api/tasks",method="PUT",payload={"tasks":tasks})
+            kristine_api("/kristine/api/tasks",method="PUT",payload=_finance_tasks_payload(tasks,approver_id))
             # Backend liefert die gespeicherte Liste nicht zwingend zurück; Bootstrap neu lesen,
             # damit die anschließende Zahlungsprüfung immer den persistierten Stand sieht.
             boot,tasks=finance_tasks()

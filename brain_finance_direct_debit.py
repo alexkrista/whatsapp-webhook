@@ -301,7 +301,13 @@ def install(ns):
                 body = response.get_json(silent=True) or {}
                 if not body.get("ok"):
                     return response
-                rows = direct_debits()
+                inherited = list(body.get("directDebit") or [])
+                merged = {}
+                for row in inherited + direct_debits():
+                    key = (str(row.get("source") or ""), str(row.get("id") or ""))
+                    if key != ("", ""):
+                        merged[key] = row
+                rows = list(merged.values())
                 totals = {}
                 for row in rows:
                     cur = str(row.get("currency") or "EUR")
@@ -328,7 +334,7 @@ def install(ns):
             html = html.replace("<h2>Offene Überweisungen</h2>", "<h2>Zu zahlende Rechnungen</h2>")
             section = r'''
 <section class="card" id="directDebitCard">
-  <div class="section-title"><h2>Erwartete Einzüge</h2><div><label class="dd-range">Zeitraum <select id="directDebitRange"><option value="7">7 Tage</option><option value="31">1 Monat</option></select></label><div class="hint">Überfällige bleiben bis zum tatsächlichen CAMT-Treffer sichtbar.</div></div></div>
+  <div class="section-title"><h2>Erwartete Einzüge</h2><div><label class="dd-range">Zeitraum <select id="directDebitRange"><option value="31" selected>1 Monat</option><option value="7">7 Tage</option></select></label><div class="hint">Überfällige bleiben bis zum tatsächlichen CAMT-Treffer sichtbar.</div></div></div>
   <div id="directDebitMeta" class="note">Einzüge werden geladen …</div>
   <div id="directDebitRows"><div class="empty">Wird geladen …</div></div>
 </section>
@@ -353,7 +359,7 @@ def install(ns):
  const status=x=>x.approvalStatus==='blocked'?'<span class="dd-blocked">⛔ gesperrt · Einzug trotzdem beobachten</span>':x.approvalStatus==='pending'?'<span class="dd-warn">⏳ Freigabe offen · wartet auf CAMT</span>':'<span class="dd-wait">↙ erwartet · wartet auf CAMT</span>';
  const pdf=x=>x.path?`<a class="pdf" href="/pdf?path=${encodeURIComponent(x.path)}" target="_blank">PDF</a>`:'–';
  function totals(rows){const t={};rows.forEach(x=>{const c=x.currency||'EUR';t[c]=(t[c]||0)+Number(x.amount||0)});return Object.entries(t).map(([c,n])=>money(n,c)).join(' · ')}
- function visible(rows){const days=Number(range?.value||7),today=new Date();today.setHours(12,0,0,0);return (rows||[]).filter(x=>{const raw=x.expectedDebitDate||x.dueDate;if(!raw)return true;const due=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(due.getTime())||Math.round((due-today)/86400000)<=days})}
+ function visible(rows){const days=Number(range?.value||31),today=new Date();today.setHours(12,0,0,0);return (rows||[]).filter(x=>{const raw=x.expectedDebitDate||x.dueDate;if(!raw)return true;const due=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(due.getTime())||Math.round((due-today)/86400000)<=days})}
  function render(rows){
    rows=visible(rows).sort((a,b)=>String(a.expectedDebitDate||a.dueDate||'9999').localeCompare(String(b.expectedDebitDate||b.dueDate||'9999'))||String(a.supplier||'').localeCompare(String(b.supplier||''),'de'));
    meta.innerHTML=`<strong>${rows.length} erwartete Einzüge</strong>${rows.length?' · '+esc(totals(rows)):''} · älteste Fälligkeit zuerst`;

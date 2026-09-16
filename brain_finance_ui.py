@@ -13,6 +13,16 @@ CSS += r'''
 @media(max-width:900px){.submitted-row{grid-template-columns:110px minmax(0,1fr) auto}.submitted-row>div:nth-child(3),.submitted-row>div:nth-child(4),.submitted-row>div:nth-child(5),.submitted-row>.submitted-action{grid-column:2}.submitted-row>div:last-child{grid-column:3;grid-row:1}}
 @media(max-width:520px){.submitted-row{grid-template-columns:1fr}.submitted-row>*,.submitted-row>div:nth-child(3),.submitted-row>div:nth-child(4),.submitted-row>div:nth-child(5),.submitted-row>.submitted-action,.submitted-row>div:last-child{grid-column:1;grid-row:auto}.submitted-action{width:100%}}
 '''
+CSS += r'''
+#sepaArchive .archive-row{grid-template-columns:110px minmax(0,1.3fr) minmax(0,2fr) max-content max-content;gap:18px;align-items:center;padding:16px 6px}
+#sepaArchive .archive-row>*{min-width:0}
+#sepaArchive .archive-row>div:first-child{white-space:nowrap}
+#sepaArchive .archive-row>div:nth-child(2),#sepaArchive .archive-row>div:nth-child(3){overflow-wrap:anywhere;line-height:1.4}
+#sepaArchive .archive-row .amount,#sepaArchive .sepa-download{white-space:nowrap}
+#sepaArchive .sepa-download{justify-self:start}
+@media(max-width:900px){#sepaArchive .archive-row{grid-template-columns:110px minmax(0,1fr);gap:10px 16px}#sepaArchive .archive-row>div:nth-child(3),#sepaArchive .archive-row>.amount,#sepaArchive .sepa-download{grid-column:2}#sepaArchive .archive-row>.amount{text-align:left}}
+@media(max-width:520px){#sepaArchive .archive-row{grid-template-columns:minmax(0,1fr)}#sepaArchive .archive-row>*{grid-column:1!important}}
+'''
 
 def payments_page():
  return r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KRISTINE · Bezahlung</title><style>__CSS__</style></head><body><main class="shell">
