@@ -16,6 +16,7 @@ function registerPaintMixHistory(app, options = {}) {
   const historyFile = path.join(root, "mix-history.json");
   const syncStateFile = path.join(root, "mix-history-sync.json");
   const tasksFile = path.join(kristineRoot, "tasks.json");
+  const employeesFile = path.join(dataDir, "_system", "employees.json");
   const jobMaterialsFile = path.join(root, "job-materials.jsonl");
 
   let writeChain = Promise.resolve();
@@ -177,7 +178,18 @@ function registerPaintMixHistory(app, options = {}) {
     return `Mischung zuordnen · ${tone}${row.size ? ` · ${row.size}` : ""}`.slice(0, 180);
   }
 
-  function makeTask(row) {
+  async function mixingTaskAssignee() {
+    const employees = await readJson(employeesFile, []);
+    const list = Array.isArray(employees) ? employees.filter(employee => employee?.active !== false) : [];
+    const alex = list.find(employee => norm(employee?.name) === "alexanderkrista")
+      || list.find(employee => norm(employee?.name).startsWith("alex"));
+    return {
+      assigneeId: clean(alex?.id || "admin", 120),
+      assigneeName: clean(alex?.name || "Alexander Krista", 180),
+    };
+  }
+
+  function makeTask(row, assignee) {
     const parts = [
       row.productName, row.baseName || row.baseCode, row.size, row.colourCode || row.colourName,
       row.mixedAt ? new Date(row.mixedAt).toLocaleString("de-AT", { timeZone: "Europe/Vienna" }) : "",
@@ -186,7 +198,7 @@ function registerPaintMixHistory(app, options = {}) {
     ].filter(Boolean);
     return {
       id: `mix_task_${crypto.createHash("sha1").update(row.id).digest("hex").slice(0, 18)}`,
-      title: taskTitle(row), assigneeId: "", assigneeName: "", jobId: "", jobName: "",
+      title: taskTitle(row), assigneeId: assignee.assigneeId, assigneeName: assignee.assigneeName, jobId: "", jobName: "",
       taskType: "Sonstiges", priority: "heute", creatorId: "mixing-machine", creatorName: "Mischmaschine",
       address: "", contactName: "", contactPhone: "", contactEmail: "",
       dueDate: viennaDate(row.mixedAt), reminder: parts.join(" · ").slice(0, 500),
@@ -194,20 +206,30 @@ function registerPaintMixHistory(app, options = {}) {
     };
   }
 
-  async function createTasksForNewRows(newRows) {
-    if (!newRows.length) return 0;
+  async function reconcileOpenMixTasks(rows) {
+    const openRows = (Array.isArray(rows) ? rows : []).filter(row => row?.status === "open");
+    if (!openRows.length) return { created: 0, repaired: 0, linked: 0 };
     const tasks = await readJson(tasksFile, []);
     const list = Array.isArray(tasks) ? tasks : [];
-    const byId = new Set(list.map(task => String(task?.id || "")));
-    let created = 0;
-    for (const row of newRows) {
-      const task = makeTask(row);
-      row.taskId = task.id;
-      if (byId.has(task.id)) continue;
-      list.push(task); byId.add(task.id); created += 1;
+    const byId = new Map(list.map(task => [String(task?.id || ""), task]));
+    const assignee = await mixingTaskAssignee();
+    let created = 0, repaired = 0, linked = 0;
+    for (const row of openRows) {
+      const wanted = makeTask(row, assignee);
+      if (row.taskId !== wanted.id) { row.taskId = wanted.id; linked += 1; }
+      const existing = byId.get(wanted.id);
+      if (!existing) {
+        list.push(wanted); byId.set(wanted.id, wanted); created += 1;
+        continue;
+      }
+      if (!clean(existing.assigneeId) || !clean(existing.assigneeName)) {
+        existing.assigneeId = assignee.assigneeId;
+        existing.assigneeName = assignee.assigneeName;
+        repaired += 1;
+      }
     }
-    if (created) await writeJson(tasksFile, list.slice(-10000));
-    return created;
+    if (created || repaired) await writeJson(tasksFile, list.slice(-10000));
+    return { created, repaired, linked };
   }
 
   async function ingest(rows, machine = "", options = {}) {
@@ -227,18 +249,27 @@ function registerPaintMixHistory(app, options = {}) {
       normalized.machine = clean(machine, 120); normalized.taskId = "";
       list.push(normalized); additions.push(normalized); known.add(normalized.id);
     }
-    const tasksCreated = options.baseline || options.createTasks === false ? 0 : await createTasksForNewRows(additions);
-    if (additions.length) await writeJson(historyFile, list);
+    const taskSync = options.baseline || options.createTasks === false
+      ? { created: 0, repaired: 0, linked: 0 }
+      : await reconcileOpenMixTasks(list);
+    if (additions.length || taskSync.linked) await writeJson(historyFile, list);
     const now = new Date().toISOString();
     const state = await readJson(syncStateFile, {});
     const newest = additions.map(row => row.mixedAt).filter(Boolean).sort().at(-1) || state.lastHistoryAt || null;
     await writeJson(syncStateFile, {
       ...state, lastSyncAt: now, lastHistoryAt: newest, lastMachine: clean(machine, 120),
       lastReceivedRows: Array.isArray(rows) ? rows.length : 0, lastNewRows: additions.length,
-      lastTasksCreated: tasksCreated, lastSkippedCancelled: skippedCancelled,
+      lastTasksCreated: taskSync.created, lastTasksRepaired: taskSync.repaired, lastSkippedCancelled: skippedCancelled,
       lastMode: options.baseline ? "baseline" : "incremental", updatedAt: now,
     });
-    return { received: Array.isArray(rows) ? rows.length : 0, added: additions.length, tasksCreated, skippedCancelled, newest };
+    return {
+      received: Array.isArray(rows) ? rows.length : 0,
+      added: additions.length,
+      tasksCreated: taskSync.created,
+      tasksRepaired: taskSync.repaired,
+      skippedCancelled,
+      newest,
+    };
   }
 
   async function markTaskDone(taskId) {
@@ -411,6 +442,20 @@ function registerPaintMixHistory(app, options = {}) {
       const [state, rows] = await Promise.all([readJson(syncStateFile, {}), readJson(historyFile, [])]);
       const list = Array.isArray(rows) ? rows : [];
       res.json({ ok: true, connectorVersion: 2, state, open: list.filter(row => row.status === "open").length, total: list.length, schedule: "Täglich 06:15–18:30 · jede Minute" });
+    } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
+  });
+
+  app.post("/admin/api/paint/mix-history/tasks/repair", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await serial(async () => {
+        const rows = await readJson(historyFile, []);
+        const list = Array.isArray(rows) ? rows : [];
+        const taskSync = await reconcileOpenMixTasks(list);
+        if (taskSync.linked) await writeJson(historyFile, list);
+        return taskSync;
+      });
+      res.json({ ok: true, ...result });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
