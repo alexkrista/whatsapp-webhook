@@ -607,6 +607,26 @@ function clampOfficialStart(actualTime) {
       timeline: [],
     };
     const state = { ...previous, employeeName: employeeName || previous.employeeName || employeeId };
+    // Der gespeicherte Dialogstatus kann vom Vortag stammen, wenn nicht alle
+    // Kontrollfragen beantwortet wurden. Für "läuft / läuft nicht" zählen
+    // ausschließlich die tatsächlichen Zeitbuchungen des angefragten Tages.
+    const todaysTimeEvents = timeEvents
+      .filter(row => String(row?.employeeId || "") === String(employeeId) && String(row?.date || "") === String(today))
+      .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || "")));
+    const lastTimeEvent = [...todaysTimeEvents].reverse().find(row =>
+      ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row?.type || "").toLowerCase())
+    );
+    const lastTimeType = String(lastTimeEvent?.type || "").toLowerCase();
+    state.mode = ["start","weiter","up"].includes(lastTimeType) ? "working"
+      : lastTimeType === "pause" ? "pause"
+      : lastTimeType === "mittag" ? "lunch"
+      : ["ende","fertig","stop","stopp"].includes(lastTimeType) ? "finished_day"
+      : "idle";
+    const pendingDate = state.pending?.createdAt ? localDateISO(new Date(state.pending.createdAt)) : "";
+    if (!lastTimeEvent && pendingDate && pendingDate !== today) {
+      state.pending = null;
+      state.dayReview = null;
+    }
     let current = activeAssignment(dayAssignments, state);
     if (
   state.activeJobOverride?.date === today &&

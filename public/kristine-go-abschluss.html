@@ -25,12 +25,12 @@
     .section{margin-top:18px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:0 3px 10px}.section-head h2{margin:0;font-size:18px}.section-head span{font-size:11px;color:var(--muted);text-align:right}
     .card{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
     .day-overview{padding:15px}.overview-top{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}.metric{padding:11px;border-radius:14px;background:#f5f8fb}.metric small{display:block;color:var(--muted);font-size:9px}.metric strong{display:block;margin-top:3px;font-size:13px}
-    .timeline{display:grid}.timeline-row{display:grid;grid-template-columns:52px 18px 1fr;gap:8px;align-items:start;min-height:48px}.timeline-time{padding-top:3px;color:var(--muted);font-size:11px;font-weight:800}.timeline-rail{position:relative;display:flex;justify-content:center;height:100%}.timeline-rail:after{content:"";position:absolute;top:14px;bottom:-7px;width:2px;background:#dce5ee}.timeline-row:last-child .timeline-rail:after{display:none}.timeline-dot{position:relative;z-index:1;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--blue);font-size:8px}.timeline-dot.pause{border-color:var(--orange)}.timeline-dot.end{border-color:var(--green)}.timeline-copy{padding:1px 0 12px}.timeline-copy strong{display:block;font-size:13px}.timeline-copy small{display:block;margin-top:2px;color:var(--muted);font-size:11px;line-height:1.35}.empty-timeline{padding:5px 0;color:var(--muted);font-size:12px}
+    .timeline{display:grid;gap:12px}.timeline-row{padding:15px;border:2px solid #dbe5f0;border-radius:18px;background:#f8fbff}.timeline-row.pause{background:#fff9ef;border-color:#f0d7a6}.timeline-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.timeline-row input,.timeline-row select{width:100%;min-height:48px;border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px;font:inherit;font-weight:850}.timeline-row label{font-size:10px;color:var(--muted);font-weight:850}.timeline-site{margin-top:10px}.empty-timeline{padding:5px 0;color:var(--muted);font-size:12px}.save-times{width:100%;min-height:50px;margin-top:12px;border:0;border-radius:14px;background:var(--blue);color:#fff;font-weight:900}
     .check-list{overflow:hidden}.check-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;width:100%;padding:15px;border:0;border-bottom:1px solid #edf1f5;background:#fff;color:var(--ink);text-align:left}.check-row:last-child{border-bottom:0}
     .status{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;font-size:13px;font-weight:950}.status.ok{background:var(--green-soft);color:var(--green)}.status.open{background:var(--orange-soft);color:#a86b08}.status.bad{background:var(--red-soft);color:var(--red)}
     .row-copy strong{display:block;font-size:14px}.row-copy small{display:block;margin-top:3px;color:var(--muted);font-size:11px;line-height:1.35}.action-chip{padding:6px 8px;border-radius:999px;background:#f2f5f8;color:var(--blue);font-size:10px;font-weight:900;white-space:nowrap}
     .photo-categories{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 15px 15px;border-top:1px solid #edf1f5;background:#fbfcfd}.photo-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border-radius:12px;border:1px solid var(--border);background:#fff;font-size:11px;font-weight:800}.photo-chip b{font-size:11px}.photo-chip.ok b{color:var(--green)}.photo-chip.bad b{color:var(--red)}
-    .note-card{padding:16px}textarea{width:100%;min-height:112px;padding:14px;border:1px solid var(--border);border-radius:15px;background:#fbfcfd;color:var(--ink);resize:vertical;outline:none}textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(36,111,214,.11)}.helper{margin:9px 2px 0;color:var(--muted);font-size:11px}
+    .note-card{padding:16px}textarea{width:100%;min-height:112px;padding:14px;border:1px solid var(--border);border-radius:15px;background:#fbfcfd;color:var(--ink);resize:vertical;outline:none}textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(36,111,214,.11)}.helper{margin:9px 2px 0;color:var(--muted);font-size:11px}.speak{width:100%;min-height:48px;margin-bottom:10px;border:1px solid var(--blue);border-radius:14px;background:#eef5ff;color:var(--blue2);font-weight:900}.speak.listening{background:var(--red);color:#fff}.choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 15px}.choice{min-height:48px;border:1px solid var(--border);border-radius:13px;background:#fff;font-weight:900}.choice.on{background:var(--green);border-color:var(--green);color:#fff}
     .confirm-card{padding:16px}.confirm-row{display:flex;align-items:flex-start;gap:11px}.confirm-row input{width:22px;height:22px;margin:0;accent-color:var(--green);flex:0 0 auto}.confirm-row label{font-size:13px;line-height:1.45}.warning{margin-top:12px;padding:12px;border-left:4px solid var(--orange);border-radius:12px;background:var(--orange-soft);color:#6f4a0a;font-size:12px;line-height:1.45}
     .finish{width:100%;min-height:61px;margin-top:16px;border:0;border-radius:19px;background:var(--navy);color:#fff;font-size:16px;font-weight:950;box-shadow:var(--shadow)}.finish:disabled{opacity:.45;cursor:not-allowed}.finish.ready{background:var(--green)}
     .after{padding:24px;text-align:center}.after-icon{display:grid;place-items:center;width:68px;height:68px;margin:0 auto 13px;border-radius:50%;background:var(--green-soft);color:var(--green);font-size:32px;font-weight:900}.after h2{margin:0 0 7px}.after p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.after-actions{display:grid;gap:9px;margin-top:17px}.after-actions a{display:flex;align-items:center;justify-content:center;min-height:48px;padding:10px 14px;border-radius:14px;text-decoration:none;font-weight:900}.back-go{background:var(--navy);color:#fff}.open-wa{border:1px solid var(--border);background:#fff;color:var(--green)}.auto-return{margin-top:9px;color:var(--muted);font-size:10px}
@@ -65,7 +65,7 @@
 <div class="metric"><small>Baustellen</small><strong id="siteCount">0</strong></div>
 <div class="metric"><small>Letzter Status</small><strong id="lastStatus">–</strong></div>
 </div>
-<div id="timeline" class="timeline"></div>
+<div id="timeline" class="timeline"></div><button id="saveTimes" class="save-times" type="button">Zeiten speichern</button>
 </div>
 </section>
 
@@ -74,20 +74,14 @@
 <div class="card check-list">
 <button class="check-row" type="button" data-kind="time"><span id="statusTime" class="status ok">✓</span><span class="row-copy"><strong>Arbeitszeit</strong><small id="textTime">geprüft</small></span><span class="action-chip">Ändern</span></button>
 <button class="check-row" type="button" data-kind="photo"><span id="statusPhoto" class="status open">!</span><span class="row-copy"><strong>Fotodokumentation</strong><small id="textPhoto">noch nicht geprüft</small></span><span class="action-chip">Fotos öffnen</span></button>
-<div class="photo-categories">
-<div id="photoBefore" class="photo-chip ok"><span>Vorher</span><b>optional</b></div>
-<div id="photoProgress" class="photo-chip bad"><span>Fortschritt</span><b>fehlt</b></div>
-<div id="photoAfter" class="photo-chip ok"><span>Nachher</span><b>optional</b></div>
-<div id="photoComplaint" class="photo-chip ok"><span>Reklamation</span><b>optional</b></div>
-</div>
-<button class="check-row" type="button" data-kind="material"><span id="statusMaterial" class="status open">!</span><span class="row-copy"><strong>Materialdokumentation</strong><small id="textMaterial">noch nicht geprüft</small></span><span class="action-chip">Bearbeiten</span></button>
 <button class="check-row" type="button" data-kind="regie"><span id="statusRegie" class="status ok">✓</span><span class="row-copy"><strong>Regie</strong><small id="textRegie">bei Bedarf prüfen</small></span><span class="action-chip">Bearbeiten</span></button>
-<button class="check-row" type="button" data-kind="order"><span id="statusOrder" class="status open">!</span><span class="row-copy"><strong>Bestellung</strong><small id="textOrder">heute / morgen noch offen</small></span><span class="action-chip">Bearbeiten</span></button>
+<div class="choice-row"><button class="choice" type="button" data-choice="photos">Fotos: Ja</button><button class="choice" type="button" data-choice="photos-no">Fotos: Nein</button></div>
+<div class="choice-row"><button class="choice" type="button" data-choice="regie">Regie: Ja</button><button class="choice" type="button" data-choice="regie-no">Regie: Nein</button></div>
 </div>
 </section>
 
-<section class="section"><div class="section-head"><h2>Besonderheiten heute</h2><span>optional</span></div><div class="card note-card"><textarea id="note" placeholder="Was soll das Büro oder die nächste Mannschaft wissen?"></textarea><div class="helper">Die Notiz bleibt baustellen- und tagesbezogen erhalten.</div></div></section>
-<section class="section"><div class="section-head"><h2>Verbindlich bestätigen</h2><span>letzte Kontrolle</span></div><div class="card confirm-card"><div class="confirm-row"><input id="confirm" type="checkbox"><label for="confirm">Ich habe Arbeitszeit, Fotodokumentation, Materialdokumentation, Regie und Bestellung geprüft.</label></div><div id="openWarning" class="warning">Es sind noch offene Punkte vorhanden. Du kannst sie oben direkt bearbeiten und trotzdem bewusst bestätigen.</div></div></section>
+<section class="section"><div class="section-head"><h2>Notiz für morgen</h2><span>optional · WhatsApp 06:45</span></div><div class="card note-card"><button id="speakNote" class="speak" type="button">🎙️ Notiz sprechen</button><textarea id="note" placeholder="Was soll der Mitarbeiter morgen wissen?"></textarea><div class="helper">Die Notiz wird morgen um 06:45 Uhr per WhatsApp an dich gesendet.</div></div></section>
+<section class="section"><div class="section-head"><h2>Verbindlich bestätigen</h2><span>letzte Kontrolle</span></div><div class="card confirm-card"><div class="confirm-row"><input id="confirm" type="checkbox"><label for="confirm">Arbeitszeit, Fotos und Regie sind richtig beantwortet.</label></div><div id="openWarning" class="warning">Bitte Fotos und Regie mit Ja oder Nein beantworten.</div></div></section>
 <button id="finish" class="finish" type="button" disabled>Tagesabschluss bestätigen</button>
 
 <section id="after" class="card after hidden">
@@ -131,13 +125,16 @@ function buildDay(events){
 function setStatus(kind,done,text,bad=false){const cap=kind.charAt(0).toUpperCase()+kind.slice(1),status=document.getElementById("status"+cap),copy=document.getElementById("text"+cap);status.textContent=done?"✓":"!";status.className=`status ${done?"ok":bad?"bad":"open"}`;if(copy)copy.textContent=text}
 function setPhotoChip(id,state,label){const el=document.getElementById(id);el.className=`photo-chip ${state}`;el.querySelector("b").textContent=label}
 
-let employee=null,assignment=null,employeeState=null,day=null,openRegieDraft=null;
-let checks={time:false,photos:false,material:false,regie:false,order:false};
+let employee=null,assignment=null,employeeState=null,day=null,openRegieDraft=null,editableSegments=[];
+let checks={time:false,photos:false,regie:false};
 
 function renderTimeline(){
  const timeline=document.getElementById("timeline");
- if(!day.rows.length){timeline.innerHTML='<div class="empty-timeline">Für heute wurden noch keine Zeitereignisse gefunden.</div>';return}
- timeline.innerHTML=day.rows.map(event=>{const type=String(event.type||"").toLowerCase(),place=[event.jobId,event.jobName].filter(Boolean).join(" – "),detail=["start","weiter"].includes(type)?(place||"Baustelle"):type==="pause"?"Arbeitszeit pausiert":type==="mittag"?"Mittagspause":"Arbeitstag beendet";return `<div class="timeline-row"><div class="timeline-time">${event.at||"–"}</div><div class="timeline-rail"><span class="timeline-dot ${["pause","mittag"].includes(type)?"pause":type==="ende"?"end":""}">${eventIcon(type)}</span></div><div class="timeline-copy"><strong>${statusLabel(type)}</strong><small>${detail}</small></div></div>`}).join("")
+ if(!editableSegments.length){timeline.innerHTML='<div class="empty-timeline">Für heute wurden noch keine Zeitblöcke gefunden.</div>';return}
+ const jobRows=[...editableSegments,...(window.__bootstrapAssignments||[]).filter(x=>String(x.date||'')===String(today)&&String(x.employeeId||'')===String(employeeId))];
+ const jobs=[...new Map(jobRows.filter(x=>x.jobId||x.jobName).map(x=>[String(x.jobId||x.jobName),{id:String(x.jobId||""),name:String(x.jobName||x.jobId||"")}])).values()];
+ timeline.innerHTML=editableSegments.map((segment,index)=>{const pause=["pause","lunch"].includes(segment.type);return `<div class="timeline-row ${pause?'pause':''}" data-index="${index}"><div class="timeline-fields"><label>Von<input class="seg-from" type="time" value="${segment.from||''}"></label><label>Bis<input class="seg-to" type="time" value="${segment.to||''}"></label></div><label class="timeline-site">${pause?'Pause':'Baustelle'}<select class="seg-job" ${pause?'disabled':''}>${pause?`<option>${segment.type==='lunch'?'Mittag':'Pause'}</option>`:jobs.map(j=>`<option value="${j.id}" ${j.id===String(segment.jobId||'')?'selected':''}>${j.id?j.id+' – ':''}${j.name}</option>`).join('')}</select></label></div>`}).join("");
+ timeline.querySelectorAll('.timeline-row').forEach(row=>{const segment=editableSegments[+row.dataset.index];row.querySelector('.seg-from').onchange=e=>segment.from=e.target.value;row.querySelector('.seg-to').onchange=e=>segment.to=e.target.value;const job=row.querySelector('.seg-job');if(job&&!job.disabled)job.onchange=e=>{const selected=jobs.find(x=>x.id===e.target.value);segment.jobId=selected?.id||'';segment.jobName=selected?.name||''}})
 }
 
 function photoReviewState(currentAssignment){
@@ -153,7 +150,7 @@ function photoReviewState(currentAssignment){
  if(lastDay)return{done:afterDone,text:afterDone?"Nachher-Fotos vorhanden":"Nachher-/Abschlussfotos fehlen"};
  return{done:progressDone,text:progressDone?"Fortschrittsfotos vorhanden":"Fortschrittsfotos fehlen"}
 }
-function updateProgress(){const values=Object.values(checks),done=values.filter(Boolean).length,percent=Math.round(done/values.length*100);document.getElementById("progressBar").style.width=`${percent}%`;document.getElementById("progressText").textContent=`${percent} %`;document.getElementById("openWarning").classList.toggle("hidden",done===values.length)}
+function updateProgress(){const values=Object.values(checks),done=values.filter(Boolean).length,percent=Math.round(done/values.length*100);document.getElementById("progressBar").style.width=`${percent}%`;document.getElementById("progressText").textContent=`${percent} %`;document.getElementById("openWarning").classList.toggle("hidden",done===values.length);const confirm=document.getElementById('confirm'),finish=document.getElementById('finish'),ready=Boolean(confirm?.checked&&done===values.length);if(finish){finish.disabled=!ready;finish.classList.toggle('ready',ready)}}
 
 async function init(){
  try{
@@ -163,6 +160,7 @@ async function init(){
   const todayAssignments=(data.assignments||[]).filter(a=>String(a.employeeId)===String(employeeId)&&String(a.date)===String(today)).sort((a,b)=>String(a.from||"").localeCompare(String(b.from||"")));
   assignment=employeeState?.activeJobOverride||todayAssignments.find(a=>`${a?.date||""}|${a?.employeeId||""}|${a?.from||""}|${a?.jobId||""}`===employeeState?.activeAssignmentKey)||todayAssignments[0]||null;
   day=buildDay(data.timeEvents||[]);
+  const segmentData=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(today)}`);editableSegments=segmentData.segments||[];
   if(!assignment&&day.rows.length){const latestWork=[...day.rows].reverse().find(e=>["start","weiter"].includes(String(e.type||"").toLowerCase())&&(e.jobId||e.jobName));if(latestWork)assignment={jobId:latestWork.jobId||"",jobName:latestWork.jobName||"",city:latestWork.city||"",address:latestWork.address||""}}
   document.getElementById("title").textContent=`${employeeName(employee)}, Tagesabschluss ${today.split("-").reverse().join(".")}`;
   document.getElementById("site").textContent=assignmentTitle(assignment);
@@ -175,12 +173,10 @@ async function init(){
   renderTimeline();
   checks.time=day.rows.some(e=>["start","weiter"].includes(String(e.type||"").toLowerCase()));
   setStatus("time",checks.time,checks.time?`${duration(day.workMinutes)} Arbeit · ${duration(day.pauseMinutes)} Pause`:"noch keine Arbeitszeit");
-  const photo=photoReviewState(assignment);checks.photos=photo.done;setStatus("photo",photo.done,photo.text,!photo.done);
-  const material=review("material");checks.material=Boolean(material);setStatus("material",checks.material,material?.summary||"noch nicht geprüft");
+  checks.photos=false;setStatus("photo",false,"Bitte Ja oder Nein wählen");
   const draftData=await api(`/kristine/api/regie/drafts?employeeId=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(today)}`);openRegieDraft=draftData.drafts?.[0]||null;
-  checks.regie=!openRegieDraft;setStatus("regie",checks.regie,openRegieDraft?"Regiebericht offen – jetzt fertig machen":"kein offener Regiebericht",Boolean(openRegieDraft));
+  checks.regie=false;setStatus("regie",false,openRegieDraft?"Regiebericht offen – jetzt fertig machen":"Bitte Ja oder Nein wählen",Boolean(openRegieDraft));
   if(openRegieDraft){const row=document.querySelector('[data-kind="regie"]');row.querySelector('.action-chip').textContent='Jetzt fertig';document.getElementById('openWarning').textContent='Regiebericht noch offen: Bitte jetzt fertig machen und an Alex senden. Erst danach kannst du den Tagesabschluss bestätigen.'}
-  const order=review("order");checks.order=Boolean(order);setStatus("order",checks.order,order?.summary||"noch nicht beantwortet");
   updateProgress();
   const noteKey=`kg-finish-note:${today}:${employeeId}`,note=document.getElementById("note");note.value=localStorage.getItem(noteKey)||"";note.addEventListener("input",event=>localStorage.setItem(noteKey,event.target.value));
   document.getElementById("loading").classList.add("hidden");document.getElementById("content").classList.remove("hidden");
@@ -189,12 +185,19 @@ async function init(){
 
 document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:openRegieDraft?.jobId||assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
 
+document.querySelectorAll('[data-choice]').forEach(button=>button.addEventListener('click',()=>{const raw=button.dataset.choice,kind=raw.replace('-no',''),yes=!raw.endsWith('-no');if(kind==='photos'){checks.photos=true;setStatus('photo',true,yes?'Fotos vollständig':'Heute keine Fotos erforderlich')}if(kind==='regie'&&!openRegieDraft){checks.regie=true;setStatus('regie',true,yes?'Regie erledigt':'Keine Regie erforderlich')}document.querySelectorAll(`[data-choice^="${kind}"]`).forEach(x=>x.classList.remove('on'));button.classList.add('on');updateProgress()}));
+
+document.getElementById('saveTimes').addEventListener('click',async()=>{const button=document.getElementById('saveTimes');button.disabled=true;try{await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(today)}`,{method:'PUT',body:JSON.stringify({employeeName:employeeName(employee),segments:editableSegments,reason:'Korrektur beim Tagesabschluss',correctedBy:employeeName(employee)})});checks.time=true;setStatus('time',true,'Zeiten gespeichert');button.textContent='✓ Zeiten gespeichert';updateProgress()}catch(error){toast(error.message)}finally{button.disabled=false}});
+
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition,speak=document.getElementById('speakNote');
+if(!SpeechRecognition)speak.hidden=true;else speak.addEventListener('click',()=>{const recognition=new SpeechRecognition();recognition.lang='de-AT';recognition.interimResults=false;speak.classList.add('listening');speak.textContent='🎙️ Ich höre zu …';recognition.onresult=e=>{const note=document.getElementById('note'),text=e.results[0][0].transcript;note.value=[note.value.trim(),text].filter(Boolean).join(' ');note.dispatchEvent(new Event('input'))};recognition.onerror=()=>toast('Spracherkennung hat nicht geklappt.');recognition.onend=()=>{speak.classList.remove('listening');speak.textContent='🎙️ Notiz sprechen'};recognition.start()});
+
 const confirm=document.getElementById("confirm"),finish=document.getElementById("finish");
-confirm.addEventListener("change",()=>{finish.disabled=!confirm.checked||!checks.regie;finish.classList.toggle("ready",confirm.checked&&checks.regie);if(confirm.checked&&!checks.regie)toast("Regiebericht noch offen – bitte zuerst fertig machen.")});
+confirm.addEventListener("change",()=>{const ready=confirm.checked&&checks.time&&checks.photos&&checks.regie;finish.disabled=!ready;finish.classList.toggle("ready",ready);if(confirm.checked&&!ready)toast("Bitte Zeiten, Fotos und Regie zuerst bestätigen.")});
 finish.addEventListener("click",async()=>{
  finish.disabled=true;finish.textContent="Wird gespeichert …";
  try{
-  const result=await api("/kristine/api/day-close",{method:"POST",body:JSON.stringify({employeeId,employeeName:employeeName(employee),date:today,jobId:assignment?.jobId||"",jobName:assignment?.jobName||"",note:document.getElementById("note").value.trim(),confirmed:true,checks:{time:checks.time,photos:checks.photos,material:checks.material,regie:checks.regie,order:checks.order}})});
+  const result=await api("/kristine/api/day-close",{method:"POST",body:JSON.stringify({employeeId,employeeName:employeeName(employee),date:today,jobId:assignment?.jobId||"",jobName:assignment?.jobName||"",note:document.getElementById("note").value.trim(),confirmed:true,checks:{time:checks.time,photos:checks.photos,material:true,regie:checks.regie,order:true}})});
   document.querySelectorAll(".section,.hero").forEach(section=>section.classList.add("hidden"));finish.classList.add("hidden");document.getElementById("after").classList.remove("hidden");
   document.getElementById("afterText").textContent=result.whatsapp?.sent?"Tagesabschluss gespeichert. Die Bestätigung wurde an WhatsApp gesendet.":"Tagesabschluss gespeichert. WhatsApp konnte diesmal nicht bestätigt werden.";
   let seconds=3;const auto=document.getElementById("autoReturn");auto.textContent=`Zurück zu KRISTINE in ${seconds} Sekunden …`;

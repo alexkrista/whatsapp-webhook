@@ -884,6 +884,7 @@ async function registerMorningStatus({
     assignments: path.join(kristineDir, "assignments.json"),
     absences: path.join(kristineDir, "absences.json"),
     events: path.join(kristineDir, "time-events.json"),
+    dayCloses: path.join(kristineDir, "day-closes.json"),
     lateNotices: path.join(kristineDir, "late-notices.json"),
     scheduler: path.join(kristineDir, "scheduler-state.json"),
     holidays: path.join(systemDir, "holidays.json"),
@@ -903,6 +904,7 @@ async function registerMorningStatus({
       assignments,
       absences,
       events,
+      dayCloses,
       lateNotices,
       scheduler,
       holidayRaw,
@@ -913,6 +915,7 @@ async function registerMorningStatus({
       readJson(files.assignments, []),
       readJson(files.absences, []),
       readJson(files.events, []),
+      readJson(files.dayCloses, []),
       readJson(files.lateNotices, []),
       readJson(files.scheduler, {}),
       readJson(files.holidays, []),
@@ -925,6 +928,7 @@ async function registerMorningStatus({
       assignments,
       absences,
       events,
+      dayCloses,
       lateNotices,
       scheduler,
       holidays: unwrapArray(holidayRaw, ["holidays"]),
@@ -1031,6 +1035,25 @@ async function runSixFortyFive(
       }
     }
 
+    // Eine am Tagesabschluss diktierte Notiz erreicht den betroffenen
+    // Mitarbeiter am nächsten Morgen – einmalig und unabhängig von der Einteilung.
+    const yesterday = addDaysIso(date, -1);
+    for (const close of state.dayCloses || []) {
+      const id = String(close?.employeeId || "");
+      const note = String(close?.note || "").trim();
+      const employee = (state.employees || []).find(row => String(row?.id || row?.employeeId || "") === id);
+      const deliveryKey = `dayCloseNote:${date}:${id}`;
+      if (!note || String(close?.date || "") !== yesterday || state.scheduler[deliveryKey] || !employee) continue;
+      const to = normalizePhone(employee.phone);
+      if (!to) continue;
+      try {
+        await sendWhatsApp({phoneNumberId,to,reply:`📝 Notiz von gestern\n\n${note}`});
+        state.scheduler[deliveryKey] = new Date().toISOString();
+      } catch (error) {
+        logger.error("06:45 Tagesnotiz fehlgeschlagen", displayName(employee), error);
+      }
+    }
+
     await saveRun("morningGreeting", date, state.scheduler);
 
     logger.log("KRISTA 06:45 Morgenbegrüßung", {
@@ -1045,6 +1068,30 @@ async function runSixFortyFive(
       suppressed: statuses.length - recipients.length,
       statuses,
     };
+  }
+
+  async function runWorktimePrompt(phase, date = localIsoDate(), force = false) {
+    const config = {
+      lunch:{key:"lunchPrompt",types:["start","weiter","up"],reply:"🍽️ Mittagspause starten? Bitte die tatsächliche Zeit bestätigen.",buttons:["Mittag"]},
+      resume:{key:"resumePrompt",types:["mittag"],reply:"▶️ Mittagspause beendet? Bitte erst drücken, wenn du tatsächlich weiterarbeitest.",buttons:["Weiter"]},
+      finish:{key:"finishPrompt",types:["start","weiter","up"],reply:"🏁 Feierabend? Bitte erst beenden, wenn deine tatsächliche Arbeitszeit endet.",buttons:["Ende"]},
+    }[phase];
+    if (!config) throw new Error("Unbekannte Arbeitszeit-Erinnerung");
+    const state = await loadState();
+    if (!force && state.scheduler[config.key] === date) return {skipped:true};
+    let sent = 0;
+    for (const employee of productionEmployees(state.employees)) {
+      const id = String(employee.id || employee.employeeId || "");
+      const last = (state.events || []).filter(row => String(row.employeeId) === id && String(row.date) === date)
+        .filter(row => ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row.type || "").toLowerCase()))
+        .sort((a,b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.at || "").localeCompare(String(b.at || ""))).at(-1);
+      if (!config.types.includes(String(last?.type || "").toLowerCase())) continue;
+      const to = normalizePhone(employee.phone); if (!to) continue;
+      try { await sendWhatsApp({phoneNumberId,to,reply:config.reply,buttons:config.buttons}); sent += 1; }
+      catch (error) { logger.error(`${config.key} fehlgeschlagen`, displayName(employee), error); }
+    }
+    await saveRun(config.key,date,state.scheduler);
+    return {sent};
   }
 
 async function runSevenOClock(
@@ -1341,6 +1388,10 @@ async function runSevenOClock(
         await runEightOClock(date);
       }
 
+      if (inWindow(hm, "12:00", "12:14")) await runWorktimePrompt("lunch", date);
+      if (inWindow(hm, "12:30", "12:44")) await runWorktimePrompt("resume", date);
+      if (inWindow(hm, "17:00", "17:29")) await runWorktimePrompt("finish", date);
+
       // Montag–Donnerstag: Planung für den nächsten Tag.
       if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:00", "15:29")) {
         await runFifteenOClock(date);
@@ -1381,6 +1432,9 @@ async function runSevenOClock(
         "06:45 Morgenbegrüßung · nur Produktion",
         "07:00 Startprüfung · nur Produktion",
         "08:00 Chefstatus · nur Produktion",
+        "12:00 Mittag erinnern · tatsächliche Zeit bestätigen",
+        "12:30 Weiter erinnern · tatsächliche Zeit bestätigen",
+        "17:00 Feierabend erinnern · tatsächliche Zeit bestätigen",
         "Mo–Do 15:00 Planung morgen · nur Produktion",
         "Mo–Do 15:30 Nachfassung · nur Produktion",
         "Fr 11:00 Montagseinteilung · nur Produktion",
@@ -1410,6 +1464,7 @@ async function runSevenOClock(
     runEightOClock,
     runFifteenOClock,
     runFifteenThirty,
+    runWorktimePrompt,
     getStatus,
     clampStartTime,
     dailyTargetHours: DAILY_TARGET_HOURS,
