@@ -182,6 +182,9 @@ UI = r'''
 #brainSelectionLayer{position:absolute;text-align:left;z-index:1;user-select:text;-webkit-user-select:text;color:transparent;line-height:1;pointer-events:auto}
 #brainSelectionLayer span{position:absolute;white-space:pre;transform-origin:0 0;color:transparent;cursor:text;user-select:text;-webkit-user-select:text}
 #brainSelectionLayer span::selection{background:rgba(40,125,255,.4);color:transparent}
+#brainSelectionLayer.fence-mode{cursor:crosshair;user-select:none;-webkit-user-select:none;touch-action:none}
+#brainSelectionLayer.fence-mode span{pointer-events:none;user-select:none;-webkit-user-select:none}
+#brainSelectionFence{position:absolute;z-index:3;pointer-events:none;border:2px solid #4da3ff;border-radius:4px;background:rgba(40,125,255,.16);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 0 14px rgba(40,125,255,.22)}
 #brainSelectionStatus{padding:6px 14px;font-size:12px;color:#cbd4df}
 .brain-line-actions{display:flex;gap:6px;margin:5px 0 10px}.brain-line-actions button{padding:5px 9px;font-size:12px}
 #brainMaterialDialog{width:min(640px,94vw);max-height:90vh;overflow:auto;background:#141a22;color:#fff;border:1px solid #536171;border-radius:14px;padding:20px;z-index:11000}
@@ -207,13 +210,16 @@ UI = r'''
  const modal=document.getElementById('pdfSuperModal'),stage=document.getElementById('pdfStage'),img=document.getElementById('pdfImage');
  if(!modal||!stage||!img)return;
  const prefix='/incoming/capture/material-selection',dialog=document.getElementById('brainMaterialDialog'),form=document.getElementById('brainMaterialForm'),message=document.getElementById('brainMaterialMessage'),save=document.getElementById('brainMaterialSave');
- let selected='',selectedContext=null,requestId=0,draftToken='',previewId=0,saving=false;
+ let selected='',selectedContext=null,requestId=0,draftToken='',previewId=0,saving=false,fenceMode=false,fenceStart=null,fencePointer=null;
  const layer=document.createElement('div');layer.id='brainSelectionLayer';stage.append(layer);
+ const fence=document.createElement('div');fence.id='brainSelectionFence';fence.hidden=true;layer.append(fence);
  const status=document.createElement('div');status.id='brainSelectionStatus';status.setAttribute('role','status');stage.before(status);
- const tools=modal.querySelector('.pdf-super-tools'),copy=document.createElement('button'),create=document.createElement('button');
- copy.type=create.type='button';copy.textContent='Auswahl kopieren';create.textContent='＋ Material aus Auswahl';tools.append(copy,create);
+ const tools=modal.querySelector('.pdf-super-tools'),copy=document.createElement('button'),fenceButton=document.createElement('button'),create=document.createElement('button');
+ copy.type=fenceButton.type=create.type='button';copy.textContent='Auswahl kopieren';fenceButton.textContent='▱ Bereich aufziehen';fenceButton.setAttribute('aria-pressed','false');create.textContent='＋ Material aus Auswahl';tools.append(copy,fenceButton,create);
  function context(){return {path:pdfState.path,page:pdfState.page}}
- function reset(){requestId++;selected='';selectedContext=null;layer.replaceChildren();copy.disabled=create.disabled=true;status.textContent='Text wird geladen …'}
+ function setSelected(value,ctx){selected=String(value||'').replace(/\s+/g,' ').trim();selectedContext=selected?ctx:null;copy.disabled=create.disabled=!selected}
+ function setFenceMode(active){fenceMode=!!active;fenceStart=null;fencePointer=null;layer.classList.toggle('fence-mode',fenceMode);fenceButton.setAttribute('aria-pressed',String(fenceMode));fenceButton.textContent=fenceMode?'✓ Bereich aktiv':'▱ Bereich aufziehen';if(!fenceMode)fence.hidden=true}
+ function reset(){requestId++;setSelected('',null);setFenceMode(false);layer.replaceChildren();layer.append(fence);status.textContent='Text wird geladen …'}
  reset();
  async function api(path,body){const r=await fetch(prefix+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Anfrage fehlgeschlagen');return d}
  async function loadText(){
@@ -222,7 +228,7 @@ UI = r'''
    if(id!==requestId||modal.hidden||src!==img.getAttribute('src'))return;
    const sx=img.offsetWidth/d.width,sy=img.offsetHeight/d.height;
    layer.style.left=img.offsetLeft+'px';layer.style.top=img.offsetTop+'px';layer.style.width=img.offsetWidth+'px';layer.style.height=img.offsetHeight+'px';
-   layer.replaceChildren();
+   layer.replaceChildren();layer.append(fence);
    for(const w of d.words){const s=document.createElement('span');s.textContent=w.text+' ';s.style.left=w.x0*sx+'px';s.style.top=w.y0*sy+'px';s.style.fontSize=Math.max(5,(w.y1-w.y0)*sy*.85)+'px';s.style.height=(w.y1-w.y0)*sy+'px';layer.append(s);const measured=s.getBoundingClientRect().width;if(measured)s.style.transform='scaleX('+((w.x1-w.x0)*sx/measured)+')'}
    status.textContent=d.words.length?'Rechnungsposition mit der Maus oder durch langes Drücken markieren.':'Kein auswählbarer Text erkannt. Bitte die Textzeile aus den Suchtreffern verwenden.';
   }catch(e){if(id===requestId)status.textContent=e.message}
@@ -232,15 +238,28 @@ UI = r'''
  img.addEventListener('load',loadText);
  document.getElementById('pdfClose').addEventListener('click',reset);
  // Retain selection when a toolbar button takes focus; invalidate it on page/document changes.
- for(const b of [copy,create])b.addEventListener('mousedown',e=>e.preventDefault());
+ for(const b of [copy,fenceButton,create])b.addEventListener('mousedown',e=>e.preventDefault());
  document.addEventListener('selectionchange',()=>{
   const s=window.getSelection();if(!s||!s.rangeCount||modal.hidden)return;
   if(layer.contains(s.anchorNode)&&layer.contains(s.focusNode)){
-   selected=s.toString().replace(/\s+/g,' ').trim();selectedContext=context();copy.disabled=create.disabled=!selected;
+   setSelected(s.toString(),context());
   }else if(!tools.contains(document.activeElement)&&!dialog.open){
-   selected='';selectedContext=null;copy.disabled=create.disabled=true;
+   setSelected('',null);
   }
  });
+ function fencePoint(e){const r=layer.getBoundingClientRect();return {x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))}}
+ function drawFence(a,b){const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),w=Math.abs(a.x-b.x),h=Math.abs(a.y-b.y);fence.hidden=false;fence.style.left=x+'px';fence.style.top=y+'px';fence.style.width=w+'px';fence.style.height=h+'px';return {x,y,w,h}}
+ function finishFence(box){
+  if(box.w<5||box.h<5){setSelected('',null);status.textContent='Bitte einen Rahmen um die gewünschte Materialzeile aufziehen.';return}
+  const words=[...layer.querySelectorAll(':scope > span')].filter(word=>{const x=parseFloat(word.style.left)||0,y=parseFloat(word.style.top)||0,w=word.getBoundingClientRect().width,h=parseFloat(word.style.height)||word.getBoundingClientRect().height,cx=x+w/2,cy=y+h/2;return cx>=box.x&&cx<=box.x+box.w&&cy>=box.y&&cy<=box.y+box.h});
+  setSelected(words.map(word=>word.textContent).join(' '),context());
+  status.textContent=selected?'Nur dieser Bereich wird übernommen: '+selected:'Im Rahmen wurde kein Text erkannt. Bitte etwas größer aufziehen.';
+ }
+ fenceButton.onclick=()=>{setFenceMode(!fenceMode);window.getSelection()?.removeAllRanges();setSelected('',null);status.textContent=fenceMode?'Rahmen mit gedrückter Maustaste genau um die Materialposition aufziehen.':'Rechnungsposition mit der Maus oder durch langes Drücken markieren.'};
+ layer.addEventListener('pointerdown',e=>{if(!fenceMode||e.button!==0)return;e.preventDefault();fenceStart=fencePoint(e);fencePointer=e.pointerId;layer.setPointerCapture?.(e.pointerId);drawFence(fenceStart,fenceStart)});
+ layer.addEventListener('pointermove',e=>{if(!fenceMode||fencePointer!==e.pointerId||!fenceStart)return;e.preventDefault();drawFence(fenceStart,fencePoint(e))});
+ layer.addEventListener('pointerup',e=>{if(!fenceMode||fencePointer!==e.pointerId||!fenceStart)return;e.preventDefault();const box=drawFence(fenceStart,fencePoint(e));fencePointer=null;fenceStart=null;finishFence(box)});
+ layer.addEventListener('pointercancel',()=>{fencePointer=null;fenceStart=null;fence.hidden=true});
  async function copyText(text,target){
   try{if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(text);else throw Error('fallback');target.textContent='Auswahl kopiert.'}
   catch(_){const input=document.createElement('textarea');input.value=text;input.style.position='fixed';input.style.top='0';document.body.append(input);input.select();const ok=document.execCommand('copy');input.remove();target.textContent=ok?'Auswahl kopiert.':'Kopieren nicht möglich. Bitte Text markieren und Strg+C verwenden.'}

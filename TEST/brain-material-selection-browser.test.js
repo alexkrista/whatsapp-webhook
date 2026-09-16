@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'brain_material_selection.py'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'brain_material_selection.py'), 'utf8').replace(/\r\n/g, '\n');
 const ui = source.split("UI = r'''\n")[1].split("\n'''")[0];
 const archive = fs.readFileSync(path.join(root, 'archive-connector.py'), 'utf8');
 const viewer = "function urlFor(route,path){return route+'?path='+encodeURIComponent(path)}\n" + archive.slice(archive.indexOf("let pdfState={"), archive.indexOf("document.addEventListener('click',e=>{const a=e.target.closest('a.action"));
@@ -23,7 +23,7 @@ const html = `<!doctype html><html><body><div id="materialResults"><div class="m
    if(url.pathname==='/pdf-page')return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="white"/></svg>'});
    let data={ok:true};
    if(url.pathname==='/pdf-info')data={ok:true,pages:2,width:600};
-   if(url.pathname.endsWith('/text'))data={ok:true,width:600,height:400,words:[{text:'Farbe',x0:20,y0:20,x1:70,y1:40},{text:'12,50',x0:80,y0:20,x1:125,y1:40}]};
+   if(url.pathname.endsWith('/text'))data={ok:true,width:600,height:400,words:[{text:'Farbe',x0:20,y0:20,x1:70,y1:40},{text:'12,50',x0:80,y0:20,x1:125,y1:40},{text:'AndereZeile',x0:20,y0:80,x1:115,y1:100}]};
    if(url.pathname.endsWith('/preview')){
     const body=route.request().postDataJSON();requests.push(body);
     data={ok:true,token:'test-token',recognized:true,source:{...body,invoiceNumber:'R17',invoiceDate:'2026-09-11'},fields:{product:'Farbe <img src=x onerror=alert(1)>',supplier:'Lieferant',supplierArticleNumber:'SKU-17',unit:'Stk',containerSize:1,purchasePrice:12.5}};
@@ -50,6 +50,15 @@ const html = `<!doctype html><html><body><div id="materialResults"><div class="m
   await page.getByRole('button',{name:'＋ Material aus Auswahl',exact:true}).click();
   await page.waitForFunction(()=>!document.getElementById('brainMaterialSave').disabled);
   assert.equal(requests[2].selection,'Farbe 12,50');assert.equal(requests[2].page,1);
+  await page.getByRole('button',{name:'Schließen',exact:true}).click();
+  await page.getByRole('button',{name:'▱ Bereich aufziehen',exact:true}).click();
+  const layerBox=await page.locator('#brainSelectionLayer').boundingBox();
+  await page.mouse.move(layerBox.x+10,layerBox.y+10);await page.mouse.down();await page.mouse.move(layerBox.x+140,layerBox.y+50);await page.mouse.up();
+  assert.equal(await page.getByRole('button',{name:'＋ Material aus Auswahl',exact:true}).isDisabled(),false);
+  assert.match(await page.locator('#brainSelectionStatus').textContent(),/^Nur dieser Bereich wird übernommen: Farbe 12,50$/);
+  await page.getByRole('button',{name:'＋ Material aus Auswahl',exact:true}).click();
+  await page.waitForFunction(()=>!document.getElementById('brainMaterialSave').disabled);
+  assert.equal(requests[3].selection,'Farbe 12,50');assert.equal(requests[3].page,1);
   await page.getByRole('button',{name:'Schließen',exact:true}).click();
   await page.locator('#pdfNext').click();
   assert.equal(await page.getByRole('button',{name:'＋ Material aus Auswahl',exact:true}).isDisabled(),true);
