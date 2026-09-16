@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KRISTINE · Bank Nur-Lesen</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d1014;--card:#171b21;--line:#303743;--text:#f2f4f7;--muted:#a6afbd;--green:#80d89a;--amber:#f1c96a;--red:#ff9f98}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+    main{width:min(1180px,calc(100% - 28px));margin:28px auto 70px}.top,.row,.actions{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    h1,h2{margin:0}.top{margin-bottom:18px}.back{color:var(--green);text-decoration:none}.mode{padding:7px 11px;border:1px solid #42664d;border-radius:999px;color:var(--green);font-weight:800}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0}.muted{color:var(--muted)}.good{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+    button,input,select{min-height:42px;border:1px solid var(--line);border-radius:9px;background:#10141a;color:var(--text);padding:9px 12px;font:inherit}button{cursor:pointer;font-weight:750}button.primary{background:#276c3d;border-color:#348d50}button:disabled{opacity:.55;cursor:not-allowed}
+    label{display:grid;gap:5px;color:var(--muted);font-size:13px}.filters{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;align-items:end}.filters button{width:100%}
+    .account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.account{border:1px solid var(--line);border-radius:12px;padding:13px}.account strong{display:block;font-size:19px;margin-top:7px}
+    .table{overflow:auto;margin-top:12px}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;padding:11px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase}.amount{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .notice{white-space:pre-line}.setup-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px}.hidden{display:none!important}
+    @media(max-width:760px){.filters{grid-template-columns:1fr 1fr}.setup-row{grid-template-columns:1fr}.filters .wide{grid-column:1/-1}}
+  </style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div><a class="back" href="/">← The Brain</a><h1>Bank</h1><p class="muted">Konten, Umsätze und Auszüge aus konfipay.</p></div>
+    <span class="mode">Nur lesen</span>
+  </header>
+
+  <section class="card">
+    <div class="row"><div><h2>Verbindung</h2><p id="connection" class="muted">Status wird geladen …</p></div><button id="refresh" disabled>Konten aktualisieren</button></div>
+    <p class="muted">Diese Ausbaustufe kann keine Zahlung, Bankzuordnung oder Gutschrift auslösen.</p>
+    <p id="message" class="notice" role="status" aria-live="polite"></p>
+    <form id="setup" class="hidden" autocomplete="off">
+      <p class="muted">Den Nur-Lesen-API-Schlüssel ausschließlich direkt am Brain-PC hinterlegen.</p>
+      <div class="setup-row"><input id="apiKey" type="password" autocomplete="new-password" maxlength="64" placeholder="64-stelliger API-Schlüssel"><button class="primary" type="submit">Prüfen und speichern</button></div>
+    </form>
+    <p id="remoteNotice" class="warn hidden">Der API-Schlüssel kann nur direkt über http://127.0.0.1:5051/konfipay eingerichtet werden.</p>
+  </section>
+
+  <section class="card"><div class="row"><h2>Kontostände</h2><span id="fetched" class="muted"></span></div><div id="accounts" class="account-grid"><p class="muted">Noch keine Konten geladen.</p></div></section>
+
+  <section class="card">
+    <h2>Gebuchte und vorgemerkte Umsätze</h2>
+    <div class="filters">
+      <label>Von<input id="txFrom" type="date"></label><label>Bis<input id="txTo" type="date"></label>
+      <label>Konto<select id="txAccount"><option value="">Alle Konten</option></select></label>
+      <label>Status<select id="txBooking"><option value="booked">Gebucht</option><option value="pending">Vorgemerkt</option></select></label>
+      <label>Richtung<select id="txDirection"><option value="">Alle</option><option value="CRDT">Eingang</option><option value="DBIT">Ausgang</option></select></label>
+      <button id="loadTransactions" class="primary wide" type="button">Umsätze laden</button>
+    </div>
+    <p id="txMessage" class="muted" role="status"></p>
+    <div class="table"><table><thead><tr><th>Datum</th><th>Gegenkonto</th><th>Zweck</th><th class="amount">Betrag</th></tr></thead><tbody id="transactions"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Kontoauszüge</h2>
+    <div class="filters">
+      <label>Von<input id="stFrom" type="date"></label><label>Bis<input id="stTo" type="date"></label>
+      <label>Konto<select id="stAccount"><option value="">Alle Konten</option></select></label>
+      <label>Format<select id="stFormat"><option value="Pdf">PDF</option><option value="53">CAMT.053</option><option value="52">CAMT.052</option><option value="54">CAMT.054</option><option value="940">MT940</option><option value="942">MT942</option></select></label>
+      <button id="loadStatements" class="primary wide" type="button">Auszüge laden</button>
+    </div>
+    <p id="stMessage" class="muted" role="status"></p>
+    <div class="table"><table><thead><tr><th>Bereitgestellt</th><th>Datei</th><th>Konto</th><th></th></tr></thead><tbody id="statements"></tbody></table></div>
+  </section>
+</main>
+<script>
+"use strict";
+const csrf="__BRAIN_CSRF__",canConfigure=__CAN_CONFIGURE__;
+const byId=id=>document.getElementById(id);
+const text=(tag,value,className="")=>{const node=document.createElement(tag);node.textContent=String(value??"");if(className)node.className=className;return node};
+const money=(value,currency="EUR")=>value===null||value===undefined?"–":new Intl.NumberFormat("de-AT",{style:"currency",currency:currency||"EUR"}).format(Number(value));
+const day=value=>{const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return match?`${match[3]}.${match[2]}.${match[1]}`:(value||"–")};
+const stamp=value=>{if(!value)return "–";const date=new Date(value);return Number.isNaN(date.getTime())?String(value):new Intl.DateTimeFormat("de-AT",{dateStyle:"short",timeStyle:"short"}).format(date)};
+
+async function api(path,options={}){
+  const response=await fetch("/konfipay/api/"+path,{cache:"no-store",...options});
+  const data=await response.json();
+  if(!response.ok||!data.ok)throw new Error(data.error||"Abruf fehlgeschlagen.");
+  return data;
+}
+function setMessage(value,error=false){byId("message").textContent=value||"";byId("message").className="notice "+(error?"bad":"good")}
+function setDates(){const now=new Date(),today=now.toISOString().slice(0,10),start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString().slice(0,10);for(const id of ["txFrom","stFrom"])byId(id).value=start;for(const id of ["txTo","stTo"])byId(id).value=today}
+function query(prefix,page=1){const params=new URLSearchParams({from:byId(prefix+"From").value,to:byId(prefix+"To").value,page:String(page)}),account=byId(prefix+"Account").value;if(account)params.set("account",account);return params}
+
+function renderAccounts(snapshot){
+  const host=byId("accounts");host.replaceChildren();
+  const accounts=snapshot?.accounts||[];
+  if(!accounts.length){host.append(text("p","Noch keine Konten geladen.","muted"));return}
+  for(const account of accounts){const card=text("div","","account");card.append(text("span",account.name||"Bankkonto","muted"),text("strong",money(account.amount,account.currency)),text("span",`${account.iban||""} · Stand ${day(account.date)}`,"muted"));host.append(card)}
+  for(const select of [byId("txAccount"),byId("stAccount")]){const selected=select.value;select.replaceChildren();const all=text("option","Alle Konten");all.value="";select.append(all);for(const account of accounts){const option=text("option",`${account.name||"Bankkonto"} · ${account.iban||""}`);option.value=account.id;select.append(option)}select.value=selected}
+  byId("fetched").textContent="Stand "+stamp(snapshot.fetchedAt);
+}
+function renderState(data){
+  byId("refresh").disabled=!data.configured;
+  byId("connection").textContent=data.connected?"Verbunden · Nur-Lesen":data.configured?"Schlüssel vorhanden · bitte aktualisieren":"Noch nicht eingerichtet";
+  byId("connection").className=data.connected?"good":data.error?"bad":"muted";
+  renderAccounts(data.snapshot);
+  setMessage(data.error||"");
+}
+async function refresh(){byId("refresh").disabled=true;try{renderState(await api("refresh"))}catch(error){setMessage(error.message,true)}finally{byId("refresh").disabled=false}}
+
+byId("setup").classList.toggle("hidden",!canConfigure);byId("remoteNotice").classList.toggle("hidden",canConfigure);
+byId("setup").addEventListener("submit",async event=>{event.preventDefault();const key=byId("apiKey").value.trim();if(key.length!==64)return setMessage("Bitte den vollständigen 64-stelligen Schlüssel eingeben.",true);try{const data=await api("connect",{method:"POST",headers:{"Content-Type":"application/json","X-Brain-Konfipay":csrf},body:JSON.stringify({apiKey:key})});byId("apiKey").value="";renderState(data)}catch(error){setMessage(error.message,true)}});
+byId("refresh").addEventListener("click",refresh);
+
+byId("loadTransactions").addEventListener("click",async()=>{
+  const body=byId("transactions"),message=byId("txMessage"),params=query("tx");params.set("booking",byId("txBooking").value);if(byId("txDirection").value)params.set("direction",byId("txDirection").value);message.textContent="Umsätze werden gelesen …";body.replaceChildren();
+  try{const data=await api("transactions?"+params);for(const item of data.items){const row=document.createElement("tr"),direction=item.creditDebitIndicator==="DBIT"?"−":"+";row.append(text("td",day(item.bookingDate)),text("td",`${item.name||"–"}\n${item.iban||""}`),text("td",item.purpose||item.bookingText||"–"),text("td",direction+money(Math.abs(Number(item.amount||0)),item.currency),"amount"));body.append(row)}message.textContent=`${data.total??data.items.length} Umsatz/Umsätze`;}catch(error){message.textContent=error.message}
+});
+
+byId("loadStatements").addEventListener("click",async()=>{
+  const body=byId("statements"),message=byId("stMessage"),params=query("st");params.set("format",byId("stFormat").value);message.textContent="Auszüge werden gelesen …";body.replaceChildren();
+  try{const data=await api("statements?"+params);for(const item of data.items){const row=document.createElement("tr"),download=document.createElement("a");download.textContent="Herunterladen";download.href="/konfipay/api/statement-download?rid="+encodeURIComponent(item.rId);row.append(text("td",stamp(item.timestamp)),text("td",item.fileName||item.format||"Kontoauszug"),text("td",item.bankAccount?.iban||"–"));const cell=document.createElement("td");cell.append(download);row.append(cell);body.append(row)}message.textContent=`${data.total??data.items.length} Auszug/Auszüge`;}catch(error){message.textContent=error.message}
+});
+
+setDates();
+(async()=>{try{const state=await api("status");renderState(state);if(state.configured)await refresh()}catch(error){setMessage(error.message,true)}})();
+</script>
+</body>
+</html>

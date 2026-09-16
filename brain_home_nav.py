@@ -5,6 +5,8 @@
 def install(ns):
     import brain_service_runtime
     brain_service_runtime.install(ns)
+    import brain_konfipay
+    konfipay_enabled = brain_konfipay.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:
@@ -126,6 +128,8 @@ def install(ns):
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
 
+    __KONFIPAY_NAV__
+
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
     debtor.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/open-items'});
@@ -147,6 +151,14 @@ def install(ns):
 })();
 </script>
 '''
+
+    bank_nav = r'''
+    const bank=captureNav.cloneNode(true);
+    bank.id='modeKonfipay';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏦 Bank · nur lesen';
+    bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
+    bottom.appendChild(bank);
+''' if konfipay_enabled else ''
+    script = script.replace("__KONFIPAY_NAV__", bank_nav)
 
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
