@@ -40,7 +40,7 @@ KRISTINE_ADMIN_TOKEN = os.environ.get("KRISTINE_ADMIN_TOKEN", "").strip()
 
 # Vom Handy aus werden absichtlich nur diese vier Endpunkte freigegeben.
 # Diagnose-, Schema-, Fusion- und /open-Endpunkte bleiben ausschließlich lokal.
-MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
+MOBILE_ALLOWED_PATHS = {"/", "/mobile", "/mobile/", "/incoming-capture", "/status", "/search", "/project/address-search", "/project/address-projects", "/project/customer-links", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/thumb", "/pdf", "/pdf-info", "/pdf-page", "/contacts", "/material-search", "/kristine-job-next", "/kristine-job-create", "/search-incoming", "/incoming/suppliers", "/incoming/invoices", "/incoming/address-search", "/incoming/address-invoices", "/incoming/address-link", "/incoming/address-reject", "/incoming/unassigned", "/incoming/watch-ack"}
 
 
 def _request_is_local():
@@ -358,6 +358,15 @@ def _ensure_capture_schema(con):
         );
         CREATE INDEX IF NOT EXISTS idx_brain_contacts_entity
             ON brain_contacts(entity_type, entity_id, sort_order, id);
+
+        CREATE TABLE IF NOT EXISTS brain_customer_links (
+            customer_index TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_brain_customer_links_group
+            ON brain_customer_links(group_id, customer_index);
     """)
 
     # Bestehende 0.13.x-Datenbanken werden ohne Datenverlust erweitert.
@@ -392,6 +401,105 @@ def _contact_entity_type(value):
         "project": "project", "projekt": "project",
     }
     return aliases.get(raw, "")
+
+
+def _normalize_customer_index(value):
+    raw = str(value or "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        raise ValueError("Ungültiger WinWorker-Kundenindex.")
+    return str(int(raw))
+
+
+def customer_link_members(customer_index, con=None):
+    """Return all Brain-linked WW customer indices, including the requested one."""
+    customer_index = _normalize_customer_index(customer_index)
+    owns_connection = con is None
+    con = con or _capture_connection()
+    try:
+        linked = con.execute(
+            "SELECT group_id FROM brain_customer_links WHERE customer_index=?",
+            (customer_index,),
+        ).fetchone()
+        if not linked:
+            return [int(customer_index)]
+        rows = con.execute(
+            "SELECT customer_index FROM brain_customer_links WHERE group_id=?",
+            (str(linked["group_id"]),),
+        ).fetchall()
+        members = sorted({int(row["customer_index"]) for row in rows})
+        return members or [int(customer_index)]
+    finally:
+        if owns_connection:
+            con.close()
+
+
+def link_customers(customer_indices):
+    """Merge WW customer identities inside The Brain without changing WinWorker."""
+    requested = sorted({_normalize_customer_index(value) for value in (customer_indices or [])}, key=int)
+    if len(requested) < 2:
+        raise ValueError("Bitte mindestens zwei Kunden zum Verbinden markieren.")
+    if len(requested) > 20:
+        raise ValueError("Es können höchstens 20 WinWorker-Kunden gemeinsam verbunden werden.")
+
+    ww = sql_connection("WinWorker_Adressen_Standard")
+    try:
+        placeholders = ",".join("?" for _ in requested)
+        rows = ww.cursor().execute(
+            f"SELECT StammIndex FROM dbo.Kunden WHERE StammIndex IN ({placeholders})",
+            *[int(value) for value in requested],
+        ).fetchall()
+        existing = {str(int(row.StammIndex)) for row in rows}
+    finally:
+        ww.close()
+    missing = [value for value in requested if value not in existing]
+    if missing:
+        raise ValueError("Mindestens ein WinWorker-Kunde wurde nicht gefunden.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    con = _capture_connection()
+    try:
+        all_members = set(requested)
+        existing_groups = set()
+        for customer_index in requested:
+            linked = con.execute(
+                "SELECT group_id FROM brain_customer_links WHERE customer_index=?",
+                (customer_index,),
+            ).fetchone()
+            if linked:
+                existing_groups.add(str(linked["group_id"]))
+        for group_id in existing_groups:
+            rows = con.execute(
+                "SELECT customer_index FROM brain_customer_links WHERE group_id=?",
+                (group_id,),
+            ).fetchall()
+            all_members.update(str(row["customer_index"]) for row in rows)
+
+        members = sorted(all_members, key=int)
+        group_id = members[0]
+        if existing_groups:
+            placeholders = ",".join("?" for _ in existing_groups)
+            con.execute(
+                f"DELETE FROM brain_customer_links WHERE group_id IN ({placeholders})",
+                tuple(sorted(existing_groups)),
+            )
+        con.executemany(
+            """INSERT OR REPLACE INTO brain_customer_links
+               (customer_index, group_id, created_at, updated_at)
+               VALUES (?,?,?,?)""",
+            [(member, group_id, now, now) for member in members],
+        )
+
+        # Existing Brain contacts become visible from the shared customer file.
+        placeholders = ",".join("?" for _ in members)
+        con.execute(
+            f"""UPDATE brain_contacts SET entity_id=?, updated_at=?
+                WHERE entity_type='customer' AND entity_id IN ({placeholders})""",
+            (group_id, now, *members),
+        )
+        con.commit()
+        return {"groupId": group_id, "customerIndexes": [int(value) for value in members]}
+    finally:
+        con.close()
 
 
 def brain_contacts(entity_type, entity_id):
@@ -4122,10 +4230,11 @@ def open_order_projects(query="", limit=500):
 
 
 def projects_for_customer(customer_index):
-    customer_index = int(customer_index)
+    customer_indices = customer_link_members(customer_index)
+    placeholders = ",".join("?" for _ in customer_indices)
     con = sql_connection()
     cur = con.cursor()
-    rows = cur.execute("""
+    rows = cur.execute(f"""
         SELECT TOP 500
             p.ProjektIndex,
             p.sProjektNummer,
@@ -4147,7 +4256,7 @@ def projects_for_customer(customer_index):
             ON p.KundenIndex = k.StammIndex
         LEFT JOIN dbo.[Bücher] AS b
             ON b.ProjektIndex = p.ProjektIndex
-        WHERE p.KundenIndex = ?
+        WHERE p.KundenIndex IN ({placeholders})
         GROUP BY
             p.ProjektIndex,
             p.sProjektNummer,
@@ -4165,7 +4274,7 @@ def projects_for_customer(customer_index):
         ORDER BY
             MAX(b.dzDocDatum) DESC,
             p.ProjektIndex DESC
-    """, customer_index).fetchall()
+    """, *customer_indices).fetchall()
     con.close()
 
     result = [_project_row_to_dict(row) for row in rows]
@@ -4369,10 +4478,46 @@ def project_address_candidates(query, limit=30):
         return (-value, -int(candidate.get("matchingProjectCount") or 0), hay)
 
     rows = sorted(grouped.values(), key=score)
-    return rows[:max(1, min(int(limit or 30), 100))]
+    link_con = _capture_connection()
+    try:
+        for candidate in rows:
+            customer_index = candidate.get("customerIndex")
+            if customer_index in (None, ""):
+                candidate["linkedCustomerIndexes"] = []
+                candidate["linkedCustomerCount"] = 0
+                continue
+            linked = customer_link_members(customer_index, con=link_con)
+            candidate["linkedCustomerIndexes"] = linked
+            candidate["linkedCustomerCount"] = len(linked) if len(linked) > 1 else 0
+    finally:
+        link_con.close()
+
+    # Linked WW records are one visible Brain customer, not duplicate cards.
+    combined = {}
+    for candidate in rows:
+        linked = candidate.get("linkedCustomerIndexes") or []
+        key = f"linked:{linked[0]}" if len(linked) > 1 else str(candidate.get("key") or "")
+        customer_number = candidate.get("customerNumber")
+        if key not in combined:
+            item = dict(candidate)
+            item["customerNumbers"] = [] if customer_number in (None, "") else [customer_number]
+            if linked:
+                item["customerIndex"] = linked[0]
+            combined[key] = item
+            continue
+        item = combined[key]
+        item["matchingProjectCount"] = int(item.get("matchingProjectCount") or 0) + int(candidate.get("matchingProjectCount") or 0)
+        if customer_number not in (None, "") and customer_number not in item["customerNumbers"]:
+            item["customerNumbers"].append(customer_number)
+        for label in candidate.get("sampleProjects") or []:
+            if label not in item["sampleProjects"] and len(item["sampleProjects"]) < 4:
+                item["sampleProjects"].append(label)
+
+    return list(combined.values())[:max(1, min(int(limit or 30), 100))]
 
 
 def customer_project_overview(customer_index):
+    linked_customer_indices = customer_link_members(customer_index)
     projects = projects_for_customer(customer_index)
     ids = [p.get("projectIndex") for p in projects]
     try:
@@ -4409,9 +4554,17 @@ def customer_project_overview(customer_index):
     )
 
     first = projects[0] if projects else {}
+    customer_numbers = []
+    for project in projects:
+        customer_number = project.get("customerNumber")
+        if customer_number not in (None, "") and customer_number not in customer_numbers:
+            customer_numbers.append(customer_number)
     overview = {
-        "customerIndex": int(customer_index),
-        "customerNumber": first.get("customerNumber"),
+        "customerIndex": int(linked_customer_indices[0]),
+        "customerIndexes": linked_customer_indices,
+        "linkedCustomerCount": len(linked_customer_indices) if len(linked_customer_indices) > 1 else 0,
+        "customerNumber": customer_numbers[0] if customer_numbers else first.get("customerNumber"),
+        "customerNumbers": customer_numbers,
         "name": first.get("company") or first.get("customer") or "Adresse",
         "company": first.get("company") or "",
         "person": first.get("customer") or "",
@@ -6191,8 +6344,15 @@ mark.material-hit-mark{background:#ffe86b;color:#111;border-radius:3px;padding:0
 .project-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .project-address-card{cursor:pointer;margin:0}
 .project-address-card:hover{border-color:#8994a5}
+.project-address-card.link-marked{border-color:#62a16a;box-shadow:0 0 0 2px rgba(79,143,88,.2)}
 .project-address-card .project-title{font-size:17px}
 .project-address-samples{margin-top:9px;color:var(--muted);font-size:12px;line-height:1.45}
+.customer-link-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--panel2)}
+.customer-link-bar strong{display:block;margin-bottom:2px}.customer-link-bar .sub{margin:0}
+.customer-link-bar button:disabled{opacity:.45;cursor:not-allowed}
+.project-address-card .actions{display:flex;gap:8px;flex-wrap:wrap}
+.project-address-card .link-toggle{background:transparent;color:var(--text);border:1px solid #59616c}
+.project-address-card.link-marked .link-toggle{background:#1a2c1e;border-color:#62a16a;color:#b9e8bf}
 .customer-overview{margin-bottom:14px}
 .customer-overview-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
 .customer-overview-name{font-size:21px;font-weight:900}
@@ -6779,7 +6939,7 @@ const captureCostSummary=document.getElementById('captureCostSummary'),captureCo
 const captureRecent=document.getElementById('captureRecent'),captureRecentTitle=document.getElementById('captureRecentTitle'),captureReload=document.getElementById('captureReload'),captureClearTest=document.getElementById('captureClearTest');
 
 
-let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,incomingMaterialQuery='',captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[],capturePdfObjectUrl='',captureAcceptNewIban=false;
+let baseQuery='',currentProjects=[],currentDocs=[],selectedProject=null,selectedAddress=null,currentDocType='',projectDetailMode=false,previousView=null,searchMode='projects',projectAddressCandidates=[],projectCustomerLinkSelection=new Set(),selectedProjectAddress=null,projectOverview=null,incomingAll=[],incomingCandidates=[],selectedSupplier=null,selectedWwAddress=null,incomingMaterialQuery='',captureSelectedSupplier=null,captureAnalysis=null,captureAllocationRows=[],capturePdfObjectUrl='',captureAcceptNewIban=false;
 let captureArea=localStorage.getItem('kristineCaptureArea')==='live'?'live':'test';
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -6883,26 +7043,51 @@ function groupCounts(list,fn){
 
 function renderProjectAddressCandidates(){
   projectAddressSection.hidden=false;
+  const linkBar=projectAddressCandidates.length>1?`<div class="customer-link-bar">
+      <div><strong>🔗 Doppelte Kunden verbinden</strong><div class="sub">Mindestens zwei Karten markieren. WinWorker bleibt unverändert.</div></div>
+      <button id="connectMarkedCustomers" type="button" ${projectCustomerLinkSelection.size<2?'disabled':''}>${projectCustomerLinkSelection.size?`${projectCustomerLinkSelection.size} markiert · `:''}Als einen Kunden verbinden</button>
+    </div>`:'';
   projectAddresses.innerHTML=projectAddressCandidates.length
-    ? projectAddressCandidates.map((a,i)=>`<div class="card project-address-card" data-project-address="${i}">
+    ? linkBar+projectAddressCandidates.map((a,i)=>`<div class="card project-address-card ${projectCustomerLinkSelection.has(String(a.customerIndex))?'link-marked':''}" data-project-address="${i}">
         <div class="project-title">${esc(a.name||a.person||'Adresse')}</div>
         ${a.person&&a.person!==a.name?`<div class="sub">${esc(a.person)}</div>`:''}
         ${a.address?`<div class="sub">${esc(a.address)}</div>`:''}
         <div class="metrics">
           <span class="pill">${Number(a.matchingProjectCount||0)} passende Projekt${Number(a.matchingProjectCount||0)===1?'':'e'}</span>
-          ${a.customerNumber!==null&&a.customerNumber!==undefined&&a.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(a.customerNumber)}</span>`:''}
+          ${(Array.isArray(a.customerNumbers)&&a.customerNumbers.length?a.customerNumbers:[a.customerNumber]).filter(v=>v!==null&&v!==undefined&&v!=='').map(v=>`<span class="pill">WW-Kundennr. ${esc(v)}</span>`).join('')}
+          ${Number(a.linkedCustomerCount||0)>1?`<span class="pill">🔗 ${Number(a.linkedCustomerCount)} Kunden verbunden</span>`:''}
         </div>
         ${Array.isArray(a.sampleProjects)&&a.sampleProjects.length?`<div class="project-address-samples">${a.sampleProjects.map(esc).join('<br>')}</div>`:''}
-        <div class="actions"><button type="button" data-choose-project-address="${i}">Diese Adresse auswählen</button></div>
+        <div class="actions"><button type="button" data-choose-project-address="${i}">Diese Adresse auswählen</button><button class="link-toggle" type="button" data-link-project-address="${i}">${projectCustomerLinkSelection.has(String(a.customerIndex))?'✓ Zum Verbinden markiert':'Zum Verbinden markieren'}</button></div>
       </div>`).join('')
     : '<div class="empty">Keine passende WinWorker-Adresse gefunden.</div>';
 
+  document.getElementById('connectMarkedCustomers')?.addEventListener('click',connectMarkedProjectCustomers);
   projectAddresses.querySelectorAll('[data-choose-project-address]').forEach(btn=>{
     btn.onclick=e=>{e.stopPropagation();selectProjectAddress(projectAddressCandidates[Number(btn.dataset.chooseProjectAddress)]||null)};
+  });
+  projectAddresses.querySelectorAll('[data-link-project-address]').forEach(btn=>{
+    btn.onclick=e=>{e.stopPropagation();const address=projectAddressCandidates[Number(btn.dataset.linkProjectAddress)]||null;if(!address||address.customerIndex===null||address.customerIndex===undefined)return;const key=String(address.customerIndex);if(projectCustomerLinkSelection.has(key))projectCustomerLinkSelection.delete(key);else projectCustomerLinkSelection.add(key);renderProjectAddressCandidates()};
   });
   projectAddresses.querySelectorAll('[data-project-address]').forEach(card=>{
     card.onclick=()=>selectProjectAddress(projectAddressCandidates[Number(card.dataset.projectAddress)]||null);
   });
+}
+
+async function connectMarkedProjectCustomers(){
+  const customerIndexes=[...projectCustomerLinkSelection];
+  if(customerIndexes.length<2)return;
+  const labels=projectAddressCandidates.filter(a=>projectCustomerLinkSelection.has(String(a.customerIndex))).map(a=>`${a.name||a.person||'Kunde'} · WW ${a.customerNumber||a.customerIndex}`);
+  if(!confirm(`${labels.join('\n')}\n\nDiese Kunden in The Brain zu einer gemeinsamen Kundenakte verbinden?\nWinWorker wird dabei nicht verändert.`))return;
+  const button=document.getElementById('connectMarkedCustomers');if(button){button.disabled=true;button.textContent='Wird verbunden …'}
+  try{
+    const r=await fetch('/project/customer-links',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerIndexes})});
+    const data=await r.json();if(!r.ok||!data.ok)throw new Error(data.error||'Verbinden fehlgeschlagen');
+    const refresh=await fetch('/project/address-search?q='+encodeURIComponent(baseQuery),{cache:'no-store'}),fresh=await refresh.json();
+    if(!refresh.ok||!fresh.ok)throw new Error(fresh.error||'Aktualisierung fehlgeschlagen');
+    projectAddressCandidates=fresh.addresses||[];projectCustomerLinkSelection.clear();renderProjectAddressCandidates();
+    meta.textContent=`Verbunden: ${Number(data.customerIndexes?.length||0)} WinWorker-Kunden erscheinen jetzt gemeinsam.`;
+  }catch(error){alert(error.message||'Verbinden fehlgeschlagen');renderProjectAddressCandidates()}
 }
 
 function renderProjectCustomerOverview(o){
@@ -6916,7 +7101,8 @@ function renderProjectCustomerOverview(o){
         ${o?.address?`<div class="sub">${esc(o.address)}</div>`:''}
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${o?.customerNumber!==null&&o?.customerNumber!==undefined&&o?.customerNumber!==''?`<span class="pill">WW-Kundennr. ${esc(o.customerNumber)}</span>`:''}
+        ${(Array.isArray(o?.customerNumbers)&&o.customerNumbers.length?o.customerNumbers:[o?.customerNumber]).filter(v=>v!==null&&v!==undefined&&v!=='').map(v=>`<span class="pill">WW-Kundennr. ${esc(v)}</span>`).join('')}
+        ${Number(o?.linkedCustomerCount||0)>1?`<span class="pill">🔗 ${Number(o.linkedCustomerCount)} Kunden verbunden</span>`:''}
         <button id="customerContactBtn" class="contact-button" type="button">📞 Kunde / Kontakte</button>
       </div>
     </div>
@@ -6950,7 +7136,7 @@ async function selectProjectAddress(address){
     backToProjectAddresses.hidden=false;backToProjects.hidden=true;
     ps.hidden=false;ds.hidden=true;summary.hidden=true;
     renderProjectCustomerOverview(projectOverview);renderProjects();
-    meta.textContent=`${address.name||'Adresse'} · ${currentProjects.length} Projekte · bitte Projekt auswählen`;
+    meta.textContent=`${address.name||'Adresse'} · ${currentProjects.length} Projekte${Number(projectOverview?.linkedCustomerCount||0)>1?` aus ${Number(projectOverview.linkedCustomerCount)} verbundenen Kunden`:''} · bitte Projekt auswählen`;
     ps.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
     projectAddressSection.hidden=false;
@@ -6961,6 +7147,7 @@ async function selectProjectAddress(address){
 function showProjectAddressSelection(){
   selectedProjectAddress=null;selectedProject=null;projectOverview=null;projectDetailMode=false;previousView=null;
   currentProjects=[];currentDocs=[];currentDocType='';
+  projectCustomerLinkSelection.clear();
   ps.hidden=true;ds.hidden=true;summary.hidden=true;projectCustomerOverview.hidden=true;
   backToProjectAddresses.hidden=true;backToProjects.hidden=true;
   projectsTitle.textContent='Projekte auswählen';
@@ -7802,7 +7989,7 @@ async function runSearch(term,isRefined=false){
   term=String(term||'').trim();
   if(term.length<2){meta.innerHTML='<span class="error">Bitte mindestens 2 Zeichen eingeben.</span>';q.focus();return}
 
-  baseQuery=term;selectedAddress=null;selectedProjectAddress=null;selectedProject=null;projectOverview=null;
+  baseQuery=term;selectedAddress=null;selectedProjectAddress=null;selectedProject=null;projectOverview=null;projectCustomerLinkSelection.clear();
   projectDetailMode=false;previousView=null;projectAddressCandidates=[];currentProjects=[];currentDocs=[];currentDocType='';
   loader.style.display='block';meta.textContent='Suche passende WinWorker-Kunden und Adressen …';
   projectAddressSection.hidden=true;ps.hidden=true;ds.hidden=true;addressBar.hidden=true;summary.hidden=true;projectCustomerOverview.hidden=true;
@@ -8239,6 +8426,22 @@ def project_address_search_api():
             "count": len(rows),
             "sourceOfTruth": "WinWorker Projekte + Kunden + Belegnummern",
         })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/project/customer-links")
+def project_customer_links_api():
+    try:
+        payload = request.get_json(silent=True) or {}
+        linked = link_customers(payload.get("customerIndexes"))
+        return jsonify({
+            "ok": True,
+            **linked,
+            "message": f"{len(linked['customerIndexes'])} WinWorker-Kunden sind jetzt in The Brain verbunden.",
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
