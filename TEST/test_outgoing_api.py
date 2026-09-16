@@ -71,6 +71,17 @@ class OutgoingApiTests(unittest.TestCase):
         os.environ.pop("KRISTINE_ADMIN_TOKEN", None)
         cls.tmp.cleanup()
 
+    def test_open_items_print_layout_allows_table_to_flow_across_pages(self):
+        page = self.client.get("/outgoing/open-items")
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("@page{size:A4 landscape", html)
+        self.assertIn(".group{margin:0;border:0", html)
+        self.assertIn("break-inside:auto", html)
+        self.assertIn("thead{display:table-header-group}", html)
+        self.assertIn("tr{break-inside:avoid", html)
+        self.assertNotIn(".group{break-inside:avoid}", html)
+
     def test_full_invoice_flow_creates_pdf(self):
         self.assertEqual(self.client.get("/outgoing/invoices").status_code, 200)
         self.assertEqual(self.client.get("/outgoing/open-items").status_code, 200)
