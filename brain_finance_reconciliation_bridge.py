@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
 from datetime import datetime
 
 from brain_finance_source import FinanceStore, norm_method, norm_status
@@ -23,6 +24,7 @@ def install(ns):
     page = str(ns.get("MOBILE_PAGE") or "")
     capture_connection = ns.get("_capture_connection")
     capture_db = ns.get("CAPTURE_DB")
+    kristine_api = ns.get("kristine_api_request")
     if app is None or not page or not callable(capture_connection):
         return
 
@@ -53,7 +55,7 @@ def install(ns):
                 return jsonify(ok=False, error="movementId fehlt"), 400
             return dynamic_allocate(movement_id)
 
-    def exact_revolut_match(tx):
+    def exact_revolut_match(tx, expected_method="revolut"):
         amount = round(float(tx.get("amount") or 0), 2)
         currency = str(tx.get("currency") or "EUR").upper()
         merchant = _txt(tx.get("merchant") or tx.get("counterpartyName") or tx.get("description")).lower()
@@ -63,7 +65,7 @@ def install(ns):
         except Exception:
             items = []
         for item in items:
-            if norm_method(item.get("paymentMethod")) != "revolut" or norm_status(item.get("paymentStatus")) == "paid":
+            if norm_method(item.get("paymentMethod")) != expected_method or norm_status(item.get("paymentStatus")) == "paid":
                 continue
             if str(item.get("currency") or "EUR").upper() != currency:
                 continue
@@ -87,14 +89,19 @@ def install(ns):
                 if not isinstance(transactions, list) or not transactions:
                     raise ValueError("Keine Revolut-Transaktionen geliefert.")
                 external_statement = _txt(body.get("statementId") or body.get("period") or datetime.now().date().isoformat())
-                account = _txt(body.get("account") or "REVOLUT")
+                channel_raw = _txt(body.get("channel") or body.get("accountType") or body.get("source") or "REVOLUT").lower()
+                is_business = "business" in channel_raw or channel_raw in {"revolut_business", "business_api"}
+                statement_source = "REVOLUT_BUSINESS" if is_business else "REVOLUT"
+                expected_method = "revolut_business" if is_business else "revolut"
+                payment_context = "Revolut Business" if is_business else "Revolut"
+                account = _txt(body.get("account") or statement_source)
                 currency = str(body.get("currency") or "EUR").upper()
                 digest = hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
                 c = con()
                 try:
                     existing = c.execute(
-                        "SELECT id FROM brain_statement_imports WHERE source='REVOLUT' AND file_sha256=?",
-                        (digest,),
+                        "SELECT id FROM brain_statement_imports WHERE source=? AND file_sha256=?",
+                        (statement_source, digest),
                     ).fetchone()
                     if existing:
                         return jsonify(ok=True, duplicate=True, statementId=int(existing["id"]), added=0)
@@ -102,24 +109,27 @@ def install(ns):
                     cur = c.execute("""
                         INSERT INTO brain_statement_imports
                         (source,external_id,account_iban,period_start,period_end,currency,opening_balance,closing_balance,file_sha256,imported_at)
-                        VALUES('REVOLUT',?,?,?,?,?,?,?,?,?)
+                        VALUES(?,?,?,?,?,?,?,?,?,?)
                     """, (
-                        external_statement, account,
+                        statement_source, external_statement, account,
                         str(body.get("periodStart") or "")[:10], str(body.get("periodEnd") or "")[:10],
                         currency, body.get("openingBalance"), body.get("closingBalance"), digest, now,
                     ))
                     statement_id = int(cur.lastrowid)
                     added = 0
-                    auto_paid = 0
+                    suggested = 0
+                    attachments_queued = 0
+                    attachment_errors = []
                     for index, tx in enumerate(transactions, 1):
                         if not isinstance(tx, dict):
                             continue
-                        amount = round(abs(float(tx.get("amount") or 0)), 2)
+                        signed_amount = round(float(tx.get("amount") or 0), 2)
+                        amount = round(abs(signed_amount), 2)
                         if amount <= 0:
                             continue
                         tx_currency = str(tx.get("currency") or currency).upper()
                         direction_raw = str(tx.get("direction") or tx.get("type") or "").lower()
-                        direction = "in" if direction_raw in {"in", "credit", "crdt", "income"} else "out"
+                        direction = "in" if direction_raw in {"in", "credit", "crdt", "income"} or (not direction_raw and signed_amount > 0) else "out"
                         merchant = _txt(tx.get("merchant") or tx.get("counterpartyName") or tx.get("description"))
                         booking = str(tx.get("bookingDate") or tx.get("date") or "")[:10]
                         reference = _txt(tx.get("reference") or tx.get("id") or tx.get("transactionId"))
@@ -128,7 +138,7 @@ def install(ns):
                             external_id = "revolut:" + hashlib.sha256(
                                 f"{external_statement}|{index}|{booking}|{direction}|{amount}|{tx_currency}|{merchant}|{reference}".encode("utf-8", "ignore")
                             ).hexdigest()[:32]
-                        match = exact_revolut_match({**tx, "amount": amount, "currency": tx_currency, "merchant": merchant}) if direction == "out" else None
+                        match = exact_revolut_match({**tx, "amount": amount, "currency": tx_currency, "merchant": merchant}, expected_method) if direction == "out" else None
                         suggested_category = "supplier_payment" if match else ""
                         target_source = str((match or {}).get("source") or "")
                         target_id = str((match or {}).get("id") or "")
@@ -140,28 +150,56 @@ def install(ns):
                              suggested_category,suggested_target_source,suggested_target_id,suggested_reason,status,created_at)
                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)
                         """, (
-                            statement_id, "REVOLUT", external_id, booking, str(tx.get("valueDate") or booking)[:10],
+                            statement_id, statement_source, external_id, booking, str(tx.get("valueDate") or booking)[:10],
                             direction, amount, tx_currency, merchant, _txt(tx.get("counterpartyIban")),
                             _txt(tx.get("endToEndId")), reference, _txt(tx.get("description") or merchant),
                             suggested_category, target_source, target_id, reason, now,
                         ))
                         if cur.rowcount:
-                            movement_id = int(cur.lastrowid)
                             added += 1
                             if match:
-                                c.execute("""
-                                    INSERT INTO brain_statement_allocations
-                                    (movement_id,line_no,category,amount,target_source,target_id,note,created_at)
-                                    VALUES(?,1,'supplier_payment',?,?,?,?,?)
-                                """, (movement_id, amount, target_source, target_id, reason, now))
-                                c.execute("UPDATE brain_statement_movements SET status='reconciled' WHERE id=?", (movement_id,))
-                                try:
-                                    store.set_meta(target_source, target_id, status="paid")
-                                    auto_paid += 1
-                                except Exception as exc:
-                                    print("⚠ Revolut Zielstatus:", exc)
+                                suggested += 1
+
+                        # Anhänge aus der Revolut-API landen im selben Eingangskorb
+                        # wie Scan und Drag & Drop. Das bestehende Intake dedupliziert
+                        # nach Dateiinhalt; die Zahlung wird erst manuell zugeordnet.
+                        attachments = tx.get("attachments") or []
+                        if isinstance(attachments, dict):
+                            attachments = [attachments]
+                        for attachment in attachments if isinstance(attachments, list) else []:
+                            if not isinstance(attachment, dict):
+                                continue
+                            try:
+                                raw_data = attachment.get("data") or attachment.get("contentBytes") or attachment.get("base64") or ""
+                                if isinstance(raw_data, bytes):
+                                    encoded = base64.b64encode(raw_data).decode("ascii")
+                                else:
+                                    encoded = str(raw_data or "")
+                                    if "," in encoded and encoded.lower().startswith("data:"):
+                                        encoded = encoded.split(",", 1)[1]
+                                if not encoded:
+                                    raise ValueError("Anhang enthält keine Datei.")
+                                if not callable(kristine_api):
+                                    raise RuntimeError("Rechnungseingang ist nicht erreichbar.")
+                                result = kristine_api("/kristine/api/invoice-intake/import", method="POST", payload={
+                                    "name": _txt(attachment.get("name") or attachment.get("filename") or f"Revolut-{external_id}.pdf")[:180],
+                                    "type": _txt(attachment.get("type") or attachment.get("contentType") or "application/pdf")[:160],
+                                    "data": encoded,
+                                    "source": payment_context + " API",
+                                    "submittedById": "revolut-business-api" if is_business else "revolut-api",
+                                    "submittedByName": payment_context + " API",
+                                    "capturedAt": str(tx.get("completedAt") or tx.get("createdAt") or booking)[:60],
+                                    "paymentContext": payment_context,
+                                    "note": (reference or external_id)[:500],
+                                }) or {}
+                                if result.get("ok") is False:
+                                    raise ValueError(str(result.get("error") or "Anhang konnte nicht übernommen werden."))
+                                attachments_queued += 1
+                            except Exception as exc:
+                                attachment_errors.append({"transactionId": external_id, "error": str(exc)})
                     c.commit()
-                    return jsonify(ok=True, duplicate=False, statementId=statement_id, added=added, autoPaid=auto_paid)
+                    return jsonify(ok=True, duplicate=False, statementId=statement_id, added=added, suggested=suggested,
+                                   autoPaid=0, attachmentsQueued=attachments_queued, attachmentErrors=attachment_errors)
                 finally:
                     c.close()
             except ValueError as exc:

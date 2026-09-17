@@ -12,7 +12,7 @@ COMMON_CURRENCIES = (
     "EUR", "USD", "CHF", "GBP", "CAD", "AUD", "JPY", "SEK", "NOK", "DKK",
     "PLN", "CZK", "HUF", "RON", "BGN", "CNY", "HKD", "SGD", "NZD", "TRY",
 )
-PAYMENT_METHODS = {"unknown", "transfer", "direct_debit", "revolut", "cash"}
+PAYMENT_METHODS = {"unknown", "transfer", "direct_debit", "revolut_business", "revolut", "cash"}
 
 
 def _currency(value):
@@ -26,6 +26,7 @@ def _payment_method(value):
         "": "unknown", "offen": "unknown", "unbekannt": "unknown",
         "ueberweisung": "transfer", "überweisung": "transfer", "sepa": "transfer", "bank": "transfer",
         "einzug": "direct_debit", "lastschrift": "direct_debit", "abbucher": "direct_debit",
+        "revolut_business": "revolut_business", "revolut_business_api": "revolut_business", "business": "revolut_business",
         "revolut": "revolut", "kreditkarte": "revolut", "karte": "revolut",
         "bar": "cash", "barzahlung": "cash", "kassa": "cash",
     }
@@ -347,7 +348,7 @@ def install(ns):
   currencyCodes.forEach(code=>{if(![...captureCurrency.options].some(o=>String(o.value||o.textContent).toUpperCase()===code)){const o=document.createElement('option');o.value=code;o.textContent=code;captureCurrency.appendChild(o)}});
   const currencyWrap=captureCurrency.parentElement;
   const paymentWrap=document.createElement('div');paymentWrap.className='capture-payment-method-wrap';
-  paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut">Revolut / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
+  paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
   currencyWrap.insertAdjacentElement('afterend',paymentWrap);
   const fx=document.createElement('div');fx.id='captureFxPanel';fx.className='capture-fx-panel';fx.hidden=true;
   fx.innerHTML='<label>Umrechnungsfaktor<div class="capture-fx-rate-line" id="captureFxRateLabel">1 USD = EUR</div><input id="captureFxRate" type="number" step="0.000001" min="0"></label><label>Kurs-Stichtag<input id="captureFxDate" type="date"></label><div><div class="formlabel">EUR-Vergleich</div><div id="captureFxEstimate" class="capture-fx-estimate">–</div><div id="captureFxSource" class="sub"></div></div><button id="captureFxOnline" type="button" class="capture-fx-online">↻ Kurs online</button><label>Abgleich ± Prozent<input id="captureFxTolPercent" type="number" min="0" max="25" step="0.1" value="3"></label><label>oder mindestens ± EUR<input id="captureFxTolEur" type="number" min="0" max="100" step="0.01" value="1.00"></label><div class="capture-fx-hint">Der Rechnungskurs wird fix gespeichert. Beim späteren Bank/Revolut-Abgleich darf der tatsächliche Karten-/Bankkurs abweichen; die Toleranz gilt nur zusammen mit Lieferant/Referenz/Datum.</div>';

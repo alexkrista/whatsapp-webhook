@@ -23,12 +23,12 @@ assert.match(outgoing, /def project_recorded_hours_net\(project_number, before_d
 assert.match(outgoing, /cutoff and day >= cutoff/);
 assert.match(incoming, /_tower_billing_snapshot_install\(ns\)/);
 assert.match(archive, /"\/tower\/billing-snapshot"/);
-assert.match(archive, /"version": "0\.14\.64"/);
+assert.match(archive, /"version": "0\.14\.67"/);
 assert.match(tower, /brainApi\('\/tower\/billing-snapshot',240000,\{method:'POST'/);
 assert.match(tower, /hoursThroughDate:billingThroughDate/);
 assert.match(tower, /href="\$\{tokenUrl\('\/kristine\/baustellen'\)\}#\$\{encodeURIComponent\(row\.job\.jobId\)\}"/);
 assert.match(tower, /billingReady\?money\(total\)/);
 assert.match(tower, /row\.amountToInvoice!==null\?B\.formatMoney\(row\.amountToInvoice\)/);
-assert.match(topbar, /tower-baustellen-signals\.js\?v=20260915-billing-snapshot-2/);
+assert.match(topbar, /tower-baustellen-signals\.js\?v=20260915-billing-snapshot-5/);
 
 console.log("OK: Tower-Abrechnungsstand ist nachts gespeichert, manuell aktualisierbar und bis Vortag begrenzt.");

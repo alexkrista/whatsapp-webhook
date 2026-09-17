@@ -4,12 +4,12 @@ import hashlib
 import json
 from datetime import datetime
 
-METHODS={"unknown","transfer","direct_debit","revolut","cash"}
+METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","cash"}
 STATUSES={"open","sepa_submitted","paid"}
 
 def norm_method(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")
-    return {"":"unknown","zahlung":"transfer","ueberweisung":"transfer","überweisung":"transfer","sepa":"transfer","bank":"transfer","einzug":"direct_debit","lastschrift":"direct_debit","abbucher":"direct_debit","kreditkarte":"revolut","karte":"revolut","barzahlung":"cash","bar":"cash"}.get(r,r if r in METHODS else "unknown")
+    return {"":"unknown","zahlung":"transfer","ueberweisung":"transfer","überweisung":"transfer","sepa":"transfer","bank":"transfer","einzug":"direct_debit","lastschrift":"direct_debit","abbucher":"direct_debit","revolut_business":"revolut_business","revolut_business_api":"revolut_business","business":"revolut_business","kreditkarte":"revolut","karte":"revolut","barzahlung":"cash","bar":"cash","kassa":"cash"}.get(r,r if r in METHODS else "unknown")
 
 def norm_status(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")

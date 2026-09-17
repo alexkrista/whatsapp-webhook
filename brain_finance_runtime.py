@@ -311,7 +311,7 @@ def install(ns):
         @app.get("/incoming/revolut/items")
         def brain_incoming_revolut_items():
             try:
-                items=[x for x in store.items(True) if norm_method(x.get("paymentMethod"))=="revolut"]; opened=[x for x in items if norm_status(x.get("paymentStatus"))!="paid"]
+                items=[x for x in store.items(True) if norm_method(x.get("paymentMethod")) in {"revolut_business","revolut"}]; opened=[x for x in items if norm_status(x.get("paymentStatus"))!="paid"]
                 return jsonify(ok=True,count=len(items),openCount=len(opened),openTotal=round(sum(float(x.get("amount") or 0) for x in opened),2),items=items)
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/payments")
@@ -335,7 +335,7 @@ def install(ns):
             app._brain_finance_approval_after_capture=True
 
     page=re.sub(r'<section id="incomingOpenItemsPanel".*?</section>','',page,flags=re.S); page=re.sub(r'<script id="kristaIncomingOpenItemsV[1234]">.*?</script>','',page,flags=re.S)
-    panel=r'''<section id="incomingRevolutPanel" class="incoming-revolut-panel"><div><strong>Revolut</strong><div class="sub" id="incomingRevolutMeta">Kartenbelege und offene Zuordnungen</div></div><a class="action incoming-revolut-open" href="/incoming/revolut">Revolut öffnen →</a></section>'''
+    panel=r'''<section id="incomingRevolutPanel" class="incoming-revolut-panel"><div><strong>Revolut Business</strong><div class="sub" id="incomingRevolutMeta">Buchungen, Belege und offene Zuordnungen</div></div><a class="action incoming-revolut-open" href="/incoming/revolut">Revolut öffnen →</a></section>'''
     css=r'''.incoming-revolut-panel{margin:12px 0 18px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card);display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.incoming-revolut-panel strong{font-size:17px}.incoming-revolut-open{font-weight:850;text-decoration:none}'''
     script=r'''<script id="kristaIncomingRevolutV1">(()=>{const m=document.getElementById('incomingRevolutMeta');if(!m)return;const f=n=>new Intl.NumberFormat('de-AT',{style:'currency',currency:'EUR'}).format(Number(n||0));fetch('/incoming/revolut/items',{cache:'no-store'}).then(r=>r.json()).then(d=>{if(!d.ok)throw Error(d.error||'Fehler');m.textContent=`${d.openCount||0} offen · ${f(d.openTotal)} · Belege/Rechnungen`}).catch(e=>m.textContent=e.message)})();</script>'''
     marker='<div class="capture-dashboard" id="captureDashboard"></div>'

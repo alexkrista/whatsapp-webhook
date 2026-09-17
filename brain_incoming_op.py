@@ -27,6 +27,7 @@ from brain_finance_direct_debit import install as _direct_debit_install
 from brain_finance_direct_debit_cutover import install as _direct_debit_cutover_install
 from brain_finance_reconciliation import install as _reconciliation_install
 from brain_finance_reconciliation_bridge import install as _reconciliation_bridge_install
+from brain_revolut_business import install as _revolut_business_install
 from brain_invoice_intake import install as _invoice_intake_install
 from brain_capture_global_drop import install as _capture_global_drop_install
 from brain_capture_learning import install as _capture_learning_install
@@ -59,6 +60,7 @@ def install(ns):
     _direct_debit_cutover_install(ns)
     _reconciliation_install(ns)
     _reconciliation_bridge_install(ns)
+    _revolut_business_install(ns)
     _invoice_intake_install(ns)
 
     # Bewährter Capture-Stack: Datei-Einzug + modernes 3-Spalten-Design + Lernen.
