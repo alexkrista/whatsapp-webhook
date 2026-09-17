@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict'),{auditReport}=require('../regie-hours-check');
+const date='2026-09-15',person={id:'edi',name:'Edi',hours:4},report={id:'one',jobId:'26082',date,employees:[person]},archive=[{employeeId:'edi',date,segments:[{type:'work',jobId:'26082',from:'07:00',to:'12:02'},{type:'lunch',from:'12:02',to:'12:30'},{type:'work',jobId:'26082',from:'12:30',to:'17:00'}]}];
+const check=(hours,others=[],source=archive)=>auditReport({...report,employees:[{...person,hours}]},others,[],source);
+assert.equal(check(4,[{...report,id:'two',employees:[{...person,hours:5.5}]}]).blocked,false);
+assert.equal(check(9.75).blocked,false);assert.equal(check(10).blocked,true);
+assert.equal(check(9.5,[{...report,id:'two',employees:[{...person,hours:9.5}]}]).blocked,true);
+assert.equal(check(9.5,[{...report,id:'two',date:'2026-09-16',employees:[{...person,hours:9.5}]}]).blocked,false);
+assert.equal(check(9.5,[{...report,id:'two',jobId:'26083',employees:[{...person,hours:9.5}]}]).blocked,false);
+assert.equal(check(9.5,[{...report,id:'one',employees:[{...person,hours:9.5}]}]).blocked,false);
+assert.equal(check(10,[],[]).missingTimes,true);
+assert.equal(check(4,[{...report,id:'two',employees:[{id:'other',name:'Other',hours:12}]}]).blocked,false);
+const master=[{id:'edi',name:'Edmund Mock'}];assert.equal(auditReport(report,[{...report,id:'two',employees:[{name:'Edmund Mock',hours:9.5}]}],[],archive,master).blocked,true);
+const events=[{employeeId:'edi',date,jobId:'26082',type:'start',at:'07:00'},{employeeId:'edi',date,type:'mittag',at:'12:00'},{employeeId:'edi',date,jobId:'26082',type:'weiter',at:'12:30'},{employeeId:'edi',date,type:'ende',at:'17:00'}];
+assert.equal(auditReport({...report,employees:[{...person,hours:9.75}]},[],events,[]).blocked,true);
+console.log('Regie: split reports, daily rounding, duplicates, employees, dates, edit exclusion, missing stamps and breaks passed');
