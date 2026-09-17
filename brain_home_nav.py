@@ -29,18 +29,24 @@ def install(ns):
         app.add_url_rule("/sepa-split", "brain_sepa_split", brain_sepa_split, methods=["GET"])
 
     import re
-    page = re.sub(r'<script\s+id="kristaBrainHomeNavV[12]">.*?</script>', '', page, flags=re.I | re.S)
+    page = re.sub(r'<script\s+id="kristaBrainHomeNavV[123]">.*?</script>', '', page, flags=re.I | re.S)
 
     css = r'''
-.brain-home-nav-rows{display:grid;gap:10px;margin-bottom:2px}
+.wrap{max-width:1180px}
+.brain-home-nav-rows{display:grid;gap:12px;margin-bottom:2px;width:100%}
+.brain-home-section{display:grid;gap:9px;padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(10,12,15,.34)}
+.brain-home-section-title{margin:0;color:var(--muted);font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
 .brain-home-nav-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .brain-home-nav-row>*{margin:0!important}
+.brain-home-nav-row .mode.active{background:#25332b!important;color:var(--text)!important;border-color:#496653!important;box-shadow:inset 3px 0 0 #86c89a}
+.brain-home-knowledge .searchrow{margin-top:2px}
+.brain-home-knowledge>.meta{margin-top:0}
 .brain-combo-material-force{margin-left:8px!important;padding:6px 9px!important;font-size:11px!important}
-@media(max-width:700px){.brain-home-nav-row>*{flex:1 1 auto}.brain-combo-material-force{margin:7px 0 0!important;width:100%}}
+@media(max-width:700px){.wrap{max-width:100%}.brain-home-section{padding:11px}.brain-home-nav-row>*{flex:1 1 auto}.brain-combo-material-force{margin:7px 0 0!important;width:100%}}
 '''
 
     script = r'''
-<script id="kristaBrainHomeNavV2">
+<script id="kristaBrainHomeNavV3">
 (function(){
   function text(el){return String(el?.textContent||'').replace(/\s+/g,' ').trim()}
   function find(label){return [...document.querySelectorAll('button,a')].find(el=>text(el).includes(label))||null}
@@ -122,13 +128,22 @@ def install(ns):
     if(!host)return;
 
     const wrapper=document.createElement('div');wrapper.id='brainHomeNavRows';wrapper.className='brain-home-nav-rows';
-    const top=document.createElement('div');top.className='brain-home-nav-row';
-    const bottom=document.createElement('div');bottom.className='brain-home-nav-row';
+    function section(title,extra=''){
+      const box=document.createElement('section');box.className='brain-home-section '+extra;
+      const heading=document.createElement('h2');heading.className='brain-home-section-title';heading.textContent=title;
+      const row=document.createElement('div');row.className='brain-home-nav-row';box.append(heading,row);wrapper.append(box);return {box,row};
+    }
     const first=nodes.map(n=>({n,idx:[...host.children].indexOf(n)})).filter(x=>x.idx>=0).sort((a,b)=>a.idx-b.idx)[0]?.n;
     if(first&&first.parentElement===host)host.insertBefore(wrapper,first);else host.insertBefore(wrapper,host.firstChild);
-    wrapper.append(top,bottom);
-    top.append(project,material);
-    bottom.append(captureNav);
+    const knowledge=section('Wissen & Suche','brain-home-knowledge');
+    const invoices=section('Rechnungen bearbeiten','brain-home-invoices');
+    const accounts=section('Konten & Kassa','brain-home-accounts');
+    knowledge.row.append(material,project);
+    invoices.row.append(captureNav);
+    const searchRow=document.getElementById('mainSearchRow'),searchMeta=document.getElementById('meta'),searchLoader=document.getElementById('loader');
+    if(searchRow)knowledge.box.append(searchRow);
+    if(searchMeta)knowledge.box.append(searchMeta);
+    if(searchLoader)knowledge.box.append(searchLoader);
 
     // Der native Brain-Endpunkt öffnet die Erfassung bereits selbst im capture-Modus.
     // Deshalb hier bewusst keine Abhängigkeit mehr von setSearchMode oder dem
@@ -142,37 +157,37 @@ def install(ns):
     const op=captureNav.cloneNode(true);
     op.id='modePayments';op.classList.remove('active');op.removeAttribute('onclick');op.textContent='💶 Kreditoren-OP';
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
-    bottom.appendChild(op);
+    invoices.row.appendChild(op);
 
     const bank=captureNav.cloneNode(true);
     bank.id='modeBank';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏦 Bank';
     bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
-    bottom.appendChild(bank);
+    accounts.row.appendChild(bank);
 
     const revolut=captureNav.cloneNode(true);
     revolut.id='modeRevolut';revolut.classList.remove('active');revolut.removeAttribute('onclick');revolut.textContent='💳 Revolut Business';
     revolut.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
-    bottom.appendChild(revolut);
+    accounts.row.appendChild(revolut);
 
     const kassa=captureNav.cloneNode(true);
     kassa.id='modeKassa';kassa.classList.remove('active');kassa.removeAttribute('onclick');kassa.textContent='💶 KASSA';
     kassa.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/kassa'});
-    bottom.appendChild(kassa);
+    accounts.row.appendChild(kassa);
 
     const invoiceBook=captureNav.cloneNode(true);
     invoiceBook.id='modeInvoiceBook';invoiceBook.classList.remove('active');invoiceBook.removeAttribute('onclick');invoiceBook.textContent='📚 RECHNUNGSBUCH';
     invoiceBook.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/invoice-book'});
-    bottom.appendChild(invoiceBook);
+    invoices.row.appendChild(invoiceBook);
 
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
     debtor.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/open-items'});
-    bottom.appendChild(debtor);
+    invoices.row.insertBefore(debtor,invoiceBook);
 
     const outgoing=captureNav.cloneNode(true);
     outgoing.id='modeOutgoing';outgoing.classList.remove('active');outgoing.removeAttribute('onclick');outgoing.textContent='🧾 Ausgangsrechnungen';
     outgoing.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/invoices'});
-    bottom.appendChild(outgoing);
+    knowledge.row.insertBefore(outgoing,project);
 
     material.onclick=e=>{e.preventDefault();prepareIncoming()};
     if(typeof go!=='undefined')go.onclick=()=>{
@@ -189,4 +204,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("Brain navigation V2: projects | incoming | creditor/debtor open items | outgoing invoices")
+    print("Brain navigation V3: Wissen & Suche | Rechnungen | Konten & Kassa")
