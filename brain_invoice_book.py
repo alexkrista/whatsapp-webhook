@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import secrets
+import threading
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from brain_finance_source import norm_method, norm_status
 from brain_finance_source_v2 import FinanceStore
+
+BOOK_LOCK = threading.RLock()
+LEGACY_PAID_CUTOFF = "2025-11-26"
 
 
 def _now():
@@ -38,6 +42,16 @@ class InvoiceBook:
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_brain_invoice_status_history_invoice ON brain_invoice_status_history(source,source_id,changed_at DESC)")
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS brain_invoice_book_numbers(
+                book_number INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                booked_at TEXT NOT NULL,
+                UNIQUE(source,source_id)
+            )
+        """)
+        con.execute("CREATE TABLE IF NOT EXISTS brain_invoice_book_migrations(name TEXT PRIMARY KEY,details TEXT NOT NULL,created_at TEXT NOT NULL)")
         con.commit()
         return con
 
@@ -55,7 +69,7 @@ class InvoiceBook:
             row["path"] = str(hit.get("pdfPath") or hit.get("originalPath") or row.get("path") or "")
         return rows
 
-    def _ww(self, query="", year=0, one_id=None):
+    def _ww(self, query="", year=0, one_id=None, limit=5000, with_pdfs=True):
         sql_connection = self.ns.get("sql_connection")
         payment_state = self.ns.get("_payment_state")
         iso = self.ns.get("_iso_date")
@@ -78,8 +92,9 @@ class InvoiceBook:
         clause = " WHERE " + " AND ".join(where) if where else ""
         con = sql_connection("WinWorker_Projekte_Standard")
         try:
-            rows = con.cursor().execute("""
-                SELECT TOP 500 e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,
+            safe_limit = max(1, min(20000, int(limit or 5000)))
+            rows = con.cursor().execute(f"""
+                SELECT TOP {safe_limit} e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,
                        e.sZahlungsStatus,e.sIban,e.sSwift,e.sBankkontoInhaber,
                        dm.sDocID,k.sFirma,k.sName,k.sVorname
                 FROM dbo.Eingangsbelege e
@@ -120,9 +135,9 @@ class InvoiceBook:
                 "iban": str(raw.sIban or "").strip(), "bic": str(raw.sSwift or "").strip(),
                 "accountHolder": str(raw.sBankkontoInhaber or "").strip(), "path": "",
             })
-        return self._pdfs(out)
+        return self._pdfs(out) if with_pdfs else out
 
-    def _local(self, query="", year=0, one_id=None):
+    def _local(self, query="", year=0, one_id=None, limit=5000):
         connect = self.ns.get("_capture_connection")
         db_path = self.ns.get("CAPTURE_DB")
         if not callable(connect):
@@ -144,12 +159,13 @@ class InvoiceBook:
         clause = " WHERE " + " AND ".join(where) if where else ""
         con = connect(db_path)
         try:
+            safe_limit = max(1, min(20000, int(limit or 5000)))
             rows = con.execute("""
                 SELECT id,doc_id,supplier_name,supplier_invoice_number,invoice_date,
                        gross_amount,currency,iban,swift,account_holder,payment_state,
                        payment_status,payment_method,pdf_path
                 FROM incoming_invoices
-            """ + clause + " ORDER BY invoice_date DESC,id DESC LIMIT 500", args).fetchall()
+            """ + clause + " ORDER BY invoice_date DESC,id DESC LIMIT ?", args + [safe_limit]).fetchall()
         finally:
             con.close()
         meta = self.store.meta()
@@ -174,12 +190,85 @@ class InvoiceBook:
             })
         return out
 
+    def ensure_numbers(self):
+        with BOOK_LOCK:
+            con = self.db()
+            try:
+                seeded = con.execute("SELECT 1 FROM brain_invoice_book_migrations WHERE name='book-numbers-v1'").fetchone()
+            finally:
+                con.close()
+            if seeded:
+                return
+            rows = self._ww("", 0, limit=20000, with_pdfs=False) + self._local("", 0, limit=20000)
+            local_docs = {x["docId"] for x in rows if x["source"] == "KRISTINE" and x.get("docId")}
+            rows = [x for x in rows if x["source"] == "KRISTINE" or not x.get("docId") or x["docId"] not in local_docs]
+            rows.sort(key=lambda x: (str(x.get("invoiceDate") or "9999-12-31"), str(x.get("source") or ""), str(x.get("id") or "")))
+            con = self.db()
+            try:
+                for row in rows:
+                    con.execute("INSERT OR IGNORE INTO brain_invoice_book_numbers(source,source_id,booked_at) VALUES(?,?,?)", (row["source"], row["id"], str(row.get("invoiceDate") or "")))
+                con.execute("INSERT OR REPLACE INTO brain_invoice_book_migrations(name,details,created_at) VALUES('book-numbers-v1',?,?)", (f"{len(rows)} Rechnungen chronologisch nummeriert", _now()))
+                con.commit()
+            finally:
+                con.close()
+
+    def add_numbers(self, rows):
+        self.ensure_numbers()
+        con = self.db()
+        try:
+            for row in sorted(rows, key=lambda x: (str(x.get("invoiceDate") or "9999-12-31"), str(x.get("source") or ""), str(x.get("id") or ""))):
+                con.execute("INSERT OR IGNORE INTO brain_invoice_book_numbers(source,source_id,booked_at) VALUES(?,?,?)", (row["source"], row["id"], str(row.get("invoiceDate") or "")))
+            con.commit()
+            numbers = {(str(x["source"]), str(x["source_id"])): int(x["book_number"]) for x in con.execute("SELECT source,source_id,book_number FROM brain_invoice_book_numbers").fetchall()}
+        finally:
+            con.close()
+        for row in rows:
+            number = numbers.get((row["source"], row["id"]))
+            row["bookNumber"] = f"B{number:06d}" if number else ""
+        return rows
+
     def items(self, query="", year=0):
         rows = self._ww(query, year) + self._local(query, year)
         local_docs = {x["docId"] for x in rows if x["source"] == "KRISTINE" and x.get("docId")}
         rows = [x for x in rows if x["source"] == "KRISTINE" or not x.get("docId") or x["docId"] not in local_docs]
         rows.sort(key=lambda x: (str(x.get("invoiceDate") or ""), str(x.get("supplier") or "").lower()), reverse=True)
-        return rows[:500]
+        return self.add_numbers(rows[:10000])
+
+    def monthly_totals(self, rows):
+        months = {}
+        for row in rows:
+            month = str(row.get("invoiceDate") or "")[:7] or "Ohne Datum"
+            bucket = months.setdefault(month, {"month": month, "count": 0, "total": 0.0, "paid": 0.0, "open": 0.0})
+            value = round(float(row.get("amount") or 0), 2)
+            bucket["count"] += 1
+            bucket["total"] += value
+            bucket["paid" if norm_status(row.get("paymentStatus")) == "paid" else "open"] += value
+        return [{**x, "total": round(x["total"], 2), "paid": round(x["paid"], 2), "open": round(x["open"], 2)} for _, x in sorted(months.items(), reverse=True)]
+
+    def apply_legacy_paid_cutoff(self):
+        migration = "unknown-paid-through-2025-11-26"
+        with BOOK_LOCK:
+            con = self.db()
+            try:
+                row = con.execute("SELECT details,created_at FROM brain_invoice_book_migrations WHERE name=?", (migration,)).fetchone()
+                if row:
+                    return {"applied": False, "details": str(row["details"]), "createdAt": str(row["created_at"])}
+            finally:
+                con.close()
+            candidates = [x for x in self.store.items(False) if norm_method(x.get("paymentMethod")) == "unknown" and str(x.get("invoiceDate") or "")[:10] <= LEGACY_PAID_CUTOFF]
+            changed = 0
+            reason = "Altbestand Zahlungsart ungeklärt bis einschließlich 26.11.2025 automatisch als bezahlt gebucht"
+            for item in candidates:
+                self.change(str(item.get("source") or ""), str(item.get("id") or ""), "paid", reason, "KRISTINE Automatik")
+                changed += 1
+            details = f"{changed} ungeklärte Rechnungen bis einschließlich {LEGACY_PAID_CUTOFF} als bezahlt gebucht"
+            con = self.db()
+            try:
+                con.execute("INSERT INTO brain_invoice_book_migrations(name,details,created_at) VALUES(?,?,?)", (migration, details, _now()))
+                con.commit()
+            finally:
+                con.close()
+            return {"applied": True, "details": details, "createdAt": _now()}
 
     def one(self, source, source_id):
         if source == "WinWorker" and str(source_id).startswith("ww:"):
@@ -208,12 +297,14 @@ class InvoiceBook:
         old_method = norm_method(before.get("paymentMethod"))
         if action == "repay":
             new_status, new_method = "open", "transfer"
+        elif action == "open":
+            new_status, new_method = "open", old_method
         elif action == "paid":
             new_status, new_method = "paid", old_method
         else:
             raise ValueError("Unbekannte Statusänderung.")
         if source == "WinWorker":
-            if action == "repay":
+            if action in {"repay", "open"}:
                 self.store.set_legacy(source_id, False)
                 self.store.set_status_override(source, source_id, "open")
             else:
@@ -275,8 +366,9 @@ def install(ns):
         try:
             query = str(request.args.get("q") or "").strip()[:100]
             year = int(request.args.get("year") or 0)
+            cutoff = book.apply_legacy_paid_cutoff()
             rows = book.items(query, year)
-            return jsonify(ok=True, count=len(rows), items=rows)
+            return jsonify(ok=True, count=len(rows), items=rows, months=book.monthly_totals(rows), cutoff=cutoff)
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 500
 
@@ -292,10 +384,24 @@ def install(ns):
         try:
             body = request.get_json(silent=True) or {}
             row = book.change(str(body.get("source") or ""), str(body.get("id") or ""), str(body.get("action") or ""), body.get("reason"), body.get("changedBy") or "Alex")
-            return jsonify(ok=True, invoice=row, message="Rechnung ist wieder im Zahlungslauf." if body.get("action") == "repay" else "Rechnung wurde als bezahlt markiert.")
+            action = str(body.get("action") or "")
+            message = "Rechnung ist wieder im Zahlungslauf." if action == "repay" else "Rechnung wurde wieder geöffnet." if action == "open" else "Rechnung wurde als bezahlt markiert."
+            return jsonify(ok=True, invoice=row, message=message)
         except ValueError as exc:
             return jsonify(ok=False, error=str(exc)), 400
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 500
 
-    print("✅ Rechnungsbuch aktiv: Historie · bezahlt · erneut in den Zahlungslauf")
+    original_items = app.view_functions.get("brain_incoming_payment_open_items")
+    if original_items and not getattr(original_items, "_krista_legacy_paid_cutoff", False):
+        def payment_items_with_legacy_cutoff():
+            try:
+                book.apply_legacy_paid_cutoff()
+            except Exception as exc:
+                app.logger.exception("Altbestand bis 26.11.2025 konnte nicht automatisch abgeschlossen werden: %s", exc)
+            return original_items()
+        payment_items_with_legacy_cutoff.__name__ = "brain_incoming_payment_open_items_legacy_cutoff"
+        payment_items_with_legacy_cutoff._krista_legacy_paid_cutoff = True
+        app.view_functions["brain_incoming_payment_open_items"] = payment_items_with_legacy_cutoff
+
+    print("✅ Rechnungsbuch aktiv: Buchungsnummer · Monatssalden · Statuskorrektur · Altbestand-Stichtag")

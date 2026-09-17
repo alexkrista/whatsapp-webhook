@@ -32,29 +32,36 @@ def install(ns):
         for path in paths:
             allowed.add(path)
 
-    def ensure_test_schema(con):
+    def ensure_schema(con):
         existing = {str(row[1]) for row in con.execute("PRAGMA table_info(incoming_invoices)").fetchall()}
         if "payment_method" not in existing:
             con.execute("ALTER TABLE incoming_invoices ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'unknown'")
         con.commit()
 
-    def test_items():
-        con = area_connection("test")
+    def captured_cash_items(area):
+        con = area_connection(area)
         try:
-            ensure_test_schema(con)
+            ensure_schema(con)
             rows = con.execute("""
                 SELECT id,doc_id,supplier_name,supplier_invoice_number,invoice_date,
                        COALESCE(NULLIF(net_due_date,''),NULLIF(due_date,''),invoice_date) AS due_date_effective,
                        gross_amount,currency,payment_state,payment_status,pdf_path,payment_method
                 FROM incoming_invoices
                 WHERE LOWER(COALESCE(payment_method,'unknown'))='cash'
-                  AND LOWER(COALESCE(payment_state,'open')) NOT IN ('paid','bezahlt','closed','geschlossen')
-                ORDER BY due_date_effective,supplier_name COLLATE NOCASE,id
+                ORDER BY due_date_effective DESC,id DESC
             """).fetchall()
-            return [
-                {
-                    "id": f"kristine:{int(row['id'])}",
-                    "source": "KRISTINE_TEST",
+            meta = store.meta() if area == "live" else {}
+            result = []
+            for row in rows:
+                source_id = f"kristine:{int(row['id'])}"
+                override = meta.get(("KRISTINE", source_id), {})
+                method = norm_method(override.get("paymentMethod") or row["payment_method"])
+                if method != "cash":
+                    continue
+                status = norm_status(override.get("paymentStatus") or row["payment_state"] or row["payment_status"])
+                result.append({
+                    "id": source_id,
+                    "source": "KRISTINE_TEST" if area == "test" else "KRISTINE",
                     "docId": str(row["doc_id"] or ""),
                     "supplier": str(row["supplier_name"] or ""),
                     "invoiceNumber": str(row["supplier_invoice_number"] or ""),
@@ -63,11 +70,10 @@ def install(ns):
                     "amount": float(row["gross_amount"] or 0),
                     "currency": str(row["currency"] or "EUR"),
                     "paymentMethod": "cash",
-                    "paymentStatus": norm_status(row["payment_state"]),
+                    "paymentStatus": status,
                     "path": str(row["pdf_path"] or ""),
-                }
-                for row in rows
-            ]
+                })
+            return result
         finally:
             con.close()
 
@@ -75,12 +81,15 @@ def install(ns):
         # Bewusst nur offene Belege laden. store.items(True) wuerde den gesamten
         # historischen WinWorker-Bestand samt PDF-Lookup laden und ist fuer diese
         # operative Kassa-Liste weder notwendig noch sinnvoll.
-        return [
+        local = captured_cash_items("live")
+        ww_open = [
             dict(item)
             for item in store.items(False)
+            if item.get("source") == "WinWorker"
             if norm_method(item.get("paymentMethod")) == "cash"
             and norm_status(item.get("paymentStatus")) != "paid"
         ]
+        return sorted(local + ww_open, key=lambda x: (str(x.get("invoiceDate") or ""), str(x.get("id") or "")), reverse=True)
 
     if "brain_incoming_kassa_items" not in app.view_functions:
         from flask import request, jsonify, Response
@@ -89,14 +98,15 @@ def install(ns):
         def brain_incoming_kassa_items():
             try:
                 area = capture_area(request.args.get("area") or "live")
-                items = test_items() if area == "test" else live_items()
-                total = round(sum(float(x.get("amount") or 0) for x in items), 2)
+                items = captured_cash_items("test") if area == "test" else live_items()
+                open_items = [x for x in items if norm_status(x.get("paymentStatus")) != "paid"]
+                total = round(sum(float(x.get("amount") or 0) for x in open_items), 2)
                 return jsonify(
                     ok=True,
                     area=area,
                     trainingMode=(area == "test"),
                     count=len(items),
-                    openCount=len(items),
+                    openCount=len(open_items),
                     openTotal=total,
                     items=items,
                 )
@@ -122,7 +132,7 @@ def install(ns):
                     invoice_id = int(source_id.split(":", 1)[1])
                     con = area_connection("test")
                     try:
-                        ensure_test_schema(con)
+                        ensure_schema(con)
                         found = con.execute("SELECT id FROM incoming_invoices WHERE id=?", (invoice_id,)).fetchone()
                         if not found:
                             raise ValueError("TEST-Kassabeleg nicht gefunden.")
@@ -151,6 +161,14 @@ def install(ns):
                 else:
                     saved = store.set_meta(source, source_id, method="transfer", status="open", note="Kassa → Ueberweisung / SEPA")
                     message = "Zur Ueberweisung verschoben · erscheint jetzt im Bezahl-OP / SEPA."
+                if source == "KRISTINE" and source_id.startswith("kristine:"):
+                    con = area_connection("live")
+                    try:
+                        invoice_id = int(source_id.split(":", 1)[1])
+                        con.execute("UPDATE incoming_invoices SET payment_method=?,payment_state=?,payment_status=?,updated_at=? WHERE id=?", ("cash" if mode == "cash" else "transfer", "paid" if mode == "cash" else "open", "Bezahlt" if mode == "cash" else "Offen", datetime.now().isoformat(timespec="seconds"), invoice_id))
+                        con.commit()
+                    finally:
+                        con.close()
                 return jsonify(ok=True, area="live", mode=mode, message=message, sepaUrl="/incoming/payments", **saved)
             except ValueError as exc:
                 return jsonify(ok=False, error=str(exc)), 400
@@ -164,8 +182,8 @@ def install(ns):
             test_note = "<div class=\"note\"><strong>TESTGELAENDE.</strong> Bar/Ueberweisung wird nur simuliert; keine echte SEPA-Zahlung.</div>" if area == "test" else ""
             html = f'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KRISTINE · Kassa</title><style>
 :root{{color-scheme:dark;--bg:#101316;--card:#171b20;--line:#343c46;--text:#eef2f4;--muted:#9da8b3;--accent:#438b5c;--blue:#315d91}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}}.shell{{max-width:1500px;margin:auto;padding:18px}}.head,.section-title{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}}.head h1{{margin:0}}.sub,.hint{{color:var(--muted);font-size:12px}}.back,.pdf{{color:inherit;font-weight:800}}.metrics{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}}.metric,.card,.note{{border:1px solid var(--line);border-radius:13px;background:var(--card);padding:12px}}.metric span{{display:block;color:var(--muted);font-size:12px}}.metric strong{{font-size:20px}}.card{{margin-bottom:14px}}.note{{margin-bottom:14px}}.row{{display:grid;grid-template-columns:105px minmax(180px,1.5fr) minmax(120px,.8fr) 125px 100px minmax(240px,auto);gap:9px;align-items:center;padding:10px 6px;border-top:1px solid var(--line);font-size:13px}}.row:first-child{{border-top:0}}.amount{{font-weight:850;text-align:right}}button,a.action{{border:1px solid #485461;border-radius:9px;padding:8px 10px;color:inherit;background:#252c34;text-decoration:none;font-weight:850;cursor:pointer}}button.cash{{background:var(--accent);border-color:var(--accent)}}button.transfer{{background:var(--blue);border-color:var(--blue)}}.actions{{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}}.empty{{padding:20px;text-align:center;color:var(--muted)}}@media(max-width:900px){{.metrics{{grid-template-columns:1fr 1fr}}.row{{grid-template-columns:1fr 1fr}}.amount{{text-align:left}}.actions{{justify-content:flex-start}}}}@media(max-width:520px){{.metrics,.row{{grid-template-columns:1fr}}}}
-</style></head><body><main class="shell"><div class="head"><div><h1>Kassa{' · TEST' if area == 'test' else ''}</h1><div class="sub">Kassabelege: bar bezahlt oder Ueberweisung / SEPA.</div></div><div class="actions"><a class="action cash" href="https://kasse.offisy.at/" target="_blank" rel="noopener noreferrer">+ Kassabeleg buchen · Ein-/Ausgang ↗</a><a class="action" href="/incoming/payments">SEPA / OP</a><a class="back" href="/">← Erfassung</a></div></div>{test_note}<div class="metrics"><div class="metric"><span>Kassabelege offen</span><strong id="cnt">–</strong></div><div class="metric"><span>Offener Betrag</span><strong id="tot">–</strong></div><div class="metric"><span>Zahlungsart</span><strong>Bar / SEPA</strong></div></div><section class="card"><div class="section-title"><h2>Zu klaeren</h2><span class="hint">Bar = erledigt. Ueberweisung = wandert in den normalen Bezahl-OP und wird dort erst nach Freigabe SEPA-faehig.</span></div><div id="rows"><div class="empty">Wird geladen …</div></div></section></main><script>
-(()=>{{const area={area_q!r},box=document.getElementById('rows'),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c])),money=(n,c='EUR')=>{{try{{return new Intl.NumberFormat('de-AT',{{style:'currency',currency:c||'EUR'}}).format(Number(n||0))}}catch(_){{return Number(n||0).toFixed(2)+' '+(c||'EUR')}}}},date=s=>{{const m=String(s||'').match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')}};async function settle(x,mode){{const text=mode==='cash'?'Als BAR BEZAHLT markieren?':'In UEBERWEISUNG / SEPA verschieben?';if(!confirm(text+'\\n\\n'+(x.supplier||'')+' · '+(x.invoiceNumber||'')+' · '+money(x.amount,x.currency)))return;const r=await fetch('/incoming/kassa/settle',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{area,source:x.source,id:x.id,mode}})}}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Fehler');alert(d.message||'Gespeichert');await load()}}async function load(){{const r=await fetch('/incoming/kassa/items?area='+encodeURIComponent(area),{{cache:'no-store'}}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Kassa konnte nicht geladen werden');cnt.textContent=d.openCount||0;tot.textContent=money(d.openTotal||0);const items=d.items||[];box.innerHTML=items.length?items.map((x,i)=>`<div class="row"><div>${{esc(date(x.invoiceDate||x.dueDate))}}</div><div><strong>${{esc(x.supplier||'–')}}</strong><div class="sub">${{esc(x.docId||'')}}</div></div><div>${{esc(x.invoiceNumber||'–')}}</div><div class="amount">${{esc(money(x.amount,x.currency))}}</div><div>${{x.path?`<a class="pdf" href="/pdf?path=${{encodeURIComponent(x.path)}}" target="_blank">PDF</a>`:'–'}}</div><div class="actions"><button class="cash" type="button" data-i="${{i}}" data-mode="cash">✓ Bar bezahlt</button><button class="transfer" type="button" data-i="${{i}}" data-mode="transfer">→ Ueberweisung / SEPA</button></div></div>`).join(''):'<div class="empty">Keine offenen Kassabelege.</div>';box.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>settle(items[Number(b.dataset.i)],b.dataset.mode))}}load().catch(e=>box.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>')}})();
+</style></head><body><main class="shell"><div class="head"><div><h1>Kassa{' · TEST' if area == 'test' else ''}</h1><div class="sub">Kassabelege: bar bezahlt oder Ueberweisung / SEPA.</div></div><div class="actions"><a class="action cash" href="https://kasse.offisy.at/" target="_blank" rel="noopener noreferrer">+ Kassabeleg buchen · Ein-/Ausgang ↗</a><a class="action" href="/incoming/payments">SEPA / OP</a><a class="back" href="/">← Erfassung</a></div></div>{test_note}<div class="metrics"><div class="metric"><span>Kassabelege offen</span><strong id="cnt">–</strong></div><div class="metric"><span>Offener Betrag</span><strong id="tot">–</strong></div><div class="metric"><span>Zahlungsart</span><strong>Bar / SEPA</strong></div></div><section class="card"><div class="section-title"><h2>Erfasste Kassabelege</h2><span class="hint">Offen: Bar bestaetigen oder zu SEPA verschieben. Bereits bezahlte Belege bleiben sichtbar.</span></div><div id="rows"><div class="empty">Wird geladen …</div></div></section></main><script>
+(()=>{{const area={area_q!r},box=document.getElementById('rows'),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c])),money=(n,c='EUR')=>{{try{{return new Intl.NumberFormat('de-AT',{{style:'currency',currency:c||'EUR'}}).format(Number(n||0))}}catch(_){{return Number(n||0).toFixed(2)+' '+(c||'EUR')}}}},date=s=>{{const m=String(s||'').match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')}};async function settle(x,mode){{const text=mode==='cash'?'Als BAR BEZAHLT markieren?':'In UEBERWEISUNG / SEPA verschieben?';if(!confirm(text+'\\n\\n'+(x.supplier||'')+' · '+(x.invoiceNumber||'')+' · '+money(x.amount,x.currency)))return;const r=await fetch('/incoming/kassa/settle',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{area,source:x.source,id:x.id,mode}})}}),d=await r.json();if(!r.ok||!d.ok)return alert(d.error||'Fehler');alert(d.message||'Gespeichert');await load()}}async function load(){{const r=await fetch('/incoming/kassa/items?area='+encodeURIComponent(area),{{cache:'no-store'}}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Kassa konnte nicht geladen werden');cnt.textContent=d.openCount||0;tot.textContent=money(d.openTotal||0);const items=d.items||[];box.innerHTML=items.length?items.map((x,i)=>`<div class="row"><div>${{esc(date(x.invoiceDate||x.dueDate))}}</div><div><strong>${{esc(x.supplier||'–')}}</strong><div class="sub">${{esc(x.docId||'')}}</div></div><div>${{esc(x.invoiceNumber||'–')}}</div><div class="amount">${{esc(money(x.amount,x.currency))}}</div><div>${{x.path?`<a class="pdf" href="/pdf?path=${{encodeURIComponent(x.path)}}" target="_blank">PDF</a>`:'–'}}</div><div class="actions">${{x.paymentStatus==='paid'?'<strong class="cash">✓ Bar bezahlt</strong>':`<button class="cash" type="button" data-i="${{i}}" data-mode="cash">✓ Bar bezahlt</button><button class="transfer" type="button" data-i="${{i}}" data-mode="transfer">→ Ueberweisung / SEPA</button>`}}</div></div>`).join(''):'<div class="empty">Keine Kassabelege erfasst.</div>';box.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>settle(items[Number(b.dataset.i)],b.dataset.mode))}}load().catch(e=>box.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>')}})();
 </script></body></html>'''
             return Response(html, mimetype="text/html")
 

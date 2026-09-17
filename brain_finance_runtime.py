@@ -217,6 +217,8 @@ def install(ns):
 
     if "brain_incoming_open_items" not in app.view_functions:
         from flask import request,jsonify,Response
+        import brain_finance_direct_pay
+        brain_finance_direct_pay.install(ns,requested_live_items,sepa_payload,store)
         @app.get("/incoming/open-items")
         def brain_incoming_open_items():
             try:

@@ -26,6 +26,15 @@ class BrainFinancePaymentUiTests(unittest.TestCase):
         self.assertIn("#sepaArchive .archive-row>*{min-width:0}", html)
         self.assertIn("#sepaArchive .archive-row .amount,#sepaArchive .sepa-download{white-space:nowrap}", html)
 
+    def test_direct_konfipay_preview_and_submission_are_visible(self):
+        html = payments_page()
+        self.assertIn('id="directPayDialog"', html)
+        self.assertIn("Erwarteter Kontostand vorher", html)
+        self.assertIn("Erwarteter Kontostand danach", html)
+        self.assertIn("An konfipay schicken", html)
+        self.assertIn("/incoming/pay-direct/preview", html)
+        self.assertIn("/incoming/pay-direct/submit", html)
+
     def test_direct_debit_period_can_be_switched(self):
         source = (Path(__file__).parents[1] / "brain_finance_direct_debit.py").read_text(encoding="utf-8")
         tools = (Path(__file__).parents[1] / "brain_finance_op_tools.py").read_text(encoding="utf-8")
