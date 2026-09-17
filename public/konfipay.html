@@ -1,120 +1,291 @@
 <!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>KRISTINE · Bank Nur-Lesen</title>
-  <style>
-    :root{color-scheme:dark;--bg:#0d1014;--card:#171b21;--line:#303743;--text:#f2f4f7;--muted:#a6afbd;--green:#80d89a;--amber:#f1c96a;--red:#ff9f98}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-    main{width:min(1180px,calc(100% - 28px));margin:28px auto 70px}.top,.row,.actions{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-    h1,h2{margin:0}.top{margin-bottom:18px}.back{color:var(--green);text-decoration:none}.mode{padding:7px 11px;border:1px solid #42664d;border-radius:999px;color:var(--green);font-weight:800}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0}.muted{color:var(--muted)}.good{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
-    button,input,select{min-height:42px;border:1px solid var(--line);border-radius:9px;background:#10141a;color:var(--text);padding:9px 12px;font:inherit}button{cursor:pointer;font-weight:750}button.primary{background:#276c3d;border-color:#348d50}button:disabled{opacity:.55;cursor:not-allowed}
-    label{display:grid;gap:5px;color:var(--muted);font-size:13px}.filters{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;align-items:end}.filters button{width:100%}
-    .account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.account{border:1px solid var(--line);border-radius:12px;padding:13px}.account strong{display:block;font-size:19px;margin-top:7px}
-    .table{overflow:auto;margin-top:12px}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;padding:11px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase}.amount{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-    .notice{white-space:pre-line}.setup-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px}.hidden{display:none!important}
-    @media(max-width:760px){.filters{grid-template-columns:1fr 1fr}.setup-row{grid-template-columns:1fr}.filters .wide{grid-column:1/-1}}
-  </style>
-</head>
-<body>
-<main>
-  <header class="top">
-    <div><a class="back" href="/">← The Brain</a><h1>Bank</h1><p class="muted">Konten, Umsätze und Auszüge aus konfipay.</p></div>
-    <span class="mode">Nur lesen</span>
-  </header>
-
-  <section class="card">
-    <div class="row"><div><h2>Verbindung</h2><p id="connection" class="muted">Status wird geladen …</p></div><button id="refresh" disabled>Konten aktualisieren</button></div>
-    <p class="muted">Diese Ausbaustufe kann keine Zahlung, Bankzuordnung oder Gutschrift auslösen.</p>
-    <p id="message" class="notice" role="status" aria-live="polite"></p>
-    <form id="setup" class="hidden" autocomplete="off">
-      <p class="muted">Den Nur-Lesen-API-Schlüssel ausschließlich direkt am Brain-PC hinterlegen.</p>
-      <div class="setup-row"><input id="apiKey" type="password" autocomplete="new-password" maxlength="64" placeholder="64-stelliger API-Schlüssel"><button class="primary" type="submit">Prüfen und speichern</button></div>
-    </form>
-    <p id="remoteNotice" class="warn hidden">Der API-Schlüssel kann nur direkt über http://127.0.0.1:5051/konfipay eingerichtet werden.</p>
-  </section>
-
-  <section class="card"><div class="row"><h2>Kontostände</h2><span id="fetched" class="muted"></span></div><div id="accounts" class="account-grid"><p class="muted">Noch keine Konten geladen.</p></div></section>
-
-  <section class="card">
-    <h2>Gebuchte und vorgemerkte Umsätze</h2>
-    <div class="filters">
-      <label>Von<input id="txFrom" type="date"></label><label>Bis<input id="txTo" type="date"></label>
-      <label>Konto<select id="txAccount"><option value="">Alle Konten</option></select></label>
-      <label>Status<select id="txBooking"><option value="booked">Gebucht</option><option value="pending">Vorgemerkt</option></select></label>
-      <label>Richtung<select id="txDirection"><option value="">Alle</option><option value="CRDT">Eingang</option><option value="DBIT">Ausgang</option></select></label>
-      <button id="loadTransactions" class="primary wide" type="button">Umsätze laden</button>
-    </div>
-    <p id="txMessage" class="muted" role="status"></p>
-    <div class="table"><table><thead><tr><th>Datum</th><th>Gegenkonto</th><th>Zweck</th><th class="amount">Betrag</th></tr></thead><tbody id="transactions"></tbody></table></div>
-  </section>
-
-  <section class="card">
-    <h2>Kontoauszüge</h2>
-    <div class="filters">
-      <label>Von<input id="stFrom" type="date"></label><label>Bis<input id="stTo" type="date"></label>
-      <label>Konto<select id="stAccount"><option value="">Alle Konten</option></select></label>
-      <label>Format<select id="stFormat"><option value="Pdf">PDF</option><option value="53">CAMT.053</option><option value="52">CAMT.052</option><option value="54">CAMT.054</option><option value="940">MT940</option><option value="942">MT942</option></select></label>
-      <button id="loadStatements" class="primary wide" type="button">Auszüge laden</button>
-    </div>
-    <p id="stMessage" class="muted" role="status"></p>
-    <div class="table"><table><thead><tr><th>Bereitgestellt</th><th>Datei</th><th>Konto</th><th></th></tr></thead><tbody id="statements"></tbody></table></div>
-  </section>
-</main>
-<script>
-"use strict";
-const csrf="__BRAIN_CSRF__",canConfigure=__CAN_CONFIGURE__;
-const byId=id=>document.getElementById(id);
-const text=(tag,value,className="")=>{const node=document.createElement(tag);node.textContent=String(value??"");if(className)node.className=className;return node};
-const money=(value,currency="EUR")=>value===null||value===undefined?"–":new Intl.NumberFormat("de-AT",{style:"currency",currency:currency||"EUR"}).format(Number(value));
-const day=value=>{const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return match?`${match[3]}.${match[2]}.${match[1]}`:(value||"–")};
-const stamp=value=>{if(!value)return "–";const date=new Date(value);return Number.isNaN(date.getTime())?String(value):new Intl.DateTimeFormat("de-AT",{dateStyle:"short",timeStyle:"short"}).format(date)};
-
-async function api(path,options={}){
-  const response=await fetch("/konfipay/api/"+path,{cache:"no-store",...options});
-  const data=await response.json();
-  if(!response.ok||!data.ok)throw new Error(data.error||"Abruf fehlgeschlagen.");
-  return data;
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0e0f11"><title>konfipay · The Brain</title>
+<style>
+:root{color-scheme:dark;--bg:#0e0f11;--panel:#17191d;--panel2:#20232a;--text:#f5f7fa;--muted:#aab0bb;--line:#2c313a;--good:#9fe0b4;--warn:#ffd38a;--bad:#ffb3b3}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{max-width:1050px;margin:34px auto;padding:0 20px}a{color:var(--text)}.back{display:inline-block;margin-bottom:24px;color:var(--muted)}.brand{color:var(--muted);font-size:12px;letter-spacing:.13em;font-weight:700}h1{font-size:34px;line-height:1.2;margin:5px 0 12px}h2{font-size:19px;margin:0 0 10px}.sub{color:var(--muted);margin:0 0 24px}.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;margin:18px 0}.row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;background:var(--panel2)}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}button{border:0;border-radius:10px;padding:12px 17px;font:inherit;font-size:14px;font-weight:700;background:#fff;color:#111;cursor:pointer}button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line)}button:disabled{opacity:.45;cursor:default}input{width:100%;background:#0e0f11;border:1px solid #5f6774;border-radius:10px;padding:13px;color:var(--text);font:inherit}input:focus{outline:2px solid #aab0bb;outline-offset:2px}label{display:block;margin-bottom:7px;font-weight:600}.field{flex:1;min-width:220px}.formrow{display:flex;gap:12px;align-items:flex-end;margin-top:16px}.small{font-size:13px;color:var(--muted)}.notice{margin:14px 0 0;white-space:pre-wrap}#totals{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.total{background:#111318;border:1px solid var(--line);padding:16px 20px;border-radius:12px;min-width:220px}.total small{display:block;color:var(--muted)}.total strong{display:block;font-size:28px;margin-top:4px}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}.amount{text-align:right;white-space:nowrap}td small{display:block;color:var(--muted);margin-top:4px}.empty{border:1px dashed #414854;border-radius:12px;padding:28px 20px;text-align:center;color:var(--muted)}.links{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px}.links a{font-size:14px}.section-label{margin-bottom:4px}footer{font-size:13px;color:var(--muted);padding:10px 0 30px}[hidden]{display:none!important}@media(max-width:650px){.wrap{padding:0 14px;margin-top:22px}.card{padding:17px}.formrow{flex-direction:column;align-items:stretch}.field{min-width:0}.total{width:100%}table{min-width:550px}h1{font-size:30px}}
+select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radius:10px;padding:12px;font:inherit;max-width:100%}td{white-space:pre-line}dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;width:min(1100px,95vw);max-height:90vh}dialog::backdrop{background:rgba(0,0,0,.75)}.bank-action{display:inline-block;background:white;color:#111;padding:12px 17px;border-radius:10px;font-weight:700;text-decoration:none}.bank-filters{justify-content:flex-start;align-items:flex-start}.bank-filters input,.bank-filters select,.bank-filters>button{height:52px}.bank-filters>button{margin-top:31px}</style></head><body><main class="wrap">
+<a class="back" href="/">← Zurück zu The Brain</a><div class="brand">KRISTINE · BANKVERBINDUNG</div><h1>konfipay</h1><p class="sub">Deine Bankkonten und Salden direkt in Brain.</p>
+<section class="card"><div class="row"><div><h2 class="section-label">Verbindung</h2><span id="connection" class="badge">Status wird geladen …</span></div><div class="row"><button id="keyToggle" class="secondary" type="button" aria-controls="setup" aria-expanded="false" hidden>API-Schlüssel ändern</button><button id="refresh" class="secondary" disabled>Aktualisieren</button></div></div><p id="message" class="notice" role="status" aria-live="polite"></p><p id="fetched" class="small"></p><p id="dataChanged" class="small" title="Von Brain erkannte Änderung der Kontostände und der für die Berechnung abgerufenen Umsätze.">Letzte Datenänderung wird geprüft …</p></section>
+<section id="setup" class="card" hidden><h2 id="setupTitle">Mit konfipay verbinden</h2><p class="small">Erstelle in konfipay einen API-Schlüssel für „KRISTINE Brain“ mit den benötigten Berechtigungen für Bankkonten, Umsätze/Auszüge und Zahlungsaufträge. Hinterlege ihn hier direkt am Brain-PC.</p><div id="remoteNotice" hidden><p class="warn">Du hast Brain über die Netzwerkadresse geöffnet. Zum Hinterlegen des API-Schlüssels öffne bitte den lokalen Zugang auf dem Brain-PC.</p><a href="http://127.0.0.1:5051/konfipay" style="display:inline-block;background:#fff;color:#111;padding:13px 18px;border-radius:10px;text-decoration:none;font-weight:700">Einrichtung am Brain-PC öffnen →</a><p class="small">Am Brain-PC anklicken. Es öffnet sich die freigegebene Eingabe im selben Browser. Auf einem anderen Gerät funktioniert dieser lokale Zugang nicht.</p></div>
+<form id="connectForm" autocomplete="off" novalidate><div class="formrow"><div class="field"><label for="apiKey">API-Schlüssel</label><input id="apiKey" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="keyHint" placeholder="64-stelligen Schlüssel einfügen"></div><button id="pasteButton" class="secondary" type="button">Einfügen</button><button id="connectButton" type="submit">Prüfen & verbinden</button></div><p id="keyHint" class="small" role="status" aria-live="polite">Noch kein Schlüssel eingefügt.</p></form>
+<p class="small">Der Schlüssel wird verschlüsselt unter dem Windows-Dienstkonto gespeichert. Er wird nach dem Verbinden nicht mehr angezeigt.</p><div class="links"><a href="https://portal.konfipay.de/ApiManagement/Keys" target="_blank" rel="noopener noreferrer">API-Schlüssel in konfipay öffnen ↗</a></div></section>
+<section class="card"><div class="row"><h2>Kontostände</h2></div><div hidden><div id="totals"></div><div id="empty" class="empty">Nach dem Verbinden erscheinen hier deine Konten.</div><div id="accountTable" class="scroll" hidden><table><thead><tr><th>Konto</th><th>IBAN</th><th class="amount">Saldo</th><th>Bankstand</th></tr></thead><tbody id="accounts"></tbody></table></div><p id="balanceNote" class="small"></p></div><div id="expectedPanel"><h2>Erwarteter Kontostand</h2><div id="expectedRows"></div><p id="expectedMessage" class="small" role="status"></p></div></section>
+<section class="card" id="banking"><h2>Umsätze, Auszüge & Zahlungsarchiv</h2>
+<div class="row bank-filters">
+<div><label for="bankView">Bereich</label><select id="bankView"><option value="transactions">Gebuchte Umsätze</option><option value="intraday">Untertägige Umsätze</option><option value="statements">Kontoauszüge</option><option value="archive">Zahlungsarchiv in konfipay</option></select></div>
+<div id="accountFilter"><label for="bankAccount">Konto</label><select id="bankAccount"><option value="">Alle Konten</option></select></div>
+<div><label for="bankFrom">Von</label><input id="bankFrom" type="date"></div><div><label for="bankTo">Bis</label><input id="bankTo" type="date"></div>
+<div id="directionFilter"><label for="bankDirection">Richtung</label><select id="bankDirection"><option value="">Eingänge & Ausgänge</option><option value="CRDT">Nur Eingänge</option><option value="DBIT">Nur Ausgänge</option></select></div>
+<div id="formatFilter" hidden><label for="bankFormat">Format</label><select id="bankFormat"><option value="Pdf">PDF-Auszug</option><option value="53">CAMT.053 · gebucht</option><option value="52">CAMT.052 · untertägig</option><option value="54">CAMT.054 · Sammelbuchungen</option><option value="940">MT940</option><option value="942">MT942 · untertägig</option></select></div>
+<div id="searchFilter" style="flex:1;min-width:240px"><label for="bankSearch">Suche</label><input id="bankSearch" type="search" placeholder="Name, Betrag, IBAN, Verwendungszweck …" style="width:100%" aria-describedby="searchHint"><div id="searchHint" class="small" style="margin-top:6px">Ganzer Zeitraum · z. B. Müller oder 1.234,56 · Enter zum Suchen</div></div><button id="bankLoad" type="button">Anzeigen</button></div>
+<p id="bankNote" class="small">Gebuchte Umsätze aus den von der Bank bereitgestellten Auszügen.</p><p id="bankMessage" role="status" aria-live="polite"></p>
+<div class="scroll"><table><thead id="bankHead"></thead><tbody id="bankRows"></tbody></table></div>
+<div class="row" style="margin-top:14px;justify-content:flex-start"><button id="bankPrev" class="secondary" disabled>Zurück</button><span id="bankPage" class="small"></span><button id="bankNext" class="secondary" disabled>Weiter</button></div></section>
+<section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
+<button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
+<dialog id="paymentDetails"><div class="row"><h2 id="detailTitle">Zahlungsinhalt</h2><button id="detailClose" class="secondary">Schließen</button></div><p id="detailMessage" class="small"></p><div class="scroll"><table><thead><tr><th>Empfänger / IBAN</th><th>Betrag</th><th>Termin / Auftraggeberkonto</th><th>Verwendungszweck / EndToEndId</th></tr></thead><tbody id="detailRows"></tbody></table></div><div class="row" style="margin-top:16px"><button id="detailMore" class="secondary" hidden>Weitere Zahlungen laden</button><a id="detailXml" hidden>Original-XML herunterladen</a></div></dialog>
+<footer>Salden stammen aus den von konfipay bereitgestellten Bankauszügen. Das Datum „Bankstand“ zeigt die Aktualität des jeweiligen Saldos. Bei geöffneter Seite wird alle fünf Minuten aktualisiert. Zahlungen werden ausschließlich nach deiner ausdrücklichen Freigabe im Zahlungsbereich übergeben.</footer>
+<section class="card" id="statementArchive"><h2>Kontoauszugsarchiv</h2><p class="small">PDF-Originale und gebuchte CAMT.053-Auszüge, nach Konto und Monat abgelegt. Automatischer Abruf alle sechs Stunden, solange Brain läuft.</p><div class="row" style="justify-content:flex-start"><div><label for="archiveYear">Jahr nachladen</label><input id="archiveYear" type="number" min="2000" style="width:130px"></div><button id="archiveSync" type="button">Auszüge archivieren</button><button id="archiveRefresh" class="secondary" type="button">Ansicht aktualisieren</button></div><p id="archiveState" class="small" role="status"></p><p id="archivePath" class="small" style="overflow-wrap:anywhere"></p><div id="archiveMonths"></div><p class="small">Monatspakete enthalten Originaldateien und eine Dateiübersicht. Zuordnungen, Skonti und Gutschriften sind kein Bestandteil dieser Bankdateien. Fehlende PDF- oder CAMT-Dateien werden angezeigt; ein Paket ist keine Bestätigung der Vollständigkeit.</p></section>
+</main><script>
+'use strict';
+const csrf='__BRAIN_CSRF__', canConfigure=__CAN_CONFIGURE__, $=id=>document.getElementById(id);
+let busy=false, configured=false, keyEditorOpen=false;
+function updateKeyEditor(){const open=!configured||keyEditorOpen;$('setup').hidden=!open;$('keyToggle').hidden=!configured;$('keyToggle').textContent=keyEditorOpen?'Schließen':'API-Schlüssel ändern';$('keyToggle').setAttribute('aria-expanded',String(open));}
+$('keyToggle').addEventListener('click',()=>{if(busy)return;keyEditorOpen=!keyEditorOpen;if(!keyEditorOpen){$('apiKey').value='';keyHint();}updateKeyEditor();if(keyEditorOpen&&canConfigure)$('apiKey').focus();});
+function stamp(value){if(!value)return '–';const d=new Date(value);return Number.isNaN(d.getTime())?'–':d.toLocaleString('de-AT');}
+function bankDate(value){if(!value)return '–';const match=String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);return match?match[3]+'.'+match[2]+'.'+match[1]:'–';}
+function money(value,currency){const s=String(value),m=s.match(/^(-?)(\d+)(?:\.(\d+))?$/);if(!m)return '–';return m[1]+m[2].replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+(m[3]||'').padEnd(2,'0')+' '+currency;}
+function message(text,error=false){$('message').textContent=text;$('message').className='notice'+(error?' bad':'');}
+function setBusy(value){busy=value;$('keyToggle').disabled=value;$('refresh').disabled=value||!configured;$('connectButton').disabled=value||!canConfigure;$('apiKey').disabled=value||!canConfigure;$('pasteButton').disabled=value||!canConfigure;}
+function keyHint(){const n=$('apiKey').value.trim().length;$('keyHint').textContent=n?n+' von 64 Zeichen'+(n===64?' – bereit zum Verbinden.':'. Bitte den vollständigen API-Schlüssel kopieren.'):'Noch kein Schlüssel eingefügt.';$('keyHint').className=n===64?'small good':'small';}
+$('apiKey').addEventListener('input',keyHint);
+$('apiKey').addEventListener('paste',e=>{if(!e.clipboardData)return;e.preventDefault();$('apiKey').value=e.clipboardData.getData('text/plain').trim();keyHint();});
+$('pasteButton').addEventListener('click',async()=>{try{if(!navigator.clipboard?.readText)throw new Error();const text=await navigator.clipboard.readText();$('apiKey').value=text.trim();keyHint();$('apiKey').focus();if(!text.trim())$('keyHint').textContent='Die Zwischenablage ist leer. Bitte zuerst den Schlüssel in konfipay kopieren.';}catch{$('apiKey').focus();$('keyHint').textContent='Der Browser erlaubt keinen Zugriff auf die Zwischenablage. Bitte im Feld Strg + V verwenden oder diese lokale Adresse in Edge öffnen.';}});
+async function api(path,body){const response=await fetch('/konfipay/api/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Brain-Konfipay':csrf},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'Verbindung fehlgeschlagen.');return data;}
+function render(data){
+ configured=Boolean(data.configured);updateKeyEditor();const snapshot=data.snapshot;fillBankAccounts(snapshot);
+ $('connection').textContent=data.connected?'Verbunden':configured?'Verbindung prüfen':'Noch nicht verbunden';
+ $('connection').className='badge '+(data.connected?'good':configured?'warn':'');
+ $('setupTitle').textContent=configured?'API-Schlüssel ersetzen':'Mit konfipay verbinden';
+ $('fetched').textContent=snapshot?'Letzter erfolgreicher Abruf: '+stamp(snapshot.fetchedAt):'';
+ message(data.error||(data.connected?'Kontoverbindung bereit.':configured?'Schlüssel hinterlegt. Konten werden beim Aktualisieren abgerufen.':'Einmal den API-Schlüssel hinterlegen – danach übernimmt Brain den Abruf.'),Boolean(data.error));
+ $('totals').replaceChildren();$('accounts').replaceChildren();
+ const accounts=snapshot?.accounts||[];
+ for(const [currency,amount]of Object.entries(snapshot?.totals||{})){
+  const div=document.createElement('div');div.className='total';const label=document.createElement('small'),value=document.createElement('strong');
+  label.textContent='Summe bekannter Salden · '+currency;value.textContent=money(amount,currency);div.append(label,value);$('totals').append(div);
+ }
+ for(const account of accounts){const tr=document.createElement('tr');
+  for(const [index,text]of [account.name,account.iban?('•••• '+account.iban.replace(/\s/g,'').slice(-4)):'–',account.amount===null?'Noch kein Saldo':money(account.amount,account.currency),bankDate(account.date)].entries()){
+   const td=document.createElement('td');td.textContent=text;if(index===2)td.className='amount';tr.append(td);
+  }$('accounts').append(tr);
+ }
+ $('empty').hidden=accounts.length>0;$('accountTable').hidden=!accounts.length;
+ $('empty').textContent=snapshot?'Keine aktiven Bankkonten gefunden. Bitte in konfipay die Konteneinrichtung prüfen.':'Nach dem Verbinden erscheinen hier deine Konten.';
+ const dates=new Set(accounts.filter(a=>a.amount!==null).map(a=>a.date));
+ $('balanceNote').textContent=[data.stale?'Verbindung unterbrochen: Angezeigt werden die zuletzt abgerufenen Werte.':'',snapshot?.missingBalances?snapshot.missingBalances+' Konto/Konten ohne Saldo sind nicht in den Summen enthalten.':'',dates.size>1?'Die Kontostände haben unterschiedliche Standdaten.':''].filter(Boolean).join(' ');
+ setBusy(busy);
 }
-function setMessage(value,error=false){byId("message").textContent=value||"";byId("message").className="notice "+(error?"bad":"good")}
-function setDates(){const now=new Date(),today=now.toISOString().slice(0,10),start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString().slice(0,10);for(const id of ["txFrom","stFrom"])byId(id).value=start;for(const id of ["txTo","stTo"])byId(id).value=today}
-function query(prefix,page=1){const params=new URLSearchParams({from:byId(prefix+"From").value,to:byId(prefix+"To").value,page:String(page)}),account=byId(prefix+"Account").value;if(account)params.set("account",account);return params}
-
-function renderAccounts(snapshot){
-  const host=byId("accounts");host.replaceChildren();
-  const accounts=snapshot?.accounts||[];
-  if(!accounts.length){host.append(text("p","Noch keine Konten geladen.","muted"));return}
-  for(const account of accounts){const card=text("div","","account");card.append(text("span",account.name||"Bankkonto","muted"),text("strong",money(account.amount,account.currency)),text("span",`${account.iban||""} · Stand ${day(account.date)}`,"muted"));host.append(card)}
-  for(const select of [byId("txAccount"),byId("stAccount")]){const selected=select.value;select.replaceChildren();const all=text("option","Alle Konten");all.value="";select.append(all);for(const account of accounts){const option=text("option",`${account.name||"Bankkonto"} · ${account.iban||""}`);option.value=account.id;select.append(option)}select.value=selected}
-  byId("fetched").textContent="Stand "+stamp(snapshot.fetchedAt);
+async function refresh(){if(busy||!configured)return;setBusy(true);message('Konten werden abgerufen …');try{render(await api('refresh',{}));await loadExpected();}catch(error){message(error.message,true);}finally{setBusy(false);}}
+$('connectForm').addEventListener('submit',async e=>{e.preventDefault();if(busy||!canConfigure)return;const key=$('apiKey').value.trim();if(key.length!==64){keyHint();return message('Bitte den vollständigen 64-stelligen API-Schlüssel eingeben. Im Feld stehen '+key.length+' Zeichen.',true);}setBusy(true);message('Verbindung wird geprüft …');try{const data=await api('connect',{apiKey:key});keyEditorOpen=false;render(data);$('apiKey').value='';keyHint();}catch(error){message(error.message,true);}finally{setBusy(false);}});
+$('refresh').addEventListener('click',refresh);$('remoteNotice').hidden=canConfigure;$('connectForm').hidden=!canConfigure;setBusy(false);
+(async()=>{try{render(await api('status'));if(configured)await refresh();}catch(error){message('Brain konnte den Verbindungsstatus nicht laden. '+error.message,true);}})();
+setInterval(()=>{if(!document.hidden)refresh();},300000);
+</script><script>
+'use strict';
+const bankStatusNames={FIN_CONFIRMED:'Ausführung bestätigt',FIN_ACCEPTED:'Technisch angenommen – noch keine Ausführungsbestätigung',FIN_UPLOAD_SUCCEEDED:'An Bank übertragen',FIN_PARTIALLY_ACCEPTED:'Teilweise angenommen',FIN_REJECTED:'Von Bank abgelehnt',FIN_UPLOAD_FAILED:'Übertragung fehlgeschlagen',FIN_UPLOAD_UNCLEAR:'Übertragung unklar – prüfen',FIN_VEU_FORWARDED:'Wartet auf Unterschrift',FIN_VEU_CANCELED:'Unterschrift abgebrochen',KON_REJECTED:'Von konfipay abgelehnt',KON_ACCEPTED_AND_QUEUED:'In Warteschlange',creating:'Übergabe begonnen – Status prüfen',created:'Bei konfipay gespeichert',submitting:'Bankübertragung begonnen – Status prüfen',submitted:'An konfipay übergeben',unknown:'Ergebnis unklar – nicht erneut senden',rejected:'Abgelehnt'};
+let searchCache=null;
+function searchText(value){return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
+function searchAmount(value){
+ let s=String(value).trim().replace(/\s|€/g,'').replace(/^[-+−]/,'');
+ if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');
+ if(!/^\d+(?:\.\d{1,2})?$/.test(s))return null;
+ const [whole,fraction='']=s.split('.');return BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));
 }
-function renderState(data){
-  byId("refresh").disabled=!data.configured;
-  byId("connection").textContent=data.connected?"Verbunden · Nur-Lesen":data.configured?"Schlüssel vorhanden · bitte aktualisieren":"Noch nicht eingerichtet";
-  byId("connection").className=data.connected?"good":data.error?"bad":"muted";
-  renderAccounts(data.snapshot);
-  setMessage(data.error||"");
+function matchesTransaction(item,query){
+ const fields=[item.name,item.iban,item.purpose,item.bookingText,item.endToEndId,item.currency,item.bankAccount?.iban];
+ const text=searchText(fields.filter(Boolean).join(' '));
+ const compact=searchText(query).replace(/\s/g,'');
+ if(compact && [item.iban,item.bankAccount?.iban].some(iban=>searchText(iban).replace(/\s/g,'').includes(compact)))return true;
+ return searchText(query).trim().split(/\s+/).filter(Boolean).every(term=>{
+  const amount=searchAmount(term);
+  return text.includes(term)||(amount!==null&&amount===searchAmount(item.amount));
+ });
 }
-async function refresh(){byId("refresh").disabled=true;try{renderState(await api("refresh"))}catch(error){setMessage(error.message,true)}finally{byId("refresh").disabled=false}}
+async function searchedTransactions(query,page){
+ const {search,mode,...filters}=query;
+ const key=JSON.stringify(filters);
+ if(!searchCache||searchCache.key!==key||Date.now()-searchCache.time>120000){
+  let items=[],pages=1;
+  for(let n=1;n<=pages;n++){
+   $('bankMessage').textContent='Zeitraum wird durchsucht · Seite '+n+' von '+pages+' …';
+   const data=await api('transactions?'+new URLSearchParams({...filters,page:n}));
+   pages=Math.max(1,Number(data.pages)||1);
+   if(pages>200)throw new Error('Für diese Suche bitte den Zeitraum verkleinern (mehr als 20.000 Umsätze).');
+   items.push(...data.items);
+  }
+  searchCache={key,time:Date.now(),items};
+ }
+ const matches=searchCache.items.filter(item=>matchesTransaction(item,search));
+ return {items:matches.slice((page-1)*100,page*100),page,pages:Math.max(1,Math.ceil(matches.length/100)),total:matches.length,searched:searchCache.items.length};
+}
 
-byId("setup").classList.toggle("hidden",!canConfigure);byId("remoteNotice").classList.toggle("hidden",canConfigure);
-byId("setup").addEventListener("submit",async event=>{event.preventDefault();const key=byId("apiKey").value.trim();if(key.length!==64)return setMessage("Bitte den vollständigen 64-stelligen Schlüssel eingeben.",true);try{const data=await api("connect",{method:"POST",headers:{"Content-Type":"application/json","X-Brain-Konfipay":csrf},body:JSON.stringify({apiKey:key})});byId("apiKey").value="";renderState(data)}catch(error){setMessage(error.message,true)}});
-byId("refresh").addEventListener("click",refresh);
-
-byId("loadTransactions").addEventListener("click",async()=>{
-  const body=byId("transactions"),message=byId("txMessage"),params=query("tx");params.set("booking",byId("txBooking").value);if(byId("txDirection").value)params.set("direction",byId("txDirection").value);message.textContent="Umsätze werden gelesen …";body.replaceChildren();
-  try{const data=await api("transactions?"+params);for(const item of data.items){const row=document.createElement("tr"),direction=item.creditDebitIndicator==="DBIT"?"−":"+";row.append(text("td",day(item.bookingDate)),text("td",`${item.name||"–"}\n${item.iban||""}`),text("td",item.purpose||item.bookingText||"–"),text("td",direction+money(Math.abs(Number(item.amount||0)),item.currency),"amount"));body.append(row)}message.textContent=`${data.total??data.items.length} Umsatz/Umsätze`;}catch(error){message.textContent=error.message}
-});
-
-byId("loadStatements").addEventListener("click",async()=>{
-  const body=byId("statements"),message=byId("stMessage"),params=query("st");params.set("format",byId("stFormat").value);message.textContent="Auszüge werden gelesen …";body.replaceChildren();
-  try{const data=await api("statements?"+params);for(const item of data.items){const row=document.createElement("tr"),download=document.createElement("a");download.textContent="Herunterladen";download.href="/konfipay/api/statement-download?rid="+encodeURIComponent(item.rId);row.append(text("td",stamp(item.timestamp)),text("td",item.fileName||item.format||"Kontoauszug"),text("td",item.bankAccount?.iban||"–"));const cell=document.createElement("td");cell.append(download);row.append(cell);body.append(row)}message.textContent=`${data.total??data.items.length} Auszug/Auszüge`;}catch(error){message.textContent=error.message}
-});
-
-setDates();
-(async()=>{try{const state=await api("status");renderState(state);if(state.configured)await refresh()}catch(error){setMessage(error.message,true)}})();
+function statusName(value){return bankStatusNames[value]||value||'Noch kein Status';}
+let bankingPage=1,bankingPages=1,bankingBusy=false,bankQuery=null,detailRid=null,detailPage=1,detailVersion=0;
+function dateInput(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+const bankToday=new Date(),bankStart=new Date();bankStart.setDate(bankStart.getDate()-30);$('bankFrom').value=dateInput(bankStart);$('bankTo').value=dateInput(bankToday);
+function bankFilters(){const mode=$('bankView').value;$('searchFilter').hidden=!['transactions','intraday'].includes(mode);$('directionFilter').hidden=!['transactions','intraday'].includes(mode);$('formatFilter').hidden=mode!=='statements';$('accountFilter').hidden=mode==='archive';$('bankNote').textContent=mode==='intraday'?'Vorgemerkte Eingänge und Ausgänge aus untertägigen Bankmeldungen. Sie sind noch nicht endgültig gebucht und werden nicht als bezahlte Rechnungen behandelt. Verfügbarkeit hängt von Bank und konfipay-Abruf ab.':mode==='statements'?'Downloads im Originalformat, das die Bank liefert. PDF ist nur verfügbar, wenn die Bank PDF-Auszüge bereitstellt.':mode==='archive'?'Zahlungsdateien in konfipay. „Inhalt“ zeigt die einzelnen Zahlungen des Sammlers.':'Gebuchte Eingänge und Ausgänge. Es wird kein Abrufstatus quittiert.';}
+$('bankView').addEventListener('change',()=>{if($('bankView').value==='intraday'){$('bankDirection').value='';$('bankFrom').value=dateInput(new Date());$('bankTo').value=dateInput(new Date());}bankFilters();$('bankRows').replaceChildren();$('bankMessage').textContent='';$('bankHead').replaceChildren();$('bankPrev').disabled=true;$('bankNext').disabled=true;$('bankPage').textContent='';});bankFilters();
+function fillBankAccounts(snapshot){const select=$('bankAccount'),old=select.value;select.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='Alle Konten';select.append(all);for(const a of snapshot?.accounts||[]){const o=document.createElement('option');o.value=a.id;o.textContent=a.name+' · '+a.iban.slice(-4);select.append(o);}select.value=old;}
+function cell(tr,text){const td=document.createElement('td');td.textContent=text??'–';tr.append(td);return td;}
+function action(cell,label,fn){const b=document.createElement('button');b.className='secondary';b.textContent=label;b.addEventListener('click',fn);cell.append(b);return b;}
+async function loadBank(page=1){if(bankingBusy)return;bankingBusy=true;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankFormat','bankSearch'])$(id).disabled=true;$('bankLoad').disabled=true;$('bankPrev').disabled=true;$('bankNext').disabled=true;$('bankRows').replaceChildren();$('bankMessage').textContent='Daten werden geladen …';
+ try{
+  if(page===1){const mode=$('bankView').value;bankQuery={mode,from:$('bankFrom').value,to:$('bankTo').value,account:mode==='archive'?'':$('bankAccount').value,direction:$('bankDirection').value,booking:mode==='intraday'?'pending':'booked',format:$('bankFormat').value,search:['transactions','intraday'].includes(mode)?$('bankSearch').value.trim():''};}
+  const q=new URLSearchParams({...bankQuery,page});const route=bankQuery.mode==='statements'?'statements':bankQuery.mode==='archive'?'payment-archive':'transactions';const data=bankQuery.search?await searchedTransactions(bankQuery,page):await api(route+'?'+q);
+  bankingPage=Number(data.page)||1;bankingPages=Math.max(1,Number(data.pages)||1);const header=document.createElement('tr');
+  for(const name of route==='transactions'?['Buchung / Valuta','Absender / Empfänger','Betrag','Verwendungszweck / Konto','Zuordnung']:route==='statements'?['Datum','Datei','Konto','Download']:['Erstellt','Termin / Typ','Status','Inhalt']){const th=document.createElement('th');th.textContent=name;header.append(th);}$('bankHead').replaceChildren(header);
+  for(const item of data.items){const tr=document.createElement('tr');
+   if(route==='transactions'){cell(tr,bankDate(item.bookingDate)+' / '+bankDate(item.valueDate));cell(tr,(item.name||'–')+'\n'+(item.iban||''));const amount=cell(tr,(item.creditDebitIndicator==='DBIT'?'−':item.creditDebitIndicator==='CRDT'?'+':'')+money(String(item.amount??'').replace(/^[-+]/,''),item.currency||''));amount.className=item.creditDebitIndicator==='CRDT'?'good':'amount';cell(tr,(item.purpose||item.bookingText||'–')+'\n'+(item.bankAccount?.iban||''));assignmentCell(tr,item,bankQuery.booking==='pending');}
+   else if(route==='statements'){cell(tr,stamp(item.timestamp));cell(tr,(item.fileName||'Kontoauszug')+' · '+(item.format||''));cell(tr,item.bankAccount?.iban||'–');const td=cell(tr,'');const a=document.createElement('a');a.textContent='Herunterladen';a.href='/konfipay/api/statement-download?rid='+encodeURIComponent(item.rId);td.append(a);}
+   else{cell(tr,stamp(item.timestamp));cell(tr,bankDate(item.executionDate)+' · '+(item.paymentType||''));cell(tr,statusName(item.status?.statusValue));action(cell(tr,''),'Inhalt',()=>openRemoteContent(item.rId));}
+   $('bankRows').append(tr);
+  }
+  if(route==='transactions'&&bankQuery.booking==='booked')await refreshAssignmentButtons();
+  $('bankMessage').textContent=bankQuery.search?data.total+' Treffer in '+data.searched+' Umsätzen im gewählten Zeitraum':data.items.length?(data.total??data.items.length)+' Einträge im Zeitraum':bankQuery.mode==='intraday'?'Keine untertägigen Eingänge geliefert. Bitte Bankabruf und Zeitraum in konfipay prüfen.':'Keine Einträge für diese Auswahl.';$('bankPage').textContent='Seite '+bankingPage+' von '+bankingPages;
+ }catch(error){$('bankMessage').textContent=error.message;$('bankPage').textContent='';bankingPage=1;bankingPages=1;}finally{bankingBusy=false;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankFormat','bankSearch'])$(id).disabled=false;$('bankLoad').disabled=false;$('bankPrev').disabled=bankingPage<=1;$('bankNext').disabled=bankingPage>=bankingPages;}}
+$('bankSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadBank(1);}});
+$('bankSearch').addEventListener('search',()=>{if(!$('bankSearch').value)loadBank(1);});
+$('bankLoad').addEventListener('click',()=>loadBank(1));$('bankPrev').addEventListener('click',()=>loadBank(bankingPage-1));$('bankNext').addEventListener('click',()=>loadBank(bankingPage+1));
+function detailRows(items){for(const item of items){const tr=document.createElement('tr');cell(tr,item.name+'\n'+item.iban);cell(tr,money(item.amount,item.currency||'EUR'));cell(tr,bankDate(item.date)+'\n'+item.debtorIban);cell(tr,(item.purpose||'–')+'\n'+(item.endToEndId||''));$('detailRows').append(tr);}}
+function beginDetail(title){detailVersion++;$('detailTitle').textContent=title;$('detailRows').replaceChildren();$('detailMessage').textContent='Inhalt wird geladen …';$('detailMore').hidden=true;$('detailXml').hidden=true;if(!$('paymentDetails').open)$('paymentDetails').showModal();return detailVersion;}
+$('detailClose').addEventListener('click',()=>{detailVersion++;$('paymentDetails').close();});
+async function openLocalContent(item){const version=beginDetail(item.name);try{const d=await api('payment-content?id='+encodeURIComponent(item.id));if(version!==detailVersion)return;detailRows(d.items);$('detailMessage').textContent=d.items.length+' Zahlungen · '+statusName(item.status||item.state);$('detailXml').href='/konfipay/api/payment-xml?id='+encodeURIComponent(item.id);$('detailXml').hidden=false;}catch(e){$('detailMessage').textContent=e.message;}}
+async function openRemoteContent(rid,more=false){const version=more?detailVersion:beginDetail('Zahlungsinhalt aus konfipay');if(!more){detailRid=rid;detailPage=1;}try{const d=await api('payment-archive-content?rid='+encodeURIComponent(rid)+'&page='+detailPage);if(version!==detailVersion)return;detailRows(d.items.map(x=>({name:x.otherPartyBankAccount?.description||'–',iban:x.otherPartyBankAccount?.iban||'',amount:x.transaction?.amount,currency:x.transaction?.currency,date:x.transaction?.executionDate,debtorIban:x.initPartyBankAccount?.iban||'',purpose:x.transaction?.rmtInfoUStrd||'',endToEndId:x.transaction?.endToEndId||''})));$('detailMessage').textContent=(d.total??d.items.length)+' Zahlungen · Seite '+d.page+' von '+Math.max(1,d.pages||1);$('detailMore').hidden=Number(d.page)>=Number(d.pages);detailPage=Number(d.page)+1;}catch(e){$('detailMessage').textContent=e.message;}}
+$('detailMore').addEventListener('click',()=>openRemoteContent(detailRid,true));
+async function loadHistory(){$('historyLoad').disabled=true;$('historyMessage').textContent='Archiv wird geladen …';try{const d=await api('payment-history');$('historyRows').replaceChildren();for(const item of d.items){const tr=document.createElement('tr');cell(tr,item.name+'\n'+stamp(item.created));cell(tr,item.count);cell(tr,money(item.total,'EUR'));cell(tr,statusName(item.status||item.state)+(item.error?'\n'+item.error:''));const td=cell(tr,'');action(td,'Inhalt',()=>openLocalContent(item));if(item.rid)action(td,'Status prüfen',async()=>{try{await api('payment-status',{rid:item.rid});await loadHistory();}catch(e){$('historyMessage').textContent=e.message;}});$('historyRows').append(tr);}$('historyMessage').textContent=d.items.length?d.items.length+' Übergaben (maximal die letzten 100). Bei unklarem Status nicht erneut senden.':'Noch keine Zahlungen über Brain übergeben.';}catch(e){$('historyMessage').textContent=e.message;}finally{$('historyLoad').disabled=false;}}
+$('historyLoad').addEventListener('click',loadHistory);
 </script>
-</body>
-</html>
+<script>let expectedBusy=false;
+async function loadExpected(){
+ if(expectedBusy)return;
+ expectedBusy=true;$('expectedRows').replaceChildren();$('expectedMessage').textContent='Untertägiger Stand wird berechnet …';
+ try{const data=await api('expected-balances');
+  $('dataChanged').textContent=data.changeTracking==='ok'?(data.lastChangedAt?'Letzte erkannte Datenänderung: '+stamp(data.lastChangedAt):'Erstmals erfasst: '+stamp(data.firstObservedAt)+' · seitdem keine Datenänderung erkannt'):'Letzte Datenänderung: derzeit nicht zuverlässig prüfbar';
+  for(const a of data.accounts){const card=document.createElement('div');card.className='card';const title=document.createElement('h2');title.textContent=a.name+' · '+a.iban.slice(-4);card.append(title);
+   function line(label,value,strong=false){const row=document.createElement('div');row.className='row';row.style.padding='9px 0';const l=document.createElement('span'),v=document.createElement(strong?'strong':'span');l.textContent=label;v.textContent=value;if(strong){row.style.borderTop='1px solid var(--line)';v.style.fontSize='26px';}row.append(l,v);card.append(row);}
+   line('Kontostand '+bankDate(a.date),money(a.amount,a.currency));
+   if(a.error){line('Erwarteter Kontostand',a.error);}else{
+    if(Number(a.earlierNet)!==0)line('Weitere Buchungen bis gestern',money(a.earlierNet,a.currency));
+    line('Eingänge '+bankDate(data.date),'+ '+money(a.todayIn,a.currency));
+    line('Ausgänge '+bankDate(data.date),'− '+money(a.todayOut,a.currency));
+    if(Number(a.ownOutgoing)>0)line('Jetzt überwiesen · noch nicht im Bankumsatz','− '+money(a.ownOutgoing,a.currency));
+    line('Erwarteter Kontostand',money(a.expected,a.currency),true);
+   }
+   $('expectedRows').append(card);
+  }
+  await renderLiquidity(data);
+  $('expectedMessage').textContent='Abgerufen: '+stamp(data.fetchedAt)+'. Eigene übergebene Zahlungen werden zusätzlich abgezogen, solange sie noch nicht in den Bankumsätzen erscheinen. Eine eventuell nötige Bankunterschrift bleibt erforderlich. Kein bestätigter verfügbarer Banksaldo.';
+ }catch(e){$('expectedMessage').textContent=e.message;$('dataChanged').textContent='Letzte Datenänderung: Abruf fehlgeschlagen';}finally{expectedBusy=false;}
+}
+async function renderLiquidity(bank){
+ const card=document.createElement('div');card.className='card';card.id='liquiditySummary';const title=document.createElement('h2');title.textContent='Kontenübersicht';card.append(title);$('expectedRows').append(card);
+ function line(label,value,strong=false){const row=document.createElement('div');row.className='row';row.style.padding='9px 0';const l=document.createElement('span'),v=document.createElement(strong?'strong':'span');l.textContent=label;v.textContent=value;if(strong)row.style.borderTop='1px solid var(--line)';row.append(l,v);card.append(row);}
+ function cents(value){const m=String(value).match(/^(-?)(\d+)(?:\.(\d{1,2}))?$/);if(!m)throw Error('Ungültiger Kontostand');return (m[1]?-1n:1n)*(BigInt(m[2])*100n+BigInt((m[3]||'').padEnd(2,'0')));}
+ function decimal(value){const sign=value<0n?'-':'';if(value<0n)value=-value;return sign+String(value/100n)+'.'+String(value%100n).padStart(2,'0');}
+ const totals={};let complete=!!bank.accounts?.length;
+ for(const a of bank.accounts||[]){if(a.error||a.expected===null){complete=false;continue;}try{totals[a.currency]=(totals[a.currency]||0n)+cents(a.expected);}catch(e){complete=false;}}
+ line('Bank · erwartet',complete?Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '):'Nicht vollständig verfügbar');
+ let revolut;try{const r=await fetch('/revolut/balances',{cache:'no-store'});revolut=await r.json();if(!r.ok||!revolut.ok)throw Error(revolut.error||'Abruf fehlgeschlagen');
+ const visibleRevolut=Object.entries(revolut.totals).filter(([c,v])=>c==='EUR'||cents(v)!==0n);
+ line('Revolut Business',visibleRevolut.map(([c,v])=>money(v,c)).join(' · '));
+ for(const [currency,value] of visibleRevolut)totals[currency]=(totals[currency]||0n)+cents(value);
+ }catch(e){complete=false;line('Revolut Business','Nicht verfügbar · '+e.message);}
+ try{const r=await fetch('/controlling/import/balances',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok||d.accounts?.length!==2)throw Error('Abruf fehlgeschlagen');
+ for(const a of d.accounts){if(a.amount===null){complete=false;line(a.name,'Bestand fehlt');continue;}if(!Number.isSafeInteger(a.amount))throw Error('Ungültiger Bestand');line(a.name,money(decimal(BigInt(a.amount)),a.currency)+' · Stand '+bankDate(a.date));totals[a.currency]=(totals[a.currency]||0n)+BigInt(a.amount);}
+ }catch(e){complete=false;line('Alte Konten','Stände nicht vollständig verfügbar');}
+ let cash=null;try{const r=await fetch('/incoming/kassa/book/balance',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');cash=d;
+ line('Kassa',d.balance===null?'Bestand fehlt · Excel importieren / Anfangsbestand angeben':money(decimal(BigInt(d.balance)),'EUR')+' · Import '+stamp(d.lastImport));
+ }catch(e){line('Kassa','Importbestand nicht verfügbar');}
+ if(complete)line('Zwischensumme · Konten ohne Kassa',Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '),true);
+ if(complete&&cash?.balance!==null&&cash?.balance!==undefined){totals.EUR=(totals.EUR||0n)+BigInt(cash.balance);line('Gesamt · inklusive Kassa',Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '),true);}else line('Gesamt · inklusive Kassa','Noch nicht vollständig verfügbar',true);
+ const note=document.createElement('p');note.className='small';note.textContent='Revolut Alt und Aircash Alt: zuletzt bestätigte Stände zum angegebenen Datum, kein Live-Abruf. Die Summe enthält diese Stände. Kassa laut letztem offisy-Excel-Import. Fremdwährungen werden separat ausgewiesen. Bei noch nicht beidseitig sichtbaren Umbuchungen kann die Summe vorübergehend abweichen.'+(revolut?.fetchedAt?' Revolut Business abgerufen: '+stamp(revolut.fetchedAt)+'.':'');card.append(note);
+}
+</script><script>let archiveTimer=null,archiveLoading=false;
+$('archiveYear').value=new Date().getFullYear();$('archiveYear').max=new Date().getFullYear();
+async function loadStatementArchive(){
+ if(archiveLoading)return;archiveLoading=true;clearTimeout(archiveTimer);
+ try{const d=await api('statement-archive');$('archivePath').textContent='Ablage: '+d.root;$('archiveSync').disabled=d.busy;
+  $('archiveState').textContent=(d.busy?'Archivierung läuft … ':d.last?'Letzter Archivlauf: '+stamp(d.last)+' · '+d.added+' neue Dateien. ':'Noch kein Archivlauf. ')+(d.error||'');
+  $('archiveMonths').replaceChildren();
+  for(const m of d.months){const box=document.createElement('div');box.className='card';const row=document.createElement('div');row.className='row';const title=document.createElement('strong');title.textContent=m.month+' · '+m.name+' · '+m.iban.slice(-4);const link=document.createElement('a');link.className='bank-action';link.textContent='Monat herunterladen';link.href='/konfipay/api/statement-archive-zip?'+new URLSearchParams({account:m.account,month:m.month});row.append(title,link);box.append(row);
+   const counts=document.createElement('p');counts.className='small';counts.textContent=m.pdf+' PDF · '+m.xml+' CAMT.053'+(!m.pdf?' · Kein PDF vorhanden':'')+(!m.xml?' · Keine CAMT-Datei vorhanden':'');box.append(counts);
+   const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Enthaltene Auszüge anzeigen';details.append(summary);const list=document.createElement('ul');for(const f of m.files){const li=document.createElement('li');li.textContent=bankDate(f.source_date)+' · '+(f.original||f.format)+(f.date_basis==='Bereitstellung'?' · Datum der Bereitstellung':f.date_basis.startsWith('Auszugszeitraum')?' · '+f.date_basis:'');const open=document.createElement('a');open.textContent=f.format==='Pdf'?'Ansehen':'XML ansehen';open.href='/konfipay/api/statement-archive-file?rid='+encodeURIComponent(f.rid);open.target='_blank';open.rel='noopener noreferrer';open.style.marginLeft='12px';li.append(open);const download=document.createElement('a');download.textContent='Herunterladen';download.href=open.href+'&download=1';download.style.marginLeft='12px';li.append(download);li.style.marginBottom='12px';list.append(li);}details.append(list);box.append(details);$('archiveMonths').append(box);
+  }
+  if(!d.months.length){const p=document.createElement('p');p.textContent='Noch keine Auszüge archiviert.';$('archiveMonths').append(p);}
+  if(d.busy)archiveTimer=setTimeout(loadStatementArchive,3000);
+ }catch(e){$('archiveState').textContent=e.message;}finally{archiveLoading=false;}
+}
+$('archiveSync').addEventListener('click',async()=>{$('archiveSync').disabled=true;try{await api('statement-archive-sync',{year:Number($('archiveYear').value)});await loadStatementArchive();}catch(e){$('archiveState').textContent=e.message;$('archiveSync').disabled=false;}});
+$('archiveRefresh').addEventListener('click',loadStatementArchive);
+loadStatementArchive();
+</script><script>// Bank allocation: one explicit save, separate from payment transmission.
+const assignmentDialog=document.createElement('dialog');
+assignmentDialog.className='assignment-dialog';document.body.append(assignmentDialog);
+const assignmentStyle=document.createElement('style');assignmentStyle.textContent=`
+.assignment-dialog{background:#17191d;color:#f5f6f8;border:1px solid #383d47;border-radius:20px;padding:28px;width:min(1000px,92vw);max-height:88vh;box-sizing:border-box}.assignment-dialog::backdrop{background:#000b}.assignment-dialog h2{margin-top:0}.assignment-dialog input,.assignment-dialog select{box-sizing:border-box;width:100%;min-width:0;height:48px}.assignment-dialog label{display:block;font-weight:600;margin:12px 0 6px}.assignment-line{padding:18px;background:#101113;border:1px solid #353a45;border-radius:12px;margin:16px 0}.assignment-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}.assignment-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.assignment-status{font-size:14px;padding:10px 14px;white-space:nowrap}.assignment-status.assigned{color:#82db9c;border-color:#398653}.assignment-status.unassigned{color:#f5cf65;border-color:#a4812b}.assignment-dialog .assignment-note{color:#abb3c2;white-space:pre-wrap;margin:12px 0}.assignment-dialog .assignment-error{color:#ffb2ab;margin-top:12px}.assignment-dialog input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin-right:10px}@media(max-width:650px){.assignment-grid{grid-template-columns:1fr}.assignment-dialog{padding:18px}}
+`;document.head.append(assignmentStyle);
+function aNode(tag,text,parent){const n=document.createElement(tag);if(text!=null)n.textContent=text;if(parent)parent.append(n);return n;}
+function aButton(text,parent,fn){const b=aNode('button',text,parent);b.type='button';b.onclick=fn;return b;}
+let assignmentControlId=0;
+function aInput(parent,label,type='text'){const l=aNode('label',label,parent);const input=aNode('input',null,parent);input.id='assignment-control-'+(++assignmentControlId);l.htmlFor=input.id;input.type=type;return input;}
+function aSelect(parent,label,choices){const l=aNode('label',label,parent);const s=aNode('select',null,parent);s.id='assignment-control-'+(++assignmentControlId);l.htmlFor=s.id;for(const [value,text] of choices){const o=aNode('option',text,s);o.value=value;}return s;}
+function aMoney(value,currency='EUR'){return money(value,currency);}
+function aCents(value){const text=String(value).trim().replace(',','.');if(!/^\d+(\.\d{1,2})?$/.test(text))return NaN;const [whole,part='']=text.split('.');return Number(whole)*100+Number(part.padEnd(2,'0'));}
+function aFrame(title){assignmentDialog.replaceChildren();aNode('h2',title,assignmentDialog);if(!assignmentDialog.open)assignmentDialog.showModal();}
+async function openAssignment(rid){
+ aFrame('Zahlung zuordnen');const loading=aNode('p','Wird geladen …',assignmentDialog);
+ try{const data=await api('assignment?rid='+encodeURIComponent(rid));renderAssignment(data);}catch(e){loading.textContent=e.message;aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());}
+}
+function renderAssignment(data){
+ const tx=data.transaction; aFrame(data.assigned?'Zugeordnete Zahlung':'Zahlung zuordnen');
+ aNode('p',(tx.name||'Ohne Namen')+' · '+aMoney(tx.amount,tx.currency)+' · '+bankDate(tx.bookingDate),assignmentDialog);
+ aNode('p',tx.purpose||tx.bookingText||'',assignmentDialog).className='assignment-note';
+ const error=aNode('p','',assignmentDialog);error.className='assignment-error';
+ if(data.assigned){
+  aNode('p','🟢 Zugeordnet',assignmentDialog);
+  for(const line of data.lines){const box=aNode('div',null,assignmentDialog);box.className='assignment-line';aNode('strong',line.label,box);
+   aNode('p','Zugeordnet: '+aMoney(line.paid,tx.currency)+(line.category==='invoice'?' · Noch offen in der OP: '+aMoney(line.open,tx.currency):''),box);
+   if(line.reason)aNode('p',line.reason,box);
+   if(line.decision==='pending'||line.decision==='issuing'){
+    aNode('p',(line.mode==='discount'?'Skonto':'Abzug')+': '+aMoney(line.difference,tx.currency)+' · Prüfung durch Alex',box);
+    const actions=aNode('div',null,box);actions.className='assignment-actions';
+    const decide=async approved=>{for(const b of actions.querySelectorAll('button'))b.disabled=true;error.textContent='';try{renderAssignment(await api('assignment-decide',{id:line.id,approved}));}catch(e){error.textContent=e.message;for(const b of actions.querySelectorAll('button'))b.disabled=false;}};
+    aButton(line.decision==='issuing'?'Gutschrift fertigstellen':'Abzug ja – Gutschrift erstellen',actions,()=>decide(true));
+    if(line.decision==='pending')aButton('Abzug nein – Rest bleibt offen',actions,()=>decide(false));
+   }else if(line.decision==='rejected')aNode('p','Abzug abgelehnt – Rest bleibt offen.',box);
+   else if(line.decision==='approved')aNode('p','Abzug genehmigt · Gutschrift erstellt.',box);
+   if(line.correction_id&&line.decision==='approved'){const link=aNode('a','Gutschrift ansehen / drucken ↗',box);link.href='/api/outgoing/invoices/'+line.correction_id+'/pdf';link.target='_blank';link.rel='noopener';}
+   if(line.task_error){aNode('p',line.task_error,box).className='assignment-error';if(line.decision==='pending')aButton('Aufgabe an Alex erneut übermitteln',box,async()=>{try{renderAssignment(await api('assignment-tasks',{rid:tx.rId}));}catch(e){error.textContent=e.message;}});}
+  }
+  if(data.frequency&&data.frequency!=='none')aNode('p','Wiederholung: '+(data.frequencyLabel||data.frequency)+(data.scheduleDates?.length?' · '+data.scheduleDates.map(bankDate).join(' / '):''),assignmentDialog);
+  if(data.note)aNode('p',data.note,assignmentDialog);
+  aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());return;
+ }
+ const search=aInput(assignmentDialog,'Rechnung suchen – Name oder Rechnungsnummer');search.placeholder='z. B. Müller oder 2026-123';
+ const list=aNode('div',null,assignmentDialog);const rows=[];
+ const total=aNode('p','',assignmentDialog);total.className='assignment-note';
+ function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=Math.abs(aCents(String(tx.amount).replace(/^[-+]/,'')))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
+ function addLine(){
+  const box=aNode('div',null,list);box.className='assignment-line';const grid=aNode('div',null,box);grid.className='assignment-grid';const left=aNode('div',null,grid),right=aNode('div',null,grid);
+  const category=aSelect(left,'Zuordnung',[['invoice','Rechnung'],['electricity','Strom'],['municipality','Wasser / Kanal / Müll Gemeinde'],['heating','Heizung'],['rent','Miete'],['vehicle_insurance','KFZ Versicherung'],['vehicle_leasing','KFZ Leasing'],['bike_leasing','Bike Leasing'],['software','Software'],['liability_insurance','Haftpflicht Versicherung'],['bank_fee','Bankgebühren'],['interest','Zinsen'],['wage','Löhne'],['telephone','Telefon'],['renovation_installment','Sanierungsrate'],['internal_revolut','Umbuchung · Revolut'],['internal_revolut_old','Umbuchung · Revolut alt'],['internal_aircash','Umbuchung · Aircash'],['internal_cash','Umbuchung · Kassa'],['alex_private','Alex Privat'],['tax','Steuer'],['other','+ Neue Kostenart']]);
+  const select=aSelect(left,'Rechnung',[['','Bitte Rechnung auswählen']]);
+  const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(tx.amount).replace(/^[-+]/,'');
+  const mode=aSelect(right,'Bei fehlendem Betrag',[['partial','Teilzahlung – Rest offen'],['discount','Skonto – Alex prüft'],['deduction','Abzug – Alex prüft']]);
+  const info=aNode('p','',box);info.className='assignment-note';const reason=aInput(box,'Hinweis (bei „Neue Kostenart“: Bezeichnung)');
+  const row={box,category,select,paid,mode,reason};rows.push(row);
+  row.filter=()=>{const chosen=select.value;select.replaceChildren();const empty=aNode('option','Bitte Rechnung auswählen',select);empty.value='';for(const candidate of data.candidates){const key=candidate.source+'|'+candidate.target;if(key!==chosen&&!candidate.label.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))continue;const o=aNode('option',(candidate.suggested?'Vorschlag: ':'')+candidate.label+' · offen '+aMoney(candidate.open,candidate.currency),select);o.value=key;}select.value=chosen;};
+  row.update=()=>{const invoice=data.candidates.find(c=>c.source+'|'+c.target===select.value);const difference=invoice?aCents(invoice.open)-aCents(paid.value):NaN;info.textContent=invoice?'Rechnung offen: '+aMoney(invoice.open,tx.currency)+' · Rest nach Zuordnung: '+aMoney(difference/100,tx.currency):category.value==='renovation_installment'?'Fixer Zahlungsplan: 31.08.2026 / 26.08.2027 / 31.08.2027 / 26.02.2028':'';select.disabled=category.value!=='invoice';mode.disabled=category.value!=='invoice';reason.placeholder=category.value==='other'?'Neue Kostenart eingeben':'optional';summary();};
+  row.filter();category.onchange=select.onchange=paid.oninput=row.update;
+  aButton('Zeile entfernen',box,()=>{rows.splice(rows.indexOf(row),1);box.remove();summary();});row.update();
+ }
+ search.oninput=()=>rows.forEach(r=>r.filter());addLine();aButton('+ Weitere Rechnung / Aufteilung',assignmentDialog,addLine);
+ const frequency=aSelect(assignmentDialog,'Wiederholung',[['none','Einmalig'],['monthly','Monatlich'],['quarterly','Vierteljährlich'],['semiannual','Halbjährlich'],['annual','Jährlich']]);if(data.recurringSuggestion)frequency.value='monthly';
+ const note=aInput(assignmentDialog,'Interne Notiz (optional)');
+ aNode('p','Nach dem Speichern ist die Zahlung grün. Teilbeträge und ungeklärte Abzüge bleiben in der OP offen.',assignmentDialog).className='assignment-note';
+ const actions=aNode('div',null,assignmentDialog);actions.className='assignment-actions';
+ const save=aButton('Zuordnung speichern',actions,async()=>{
+  error.textContent='';const lines=rows.map(r=>{const [source='',target='']=r.select.value.split('|');return {category:r.category.value,source,target,amount:r.paid.value.replace(',','.'),mode:r.mode.value,reason:r.reason.value};});
+  save.disabled=true;try{const result=await api('assignment-save',{rid:tx.rId,lines,note:note.value,frequency:frequency.value});renderAssignment(result);await refreshAssignmentButtons();}catch(e){error.textContent=e.message;save.disabled=false;}
+ });aButton('Abbrechen',actions,()=>assignmentDialog.close());
+}
+async function refreshAssignmentButtons(){
+ const buttons=[...document.querySelectorAll('[data-assignment-rid]')];if(!buttons.length)return;
+ const data=await api('assignment-status',{ids:buttons.map(b=>b.dataset.assignmentRid)});
+ for(const b of buttons){const assigned=data.statuses[b.dataset.assignmentRid];b.textContent=assigned?'🟢 Zugeordnet':'🟡 Nicht zugeordnet';b.className='assignment-status '+(assigned?'assigned':'unassigned');}
+}
+function assignmentCell(tr,item,pending){const td=cell(tr,'');if(pending){td.textContent='Vorgemerkt';return;}const b=aButton('Zuordnung laden …',td,()=>openAssignment(item.rId));b.dataset.assignmentRid=item.rId;b.className='assignment-status';}
+const reviewButton=aButton('Abzüge prüfen · Alex',$('banking'),async()=>{
+ aFrame('Abzüge prüfen · Alex');try{const data=await api('assignment-review');if(!data.items.length)aNode('p','Keine offenen Abzugsprüfungen.',assignmentDialog);for(const item of data.items){const box=aNode('div',null,assignmentDialog);box.className='assignment-line';aNode('strong',item.label,box);aNode('p','Differenz: '+aMoney(item.difference/100)+' · '+item.reason,box);aButton('Prüfen',box,()=>openAssignment(item.rid));}}catch(e){aNode('p',e.message,assignmentDialog);}aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());
+});reviewButton.style.marginTop='18px';
+
+</script></body></html>

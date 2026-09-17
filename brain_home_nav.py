@@ -6,7 +6,7 @@ def install(ns):
     import brain_service_runtime
     brain_service_runtime.install(ns)
     import brain_konfipay
-    konfipay_enabled = brain_konfipay.install(ns)
+    brain_konfipay.install(ns)
     import brain_revolut_connection
     brain_revolut_connection.install(ns)
 
@@ -132,15 +132,13 @@ def install(ns):
 
     const bank=captureNav.cloneNode(true);
     bank.id='modeBank';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏦 Bank';
-    bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/reconciliation'});
+    bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
     bottom.appendChild(bank);
 
     const revolut=captureNav.cloneNode(true);
     revolut.id='modeRevolut';revolut.classList.remove('active');revolut.removeAttribute('onclick');revolut.textContent='💳 Revolut Business';
     revolut.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
     bottom.appendChild(revolut);
-
-    __KONFIPAY_NAV__
 
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
@@ -163,14 +161,6 @@ def install(ns):
 })();
 </script>
 '''
-
-    bank_nav = r'''
-    const accounts=captureNav.cloneNode(true);
-    accounts.id='modeKonfipay';accounts.classList.remove('active');accounts.removeAttribute('onclick');accounts.textContent='🏛 Konten · nur lesen';
-    accounts.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
-    bottom.appendChild(accounts);
-''' if konfipay_enabled else ''
-    script = script.replace("__KONFIPAY_NAV__", bank_nav)
 
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)

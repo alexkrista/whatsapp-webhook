@@ -1843,7 +1843,7 @@ class OutgoingStore:
     def _next_number(self, con, issue_date, external_numbers=None):
         return self._number_for(con, issue_date, external_numbers, consume=True)
 
-    def create_correction_draft(self, invoice_id, data):
+    def create_correction_draft(self, invoice_id, data, *, assignment_line=None):
         """Create a linked full cancellation (ST) or partial credit note (GS)."""
         kind = str(data.get("kind") or "").upper()
         if kind not in {"ST", "GS"}:
@@ -1853,6 +1853,20 @@ class OutgoingStore:
             raise ValueError("Begründung der Korrektur fehlt.")
         issue_date = _iso_date(data.get("issueDate") or date.today().isoformat(), required=True, label="Belegdatum")
         with _LOCK, self.connect() as con:
+            if assignment_line is not None:
+                assignment = con.execute(
+                    "SELECT * FROM bank_assignment_lines WHERE id=?", (int(assignment_line),)
+                ).fetchone()
+                if (
+                    not assignment
+                    or assignment["source"] != "OUTGOING"
+                    or int(assignment["target"]) != int(invoice_id)
+                    or assignment["decision"] != "issuing"
+                    or _money(data.get("gross")) != _money(Decimal(assignment["difference"]) / 100)
+                ):
+                    raise ValueError("Abzugsprüfung passt nicht zur Gutschrift.")
+                if assignment["correction_id"]:
+                    return self.invoice(assignment["correction_id"])
             original = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (int(invoice_id),)).fetchone()
             if not original or original["status"] != "issued" or original["kind"] in {"ST", "GS"}:
                 raise ValueError("Ausgangsrechnung für die Korrektur nicht gefunden.")
@@ -1894,6 +1908,11 @@ class OutgoingStore:
                 str(gross), str(gross), original["tax_note"], reason, int(invoice_id), reason, now, now,
             ))
             correction_id = cur.lastrowid
+            if assignment_line is not None:
+                con.execute(
+                    "UPDATE bank_assignment_lines SET correction_id=? WHERE id=?",
+                    (correction_id, int(assignment_line)),
+                )
             if kind == "ST":
                 original_lines = list(con.execute(
                     "SELECT * FROM outgoing_lines WHERE invoice_id=? ORDER BY line_no", (int(invoice_id),)
