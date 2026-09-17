@@ -201,6 +201,15 @@ ${voicemailBlock}
     style.id = "kristaCompactTaskStyle";
     style.textContent = `
       #taskList{display:grid;gap:6px}
+      #taskList .krista-task-group{border:1px solid #ddd8cf;border-radius:12px;background:#f7f6f2;overflow:hidden}
+      #taskList .krista-task-group>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;list-style:none;cursor:pointer;padding:11px 14px;background:#eeece6;font-weight:900;user-select:none}
+      #taskList .krista-task-group>summary::-webkit-details-marker{display:none}
+      #taskList .krista-task-group>summary:before{content:'▶';font-size:10px;color:#657068;transition:transform .15s}
+      #taskList .krista-task-group[open]>summary:before{transform:rotate(90deg)}
+      #taskList .krista-task-group-title{display:flex;align-items:center;gap:8px;margin-right:auto}
+      #taskList .krista-task-group-count{display:inline-flex;min-width:27px;justify-content:center;border-radius:999px;padding:3px 8px;background:#fff;border:1px solid #d5d0c7;font-size:11px}
+      #taskList .krista-task-group-rows{display:grid;gap:6px;padding:7px}
+      #taskList .krista-task-group-empty{padding:10px 12px;color:#777;font-size:12px;background:#fff;border-radius:9px}
       #taskList .krista-task-row{
         display:grid;
         grid-template-columns:minmax(220px,2fr) minmax(130px,.9fr) minmax(150px,1fr) minmax(145px,.9fr) auto;
@@ -380,7 +389,7 @@ ${voicemailBlock}
     const list = document.getElementById("taskList");
     if (!list) return;
 
-    list.innerHTML = tasks.length ? tasks.map((task) => {
+    const taskRowHtml = (task) => {
       const job = (masterJobs || []).find((row) => String(row.jobId) === String(task.jobId));
       const priority = task.priority === "sofort" ? "🔴 Sofort" : task.priority === "heute" ? "🟡 Heute" : "🟢 Normal";
       const statusTime = task.status === "done"
@@ -394,10 +403,34 @@ ${voicemailBlock}
         <div class="krista-task-cell"><strong>${esc(statusTime)}</strong><div class="krista-task-sub">${task.status === "done" ? "erledigt" : "fällig"}</div></div>
         <div class="krista-task-actions"><button type="button" class="secondary krista-task-attachment-button" data-task-attachments="${esc(String(task.id || ""))}" hidden>📎</button><button class="secondary" onclick="openTaskListModal('${task.id}')">Details</button>${task.status !== "done" ? `<button class="green" onclick="markTaskDone('${task.id}')">✓</button>` : ""}<button class="danger" onclick="removeTask('${task.id}')">×</button></div>
       </div>`;
-    }).join("") : '<span class="small">Keine Aufgaben.</span>';
+    };
+    const groupDefinitions = [
+      { key:"other", label:"Aufgaben", icon:"📌" },
+      { key:"regie", label:"Regie", icon:"📋" },
+      { key:"invoice", label:"Rechnungen", icon:"💶" },
+      { key:"customer", label:"Kundenpunkte", icon:"👤" },
+    ];
+    const existingState = new Map([...list.querySelectorAll(".krista-task-group")].map(group => [group.dataset.taskGroup, group.open]));
+    const grouped = new Map(groupDefinitions.map(group => [group.key, []]));
+    tasks.forEach(task => grouped.get(taskGroupKey(task)).push(task));
+    list.innerHTML = groupDefinitions.map(group => {
+      const rows = grouped.get(group.key) || [];
+      const remembered = existingState.get(group.key);
+      const open = remembered === undefined ? true : remembered;
+      return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rows.length ? rows.map(taskRowHtml).join("") : '<div class="krista-task-group-empty">Keine Einträge.</div>'}</div></details>`;
+    }).join("");
 
     hydrateAttachmentButtons(false);
     setTimeout(() => hydrateAttachmentButtons(true), 1800);
+  }
+
+  function taskGroupKey(task) {
+    const title = String(task?.title || "").toLowerCase();
+    const reminder = String(task?.reminder || "");
+    if (reminder.includes("[FINANCE_APPROVAL]") || title.includes("rechnung freigeben")) return "invoice";
+    if (reminder.includes("[REGIE_APPROVAL]") || title.includes("regiebericht prüfen")) return "regie";
+    if (String(task?.creatorId || "") === "customer-portal" || title.includes("kundenpunkt prüfen")) return "customer";
+    return "other";
   }
 
   function install() {

@@ -1,0 +1,16 @@
+"use strict";
+const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
+const source=fs.readFileSync(path.join(__dirname,"../public/ui/kristine-task-list.js"),"utf8");
+const start=source.indexOf("  function taskGroupKey(task)"),end=source.indexOf("  function install()",start);
+assert(start>=0&&end>start,"taskGroupKey fehlt");
+const context=vm.createContext({});vm.runInContext(source.slice(start,end)+"\nglobalThis.taskGroupKey=taskGroupKey;",context);
+assert.equal(context.taskGroupKey({title:"Kundenpunkt prüfen · Kunde"}),"customer");
+assert.equal(context.taskGroupKey({title:"Irgendwas",reminder:"[FINANCE_APPROVAL]id=1"}),"invoice");
+assert.equal(context.taskGroupKey({title:"Regiebericht prüfen · Rapport 4"}),"regie");
+assert.equal(context.taskGroupKey({title:"Rückruf Kunde"}),"other");
+for(const label of ["Aufgaben","Regie","Rechnungen","Kundenpunkte"])assert(source.includes(`label:\"${label}\"`));
+assert(source.indexOf('label:"Aufgaben"')<source.indexOf('label:"Regie"'));
+assert(source.indexOf('label:"Regie"')<source.indexOf('label:"Rechnungen"'));
+assert(source.indexOf('label:"Rechnungen"')<source.indexOf('label:"Kundenpunkte"'));
+assert(source.includes('class="krista-task-group"'));
+console.log("OK: Aufgaben werden in vier einklappbare Bereiche gegliedert.");
