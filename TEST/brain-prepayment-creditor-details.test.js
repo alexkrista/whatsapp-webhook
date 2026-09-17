@@ -46,7 +46,7 @@ assert(ui.includes('Mahnspesen €'));
 assert(ui.includes("fetch('/incoming/creditor-details'"));
 assert(ui.includes("event.target.closest('input,a,button,select')"));
 
-assert(service.includes('BRAIN_CONNECTOR_VERSION = "0.14.77"'));
-assert(connector.includes('"version": "0.14.77"'));
+assert(service.includes('BRAIN_CONNECTOR_VERSION = "0.14.78"'));
+assert(connector.includes('"version": "0.14.78"'));
 
 console.log('prepayment and creditor details checks: ok');

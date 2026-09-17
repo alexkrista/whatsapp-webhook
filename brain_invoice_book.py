@@ -255,15 +255,42 @@ class InvoiceBook:
                     return {"applied": False, "details": str(row["details"]), "createdAt": str(row["created_at"])}
             finally:
                 con.close()
-            candidates = [x for x in self.store.items(False) if norm_method(x.get("paymentMethod")) == "unknown" and str(x.get("invoiceDate") or "")[:10] <= LEGACY_PAID_CUTOFF]
-            changed = 0
+            candidates = [
+                item for item in self.store.items(False)
+                if norm_method(item.get("paymentMethod")) == "unknown"
+                and str(item.get("invoiceDate") or "")[:10] <= LEGACY_PAID_CUTOFF
+            ]
             reason = "Altbestand Zahlungsart ungeklärt bis einschließlich 26.11.2025 automatisch als bezahlt gebucht"
-            for item in candidates:
-                self.change(str(item.get("source") or ""), str(item.get("id") or ""), "paid", reason, "KRISTINE Automatik")
-                changed += 1
-            details = f"{changed} ungeklärte Rechnungen bis einschließlich {LEGACY_PAID_CUTOFF} als bezahlt gebucht"
             con = self.db()
             try:
+                now = _now()
+                con.execute("BEGIN IMMEDIATE")
+                for item in candidates:
+                    source = str(item.get("source") or "")
+                    source_id = str(item.get("id") or "")
+                    method = norm_method(item.get("paymentMethod"))
+                    if source == "KRISTINE":
+                        invoice_id = int(source_id.split(":", 1)[1])
+                        con.execute(
+                            "UPDATE incoming_invoices SET payment_state='paid',payment_status='Bezahlt',updated_at=? WHERE id=?",
+                            (now, invoice_id),
+                        )
+                    con.execute(
+                        "INSERT INTO brain_payment_meta(source,source_id,payment_method,payment_status,payment_id,note,updated_at) "
+                        "VALUES(?,?,?,'paid','',?,?) ON CONFLICT(source,source_id) DO UPDATE SET "
+                        "payment_status='paid',note=excluded.note,updated_at=excluded.updated_at",
+                        (source, source_id, method, reason, now),
+                    )
+                    con.execute(
+                        "INSERT INTO brain_invoice_status_history(source,source_id,old_status,new_status,old_method,new_method,source_status,reason,changed_by,changed_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            source, source_id, norm_status(item.get("paymentStatus")), "paid",
+                            method, method, str(item.get("sourcePaymentStatus") or ""),
+                            reason, "KRISTINE Automatik", now,
+                        ),
+                    )
+                details = f"{len(candidates)} ungeklärte Rechnungen bis einschließlich {LEGACY_PAID_CUTOFF} als bezahlt gebucht"
                 con.execute("INSERT INTO brain_invoice_book_migrations(name,details,created_at) VALUES(?,?,?)", (migration, details, _now()))
                 con.commit()
             finally:
@@ -391,17 +418,5 @@ def install(ns):
             return jsonify(ok=False, error=str(exc)), 400
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 500
-
-    original_items = app.view_functions.get("brain_incoming_payment_open_items")
-    if original_items and not getattr(original_items, "_krista_legacy_paid_cutoff", False):
-        def payment_items_with_legacy_cutoff():
-            try:
-                book.apply_legacy_paid_cutoff()
-            except Exception as exc:
-                app.logger.exception("Altbestand bis 26.11.2025 konnte nicht automatisch abgeschlossen werden: %s", exc)
-            return original_items()
-        payment_items_with_legacy_cutoff.__name__ = "brain_incoming_payment_open_items_legacy_cutoff"
-        payment_items_with_legacy_cutoff._krista_legacy_paid_cutoff = True
-        app.view_functions["brain_incoming_payment_open_items"] = payment_items_with_legacy_cutoff
 
     print("✅ Rechnungsbuch aktiv: Buchungsnummer · Monatssalden · Statuskorrektur · Altbestand-Stichtag")
