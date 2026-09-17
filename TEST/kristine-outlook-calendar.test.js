@@ -58,6 +58,10 @@ function jwt(account) {
     global.fetch = async (url, options = {}) => {
       if (String(url).endsWith("/devicecode")) return new Response(JSON.stringify({ device_code:"device", user_code:"ABCD-EFGH", verification_uri:"https://login.microsoft.com/device", expires_in:900, interval:1 }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).endsWith("/token")) return new Response(JSON.stringify({ access_token:"access", refresh_token:"refresh", id_token:jwt("alexander.krista@krista.at"), expires_in:3600, scope:"Calendars.ReadWrite Calendars.ReadWrite.Shared Mail.Read Mail.Read.Shared" }), { status:200, headers:{ "Content-Type":"application/json" } });
+      if (String(url).includes("/me/calendarView?")) return new Response(JSON.stringify({ value:[
+        { id:"outlook-morning", subject:"Baustellentermin", isAllDay:false, showAs:"busy", start:{ dateTime:"2026-09-18T08:30:00.0000000" }, end:{ dateTime:"2026-09-18T09:15:00.0000000" }, location:{ displayName:"Rankweil" } },
+        { id:"outlook-day", subject:"Urlaub", isAllDay:true, showAs:"free", start:{ dateTime:"2026-09-18T00:00:00.0000000" }, end:{ dateTime:"2026-09-19T00:00:00.0000000" } },
+      ] }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).includes("graph.microsoft.com")) {
         graphPayload = JSON.parse(options.body);
         return new Response(JSON.stringify({ id:"outlook-event-123", webLink:"https://outlook.example/event/123" }), { status:201, headers:{ "Content-Type":"application/json" } });
@@ -75,6 +79,15 @@ function jwt(account) {
     const statusAfterRestart = await call(restarted.routes, "GET", "/kristine/api/outlook/status");
     assert.equal(statusAfterRestart.body.connected, true, "persisted token must load in a new process/module instance");
     assert.equal(statusAfterRestart.body.account, "alexander.krista@krista.at");
+
+    const day = await call(routes, "GET", "/kristine/api/outlook/day", { query:{ date:"2026-09-18" } });
+    assert.equal(day.statusCode, 200);
+    assert.deepEqual(day.body.appointments.map(row => [row.title, row.allDay, row.from, row.to]), [
+      ["Urlaub", true, "", ""],
+      ["Baustellentermin", false, "08:30", "09:15"],
+    ]);
+    const badDay = await call(routes, "GET", "/kristine/api/outlook/day", { query:{ date:"2026-02-31" } });
+    assert.equal(badDay.statusCode, 400);
 
     const retry = await call(routes, "POST", "/kristine/api/appointments/:id/retry", { params:{ id:create.body.appointment.id } });
     assert.equal(retry.body.outlookSynced, true);

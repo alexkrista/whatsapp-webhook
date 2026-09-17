@@ -199,6 +199,53 @@ function installOutlookCalendar(app, deps = {}) {
     }
   }
 
+  function nextIsoDate(date) {
+    const day = new Date(`${date}T12:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + 1);
+    return day.toISOString().slice(0, 10);
+  }
+
+  function graphTime(value) {
+    const match = String(value || "").match(/T(\d{2}:\d{2})/);
+    return match ? match[1] : "";
+  }
+
+  function validIsoDate(date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+    const value = new Date(`${date}T12:00:00Z`);
+    return !Number.isNaN(value.getTime()) && value.toISOString().slice(0, 10) === date;
+  }
+
+  async function graphDayAppointments(date) {
+    const query = new URLSearchParams({
+      startDateTime:`${date}T00:00:00`,
+      endDateTime:`${nextIsoDate(date)}T00:00:00`,
+      "$select":"id,subject,start,end,isAllDay,showAs,location,isCancelled",
+      "$orderby":"start/dateTime",
+      "$top":"100",
+    });
+    let url = `${GRAPH_ROOT}/me/calendarView?${query}`;
+    const rows = [];
+    while (url) {
+      const response = await fetch(url, {
+        headers:{ Authorization:`Bearer ${await accessToken()}`, Prefer:`outlook.timezone=\"${TIME_ZONE}\"` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+      for (const event of Array.isArray(body.value) ? body.value : []) {
+        if (event.isCancelled) continue;
+        rows.push({
+          id:String(event.id || ""), title:String(event.subject || "Termin"),
+          allDay:Boolean(event.isAllDay), from:event.isAllDay ? "" : graphTime(event.start?.dateTime),
+          to:event.isAllDay ? "" : graphTime(event.end?.dateTime), showAs:String(event.showAs || "busy"),
+          location:String(event.location?.displayName || ""), source:"outlook",
+        });
+      }
+      url = String(body["@odata.nextLink"] || "");
+    }
+    return rows;
+  }
+
   async function refreshOutlookLink(appointment) {
     if (!appointment?.outlook?.eventId) throw new Error("Outlook-Event-ID fehlt.");
     const link = signedKgoLink(appointment.taskId);
@@ -268,6 +315,28 @@ function installOutlookCalendar(app, deps = {}) {
       res.json({ ok:true, configured:Boolean(encryptionSecret()), connected, account:account || "", expectedAccount:EXPECTED_ACCOUNT, scopes:SCOPES });
     }
     catch (error) { res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:false, account:"", expectedAccount:EXPECTED_ACCOUNT, error:String(error?.message || error) }); }
+  });
+
+  app.get("/kristine/api/outlook/day", async (req, res) => {
+    if (!allowed(req, res)) return;
+    const date = String(req.query.date || "");
+    if (!validIsoDate(date)) {
+      return res.status(400).json({ ok:false, error:"Ungültiges Kalenderdatum." });
+    }
+    try {
+      const appointments = await graphDayAppointments(date);
+      const graphIds = new Set(appointments.map(row => row.id).filter(Boolean));
+      const local = (await readJson(appointmentsFile, [])).filter(row => row.date === date && row.outlook?.status !== "synced" && (!row.outlook?.eventId || !graphIds.has(String(row.outlook.eventId))));
+      for (const row of local) appointments.push({
+        id:String(row.id || ""), title:String(row.title || "Termin"), allDay:Boolean(row.allDay),
+        from:String(row.from || ""), to:String(row.to || ""), showAs:"busy", location:String(row.location || ""), source:"kristine",
+      });
+      appointments.sort((a, b) => Number(b.allDay) - Number(a.allDay) || String(a.from).localeCompare(String(b.from)) || String(a.title).localeCompare(String(b.title)));
+      res.json({ ok:true, date, account:EXPECTED_ACCOUNT, appointments });
+    } catch (error) {
+      await audit("graph_read_day_error", { date, error:String(error?.message || error).slice(0, 1000) });
+      res.status(502).json({ ok:false, error:`Outlook-Kalender konnte nicht geladen werden: ${String(error?.message || error)}` });
+    }
   });
 
   app.get("/kristine/outlook-entry", (req, res) => {

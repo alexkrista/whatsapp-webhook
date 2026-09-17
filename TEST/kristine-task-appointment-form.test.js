@@ -6,12 +6,16 @@ const path = require("path");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "public", "kristine.html"), "utf8");
 const calendar = fs.readFileSync(path.join(__dirname, "..", "public", "ui", "kristine-task-calendar.js"), "utf8");
+const availability = fs.readFileSync(path.join(__dirname, "..", "public", "ui", "kristine-task-availability.js"), "utf8");
 
 assert.match(html, /id="tDueDateField"><label>Fällig<\/label>/, "ordinary due-date field must remain");
 assert.match(html, /id="tAppointmentDate"[^>]*type="date"/, "appointment date is missing");
 assert.match(html, /id="tAppointmentFrom"[^>]*type="time"/, "appointment start is missing");
 assert.match(html, /id="tAppointmentTo"[^>]*type="time"/, "appointment end is missing");
 assert.match(html, /id="tCalendarAlex"[^>]*checked disabled/, "Alex must be selected in V1");
+assert.match(html, /id="tAppointmentAvailability"/, "appointment form needs a live day overview");
+assert.match(availability, /kristine\/api\/outlook\/day\?date=/, "selected day must load existing Outlook appointments");
+assert.match(availability, /Überschneidung/, "selected time must flag overlapping appointments");
 assert.match(html, /id="tAppointmentPhotoDrop"[^>]*role="button"/, "new appointment form needs a photo drop zone");
 assert.match(html, /id="tAppointmentPhotoInput"[^>]*accept="image\/\*"[^>]*multiple/, "appointment form must support multiple photos");
 assert.match(html, /drop\.addEventListener\('drop',event=>addPendingTaskAppointmentPhotos/, "appointment form must accept dropped photos");
