@@ -130,6 +130,11 @@ def install(ns):
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
 
+    const finance=captureNav.cloneNode(true);
+    finance.id='modeBank';finance.classList.remove('active');finance.removeAttribute('onclick');finance.textContent='🏦 Bank / Revolut';
+    finance.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
+    bottom.appendChild(finance);
+
     __KONFIPAY_NAV__
 
     const debtor=captureNav.cloneNode(true);
@@ -156,7 +161,7 @@ def install(ns):
 
     bank_nav = r'''
     const bank=captureNav.cloneNode(true);
-    bank.id='modeKonfipay';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏦 Bank · nur lesen';
+    bank.id='modeKonfipay';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏛 Konten · nur lesen';
     bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
     bottom.appendChild(bank);
 ''' if konfipay_enabled else ''

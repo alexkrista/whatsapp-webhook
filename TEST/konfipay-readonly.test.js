@@ -44,7 +44,7 @@ for (const dependency of ["revolut", "kassa", "controlling", "directPay"]) {
 
 assert.match(home, /konfipay_enabled\s*=\s*brain_konfipay\.install\(ns\)/);
 assert.match(home, /if konfipay_enabled else ''/);
-assert.match(home, /Bank · nur lesen/);
+assert.match(home, /Konten · nur lesen/);
 assert.match(home, /script = script\.replace\("__KONFIPAY_NAV__", bank_nav\)/);
 
 console.log("OK: Konfipay K1 bleibt standardmäßig aus und enthält nur Lesefunktionen plus lokale Schlüssel-Einrichtung.");
