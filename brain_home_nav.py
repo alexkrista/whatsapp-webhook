@@ -130,10 +130,15 @@ def install(ns):
     op.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/payments'});
     bottom.appendChild(op);
 
-    const finance=captureNav.cloneNode(true);
-    finance.id='modeBank';finance.classList.remove('active');finance.removeAttribute('onclick');finance.textContent='🏦 Bank / Revolut';
-    finance.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
-    bottom.appendChild(finance);
+    const bank=captureNav.cloneNode(true);
+    bank.id='modeBank';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏦 Bank';
+    bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/reconciliation'});
+    bottom.appendChild(bank);
+
+    const revolut=captureNav.cloneNode(true);
+    revolut.id='modeRevolut';revolut.classList.remove('active');revolut.removeAttribute('onclick');revolut.textContent='💳 Revolut Business';
+    revolut.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
+    bottom.appendChild(revolut);
 
     __KONFIPAY_NAV__
 
@@ -160,10 +165,10 @@ def install(ns):
 '''
 
     bank_nav = r'''
-    const bank=captureNav.cloneNode(true);
-    bank.id='modeKonfipay';bank.classList.remove('active');bank.removeAttribute('onclick');bank.textContent='🏛 Konten · nur lesen';
-    bank.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
-    bottom.appendChild(bank);
+    const accounts=captureNav.cloneNode(true);
+    accounts.id='modeKonfipay';accounts.classList.remove('active');accounts.removeAttribute('onclick');accounts.textContent='🏛 Konten · nur lesen';
+    accounts.addEventListener('click',e=>{e.preventDefault();window.location.href='/konfipay'});
+    bottom.appendChild(accounts);
 ''' if konfipay_enabled else ''
     script = script.replace("__KONFIPAY_NAV__", bank_nav)
 
