@@ -14,7 +14,7 @@ CATEGORIES = {
     'vehicle_leasing':'KFZ Leasing', 'bike_leasing':'Bike Leasing', 'software':'Software',
     'liability_insurance':'Haftpflicht Versicherung', 'bank_fee':'Bankgebühren',
     'interest':'Zinsen', 'wage':'Löhne', 'telephone':'Telefon',
-    'renovation_installment':'Sanierungsrate', 'internal_revolut':'Umbuchung · Revolut',
+    'renovation_installment':'Rate Sanierung', 'internal_revolut':'Umbuchung · Revolut',
     'internal_revolut_old':'Umbuchung · Revolut alt', 'internal_aircash':'Umbuchung · Aircash',
     'internal_cash':'Umbuchung · Kassa', 'alex_private':'Alex Privat',
     'tax':'Steuer', 'other':'Neue Kostenart',
@@ -123,9 +123,13 @@ class Assignments:
                     for x in self.outgoing.debtor_open_items()]
         else:
             from brain_finance_source import FinanceStore
-            rows = [dict(source=x['source'], target=str(x['id']), label=x['supplier']+' · '+str(x.get('invoiceNumber') or ''),
+            source_rows = self.supplier_overlay(FinanceStore(self.ns).items(True), True)
+            source_rows = [x for x in source_rows if float(x.get('amount') or 0) > .005 and
+                           (x.get('paymentStatus') != 'paid' or x.get('paymentMethod') == 'direct_debit')]
+            rows = [dict(source=x['source'], target=str(x['id']),
+                    label=x['supplier']+' · '+str(x.get('invoiceNumber') or '')+(' · Einzug aus WW' if x.get('source')=='WinWorker' and x.get('paymentMethod')=='direct_debit' else ''),
                     open=amount(cents(x['amount'])), currency=x['currency'], number=x.get('invoiceNumber'), e2e=x.get('paymentId'))
-                    for x in FinanceStore(self.ns).items(False)]
+                    for x in source_rows]
         purpose = str(tx.get('purpose') or '').casefold()
         for x in rows:
             x['suggested'] = bool((x.get('number') and str(x['number']).casefold() in purpose) or

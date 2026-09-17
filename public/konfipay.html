@@ -15,6 +15,7 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <div id="accountFilter"><label for="bankAccount">Konto</label><select id="bankAccount"><option value="">Alle Konten</option></select></div>
 <div><label for="bankFrom">Von</label><input id="bankFrom" type="date"></div><div><label for="bankTo">Bis</label><input id="bankTo" type="date"></div>
 <div id="directionFilter"><label for="bankDirection">Richtung</label><select id="bankDirection"><option value="">Eingänge & Ausgänge</option><option value="CRDT">Nur Eingänge</option><option value="DBIT">Nur Ausgänge</option></select></div>
+<div id="assignmentFilter"><label for="bankAssignment">Zuordnung</label><select id="bankAssignment"><option value="date">Alle nach Datum</option><option value="unassigned-first">Nicht zugeordnet zuerst</option><option value="unassigned">Nur nicht zugeordnet</option><option value="assigned">Nur zugeordnet</option></select></div>
 <div id="formatFilter" hidden><label for="bankFormat">Format</label><select id="bankFormat"><option value="Pdf">PDF-Auszug</option><option value="53">CAMT.053 · gebucht</option><option value="52">CAMT.052 · untertägig</option><option value="54">CAMT.054 · Sammelbuchungen</option><option value="940">MT940</option><option value="942">MT942 · untertägig</option></select></div>
 <div id="searchFilter" style="flex:1;min-width:240px"><label for="bankSearch">Suche</label><input id="bankSearch" type="search" placeholder="Name, Betrag, IBAN, Verwendungszweck …" style="width:100%" aria-describedby="searchHint"><div id="searchHint" class="small" style="margin-top:6px">Ganzer Zeitraum · z. B. Müller oder 1.234,56 · Enter zum Suchen</div></div><button id="bankLoad" type="button">Anzeigen</button></div>
 <p id="bankNote" class="small">Gebuchte Umsätze aus den von der Bank bereitgestellten Auszügen.</p><p id="bankMessage" role="status" aria-live="polite"></p>
@@ -91,8 +92,16 @@ function matchesTransaction(item,query){
   return text.includes(term)||(amount!==null&&amount===searchAmount(item.amount));
  });
 }
-async function searchedTransactions(query,page){
- const {search,mode,...filters}=query;
+async function transactionAssignmentStatuses(items){
+ const statuses={};
+ for(let i=0;i<items.length;i+=100){
+  const ids=items.slice(i,i+100).map(x=>x.rId).filter(Boolean);
+  if(ids.length)Object.assign(statuses,(await api('assignment-status',{ids})).statuses||{});
+ }
+ return statuses;
+}
+async function filteredTransactions(query,page){
+ const {search,assignment,mode,...filters}=query;
  const key=JSON.stringify(filters);
  if(!searchCache||searchCache.key!==key||Date.now()-searchCache.time>120000){
   let items=[],pages=1;
@@ -105,7 +114,15 @@ async function searchedTransactions(query,page){
   }
   searchCache={key,time:Date.now(),items};
  }
- const matches=searchCache.items.filter(item=>matchesTransaction(item,search));
+ let matches=search?searchCache.items.filter(item=>matchesTransaction(item,search)):searchCache.items.slice();
+ if(assignment&&assignment!=='date'){
+  $('bankMessage').textContent='Zuordnungen im gewählten Zeitraum werden geprüft …';
+  const statuses=await transactionAssignmentStatuses(matches);
+  matches.forEach(item=>item._assigned=Boolean(statuses[item.rId]));
+  if(assignment==='unassigned')matches=matches.filter(x=>!x._assigned);
+  else if(assignment==='assigned')matches=matches.filter(x=>x._assigned);
+  else if(assignment==='unassigned-first')matches.sort((a,b)=>Number(a._assigned)-Number(b._assigned));
+ }
  return {items:matches.slice((page-1)*100,page*100),page,pages:Math.max(1,Math.ceil(matches.length/100)),total:matches.length,searched:searchCache.items.length};
 }
 
@@ -113,15 +130,15 @@ function statusName(value){return bankStatusNames[value]||value||'Noch kein Stat
 let bankingPage=1,bankingPages=1,bankingBusy=false,bankQuery=null,detailRid=null,detailPage=1,detailVersion=0;
 function dateInput(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 const bankToday=new Date(),bankStart=new Date();bankStart.setDate(bankStart.getDate()-30);$('bankFrom').value=dateInput(bankStart);$('bankTo').value=dateInput(bankToday);
-function bankFilters(){const mode=$('bankView').value;$('searchFilter').hidden=!['transactions','intraday'].includes(mode);$('directionFilter').hidden=!['transactions','intraday'].includes(mode);$('formatFilter').hidden=mode!=='statements';$('accountFilter').hidden=mode==='archive';$('bankNote').textContent=mode==='intraday'?'Vorgemerkte Eingänge und Ausgänge aus untertägigen Bankmeldungen. Sie sind noch nicht endgültig gebucht und werden nicht als bezahlte Rechnungen behandelt. Verfügbarkeit hängt von Bank und konfipay-Abruf ab.':mode==='statements'?'Downloads im Originalformat, das die Bank liefert. PDF ist nur verfügbar, wenn die Bank PDF-Auszüge bereitstellt.':mode==='archive'?'Zahlungsdateien in konfipay. „Inhalt“ zeigt die einzelnen Zahlungen des Sammlers.':'Gebuchte Eingänge und Ausgänge. Es wird kein Abrufstatus quittiert.';}
+function bankFilters(){const mode=$('bankView').value;$('searchFilter').hidden=!['transactions','intraday'].includes(mode);$('directionFilter').hidden=!['transactions','intraday'].includes(mode);$('assignmentFilter').hidden=mode!=='transactions';$('formatFilter').hidden=mode!=='statements';$('accountFilter').hidden=mode==='archive';$('bankNote').textContent=mode==='intraday'?'Vorgemerkte Eingänge und Ausgänge aus untertägigen Bankmeldungen. Sie sind noch nicht endgültig gebucht und werden nicht als bezahlte Rechnungen behandelt. Verfügbarkeit hängt von Bank und konfipay-Abruf ab.':mode==='statements'?'Downloads im Originalformat, das die Bank liefert. PDF ist nur verfügbar, wenn die Bank PDF-Auszüge bereitstellt.':mode==='archive'?'Zahlungsdateien in konfipay. „Inhalt“ zeigt die einzelnen Zahlungen des Sammlers.':'Gebuchte Eingänge und Ausgänge. Es wird kein Abrufstatus quittiert.';}
 $('bankView').addEventListener('change',()=>{if($('bankView').value==='intraday'){$('bankDirection').value='';$('bankFrom').value=dateInput(new Date());$('bankTo').value=dateInput(new Date());}bankFilters();$('bankRows').replaceChildren();$('bankMessage').textContent='';$('bankHead').replaceChildren();$('bankPrev').disabled=true;$('bankNext').disabled=true;$('bankPage').textContent='';});bankFilters();
 function fillBankAccounts(snapshot){const select=$('bankAccount'),old=select.value;select.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='Alle Konten';select.append(all);for(const a of snapshot?.accounts||[]){const o=document.createElement('option');o.value=a.id;o.textContent=a.name+' · '+a.iban.slice(-4);select.append(o);}select.value=old;}
 function cell(tr,text){const td=document.createElement('td');td.textContent=text??'–';tr.append(td);return td;}
 function action(cell,label,fn){const b=document.createElement('button');b.className='secondary';b.textContent=label;b.addEventListener('click',fn);cell.append(b);return b;}
-async function loadBank(page=1){if(bankingBusy)return;bankingBusy=true;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankFormat','bankSearch'])$(id).disabled=true;$('bankLoad').disabled=true;$('bankPrev').disabled=true;$('bankNext').disabled=true;$('bankRows').replaceChildren();$('bankMessage').textContent='Daten werden geladen …';
+async function loadBank(page=1){if(bankingBusy)return;bankingBusy=true;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankAssignment','bankFormat','bankSearch'])$(id).disabled=true;$('bankLoad').disabled=true;$('bankPrev').disabled=true;$('bankNext').disabled=true;$('bankRows').replaceChildren();$('bankMessage').textContent='Daten werden geladen …';
  try{
-  if(page===1){const mode=$('bankView').value;bankQuery={mode,from:$('bankFrom').value,to:$('bankTo').value,account:mode==='archive'?'':$('bankAccount').value,direction:$('bankDirection').value,booking:mode==='intraday'?'pending':'booked',format:$('bankFormat').value,search:['transactions','intraday'].includes(mode)?$('bankSearch').value.trim():''};}
-  const q=new URLSearchParams({...bankQuery,page});const route=bankQuery.mode==='statements'?'statements':bankQuery.mode==='archive'?'payment-archive':'transactions';const data=bankQuery.search?await searchedTransactions(bankQuery,page):await api(route+'?'+q);
+  if(page===1){const mode=$('bankView').value;bankQuery={mode,from:$('bankFrom').value,to:$('bankTo').value,account:mode==='archive'?'':$('bankAccount').value,direction:$('bankDirection').value,booking:mode==='intraday'?'pending':'booked',format:$('bankFormat').value,search:['transactions','intraday'].includes(mode)?$('bankSearch').value.trim():'',assignment:mode==='transactions'?$('bankAssignment').value:'date'};}
+  const q=new URLSearchParams({...bankQuery,page});const route=bankQuery.mode==='statements'?'statements':bankQuery.mode==='archive'?'payment-archive':'transactions';const needsLocalFilter=route==='transactions'&&(Boolean(bankQuery.search)||bankQuery.assignment!=='date');const data=needsLocalFilter?await filteredTransactions(bankQuery,page):await api(route+'?'+q);
   bankingPage=Number(data.page)||1;bankingPages=Math.max(1,Number(data.pages)||1);const header=document.createElement('tr');
   for(const name of route==='transactions'?['Buchung / Valuta','Absender / Empfänger','Betrag','Verwendungszweck / Konto','Zuordnung']:route==='statements'?['Datum','Datei','Konto','Download']:['Erstellt','Termin / Typ','Status','Inhalt']){const th=document.createElement('th');th.textContent=name;header.append(th);}$('bankHead').replaceChildren(header);
   for(const item of data.items){const tr=document.createElement('tr');
@@ -131,8 +148,8 @@ async function loadBank(page=1){if(bankingBusy)return;bankingBusy=true;for(const
    $('bankRows').append(tr);
   }
   if(route==='transactions'&&bankQuery.booking==='booked')await refreshAssignmentButtons();
-  $('bankMessage').textContent=bankQuery.search?data.total+' Treffer in '+data.searched+' Umsätzen im gewählten Zeitraum':data.items.length?(data.total??data.items.length)+' Einträge im Zeitraum':bankQuery.mode==='intraday'?'Keine untertägigen Eingänge geliefert. Bitte Bankabruf und Zeitraum in konfipay prüfen.':'Keine Einträge für diese Auswahl.';$('bankPage').textContent='Seite '+bankingPage+' von '+bankingPages;
- }catch(error){$('bankMessage').textContent=error.message;$('bankPage').textContent='';bankingPage=1;bankingPages=1;}finally{bankingBusy=false;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankFormat','bankSearch'])$(id).disabled=false;$('bankLoad').disabled=false;$('bankPrev').disabled=bankingPage<=1;$('bankNext').disabled=bankingPage>=bankingPages;}}
+  $('bankMessage').textContent=needsLocalFilter?data.total+' Treffer in '+data.searched+' Umsätzen im gewählten Zeitraum':data.items.length?(data.total??data.items.length)+' Einträge im Zeitraum':bankQuery.mode==='intraday'?'Keine untertägigen Eingänge geliefert. Bitte Bankabruf und Zeitraum in konfipay prüfen.':'Keine Einträge für diese Auswahl.';$('bankPage').textContent='Seite '+bankingPage+' von '+bankingPages;
+ }catch(error){$('bankMessage').textContent=error.message;$('bankPage').textContent='';bankingPage=1;bankingPages=1;}finally{bankingBusy=false;for(const id of ['bankView','bankAccount','bankFrom','bankTo','bankDirection','bankAssignment','bankFormat','bankSearch'])$(id).disabled=false;$('bankLoad').disabled=false;$('bankPrev').disabled=bankingPage<=1;$('bankNext').disabled=bankingPage>=bankingPages;}}
 $('bankSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadBank(1);}});
 $('bankSearch').addEventListener('search',()=>{if(!$('bankSearch').value)loadBank(1);});
 $('bankLoad').addEventListener('click',()=>loadBank(1));$('bankPrev').addEventListener('click',()=>loadBank(bankingPage-1));$('bankNext').addEventListener('click',()=>loadBank(bankingPage+1));
@@ -233,7 +250,7 @@ function renderAssignment(data){
  function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=Math.abs(aCents(String(tx.amount).replace(/^[-+]/,'')))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
  function addLine(){
   const box=aNode('div',null,list);box.className='assignment-line';const grid=aNode('div',null,box);grid.className='assignment-grid';const left=aNode('div',null,grid),right=aNode('div',null,grid);
-  const category=aSelect(left,'Zuordnung',[['invoice','Rechnung'],['electricity','Strom'],['municipality','Wasser / Kanal / Müll Gemeinde'],['heating','Heizung'],['rent','Miete'],['vehicle_insurance','KFZ Versicherung'],['vehicle_leasing','KFZ Leasing'],['bike_leasing','Bike Leasing'],['software','Software'],['liability_insurance','Haftpflicht Versicherung'],['bank_fee','Bankgebühren'],['interest','Zinsen'],['wage','Löhne'],['telephone','Telefon'],['renovation_installment','Sanierungsrate'],['internal_revolut','Umbuchung · Revolut'],['internal_revolut_old','Umbuchung · Revolut alt'],['internal_aircash','Umbuchung · Aircash'],['internal_cash','Umbuchung · Kassa'],['alex_private','Alex Privat'],['tax','Steuer'],['other','+ Neue Kostenart']]);
+  const category=aSelect(left,'Zuordnung',[['invoice','Rechnung'],['electricity','Strom'],['municipality','Wasser / Kanal / Müll Gemeinde'],['heating','Heizung'],['rent','Miete'],['vehicle_insurance','KFZ Versicherung'],['vehicle_leasing','KFZ Leasing'],['bike_leasing','Bike Leasing'],['software','Software'],['liability_insurance','Haftpflicht Versicherung'],['bank_fee','Bankgebühren'],['interest','Zinsen'],['wage','Löhne'],['telephone','Telefon'],['renovation_installment','1 · Rate Sanierung'],['internal_revolut','Umbuchung · Revolut'],['internal_revolut_old','Umbuchung · Revolut alt'],['internal_aircash','Umbuchung · Aircash'],['internal_cash','Umbuchung · Kassa'],['alex_private','Alex Privat'],['tax','Steuer'],['other','+ Neue Kostenart']]);
   const select=aSelect(left,'Rechnung',[['','Bitte Rechnung auswählen']]);
   const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(tx.amount).replace(/^[-+]/,'');
   const mode=aSelect(right,'Bei fehlendem Betrag',[['partial','Teilzahlung – Rest offen'],['discount','Skonto – Alex prüft'],['deduction','Abzug – Alex prüft']]);

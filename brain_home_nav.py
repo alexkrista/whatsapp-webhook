@@ -11,6 +11,8 @@ def install(ns):
     brain_revolut_connection.install(ns)
     import brain_cash_book
     brain_cash_book.install(ns)
+    import brain_invoice_book
+    brain_invoice_book.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:
@@ -156,6 +158,11 @@ def install(ns):
     kassa.id='modeKassa';kassa.classList.remove('active');kassa.removeAttribute('onclick');kassa.textContent='💶 KASSA';
     kassa.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/kassa'});
     bottom.appendChild(kassa);
+
+    const invoiceBook=captureNav.cloneNode(true);
+    invoiceBook.id='modeInvoiceBook';invoiceBook.classList.remove('active');invoiceBook.removeAttribute('onclick');invoiceBook.textContent='📚 RECHNUNGSBUCH';
+    invoiceBook.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/invoice-book'});
+    bottom.appendChild(invoiceBook);
 
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
