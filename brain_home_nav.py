@@ -9,10 +9,22 @@ def install(ns):
     brain_konfipay.install(ns)
     import brain_revolut_connection
     brain_revolut_connection.install(ns)
+    import brain_cash_book
+    brain_cash_book.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:
         return
+
+    # Lokales Werkzeug zum Pruefen und Aufteilen von SEPA-Sammlern.
+    from pathlib import Path
+    from flask import send_file
+    app = ns["app"]
+    ns["MOBILE_ALLOWED_PATHS"].add("/sepa-split")
+    if "brain_sepa_split" not in app.view_functions:
+        def brain_sepa_split():
+            return send_file(Path(__file__).resolve().parent / "public" / "sepa-split.html", mimetype="text/html")
+        app.add_url_rule("/sepa-split", "brain_sepa_split", brain_sepa_split, methods=["GET"])
 
     import re
     page = re.sub(r'<script\s+id="kristaBrainHomeNavV[12]">.*?</script>', '', page, flags=re.I | re.S)
@@ -139,6 +151,11 @@ def install(ns):
     revolut.id='modeRevolut';revolut.classList.remove('active');revolut.removeAttribute('onclick');revolut.textContent='💳 Revolut Business';
     revolut.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
     bottom.appendChild(revolut);
+
+    const kassa=captureNav.cloneNode(true);
+    kassa.id='modeKassa';kassa.classList.remove('active');kassa.removeAttribute('onclick');kassa.textContent='💶 KASSA';
+    kassa.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/kassa'});
+    bottom.appendChild(kassa);
 
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';

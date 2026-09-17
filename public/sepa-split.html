@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="theme-color" content="#0e0f11">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>SEPA aufteilen · Einzelaufträge & Pakete</title>
+<style>
+  :root{
+    color-scheme:dark; --bg:#0e0f11; --card:#17191d; --text:#f5f7fa; --muted:#aab0bb;
+    --line:#2c313a; --accent:#fff; --ok:#9fe0b4; --warn:#ffd38a; --danger:#ffb3b3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+  .wrap{max-width:1100px;margin:38px auto;padding:0 18px}
+  h1{font-size:30px;margin:0 0 8px}
+  .sub{color:var(--muted);margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 4px 18px rgba(0,0,0,.22)}
+  .drop{display:block;width:100%;border:2px dashed #5f6774;border-radius:14px;padding:34px 18px;text-align:center;cursor:pointer;transition:.15s;background:#111318}
+  .drop.drag{border-color:var(--accent);background:#20232a}
+  .drop strong{display:block;font-size:18px;margin-bottom:5px}
+  .drop span{color:var(--muted)}
+  input[type=file]{display:none}
+  .status{margin-top:16px;display:none}
+  .status.show{display:block}
+  .error{color:var(--danger);font-weight:650}
+  .ok{color:var(--ok);font-weight:650}
+  .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}
+  .metric{border:1px solid var(--line);border-radius:12px;padding:12px}
+  .metric small{display:block;color:var(--muted);margin-bottom:3px}
+  .metric b{font-size:18px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 6px}
+  button{border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer}
+  button.primary{background:var(--accent);color:#111}
+  button.secondary{background:#20232a;color:var(--text)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:14px}
+  th,td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  td.amount{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  th.amount{text-align:right}
+  .mini{padding:7px 10px;font-size:12px;background:#20232a;color:var(--text)}
+  .note{margin-top:16px;color:var(--muted);font-size:13px;line-height:1.45}
+  .pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#20232a;color:#dfe3e8;font-size:12px}
+  .scroll{overflow:auto}
+  .package-input{width:86px;padding:10px;border:1px solid #5f6774;border-radius:9px;background:#0e0f11;color:var(--text);font:inherit;font-weight:700}
+  .package-input:focus{outline:2px solid #aab0bb;outline-offset:2px}
+  .package-input[aria-invalid=true]{border-color:var(--danger)}
+  .package-label,.payment-note{display:block;font-size:12px;color:var(--muted);margin-top:5px;max-width:260px;overflow-wrap:anywhere}
+  .assignment-help{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#111318;line-height:1.6}
+  .assignment-help p{margin:0}
+  .assignment-help .actions{margin-bottom:0}
+  .export-list{display:grid;gap:8px;margin-top:14px}
+  .export-row{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:#111318}
+  .export-row small{display:block;color:var(--muted);margin-top:4px}
+  .export-row button{flex-shrink:0}
+  .export-title{font-size:18px;margin:24px 0 4px}
+  tr.excluded td:not(:last-child){opacity:.45;text-decoration:line-through}
+  tr.excluded .package-label{color:var(--warn)}
+  @media(max-width:760px){.summary{grid-template-columns:1fr 1fr} table{min-width:780px}}
+dialog{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;width:min(1200px,95vw);max-height:90vh;padding:24px}dialog::backdrop{background:rgba(0,0,0,.8)}#transferResult{white-space:pre-wrap}#transferConfirm{width:20px;height:20px;flex-shrink:0}</style>
+</head>
+<body>
+<div class="wrap">
+  <a href="/" style="display:inline-block;margin-bottom:16px;color:var(--text)">← Zurück zu The Brain</a>
+  <h1>SEPA aufteilen</h1>
+  <div class="sub">Sammler einlesen, Zahlungen ansehen und als Einzelaufträge oder Pakete herunterladen.</div>
+
+  <div class="card">
+    <div class="assignment-help" style="margin-bottom:16px">
+      <p><strong>Neu: Excel-Sammler erstellen</strong><br>Vorlage laden, Zahlungen zeilenweise eintragen und die fertige Excel-Datei unten hineinziehen. KRISTINE prüft Pflichtfelder, IBAN, Beträge und doppelte Zeilen.</p>
+      <div class="actions"><a href="/incoming/payment-batch/excel-template"><button type="button" class="secondary">Excel-Vorlage herunterladen</button></a></div>
+    </div>
+    <label class="drop" id="drop">
+      <input id="file" type="file" accept=".xlsx,.xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/xml,application/xml">
+      <strong>Excel-Sammler oder SEPA-XML hier hineinziehen</strong>
+      <span>oder klicken und Datei auswählen</span>
+    </label>
+
+    <div id="status" class="status"></div>
+
+    <div id="result" style="display:none">
+      <div class="summary">
+        <div class="metric"><small>Datei</small><b id="mFile">–</b></div>
+        <div class="metric"><small>Aufträge</small><b id="mCount">–</b></div>
+        <div class="metric"><small>Gesamtsumme</small><b id="mTotal">–</b></div>
+        <div class="metric"><small>SEPA-Version</small><b id="mVersion">–</b></div>
+      </div>
+
+      <div class="assignment-help">
+        <p><strong>0 = einzeln · 1, 2, 3 … = Paket · x = weglassen</strong><br>Gleiche Zahlen gehören zusammen: Alle Zahlungen mit 1 werden Paket 1, alle mit 2 werden Paket 2. Zahlungen mit x werden aus dem Download entfernt.</p>
+        <div class="actions">
+          <button class="secondary" id="allSingleBtn">Alle einzeln (0)</button>
+          <button class="secondary" id="allPackageBtn">Alle in Paket 1</button>
+          <button class="secondary" id="resetBtn">Andere Datei</button>
+        </div>
+      </div>
+
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th>#</th><th>Empfänger / Verwendungszweck</th><th>IBAN</th><th>EndToEndId</th><th class="amount">Betrag</th><th>Paket</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <h2 class="export-title" id="exportTitle">Dein Download</h2>
+      <p id="exportSummary" class="note" aria-live="polite"></p>
+      <div class="export-list" id="exports"></div>
+      <div class="actions"><button class="primary" id="zipBtn" disabled>Alles als ZIP herunterladen</button></div>
+      <div class="note">
+        Verarbeitung erfolgt ausschließlich in diesem Browser. Die Originaldatei wird nicht hochgeladen.
+        Jede Zahlung ohne x ist genau einmal im ZIP enthalten. Auftraggeber, Ausführungstermine, Zahlungsdaten und EndToEndId bleiben unverändert.
+        Pakete können mehrere ursprüngliche Zahlungsblöcke enthalten, etwa bei unterschiedlichen Ausführungsterminen oder Auftraggeberkonten.
+        <span class="pill">MsgId/PmtInfId: innerhalb der ersten 16 Zeichen eindeutig</span>.
+        Unveränderte Zusammenstellungen behalten beim erneuten Speichern ihre Kennungen. Geänderte Zusammenstellungen erhalten neue Kennungen.
+        Bereits gezeichnete oder ausgeführte Zahlungen nicht erneut einreichen.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap"><div id="bankTransferEntry" class="card" hidden><h2>An konfipay übergeben</h2><p>Deine aktuelle Zusammenstellung wird zunächst auf dem Brain-PC geprüft. Erst nach der folgenden Freigabe gehen die Zahlungen an konfipay und zur Bank.</p><button id="prepareTransfer" class="primary">Zusammenstellung prüfen</button><p id="transferMessage" class="note" role="status"></p><a href="/konfipay#banking" style="color:var(--text)">Zum Zahlungsarchiv in konfipay</a></div>
+<dialog id="transferDialog"><h2>Verbindliche Zahlungsfreigabe</h2><p id="transferTotal"></p><div id="transferReview"></div><p>Mit der Freigabe werden genau diese Dateien an konfipay übergeben und die Bankübertragung angestoßen. Eine eventuell erforderliche Bankunterschrift bleibt bestehen.</p><label style="display:flex;gap:12px;align-items:start"><input type="checkbox" id="transferConfirm"><span>Ich habe Empfänger, IBAN, Beträge und Termine geprüft und gebe diese Zahlungen verbindlich frei.</span></label><div class="actions"><button id="sendTransfer" class="primary" disabled>Jetzt verbindlich an konfipay übergeben</button><button id="cancelTransfer" class="secondary">Abbrechen</button></div><p id="transferResult" role="status"></p></dialog></div>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const fileInput = $("file"), drop = $("drop"), status = $("status"), result = $("result");
+const rows = $("rows"), zipBtn = $("zipBtn"), resetBtn = $("resetBtn");
+let generated = [];
+let sourceDoc = null, payments = [], importPrefix = '', nextId = 1, importVersion = 0;
+const outputCache = new Map();
+
+function setStatus(msg, kind="ok"){
+  status.className = "status show " + kind;
+  status.textContent = msg;
+}
+function clearStatus(){ status.className="status"; status.textContent=""; }
+
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+drop.addEventListener("drop", e => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) processFile(f);
+});
+fileInput.addEventListener("change", () => { if(fileInput.files[0]) processFile(fileInput.files[0]); });
+resetBtn.addEventListener("click", reset);
+
+function reset(){
+  importVersion++;
+  generated = [];
+  sourceDoc = null; payments = []; importPrefix = ''; nextId = 1; outputCache.clear();
+  zipBtn.disabled = true;
+  $("exports").replaceChildren(); $("exportSummary").textContent = '';
+  rows.innerHTML = "";
+  result.style.display = "none";
+  clearStatus();
+  fileInput.value = "";
+}
+
+function elementsByLocal(root, local){
+  return Array.from(root.getElementsByTagName("*")).filter(el => el.localName === local);
+}
+function directChildByLocal(root, local){
+  return Array.from(root.children || []).find(el => el.localName === local) || null;
+}
+function firstDesc(root, local){
+  return elementsByLocal(root, local)[0] || null;
+}
+function textOf(root, local){
+  const el = firstDesc(root, local);
+  return el ? (el.textContent || "").trim() : "";
+}
+function sanitize(s){
+  let x = (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  x = x.replace(/[^a-zA-Z0-9._-]+/g,"_").replace(/^_+|_+$/g,"");
+  return (x || "Zahlung").slice(0,60);
+}
+// Global identifier counter covers both output documents and their payment blocks.
+// EndToEndId is never modified.
+function createImportPrefix(){
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[byte % 36]).join("");
+}
+function singleOrderId(prefix, index){
+  if(!/^[A-Z0-9]{12}$/.test(prefix) || !Number.isSafeInteger(index) || index < 1 || index >= 36 ** 4){
+    throw new Error("Keine eindeutige 16-stellige Auftragskennung erzeugbar.");
+  }
+  return prefix + index.toString(36).toUpperCase().padStart(4, "0");
+}
+function pad(n,w=3){ return String(n).padStart(w,"0"); }
+function parseAmount(tx){
+  const amount = directChildByLocal(tx,"Amt");
+  const el = amount && directChildByLocal(amount,"InstdAmt");
+  const raw = el ? (el.textContent || "").trim() : "";
+  if(!el || el.getAttribute('Ccy') !== 'EUR' || !/^\d+(?:\.\d{1,2})?$/.test(raw)) throw new Error('Bitte eine SEPA-Datei mit gültigen EUR-Überweisungsbeträgen verwenden.');
+  const [whole, fraction=''] = raw.split('.');
+  const cents = BigInt(whole)*100n + BigInt(fraction.padEnd(2,'0'));
+  if(cents<=0n) throw new Error('Überweisungsbeträge müssen größer als 0 sein.');
+  return {raw, currency:'EUR', cents};
+}
+function decimalAmount(cents){return (cents/100n).toString()+'.'+(cents%100n).toString().padStart(2,'0');}
+function displayAmount(cents){const [a,b]=decimalAmount(cents).split('.');return a.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+b+' €';}
+function totalCents(list){return list.reduce((sum,p)=>sum+p.cents,0n);}
+function creditorName(tx){
+  const cdtr = firstDesc(tx,"Cdtr");
+  return cdtr ? textOf(cdtr,"Nm") : "";
+}
+function creditorIban(tx){
+  const acct = firstDesc(tx,"CdtrAcct");
+  return acct ? textOf(acct,"IBAN") : "";
+}
+function endToEnd(tx){
+  const pmtId = firstDesc(tx,"PmtId");
+  return pmtId ? textOf(pmtId,"EndToEndId") : "";
+}
+function namespaceVersion(doc){
+  const ns = doc.documentElement.namespaceURI || "";
+  const m = ns.match(/pain\.001\.\d{3}\.\d{2}/i);
+  return m ? m[0] : (ns.split(":").pop() || "unbekannt");
+}
+function formatMoney(n,c="EUR"){
+  if(!Number.isFinite(n)) return "–";
+  try { return new Intl.NumberFormat("de-AT",{style:"currency",currency:c}).format(n); }
+  catch { return n.toFixed(2) + " " + c; }
+}
+function downloadBlob(blob, name){
+  const a = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+async function processFile(file,initialAssignments=null){
+  reset();
+  const version = importVersion;
+  if(/\.xlsx$/i.test(file.name)){
+    try{
+      setStatus('Excel-Datei wird geprüft …');
+      const form=new FormData();form.append('file',file,file.name);
+      const response=await fetch('/incoming/payment-batch/excel',{method:'POST',body:form,cache:'no-store'});
+      const data=await response.json();
+      if(!response.ok||!data.ok)throw Error(data.error||'Excel-Datei konnte nicht gelesen werden.');
+      return processFile(new File([data.xml],data.filename||'SEPA_Excel.xml',{type:'application/xml'}),data.assignments||[]);
+    }catch(error){result.style.display='none';setStatus(error.message||String(error),'error');return;}
+  }
+  if(!/\.xml$/i.test(file.name)) return setStatus('Bitte eine Excel-Vorlage (.xlsx) oder SEPA-XML-Datei auswählen.','error');
+  try{
+    const xmlText = await file.text();
+    if(version!==importVersion)return;
+    if(/<!DOCTYPE|<!ENTITY/i.test(xmlText)) throw new Error('XML mit DTD oder Entitätsdefinitionen wird nicht unterstützt.');
+    const doc = new DOMParser().parseFromString(xmlText,'application/xml');
+    if(doc.getElementsByTagNameNS('*','parsererror').length) throw new Error('Die XML-Datei ist nicht gültig.');
+    if(doc.documentElement.localName!=='Document' || !/^urn:iso:std:iso:20022:tech:xsd:pain\.001\.001\.\d{2}$/.test(doc.documentElement.namespaceURI||'')) throw new Error('Bitte eine SEPA-Überweisungsdatei im Format pain.001 verwenden.');
+    if(doc.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#','Signature').length) throw new Error('Bitte eine unsignierte Quelldatei verwenden.');
+    const init=directChildByLocal(doc.documentElement,'CstmrCdtTrfInitn');
+    const header=init && directChildByLocal(init,'GrpHdr');
+    if(!header || !directChildByLocal(header,'MsgId') || !directChildByLocal(header,'NbOfTxs')) throw new Error('Der SEPA-Dateikopf ist unvollständig.');
+    const pmtInfos=Array.from(init.children).filter(x=>x.localName==='PmtInf');
+    const parsed=[];
+    pmtInfos.forEach((block,pmtIndex)=>{
+      if(!directChildByLocal(block,'PmtInfId') || directChildByLocal(block,'PmtMtd')?.textContent.trim()!=='TRF') throw new Error('Ungültiger Überweisungsblock.');
+      Array.from(block.children).filter(x=>x.localName==='CdtTrfTxInf').forEach((tx,txIndex)=>{
+        const amt=parseAmount(tx);
+        parsed.push({pmtIndex,txIndex,sourceIndex:parsed.length,creditor:creditorName(tx),iban:creditorIban(tx),e2e:endToEnd(tx),
+          purpose:elementsByLocal(tx,'Ustrd').map(x=>x.textContent).join(' · ') || textOf(firstDesc(tx,'RmtInf')||tx,'Ref'),
+          amountRaw:amt.raw,cents:amt.cents,currency:amt.currency,assignment:'0'});
+      });
+    });
+    if(!parsed.length) throw new Error('Keine Überweisungen gefunden.');
+    if(parsed.length>65535)throw new Error('Bitte höchstens 65.535 Zahlungen pro Datei einlesen.');
+    sourceDoc=doc; payments=parsed; importPrefix=createImportPrefix();
+    $('mFile').textContent=file.name; $('mCount').textContent=payments.length;
+    $('mTotal').textContent=displayAmount(totalCents(payments)); $('mVersion').textContent=namespaceVersion(doc);
+    const fragment=document.createDocumentFragment();
+    payments.forEach((p,i)=>{
+      const tr=document.createElement('tr');
+      const lastIban=p.iban?'•••• '+p.iban.replace(/\s+/g,'').slice(-4):'–';
+      tr.innerHTML=`<td>${i+1}</td><td>${escapeHtml(p.creditor||'–')}<span class="payment-note">${escapeHtml(p.purpose)}</span></td>
+        <td>${escapeHtml(lastIban)}</td><td>${escapeHtml(p.e2e||'–')}</td><td class="amount">${displayAmount(p.cents)}</td>
+        <td><input class="package-input" type="text" value="0" maxlength="6" autocomplete="off" spellcheck="false" data-i="${i}" aria-label="Paket für Zahlung ${i+1}: ${escapeHtml(p.creditor)}" aria-describedby="packageHint${i}"><span class="package-label" id="packageHint${i}">Einzeln</span></td>`;
+      fragment.append(tr);
+    });
+    rows.replaceChildren(fragment);
+    if(Array.isArray(initialAssignments))rows.querySelectorAll('.package-input').forEach((input,index)=>{if(initialAssignments[index]!=null)input.value=String(initialAssignments[index]);});
+    result.style.display='block';
+    updateExports();
+  }catch(error){
+    if(version!==importVersion)return;
+    generated=[];sourceDoc=null;payments=[];outputCache.clear();zipBtn.disabled=true;
+    result.style.display='none';setStatus(error.message||String(error),'error');
+  }
+}
+
+function assignmentValue(value){
+  const raw=String(value).trim().toLowerCase();
+  if(raw==='x')return 'x';
+  if(!/^\d{1,6}$/.test(raw))return null;
+  return String(Number(raw));
+}
+function updateExports(){
+  generated=[];zipBtn.disabled=true;$('exports').replaceChildren();
+  if(!sourceDoc)return;
+  const groups=new Map();let invalid=false;
+  rows.querySelectorAll('.package-input').forEach(input=>{
+    const index=Number(input.dataset.i),p=payments[index],value=assignmentValue(input.value);
+    p.assignment=value;
+    input.setAttribute('aria-invalid',value===null?'true':'false');
+    input.closest('tr').classList.toggle('excluded',value==='x');
+    $('packageHint'+index).textContent=value===null?'0, Paketnummer oder x':value==='x'?'Wird weggelassen':value==='0'?'Einzeln':'Paket '+value;
+    if(value===null){invalid=true;return;}
+    if(value==='x')return;
+    const key=value==='0'?'single:'+index:'package:'+value;
+    if(!groups.has(key))groups.set(key,{label:value==='0'?'Einzelauftrag '+(index+1):'Paket '+value,number:value,items:[]});
+    groups.get(key).items.push(p);
+  });
+  if(invalid){$('exportTitle').textContent='Eingabe prüfen';$('exportSummary').textContent='Bitte in jedem Feld 0, eine Paketnummer (1–999999) oder x eintragen.';setStatus('Ein Paketfeld ist noch leer oder ungültig. Downloads sind bis zur Korrektur gesperrt.','error');return;}
+  try{
+    const selected=payments.filter(p=>p.assignment!=='x'), excluded=payments.filter(p=>p.assignment==='x');
+    for(const group of groups.values()){
+      const signature=group.items.map(p=>p.sourceIndex).join(',');
+      let cached=outputCache.get(signature);
+      if(!cached){cached=buildGroup(sourceDoc,group.items);outputCache.set(signature,cached);}
+      const p=group.items[0];
+      const name=group.number==='0'?`${pad(p.sourceIndex+1)}_${sanitize(p.creditor)}_${sanitize(decimalAmount(p.cents))}_EUR.xml`:`Paket_${group.number}_${group.items.length}_Auftraege.xml`;
+      generated.push({...cached,name,label:group.label,count:group.items.length,cents:totalCents(group.items),items:group.items});
+    }
+    $('exportTitle').textContent=generated.length+' XML-Datei'+(generated.length===1?'':'en')+' für deinen Download';
+    $('exportSummary').textContent=selected.length+' Zahlungen · '+displayAmount(totalCents(selected))+' im Download'+(excluded.length?' · '+excluded.length+' weggelassen ('+displayAmount(totalCents(excluded))+')':'');
+    const fragment=document.createDocumentFragment();
+    generated.forEach(g=>{
+      const div=document.createElement('div');div.className='export-row';
+      const info=document.createElement('div'),title=document.createElement('strong'),detail=document.createElement('small');
+      title.textContent=g.label;detail.textContent=g.count+' Zahlung'+(g.count===1?'':'en')+' · '+displayAmount(g.cents)+(g.count===1?' · '+(g.items[0].creditor||'Empfänger'):'');
+      info.append(title,detail);
+      const button=document.createElement('button');button.className='mini';button.textContent='XML speichern';button.setAttribute('aria-label',g.label+' als XML speichern');
+      button.addEventListener('click',()=>downloadBlob(new Blob([g.xml],{type:'application/xml;charset=utf-8'}),g.name));
+      div.append(info,button);fragment.append(div);
+    });
+    $('exports').append(fragment);zipBtn.disabled=!generated.length;
+    setStatus(generated.length?'Zusammenstellung bereit. Paketnummern und x kannst du jederzeit ändern.':'Alle Zahlungen sind mit x markiert. Es wird keine Datei erstellt.');
+  }catch(error){generated=[];zipBtn.disabled=true;$('exports').replaceChildren();$('exportSummary').textContent='Kein Download möglich.';setStatus(error.message||String(error),'error');}
+}
+
+function buildGroup(originalDoc,selected){
+  const clone=originalDoc.cloneNode(true);
+  const init=directChildByLocal(clone.documentElement,'CstmrCdtTrfInitn');
+  const header=directChildByLocal(init,'GrpHdr');
+  const blocks=Array.from(init.children).filter(x=>x.localName==='PmtInf');
+  const byBlock=new Map();
+  for(const p of selected){if(!byBlock.has(p.pmtIndex))byBlock.set(p.pmtIndex,[]);byBlock.get(p.pmtIndex).push(p);}
+  const newId=()=>singleOrderId(importPrefix,nextId++);
+  directChildByLocal(header,'MsgId').textContent=newId();
+  function updateTotals(node,list){
+    const count=directChildByLocal(node,'NbOfTxs'),sum=directChildByLocal(node,'CtrlSum');
+    if(count)count.textContent=String(list.length);
+    if(sum)sum.textContent=decimalAmount(totalCents(list));
+  }
+  updateTotals(header,selected);
+  blocks.forEach((block,index)=>{
+    const items=byBlock.get(index);
+    if(!items){block.remove();return;}
+    const keep=new Set(items.map(p=>p.txIndex));
+    Array.from(block.children).filter(x=>x.localName==='CdtTrfTxInf').forEach((tx,i)=>{if(!keep.has(i))tx.remove();});
+    directChildByLocal(block,'PmtInfId').textContent=newId();updateTotals(block,items);
+  });
+  return {xml:'<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(clone.documentElement)};
+}
+
+rows.addEventListener('input',e=>{if(e.target.matches('.package-input'))updateExports();});
+rows.addEventListener('change',e=>{if(e.target.matches('.package-input')){const value=assignmentValue(e.target.value);if(value!==null)e.target.value=value;}});
+function setAll(value){if(!payments.length)return;rows.querySelectorAll('.package-input').forEach(input=>input.value=value);updateExports();}
+$('allSingleBtn').addEventListener('click',()=>setAll('0'));
+$('allPackageBtn').addEventListener('click',()=>setAll('1'));
+
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
+
+/* Minimal ZIP writer (store/no compression), fully local, UTF-8 filenames */
+function crc32(bytes){
+  let crc = 0 ^ (-1);
+  for(let i=0;i<bytes.length;i++){
+    crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xFF];
+  }
+  return (crc ^ (-1)) >>> 0;
+}
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){
+    let c=n;
+    for(let k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n]=c>>>0;
+  }
+  return t;
+})();
+function u16(n){ return new Uint8Array([n&255,(n>>>8)&255]); }
+function u32(n){ return new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]); }
+function cat(parts){
+  const len=parts.reduce((s,p)=>s+p.length,0), out=new Uint8Array(len);
+  let o=0; for(const p of parts){ out.set(p,o); o+=p.length; } return out;
+}
+function dosDateTime(d=new Date()){
+  let year=Math.max(1980,d.getFullYear());
+  const date=((year-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+  const time=(d.getHours()<<11)|(d.getMinutes()<<5)|Math.floor(d.getSeconds()/2);
+  return {date,time};
+}
+function makeZip(files){
+  const enc = new TextEncoder(), locals=[], centrals=[];
+  let offset=0; const dt=dosDateTime();
+  for(const f of files){
+    const name=enc.encode(f.name), data=enc.encode(f.xml), crc=crc32(data), flag=0x0800;
+    const local=cat([
+      u32(0x04034b50),u16(20),u16(flag),u16(0),u16(dt.time),u16(dt.date),
+      u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),name,data
+    ]);
+    locals.push(local);
+    const central=cat([
+      u32(0x02014b50),u16(20),u16(20),u16(flag),u16(0),u16(dt.time),u16(dt.date),
+      u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),
+      u16(0),u16(0),u32(0),u32(offset),name
+    ]);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const localBlob=cat(locals), centralBlob=cat(centrals);
+  const eocd=cat([
+    u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),
+    u32(centralBlob.length),u32(localBlob.length),u16(0)
+  ]);
+  return new Blob([localBlob,centralBlob,eocd],{type:"application/zip"});
+}
+
+zipBtn.addEventListener("click", () => {
+  if(!generated.length) return;
+  downloadBlob(makeZip(generated), "SEPA_Zusammenstellung.zip");
+});
+</script>
+<script>
+'use strict';
+let transferCsrf='',transferDraft=null,transferBusy=false;
+const transferMode=location.protocol.startsWith('http')&&new URLSearchParams(location.search).get('konfipay')==='1';
+$('bankTransferEntry').hidden=!transferMode;
+if(transferMode){document.querySelector('.sub').textContent='Sammler einlesen, mit 0 / Paketnummer / x zusammenstellen und nach Prüfung an konfipay übergeben.';const note=document.querySelector('#result > .note');if(note)note.textContent='Die Aufteilung erfolgt im Browser. „Zusammenstellung prüfen“ überträgt die ausgewählten Dateien an den Brain-PC. Erst deine verbindliche Freigabe sendet sie weiter an konfipay. Zahlungsdaten und EndToEndId bleiben unverändert.';}
+async function transferApi(path,body){const r=await fetch('/konfipay/api/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Brain-Konfipay':transferCsrf},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const data=await r.json();if(!r.ok||!data.ok)throw Error(data.error||'Übergabe fehlgeschlagen.');return data;}
+$('prepareTransfer').addEventListener('click',async()=>{
+ if(transferBusy)return;if(!generated.length||zipBtn.disabled){$('transferMessage').textContent='Bitte zuerst einen Sammler einlesen und eine gültige Zusammenstellung auswählen.';return;}
+ transferBusy=true;$('prepareTransfer').disabled=true;$('transferMessage').textContent='Zusammenstellung wird auf dem Brain-PC geprüft …';transferDraft=null;
+ try{
+  const context=await transferApi('context');if(!context.configured)throw Error('Bitte zuerst die konfipay-Verbindung einrichten.');transferCsrf=context.csrf;
+  const preview=await transferApi('payment-prepare',{files:generated.map(g=>({name:g.name,xml:g.xml}))});transferDraft=preview.draft;
+  $('transferTotal').textContent=preview.count+' Zahlungen · '+preview.total.replace('.',',')+' EUR · '+preview.files.length+' Dateien';$('transferReview').replaceChildren();
+  for(const file of preview.files){const title=document.createElement('h3');title.textContent=file.name+' · '+file.total.replace('.',',')+' EUR';$('transferReview').append(title);const scroll=document.createElement('div');scroll.className='scroll';const table=document.createElement('table'),thead=document.createElement('thead'),head=document.createElement('tr');for(const text of ['Empfänger / IBAN','Betrag','Termin / Auftraggeberkonto','Verwendungszweck']){const th=document.createElement('th');th.textContent=text;head.append(th);}thead.append(head);table.append(thead);const tbody=document.createElement('tbody');
+   for(const item of file.items){const tr=document.createElement('tr');for(const text of [item.name+'\n'+item.iban,item.amount.replace('.',',')+' EUR',item.date+'\n'+item.debtorIban,item.purpose+'\n'+item.endToEndId]){const td=document.createElement('td');td.style.whiteSpace='pre-line';td.textContent=text;tr.append(td);}tbody.append(tr);}table.append(tbody);scroll.append(table);$('transferReview').append(scroll);
+  }
+  $('transferConfirm').checked=false;$('sendTransfer').disabled=true;$('transferConfirm').disabled=false;$('cancelTransfer').disabled=false;$('transferResult').textContent='';$('transferDialog').showModal();$('transferMessage').textContent='Vorschau bereit. Noch keine Zahlung an konfipay gesendet.';
+ }catch(e){$('transferMessage').textContent=e.message;}finally{transferBusy=false;$('prepareTransfer').disabled=false;}
+});
+$('transferConfirm').addEventListener('change',()=>{$('sendTransfer').disabled=transferBusy||!transferDraft||!$('transferConfirm').checked;});
+$('cancelTransfer').addEventListener('click',()=>{if(!transferBusy){transferDraft=null;$('transferDialog').close();}});
+$('transferDialog').addEventListener('cancel',e=>{if(transferBusy)e.preventDefault();else transferDraft=null;});
+$('sendTransfer').addEventListener('click',async()=>{
+ if(transferBusy||!transferDraft||!$('transferConfirm').checked)return;
+ const draft=transferDraft;transferDraft=null;transferBusy=true;$('sendTransfer').disabled=true;$('cancelTransfer').disabled=true;$('transferConfirm').disabled=true;$('transferResult').textContent='Verbindliche Übergabe läuft. Bitte warten und nicht erneut senden.';
+ try{const d=await transferApi('payment-submit',{draft,confirmed:true});$('transferResult').textContent=d.results.map(r=>r.name+': '+(r.error||r.status||r.state)).join('\n')+(d.remaining?'\n'+d.remaining+' Datei(en) wurden noch nicht übergeben.':'')+'\nDen weiteren Status und Inhalt findest du im Brain-Zahlungsarchiv.';$('transferMessage').textContent='Übergabe bearbeitet. Bitte den Zahlungsstatus im Archiv prüfen.';}
+ catch(e){$('transferResult').textContent=e.message+' Falls die Verbindung unterbrochen wurde: erst das Zahlungsarchiv prüfen, nicht erneut senden.';}
+ finally{transferBusy=false;$('cancelTransfer').disabled=false;$('cancelTransfer').textContent='Schließen';}
+});
+</script>
+</body>
+</html>
