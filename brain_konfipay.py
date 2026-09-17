@@ -25,6 +25,11 @@ class ConnectionError(Exception):
     pass
 
 
+# Neuere Revolut-Bausteine verwenden diesen eindeutigeren Namen. Der
+# vollständige Bankbereich behält ConnectionError für bestehende Aufrufer.
+KonfipayError = ConnectionError
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None

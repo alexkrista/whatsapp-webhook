@@ -37,13 +37,14 @@ assert(intake.includes('data-context='));
 assert(intake.includes("ctx.includes('business')?'revolut_business'"));
 assert(loader.includes('_revolut_business_install(ns)'));
 assert(connection.includes('API = "https://b2b.revolut.com/api/1.0"'));
+assert(read('brain_konfipay.py').includes('KonfipayError = ConnectionError'));
 assert(connection.includes('endpoint not in {"/accounts", "/transactions", "/expenses"}'));
 assert(connection.includes('def receipt(self, expense_id, receipt_id):'));
 assert(home.includes("bank.textContent='🏦 Bank'"));
 assert(home.includes("window.location.href='/konfipay'"));
 assert(home.includes('Revolut Business'));
 assert(home.includes("window.location.href='/incoming/revolut'"));
-assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.72"'));
+assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.73"'));
 
 const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)];
 assert.strictEqual(scripts.length, 1, 'Revolut Business page script missing');
