@@ -283,8 +283,10 @@ function registerPaintMixHistory(app, options = {}) {
   }
 
   async function findArticleForMix(row, articles) {
-    const wanted = identityKey({ product: row.productName, baseCode: row.baseCode || row.baseName, baseName: row.baseName, size: row.size });
-    let candidates = (Array.isArray(articles) ? articles : []).filter(article => article && article.active !== false && identityKey(article) === wanted);
+    const productAlias = value => /^(intelligent matt)( emulsion)?$/i.test(String(value || "").trim()) ? "Intelligent Matt" : value;
+    const mixIdentity = article => identityKey({...article,product:productAlias(article.product)});
+    const wanted = mixIdentity({ product: row.productName, baseCode: row.baseCode || row.baseName, baseName: row.baseName, size: row.size });
+    let candidates = (Array.isArray(articles) ? articles : []).filter(article => article && article.active !== false && mixIdentity(article) === wanted);
     if (candidates.length === 1) return { article: candidates[0], candidates };
     return { article: null, candidates };
   }
