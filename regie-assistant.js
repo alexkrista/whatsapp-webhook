@@ -509,7 +509,17 @@ function registerRegieAssistant(app, options) {
   async function checkHours(report,reports,sources) {
     return require('./regie-hours-check').auditReport(report,reports,...(sources||await hourSources()));
   }
-  async function enforceHours(report,reports) { const check=await checkHours(report,reports);if(check.blocked)throw new Error(check.warnings[0]);return check; }
+  const hoursCheckKey = check => JSON.stringify((check?.exceeded || []).map(row => [
+    clean(row.employee, 180), round(row.hours), round(row.limit), Math.round(num(row.stampedMinutes)),
+  ]));
+  const hoursCheckAccepted = (report, check) => Boolean(
+    check?.blocked && report?.hoursCheckConfirmedAt && report?.hoursCheckConfirmationKey === hoursCheckKey(check)
+  );
+  async function enforceHours(report,reports) {
+    const check=await checkHours(report,reports);
+    if(check.blocked&&!hoursCheckAccepted(report,check))throw new Error(check.warnings[0]);
+    return check;
+  }
   async function persistReport(body, finish) {
     const reports = await readJson(REPORTS, []);
     const id = safeId(body.id) || `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -572,7 +582,13 @@ function registerRegieAssistant(app, options) {
     };
     report.totals = calculateTotals(report);
     report.hoursCheck = await checkHours(report,reports);
-    if ((finish || existing.status === "completed") && report.hoursCheck.blocked) throw new Error(report.hoursCheck.warnings[0]);
+    if(body.hoursCheckConfirmed===true&&report.hoursCheck.blocked){
+      report.hoursCheckConfirmedAt=now;
+      report.hoursCheckConfirmedBy="Alexander Krista";
+      report.hoursCheckConfirmationKey=hoursCheckKey(report.hoursCheck);
+    }
+    report.hoursCheck.accepted=hoursCheckAccepted(report,report.hoursCheck);
+    if ((finish || existing.status === "completed") && report.hoursCheck.blocked && !hoursCheckAccepted(report,report.hoursCheck)) throw new Error(report.hoursCheck.warnings[0]);
     if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
     await writeJson(REPORTS, reports.slice(-10000));
     if (correctReport) {
@@ -656,7 +672,7 @@ function registerRegieAssistant(app, options) {
     if (normalizeLegacyExpressNumbers(reports)) await writeJson(REPORTS, reports);
     await reconcileCompletedRegieReviewTasks(reports);
     const sources=await hourSources();
-    for(const report of reports) report.hoursCheck=await checkHours(report,reports,sources);
+    for(const report of reports){report.hoursCheck=await checkHours(report,reports,sources);report.hoursCheck.accepted=hoursCheckAccepted(report,report.hoursCheck)}
     res.json({ ok: true, reports: reports.slice().sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))) });
   });
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {
@@ -706,7 +722,7 @@ function registerRegieAssistant(app, options) {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
     if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
-    report.hoursCheck=await checkHours(report,reports);
+    report.hoursCheck=await checkHours(report,reports);report.hoursCheck.accepted=hoursCheckAccepted(report,report.hoursCheck);
     res.json({ ok: true, report });
   });
   app.get("/kristine/api/regie-reports/:id/recipients", async (req, res) => {

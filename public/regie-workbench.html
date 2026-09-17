@@ -166,10 +166,11 @@ async function save(finish){
  try{
   $('statusline').textContent='Speichere …';
   let data=await api('/kristine/api/regie-reports/save',{method:'POST',body:JSON.stringify({...collect(),correctReport:true,uploads:[],finish:false})});current=normalizeReport(data.report);
-  if(current.hoursCheck?.blocked){renderReview();if(finish)throw new Error(current.hoursCheck.warnings[0]);alert(current.hoursCheck.warnings[0]);}
+  let hoursCheckConfirmed=false;
+  if(current.hoursCheck?.blocked&&!current.hoursCheck?.accepted){renderReview();hoursCheckConfirmed=confirm(`${current.hoursCheck.warnings[0]}\n\nOK = geprüft und trotzdem speichern\nAbbrechen = zurück zum Bericht`);if(!hoursCheckConfirmed){$('statusline').textContent='Nicht gespeichert – Bericht kann korrigiert werden.';return null}if(!finish){data=await api('/kristine/api/regie-reports/save',{method:'POST',body:JSON.stringify({...collect(),correctReport:true,uploads:[],finish:false,hoursCheckConfirmed:true})});current=normalizeReport(data.report)}}
   const total=pendingFiles.length;let done=0;
   while(pendingFiles.length){$('statusline').textContent=`Datei ${++done} von ${total} wird einzeln übertragen …`;current=normalizeReport(await RegieUpload.send(current,pendingFiles[0],api));pendingFiles.shift();renderFiles()}
-  if(finish){data=await api('/kristine/api/regie-reports/save',{method:'POST',body:JSON.stringify({...collect(),uploads:[],finish:true})});current=normalizeReport(data.report)}
+  if(finish){data=await api('/kristine/api/regie-reports/save',{method:'POST',body:JSON.stringify({...collect(),uploads:[],finish:true,hoursCheckConfirmed})});current=normalizeReport(data.report)}
   $('statusline').textContent=finish?'✓ Aufgabe für Alex erstellt':'✓ Änderungen gespeichert';await loadReports();renderEmployees();renderMaterials();renderFiles();renderReview();recalculate();if(finish)setTimeout(()=>$('editorDialog').close(),650);return current;
  }catch(error){$('statusline').textContent='Übertragung unterbrochen – erneut speichern setzt fort.';alert(error.message);throw error}finally{savingReport=false;$('editorDialog').inert=false}
 }
