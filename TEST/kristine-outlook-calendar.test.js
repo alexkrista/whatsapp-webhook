@@ -13,7 +13,7 @@ assert.match(moduleSource, /hasRequiredScopes/);
 function appHarness() {
   const routes = new Map();
   const app = {};
-  for (const method of ["get", "post"]) app[method] = (route, handler) => routes.set(`${method.toUpperCase()} ${route}`, handler);
+  for (const method of ["get", "post", "patch"]) app[method] = (route, handler) => routes.set(`${method.toUpperCase()} ${route}`, handler);
   return { app, routes };
 }
 
@@ -62,6 +62,10 @@ function jwt(account) {
         { id:"outlook-morning", subject:"Baustellentermin", isAllDay:false, showAs:"busy", start:{ dateTime:"2026-09-18T08:30:00.0000000" }, end:{ dateTime:"2026-09-18T09:15:00.0000000" }, location:{ displayName:"Rankweil" } },
         { id:"outlook-day", subject:"Urlaub", isAllDay:true, showAs:"free", start:{ dateTime:"2026-09-18T00:00:00.0000000" }, end:{ dateTime:"2026-09-19T00:00:00.0000000" } },
       ] }), { status:200, headers:{ "Content-Type":"application/json" } });
+      if (String(url).includes("/me/calendar/getSchedule")) return new Response(JSON.stringify({ value:[{ scheduleItems:[
+        { subject:"Baustellentermin", status:"busy", start:{ dateTime:"2026-09-18T08:30:00.0000000" }, end:{ dateTime:"2026-09-18T09:15:00.0000000" }, location:"Rankweil" },
+        { subject:"Nur in Frei/Belegt", status:"busy", start:{ dateTime:"2026-09-18T13:00:00.0000000" }, end:{ dateTime:"2026-09-18T14:00:00.0000000" } },
+      ] }] }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).includes("graph.microsoft.com")) {
         graphPayload = JSON.parse(options.body);
         return new Response(JSON.stringify({ id:"outlook-event-123", webLink:"https://outlook.example/event/123" }), { status:201, headers:{ "Content-Type":"application/json" } });
@@ -85,6 +89,7 @@ function jwt(account) {
     assert.deepEqual(day.body.appointments.map(row => [row.title, row.allDay, row.from, row.to]), [
       ["Urlaub", true, "", ""],
       ["Baustellentermin", false, "08:30", "09:15"],
+      ["Nur in Frei/Belegt", false, "13:00", "14:00"],
     ]);
     const badDay = await call(routes, "GET", "/kristine/api/outlook/day", { query:{ date:"2026-02-31" } });
     assert.equal(badDay.statusCode, 400);
@@ -95,9 +100,20 @@ function jwt(account) {
     assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/outlook-entry\?task=task-42&sig=/);
     assert.equal(graphPayload.transactionId, create.body.appointment.id);
 
+    const updated = await call(routes, "PATCH", "/kristine/api/appointments/:id", { params:{ id:create.body.appointment.id }, body:{
+      taskId:"task-42", title:"Kundentermin geändert", date:"2026-09-04", allDay:false,
+      from:"15:00", to:"16:00", location:"Neue Straße 2", details:"Neue Hinweise",
+    } });
+    assert.equal(updated.statusCode, 200);
+    assert.equal(updated.body.outlookSynced, true);
+    assert.equal(updated.body.appointment.title, "Kundentermin geändert");
+    assert.equal(graphPayload.subject, "Kundentermin geändert");
+    assert.equal(graphPayload.start.dateTime, "2026-09-04T15:00:00");
+    assert.equal(graphPayload.transactionId, undefined, "Graph PATCH darf keine neue Transaktions-ID senden");
+
     const duplicate = await call(routes, "POST", "/kristine/api/appointments", { body:{
-      requestId:"request-2", taskId:"task-42", title:"Kundentermin", date:"2026-09-03", allDay:false,
-      from:"14:00", to:"14:30", location:"Musterstraße 1", details:"Besprechung vor Ort",
+      requestId:"request-2", taskId:"task-42", title:"Kundentermin geändert", date:"2026-09-04", allDay:false,
+      from:"15:00", to:"16:00", location:"Neue Straße 2", details:"Neue Hinweise",
     } });
     assert.equal(duplicate.statusCode, 200);
     assert.equal(duplicate.body.duplicatePrevented, true, "same natural appointment must not create a second Outlook event");

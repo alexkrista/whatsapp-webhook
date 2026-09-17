@@ -241,6 +241,19 @@ ${voicemailBlock}
       .krista-task-attachment-links a,.krista-task-attachment-links button{display:inline-flex;align-items:center;text-decoration:none;background:#fff;color:#222;border:1px solid #ccc;border-radius:8px;padding:6px 8px;font-size:11px;font-weight:750}
       .krista-task-attachment-links button{cursor:pointer}
       .krista-task-attachment-empty{font-size:12px;color:#777}
+      .krista-task-editor-backdrop{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.58);display:none;align-items:center;justify-content:center;padding:18px}
+      .krista-task-editor-backdrop.open{display:flex}
+      .krista-task-editor{width:min(760px,100%);max-height:calc(100vh - 36px);overflow:auto;background:#fff;border-radius:17px;box-shadow:0 24px 70px rgba(0,0,0,.32);padding:20px}
+      .krista-task-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+      .krista-task-editor-head h3{margin:0}
+      .krista-task-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+      .krista-task-editor-grid .full{grid-column:1/-1}
+      .krista-task-editor-grid label{display:grid;gap:5px;font-size:12px;color:#555;font-weight:700}
+      .krista-task-editor-grid input,.krista-task-editor-grid select,.krista-task-editor-grid textarea{width:100%;box-sizing:border-box;font:inherit}
+      .krista-task-editor-grid textarea{min-height:90px;resize:vertical}
+      .krista-task-editor-actions{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:16px}
+      .krista-task-editor-note{margin-right:auto;font-size:12px;font-weight:750;color:#27713d}
+      .krista-task-editor-note.error{color:#9c2f25}
       @media(max-width:900px){
         #taskList .krista-task-row{grid-template-columns:minmax(180px,1fr) auto}
         #taskList .krista-task-row>.krista-task-cell:nth-child(2),
@@ -248,6 +261,8 @@ ${voicemailBlock}
         #taskList .krista-task-row>.krista-task-cell:nth-child(4){display:none}
         .krista-task-attachment-row{grid-template-columns:1fr}
         .krista-task-attachment-links{justify-content:flex-start}
+        .krista-task-editor-grid{grid-template-columns:1fr}
+        .krista-task-editor-grid .full{grid-column:auto}
       }
     `;
     document.head.appendChild(style);
@@ -369,6 +384,145 @@ ${voicemailBlock}
     window.openTaskListModal = wrapped;
   }
 
+  function editorEmployees() {
+    return typeof masterEmployees !== "undefined" && Array.isArray(masterEmployees) ? masterEmployees : [];
+  }
+
+  function editorJobs() {
+    return typeof masterJobs !== "undefined" && Array.isArray(masterJobs) ? masterJobs : [];
+  }
+
+  function ensureTaskEditor() {
+    let backdrop = document.getElementById("kristaTaskEditorBackdrop");
+    if (backdrop) return backdrop;
+    backdrop = document.createElement("div");
+    backdrop.id = "kristaTaskEditorBackdrop";
+    backdrop.className = "krista-task-editor-backdrop";
+    backdrop.innerHTML = `<div class="krista-task-editor" role="dialog" aria-modal="true" aria-labelledby="kristaTaskEditorTitle">
+      <div class="krista-task-editor-head"><h3 id="kristaTaskEditorTitle">✏ Aufgabe bearbeiten</h3><button type="button" class="secondary" data-task-editor-close>Schließen</button></div>
+      <form id="kristaTaskEditorForm"><div class="krista-task-editor-grid" data-task-editor-fields></div>
+        <div class="krista-task-editor-actions"><span class="krista-task-editor-note" data-task-editor-note></span><button type="button" class="secondary" data-task-editor-close>Abbrechen</button><button type="submit" class="green">Änderungen speichern</button></div>
+      </form>
+    </div>`;
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop || event.target.closest("[data-task-editor-close]")) closeTaskEditor(); });
+    backdrop.querySelector("form").addEventListener("submit", saveTaskEditor);
+    document.body.appendChild(backdrop);
+    return backdrop;
+  }
+
+  function closeTaskEditor() {
+    document.getElementById("kristaTaskEditorBackdrop")?.classList.remove("open");
+  }
+
+  function selectedOption(select, value, label) {
+    const exists = [...select].some(option => String(option.value) === String(value || ""));
+    return exists || !value ? "" : `<option value="${esc(String(value))}">${esc(label || value)}</option>`;
+  }
+
+  function openTaskEditor(taskId) {
+    const task = (data?.tasks || []).find(item => String(item.id) === String(taskId));
+    if (!task || ["invoice", "regie"].includes(taskGroupKey(task))) return;
+    const backdrop = ensureTaskEditor();
+    const form = backdrop.querySelector("form");
+    const fields = backdrop.querySelector("[data-task-editor-fields]");
+    const appointment = task.taskType === "Termin" || task.appointment;
+    const employees = editorEmployees();
+    const jobs = editorJobs();
+    form.dataset.taskId = String(task.id || "");
+    fields.innerHTML = `
+      <label class="full">Aufgabe / Überschrift<input name="title" required maxlength="500" value="${esc(task.title || "")}"></label>
+      <label>Art<input value="${esc(task.taskType || "Aufgabe")}" disabled></label>
+      <label>Priorität<select name="priority"><option value="normal">Normal</option><option value="heute">Heute</option><option value="sofort">Sofort</option></select></label>
+      <label>Zuständig<select name="assigneeId" required>${employees.map(employee => `<option value="${esc(String(employee.id || ""))}">${esc(employee.name || employee.id || "")}</option>`).join("")}</select></label>
+      <label>Baustelle<select name="jobId"><option value="">– keine Baustelle –</option>${jobs.map(job => `<option value="${esc(String(job.jobId || job.id || ""))}">${esc(`#${job.jobId || job.id || ""} · ${job.name || job.jobName || "ohne Name"}`)}</option>`).join("")}</select></label>
+      ${appointment ? `<label>Datum<input name="appointmentDate" type="date" required value="${esc(task.appointment?.date || "")}"></label><label>Von<input name="appointmentFrom" type="time" required value="${esc(task.appointment?.from || "09:00")}"></label><label>Bis<input name="appointmentTo" type="time" required value="${esc(task.appointment?.to || "10:00")}"></label>` : `<label>Fällig am<input name="dueDate" type="date" value="${esc(task.dueDate || "")}"></label>`}
+      <label class="full">Hinweise / was wurde vergessen?<textarea name="reminder" maxlength="5000">${esc(task.reminder || "")}</textarea></label>`;
+    const assignee = fields.querySelector('[name="assigneeId"]');
+    assignee.insertAdjacentHTML("afterbegin", selectedOption(assignee, task.assigneeId, task.assigneeName));
+    assignee.value = String(task.assigneeId || "");
+    const job = fields.querySelector('[name="jobId"]');
+    job.insertAdjacentHTML("afterbegin", selectedOption(job, task.jobId, task.jobName));
+    job.value = String(task.jobId || "");
+    fields.querySelector('[name="priority"]').value = String(task.priority || "normal");
+    backdrop.querySelector("[data-task-editor-note]").textContent = "";
+    backdrop.classList.add("open");
+    fields.querySelector('[name="title"]')?.focus();
+  }
+
+  async function appointmentRequest(method, path, payload) {
+    const response = await fetch(tokenUrl(path), { method, credentials:"same-origin", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch {}
+    if (!response.ok) throw new Error(body?.error || text || response.statusText);
+    return body;
+  }
+
+  async function saveTaskEditor(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const task = (data?.tasks || []).find(item => String(item.id) === String(form.dataset.taskId));
+    if (!task) return;
+    const note = form.querySelector("[data-task-editor-note]");
+    const button = form.querySelector('[type="submit"]');
+    const oldLabel = button.textContent;
+    const backup = JSON.parse(JSON.stringify(task));
+    const values = new FormData(form);
+    let internallySaved = false;
+    try {
+      note.classList.remove("error");
+      note.textContent = "Wird gespeichert …";
+      button.disabled = true;
+      const title = String(values.get("title") || "").trim();
+      if (!title) throw new Error("Bitte eine Überschrift eingeben.");
+      task.title = title;
+      task.reminder = String(values.get("reminder") || "").trim();
+      task.priority = String(values.get("priority") || "normal");
+      task.assigneeId = String(values.get("assigneeId") || "");
+      task.assigneeName = form.elements.assigneeId.selectedOptions[0]?.textContent || task.assigneeId;
+      task.jobId = String(values.get("jobId") || "");
+      const selectedJob = editorJobs().find(job => String(job.jobId || job.id || "") === task.jobId);
+      task.jobName = selectedJob ? String(selectedJob.name || selectedJob.jobName || "") : (task.jobId ? form.elements.jobId.selectedOptions[0]?.textContent || "" : "");
+      if (selectedJob && typeof jobAddress === "function") task.address = jobAddress(selectedJob);
+      if (!task.appointment && task.taskType !== "Termin") task.dueDate = String(values.get("dueDate") || "");
+      let appointmentPayload = null;
+      if (task.taskType === "Termin" || task.appointment) {
+        const date = String(values.get("appointmentDate") || ""), from = String(values.get("appointmentFrom") || ""), to = String(values.get("appointmentTo") || "");
+        if (!date || !from || !to || to <= from) throw new Error("Bitte eine gültige Terminzeit eingeben.");
+        task.dueDate = "";
+        task.appointment = { ...(task.appointment || {}), date, from, to, calendarOwner:"alex", calendarAccount:"alexander.krista@krista.at" };
+        appointmentPayload = { taskId:String(task.id || ""), title:task.title, date, from, to, allDay:false, location:task.address || task.jobName || "", details:[task.reminder, task.contactName || task.contactPhone || task.contactEmail ? `Kontakt: ${[task.contactName, task.contactPhone, task.contactEmail].filter(Boolean).join(" · ")}` : ""].filter(Boolean).join("\n\n") };
+      }
+      await window.persistTasks();
+      internallySaved = true;
+      if (appointmentPayload) {
+        const current = (data?.tasks || []).find(item => String(item.id) === String(task.id));
+        const appointmentId = current?.appointment?.id || backup.appointment?.id || "";
+        const result = appointmentId
+          ? await appointmentRequest("PATCH", `/kristine/api/appointments/${encodeURIComponent(appointmentId)}`, appointmentPayload)
+          : await appointmentRequest("POST", "/kristine/api/appointments", { ...appointmentPayload, requestId:`edit-task-${task.id}` });
+        if (current) {
+          current.appointment = { ...(current.appointment || {}), id:result.appointment.id, outlook:result.appointment.outlook };
+          await window.persistTasks();
+        }
+        note.textContent = result.outlookSynced ? "✓ Aufgabe und Outlook-Termin geändert." : "✓ Aufgabe geändert; Outlook-Synchronisierung ist noch offen.";
+      } else {
+        note.textContent = "✓ Aufgabe geändert.";
+      }
+      setTimeout(closeTaskEditor, 800);
+    } catch (error) {
+      if (!internallySaved) Object.assign(task, backup);
+      if (typeof window.renderTasks === "function") window.renderTasks();
+      note.classList.add("error");
+      note.textContent = `${internallySaved ? "Aufgabe ist gespeichert; Outlook-Fehler" : "Fehler"}: ${String(error?.message || error)}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = oldLabel;
+    }
+  }
+
+  window.openKristaTaskEditor = openTaskEditor;
+
   function compactRenderTasks() {
     let tasks = [...(data?.tasks || [])];
 
@@ -394,14 +548,15 @@ ${voicemailBlock}
       const priority = task.priority === "sofort" ? "🔴 Sofort" : task.priority === "heute" ? "🟡 Heute" : "🟢 Normal";
       const statusTime = task.status === "done"
         ? (task.completedAt ? new Date(task.completedAt).toLocaleString("de-AT", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "erledigt")
-        : (typeof taskDueLabel === "function" ? taskDueLabel(task.dueDate) : (task.dueDate || "–"));
+        : (typeof taskDueLabel === "function" ? taskDueLabel(task.dueDate || task.appointment?.date) : (task.dueDate || task.appointment?.date || "–"));
       const site = task.jobName || job?.name || "";
+      const editable = !["invoice", "regie"].includes(taskGroupKey(task));
       return `<div class="krista-task-row ${task.status === "done" ? "done" : ""}">
         <div class="krista-task-cell"><div class="krista-task-title">${esc(task.title || "Aufgabe")}</div><div class="krista-task-sub"><span class="krista-task-badge">${esc(task.taskType || "Aufgabe")}</span><span class="krista-task-badge">${priority}</span>${task.reminder ? ` ${esc(task.reminder)}` : ""}</div></div>
         <div class="krista-task-cell"><strong>${esc(task.assigneeName || task.assigneeId || "–")}</strong><div class="krista-task-sub">für</div></div>
         <div class="krista-task-cell"><strong>${esc(site || "–")}</strong><div class="krista-task-sub">Baustelle</div></div>
         <div class="krista-task-cell"><strong>${esc(statusTime)}</strong><div class="krista-task-sub">${task.status === "done" ? "erledigt" : "fällig"}</div></div>
-        <div class="krista-task-actions"><button type="button" class="secondary krista-task-attachment-button" data-task-attachments="${esc(String(task.id || ""))}" hidden>📎</button><button class="secondary" onclick="openTaskListModal('${task.id}')">Details</button>${task.status !== "done" ? `<button class="green" onclick="markTaskDone('${task.id}')">✓</button>` : ""}<button class="danger" onclick="removeTask('${task.id}')">×</button></div>
+        <div class="krista-task-actions"><button type="button" class="secondary krista-task-attachment-button" data-task-attachments="${esc(String(task.id || ""))}" hidden>📎</button><button class="secondary" onclick="openTaskListModal('${task.id}')">Details</button>${editable ? `<button type="button" class="secondary" title="Aufgabe bearbeiten" onclick="openKristaTaskEditor('${task.id}')">✏</button>` : ""}${task.status !== "done" ? `<button class="green" onclick="markTaskDone('${task.id}')">✓</button>` : ""}<button class="danger" onclick="removeTask('${task.id}')">×</button></div>
       </div>`;
     };
     const groupDefinitions = [

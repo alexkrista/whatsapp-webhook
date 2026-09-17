@@ -13,4 +13,7 @@ assert(source.indexOf('label:"Aufgaben"')<source.indexOf('label:"Regie"'));
 assert(source.indexOf('label:"Regie"')<source.indexOf('label:"Rechnungen"'));
 assert(source.indexOf('label:"Rechnungen"')<source.indexOf('label:"Kundenpunkte"'));
 assert(source.includes('class="krista-task-group"'));
+assert(source.includes("window.openKristaTaskEditor = openTaskEditor"));
+assert(source.includes('appointmentRequest("PATCH"'));
+assert(source.includes("window.persistTasks()"));
 console.log("OK: Aufgaben werden in vier einklappbare Bereiche gegliedert.");

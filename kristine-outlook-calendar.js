@@ -167,15 +167,15 @@ function installOutlookCalendar(app, deps = {}) {
     return token.access_token;
   }
 
-  async function graphCreate(appointment) {
+  function graphEventPayload(appointment, { includeTransactionId = false } = {}) {
     const link = signedKgoLink(appointment.taskId);
     const content = [appointment.details, appointment.location ? `Ort: ${appointment.location}` : "", `Direkt in KGO öffnen: ${link}`].filter(Boolean).join("\n\n");
     const event = {
       subject:appointment.title,
       body:{ contentType:"text", content },
       location:appointment.location ? { displayName:appointment.location } : undefined,
-      transactionId:appointment.id,
     };
+    if (includeTransactionId) event.transactionId = appointment.id;
     if (appointment.allDay) {
       const end = new Date(`${appointment.date}T12:00:00Z`); end.setUTCDate(end.getUTCDate() + 1);
       event.isAllDay = true;
@@ -186,6 +186,11 @@ function installOutlookCalendar(app, deps = {}) {
       event.end = { dateTime:`${appointment.date}T${appointment.to}:00`, timeZone:TIME_ZONE };
     }
     if (!event.location) delete event.location;
+    return event;
+  }
+
+  async function graphCreate(appointment) {
+    const event = graphEventPayload(appointment, { includeTransactionId:true });
     try {
       const response = await fetch(`${GRAPH_ROOT}/me/calendar/events`, {
         method:"POST", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone=\"${TIME_ZONE}\"` }, body:JSON.stringify(event),
@@ -195,6 +200,24 @@ function installOutlookCalendar(app, deps = {}) {
       return body;
     } catch (error) {
       await audit("graph_create_event_error", { appointmentId:appointment.id, taskId:appointment.taskId, error:String(error?.message || error).slice(0, 1000) });
+      throw error;
+    }
+  }
+
+  async function graphUpdate(appointment) {
+    if (!appointment?.outlook?.eventId) throw new Error("Outlook-Event-ID fehlt.");
+    try {
+      const response = await fetch(`${GRAPH_ROOT}/me/events/${encodeURIComponent(appointment.outlook.eventId)}`, {
+        method:"PATCH", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone=\"${TIME_ZONE}\"` }, body:JSON.stringify(graphEventPayload(appointment)),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+      }
+      await audit("outlook_event_updated", { appointmentId:appointment.id, taskId:appointment.taskId, eventId:appointment.outlook.eventId });
+      return appointment;
+    } catch (error) {
+      await audit("graph_update_event_error", { appointmentId:appointment.id, taskId:appointment.taskId, eventId:appointment.outlook?.eventId || "", error:String(error?.message || error).slice(0, 1000) });
       throw error;
     }
   }
@@ -242,6 +265,40 @@ function installOutlookCalendar(app, deps = {}) {
         });
       }
       url = String(body["@odata.nextLink"] || "");
+    }
+    return rows;
+  }
+
+  async function graphScheduleAppointments(date) {
+    const response = await fetch(`${GRAPH_ROOT}/me/calendar/getSchedule`, {
+      method:"POST",
+      headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone=\"${TIME_ZONE}\"` },
+      body:JSON.stringify({
+        schedules:[EXPECTED_ACCOUNT],
+        startTime:{ dateTime:`${date}T00:00:00`, timeZone:TIME_ZONE },
+        endTime:{ dateTime:`${nextIsoDate(date)}T00:00:00`, timeZone:TIME_ZONE },
+        availabilityViewInterval:30,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+    const items = Array.isArray(body.value?.[0]?.scheduleItems) ? body.value[0].scheduleItems : [];
+    return items.map((item, index) => {
+      const start = String(item.start?.dateTime || ""), end = String(item.end?.dateTime || "");
+      const allDay = graphTime(start) === "00:00" && graphTime(end) === "00:00" && start.slice(0, 10) !== end.slice(0, 10);
+      return {
+        id:`schedule-${index}-${start}-${end}`, title:String(item.subject || "Belegter Termin"), allDay,
+        from:allDay ? "" : graphTime(start), to:allDay ? "" : graphTime(end), showAs:String(item.status || "busy"),
+        location:String(item.location?.displayName || item.location || ""), source:"availability",
+      };
+    });
+  }
+
+  function mergeDayAppointments(calendarRows, scheduleRows) {
+    const rows = [...calendarRows];
+    for (const row of scheduleRows) {
+      const sameSlot = rows.some(current => Boolean(current.allDay) === Boolean(row.allDay) && String(current.from) === String(row.from) && String(current.to) === String(row.to));
+      if (!sameSlot) rows.push(row);
     }
     return rows;
   }
@@ -324,7 +381,9 @@ function installOutlookCalendar(app, deps = {}) {
       return res.status(400).json({ ok:false, error:"Ungültiges Kalenderdatum." });
     }
     try {
-      const appointments = await graphDayAppointments(date);
+      const [calendarResult, scheduleResult] = await Promise.allSettled([graphDayAppointments(date), graphScheduleAppointments(date)]);
+      if (calendarResult.status === "rejected" && scheduleResult.status === "rejected") throw calendarResult.reason;
+      const appointments = mergeDayAppointments(calendarResult.status === "fulfilled" ? calendarResult.value : [], scheduleResult.status === "fulfilled" ? scheduleResult.value : []);
       const graphIds = new Set(appointments.map(row => row.id).filter(Boolean));
       const local = (await readJson(appointmentsFile, [])).filter(row => row.date === date && row.outlook?.status !== "synced" && (!row.outlook?.eventId || !graphIds.has(String(row.outlook.eventId))));
       for (const row of local) appointments.push({
@@ -393,6 +452,53 @@ function installOutlookCalendar(app, deps = {}) {
         rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return { appointment:row, created:true };
       });
       const synced = await syncAppointment(saved.appointment.id); res.status(saved.created ? 201 : 200).json({ ok:true, appointment:synced, internalSaved:true, duplicatePrevented:!saved.created, outlookSynced:synced.outlook.status === "synced" });
+    } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
+  });
+
+  app.patch("/kristine/api/appointments/:id", async (req, res) => {
+    if (!allowed(req, res)) return;
+    try {
+      const id = String(req.params.id || "");
+      const input = cleanInput(req.body || {});
+      const updated = await serialized(async () => {
+        const rows = await readJson(appointmentsFile, []);
+        const row = rows.find(item => item.id === id);
+        if (!row) throw new Error("KRISTINE-Termin nicht gefunden.");
+        Object.assign(row, input, { fingerprint:appointmentFingerprint(input), updatedAt:new Date().toISOString() });
+        await atomicJson(appointmentsFile, rows);
+        await audit("appointment_updated", { appointmentId:id, taskId:row.taskId });
+        return structuredClone(row);
+      });
+      let appointment = updated;
+      try {
+        if (updated.outlook?.eventId) {
+          await graphUpdate(updated);
+          appointment = await serialized(async () => {
+            const rows = await readJson(appointmentsFile, []);
+            const row = rows.find(item => item.id === id);
+            Object.assign(row.outlook, { status:"synced", error:"", syncedAt:new Date().toISOString(), lastAttemptAt:new Date().toISOString(), attempts:Number(row.outlook.attempts || 0) + 1 });
+            await atomicJson(appointmentsFile, rows);
+            return row;
+          });
+        } else {
+          await serialized(async () => {
+            const rows = await readJson(appointmentsFile, []);
+            const row = rows.find(item => item.id === id);
+            row.outlook.status = "pending";
+            await atomicJson(appointmentsFile, rows);
+          });
+          appointment = await syncAppointment(id);
+        }
+      } catch (error) {
+        appointment = await serialized(async () => {
+          const rows = await readJson(appointmentsFile, []);
+          const row = rows.find(item => item.id === id);
+          Object.assign(row.outlook, { status:"failed", error:String(error?.message || error).slice(0, 1000), lastAttemptAt:new Date().toISOString(), attempts:Number(row.outlook.attempts || 0) + 1 });
+          await atomicJson(appointmentsFile, rows);
+          return row;
+        });
+      }
+      res.json({ ok:true, appointment, internalSaved:true, outlookSynced:appointment.outlook.status === "synced" });
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 

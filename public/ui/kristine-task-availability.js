@@ -23,9 +23,9 @@
     target.className="full task-availability";
     if(!date){target.innerHTML='<span class="small">Datum wählen – dann erscheinen hier sofort die gebuchten Termine.</span>';return}
     const day=new Date(`${date}T12:00:00`),label=day.toLocaleDateString("de-AT",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
-    if(!rows.length){target.classList.add("free");target.innerHTML=`<strong>✓ ${safe(label)} ist noch frei</strong><div class="small">Keine gebuchten Termine im Outlook-Kalender von Alex.</div>`;return}
+    if(!rows.length){target.classList.add("free");target.innerHTML=`<strong>✓ ${safe(label)}: keine Termine</strong>`;return}
     const conflicts=rows.filter(overlaps).length;
-    target.innerHTML=`<div class="task-availability-head"><strong>📅 ${safe(label)}</strong><span class="small">${rows.length} Termin${rows.length===1?"":"e"}${conflicts?` · ⚠ ${conflicts} Überschneidung${conflicts===1?"":"en"}`:""}</span></div><div class="task-availability-list">${rows.map(row=>`<div class="task-availability-row ${overlaps(row)?"overlap":""}"><span class="time">${row.allDay?"ganztägig":`${safe(row.from||"–")}–${safe(row.to||"–")}`}</span><span><strong>${safe(row.title||"Termin")}</strong>${row.location?`<span class="location">📍 ${safe(row.location)}</span>`:""}${row.source==="kristine"?'<span class="location">in KRISTINE gespeichert · Outlook-Synchronisierung offen</span>':""}</span></div>`).join("")}</div>`;
+    target.innerHTML=`<strong>📅 ${safe(label)}</strong><div class="task-availability-list">${rows.map(row=>`<span class="task-availability-row ${overlaps(row)?"overlap":""}"><b>${row.allDay?"ganztägig":`${safe(row.from||"–")}–${safe(row.to||"–")}`}</b> ${safe(row.title||"Termin")}</span>`).join("")}</div>${conflicts?`<div class="small task-availability-warning">⚠ Überschneidung mit ${conflicts===1?"diesem Termin":"diesen Terminen"}.</div>`:""}`;
   }
 
   function renderCurrent(){renderRows(lastDate,lastRows)}
