@@ -38,7 +38,7 @@ assert(loader.includes('_revolut_business_install(ns)'));
 assert(connection.includes('API = "https://b2b.revolut.com/api/1.0"'));
 assert(connection.includes('endpoint not in {"/accounts", "/transactions", "/expenses"}'));
 assert(connection.includes('def receipt(self, expense_id, receipt_id):'));
-assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.68"'));
+assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.69"'));
 
 const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)];
 assert.strictEqual(scripts.length, 1, 'Revolut Business page script missing');
