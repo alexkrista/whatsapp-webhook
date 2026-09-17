@@ -11,6 +11,7 @@ const bridge = read('brain_finance_reconciliation_bridge.py');
 const page = read('brain_revolut_business.py');
 const intake = read('brain_invoice_intake.py');
 const loader = read('brain_incoming_op.py');
+const connection = read('brain_revolut_connection.py');
 const runtime = read('brain_service_runtime.py');
 
 assert(source.includes('"revolut_business"'));
@@ -22,6 +23,8 @@ assert(bridge.includes('autoPaid=0'));
 assert(!bridge.includes('store.set_meta(target_source, target_id, status="paid")'));
 
 assert(page.includes('/incoming/revolut/candidates'));
+assert(page.includes('/incoming/revolut/sync'));
+assert(page.includes('Live aktualisieren'));
 assert(page.includes('data-move='));
 assert(page.includes('Buchung ohne Beleg erfassen'));
 assert(page.includes("post('supplier_payment'"));
@@ -32,7 +35,10 @@ assert(page.includes('Rest 0,00'));
 assert(intake.includes('data-context='));
 assert(intake.includes("ctx.includes('business')?'revolut_business'"));
 assert(loader.includes('_revolut_business_install(ns)'));
-assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.67"'));
+assert(connection.includes('API = "https://b2b.revolut.com/api/1.0"'));
+assert(connection.includes('endpoint not in {"/accounts", "/transactions", "/expenses"}'));
+assert(connection.includes('def receipt(self, expense_id, receipt_id):'));
+assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.68"'));
 
 const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)];
 assert.strictEqual(scripts.length, 1, 'Revolut Business page script missing');

@@ -7,6 +7,8 @@ def install(ns):
     brain_service_runtime.install(ns)
     import brain_konfipay
     konfipay_enabled = brain_konfipay.install(ns)
+    import brain_revolut_connection
+    brain_revolut_connection.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:

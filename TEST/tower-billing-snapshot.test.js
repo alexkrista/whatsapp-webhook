@@ -23,7 +23,7 @@ assert.match(outgoing, /def project_recorded_hours_net\(project_number, before_d
 assert.match(outgoing, /cutoff and day >= cutoff/);
 assert.match(incoming, /_tower_billing_snapshot_install\(ns\)/);
 assert.match(archive, /"\/tower\/billing-snapshot"/);
-assert.match(archive, /"version": "0\.14\.67"/);
+assert.match(archive, /"version": "0\.14\.68"/);
 assert.match(tower, /brainApi\('\/tower\/billing-snapshot',240000,\{method:'POST'/);
 assert.match(tower, /hoursThroughDate:billingThroughDate/);
 assert.match(tower, /href="\$\{tokenUrl\('\/kristine\/baustellen'\)\}#\$\{encodeURIComponent\(row\.job\.jobId\)\}"/);
