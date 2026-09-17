@@ -19,6 +19,10 @@ from brain_finance_source import (
     payment_id,
 )
 
+# SQL Server akzeptiert pro Anweisung höchstens 2.100 Parameter. Etwas Abstand
+# zur Grenze lässt Raum für spätere zusätzliche Filterparameter.
+SQL_SERVER_ID_BATCH = 1000
+
 
 def _norm(value):
     return (str(value or "").strip().lower()
@@ -137,11 +141,14 @@ class FinanceStore(_BaseFinanceStore):
                     aliases[key] = alias
             if not aliases:
                 return rows
-            placeholders = ",".join("?" for _ in ids)
-            data = cur.execute(
-                f"SELECT {','.join(selected)} FROM dbo.Eingangsbelege e WHERE e.cID IN ({placeholders})",
-                *ids,
-            ).fetchall()
+            data = []
+            for offset in range(0, len(ids), SQL_SERVER_ID_BATCH):
+                batch = ids[offset:offset + SQL_SERVER_ID_BATCH]
+                placeholders = ",".join("?" for _ in batch)
+                data.extend(cur.execute(
+                    f"SELECT {','.join(selected)} FROM dbo.Eingangsbelege e WHERE e.cID IN ({placeholders})",
+                    *batch,
+                ).fetchall())
         finally:
             con.close()
 
