@@ -100,7 +100,7 @@ def install(ns):
     page=str(ns.get("MOBILE_PAGE") or ""); app=ns.get("app")
     if not page or app is None:return
     allowed=ns.get("MOBILE_ALLOWED_PATHS")
-    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
+    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/creditor-details","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
     if isinstance(allowed,set):
         for p in paths:allowed.add(p)
     store=FinanceStore(ns)
@@ -160,9 +160,9 @@ def install(ns):
         return out
 
     def apply_approval(item,index):
-        row=dict(item);amount=max(0.0,float(row.get("amount") or 0))
+        row=dict(item);amount=max(0.0,float(row.get("amount") or 0));fees=max(0.0,float(row.get("feesAmount") or 0))
         if str(row.get("source") or "")!="KRISTINE":
-            row.update(approvalStatus="not_required",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=amount,paymentAmount=amount,approvalMode="")
+            row.update(approvalStatus="not_required",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=amount,paymentAmount=round(amount+fees,2),approvalMode="")
             return row
         meta=index.get(("KRISTINE",str(row.get("id") or "")))
         if not meta:
@@ -175,15 +175,19 @@ def install(ns):
             approved=min(amount,max(0.0,approved));deduction=max(0.0,amount-approved)
         elif decision=="blocked":approved=0.0
         else:decision="pending";approved=0.0;deduction=0.0
-        row.update(approvalStatus=decision,approvalTaskId=meta.get("taskId") or "",approvalReason=str(meta.get("reason") or ""),approvalDeduction=round(deduction,2),approvedAmount=round(approved,2),paymentAmount=round(approved,2),approvalMode=str(meta.get("mode") or ""))
+        payment=approved+fees if decision in FINAL_APPROVALS else 0.0
+        row.update(approvalStatus=decision,approvalTaskId=meta.get("taskId") or "",approvalReason=str(meta.get("reason") or ""),approvalDeduction=round(deduction,2),approvedAmount=round(approved,2),paymentAmount=round(payment,2),approvalMode=str(meta.get("mode") or ""))
         return row
 
     def remittance_for(item):
         inv=str(item.get("invoiceNumber") or item.get("docId") or "Rechnung").strip()
-        if item.get("approvalStatus")!="reduced":return inv[:140]
-        deduction=float(item.get("approvalDeduction") or 0); reason=" ".join(str(item.get("approvalReason") or "").split())
-        base=f"{inv} - Abzug {deduction:.2f} EUR"
-        if reason:base+=f": {reason}"
+        base=inv
+        if item.get("approvalStatus")=="reduced":
+            deduction=float(item.get("approvalDeduction") or 0); reason=" ".join(str(item.get("approvalReason") or "").split())
+            base+=f" - Abzug {deduction:.2f} EUR"
+            if reason:base+=f": {reason}"
+        fees=max(0.0,float(item.get("feesAmount") or 0))
+        if fees:base+=f" + Mahnspesen {fees:.2f} EUR"
         return base[:140]
 
     def sepa_payload(items):
@@ -237,6 +241,18 @@ def install(ns):
                 if s is not None and norm_status(s) not in STATUSES:raise ValueError("Ungültiger Zahlungsstatus.")
                 saved=store.set_meta(b.get("source"),b.get("id"),m,s,b.get("note") if "note" in b else None); return jsonify(ok=True,**saved)
             except ValueError as e:return jsonify(ok=False,error=str(e)),400
+            except Exception as e:return jsonify(ok=False,error=str(e)),500
+        @app.post("/incoming/creditor-details")
+        def brain_incoming_creditor_details():
+            try:
+                b=request.get_json(silent=True) or {};source=str(b.get("source") or "");sid=str(b.get("id") or "")
+                item=next((x for x in store.items(True) if str(x.get("source") or "")==source and str(x.get("id") or "")==sid),None)
+                if not item:raise ValueError("Rechnung wurde nicht gefunden.")
+                if norm_status(item.get("paymentStatus")) in {"paid","sepa_submitted"}:
+                    raise ValueError("Bezahlte oder bereits an SEPA übergebene Rechnungen können nicht mehr geändert werden.")
+                saved=store.set_creditor_details(source,sid,b.get("dunningLevel") or 0,b.get("feesAmount") or 0,b.get("note") or "",b.get("updatedBy") or "Dunja")
+                return jsonify(ok=True,source=source,id=sid,**saved)
+            except (ValueError,TypeError) as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.post("/incoming/payment-approvals/sync")
         def brain_incoming_payment_approvals_sync():

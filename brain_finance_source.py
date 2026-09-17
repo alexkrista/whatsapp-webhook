@@ -27,8 +27,27 @@ class FinanceStore:
         c=f(db)
         c.execute("CREATE TABLE IF NOT EXISTS brain_op_overrides(source TEXT NOT NULL,source_id TEXT NOT NULL,status TEXT NOT NULL,note TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
         c.execute("CREATE TABLE IF NOT EXISTS brain_payment_meta(source TEXT NOT NULL,source_id TEXT NOT NULL,payment_method TEXT NOT NULL DEFAULT 'unknown',payment_status TEXT NOT NULL DEFAULT 'open',payment_id TEXT NOT NULL DEFAULT '',note TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
+        c.execute("CREATE TABLE IF NOT EXISTS brain_creditor_details(source TEXT NOT NULL,source_id TEXT NOT NULL,dunning_level INTEGER NOT NULL DEFAULT 0,fees_amount REAL NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',updated_by TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
         c.execute("CREATE TABLE IF NOT EXISTS brain_sepa_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT NOT NULL,filename TEXT NOT NULL,transaction_count INTEGER NOT NULL,total_amount REAL NOT NULL,currency TEXT NOT NULL DEFAULT 'EUR',summary TEXT NOT NULL DEFAULT '',items_json TEXT NOT NULL DEFAULT '[]',xml_text TEXT NOT NULL)")
         c.commit(); return c
+    def creditor_details(self):
+        c=self.con()
+        try:
+            rows=c.execute("SELECT source,source_id,dunning_level,fees_amount,note,updated_by,updated_at FROM brain_creditor_details").fetchall()
+            return {(str(r["source"]),str(r["source_id"])):{"dunningLevel":int(r["dunning_level"] or 0),"feesAmount":round(float(r["fees_amount"] or 0),2),"creditorNote":str(r["note"] or ""),"creditorUpdatedBy":str(r["updated_by"] or ""),"creditorUpdatedAt":str(r["updated_at"] or "")} for r in rows}
+        finally:c.close()
+    def set_creditor_details(self,source,source_id,dunning_level=0,fees_amount=0,note="",updated_by=""):
+        source=str(source or "").strip();source_id=str(source_id or "").strip()
+        if source not in {"WinWorker","KRISTINE"} or not source_id:raise ValueError("Ungültige Rechnung.")
+        level=int(dunning_level or 0);fees=round(float(fees_amount or 0),2)
+        if level<0 or level>9:raise ValueError("Mahnstufe muss zwischen 0 und 9 liegen.")
+        if fees<0 or fees>10000:raise ValueError("Spesen müssen zwischen 0,00 und 10.000,00 EUR liegen.")
+        saved={"dunningLevel":level,"feesAmount":fees,"creditorNote":str(note or "").strip()[:1000],"creditorUpdatedBy":str(updated_by or "Dunja").strip()[:100] or "Dunja","creditorUpdatedAt":datetime.now().isoformat(timespec="seconds")}
+        c=self.con()
+        try:
+            c.execute("INSERT INTO brain_creditor_details(source,source_id,dunning_level,fees_amount,note,updated_by,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET dunning_level=excluded.dunning_level,fees_amount=excluded.fees_amount,note=excluded.note,updated_by=excluded.updated_by,updated_at=excluded.updated_at",(source,source_id,level,fees,saved["creditorNote"],saved["creditorUpdatedBy"],saved["creditorUpdatedAt"]))
+            c.commit();return saved
+        finally:c.close()
     def meta(self):
         c=self.con()
         try:
@@ -128,4 +147,8 @@ class FinanceStore:
         return out
     def items(self,include_resolved=False):
         ww=self.ww(include_resolved); local=self.kristine(include_resolved); docs={str(x.get("docId") or "").strip() for x in local if str(x.get("docId") or "").strip()}; rows=[x for x in ww if str(x.get("docId") or "").strip() not in docs]+local
+        details=self.creditor_details()
+        for row in rows:
+            row["invoiceAmount"]=round(float(row.get("amount") or 0),2)
+            row.update(details.get((str(row.get("source") or ""),str(row.get("id") or "")),{"dunningLevel":0,"feesAmount":0.0,"creditorNote":"","creditorUpdatedBy":"","creditorUpdatedAt":""}))
         rows.sort(key=lambda x:(str(x.get("dueDate") or x.get("invoiceDate") or ""),str(x.get("supplier") or "").lower(),float(x.get("amount") or 0))); return rows

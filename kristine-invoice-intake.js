@@ -137,7 +137,7 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
     try {
       const includeProcessed = ["1", "true", "yes", "ja"].includes(String(req.query?.includeProcessed || "").toLowerCase());
       let rows = await allItems();
-      if (!includeProcessed) rows = rows.filter(row => String(row.status || "queued") !== "processed");
+      if (!includeProcessed) rows = rows.filter(row => !["processed", "deleted"].includes(String(row.status || "queued")));
       res.json({ ok: true, count: rows.length, items: rows.slice(0, 250) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
@@ -184,6 +184,25 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
       item.updatedAt = new Date().toISOString();
       await writeItem(item);
       res.json({ ok: true, item });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: String(error?.message || error) });
+    }
+  });
+
+  app.delete("/kristine/api/invoice-intake/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const item = await readItem(req.params.id);
+      if (!item) return res.status(404).json({ ok: false, error: "Rechnungseingang nicht gefunden" });
+      const reason = cleanText(req.body?.reason, 500);
+      if (reason.length < 3) return res.status(400).json({ ok: false, error: "Bitte einen kurzen Löschgrund angeben." });
+      item.status = "deleted";
+      item.deletedAt = new Date().toISOString();
+      item.deletedBy = cleanText(req.body?.deletedBy || "Dunja", 160);
+      item.deleteReason = reason;
+      item.updatedAt = item.deletedAt;
+      await writeItem(item);
+      res.json({ ok: true, archived: true, filesPreserved: true, item });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }

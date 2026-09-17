@@ -35,6 +35,7 @@ def install(ns):
         "/incoming/intake-import",
         "/incoming/intake-file",
         "/incoming/intake-complete",
+        "/incoming/intake-delete",
     )
     if isinstance(allowed, set):
         for route in routes:
@@ -146,6 +147,28 @@ def install(ns):
             except Exception as exc:
                 return jsonify(ok=False, error=str(exc)), 502
 
+        @app.delete("/incoming/intake-delete")
+        def brain_invoice_intake_delete():
+            try:
+                body = request.get_json(silent=True) or {}
+                item_id = _safe_id(body.get("id"))
+                reason = str(body.get("reason") or "").strip()
+                if not item_id:
+                    return jsonify(ok=False, error="Eingang fehlt"), 400
+                if len(reason) < 3:
+                    return jsonify(ok=False, error="Bitte einen kurzen Löschgrund angeben."), 400
+                result = kristine_api(
+                    f"/kristine/api/invoice-intake/{item_id}",
+                    method="DELETE",
+                    payload={
+                        "reason": reason[:500],
+                        "deletedBy": str(body.get("deletedBy") or "Dunja")[:160],
+                    },
+                ) or {}
+                return jsonify(result)
+            except Exception as exc:
+                return jsonify(ok=False, error=str(exc)), 502
+
     if "kristaInvoiceIntakeV1" in page:
         ns["MOBILE_PAGE"] = page
         return
@@ -154,7 +177,7 @@ def install(ns):
 .invoice-intake{margin:14px 0;border:1px solid #46515d;border-radius:14px;background:#141920;padding:14px}
 .invoice-intake-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.invoice-intake-head h3{margin:0}.invoice-intake-count{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;padding:0 9px;border-radius:999px;background:#2d7047;color:#fff;font-weight:900;font-size:12px}
 .invoice-intake-drop{margin-top:12px;border:2px dashed #566575;border-radius:12px;padding:15px;text-align:center;background:#10151b;cursor:pointer}.invoice-intake-drop.dragover{border-color:#6db486;background:#14241b}.invoice-intake-drop strong{display:block}.invoice-intake-drop small{display:block;color:#9faab5;margin-top:3px}
-.invoice-intake-list{display:grid;gap:8px;margin-top:12px}.invoice-intake-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid #343d47;border-radius:11px;padding:10px 11px;background:#1b2128}.invoice-intake-title{font-weight:850;overflow-wrap:anywhere}.invoice-intake-meta{font-size:11px;color:#9faab5;margin-top:3px}.invoice-intake-actions{display:flex;gap:7px;flex-wrap:wrap}.invoice-intake-actions button,.invoice-intake-actions a{border:1px solid #526170;border-radius:9px;padding:8px 10px;background:#25303a;color:#fff;text-decoration:none;font-weight:800;font-size:12px;cursor:pointer}.invoice-intake-actions .primary{background:#2d7047;border-color:#3d8d5e}.invoice-intake-empty{padding:8px 0;color:#9faab5;font-size:12px}.invoice-intake-current{margin-top:10px;padding:9px 11px;border-radius:10px;background:#17301f;border:1px solid #3c7350;font-size:12px}.invoice-intake-current[hidden]{display:none!important}
+.invoice-intake-list{display:grid;gap:8px;margin-top:12px}.invoice-intake-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid #343d47;border-radius:11px;padding:10px 11px;background:#1b2128}.invoice-intake-title{font-weight:850;overflow-wrap:anywhere}.invoice-intake-meta{font-size:11px;color:#9faab5;margin-top:3px}.invoice-intake-actions{display:flex;gap:7px;flex-wrap:wrap}.invoice-intake-actions button,.invoice-intake-actions a{border:1px solid #526170;border-radius:9px;padding:8px 10px;background:#25303a;color:#fff;text-decoration:none;font-weight:800;font-size:12px;cursor:pointer}.invoice-intake-actions .primary{background:#2d7047;border-color:#3d8d5e}.invoice-intake-actions .delete{background:#713631;border-color:#a74f48}.invoice-intake-empty{padding:8px 0;color:#9faab5;font-size:12px}.invoice-intake-current{margin-top:10px;padding:9px 11px;border-radius:10px;background:#17301f;border:1px solid #3c7350;font-size:12px}.invoice-intake-current[hidden]{display:none!important}
 @media(max-width:700px){.invoice-intake-item{grid-template-columns:1fr}.invoice-intake-actions>*{flex:1}}
 '''
 
@@ -172,7 +195,8 @@ def install(ns):
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtTime=s=>{if(!s)return '';try{return new Intl.DateTimeFormat('de-AT',{dateStyle:'short',timeStyle:'short'}).format(new Date(s))}catch(_){return s}};
   const person=()=>document.querySelector('.krista-brain-user strong')?.textContent?.trim()||'Brain';
-  async function load(){try{const r=await fetch('/incoming/intake-list',{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Eingang nicht erreichbar');const rows=d.items||[];count.textContent=rows.length;list.innerHTML=rows.length?rows.map(x=>`<div class="invoice-intake-item"><div><div class="invoice-intake-title">${esc(x.name||'Rechnung')}</div><div class="invoice-intake-meta">${esc(x.source||'Eingang')} · ${esc(x.submittedByName||'Unbekannt')} · ${esc(fmtTime(x.capturedAt||x.createdAt))}${x.paymentContext?' · '+esc(x.paymentContext):''}</div></div><div class="invoice-intake-actions"><button class="primary" type="button" data-intake="${esc(x.id)}" data-name="${esc(x.name||'Rechnung')}" data-stamp="${esc((x.source||'Eingang')+' · '+(x.submittedByName||'Unbekannt')+' · '+fmtTime(x.capturedAt||x.createdAt))}">Bearbeiten</button></div></div>`).join(''):'<div class="invoice-intake-empty">✓ Eingangskorb leer.</div>';list.querySelectorAll('[data-intake]').forEach(b=>b.onclick=()=>openItem(b.dataset.intake,b.dataset.name,b.dataset.stamp))}catch(e){count.textContent='!';list.innerHTML='<div class="invoice-intake-empty">'+esc(e.message||e)+'</div>'}}
+  async function load(){try{const r=await fetch('/incoming/intake-list',{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Eingang nicht erreichbar');const rows=d.items||[];count.textContent=rows.length;list.innerHTML=rows.length?rows.map(x=>`<div class="invoice-intake-item"><div><div class="invoice-intake-title">${esc(x.name||'Rechnung')}</div><div class="invoice-intake-meta">${esc(x.source||'Eingang')} · ${esc(x.submittedByName||'Unbekannt')} · ${esc(fmtTime(x.capturedAt||x.createdAt))}${x.paymentContext?' · '+esc(x.paymentContext):''}</div></div><div class="invoice-intake-actions"><button class="primary" type="button" data-intake="${esc(x.id)}" data-name="${esc(x.name||'Rechnung')}" data-stamp="${esc((x.source||'Eingang')+' · '+(x.submittedByName||'Unbekannt')+' · '+fmtTime(x.capturedAt||x.createdAt))}">Bearbeiten</button><button class="delete" type="button" data-intake-delete="${esc(x.id)}" data-name="${esc(x.name||'Rechnung')}">Löschen</button></div></div>`).join(''):'<div class="invoice-intake-empty">✓ Eingangskorb leer.</div>';list.querySelectorAll('[data-intake]').forEach(b=>b.onclick=()=>openItem(b.dataset.intake,b.dataset.name,b.dataset.stamp));list.querySelectorAll('[data-intake-delete]').forEach(b=>b.onclick=()=>deleteItem(b.dataset.intakeDelete,b.dataset.name))}catch(e){count.textContent='!';list.innerHTML='<div class="invoice-intake-empty">'+esc(e.message||e)+'</div>'}}
+  async function deleteItem(id,name){const reason=prompt(`${name||'Beleg'} aus dem Eingang entfernen?\n\nDie Originaldatei bleibt zur Wiederherstellung erhalten.\n\nLöschgrund:`,'Doppelt oder falsch');if(reason===null)return;if(reason.trim().length<3)return alert('Bitte einen kurzen Löschgrund eingeben.');if(!confirm(`${name||'Beleg'} jetzt aus dem Eingang entfernen?`))return;try{const r=await fetch('/incoming/intake-delete',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,reason:reason.trim(),deletedBy:person()})}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Löschen fehlgeschlagen');if(currentIntakeId===id){currentIntakeId='';currentIntakeStamp='';current.hidden=true}await load()}catch(e){alert(e.message||e)}}
   async function uploadFiles(files){const rows=[...(files||[])];if(!rows.length)return;drop.classList.remove('dragover');drop.querySelector('strong').textContent='Wird abgelegt …';let ok=0;for(const file of rows){try{const fd=new FormData();fd.append('file',file);fd.append('submittedById','brain');fd.append('submittedByName',person());fd.append('capturedAt',new Date().toISOString());const r=await fetch('/incoming/intake-import',{method:'POST',body:fd}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Upload fehlgeschlagen');ok++}catch(e){alert((file.name||'Datei')+': '+(e.message||e))}}drop.querySelector('strong').textContent='PDF oder Foto hier hineinziehen';if(ok)await load()}
   async function openItem(id,name,stamp){if(!id)return;try{if(typeof captureArea!=='undefined'&&captureArea!=='live'&&typeof setCaptureArea==='function'){await Promise.resolve(setCaptureArea('live'));await new Promise(r=>setTimeout(r,80))}currentIntakeId=id;currentIntakeStamp=stamp||'';current.hidden=false;current.innerHTML='<strong>In Bearbeitung:</strong> '+esc(name)+' · '+esc(stamp||'');const r=await fetch('/incoming/intake-file?id='+encodeURIComponent(id),{cache:'no-store'});if(!r.ok){let msg='Datei konnte nicht geöffnet werden';try{const d=await r.json();msg=d.error||msg}catch(_){}throw Error(msg)}const blob=await r.blob();const pdfName=String(name||'Rechnung').replace(/\.[^.]+$/, '')+'.pdf';const file=new File([blob],pdfName,{type:'application/pdf'});if(typeof setCaptureFile==='function')setCaptureFile(file);else{const dt=new DataTransfer();dt.items.add(file);captureFile.files=dt.files;captureFile.dispatchEvent(new Event('change',{bubbles:true}))}setTimeout(()=>{try{if(currentIntakeStamp&&captureNote&&!String(captureNote.value||'').includes(currentIntakeStamp))captureNote.value=(String(captureNote.value||'').trim()?String(captureNote.value||'').trim()+'\n':'')+'Eingang: '+currentIntakeStamp}catch(_){}},250)}catch(e){currentIntakeId='';currentIntakeStamp='';current.hidden=true;alert(e.message||e)}}
   drop.onclick=()=>input.click();input.onchange=()=>{const files=[...(input.files||[])];input.value='';uploadFiles(files)};['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.add('dragover')}));['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('dragover')}));drop.addEventListener('drop',e=>uploadFiles(e.dataTransfer?.files));

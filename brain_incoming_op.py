@@ -34,8 +34,10 @@ from brain_capture_duplicate_guard import install as _capture_duplicate_guard_in
 from brain_capture_learning_ui import install as _capture_learning_ui_install
 from brain_capture_tax_ui import install as _capture_tax_ui_install
 from brain_capture_accounts import install as _capture_accounts_install
+from brain_capture_prepayment import install as _capture_prepayment_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
+from brain_finance_creditor_ui import install as _creditor_ui_install
 from brain_header_dedup import install as _header_dedup_install
 from brain_finance_header import install as _finance_header_install
 from brain_outgoing_invoices import install as _outgoing_invoices_install
@@ -46,6 +48,7 @@ def install(ns):
     _capture_edit_install(ns)
     _capture_edit_fast_install(ns)
     _finance_install(ns)
+    _creditor_ui_install(ns)
     _currency_payment_install(ns)
     _finance_test_bridge_install(ns)
     _revolut_task_guard_install(ns)
@@ -65,6 +68,7 @@ def install(ns):
     _capture_learning_ui_install(ns)
     _capture_tax_ui_install(ns)
     _capture_accounts_install(ns)
+    _capture_prepayment_install(ns)
 
     # Bewusst NICHT mehr installieren:
     # brain_capture_standalone / stability-Frontend / scroll_fix / scroll_isolation.
