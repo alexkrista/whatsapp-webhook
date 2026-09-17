@@ -1,0 +1,1130 @@
+{
+  "version": "ÖNORM B 1801-1:2022-03, Anhang A (informativ)",
+  "source": "Vom Nutzer bereitgestellte Norm, Tabelle A.1, Seiten 41–46",
+  "groups": [
+    "Grund",
+    "Aufschließung",
+    "Bauwerk-Rohbau",
+    "Bauwerk-Technik",
+    "Bauwerk-Ausbau",
+    "Einrichtung",
+    "Außenanlagen",
+    "Planungsleistungen",
+    "Projektnebenleistungen",
+    "Reserven"
+  ],
+  "rows": [
+    {
+      "code": "0.G01",
+      "name": "Allgemeine Maßnahmen",
+      "page": 41
+    },
+    {
+      "code": "0.G11",
+      "name": "Grunderwerb",
+      "page": 41
+    },
+    {
+      "code": "0.G12",
+      "name": "Baurechtserwerb",
+      "page": 41
+    },
+    {
+      "code": "0.G13",
+      "name": "Abfindungen",
+      "page": 41
+    },
+    {
+      "code": "0.G21",
+      "name": "Vorstudien, Gutachten",
+      "page": 41
+    },
+    {
+      "code": "0.G22",
+      "name": "Vermessung, Vermarkung",
+      "page": 41
+    },
+    {
+      "code": "0.G23",
+      "name": "Gerichtsgebühren",
+      "page": 41
+    },
+    {
+      "code": "0.G24",
+      "name": "Notariatsgebühren",
+      "page": 41
+    },
+    {
+      "code": "0.G25",
+      "name": "Maklerhonorare",
+      "page": 41
+    },
+    {
+      "code": "0.G26",
+      "name": "Grunderwerbsteuer",
+      "page": 41
+    },
+    {
+      "code": "0.G27",
+      "name": "Wertermittlungen, Untersuchungen",
+      "page": 41
+    },
+    {
+      "code": "0.G28",
+      "name": "Genehmigungsgebühren",
+      "page": 41
+    },
+    {
+      "code": "0.G29",
+      "name": "Sonstige Grunderwerbsnebenkosten",
+      "page": 41
+    },
+    {
+      "code": "0.G30",
+      "name": "Abfindungen",
+      "page": 41
+    },
+    {
+      "code": "0.G31",
+      "name": "Ablösen dinglicher Rechte",
+      "page": 41
+    },
+    {
+      "code": "0.G41",
+      "name": "Servitute",
+      "page": 41
+    },
+    {
+      "code": "1.H01",
+      "name": "Baustellengemeinkosten",
+      "page": 41
+    },
+    {
+      "code": "1.H02",
+      "name": "Abbrucharbeiten",
+      "page": 41
+    },
+    {
+      "code": "1.H14",
+      "name": "Besondere Instandsetzungsarbeiten",
+      "page": 41
+    },
+    {
+      "code": "1.H18",
+      "name": "Winterbauarbeiten",
+      "page": 41
+    },
+    {
+      "code": "1.H20",
+      "name": "Regieleistungen",
+      "page": 41
+    },
+    {
+      "code": "1.A50",
+      "name": "Bestandsaufnahmen",
+      "page": 41
+    },
+    {
+      "code": "1.A55",
+      "name": "Baugrunduntersuchungen",
+      "page": 41
+    },
+    {
+      "code": "1.A60",
+      "name": "Räumungen, Terrainvorbereitungen",
+      "page": 41
+    },
+    {
+      "code": "1.A70",
+      "name": "Sicherungen, Provisorien",
+      "page": 41
+    },
+    {
+      "code": "1.A80",
+      "name": "Anpassungen an bestehende Anlagen",
+      "page": 41
+    },
+    {
+      "code": "2.H01",
+      "name": "Baustellengemeinkosten",
+      "page": 41
+    },
+    {
+      "code": "2.H02",
+      "name": "Abbruch",
+      "page": 41
+    },
+    {
+      "code": "2.H03",
+      "name": "Roden, Baugrube, Sicherungen und Tiefgründungen",
+      "page": 41
+    },
+    {
+      "code": "2.H04",
+      "name": "System-Gerüste",
+      "page": 41
+    },
+    {
+      "code": "2.H06",
+      "name": "Aufschließung, Infrastruktur",
+      "page": 42
+    },
+    {
+      "code": "2.H07",
+      "name": "Beton- und Stahlbetonarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H08",
+      "name": "Maurerarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H09",
+      "name": "Versetzarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H12",
+      "name": "Abdichtungen bei Betonflächen und Wänden",
+      "page": 42
+    },
+    {
+      "code": "2.H14",
+      "name": "Besondere Instandsetzungsarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H15",
+      "name": "Schlitze, Durchbrüche, Sägen und Bohren",
+      "page": 42
+    },
+    {
+      "code": "2.H16",
+      "name": "Fertigteile",
+      "page": 42
+    },
+    {
+      "code": "2.H18",
+      "name": "Winterbauarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H19",
+      "name": "Baureinigung",
+      "page": 42
+    },
+    {
+      "code": "2.H20",
+      "name": "Regieleistungen",
+      "page": 42
+    },
+    {
+      "code": "2.H28",
+      "name": "Natursteinarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H32",
+      "name": "Konstruktiver Stahlbau",
+      "page": 42
+    },
+    {
+      "code": "2.H35",
+      "name": "System-Abgasanlagen",
+      "page": 42
+    },
+    {
+      "code": "2.H36",
+      "name": "Holzbau",
+      "page": 42
+    },
+    {
+      "code": "2.H39",
+      "name": "Trockenbauarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H80",
+      "name": "Injektionsarbeiten",
+      "page": 42
+    },
+    {
+      "code": "2.H90",
+      "name": "Schutzraumeinbauten und Einrichtungen",
+      "page": 42
+    },
+    {
+      "code": "3.T01",
+      "name": "Baustellengemeinkosten",
+      "page": 42
+    },
+    {
+      "code": "3.T04",
+      "name": "Umformer und Kompensation",
+      "page": 42
+    },
+    {
+      "code": "3.T05",
+      "name": "Netzersatzanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T06",
+      "name": "Niederspannungsverteilungen",
+      "page": 42
+    },
+    {
+      "code": "3.T08",
+      "name": "Kabel und Leitungen",
+      "page": 42
+    },
+    {
+      "code": "3.T09",
+      "name": "Rohr- und Tragsysteme",
+      "page": 42
+    },
+    {
+      "code": "3.T11",
+      "name": "Leuchten liefern und montieren",
+      "page": 42
+    },
+    {
+      "code": "3.T12",
+      "name": "Erdungs- und Blitzschutzanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T14",
+      "name": "Elektroheizungsanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T17",
+      "name": "Antennenanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T18",
+      "name": "Kommunikationsanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T19",
+      "name": "Strukturierte Verkabelung",
+      "page": 42
+    },
+    {
+      "code": "3.T21",
+      "name": "Sicherheitstechnik",
+      "page": 42
+    },
+    {
+      "code": "3.T26",
+      "name": "Kompaktpositionen E-Installation",
+      "page": 42
+    },
+    {
+      "code": "3.T27",
+      "name": "Alternative Stromerzeugungsanlagen",
+      "page": 42
+    },
+    {
+      "code": "3.T28",
+      "name": "Wartung Gewährleistungszeitraum E-Installation",
+      "page": 42
+    },
+    {
+      "code": "3.T30",
+      "name": "Regieleistungen, Planung, E-Anlagenbuch",
+      "page": 42
+    },
+    {
+      "code": "3.T31",
+      "name": "Leuchten nur liefern",
+      "page": 42
+    },
+    {
+      "code": "3.T35",
+      "name": "Wärmebereitstellung für Heizung und Warmwasser",
+      "page": 42
+    },
+    {
+      "code": "3.T36",
+      "name": "Wärmeverteilung",
+      "page": 42
+    },
+    {
+      "code": "3.T37",
+      "name": "Wärmeabgabe",
+      "page": 42
+    },
+    {
+      "code": "3.T3X",
+      "name": "Elektroanlagen und Beleuchtung",
+      "page": 42
+    },
+    {
+      "code": "3.T46",
+      "name": "Heizkörper",
+      "page": 42
+    },
+    {
+      "code": "3.T48",
+      "name": "Kompaktpositionen Heizung, Sanitär, Lüftung",
+      "page": 42
+    },
+    {
+      "code": "3.T4X",
+      "name": "Heizungsanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T50",
+      "name": "Lüftungsgeräte, Ventilatoren",
+      "page": 43
+    },
+    {
+      "code": "3.T54",
+      "name": "Luftleitungen, Einbauten, Luftdurchlässe",
+      "page": 43
+    },
+    {
+      "code": "3.T55",
+      "name": "Brandschutzklappen und Brandrauch-Steuerklappen mit Brandschutz",
+      "page": 43
+    },
+    {
+      "code": "3.T59",
+      "name": "Druckluftanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T5X",
+      "name": "Lüftungsanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T61",
+      "name": "Abwasseranlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T62",
+      "name": "Wasseranlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T63",
+      "name": "Sanitäre Einrichtungen",
+      "page": 43
+    },
+    {
+      "code": "3.T64",
+      "name": "Gasanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T65",
+      "name": "Feuerlöschanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T6X",
+      "name": "Sanitär- und Gasanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T67",
+      "name": "Kälteanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T79",
+      "name": "Rohre mit vorgefertigter Wärmedämmung",
+      "page": 43
+    },
+    {
+      "code": "3.T80",
+      "name": "Mess- und Kontrollgeräte",
+      "page": 43
+    },
+    {
+      "code": "3.T81",
+      "name": "Tragkonstruktionen, Roste und Abdeckungen",
+      "page": 43
+    },
+    {
+      "code": "3.T82",
+      "name": "Wärme- und Kältedämmung",
+      "page": 43
+    },
+    {
+      "code": "3.T83",
+      "name": "Feuerschutz und Schalldämmung",
+      "page": 43
+    },
+    {
+      "code": "3.T84",
+      "name": "GA-Systeme-Raumautomation",
+      "page": 43
+    },
+    {
+      "code": "3.T85",
+      "name": "GA-System-Automation",
+      "page": 43
+    },
+    {
+      "code": "3.T86",
+      "name": "GA-System-Management",
+      "page": 43
+    },
+    {
+      "code": "3.T87",
+      "name": "GA-System-Feldgeräte",
+      "page": 43
+    },
+    {
+      "code": "3.T88",
+      "name": "GA-System-Verteiler",
+      "page": 43
+    },
+    {
+      "code": "3.T8X",
+      "name": "GA-System-Anlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T90",
+      "name": "Regieleistungen, Planung HKLS/GA-Systeme",
+      "page": 43
+    },
+    {
+      "code": "3.T91",
+      "name": "Inspektion und Wartung GA-Systeme",
+      "page": 43
+    },
+    {
+      "code": "3.T95",
+      "name": "Wartung Gewährleistungszeitraum HLKS",
+      "page": 43
+    },
+    {
+      "code": "3.T96",
+      "name": "Förderanlagen",
+      "page": 43
+    },
+    {
+      "code": "3.T98",
+      "name": "Sonstige Leistungen E-Technik",
+      "page": 43
+    },
+    {
+      "code": "4.H01",
+      "name": "Baustellengemeinkosten",
+      "page": 43
+    },
+    {
+      "code": "4.H02",
+      "name": "Abbruch",
+      "page": 43
+    },
+    {
+      "code": "4.H04",
+      "name": "System-Gerüste",
+      "page": 43
+    },
+    {
+      "code": "4.H10",
+      "name": "Putz",
+      "page": 43
+    },
+    {
+      "code": "4.H11",
+      "name": "Estricharbeiten",
+      "page": 43
+    },
+    {
+      "code": "4.H14",
+      "name": "Besondere Instandsetzungsarbeiten",
+      "page": 43
+    },
+    {
+      "code": "4.H15",
+      "name": "Schlitze, Durchbrüche, Sägen und Bohren",
+      "page": 43
+    },
+    {
+      "code": "4.H16",
+      "name": "Fertigteile",
+      "page": 43
+    },
+    {
+      "code": "4.H19",
+      "name": "Baureinigung",
+      "page": 43
+    },
+    {
+      "code": "4.H20",
+      "name": "Regieleistungen",
+      "page": 43
+    },
+    {
+      "code": "4.H21",
+      "name": "Dachabdichtungsarbeiten",
+      "page": 43
+    },
+    {
+      "code": "4.H22",
+      "name": "Dachdeckerarbeiten",
+      "page": 43
+    },
+    {
+      "code": "4.H23",
+      "name": "Bauspenglerarbeiten",
+      "page": 43
+    },
+    {
+      "code": "4.H24",
+      "name": "Fliesen- und Plattenlegearbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H25",
+      "name": "Sicherheits- und Schutzmaßnahmen",
+      "page": 44
+    },
+    {
+      "code": "4.H27",
+      "name": "Terrazzoarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H28",
+      "name": "Natursteinarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H29",
+      "name": "Kunststeinarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H30",
+      "name": "Schließanlagen",
+      "page": 44
+    },
+    {
+      "code": "4.H31",
+      "name": "Metallbauarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H32",
+      "name": "Konstruktiver Stahlbau",
+      "page": 44
+    },
+    {
+      "code": "4.H34",
+      "name": "Verglaste Rohrrahmenelemente",
+      "page": 44
+    },
+    {
+      "code": "4.H35",
+      "name": "System-Abgasanlagen",
+      "page": 44
+    },
+    {
+      "code": "4.H36",
+      "name": "Holzbau",
+      "page": 44
+    },
+    {
+      "code": "4.H37",
+      "name": "Tischlerarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H38",
+      "name": "Holzfußböden",
+      "page": 44
+    },
+    {
+      "code": "4.H39",
+      "name": "Trockenbauarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H42",
+      "name": "Glaserarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H43",
+      "name": "Türsysteme (Elemente)",
+      "page": 44
+    },
+    {
+      "code": "4.H44",
+      "name": "Wärmedämmverbundsysteme (WDVS)",
+      "page": 44
+    },
+    {
+      "code": "4.H47",
+      "name": "Tapetenarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H48",
+      "name": "Beschichtungen auf Holz, Metall, Mauerwerk, Putz, Beton und Leichtbauplatten",
+      "page": 44
+    },
+    {
+      "code": "4.H49",
+      "name": "Beschichtungen auf Betonböden",
+      "page": 44
+    },
+    {
+      "code": "4.H50",
+      "name": "Klebearbeiten für Boden- und Wandbeläge",
+      "page": 44
+    },
+    {
+      "code": "4.H55",
+      "name": "Sanierung von Fenstern und Türen aus Holz",
+      "page": 44
+    },
+    {
+      "code": "4.H56",
+      "name": "Dachflächenfenster, Lichtkuppeln, Lichtbänder",
+      "page": 44
+    },
+    {
+      "code": "4.H57",
+      "name": "Bewegliche Abschlüsse von Fenstern",
+      "page": 44
+    },
+    {
+      "code": "4.H61",
+      "name": "Sporthallenausbau",
+      "page": 44
+    },
+    {
+      "code": "4.H65",
+      "name": "Toranlagen in Gebäuden",
+      "page": 44
+    },
+    {
+      "code": "4.H67",
+      "name": "Pfosten/Riegel/Fassaden aus Aluminium",
+      "page": 44
+    },
+    {
+      "code": "4.H68",
+      "name": "Vorgehängte hinterlüftete Fassaden",
+      "page": 44
+    },
+    {
+      "code": "4.H69",
+      "name": "Aufsatzkonstruktionen für Fassaden",
+      "page": 44
+    },
+    {
+      "code": "4.H71",
+      "name": "Fenster aus Holz",
+      "page": 44
+    },
+    {
+      "code": "4.H72",
+      "name": "Fenster aus Aluminium",
+      "page": 44
+    },
+    {
+      "code": "4.H73",
+      "name": "Fenster aus Kunststoff",
+      "page": 44
+    },
+    {
+      "code": "4.H74",
+      "name": "Fenster aus Holz/Aluminium",
+      "page": 44
+    },
+    {
+      "code": "4.H75",
+      "name": "Fenster aus Kunststoff/Aluminium",
+      "page": 44
+    },
+    {
+      "code": "4.H80",
+      "name": "Injektionsarbeiten",
+      "page": 44
+    },
+    {
+      "code": "4.H90",
+      "name": "Schutzraumeinbauten und Einrichtungen",
+      "page": 44
+    },
+    {
+      "code": "5.H37",
+      "name": "Tischlerarbeiten",
+      "page": 44
+    },
+    {
+      "code": "5.H61",
+      "name": "Sporthallenausbau",
+      "page": 44
+    },
+    {
+      "code": "5.E70",
+      "name": "Spezielle Betriebseinrichtungen",
+      "page": 44
+    },
+    {
+      "code": "5.E71",
+      "name": "Spezielle Ausstattungen",
+      "page": 44
+    },
+    {
+      "code": "5.E72",
+      "name": "Möbel",
+      "page": 44
+    },
+    {
+      "code": "5.E73",
+      "name": "Textilien",
+      "page": 44
+    },
+    {
+      "code": "5.E74",
+      "name": "Geräte, Apparate",
+      "page": 45
+    },
+    {
+      "code": "5.E75",
+      "name": "Verbrauchsmaterial, Kleininventar",
+      "page": 45
+    },
+    {
+      "code": "5.E77",
+      "name": "Künstlerische Gestaltung",
+      "page": 45
+    },
+    {
+      "code": "6.H01",
+      "name": "Baustellengemeinkosten",
+      "page": 45
+    },
+    {
+      "code": "6.H02",
+      "name": "Abbruch",
+      "page": 45
+    },
+    {
+      "code": "6.H03",
+      "name": "Rodungen, Baugrube, Sicherungen und Tiefgründungen",
+      "page": 45
+    },
+    {
+      "code": "6.H04",
+      "name": "System-Gerüste",
+      "page": 45
+    },
+    {
+      "code": "6.H06",
+      "name": "Aufschließung, Infrastruktur",
+      "page": 45
+    },
+    {
+      "code": "6.H07",
+      "name": "Beton- und Stahlbetonarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H08",
+      "name": "Maurerarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H09",
+      "name": "Versetzarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H12",
+      "name": "Abdichtungen bei Betonflächen und Wänden",
+      "page": 45
+    },
+    {
+      "code": "6.H13",
+      "name": "Außenanlagen",
+      "page": 45
+    },
+    {
+      "code": "6.H16",
+      "name": "Fertigteile",
+      "page": 45
+    },
+    {
+      "code": "6.H18",
+      "name": "Winterbauarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H20",
+      "name": "Regieleistungen",
+      "page": 45
+    },
+    {
+      "code": "6.H28",
+      "name": "Natursteinarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H29",
+      "name": "Kunststeinarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H31",
+      "name": "Metallbauarbeiten",
+      "page": 45
+    },
+    {
+      "code": "6.H32",
+      "name": "Konstruktiver Stahlbau",
+      "page": 45
+    },
+    {
+      "code": "6.H36",
+      "name": "Zimmermeisterarbeiten (Holzbauarbeiten)",
+      "page": 45
+    },
+    {
+      "code": "6.H48",
+      "name": "Beschichtungen auf Holz, Metall, Mauerwerk, Putz, Beton und Leichtbauplatten",
+      "page": 45
+    },
+    {
+      "code": "6.H58",
+      "name": "Gartengestaltung und Landschaftsbau",
+      "page": 45
+    },
+    {
+      "code": "6.H59",
+      "name": "Sportanlagen im Freien",
+      "page": 45
+    },
+    {
+      "code": "7.P01",
+      "name": "Projektleitung",
+      "page": 45
+    },
+    {
+      "code": "7.P02",
+      "name": "Projektsteuerung",
+      "page": 45
+    },
+    {
+      "code": "7.P03",
+      "name": "Projektentwicklung",
+      "page": 45
+    },
+    {
+      "code": "7.P04",
+      "name": "Begleitende Kontrolle",
+      "page": 45
+    },
+    {
+      "code": "7.P05",
+      "name": "Verfahrensbetreuung",
+      "page": 45
+    },
+    {
+      "code": "7.P06",
+      "name": "Technische Bauherrnberatung",
+      "page": 45
+    },
+    {
+      "code": "7.P07",
+      "name": "Rechtliche Bauherrnberatung",
+      "page": 45
+    },
+    {
+      "code": "7.P08",
+      "name": "Kaufmännische Bauherrnberatung",
+      "page": 45
+    },
+    {
+      "code": "7.P09",
+      "name": "Facilitäre Bauherrnberatung",
+      "page": 45
+    },
+    {
+      "code": "7.P10",
+      "name": "BIM-Management",
+      "page": 45
+    },
+    {
+      "code": "7.P11",
+      "name": "Planungs- und Baukoordination nach BauKG",
+      "page": 45
+    },
+    {
+      "code": "7.P20",
+      "name": "Generalplanung",
+      "page": 45
+    },
+    {
+      "code": "7.P21",
+      "name": "Architektur-Konsumentenprojekte",
+      "page": 45
+    },
+    {
+      "code": "7.P22",
+      "name": "Objektplanung-Architektur",
+      "page": 45
+    },
+    {
+      "code": "7.P23",
+      "name": "Objektplanung-Architektur und BIM",
+      "page": 45
+    },
+    {
+      "code": "7.P24",
+      "name": "BIM-Koordination",
+      "page": 45
+    },
+    {
+      "code": "7.P25",
+      "name": "Einrichtung und Design",
+      "page": 45
+    },
+    {
+      "code": "7.P26",
+      "name": "Freianlagen",
+      "page": 46
+    },
+    {
+      "code": "7.P27",
+      "name": "Bestandsaufnahme und Bestandsplanung",
+      "page": 46
+    },
+    {
+      "code": "7.P40",
+      "name": "Tragwerksplanung",
+      "page": 46
+    },
+    {
+      "code": "7.P41",
+      "name": "Prüfingenieur nach OIB-Richtlinie 1",
+      "page": 46
+    },
+    {
+      "code": "7.P42",
+      "name": "Geotechnik",
+      "page": 46
+    },
+    {
+      "code": "7.P43",
+      "name": "Vermessungswesen und Geoinformation",
+      "page": 46
+    },
+    {
+      "code": "7.P44",
+      "name": "Bauphysik, Brandschutz",
+      "page": 46
+    },
+    {
+      "code": "7.P45",
+      "name": "Technische Ausrüstung",
+      "page": 46
+    },
+    {
+      "code": "7.P46",
+      "name": "Facility Management Consulting",
+      "page": 46
+    },
+    {
+      "code": "7.P60",
+      "name": "Ingenieurbauwerke",
+      "page": 46
+    },
+    {
+      "code": "7.P61",
+      "name": "Wasserwirtschaft",
+      "page": 46
+    },
+    {
+      "code": "7.P99",
+      "name": "Sonstige Planungsleistungen",
+      "page": 46
+    },
+    {
+      "code": "8.N10",
+      "name": "Bewilligungen, Gebühren",
+      "page": 46
+    },
+    {
+      "code": "8.N11",
+      "name": "Anschlussgebühren",
+      "page": 46
+    },
+    {
+      "code": "8.N20",
+      "name": "Versicherungen",
+      "page": 46
+    },
+    {
+      "code": "8.N30",
+      "name": "Vervielfältigungen",
+      "page": 46
+    },
+    {
+      "code": "8.N40",
+      "name": "Muster, Modelle",
+      "page": 46
+    },
+    {
+      "code": "8.N50",
+      "name": "Spesen, Reisekosten",
+      "page": 46
+    },
+    {
+      "code": "9.R01",
+      "name": "Reservemittel Budget",
+      "page": 46
+    },
+    {
+      "code": "9.R02",
+      "name": "Reservemittel Steuerung",
+      "page": 46
+    },
+    {
+      "code": "9.R03",
+      "name": "Reservemittel Risiko",
+      "page": 46
+    }
+  ],
+  "sources": [
+    {
+      "title": "BMWET Regiestunden 2026 (Elektro / HKLS)",
+      "url": "https://www.wko.at/oe/wirinstallateure/studensaetze-regieleistungen-2026.pdf",
+      "note": "Monteur 70,66 €/h, Hilfsmonteur 60,96 €/h, Spezialmonteur 91,28 €/h netto. Regieleistungen außerhalb einer Ausschreibung; kein universeller Marktpreis, kein Materialanteil."
+    },
+    {
+      "title": "AK Wien Handwerkerkosten 2025",
+      "url": "https://www.arbeiterkammer.at/beratung/konsument/AchtungFalle/Handwerkerkosten_2025.pdf",
+      "note": "Regionale Erhebung aus 2025, keine Preisliste für Vorarlberg 2026. Preisbasis und Personalzusammensetzung beachten."
+    },
+    {
+      "title": "WKO Mittellohnpreiskalkulation 2026",
+      "url": "https://www.wko.at/oe/gewerbe-handwerk/bau/mittellohnpreiskalkulation-2026.pdf",
+      "note": "Arbeitslohn, Personalnebenkosten und Verrechnungspreis sind unterschiedliche Größen. Keine daraus abgeleiteten festen Materialquoten."
+    },
+    {
+      "title": "Baumit Fließestrich – Ausheizprotokoll",
+      "url": "https://baumit.at/files/at/pdf_files/ap_faserflie_e_csfe225.pdf",
+      "note": "Produktspezifisches Beispiel: Aufheizablauf ersetzt keine Prüfung der Belegreife. Wartezeit und Freigabe getrennt planen."
+    }
+  ]
+}

@@ -7,6 +7,9 @@ const crypto = require("crypto");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
 function registerRegieAssistant(app, options) {
+  // Serialize report mutations so concurrent submissions cannot bypass the daily total.
+  const originalApp=app; let pending=Promise.resolve(); app=Object.create(originalApp);
+  for(const method of ['post','delete']) app[method]=(route,handler)=>originalApp[method](route,(req,res)=>{const run=pending.then(()=>handler(req,res));pending=run.catch(()=>{});return run;});
   const {
     dataDir,
     requireAdmin,
@@ -499,6 +502,14 @@ function registerRegieAssistant(app, options) {
     await writeDocumentation(report.jobId, rows.slice(0, 1000));
   }
 
+  async function hourSources() {
+    const [events,archive,system,legacy]=await Promise.all([readJson(TIME_EVENTS,[]),readJson(path.join(ROOT,'project-time-archive.json'),[]),readJson(SYSTEM_EMPLOYEES,[]),readJson(EMPLOYEES,[])]);
+    return [events,archive,[...system,...legacy]];
+  }
+  async function checkHours(report,reports,sources) {
+    return require('./regie-hours-check').auditReport(report,reports,...(sources||await hourSources()));
+  }
+  async function enforceHours(report,reports) { const check=await checkHours(report,reports);if(check.blocked)throw new Error(check.warnings[0]);return check; }
   async function persistReport(body, finish) {
     const reports = await readJson(REPORTS, []);
     const id = safeId(body.id) || `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -560,6 +571,8 @@ function registerRegieAssistant(app, options) {
       completedAt: existing.status === "completed" ? existing.completedAt || now : null,
     };
     report.totals = calculateTotals(report);
+    report.hoursCheck = await checkHours(report,reports);
+    if ((finish || existing.status === "completed") && report.hoursCheck.blocked) throw new Error(report.hoursCheck.warnings[0]);
     if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
     await writeJson(REPORTS, reports.slice(-10000));
     if (correctReport) {
@@ -642,6 +655,8 @@ function registerRegieAssistant(app, options) {
     const reports = await readJson(REPORTS, []);
     if (normalizeLegacyExpressNumbers(reports)) await writeJson(REPORTS, reports);
     await reconcileCompletedRegieReviewTasks(reports);
+    const sources=await hourSources();
+    for(const report of reports) report.hoursCheck=await checkHours(report,reports,sources);
     res.json({ ok: true, reports: reports.slice().sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || ""))) });
   });
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {
@@ -691,6 +706,7 @@ function registerRegieAssistant(app, options) {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
     if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
+    report.hoursCheck=await checkHours(report,reports);
     res.json({ ok: true, report });
   });
   app.get("/kristine/api/regie-reports/:id/recipients", async (req, res) => {
@@ -738,6 +754,7 @@ function registerRegieAssistant(app, options) {
       if (report.status !== "prepared" || report.processingStatus !== "issued") return res.status(409).json({ ok: false, error: "Dieser Regiebericht wartet nicht auf Freigabe." });
       const decision = clean(req.body?.decision, 30), now = new Date().toISOString();
       if (!['changes', 'archive'].includes(decision)) return res.status(400).json({ ok: false, error: "Bitte Ändern oder Nur ablegen auswählen." });
+      if (decision === "archive") await enforceHours(report,reports);
       report.reviewedAt = now;
       report.reviewedBy = { id: "admin", name: "Alexander Krista" };
       report.updatedAt = now;
@@ -777,6 +794,7 @@ function registerRegieAssistant(app, options) {
       const allowedBilling = ["open", "billed"];
       if (processing && !allowedProcessing.includes(processing)) return res.status(400).json({ ok: false, error: "Ungültiger Bearbeitungsstatus" });
       if (billing && !allowedBilling.includes(billing)) return res.status(400).json({ ok: false, error: "Ungültiger Abrechnungsstatus" });
+      if (["approved","sent","signed"].includes(processing) || billing === "billed") await enforceHours(report,reports);
       if (processing) report.processingStatus = processing;
       if (billing) report.billingStatus = billing;
       if (["approved", "sent", "signed"].includes(report.processingStatus)) report.status = "completed";
@@ -805,6 +823,7 @@ function registerRegieAssistant(app, options) {
       const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
       if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
       if (!["approved", "sent", "signed"].includes(report.processingStatus)) return res.status(409).json({ ok: false, error: "Regiebericht zuerst prüfen und freigeben." });
+      await enforceHours(report,reports);
       const to = clean(req.body?.to, 180).toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ ok: false, error: "Gültige Empfänger-E-Mail fehlt." });
       if (typeof sendRegieMail !== "function") return res.status(503).json({ ok: false, error: "E-Mail-Versand ist nicht eingerichtet." });
@@ -835,12 +854,25 @@ function registerRegieAssistant(app, options) {
       const id = safeId(req.params.id), reports = await readJson(REPORTS, []);
       const index = reports.findIndex(row => row.id === id);
       if (index < 0) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
-      if (reports[index].status === "completed") return res.status(409).json({ ok: false, error: "Fertiggestellte Regieberichte bleiben geschützt und können nicht gelöscht werden." });
-      reports.splice(index, 1);
-      const confirmations = (await readJson(CONFIRMATIONS, [])).filter(row => row.reportId !== id);
-      await Promise.all([writeJson(REPORTS, reports), writeJson(CONFIRMATIONS, confirmations)]);
-      const attachmentDir = path.resolve(FILES, id), filesRoot = `${path.resolve(FILES)}${path.sep}`;
-      if (attachmentDir.startsWith(filesRoot)) await fsp.rm(attachmentDir, { recursive: true, force: true });
+      const report=reports[index];
+      const dayFile=path.join(dataDir,safeId(report.jobId),...String(report.date).split('-'),'regie.json');
+      const day=await readJson(dayFile,null);
+      const documentation=typeof readDocumentation==='function'?await readDocumentation(report.jobId):[];
+      await writeJson(path.join(ROOT,'regie-deleted',id+'.json'),{report,day,documentation,deletedAt:new Date().toISOString(),reason:clean(req.body?.reason||'Fehleingabe / keine Regie',1000)});
+      reports.splice(index,1);
+      await writeJson(REPORTS,reports);
+      await writeJson(CONFIRMATIONS,(await readJson(CONFIRMATIONS,[])).filter(row=>row.reportId!==id));
+      if(day){
+        day.employees=(day.employees||[]).filter(row=>row.reportId!==id);
+        day.materials=(day.materials||[]).filter(row=>row.reportId!==id);
+        day.reportIds=(day.reportIds||[]).filter(value=>value!==id);
+        const oldText=day.regieDescriptions?.[id];if(oldText)day.customerText=String(day.customerText||'').replace(oldText,'').trim();
+        if(day.regieDescriptions)delete day.regieDescriptions[id];
+        await writeJson(dayFile,day);
+      }
+      if(typeof writeDocumentation==='function')await writeDocumentation(report.jobId,documentation.filter(row=>row.id!=='regie-office-'+id));
+      await completeRegieReviewTask(report,'deleted');
+      if(typeof appendJobHistory==='function')await appendJobHistory(report.jobId,{type:'regie_report_deleted',title:'Regiebericht '+report.reportNumber+' gelöscht',detail:'Fehleingabe / keine Regie',data:{reportId:id}});
       res.json({ ok: true, deleted: id });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
@@ -914,6 +946,8 @@ function registerRegieAssistant(app, options) {
       report.attachments = await saveAttachments(report.id, body.uploads, existing?.attachments || []);
       report.photos = report.attachments.filter(file => String(file.type || "").startsWith("image/"));
       report.totals = calculateTotals(report);
+      report.hoursCheck=await checkHours(report,reports);
+      if (!draft && report.hoursCheck.blocked) return res.status(409).json({ok:false,error:report.hoursCheck.warnings[0],hoursCheck:report.hoursCheck});
       if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
       if (!draft) for (const person of report.people) {
         if (String(person.id) === String(report.createdBy?.id) || confirmations.some(item => item.reportId === report.id && String(item.employeeId) === String(person.id))) continue;

@@ -142,10 +142,6 @@ function invoke(handler, req) {
   const removed = await invoke(remove, { params: { id: second.body.report.id } });
   assert.equal(removed.statusCode, 200);
   assert.equal(removed.body.deleted, second.body.report.id);
-  const protectedReport = await invoke(remove, { params: { id: first.body.report.id } });
-  assert.equal(protectedReport.statusCode, 409);
-  assert.match(protectedReport.body.error, /geschützt/);
-
   const projectRate = await invoke(save, { body: {
     finish: false,
     jobId: "26096",
@@ -371,6 +367,8 @@ function invoke(handler, req) {
     fs.writeFileSync(path.join(fixtureDir, "regie-multi-page.html"), standalone(longPrinted.body));
   }
 
+  // The preceding suggestion fixture belongs to another project; reset it for the edit/print scenario.
+  fs.writeFileSync(path.join(temporaryRoot,"_kristine","time-events.json"),"[]");
   const archivedField = (await invoke(review, { params: { id: issuedField.id }, body: { decision: "archive" } })).body.report;
   const corrected = await invoke(save, { body: { ...archivedField, correctReport: true, finish: false,
     employees: [{ ...archivedField.employees[0], from: "07:00", to: "12:15", hours: 5.25, blocks: [{ from: "07:00", to: "12:15" }] }],
@@ -388,6 +386,10 @@ function invoke(handler, req) {
   const storedCorrection = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "_kristine", "regie-reports.json"), "utf8")).find(row => row.id === issuedField.id);
   assert.equal(storedCorrection.employees[0].to, "12:15");
   assert.equal(storedCorrection.materials[0].unit, "kg");
+  const removedCompleted=await invoke(remove,{params:{id:first.body.report.id}});
+  assert.equal(removedCompleted.statusCode,200);
+  assert(fs.existsSync(path.join(temporaryRoot,'_kristine','regie-deleted',first.body.report.id+'.json')));
+  assert(!documentation.some(row=>row.id==='regie-office-'+first.body.report.id));
   console.log("OK: Regiebericht wird berechnet, korrigiert, nummeriert, archiviert und mit gespeicherten Änderungen gedruckt.");
 })().finally(() => {
   if (temporaryRoot.startsWith(os.tmpdir())) fs.rmSync(temporaryRoot, { recursive: true, force: true });

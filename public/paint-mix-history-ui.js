@@ -176,6 +176,7 @@
     const status = document.getElementById("mixHistoryStatus");
     try {
       if (status) status.textContent = "Misch-History wird geladen …";
+      await api("/admin/api/paint/mix-history/tasks/repair", { method:"POST", body:"{}" });
       const [history, sync, stats] = await Promise.all([
         api("/admin/api/paint/mix-history?status=" + (document.getElementById("mixHistoryView")?.value || "open")), api("/admin/api/paint/mix-history/status"), api("/admin/api/paint/sales-stats"),
       ]);

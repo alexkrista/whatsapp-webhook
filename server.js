@@ -360,6 +360,8 @@ function requireAdmin(req, res) {
   return true;
 }
 
+require("./bauprojekt").registerBauprojekt(app, { dataDir: DATA_DIR, requireAdmin, adminToken: ADMIN_TOKEN });
+
 app.use("/admin/api/job/:jobId", collectionWriteGuard(collectionStore, requireAdmin));
 
 const BRAIN_PERMIT_PATHS = new Set([
