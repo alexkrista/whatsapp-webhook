@@ -16,6 +16,8 @@ assert.match(html, /id="tCalendarAlex"[^>]*checked disabled/, "Alex must be sele
 assert.match(html, /id="tAppointmentAvailability"/, "appointment form needs a live day overview");
 assert.match(availability, /kristine\/api\/outlook\/day\?date=/, "selected day must load existing Outlook appointments");
 assert.match(availability, /Überschneidung/, "selected time must flag overlapping appointments");
+assert.match(availability, /Microsoft \/ Outlook anmelden/, "missing Outlook login must be fixable directly in the new appointment form");
+assert.match(availability, /kristine\/api\/outlook\/login\/start/, "appointment form must start the Microsoft device login");
 assert.match(html, /id="tAppointmentPhotoDrop"[^>]*role="button"/, "new appointment form needs a photo drop zone");
 assert.match(html, /id="tAppointmentPhotoInput"[^>]*accept="image\/\*"[^>]*multiple/, "appointment form must support multiple photos");
 assert.match(html, /drop\.addEventListener\('drop',event=>addPendingTaskAppointmentPhotos/, "appointment form must accept dropped photos");

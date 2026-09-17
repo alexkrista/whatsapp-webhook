@@ -9,6 +9,7 @@
   const safe=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
   const minutes=value=>{const match=String(value||"").match(/^(\d{2}):(\d{2})$/);return match?Number(match[1])*60+Number(match[2]):null};
   const isAppointment=()=>document.querySelector('input[name="taskType"]:checked')?.value==="Termin";
+  const endpoint=path=>typeof window.url==="function"?window.url(path):path;
 
   function overlaps(row){
     if(String(row.showAs||"").toLowerCase()==="free")return false;
@@ -29,20 +30,46 @@
 
   function renderCurrent(){renderRows(lastDate,lastRows)}
 
+  function renderError(error){
+    const target=byId("tAppointmentAvailability");if(!target)return;
+    const message=String(error?.message||error||"Kalender konnte nicht geladen werden.");
+    const needsLogin=/nicht angemeldet|anmeldung|refresh-token|token/i.test(message);
+    target.className="full task-availability error";
+    target.innerHTML=`<strong>Kalender gerade nicht erreichbar</strong><div class="small">${safe(message)}</div>${needsLogin?'<button type="button" class="secondary" data-outlook-login style="margin-top:9px">Microsoft / Outlook anmelden</button>':""}`;
+    target.querySelector("[data-outlook-login]")?.addEventListener("click",loginOutlook);
+  }
+
+  async function loginOutlook(event){
+    const button=event?.currentTarget,target=byId("tAppointmentAvailability"),microsoftWindow=window.open("about:blank","_blank");
+    if(button)button.disabled=true;
+    try{
+      const response=await fetch(endpoint("/kristine/api/outlook/login/start"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"});
+      const start=await response.json().catch(()=>({}));if(!response.ok)throw new Error(start.error||"Outlook-Anmeldung konnte nicht gestartet werden.");
+      if(microsoftWindow)microsoftWindow.location.href=start.verificationUri;
+      target.className="full task-availability loading";target.innerHTML=`<strong>Microsoft-Code ${safe(start.userCode)}</strong><div class="small">Im geöffneten Fenster als alexander.krista@krista.at anmelden. KRISTINE wartet auf die Bestätigung …</div>`;
+      for(let attempt=0;attempt<90;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,Math.max(5,Number(start.interval||5))*1000));
+        const poll=await fetch(endpoint("/kristine/api/outlook/login/poll"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:start.sessionId})});
+        const result=await poll.json().catch(()=>({}));if(poll.status===202)continue;if(!poll.ok)throw new Error(result.error||"Outlook-Anmeldung fehlgeschlagen.");
+        if(microsoftWindow&&!microsoftWindow.closed)microsoftWindow.close();lastDate="";await refresh(true);return;
+      }
+      throw new Error("Zeit für die Outlook-Anmeldung abgelaufen.");
+    }catch(error){if(microsoftWindow&&!microsoftWindow.closed)microsoftWindow.close();renderError(error)}finally{if(button)button.disabled=false}
+  }
+
   async function refresh(force=false){
     const target=byId("tAppointmentAvailability"),date=byId("tAppointmentDate")?.value||"";if(!target)return;
     if(!isAppointment()||!date){lastDate="";lastRows=[];renderRows("",[]);return}
     if(!force&&date===lastDate){renderCurrent();return}
     const current=++requestNumber;lastDate=date;lastRows=[];target.className="full task-availability loading";target.textContent="Outlook-Termine werden geladen …";
     try{
-      const endpoint=typeof window.url==="function"?window.url(`/kristine/api/outlook/day?date=${encodeURIComponent(date)}`):`/kristine/api/outlook/day?date=${encodeURIComponent(date)}`;
-      const response=await fetch(endpoint),body=await response.json().catch(()=>({}));
+      const response=await fetch(endpoint(`/kristine/api/outlook/day?date=${encodeURIComponent(date)}`)),body=await response.json().catch(()=>({}));
       if(current!==requestNumber)return;
       if(!response.ok)throw new Error(body.error||"Kalender konnte nicht geladen werden.");
       lastRows=Array.isArray(body.appointments)?body.appointments:[];renderRows(date,lastRows);
     }catch(error){
       if(current!==requestNumber)return;
-      target.className="full task-availability error";target.innerHTML=`<strong>Kalender gerade nicht erreichbar</strong><div class="small">${safe(error?.message||error)}</div>`;
+      renderError(error);
     }
   }
 
