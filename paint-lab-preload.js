@@ -39,6 +39,12 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (String(token) !== String(adminToken)) return res.status(403).send("Forbidden");
     }
 
+    // Diese Arbeitsmaske ändert sich laufend und darf nie als alte Browser-
+    // oder Proxy-Version weitergereicht werden.
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
     const file = path.join(publicDir, "paint-lab.html");
     fs.readFile(file, "utf8", (error, html) => {
       if (error) return next(error);
