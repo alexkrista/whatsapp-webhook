@@ -40,7 +40,7 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 for(const text of ["splitOfferAddress","offerRecipientNames",'kind==="woman"?"Frau":"Herr"','\\d{4,6}',"all.indexOf(name)===index",'manRole=role.includes("bauherr")&&!womanRole'])
   assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
-assert.ok(top.includes("20260918-offer-pdf-dispatch-1"),"Geänderter Angebotsbriefkopf, PDF und Versand werden ohne alten Browser-Cache geladen");
+assert.ok(top.includes("20260918-offer-a4-portrait-1"),"Geänderter Angebotsbriefkopf, PDF und Versand werden ohne alten Browser-Cache geladen");
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
 for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","E-Mail ist geöffnet. Der WhatsApp-Vorschlag bleibt hier fertig vorbereitet."])
@@ -56,6 +56,8 @@ for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","f
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
 for(const text of ["fixedOfferPagesCss","koffer-paper-page-one","koffer-paper-page-two","koffer-paper-page-logo","companyPrintFooter(\"1 / 2\")","companyPrintFooter(\"2 / 2\")","koffer-paper-footer-page","width:270px"])
   assert.ok(ui.includes(text),`Zweiseitiger Angebotsdruck enthält ${text}`);
+for(const text of ["size:A4 portrait","width:210mm!important","max-width:210mm!important","height:297mm!important","table-layout:fixed!important","white-space:normal!important"])
+  assert.ok(ui.includes(text),`Angebotsdruck bleibt maßhaltig im A4-Hochformat: ${text}`);
 assert.ok(!ui.includes("Übertrag von Seite 2:"),"Nach der Angebotssumme wird auf der Abschlussseite kein Übertrag mehr gedruckt");
 for(const text of ["groupName","groupSummary","enhanceGroupTotals",">Rabatt<","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(server.includes('customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null'),"WinWorker-Kundenadresse wird an den Angebotsdruck übergeben");

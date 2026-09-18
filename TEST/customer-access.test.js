@@ -63,6 +63,18 @@ test("office meeting notes keep responsibility and private photos in the custome
  const photo=await f.request(visible.photos[0].url,{headers:{Cookie:cookie}});assert.equal(photo.headers.get("content-type"),"image/jpeg");assert.equal(await photo.text(),"private-photo");
  const task=mergePortalTasks(f.dir,[]).find(row=>row.id==="customer_"+point.id);assert.equal(task.customerResponsibility,"bauherr");assert.equal(task.creatorId,"krista-office");
 });
+test("a finalized offer is visible and commissionable through an existing normal portal link",async t=>{
+ const f=await fixture(t),draft={offerNumber:"2609002",offerRevision:1,positions:[{text:"Regiearbeiten",quantity:2,unit:"Std",unitPrice:75}],financials:{vatRate:20}};
+ f.write("24177/.offer-draft.json",draft);f.write("24177/_offers/offer-2609002-v1.json",draft);
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie},project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ assert.equal(project.offer.number,"2609002");assert.equal(project.offer.acceptance,null);
+ const accepted=await f.request("/kundenportal/api/offer/accept",{method:"POST",headers:{...headers,"x-csrf-token":project.csrf},body:JSON.stringify({confirmed:true})});assert.equal(accepted.status,200,await accepted.text());
+ const refreshed=await(await f.request("/kundenportal/api/project",{headers})).json();assert.equal(refreshed.offer.acceptance.status,"accepted");assert.equal(f.metas["24177"].status,"Auftrag");
+});
+test("an unfinished offer draft stays hidden in a normal portal link",async t=>{
+ const f=await fixture(t);f.write("24177/.offer-draft.json",{offerNumber:"DRAFT",offerRevision:1,positions:[]});
+ const cookie=await f.login((await f.invite()).portalUrl),project=await(await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).json();assert.equal(project.offer,null);
+});
 test("office meeting photos marked internal stay out of the customer file, portal and photo endpoint",async t=>{
  const f=await fixture(t),image=Buffer.from("internal-photo").toString("base64"),route="/admin/api/job/24177/customer-portal/points";
  const response=await f.request(route,{method:"POST",headers:{"x-test-admin":"yes"},body:JSON.stringify({title:"Interner Befund",area:"Gang",text:"Nur intern dokumentieren.",responsibility:"krista",photosInternal:true,photos:[{name:"intern.jpg",data:"data:image/jpeg;base64,"+image}]})}),body=await response.json();

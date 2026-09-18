@@ -212,8 +212,12 @@ function registerCustomerAccess(app, options) {
     return source==="office"?{...point,photos:photos.map(photo=>({id:photo.id,name:photo.name,type:photo.type,internal:photo.internal===true})),internalPhotoCount:photos.filter(photo=>photo.internal===true).length}:point;
   }
   function customerOffer(ctx) {
-    if(ctx.grant.purpose!=="offer")return null;
-    const wantedNumber=clean(ctx.grant.offerNumber,20),wantedRevision=Math.max(1,Number(ctx.grant.offerRevision)||1),draft=read(offerSnapshotPath(ctx.jobId,wantedNumber,wantedRevision),null)||read(offerPath(ctx.jobId),null);
+    const current=read(offerPath(ctx.jobId),null),isOfferGrant=ctx.grant.purpose==="offer",wantedNumber=isOfferGrant?clean(ctx.grant.offerNumber,20):clean(current?.offerNumber,20),wantedRevision=isOfferGrant?Math.max(1,Number(ctx.grant.offerRevision)||1):Math.max(1,Number(current?.offerRevision)||1);
+    if(!wantedNumber)return null;
+    const snapshot=read(offerSnapshotPath(ctx.jobId,wantedNumber,wantedRevision),null),draft=snapshot||(isOfferGrant?current:null);
+    // Normale Portalzugänge sehen ausschließlich eine bereits finalisierte
+    // Angebotsfassung. Ein noch nicht gedruckter Entwurf bleibt intern.
+    if(!draft)return null;
     if(!draft||draft.offerNumber!==wantedNumber||Number(draft.offerRevision||1)!==wantedRevision)return{available:false,number:wantedNumber,revision:wantedRevision,message:"Dieses Angebot wurde inzwischen überarbeitet. Bitte fordern Sie die aktuelle Fassung bei Farben Krista an."};
     const positions=(Array.isArray(draft.positions)?draft.positions:[]).filter(row=>row?.isAlternative!==true&&Number(row?.quantity)>0).map(row=>({text:clean(row.text,1000),quantity:Math.max(0,Number(row.quantity)||0),unit:clean(row.unit,20),unitPrice:Math.max(0,Number(row.unitPrice)||0),groupName:clean(row.groupName,160)}));
     const base=positions.reduce((sum,row)=>sum+row.quantity*row.unitPrice,0),discounts=draft.groupDiscounts&&typeof draft.groupDiscounts==="object"?draft.groupDiscounts:{},groups=[...new Set(positions.map(row=>row.groupName).filter(Boolean))],groupDiscount=groups.reduce((sum,group)=>{const subtotal=positions.filter(row=>row.groupName===group).reduce((value,row)=>value+row.quantity*row.unitPrice,0);return sum+subtotal*Math.max(0,Math.min(100,Number(discounts[group])||0))/100},0),finance=draft.financials||{},afterGroups=Math.max(0,base-groupDiscount),globalDiscount=afterGroups*Math.max(0,Math.min(100,Number(finance.discountPercent)||0))/100,after=Math.max(0,afterGroups-globalDiscount),vatRate=Math.max(0,Math.min(100,Number(finance.vatRate??20)||0)),net=finance.priceMode==="gross"?after/(1+vatRate/100):after,vat=finance.priceMode==="gross"?after-net:net*vatRate/100,gross=finance.priceMode==="gross"?after:net+vat,acceptance=draft.customerAcceptance?.offerNumber===draft.offerNumber&&Number(draft.customerAcceptance?.offerRevision)===Number(draft.offerRevision)?draft.customerAcceptance:null;
