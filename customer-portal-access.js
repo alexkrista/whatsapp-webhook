@@ -242,6 +242,9 @@ function registerCustomerAccess(app, options) {
   }));
   app.get("/kundenportal/api/offer/pdf",guard(async(req,res)=>{
     const ctx=await context(req),offer=customerOffer(ctx),item=await ensureOfferPdf(ctx,offer),file=item&&secureFile(ctx.jobId,"_documentation/"+item.storedName);if(!file)throw fail(404,"Angebots-PDF nicht verfügbar.");
+    // Only this authenticated PDF may be framed by the customer portal itself.
+    // The general portal keeps frame-ancestors 'none' against third-party embedding.
+    res.setHeader("Content-Security-Policy","default-src 'none'; frame-ancestors 'self'");
     res.type("application/pdf").setHeader("Content-Disposition",`inline; filename="Angebot-${String(offer.number).replace(/[^A-Za-z0-9_-]/g,"")}.pdf"`);res.sendFile(file,{headers:{"Cache-Control":"private, no-store"}});
   }));
   app.post("/kundenportal/api/offer/accept",guard(async(req,res)=>{
