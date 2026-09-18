@@ -135,7 +135,7 @@ const OFFER_TERMS = Object.freeze({
       number: 12,
       title: "Gesetzliche Rücktrittsrechte für Verbraucher",
       paragraphs: [
-        "Bei außerhalb unserer Geschäftsräume oder im Fernabsatz geschlossenen Verträgen können gesetzliche Rücktrittsrechte bestehen. Soweit anwendbar, erhält der Auftraggeber gesondert die erforderlichen Informationen, die Rücktrittsbelehrung und das Muster-Widerrufsformular.",
+        "Bei außerhalb unserer Geschäftsräume oder im Fernabsatz geschlossenen Verträgen können gesetzliche Rücktrittsrechte bestehen. Die erforderlichen Informationen, die Rücktrittsbelehrung und das Muster-Widerrufsformular befinden sich in der Anlage zu diesen AGB und werden mit dem Angebot auf einem dauerhaften Datenträger bereitgestellt.",
         "Ein gewünschter Arbeitsbeginn vor Ablauf einer anwendbaren Rücktrittsfrist wird gesondert unter Einhaltung der gesetzlichen Voraussetzungen vereinbart.",
         "Weder die Unterzeichnung des Angebots noch die Leistung einer Anzahlung gilt für sich allein als Verzicht auf ein gesetzliches Rücktrittsrecht.",
       ],
@@ -151,6 +151,43 @@ const OFFER_TERMS = Object.freeze({
       ],
     },
   ],
+  withdrawal: {
+    title: "Informationen zur Ausübung des Widerrufsrechts",
+    noticeTitle: "Widerrufsbelehrung",
+    notice: [
+      "Sie haben das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.",
+      "Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag des Vertragsabschlusses.",
+      "Um Ihr Widerrufsrecht auszuüben, müssen Sie uns – Farben Krista GmbH & Co KG, Feldkircherstraße 45, 6820 Frastanz, T +43 5522 53940, office@krista.at – mittels einer eindeutigen Erklärung (z. B. mit der Post versandter Brief oder E-Mail) über Ihren Entschluss, diesen Vertrag zu widerrufen, informieren. Sie können dafür das beigefügte Muster-Widerrufsformular verwenden, das jedoch nicht vorgeschrieben ist.",
+      "Zur Wahrung der Widerrufsfrist reicht es aus, dass Sie die Mitteilung über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist absenden.",
+    ],
+    consequencesTitle: "Folgen des Widerrufs",
+    consequences: [
+      "Wenn Sie diesen Vertrag widerrufen, haben wir Ihnen alle Zahlungen, die wir von Ihnen erhalten haben, unverzüglich und spätestens binnen vierzehn Tagen ab dem Tag zurückzuzahlen, an dem die Mitteilung über Ihren Widerruf dieses Vertrags bei uns eingegangen ist. Für diese Rückzahlung verwenden wir dasselbe Zahlungsmittel, das Sie bei der ursprünglichen Transaktion eingesetzt haben, es sei denn, mit Ihnen wurde ausdrücklich etwas anderes vereinbart; in keinem Fall werden Ihnen wegen dieser Rückzahlung Entgelte berechnet.",
+      "Haben Sie verlangt, dass die Dienstleistungen während der Widerrufsfrist beginnen sollen, so haben Sie uns einen angemessenen Betrag zu zahlen, der dem Anteil der bis zu dem Zeitpunkt, zu dem Sie uns von der Ausübung des Widerrufsrechts hinsichtlich dieses Vertrags unterrichten, bereits erbrachten Dienstleistungen im Vergleich zum Gesamtumfang der im Vertrag vorgesehenen Dienstleistungen entspricht.",
+    ],
+    formTitle: "Muster-Widerrufsformular",
+    formIntro: "Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus und senden Sie es zurück.",
+    formLines: [
+      "An: Farben Krista GmbH & Co KG, Feldkircherstraße 45, 6820 Frastanz, office@krista.at",
+      "Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf der folgenden Waren (*)/die Erbringung der folgenden Dienstleistung (*):",
+      "Bestellt am (*)/erhalten am (*):",
+      "Name des/der Verbraucher(s):",
+      "Anschrift des/der Verbraucher(s):",
+      "Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier):",
+      "Datum:",
+      "(*) Unzutreffendes streichen.",
+    ],
+  },
 });
 
-module.exports = { OFFER_TERMS };
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>\"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]);
+}
+
+function renderOfferLegalHtml() {
+  const sectionHtml=OFFER_TERMS.sections.map(section=>`<section><h2>${escapeHtml(section.number)}. ${escapeHtml(section.title)}</h2>${section.paragraphs.map(paragraph=>`<p>${escapeHtml(paragraph)}</p>`).join("")}</section>`).join("");
+  const withdrawal=OFFER_TERMS.withdrawal;
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:16mm 15mm 18mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:9.5pt;line-height:1.4;color:#202620;margin:0}.koffer-paper h1{font-size:19pt;color:#234d2e;margin:0 0 3mm}.koffer-paper .subtitle{font-size:11pt;font-weight:700;margin-bottom:6mm}.company{padding:3mm 0 4mm;border-bottom:1px solid #6f8974;margin-bottom:5mm}.koffer-paper section{break-inside:avoid;margin-bottom:4mm}.koffer-paper h2{font-size:11.5pt;color:#294f32;margin:0 0 1.5mm}.koffer-paper p{margin:0 0 2.1mm}.legal-annex{break-before:page;page-break-before:always}.form-line{min-height:11mm;padding:2mm 0;border-bottom:1px solid #bbb}.register{margin-top:8mm;padding-top:3mm;border-top:1px solid #666;font-size:7.5pt;color:#555}</style></head><body><main class="koffer-paper"><h1>${escapeHtml(OFFER_TERMS.title)}</h1><div class="subtitle">${escapeHtml(OFFER_TERMS.subtitle)} · Stand ${escapeHtml(OFFER_TERMS.version)}</div><div class="company">${OFFER_TERMS.company.map(escapeHtml).join("<br>")}</div>${sectionHtml}<section class="legal-annex"><h1>${escapeHtml(withdrawal.title)}</h1><h2>${escapeHtml(withdrawal.noticeTitle)}</h2>${withdrawal.notice.map(paragraph=>`<p>${escapeHtml(paragraph)}</p>`).join("")}<h2>${escapeHtml(withdrawal.consequencesTitle)}</h2>${withdrawal.consequences.map(paragraph=>`<p>${escapeHtml(paragraph)}</p>`).join("")}</section><section class="legal-annex"><h1>${escapeHtml(withdrawal.formTitle)}</h1><p>${escapeHtml(withdrawal.formIntro)}</p>${withdrawal.formLines.map(line=>`<div class="form-line">${escapeHtml(line)}</div>`).join("")}<div class="register">${OFFER_TERMS.register.map(escapeHtml).join("<br>")}</div></section></main></body></html>`;
+}
+
+module.exports = { OFFER_TERMS, renderOfferLegalHtml };

@@ -3,6 +3,8 @@
 const chromium = require("@sparticuz/chromium").default;
 const puppeteer = require("puppeteer-core");
 const fs = require("node:fs");
+const { PDFDocument } = require("pdf-lib");
+const { renderOfferLegalHtml } = require("./offer-terms");
 
 async function browserExecutable() {
   if(process.platform!=="win32")return chromium.executablePath();
@@ -30,4 +32,11 @@ async function renderOfferHtmlPdf(html) {
   }finally{await browser.close()}
 }
 
-module.exports={renderOfferHtmlPdf};
+async function appendOfferLegalAnnex(offerPdf) {
+  const [offer,annex]=await Promise.all([PDFDocument.load(offerPdf),renderOfferHtmlPdf(renderOfferLegalHtml()).then(PDFDocument.load)]);
+  const pages=await offer.copyPages(annex,annex.getPageIndices());
+  for(const page of pages)offer.addPage(page);
+  return Buffer.from(await offer.save());
+}
+
+module.exports={renderOfferHtmlPdf,appendOfferLegalAnnex};
