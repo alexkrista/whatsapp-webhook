@@ -182,9 +182,9 @@ function registerCustomerAccess(app, options) {
   function storedPointRows(jobId) {
     const folder=path.join(dataDir,jobId,"_customer-portal"),rows=fs.existsSync(folder)?fs.readdirSync(folder).filter(name=>/^[a-f0-9-]+\.json$/.test(name)).map(name=>read(path.join(folder,name),null)).filter(Boolean):[];
     const tasks=new Map(mergePortalTasks(dataDir,read(path.join(dataDir,"_kristine/tasks.json"),[])).map(task=>[task.id,task]));
-    return rows.map(row=>customerPointView(row,tasks.get(row.taskId))).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return rows.map(row=>{const point=customerPointView(row,tasks.get(row.taskId)),internalPhotos=(row.photos||[]).filter(photo=>photo?.internal===true&&/^[a-f0-9-]{36}$/.test(photo.id||""));return{...point,photos:[...point.photos,...internalPhotos.map(photo=>({id:photo.id,name:clean(photo.name,180)||"Foto",type:clean(photo.type,80),internal:true}))],internalPhotoCount:internalPhotos.length}}).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   }
-  function pointPhotos(value,jobId,pointId) {
+  function pointPhotos(value,jobId,pointId,internal=false) {
     const rows=Array.isArray(value)?value:[];
     if(rows.length>6)throw fail(400,"Bitte höchstens 6 Fotos pro Punkt auswählen.");
     let total=0;
@@ -195,19 +195,21 @@ function registerCustomerAccess(app, options) {
       if(!buffer.length||buffer.length>5*1024*1024||total>15*1024*1024)throw fail(400,"Die Fotos sind zu groß. Maximal 5 MB je Foto und 15 MB insgesamt.");
       const id=crypto.randomUUID(),extension={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif"}[match[1]],relative=path.join("_customer-portal","_files",pointId,id+"."+extension);
       const file=path.join(dataDir,jobId,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,buffer,{mode:0o600});
-      return {id,name:clean(row?.name,180)||"Foto",type:match[1],file:relative.replace(/\\/g,"/")};
+      return {id,name:clean(row?.name,180)||"Foto",type:match[1],file:relative.replace(/\\/g,"/"),internal:internal===true};
     });
   }
   async function createPoint({jobId,meta,portal,contact,source,creatorName,body}) {
     const module=body?.module;if(!["communication","projectPoints"].includes(module))throw fail(400,"Ungültiger Bereich.");
     const text=clean(body?.text,5000),area=clean(body?.area,140),title=pointTitle({title:clean(body?.title,140),text,area});if(!text)throw fail(400,"Bitte eine Nachricht eingeben.");
     const responsibility=body?.responsibility==="bauherr"?"bauherr":"krista",id=crypto.randomUUID(),taskId="customer_"+id,date=new Date(now()).toISOString();
-    let photos=[];try{photos=pointPhotos(body?.photos,jobId,id)}catch(error){fs.rmSync(path.join(dataDir,jobId,"_customer-portal","_files",id),{recursive:true,force:true});throw error}
+    const photosInternal=source==="office"&&body?.photosInternal===true;
+    let photos=[];try{photos=pointPhotos(body?.photos,jobId,id,photosInternal)}catch(error){fs.rmSync(path.join(dataDir,jobId,"_customer-portal","_files",id),{recursive:true,force:true});throw error}
     const employees=typeof readEmployees==="function"?await readEmployees():[],owner=employees.find(row=>/^alexander krista$/i.test(row.name||""));
     const task={id:taskId,title:(module==="communication"?"Kundennachricht":"Kundenpunkt prüfen")+" · "+meta.name+" · "+title.slice(0,70),jobId,jobName:meta.name,assigneeId:owner?.id||"admin",assigneeName:owner?.name||"Alexander Krista",taskType:"Sonstiges",priority:"normal",creatorId:source==="office"?"krista-office":"customer-portal",creatorName:creatorName||portal.customerName||meta.name,contactName:portal.customerName,contactPhone:portal.customerPhone,contactEmail:portal.customerEmail,customerResponsibility:responsibility,reminder:text.slice(0,500),status:"open",createdAt:date,completedAt:null};
     write(path.join(dataDir,jobId,"_customer-portal",id+".json"),{id,taskId,module,title,text,area,responsibility,photos,date,contact,source,history:[{kind:"submitted",status:"open",date}]});
     write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
-    return customerPointView({id,taskId,module,title,text,area,responsibility,photos,date,history:[{kind:"submitted",status:"open",date}]},task);
+    const point=customerPointView({id,taskId,module,title,text,area,responsibility,photos,date,history:[{kind:"submitted",status:"open",date}]},task);
+    return source==="office"?{...point,photos:photos.map(photo=>({id:photo.id,name:photo.name,type:photo.type,internal:photo.internal===true})),internalPhotoCount:photos.filter(photo=>photo.internal===true).length}:point;
   }
   function customerOffer(ctx) {
     if(ctx.grant.purpose!=="offer")return null;
@@ -253,7 +255,7 @@ function registerCustomerAccess(app, options) {
     const ctx=await context(req);if(!/^[a-f0-9-]{36}$/.test(req.params.pointId)||!/^[a-f0-9-]{36}$/.test(req.params.photoId))throw fail(404,"Foto nicht gefunden.");
     const point=read(path.join(dataDir,ctx.jobId,"_customer-portal",req.params.pointId+".json"),null);
     if(!point||(point.source!=="office"&&point.contact!==ctx.grant.contact)||!ctx.portal.modules[point.module])throw fail(404,"Foto nicht freigegeben.");
-    const photo=(point.photos||[]).find(row=>row.id===req.params.photoId),file=photo&&secureFile(ctx.jobId,photo.file);
+    const photo=(point.photos||[]).find(row=>row.id===req.params.photoId&&row.internal!==true),file=photo&&secureFile(ctx.jobId,photo.file);
     if(!file)throw fail(404,"Foto nicht gefunden.");
     res.type(photo.type).sendFile(file,{headers:{"Cache-Control":"private, no-store"}});
   }));

@@ -63,6 +63,15 @@ test("office meeting notes keep responsibility and private photos in the custome
  const photo=await f.request(visible.photos[0].url,{headers:{Cookie:cookie}});assert.equal(photo.headers.get("content-type"),"image/jpeg");assert.equal(await photo.text(),"private-photo");
  const task=mergePortalTasks(f.dir,[]).find(row=>row.id==="customer_"+point.id);assert.equal(task.customerResponsibility,"bauherr");assert.equal(task.creatorId,"krista-office");
 });
+test("office meeting photos marked internal stay out of the customer file, portal and photo endpoint",async t=>{
+ const f=await fixture(t),image=Buffer.from("internal-photo").toString("base64"),route="/admin/api/job/24177/customer-portal/points";
+ const response=await f.request(route,{method:"POST",headers:{"x-test-admin":"yes"},body:JSON.stringify({title:"Interner Befund",area:"Gang",text:"Nur intern dokumentieren.",responsibility:"krista",photosInternal:true,photos:[{name:"intern.jpg",data:"data:image/jpeg;base64,"+image}]})}),body=await response.json();
+ assert.equal(response.status,201,JSON.stringify(body));assert.equal(body.point.internalPhotoCount,1);assert.equal(body.point.photos[0].internal,true);
+ const adminRows=await(await f.request(route,{headers:{"x-test-admin":"yes"}})).json(),adminPoint=adminRows.points.find(row=>row.id===body.point.id);assert.equal(adminPoint.internalPhotoCount,1);assert.equal(adminPoint.photos[0].internal,true);
+ const cookie=await f.login((await f.invite()).portalUrl),project=await(await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).json(),customerPoint=project.points.find(row=>row.id===body.point.id);assert(customerPoint);assert.equal(customerPoint.photos.length,0);
+ const hiddenUrl=`/kundenportal/api/point-photo/${body.point.id}/${body.point.photos[0].id}`;assert.equal((await f.request(hiddenUrl,{headers:{Cookie:cookie}})).status,404);
+ const stored=JSON.parse(fs.readFileSync(path.join(f.dir,"24177/_customer-portal",body.point.id+".json"),"utf8"));assert.equal(stored.photos[0].internal,true);
+});
 test("single-project access ignores unrelated project-number parameters and ungranted files",async t=>{
  const f=await fixture(t);f.metas["24177"].customerPortal.mode="single";f.metas["24177"].customerPortal.modules.projectFile=false;f.metas["24177"].customerPortal.modules.regie=false;
  const cookie=await f.login((await f.invite()).portalUrl),data=await(await f.request("/kundenportal/api/project?project=25018",{headers:{Cookie:cookie}})).json();assert.equal(data.projects.length,1);assert.equal(data.files.length,0);assert.equal(data.materials.length,0);

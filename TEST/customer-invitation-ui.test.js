@@ -39,3 +39,8 @@ test("unloaded settings and invalid phones cannot issue an invitation; preview u
   p.api.setJob("24177");p.get("cpPhone").value="";await p.api.invite("whatsapp");assert.equal(p.calls.length,0);
   await p.api.invite("preview");assert.equal(JSON.parse(p.calls[1].init.body).preview,true);assert.equal(p.popups[0].url,nativeUrl);
 });
+test("office meeting form clearly marks photos as internal and submits the protection flag",()=>{
+  const source=fs.readFileSync(path.join(__dirname,"../public/ui/kristine-customer-portal.js"),"utf8");
+  for(const text of ["cpPointPhotosInternal","Fotos intern","nicht in Kundenakte, Kundenportal oder Export","photosInternal","internalPhotoCount"])
+    assert(source.includes(text),`missing internal photo marker: ${text}`);
+});
