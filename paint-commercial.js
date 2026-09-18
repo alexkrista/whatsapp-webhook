@@ -235,6 +235,12 @@ function registerPaintCommercial(app, options = {}) {
     try {
       await ensureRoot();
       const name = clean(req.body?.name || "LG-Preisliste", 180).replace(/[\\/:*?"<>|]+/g, "_");
+      if (/(wallpaper|tapete)/i.test(name)) {
+        return res.status(409).json({
+          ok: false,
+          error: "Diese Datei sieht nach einer Tapeten-Preisliste aus. Bitte unter „Tapeten · Retail-Preisliste“ hochladen."
+        });
+      }
       const base64 = clean(req.body?.base64, 120_000_000).replace(/^data:.*?;base64,/, "");
       if (!base64) return res.status(400).json({ ok:false, error:"Preisliste fehlt" });
       const buf = Buffer.from(base64, "base64");
