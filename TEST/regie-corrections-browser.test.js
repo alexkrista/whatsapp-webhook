@@ -7,12 +7,13 @@ const {chromium}=require('playwright');
  await page.addInitScript(()=>{window.createKristaTopbar=()=>{}});
  await page.goto('http://regie.test/');
  await page.evaluate(async()=>{
-  window.saved={id:'r1',jobId:'26082',date:'2026-09-11',reportSequence:19,status:'completed',processingStatus:'archived',description:'Gewebe',hourlyRate:75,materialMarkup:50,employees:[{id:'1',name:'Clemens',from:'07:00',to:'11:53',hours:5}],materials:[{materialId:'m1',product:'Kleber',unit:'Sack',containerSize:20,quantity:2,purchasePrice:22.17,salePrice:33.26,markup:50}],attachments:[]};
+  window.saved={id:'r1',jobId:'26082',date:'2026-09-11',reportSequence:19,status:'completed',processingStatus:'archived',description:'Gewebe',hourlyRate:75,materialMarkup:50,employees:[{id:'1',name:'Clemens',from:'07:00',to:'11:53',hours:5}],materials:[{materialId:'m1',product:'Kleber',unit:'Sack',containerSize:20,quantity:2,purchasePrice:22.17,salePrice:33.26,markup:50}],attachments:[{id:'foto-1',name:'Originalfoto.jpg',type:'image/jpeg'}]};
   jobs=[{jobId:'26082',name:'Test'}];allEmployees=[{id:'1',name:'Clemens'}];materials=[{...saved.materials[0]}];
   window.writes=[];api=async(url,options)=>{if(url.endsWith('/save')){const body=JSON.parse(options.body);writes.push(body);saved={...saved,...body};return {report:saved}}if(url==='/admin/api/materials')return {materials:[{...materials[0],unit:'kg'}]};return {reports:[saved],suggestions:[],recipients:[]}};
   await openReport(saved);
  });
  assert(await page.locator('#saveDraft').isVisible());
+ assert.equal(await page.locator('#fileList .file-preview img').count(),1,'Gespeicherte Fotos werden als Vorschau angezeigt');
  await page.locator('.emp-to-1').fill('12:00');await page.locator('.mat-unit').fill('kg');await page.locator('.mat-qty').fill('40');
  await page.locator('#saveDraft').click();await page.waitForFunction(()=>writes.length===1&&!savingReport);
  await page.locator('#closeEditor').click();await page.evaluate(()=>openReport(saved));
