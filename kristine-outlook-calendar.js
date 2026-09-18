@@ -647,7 +647,7 @@ function installOutlookCalendar(app, deps = {}) {
     if (!adminToken || !task || !valid) return res.status(403).send("Forbidden");
     const browserSession = crypto.createHmac("sha256", adminToken).update("kristine-browser-session-v1").digest("base64url");
     res.setHeader("Set-Cookie", `kristine_session=${browserSession}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
-    res.redirect(302, `/kristine?task=${encodeURIComponent(task)}#tasks`);
+    res.redirect(302, `/kristine/app?task=${encodeURIComponent(task)}#tasks`);
   });
 
   app.get("/kristine/departure-entry", (req, res) => {
@@ -680,7 +680,7 @@ function installOutlookCalendar(app, deps = {}) {
       const when = [date ? new Date(`${date}T12:00:00`).toLocaleDateString("de-AT", { weekday:"short", day:"2-digit", month:"2-digit" }) : "", from ? `${from} Uhr` : ""].filter(Boolean).join(" · ");
       const navigation = address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving` : "";
       const akte = jobId ? `/admin/akte/${encodeURIComponent(jobId)}` : "";
-      const taskLink = `/kristine?task=${encodeURIComponent(taskId)}#tasks`;
+      const taskLink = `/kristine/app?task=${encodeURIComponent(taskId)}#tasks`;
       const contactPhone = String(task?.contactPhone || "").trim();
       const tel = contactPhone ? `tel:${contactPhone.replace(/[^+\d]/g, "")}` : "";
       const travel = Number(appointment?.travelMinutes || 0);

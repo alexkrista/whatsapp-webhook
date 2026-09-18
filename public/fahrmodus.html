@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>Kristine – Sprechmodus</title>
+<style>
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#171717;background:#f3f1ec}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#f3f1ec}
+main{min-height:100vh;max-width:680px;margin:auto;padding:max(18px,env(safe-area-inset-top)) 18px max(22px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px}
+.brand{padding:6px 2px 0}
+.brand h1{margin:0;font-size:28px;letter-spacing:-.4px}
+.brand p{margin:4px 0 0;color:#6d6a64;font-size:14px}
+.voice-card{border:0;width:100%;min-height:54vh;border-radius:28px;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:28px;box-shadow:0 14px 40px rgba(0,0,0,.16);touch-action:manipulation}
+.voice-card:active{transform:scale(.995)}
+.mic{width:132px;height:132px;border-radius:999px;background:#fff;color:#111;display:grid;place-items:center;font-size:62px;box-shadow:0 8px 30px rgba(255,255,255,.14)}
+.voice-card.listening .mic{animation:pulse 1.2s infinite}
+.voice-card.processing .mic{opacity:.65}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.voice-title{font-size:28px;font-weight:800}
+.voice-sub{font-size:16px;opacity:.75;text-align:center;line-height:1.35;max-width:420px}
+.status{min-height:74px;background:#fff;border-radius:18px;padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.status strong{display:block;margin-bottom:5px}
+.status span{color:#5f5c56;line-height:1.35}
+.app-link{display:flex;align-items:center;justify-content:center;text-decoration:none;background:#fff;color:#111;border:1px solid #dedbd5;border-radius:18px;padding:18px;font-weight:800;font-size:18px}
+.tiny{text-align:center;color:#79756f;font-size:12px;line-height:1.35;padding:2px 14px}
+@media(min-width:700px){main{justify-content:center}.voice-card{min-height:460px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <h1>Kristine</h1>
+    <p>Sprechmodus</p>
+  </div>
+
+  <button id="voiceCard" class="voice-card" type="button" onclick="toggleVoice()">
+    <div class="mic">🎙️</div>
+    <div id="voiceTitle" class="voice-title">Mit Kristine sprechen</div>
+    <div id="voiceSub" class="voice-sub">Einmal antippen und einfach sagen, was du brauchst.</div>
+  </button>
+
+  <div class="status">
+    <strong id="statusTitle">Bereit</strong>
+    <span id="statusText">Aufgabe, Gesprächsnotiz, Erinnerung oder Termin – Kristine fragt nur nach, wenn etwas fehlt.</span>
+  </div>
+
+  <a id="appLink" class="app-link" href="/kristine/app">Zur normalen App</a>
+  <div class="tiny">Die Aufnahme wird nur zur Spracherkennung verarbeitet. Im Baustellenprotokoll wird keine Audiodatei aus dem Sprechmodus gespeichert.</div>
+</main>
+
+<script>
+const qs=new URLSearchParams(location.search);
+const token=qs.get('token')||'';
+function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
+const ua=navigator.userAgent||'';
+const appleMobile=/iPhone|iPad|iPod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const phoneOrTablet=appleMobile||/Android/i.test(ua);
+if((location.hash||qs.has('task'))&&!qs.has('fahrmodus')) location.replace(url('/kristine/app')+location.hash);
+else if(!phoneOrTablet&&!qs.has('fahrmodus')) location.replace(url('/kristine/app'));
+const voiceCard=document.getElementById('voiceCard');
+const voiceTitle=document.getElementById('voiceTitle');
+const voiceSub=document.getElementById('voiceSub');
+const statusTitle=document.getElementById('statusTitle');
+const statusText=document.getElementById('statusText');
+const appLink=document.getElementById('appLink');
+appLink.href=url('/kristine/app');
+
+let jobs=[], employees=[];
+let stream=null, recorder=null, chunks=[], audioCtx=null, analyser=null, sourceNode=null, vadTimer=null;
+let voiceRunning=false, processing=false, heardSpeech=false, speechStartedAt=0, silentSince=0, maxTimer=null;
+let draft=null, stage='idle', keepConversation=false, awaitingAnother=false, candidateJob=null;
+
+function setUi(title,text,state=''){
+  statusTitle.textContent=title;
+  statusText.textContent=text;
+  voiceTitle.textContent=state==='listening'?'Ich höre zu …':state==='processing'?'Einen Moment …':'Mit Kristine sprechen';
+  voiceSub.textContent=state==='listening'?'Einfach sprechen. Ich stoppe automatisch, wenn du fertig bist.':state==='processing'?'Ich ordne das gerade zu.':'Einmal antippen und einfach sagen, was du brauchst.';
+  voiceCard.classList.toggle('listening',state==='listening');
+  voiceCard.classList.toggle('processing',state==='processing');
+}
+
+async function api(p,opts={}){
+  const r=await fetch(url(p),opts);
+  const t=await r.text();let j;try{j=JSON.parse(t)}catch{}
+  if(!r.ok)throw new Error(j?.error||t||r.statusText);
+  return j;
+}
+
+async function bootstrap(){
+  try{
+    const [j,e]=await Promise.all([api('/kristine/api/voice/jobs'),api('/admin/api/employees')]);
+    jobs=j.jobs||[];employees=(e.employees||[]).filter(x=>x.active!==false);
+  }catch(err){
+    setUi('Nicht verbunden',String(err.message||err));
+  }
+}
+bootstrap();
+
+function pickMime(){
+  const types=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
+  return types.find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(t))||'';
+}
+function rms(){
+  if(!analyser)return 0;
+  const a=new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(a);
+  let s=0;
+  for(const v of a){const x=(v-128)/128;s+=x*x}
+  return Math.sqrt(s/a.length);
+}
+async function startListening(){
+  if(processing||voiceRunning)return;
+  try{
+    if(!stream)stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    const mime=pickMime();
+    recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+    chunks=[];heardSpeech=false;silentSince=0;speechStartedAt=Date.now();
+    recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+    recorder.onstop=handleRecording;
+    recorder.start(250);
+    voiceRunning=true;
+    audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')await audioCtx.resume();
+    sourceNode=audioCtx.createMediaStreamSource(stream);
+    analyser=audioCtx.createAnalyser();analyser.fftSize=1024;
+    sourceNode.connect(analyser);
+    setUi('Ich höre zu','Sag einfach, was Kristine festhalten soll.','listening');
+    vadTimer=setInterval(()=>{
+      const level=rms(), now=Date.now();
+      if(level>0.028){heardSpeech=true;silentSince=0}
+      else if(heardSpeech){if(!silentSince)silentSince=now;if(now-silentSince>1450&&now-speechStartedAt>1200)stopListening()}
+    },120);
+    maxTimer=setTimeout(()=>stopListening(),45000);
+  }catch(err){
+    voiceRunning=false;
+    setUi('Mikrofon nicht verfügbar','Bitte Mikrofonzugriff für diese Seite erlauben.');
+  }
+}
+function stopListening(){
+  if(!voiceRunning)return;
+  voiceRunning=false;
+  clearInterval(vadTimer);clearTimeout(maxTimer);vadTimer=null;maxTimer=null;
+  try{sourceNode?.disconnect()}catch{}
+  sourceNode=null;analyser=null;
+  if(recorder&&recorder.state!=='inactive')recorder.stop();
+}
+function toggleVoice(){
+  if(processing)return;
+  if(voiceRunning){stopListening();return}
+  keepConversation=true;
+  startListening();
+}
+function toBase64(buf){
+  const bytes=new Uint8Array(buf);let out='';
+  const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk)out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+  return btoa(out);
+}
+async function handleRecording(){
+  if(!chunks.length){setUi('Nichts gehört','Tippe erneut und sprich etwas lauter.');return}
+  processing=true;setUi('Verarbeite Sprache','Ich schreibe mit und ordne es zu.','processing');
+  try{
+    const blob=new Blob(chunks,{type:recorder?.mimeType||'audio/mp4'});
+    if(blob.size<1200)throw new Error('Zu kurze Aufnahme');
+    const audioBase64=toBase64(await blob.arrayBuffer());
+    const r=await api('/kristine/api/voice/transcribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audioBase64,mimeType:blob.type||'audio/mp4'})});
+    const text=String(r.text||'').trim();
+    if(!text)throw new Error('Ich habe nichts verstanden.');
+    setUi('Verstanden',text);
+    await handleTranscript(text);
+  }catch(err){
+    setUi('Nicht verstanden',String(err.message||err));
+    speak('Das habe ich nicht sauber verstanden. Sag es bitte noch einmal.',true);
+  }finally{processing=false}
+}
+
+function norm(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ß/g,'ss').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function scoreJob(j,target){
+  const t=norm(target);if(!t)return 0;
+  const id=norm(j.jobId), name=norm(j.name), city=norm(j.city), contact=norm(j.contactName);
+  if(t===id)return 1;
+  if(name&&t===name)return .98;
+  if(contact&&t===contact)return .96;
+  if(id&&t.includes(id))return .95;
+  if(name&&(name.includes(t)||t.includes(name)))return .92;
+  if(contact&&(contact.includes(t)||t.includes(contact)))return .9;
+  const tw=new Set(t.split(' ').filter(x=>x.length>1));
+  const words=[...new Set((name+' '+contact+' '+city+' '+id).split(' ').filter(x=>x.length>1))];
+  let hit=0;for(const w of tw){if(words.includes(w))hit++}
+  const overlap=tw.size?hit/tw.size:0;
+  return overlap*.82;
+}
+function matchJob(target){
+  const ranked=jobs.map(j=>({j,s:scoreJob(j,target)})).sort((a,b)=>b.s-a.s);
+  const a=ranked[0],b=ranked[1];
+  if(a&&a.s>=.72&&(!b||a.s-b.s>=.07))return {job:a.j,confident:true};
+  if(a&&a.s>=.5)return {job:a.j,confident:false};
+  return {job:null,confident:false};
+}
+function jobLabel(j){return j?('#'+j.jobId+' '+(j.name||'').trim()).trim():''}
+function isYes(t){return /^(ja|jap|passt|genau|ok|okay|mach|richtig)(\b|$)/i.test(norm(t))}
+function isNo(t){return /^(nein|falsch|nicht|abbrechen|stopp|stop)(\b|$)/i.test(norm(t))}
+function wantsEnd(t){return /^(nein|nichts|fertig|schluss|das wars|das war s|ende)(\b|$)/i.test(norm(t))}
+function addMinutes(time,minutes){const m=String(time||'').match(/^(\d{2}):(\d{2})$/);if(!m)return'';const total=(Number(m[1])*60+Number(m[2])+minutes)%(24*60);return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0')}
+function germanDate(value){if(!value)return'';try{return new Intl.DateTimeFormat('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(value+'T12:00:00'))}catch{return value}}
+function jobAddress(j){return [j?.street,j?.houseNumber,[j?.postalCode,j?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+async function interpretText(text){const r=await api('/kristine/api/voice/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});return r.draft||{kind:'note',target:'',content:text,dueDate:'',date:'',from:'',to:'',rawText:text}}
+
+async function handleTranscript(text){
+  if(awaitingAnother){
+    awaitingAnother=false;
+    if(wantsEnd(text)){finishSession('Passt. Bis später.');return}
+  }
+  if(stage==='confirm'){
+    if(isYes(text)){await saveDraft();return}
+    if(isNo(text)){draft=null;candidateJob=null;stage='idle';speak('Okay. Sag es bitte noch einmal.',true);return}
+    speak('Soll ich das so anlegen? Sag einfach ja oder nein.',true);return;
+  }
+  if(stage==='targetConfirm'){
+    if(isYes(text)&&candidateJob){draft.job=candidateJob;candidateJob=null;await ensureComplete();return}
+    if(isNo(text)){candidateJob=null;stage='target';speak('Okay. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);return}
+    candidateJob=null;stage='target';draft.target=text;await resolveDraftTarget();return;
+  }
+  if(stage==='target'){draft.target=text;await resolveDraftTarget();return}
+  if(stage==='appointmentDate'||stage==='appointmentTime'){
+    const follow=await interpretText((draft.rawText||draft.content||'Termin')+' Zusatzinformation: '+text+'. Es geht weiterhin um denselben Termin.');
+    if(follow.date)draft.date=follow.date;
+    if(follow.from)draft.from=follow.from;
+    if(follow.to)draft.to=follow.to;
+    await ensureComplete();return;
+  }
+
+  draft=await interpretText(text);
+  if(!draft.content)draft.content=text;
+  if(['note','appointment'].includes(draft.kind)&&!draft.target){
+    stage='target';
+    speak(draft.kind==='appointment'?'Gerne. Bei wem oder auf welcher Baustelle ist der Termin?':'Gerne. Für welchen Kunden oder welche Baustelle ist die Notiz?',true);
+    return;
+  }
+  if(draft.target){await resolveDraftTarget();return}
+  await ensureComplete();
+}
+async function resolveDraftTarget(){
+  const m=matchJob(draft.target);
+  if(!m.job){stage='target';speak('Die Baustelle habe ich noch nicht eindeutig gefunden. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);return}
+  if(!m.confident){candidateJob=m.job;stage='targetConfirm';speak('Meinst du '+(m.job.name||('Baustelle '+m.job.jobId))+'? Sag ja oder nein.',true);return}
+  draft.job=m.job;await ensureComplete();
+}
+async function ensureComplete(){
+  if(draft.kind==='appointment'){
+    if(!draft.date){stage='appointmentDate';speak('An welchem Tag ist der Termin?',true);return}
+    if(!draft.from){stage='appointmentTime';speak('Um wie viel Uhr beginnt der Termin?',true);return}
+    if(!draft.to)draft.to=addMinutes(draft.from,60);
+  }
+  confirmDraft();
+}
+function confirmDraft(){
+  stage='confirm';
+  const site=draft.job?(draft.job.name||('Baustelle '+draft.job.jobId)):'ohne Baustelle';
+  let sentence='';
+  if(draft.kind==='appointment')sentence='Termin bei '+site+': '+draft.content+'. '+germanDate(draft.date)+' von '+draft.from+' bis '+draft.to+'.';
+  else if(draft.kind==='note')sentence='Gesprächsnotiz bei '+site+': '+draft.content+'.';
+  else if(draft.kind==='reminder')sentence='Erinnerung'+(draft.job?' bei '+site:'')+': '+draft.content+(draft.dueDate?'. Fällig '+germanDate(draft.dueDate):'')+'.';
+  else sentence='Aufgabe'+(draft.job?' bei '+site:'')+': '+draft.content+(draft.dueDate?'. Fällig '+germanDate(draft.dueDate):'')+'.';
+  speak('Ich habe verstanden: '+sentence+' Soll ich das so anlegen?',true);
+}
+
+function alexEmployee(){
+  return employees.find(e=>/\balex(ander)?\b/i.test(String(e.name||'')))||employees.find(e=>/krista/i.test(String(e.name||'')))||null;
+}
+async function saveDraft(){
+  processing=true;setUi('Speichere','Kristine legt es jetzt ab.','processing');
+  try{
+    if(draft.kind==='note'){
+      await api('/kristine/api/voice/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:draft.job.jobId,title:'Gesprächsnotiz',detail:draft.content,rawText:draft.rawText||''})});
+    }else{
+      const alex=alexEmployee();
+      const appointment=draft.kind==='appointment'?{date:draft.date,from:draft.from,to:draft.to,calendarOwner:'alex',calendarAccount:'alexander.krista@krista.at'}:null;
+      const taskResult=await api('/kristine/api/voice/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        title:draft.kind==='appointment'?draft.content:(draft.kind==='reminder'?'Erinnerung: ':'')+draft.content,
+        taskType:draft.kind==='appointment'?'Termin':'Sonstiges',
+        assigneeId:alex?String(alex.id||alex.employeeId||''):'',
+        assigneeName:alex?String(alex.name||'Alexander'):'Alexander',
+        jobId:draft.job?String(draft.job.jobId):'',
+        jobName:draft.job?String(draft.job.name||''):'',
+        address:draft.job?jobAddress(draft.job):'',
+        dueDate:draft.dueDate||'',
+        reminder:'Aus Sprechmodus',
+        appointment
+      })});
+      if(draft.kind==='appointment'){
+        const task=taskResult.task;
+        const outlook=await api('/kristine/api/appointments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          requestId:'voice-'+task.id,taskId:task.id,title:task.title,
+          date:draft.date,from:draft.from,to:draft.to,allDay:false,
+          location:task.address||task.jobName||'',
+          details:'Über Kristine Sprechmodus angelegt.',
+          jobId:task.jobId||'',jobName:task.jobName||'',address:task.address||''
+        })});
+        await api('/kristine/api/voice/task/'+encodeURIComponent(task.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({appointment:{id:outlook.appointment?.id||'',date:draft.date,from:draft.from,to:draft.to,calendarOwner:'alex',calendarAccount:'alexander.krista@krista.at',outlook:outlook.appointment?.outlook||null}})});
+        if(!outlook.outlookSynced)setUi('Termin gespeichert','Der Termin ist in Kristine gespeichert. Outlook ist noch nicht verbunden.');
+      }
+    }
+    const label=draft.job?(draft.job.name||('Baustelle '+draft.job.jobId)):'Kristine';
+    const wasAppointment=draft.kind==='appointment';
+    draft=null;stage='idle';awaitingAnother=true;candidateJob=null;
+    if(statusTitle.textContent!=='Termin gespeichert')setUi('Gespeichert',wasAppointment?'Termin und Aufgabe sind angelegt.':'Alles ist abgelegt.');
+    speak((wasAppointment?'Erledigt. Der Termin ist angelegt. ':'Erledigt. Es liegt bei '+label+'. ')+'Noch etwas?',true);
+  }catch(err){
+    setUi('Speichern fehlgeschlagen',String(err.message||err));
+    speak('Beim Speichern ist etwas schief gegangen. Versuch es bitte noch einmal.',false);
+  }finally{processing=false;voiceCard.disabled=false}
+}
+
+function speak(text,continueListening){
+  if(!('speechSynthesis'in window)){if(continueListening)setTimeout(startListening,300);return}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);u.lang='de-AT';u.rate=1.02;
+  const voices=speechSynthesis.getVoices();
+  u.voice=voices.find(v=>/^de-AT/i.test(v.lang))||voices.find(v=>/^de/i.test(v.lang))||null;
+  u.onend=()=>{if(continueListening&&keepConversation)setTimeout(startListening,350)};
+  u.onerror=()=>{if(continueListening&&keepConversation)setTimeout(startListening,350)};
+  speechSynthesis.speak(u);
+}
+function finishSession(text){
+  keepConversation=false;draft=null;candidateJob=null;stage='idle';awaitingAnother=false;
+  setUi('Bereit','Tippe auf das Mikrofon, wenn du wieder etwas festhalten willst.');
+  speak(text,false);
+}
+</script>
+</body>
+</html>
