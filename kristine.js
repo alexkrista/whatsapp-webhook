@@ -9,7 +9,7 @@ const path = require("path");
 const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
 const { financeTaskWhatsAppDetail } = require("./finance-task-whatsapp");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta, transcribeAudio, interpretVoiceText, appendJobHistory }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -1234,7 +1234,128 @@ const open = taskId
 
   app.get("/kristine", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    res.sendFile(path.join(publicDir, "kristine.html"));
+    res.sendFile(path.join(publicDir, "fahrmodus.html"), { headers:{ "Cache-Control":"no-store" } });
+  });
+
+  app.get(["/kristine/app", "/kristine/app/"], (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.sendFile(path.join(publicDir, "kristine.html"), { headers:{ "Cache-Control":"no-store" } });
+  });
+
+  app.post("/kristine/api/voice/transcribe", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      if (typeof transcribeAudio !== "function") {
+        return res.status(503).json({ ok:false, error:"Spracherkennung ist nicht konfiguriert." });
+      }
+      const audioBase64 = String(req.body?.audioBase64 || "");
+      const mimeType = String(req.body?.mimeType || "audio/mp4").slice(0, 100);
+      if (!audioBase64) return res.status(400).json({ ok:false, error:"Audio fehlt." });
+      const audioBuffer = Buffer.from(audioBase64, "base64");
+      if (!audioBuffer.length) return res.status(400).json({ ok:false, error:"Audio ist leer." });
+      if (audioBuffer.length > 12 * 1024 * 1024) return res.status(413).json({ ok:false, error:"Audio ist zu groß." });
+      const ext = /webm/i.test(mimeType) ? "webm" : /ogg/i.test(mimeType) ? "ogg" : /wav/i.test(mimeType) ? "wav" : "m4a";
+      const text = await transcribeAudio({ audioBuffer, filename:`fahrmodus.${ext}`, mimeType });
+      res.json({ ok:true, text:String(text || "").trim() });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/voice/interpret", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const text = String(req.body?.text || "").trim();
+      if (!text) return res.status(400).json({ ok:false, error:"Text fehlt." });
+      const draft = typeof interpretVoiceText === "function"
+        ? await interpretVoiceText(text)
+        : { kind:"note", target:"", content:text, dueDate:"", date:"", from:"", to:"", rawText:text };
+      res.json({ ok:true, draft });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/voice/note", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      if (typeof appendJobHistory !== "function") {
+        return res.status(503).json({ ok:false, error:"Baustellenakte ist nicht verfügbar." });
+      }
+      const jobId = String(req.body?.jobId || "").trim();
+      if (!/^[A-Za-z0-9_-]{2,80}$/.test(jobId)) return res.status(400).json({ ok:false, error:"Ungültige Baustelle." });
+      const detail = String(req.body?.detail || "").trim().slice(0, 2000);
+      if (!detail) return res.status(400).json({ ok:false, error:"Notiz ist leer." });
+      const title = String(req.body?.title || "Gesprächsnotiz").trim().slice(0, 180) || "Gesprächsnotiz";
+      await appendJobHistory(jobId, {
+        type:"voice_note",
+        title,
+        detail,
+        source:"fahrmodus",
+        data:{ rawText:String(req.body?.rawText || "").trim().slice(0, 2000) },
+      });
+      await appendEvent({ type:"voice_note", jobId, detail, source:"fahrmodus" });
+      res.json({ ok:true, jobId });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
+  app.post("/kristine/api/voice/task", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const jobId = String(req.body?.jobId || "").trim().slice(0, 80);
+      const title = String(req.body?.title || "").trim().slice(0, 180);
+      if (!title) return res.status(400).json({ ok:false, error:"Aufgabe ist leer." });
+      let jobMeta = {};
+      if (jobId && typeof readJobMeta === "function") {
+        try { jobMeta = await readJobMeta(jobId) || {}; } catch {}
+      }
+      const employees = typeof readEmployees === "function" ? await readEmployees().catch(() => []) : [];
+      let assigneeId = String(req.body?.assigneeId || "").trim().slice(0, 100);
+      let assigneeName = String(req.body?.assigneeName || "").trim().slice(0, 140);
+      if (!assigneeId) {
+        const alex = (employees || []).find(row => /\balex(ander)?\b/i.test(String(row?.name || "")))
+          || (employees || []).find(row => /krista/i.test(String(row?.name || "")));
+        if (alex) {
+          assigneeId = String(alex.id || alex.employeeId || "").slice(0, 100);
+          assigneeName = String(alex.name || alex.employeeName || "Alexander").trim().slice(0, 140);
+        }
+      }
+      const type = String(req.body?.taskType || "");
+      const taskType = ["Rückruf","Angebot","Problem","Termin","Reklamation","Sonstiges"].includes(type) ? type : "Sonstiges";
+      const now = new Date().toISOString();
+      const row = {
+        id:`voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
+        title,
+        taskType,
+        priority:["normal","heute","sofort"].includes(String(req.body?.priority || "")) ? String(req.body.priority) : "normal",
+        assigneeId,
+        assigneeName:assigneeName || "Alex",
+        jobId,
+        jobName:String(req.body?.jobName || jobMeta.name || "").trim().slice(0, 140),
+        creatorId:"admin",
+        creatorName:"Alexander Krista",
+        address:String(req.body?.address || [jobMeta.street, jobMeta.houseNumber, [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "").trim().slice(0, 300),
+        contactName:String(jobMeta.contactName || "").trim().slice(0, 140),
+        contactPhone:String(jobMeta.contactPhone || "").trim().slice(0, 60),
+        contactEmail:String(jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
+        dueDate:String(req.body?.dueDate || "").slice(0, 10),
+        reminder:String(req.body?.reminder || "Aus Fahrmodus").trim().slice(0, 500),
+        appointment:req.body?.appointment && typeof req.body.appointment === "object" ? req.body.appointment : null,
+        visitProtocol:taskType === "Termin" ? { files:[] } : null,
+        status:"open",
+        createdAt:now,
+        completedAt:null,
+      };
+      const tasks = await readJson(TASKS, []);
+      tasks.push(row);
+      await writeJson(TASKS, tasks);
+      await appendEvent({ type:"voice_task_created", taskId:row.id, jobId:row.jobId || null, detail:row.title, source:"fahrmodus" });
+      res.status(201).json({ ok:true, task:row });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
   });
 
   // Dieselbe Baustellen-Oberfläche und Datenlogik, jetzt unter KRISTINE.
