@@ -58,7 +58,7 @@ function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComp
 const ua=navigator.userAgent||'';
 const appleMobile=/iPhone|iPad|iPod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 const phoneOrTablet=appleMobile||/Android/i.test(ua);
-if(qs.has('task')&&!qs.has('fahrmodus')) location.replace(url('/kristine/app')+location.hash);
+if((location.hash||qs.has('task'))&&!qs.has('fahrmodus')) location.replace(url('/kristine/app')+location.hash);
 else if(!phoneOrTablet&&!qs.has('fahrmodus')) location.replace(url('/kristine/app'));
 const voiceCard=document.getElementById('voiceCard');
 const voiceTitle=document.getElementById('voiceTitle');

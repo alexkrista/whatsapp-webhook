@@ -1243,8 +1243,7 @@ const open = taskId
     const mobileApple = /iPhone|iPad|iPod/i.test(ua);
     const mobileAndroid = /Android/i.test(ua);
     const explicitlyNormal = String(req.query.normal || "") === "1";
-    const explicitTask = Boolean(String(req.query.task || "").trim());
-    if ((mobileApple || mobileAndroid) && !explicitlyNormal && !explicitTask) {
+    if ((mobileApple || mobileAndroid) && !explicitlyNormal) {
       const token = String(req.query.token || "");
       const suffix = token ? `?token=${encodeURIComponent(token)}` : "";
       return res.redirect(302, `/kristine${suffix}`);
