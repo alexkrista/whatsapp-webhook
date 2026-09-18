@@ -17,7 +17,7 @@ async function fixture(t,withOffice=false){
  const request=(route,opts={})=>fetch(`http://127.0.0.1:${server.address().port}`+route,{...opts,headers:{"Content-Type":"application/json",Origin:"https://protokoll.krista.at",...opts.headers}});
  const invite=async(preview=false)=>{const res=await request("/admin/api/job/24177/customer-portal/invitation",{method:"POST",headers:{"x-test-admin":"yes"},body:JSON.stringify({preview})});assert.equal(res.status,200);return res.json()};
  const login=async(url)=>{const ticket=new URL(url).hash.slice("#zugang=".length),res=await request("/kundenportal/api/session",{method:"POST",body:JSON.stringify({ticket})});assert.equal(res.status,200);const cookie=res.headers.get("set-cookie");assert.match(cookie,/HttpOnly/i);assert.match(cookie,/Secure/i);assert.match(cookie,/SameSite=Lax/i);return cookie.split(";")[0]};
- return {dir,write,metas,request,invite,login,access,advance:ms=>time+=ms,setMembers:ids=>members=ids,setBeforePdf:fn=>beforePdf=fn};
+ return {dir,write,metas,request,invite,login,access,advance:ms=>time+=ms,setMembers:ids=>members=ids,setBeforePdf:fn=>beforePdf=fn,setDocumentation:(id,rows)=>{documentation[id]=rows}};
 }
 test("WhatsApp link authenticates only the issued project, protects files and omits internal fields",async t=>{
  const f=await fixture(t);
@@ -65,13 +65,13 @@ test("office meeting notes keep responsibility and private photos in the custome
 });
 test("a finalized offer is visible and commissionable through an existing normal portal link",async t=>{
  const f=await fixture(t),draft={offerNumber:"2609002",offerRevision:1,positions:[{text:"Regiearbeiten",quantity:2,unit:"Std",unitPrice:75}],financials:{vatRate:20}};
- f.write("24177/.offer-draft.json",draft);f.write("24177/_offers/offer-2609002-v1.json",draft);
+ f.write("24177/.offer-draft.json",draft);f.write("24177/_offers/offer-2609002-v1.json",draft);f.write("24177/_documentation/angebot-2609002-v1.pdf","%PDF-approved-original"+"x".repeat(600));f.setDocumentation("24177",[{id:"offer-current",type:"offer",name:"Angebot 2609002.pdf",offerNumber:"2609002",offerRevision:1,customerVisible:true,storedName:"angebot-2609002-v1.pdf",source:"offer-approved-original"}]);
  const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie},project=await(await f.request("/kundenportal/api/project",{headers})).json();
  assert.equal(project.offer.number,"2609002");assert.equal(project.offer.acceptance,null);assert(project.offer.pdfUrl);assert(project.files.some(row=>row.name==="Angebot 2609002.pdf"));
  const pdf=await f.request(project.offer.pdfUrl,{headers});assert.equal(pdf.status,200);assert.equal(pdf.headers.get("content-security-policy"),"default-src 'none'; frame-ancestors 'self'");assert.equal(pdf.headers.get("x-frame-options"),"SAMEORIGIN");assert.equal((await pdf.arrayBuffer()).byteLength>500,true);
  const question=await f.request("/kundenportal/api/point",{method:"POST",headers:{...headers,"x-csrf-token":project.csrf},body:JSON.stringify({module:"communication",offerQuestion:true,title:"Frage zu Angebot 2609002",text:"Ist der Termin noch frei?"})});assert.equal(question.status,201);assert.match(mergePortalTasks(f.dir,[]).find(row=>row.creatorId==="customer-portal").title,/Frage zu Angebot 2609002/);
  const rejected=await f.request("/kundenportal/api/offer/accept",{method:"POST",headers:{...headers,"x-csrf-token":project.csrf},body:JSON.stringify({confirmed:true})});assert.equal(rejected.status,400);
- const accepted=await f.request("/kundenportal/api/offer/accept",{method:"POST",headers:{...headers,"x-csrf-token":project.csrf},body:JSON.stringify({confirmed:true,termsAccepted:true,paymentTerm:"skonto5_2",preferredDate:"2026-10-10"})});assert.equal(accepted.status,200,await accepted.text());
+ const accepted=await f.request("/kundenportal/api/offer/accept",{method:"POST",headers:{...headers,"x-csrf-token":project.csrf},body:JSON.stringify({confirmed:true,termsAccepted:true,termsVersion:project.offer.terms.version,paymentTerm:"skonto5_2",preferredDate:"2026-10-10"})});assert.equal(accepted.status,200,await accepted.text());
  const refreshed=await(await f.request("/kundenportal/api/project",{headers})).json();assert.equal(refreshed.offer.acceptance.status,"accepted");assert.equal(refreshed.offer.acceptance.paymentLabel,"2 % Skonto bei Zahlung binnen 5 Tagen");assert.equal(refreshed.offer.acceptance.preferredDate,"2026-10-10");assert.equal(f.metas["24177"].status,"Auftrag");
 });
 test("an unfinished offer draft stays hidden in a normal portal link",async t=>{

@@ -40,10 +40,10 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 for(const text of ["splitOfferAddress","offerRecipientNames",'kind==="woman"?"Frau":"Herr"','\\d{4,6}',"all.indexOf(name)===index",'manRole=role.includes("bauherr")&&!womanRole'])
   assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
-assert.ok(top.includes("20260918-offer-a4-portrait-1"),"Geänderter Angebotsbriefkopf, PDF und Versand werden ohne alten Browser-Cache geladen");
+assert.ok(top.includes("20260918-offer-original-agb-1"),"Original-PDF, AGB und Versand werden ohne alten Browser-Cache geladen");
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
-for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","E-Mail ist geöffnet. Der WhatsApp-Vorschlag bleibt hier fertig vorbereitet."])
+for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","Verbindliche PDF und E-Mail sind geöffnet."])
   assert.ok(ui.includes(text),`Angebotsversand bereitet E-Mail und WhatsApp gemeinsam vor: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
@@ -67,7 +67,7 @@ assert.ok(ui.includes("normalizeLoadedGroups"),"Bereits gespeicherte Regie- und 
 for(const text of ["groupName","groupDiscounts"])assert.ok(server.includes(text)||ui.includes(text),`Gruppendaten enthalten ${text}`);
 for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(text),`Vorkasseansicht enthält ${text}`);
 for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
-for(const text of ["Drucken / PDF","printOffer","printDocumentHtml","window.open","popup.print","offerDocumentMeta"])assert.ok(ui.includes(text),`Angebotsdruck enthält ${text}`);
+for(const text of ["Drucken / PDF","printOffer","printDocumentHtml","storeCanonicalOfferPdf","offer-pdf/upload","offerDocumentMeta"])assert.ok(ui.includes(text),`Angebotsdruck enthält ${text}`);
 for(const text of ["offerNumberPrefix","nextOfferNumber","offer-number-counter.json","offer-draft/finalize","offerRevision"])assert.ok(server.includes(text),`Angebotsnummernkreis enthält ${text}`);
 for(const text of ['hourlyRate:Number(job?.billingRate||job?.calculation?.billingRate||75)','materialMarkupPct:Number(job?.materialPercent||job?.calculation?.materialPercent||80)','regieMaterialMode:"percent"','regieMaterialRate:20'])assert.ok(ui.includes(text),`Standard-Faktbox liefert ${text}`);
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");

@@ -80,6 +80,8 @@ const { createGrossProfitPdf } = require("./gross-profit-pdf");
 const { registerNfonIntegration } = require("./nfon-integration");
 const { sanitizeCustomerPortal, registerCustomerPortal } = require("./customer-portal");
 const { registerCustomerAccess } = require("./customer-portal-access");
+const { renderOfferHtmlPdf } = require("./offer-html-pdf");
+const { OFFER_TERMS } = require("./offer-terms");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -97,6 +99,7 @@ app.use("/public", express.static("public", {
   },
 }));
 app.get("/public/krista-logo.png", (_req, res) => res.sendFile(path.join(process.cwd(), "krista-logo.png")));
+app.get("/api/offer-terms", (_req, res) => res.json({ ok: true, terms: OFFER_TERMS }));
 
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
@@ -3289,6 +3292,20 @@ app.put("/admin/api/job/:jobId/offer-draft", async (req, res) => {
 });
 
 app.post("/admin/api/job/:jobId/offer-draft/finalize",async(req,res)=>{if(!requireAdmin(req,res))return;try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const file=offerDraftPath(jobId),draft=await fsp.readFile(file,"utf8").then(JSON.parse).catch(()=>null);if(!draft)return res.status(404).json({ok:false,error:"Angebotsentwurf fehlt."});if(!/^\d{7}$/.test(String(draft.offerNumber||""))){draft.offerNumber=await nextOfferNumber();draft.offerCreatedAt=new Date().toISOString();draft.offerRevision=1;await fsp.writeFile(file,JSON.stringify(draft,null,2),"utf8");await appendJobHistory(jobId,{type:"offer_finalized",title:`Angebot ${draft.offerNumber} erstellt`,detail:"Angebot für Druck/PDF verbindlich nummeriert",source:"KRISTINE Angebot"})}res.json({ok:true,jobId,draft,offerNumber:draft.offerNumber,offerRevision:Math.max(1,Number(draft.offerRevision||1))})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
+
+app.post("/admin/api/job/:jobId/offer-pdf/render",express.text({type:"text/html",limit:"5mb"}),async(req,res)=>{if(!requireAdmin(req,res))return;try{
+  const jobId=String(req.params.jobId||""),number=String(req.headers["x-offer-number"]||"").trim(),revision=Math.max(1,Number(req.headers["x-offer-revision"]||1));if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
+  const draft=await fsp.readFile(offerDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!draft||draft.offerNumber!==number||Number(draft.offerRevision||1)!==revision)return res.status(409).json({ok:false,error:"Das Angebot wurde inzwischen geändert. Bitte erneut vorbereiten."});
+  const pdf=await renderOfferHtmlPdf(req.body),storedName=`angebot-${number}-v${revision}.pdf`,dir=documentationDir(jobId),file=path.join(dir,storedName);await ensureDir(dir);const tmp=file+"."+crypto.randomUUID()+".tmp";try{await fsp.writeFile(tmp,pdf);await fsp.rename(tmp,file)}finally{await fsp.rm(tmp,{force:true}).catch(()=>{})}
+  const rows=await readDocumentation(jobId),id=`offer-${crypto.createHash("sha256").update(`${jobId}|${number}|${revision}`).digest("hex").slice(0,20)}`,item={id,type:"offer",name:`Angebot ${number}.pdf`,offerNumber:number,offerRevision:revision,customerVisible:true,storedName,source:"offer-browser-render",renderedAt:new Date().toISOString(),importedAt:new Date().toISOString(),url:`/admin/api/job/${encodeURIComponent(jobId)}/documentation/file?name=${encodeURIComponent(storedName)}`},next=rows.filter(row=>row?.id!==id&&row?.storedName!==storedName);next.unshift(item);await writeDocumentation(jobId,next.slice(0,1000));await appendJobHistory(jobId,{type:"offer_pdf_stored",title:`Angebot ${number} als verbindliche PDF gespeichert`,detail:`Version ${revision} · identisch für Druck, Versand, Dokumente und Kundenportal`,source:"KRISTINE Angebot",data:{number,revision,storedName}}).catch(()=>{});res.json({ok:true,item,pdfUrl:item.url});
+}catch(e){res.status(500).json({ok:false,error:`PDF konnte nicht verbindlich gespeichert werden: ${String(e?.message||e)}`})}});
+
+app.post("/admin/api/job/:jobId/offer-pdf/upload",express.raw({type:["application/pdf","application/octet-stream"],limit:"25mb"}),async(req,res)=>{if(!requireAdmin(req,res))return;try{
+  const jobId=String(req.params.jobId||""),number=String(req.headers["x-offer-number"]||"").trim(),revision=Math.max(1,Number(req.headers["x-offer-revision"]||1)),pdf=Buffer.isBuffer(req.body)?req.body:Buffer.from(req.body||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});if(pdf.length<100||pdf.subarray(0,5).toString("ascii")!=="%PDF-")return res.status(400).json({ok:false,error:"Bitte die freigegebene Original-PDF auswählen."});
+  const draft=await fsp.readFile(offerDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!draft||draft.offerNumber!==number||Number(draft.offerRevision||1)!==revision)return res.status(409).json({ok:false,error:"Das Angebot wurde inzwischen geändert. Bitte erneut vorbereiten."});
+  const storedName=`angebot-${number}-v${revision}.pdf`,dir=documentationDir(jobId),file=path.join(dir,storedName);await ensureDir(dir);const tmp=file+"."+crypto.randomUUID()+".tmp";try{await fsp.writeFile(tmp,pdf);await fsp.rename(tmp,file)}finally{await fsp.rm(tmp,{force:true}).catch(()=>{})}
+  const rows=await readDocumentation(jobId),id=`offer-${crypto.createHash("sha256").update(`${jobId}|${number}|${revision}`).digest("hex").slice(0,20)}`,item={id,type:"offer",name:`Angebot ${number}.pdf`,offerNumber:number,offerRevision:revision,customerVisible:true,storedName,source:"offer-approved-original",approvedAt:new Date().toISOString(),importedAt:new Date().toISOString(),url:`/admin/api/job/${encodeURIComponent(jobId)}/documentation/file?name=${encodeURIComponent(storedName)}`},next=rows.filter(row=>row?.id!==id&&row?.storedName!==storedName);next.unshift(item);await writeDocumentation(jobId,next.slice(0,1000));await appendJobHistory(jobId,{type:"offer_pdf_approved",title:`Freigegebene Original-PDF für Angebot ${number} übernommen`,detail:`Version ${revision} · Originaldatei unverändert für Dokumente und Kundenportal`,source:"KRISTINE Angebot",data:{number,revision,storedName,bytes:pdf.length}}).catch(()=>{});res.json({ok:true,item,pdfUrl:item.url});
+}catch(e){res.status(500).json({ok:false,error:`Original-PDF konnte nicht gespeichert werden: ${String(e?.message||e)}`})}});
 
 app.put("/admin/api/job/:jobId/hours-cutover", async (req, res) => {
   if (!requireAdmin(req, res)) return;

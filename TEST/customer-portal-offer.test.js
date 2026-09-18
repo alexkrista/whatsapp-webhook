@@ -4,5 +4,5 @@ const access=fs.readFileSync(path.join(root,"customer-portal-access.js"),"utf8")
 assert.equal(pkg.dependencies.qrcode,"^1.5.4","QR-Code wird lokal und ohne Fremddienst erzeugt");
 for(const text of ['purpose==="offer"','90*86400000','QRCode.toString','offerNumber','offerRevision','customerOffer(ctx)','/kundenportal/api/offer/accept','req.body?.confirmed!==true','status:"Auftrag"','offer_customer_accepted'])assert.ok(access.includes(text),`Sicherer Angebotsauftrag enthält ${text}`);
 for(const text of ['offer:"Angebot"','Angebot verbindlich beauftragen','offerConfirm','offer/accept','window.confirm'])assert.ok(ui.includes(text),`Kundenportal zeigt und bestätigt das Angebot: ${text}`);
-assert.ok(html.includes("20260918-offer-accept-1"),"Kundenportal lädt die neue Angebotsansicht ohne Alt-Cache");
+assert.ok(html.includes("20260918-offer-original-agb-1"),"Kundenportal lädt Original-PDF und vollständige AGB ohne Alt-Cache");
 console.log("OK: Kundenportal-QR und verbindliche Angebotsbeauftragung sind verdrahtet.");
