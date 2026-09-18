@@ -9,5 +9,6 @@ assert.ok(html.includes("20260918-offer-original-agb-2"),"Kundenportal lädt Ori
 for(const text of ["Muster-Widerrufsformular","vierzehn Tagen","zuzüglich allfälliger beauftragter Nachträge","Feldkircherstraße 45","FN 15539b","FN 77707a"])assert.ok(terms.includes(text),`Rechtliche Angebotsanlage enthält ${text}`);
 assert.ok(pdf.includes("appendOfferLegalAnnex"),"AGB und Rücktrittsunterlagen werden an die verbindliche PDF angehängt");
 assert.ok(server.includes("offer-approved-original")&&server.includes("appendOfferLegalAnnex(originalPdf)"),"Freigegebene Originalseiten bleiben Grundlage der Kunden-PDF");
-assert.ok(server.match(/bereits verbindlich beauftragt und darf nicht mehr überschrieben werden/g)?.length===2,"Angenommene Angebote sind gegen nachträgliches Überschreiben geschützt");
+assert.ok(server.includes('"x-approved-pdf-correction"')&&server.includes("offer_pdf_corrected_after_acceptance")&&server.includes("customerAcceptanceUnchanged:accepted"),"Eine freigegebene PDF kann nach Annahme nur protokolliert korrigiert werden; der Auftrag bleibt unverändert");
+assert.ok(access.includes('new Set(["offer-approved-original","offer-approved-correction"])'),"Das Kundenportal akzeptiert keine automatisch nachgebaute PDF als verbindliches Angebot");
 console.log("OK: Kundenportal-QR und verbindliche Angebotsbeauftragung sind verdrahtet.");

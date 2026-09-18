@@ -41,6 +41,8 @@ function registerCustomerAccess(app, options) {
   const offerPath=jobId=>path.join(dataDir,jobId,".offer-draft.json");
   const offerSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",`offer-${number}-v${revision}.json`);
   const offerPdfName=(number,revision)=>`angebot-${String(number).replace(/[^A-Za-z0-9_-]/g,"")}-v${Math.max(1,Number(revision)||1)}.pdf`;
+  const offerPdfSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",offerPdfName(number,revision));
+  const offerPdfManifestPath=(jobId,number,revision)=>offerPdfSnapshotPath(jobId,number,revision)+".json";
   const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
   async function mainId(id) {
     if(!safeId(id))throw fail(404,"Akte nicht gefunden.");
@@ -228,11 +230,15 @@ function registerCustomerAccess(app, options) {
   }
   async function ensureOfferPdf(ctx,offer) {
     if(!offer?.available||typeof readDocumentation!=="function"||typeof writeDocumentation!=="function")return null;
-    const storedName=offerPdfName(offer.number,offer.revision),rows=await readDocumentation(ctx.jobId),matching=rows.filter(row=>row?.type==="offer"&&(row?.storedName===storedName||row?.offerNumber===offer.number&&Number(row?.offerRevision||1)===offer.revision)),exact=matching.find(row=>["offer-approved-original","offer-browser-render"].includes(row.source)&&row.customerVisible===true&&row.storedName&&secureFile(ctx.jobId,"_documentation/"+row.storedName));
-    // Never show a separately reconstructed PDF. Only the exact PDF captured
-    // from the final print/dispatch view is valid for the customer portal.
-    if(exact)return exact;
-    if(matching.length){const stale=new Set(matching.map(row=>row.id));await writeDocumentation(ctx.jobId,rows.filter(row=>!stale.has(row.id)));for(const row of matching)if(row.storedName===storedName)fs.rmSync(path.join(dataDir,ctx.jobId,"_documentation",storedName),{force:true})}
+    const storedName=offerPdfName(offer.number,offer.revision),rows=await readDocumentation(ctx.jobId),matching=rows.filter(row=>row?.type==="offer"&&(row?.storedName===storedName||row?.offerNumber===offer.number&&Number(row?.offerRevision||1)===offer.revision));
+    const snapshot=secureFile(ctx.jobId,"_offers/"+storedName);
+    const approvedSources=new Set(["offer-approved-original","offer-approved-correction"]),manifest=read(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),null);
+    if(snapshot&&approvedSources.has(manifest?.source))return{type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:manifest.source,storage:"offers"};
+    const exact=matching.find(row=>row.customerVisible===true&&approvedSources.has(row.source)&&row.storedName&&secureFile(ctx.jobId,"_documentation/"+row.storedName));
+    const source=exact&&secureFile(ctx.jobId,"_documentation/"+exact.storedName);
+    // Die beim Versand verwendete PDF wird unveränderlich in _offers gesichert.
+    // Ein verlorener Dokumentenindex darf sie niemals aus dem Portal entfernen.
+    if(source){const target=offerPdfSnapshotPath(ctx.jobId,offer.number,offer.revision);fs.mkdirSync(path.dirname(target),{recursive:true});if(!fs.existsSync(target))fs.copyFileSync(source,target);write(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),{offerNumber:offer.number,offerRevision:offer.revision,storedName,source:exact.source,approvedAt:exact.approvedAt||exact.importedAt||new Date(now()).toISOString()});return{...(exact||{}),type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:exact.source,storage:"offers"}}
     return null;
   }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
@@ -241,7 +247,7 @@ function registerCustomerAccess(app, options) {
     res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,offer:offer?{...offer,pdfUrl:offerPdf?"/kundenportal/api/offer/pdf":""}:offer,projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
   }));
   app.get("/kundenportal/api/offer/pdf",guard(async(req,res)=>{
-    const ctx=await context(req),offer=customerOffer(ctx),item=await ensureOfferPdf(ctx,offer),file=item&&secureFile(ctx.jobId,"_documentation/"+item.storedName);if(!file)throw fail(404,"Angebots-PDF nicht verfügbar.");
+    const ctx=await context(req),offer=customerOffer(ctx),item=await ensureOfferPdf(ctx,offer),file=item&&secureFile(ctx.jobId,(item.storage==="offers"?"_offers/":"_documentation/")+item.storedName);if(!file)throw fail(404,"Angebots-PDF nicht verfügbar.");
     // Only this authenticated PDF may be framed by the customer portal itself.
     // The general portal keeps frame-ancestors 'none' against third-party embedding.
     res.setHeader("Content-Security-Policy","default-src 'none'; frame-ancestors 'self'");
@@ -250,6 +256,7 @@ function registerCustomerAccess(app, options) {
   app.post("/kundenportal/api/offer/accept",guard(async(req,res)=>{
     sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
     const offer=customerOffer(ctx);if(!offer?.available)throw fail(409,offer?.message||"Dieses Angebot ist nicht mehr verfügbar.");
+    if(!await ensureOfferPdf(ctx,offer))throw fail(409,"Die verbindliche Angebots-PDF fehlt. Bitte Farben Krista kontaktieren; der Auftrag wurde noch nicht bestätigt.");
     const file=offerSnapshotPath(ctx.jobId,offer.number,offer.revision),draft=read(file,null);if(!draft)throw fail(409,"Die verbindliche Angebotsfassung ist nicht mehr verfügbar.");if(draft.customerAcceptance?.offerNumber===offer.number&&Number(draft.customerAcceptance?.offerRevision)===offer.revision)return res.json({ok:true,acceptance:draft.customerAcceptance,alreadyAccepted:true});
     if(req.body?.confirmed!==true)throw fail(400,"Bitte bestätigen Sie die verbindliche Beauftragung.");
     if(req.body?.termsAccepted!==true||clean(req.body?.termsVersion,40)!==OFFER_TERMS.version)throw fail(400,"Bitte bestätigen Sie die aktuelle Fassung der AGB.");
