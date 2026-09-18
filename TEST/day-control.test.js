@@ -24,6 +24,9 @@ Module._load = originalLoad;
     { id:"3", name:"Bernd Schule" },
     { id:"4", name:"Judith Krista", worktimeModelId:"krista-standard" },
     { id:"5", name:"Alexander Krista", worktimeModelId:"office-alex" },
+    { id:"6", name:"Vor Eintritt", employmentStart:"2026-09-16" },
+    { id:"7", name:"Bereits ausgetreten", employmentEnd:"2026-09-14" },
+    { id:"8", name:"Deaktiviert", active:false },
   ];
   try {
     await fsp.mkdir(dataRoot);
@@ -62,6 +65,7 @@ Module._load = originalLoad;
     assert.equal(response.statusCode,200);
     assert.equal(response.body.allReleased,true);
     assert.equal(response.body.items.length,5);
+    assert.equal(response.body.items.some(item=>["6","7","8"].includes(item.employeeId)),false,"Personalregeln begrenzen die Tageskontrolle");
     assert.equal(response.body.items.find(item=>item.employeeId==="1").totals.work,420,"Werkstatt zählt im Überblick als Arbeit");
     assert.equal(response.body.items.find(item=>item.employeeId==="2").totals.absence,468,"Urlaub zählt als Abwesenheit");
     assert.equal(response.body.items.find(item=>item.employeeId==="3").totals.work,468,"Berufsschule zählt im Überblick als Arbeit");

@@ -2641,13 +2641,23 @@ const open = taskId
     };
   }
 
+  function employeeBelongsToDay(employee,date) {
+    if(!employee||employee.active===false||employee.archived===true)return false;
+    const day=String(date||"").slice(0,10);
+    const start=String(employee.employmentStart||employee.entryDate||employee.startDate||"").slice(0,10);
+    const end=String(employee.employmentEnd||employee.exitDate||employee.endDate||"").slice(0,10);
+    if(start&&day<start)return false;
+    if(end&&day>end)return false;
+    return true;
+  }
+
   async function buildDayControl(date) {
     const [employees,events,states,releases,assignments,controls,worktimeModels]=await Promise.all([
       typeof readEmployees==="function"?readEmployees().catch(()=>[]):[],
       readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_RELEASES,[]),
       readJson(ASSIGNMENTS,[]),readJson(DAY_CONTROLS,[]),readJson(WORKTIME_MODELS,[])
     ]);
-    const activeEmployees=(employees||[]).filter(employee=>employee&&employee.active!==false&&employee.archived!==true);
+    const activeEmployees=(employees||[]).filter(employee=>employeeBelongsToDay(employee,date));
     const items=activeEmployees.map(employee=>{
       const employeeId=String(employee.id||employee.employeeId||"").trim();
       const employeeName=employeeEverydayName(employee)||employeeId;

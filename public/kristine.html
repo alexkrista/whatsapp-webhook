@@ -1363,22 +1363,36 @@ function renderKristool(){
 
 
 function normalizedEmployeeIdentity(employee,employeeId=''){
-  // Wichtig: Im Leitstand ist die KRISTA-Mitarbeiter-ID die führende Identität.
-  // Telefon und Name sind nur Rückfallebenen für alte/unvollständige Datensätze.
+  // Derselbe Mitarbeiter kann aus Stammdaten und Altdaten mit verschiedenen
+  // technischen IDs kommen. Der sichtbare, normalisierte Name verbindet diese
+  // Datensätze im Leitstand; ID und Telefon bleiben sichere Rückfallebenen.
   const id=String(employeeId||employee?.employeeId||employee?.id||'').trim();
-  if(id)return `id:${id}`;
-
-  const phone=String(employee?.phone||'').replace(/\D/g,'').replace(/^00/,'');
-  if(phone)return `phone:${phone}`;
 
   const name=String(employee?.name||employee?.employeeName||'')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-  return `name:${name||'unknown'}`;
+  if(name)return `name:${name}`;
+
+  const phone=String(employee?.phone||'').replace(/\D/g,'').replace(/^00/,'');
+  if(phone)return `phone:${phone}`;
+
+  return `id:${id||'unknown'}`;
+}
+
+function employeeOperationalOnDate(employee,date){
+  if(!employee||employee.active===false||employee.archived===true)return false;
+  const day=String(date||'').slice(0,10);
+  const start=String(employee.employmentStart||employee.entryDate||employee.startDate||'').slice(0,10);
+  const end=String(employee.employmentEnd||employee.exitDate||employee.endDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return true;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(start)&&day<start)return false;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(end)&&day>end)return false;
+  return true;
 }
 
 function canonicalControlEmployees(date){
   const planned=data.assignments.filter(a=>a.date===date);
+  const eligibleMasters=masterEmployees.filter(employee=>employeeOperationalOnDate(employee,date));
   const groups=new Map();
 
   const add=(row,source)=>{
@@ -1390,8 +1404,14 @@ function canonicalControlEmployees(date){
     const id=String(rawId||'').trim();
     if(!id)return;
 
-    const master=masterEmployees.find(e=>String(e.id)===id);
-    const employee=master||row;
+    const rowIdentity=normalizedEmployeeIdentity(row,id);
+    const master=eligibleMasters.find(e=>String(e.id)===id)
+      ||eligibleMasters.find(e=>normalizedEmployeeIdentity(e,e.id)===rowIdentity);
+    // Der Leitstand folgt den Personalregeln. Alte Planung oder ein alter
+    // KRISZEIT-Status darf ausgeschiedene/nicht eingetretene Personen nicht
+    // wieder als Mitarbeiter erfinden.
+    if(!master)return;
+    const employee=master;
     const canonicalId=String(master?.id||id);
     const key=normalizedEmployeeIdentity(employee,canonicalId);
 
@@ -1405,7 +1425,7 @@ function canonicalControlEmployees(date){
     }
   };
 
-  masterEmployees.forEach(e=>add(e,'master'));
+  eligibleMasters.forEach(e=>add(e,'master'));
   planned.forEach(a=>add(a,'planning'));
   Object.values(data.states||{}).forEach(s=>{if(s?.employeeId)add(s,'state')});
 
