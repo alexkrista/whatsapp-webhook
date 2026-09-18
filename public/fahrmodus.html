@@ -66,7 +66,7 @@ const voiceSub=document.getElementById('voiceSub');
 const statusTitle=document.getElementById('statusTitle');
 const statusText=document.getElementById('statusText');
 const appLink=document.getElementById('appLink');
-appLink.href=url('/kristine/app');
+appLink.href=url('/kristine/app?normal=1');
 
 let jobs=[], employees=[];
 let stream=null, recorder=null, chunks=[], audioCtx=null, analyser=null, sourceNode=null, vadTimer=null;
