@@ -210,6 +210,13 @@ ${voicemailBlock}
       #taskList .krista-task-group-count{display:inline-flex;min-width:27px;justify-content:center;border-radius:999px;padding:3px 8px;background:#fff;border:1px solid #d5d0c7;font-size:11px}
       #taskList .krista-task-group-rows{display:grid;gap:6px;padding:7px}
       #taskList .krista-task-group-empty{padding:10px 12px;color:#777;font-size:12px;background:#fff;border-radius:9px}
+      #taskList .krista-task-file-group{display:grid;gap:6px;padding:0 0 7px}
+      #taskList .krista-task-file-group:last-child{padding-bottom:0}
+      #taskList .krista-task-file-bar{display:flex;align-items:center;gap:9px;min-height:34px;padding:7px 10px;border:1px solid #d9d5cc;border-left:5px solid #315f3d;border-radius:9px;background:#e8eee8;color:#233128;font-weight:900}
+      #taskList .krista-task-file-name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #taskList .krista-task-file-number{color:#657068;font-size:11px;font-weight:800;white-space:nowrap}
+      #taskList .krista-task-file-count{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;border-radius:999px;padding:3px 8px;background:#fff;border:1px solid #cbd4cc;font-size:11px;white-space:nowrap}
+      #taskList .krista-task-file-rows{display:grid;gap:6px;padding-left:8px}
       #taskList .krista-task-row{
         display:grid;
         grid-template-columns:minmax(220px,2fr) minmax(130px,.9fr) minmax(150px,1fr) minmax(145px,.9fr) auto;
@@ -256,6 +263,9 @@ ${voicemailBlock}
       .krista-task-editor-note.error{color:#9c2f25}
       @media(max-width:900px){
         #taskList .krista-task-row{grid-template-columns:minmax(180px,1fr) auto}
+        #taskList .krista-task-file-bar{align-items:flex-start;flex-wrap:wrap}
+        #taskList .krista-task-file-count{margin-left:0}
+        #taskList .krista-task-file-rows{padding-left:0}
         #taskList .krista-task-row>.krista-task-cell:nth-child(2),
         #taskList .krista-task-row>.krista-task-cell:nth-child(3),
         #taskList .krista-task-row>.krista-task-cell:nth-child(4){display:none}
@@ -572,7 +582,10 @@ ${voicemailBlock}
       const rows = grouped.get(group.key) || [];
       const remembered = existingState.get(group.key);
       const open = remembered === undefined ? true : remembered;
-      return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rows.length ? rows.map(taskRowHtml).join("") : '<div class="krista-task-group-empty">Keine Einträge.</div>'}</div></details>`;
+      const rowsHtml = rows.length
+        ? (group.key === "customer" ? taskFileGroupsHtml(rows, taskRowHtml) : rows.map(taskRowHtml).join(""))
+        : '<div class="krista-task-group-empty">Keine Einträge.</div>';
+      return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rowsHtml}</div></details>`;
     }).join("");
 
     hydrateAttachmentButtons(false);
@@ -586,6 +599,28 @@ ${voicemailBlock}
     if (reminder.includes("[REGIE_APPROVAL]") || title.includes("regiebericht prüfen")) return "regie";
     if (String(task?.creatorId || "") === "customer-portal" || title.includes("kundenpunkt prüfen")) return "customer";
     return "other";
+  }
+
+  function taskFileInfo(task) {
+    const jobId = String(task?.jobId || task?.projectId || task?.siteId || "").trim();
+    const jobName = String(task?.jobName || task?.projectName || task?.siteName || "").trim();
+    const fallback = "Ohne zugeordnete Akte";
+    const label = jobName || (jobId ? `Akte ${jobId}` : fallback);
+    const normalizedName = label.toLocaleLowerCase("de-AT").replace(/\s+/g, " ").trim();
+    return { key:jobId ? `job:${jobId}` : `name:${normalizedName}`, jobId, label };
+  }
+
+  function taskFileGroupsHtml(tasks, taskRowHtml) {
+    const files = new Map();
+    for (const task of tasks) {
+      const file = taskFileInfo(task);
+      if (!files.has(file.key)) files.set(file.key, { ...file, tasks:[] });
+      files.get(file.key).tasks.push(task);
+    }
+    return [...files.values()].map(file => {
+      const count = file.tasks.length;
+      return `<section class="krista-task-file-group" data-task-file="${esc(file.key)}"><div class="krista-task-file-bar"><span aria-hidden="true">📁</span><span class="krista-task-file-name">${esc(file.label)}</span>${file.jobId ? `<span class="krista-task-file-number">Akte ${esc(file.jobId)}</span>` : ""}<span class="krista-task-file-count">${count} ${count === 1 ? "Aufgabe" : "Aufgaben"}</span></div><div class="krista-task-file-rows">${file.tasks.map(taskRowHtml).join("")}</div></section>`;
+    }).join("");
   }
 
   function install() {
