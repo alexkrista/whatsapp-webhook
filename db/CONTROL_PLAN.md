@@ -27,14 +27,14 @@ Für mindestens je drei echte Baustellen aus jedem Status vergleichen wir:
 - bereinigte Doppelüberschneidungen
 - offene Stunden nach Statusregel
 
-Kontrollregel:
+Zu kontrollierende Varianten:
 
-- Auftrag = gesamtes Soll offen
-- Laufend = Soll minus Ist offen
-- alle anderen Status = null offen
+- Rest aktiv: Auftrag und Laufend jeweils Soll minus Ist
+- Auftrag voll: Auftrag = Soll; Laufend = Soll minus Ist
+- alle anderen Status = null
 
-Danach müssen Kontrollzentrum, Baustellenliste und Baustellenakte exakt denselben
-Gesamtwert und dieselbe Herleitung anzeigen.
+Nach unserer Entscheidung müssen Kontrollzentrum, Baustellenliste und
+Baustellenakte exakt denselben Gesamtwert und dieselbe Herleitung anzeigen.
 
 ## 4. Sammelmappen
 

@@ -23,16 +23,18 @@ Dateiablage bleibt bis zur gemeinsamen Kontrolle die führende Quelle.
 5. **Lesen aus SQL** – einzeln je Fachbereich freigeben, beginnend mit der
    Baustellen-/Stundenübersicht.
 
-## Festgelegte Stundenregel v1
+## Stundenregeln für die gemeinsame Kontrolle
 
-- `Angebot`, `Fertig – nicht abgerechnet`, `Abgerechnet`, `Geschlossen`:
-  keine offenen Auftragsstunden.
-- `Auftrag`: das gesamte Soll zählt als offen.
-- `Laufend`: Soll minus tatsächlich erfasste Stunden, mindestens null.
+- `Angebot`, `Fertig – nicht abgerechnet`, `Abgerechnet`, `Geschlossen` zählen
+  in beiden Varianten nicht.
+- Variante **Rest aktiv**: Bei `Auftrag` und `Laufend` gilt Soll minus Ist.
+  Das entspricht aktuell der Baustellenliste (940,4 h am 18.09.2026).
+- Variante **Auftrag voll**: Bei `Auftrag` gilt das gesamte Soll, bei `Laufend`
+  Soll minus Ist. Das entspricht wörtlich „Auftrag + Reststunden laufend“.
 - Regie und Auftrag werden getrennt gespeichert, aber für den gesamten
   Baustellenfortschritt gemeinsam berücksichtigt.
 - Sammelmappen erscheinen einmal. Ihre Mitglieder werden in der
   Portfoliosumme nicht zusätzlich gezählt.
 
-Diese Regel bildet die Beschriftung „Auftrag + Reststunden laufend“ wörtlich
-ab. Vor einer Live-Schaltung wird sie mit echten Beispielen kontrolliert.
+SQL weist beide Werte aus. Welche Variante die verbindliche Kennzahl wird,
+entscheiden wir erst nach der Kontrolle echter Baustellen.

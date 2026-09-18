@@ -6,12 +6,13 @@ SELECT
   row_type,
   ROUND(total_target_minutes::numeric / 60, 2) AS target_hours,
   ROUND(actual_total_minutes::numeric / 60, 2) AS actual_hours,
-  ROUND(open_portfolio_minutes::numeric / 60, 2) AS open_hours
+  ROUND(open_remaining_active_minutes::numeric / 60, 2) AS remaining_active_hours,
+  ROUND(open_committed_minutes::numeric / 60, 2) AS committed_open_hours
 FROM kristine.portfolio_hour_rows_v1
-ORDER BY open_portfolio_minutes DESC, display_no;
+ORDER BY open_remaining_active_minutes DESC, display_no;
 
--- Kontrolle 2: genau der Wert, den alle Oberflächen später anzeigen müssen.
-SELECT * FROM kristine.portfolio_hour_kpi_v1;
+-- Kontrolle 2: beide Kandidaten nebeneinander; erst danach wird einer freigegeben.
+SELECT * FROM kristine.portfolio_hour_kpi_candidates_v1;
 
 -- Kontrolle 3: keine Einzelbaustelle darf in mehreren Sammelmappen stecken.
 SELECT job_no, COUNT(*) AS collection_count

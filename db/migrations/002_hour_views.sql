@@ -23,11 +23,14 @@ SELECT
   GREATEST(f.fixed_target_minutes - f.actual_order_minutes, 0)::bigint AS remaining_order_minutes,
   GREATEST(f.planned_regie_minutes - f.actual_regie_minutes, 0)::bigint AS remaining_regie_minutes,
   CASE
+    WHEN f.status IN ('Auftrag', 'Laufend') THEN GREATEST(f.total_target_minutes - f.actual_total_minutes, 0)
+    ELSE 0
+  END::bigint AS open_remaining_active_minutes,
+  CASE
     WHEN f.status = 'Auftrag' THEN f.total_target_minutes
     WHEN f.status = 'Laufend' THEN GREATEST(f.total_target_minutes - f.actual_total_minutes, 0)
     ELSE 0
-  END::bigint AS open_portfolio_minutes,
-  'Auftrag=Soll; Laufend=max(Soll-Ist,0); sonst=0'::text AS policy_v1
+  END::bigint AS open_committed_minutes
 FROM kristine.job_hour_facts_v1 f;
 
 CREATE OR REPLACE VIEW kristine.collection_hour_summary_v1 AS
@@ -43,13 +46,20 @@ SELECT
   COALESCE(SUM(h.actual_regie_minutes), 0)::bigint AS actual_regie_minutes,
   COALESCE(SUM(h.actual_total_minutes), 0)::bigint AS actual_total_minutes,
   CASE
+    WHEN c.status IN ('Auftrag', 'Laufend') THEN GREATEST(
+      COALESCE(SUM(h.total_target_minutes), 0) - COALESCE(SUM(h.actual_total_minutes), 0),
+      0
+    )
+    ELSE 0
+  END::bigint AS open_remaining_active_minutes,
+  CASE
     WHEN c.status = 'Auftrag' THEN COALESCE(SUM(h.total_target_minutes), 0)
     WHEN c.status = 'Laufend' THEN GREATEST(
       COALESCE(SUM(h.total_target_minutes), 0) - COALESCE(SUM(h.actual_total_minutes), 0),
       0
     )
     ELSE 0
-  END::bigint AS open_portfolio_minutes
+  END::bigint AS open_committed_minutes
 FROM kristine.job_collections c
 LEFT JOIN kristine.job_collection_members m ON m.collection_no = c.collection_no
 LEFT JOIN kristine.job_hour_summary_v1 h ON h.job_no = m.job_no
@@ -65,7 +75,8 @@ SELECT
   c.status,
   c.total_target_minutes,
   c.actual_total_minutes,
-  c.open_portfolio_minutes,
+  c.open_remaining_active_minutes,
+  c.open_committed_minutes,
   'collection'::text AS row_type
 FROM kristine.collection_hour_summary_v1 c
 UNION ALL
@@ -76,23 +87,27 @@ SELECT
   h.status,
   h.total_target_minutes,
   h.actual_total_minutes,
-  h.open_portfolio_minutes,
+  h.open_remaining_active_minutes,
+  h.open_committed_minutes,
   'job'::text AS row_type
 FROM kristine.job_hour_summary_v1 h
 WHERE NOT EXISTS (
   SELECT 1 FROM kristine.job_collection_members m WHERE m.job_no = h.job_no
 );
 
-CREATE OR REPLACE VIEW kristine.portfolio_hour_kpi_v1 AS
+CREATE OR REPLACE VIEW kristine.portfolio_hour_kpi_candidates_v1 AS
 SELECT
-  COALESCE(SUM(open_portfolio_minutes), 0)::bigint AS open_portfolio_minutes,
-  ROUND(COALESCE(SUM(open_portfolio_minutes), 0)::numeric / 60, 2) AS open_portfolio_hours,
-  COUNT(*) FILTER (WHERE open_portfolio_minutes > 0)::bigint AS contributing_rows,
-  'hours-policy-v1'::text AS calculation_version
+  COALESCE(SUM(open_remaining_active_minutes), 0)::bigint AS remaining_active_minutes,
+  ROUND(COALESCE(SUM(open_remaining_active_minutes), 0)::numeric / 60, 2) AS remaining_active_hours,
+  COALESCE(SUM(open_committed_minutes), 0)::bigint AS committed_open_minutes,
+  ROUND(COALESCE(SUM(open_committed_minutes), 0)::numeric / 60, 2) AS committed_open_hours,
+  COUNT(*) FILTER (WHERE open_remaining_active_minutes > 0)::bigint AS remaining_contributing_rows,
+  COUNT(*) FILTER (WHERE open_committed_minutes > 0)::bigint AS committed_contributing_rows,
+  'candidate-comparison-v1'::text AS calculation_version
 FROM kristine.portfolio_hour_rows_v1;
 
 INSERT INTO kristine.schema_migrations (version, description)
-VALUES ('002', 'Canonical job, collection and portfolio hour views v1')
+VALUES ('002', 'Auditable job, collection and portfolio hour candidates v1')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
