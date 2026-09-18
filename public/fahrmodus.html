@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>Kristine – Fahrmodus</title>
+<title>Kristine – Sprechmodus</title>
 <style>
 :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#171717;background:#f3f1ec}
 *{box-sizing:border-box}
@@ -33,29 +33,33 @@ main{min-height:100vh;max-width:680px;margin:auto;padding:max(18px,env(safe-area
 <main>
   <div class="brand">
     <h1>Kristine</h1>
-    <p>Fahrmodus</p>
+    <p>Sprechmodus</p>
   </div>
 
   <button id="voiceCard" class="voice-card" type="button" onclick="toggleVoice()">
     <div class="mic">🎙️</div>
     <div id="voiceTitle" class="voice-title">Mit Kristine sprechen</div>
-    <div id="voiceSub" class="voice-sub">Einmal antippen und einfach sagen, was festgehalten werden soll.</div>
+    <div id="voiceSub" class="voice-sub">Einmal antippen und einfach sagen, was du brauchst.</div>
   </button>
 
   <div class="status">
     <strong id="statusTitle">Bereit</strong>
-    <span id="statusText">Aufgabe, Notiz, Erinnerung oder Terminwunsch – Kristine fragt nach, wenn etwas fehlt.</span>
+    <span id="statusText">Aufgabe, Gesprächsnotiz, Erinnerung oder Termin – Kristine fragt nur nach, wenn etwas fehlt.</span>
   </div>
 
   <a id="appLink" class="app-link" href="/kristine/app">Zur normalen App</a>
-  <div class="tiny">Audio wird nur zur Transkription verarbeitet. Kristine speichert keine Audiodatei aus dem Fahrmodus.</div>
+  <div class="tiny">Die Aufnahme wird nur zur Spracherkennung verarbeitet. Im Baustellenprotokoll wird keine Audiodatei aus dem Sprechmodus gespeichert.</div>
 </main>
 
 <script>
 const qs=new URLSearchParams(location.search);
 const token=qs.get('token')||'';
 function url(p){return p+(token?(p.includes('?')?'&':'?')+'token='+encodeURIComponent(token):'')}
-if(window.innerWidth>800&&!qs.has('fahrmodus')) location.replace(url('/kristine/app'));
+const ua=navigator.userAgent||'';
+const appleMobile=/iPhone|iPad|iPod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const phoneOrTablet=appleMobile||/Android/i.test(ua);
+if((location.hash||qs.has('task'))&&!qs.has('fahrmodus')) location.replace(url('/kristine/app')+location.hash);
+else if(!phoneOrTablet&&!qs.has('fahrmodus')) location.replace(url('/kristine/app'));
 const voiceCard=document.getElementById('voiceCard');
 const voiceTitle=document.getElementById('voiceTitle');
 const voiceSub=document.getElementById('voiceSub');
@@ -73,7 +77,7 @@ function setUi(title,text,state=''){
   statusTitle.textContent=title;
   statusText.textContent=text;
   voiceTitle.textContent=state==='listening'?'Ich höre zu …':state==='processing'?'Einen Moment …':'Mit Kristine sprechen';
-  voiceSub.textContent=state==='listening'?'Einfach sprechen. Ich stoppe automatisch, wenn du fertig bist.':state==='processing'?'Ich ordne das gerade zu.':'Einmal antippen und einfach sagen, was festgehalten werden soll.';
+  voiceSub.textContent=state==='listening'?'Einfach sprechen. Ich stoppe automatisch, wenn du fertig bist.':state==='processing'?'Ich ordne das gerade zu.':'Einmal antippen und einfach sagen, was du brauchst.';
   voiceCard.classList.toggle('listening',state==='listening');
   voiceCard.classList.toggle('processing',state==='processing');
 }
@@ -199,9 +203,13 @@ function matchJob(target){
   return {job:null,confident:false};
 }
 function jobLabel(j){return j?('#'+j.jobId+' '+(j.name||'').trim()).trim():''}
-function isYes(t){return /^(ja|passt|genau|ok|okay|mach|erledigt|richtig)$/i.test(norm(t))}
-function isNo(t){return /^(nein|falsch|nicht|abbrechen|stopp|stop)$/i.test(norm(t))}
-function wantsEnd(t){return /^(nein|nichts|fertig|schluss|das wars|das war s|ende)$/i.test(norm(t))}
+function isYes(t){return /^(ja|jap|passt|genau|ok|okay|mach|richtig)(\b|$)/i.test(norm(t))}
+function isNo(t){return /^(nein|falsch|nicht|abbrechen|stopp|stop)(\b|$)/i.test(norm(t))}
+function wantsEnd(t){return /^(nein|nichts|fertig|schluss|das wars|das war s|ende)(\b|$)/i.test(norm(t))}
+function addMinutes(time,minutes){const m=String(time||'').match(/^(\d{2}):(\d{2})$/);if(!m)return'';const total=(Number(m[1])*60+Number(m[2])+minutes)%(24*60);return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0')}
+function germanDate(value){if(!value)return'';try{return new Intl.DateTimeFormat('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(value+'T12:00:00'))}catch{return value}}
+function jobAddress(j){return [j?.street,j?.houseNumber,[j?.postalCode,j?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+async function interpretText(text){const r=await api('/kristine/api/voice/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});return r.draft||{kind:'note',target:'',content:text,dueDate:'',date:'',from:'',to:'',rawText:text}}
 
 async function handleTranscript(text){
   if(awaitingAnother){
@@ -214,92 +222,100 @@ async function handleTranscript(text){
     speak('Soll ich das so anlegen? Sag einfach ja oder nein.',true);return;
   }
   if(stage==='targetConfirm'){
-    if(isYes(text)&&candidateJob){
-      draft.job=candidateJob;candidateJob=null;
-      return confirmDraft();
-    }
-    if(isNo(text)){
-      candidateJob=null;stage='target';
-      speak('Okay. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);
-      return;
-    }
-    candidateJob=null;stage='target';draft.target=text;
-    return resolveDraftTarget();
+    if(isYes(text)&&candidateJob){draft.job=candidateJob;candidateJob=null;await ensureComplete();return}
+    if(isNo(text)){candidateJob=null;stage='target';speak('Okay. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);return}
+    candidateJob=null;stage='target';draft.target=text;await resolveDraftTarget();return;
   }
-  if(stage==='target'){
-    draft.target=text;
-    return resolveDraftTarget();
+  if(stage==='target'){draft.target=text;await resolveDraftTarget();return}
+  if(stage==='appointmentDate'||stage==='appointmentTime'){
+    const follow=await interpretText((draft.rawText||draft.content||'Termin')+' Zusatzinformation: '+text+'. Es geht weiterhin um denselben Termin.');
+    if(follow.date)draft.date=follow.date;
+    if(follow.from)draft.from=follow.from;
+    if(follow.to)draft.to=follow.to;
+    await ensureComplete();return;
   }
 
-  const r=await api('/kristine/api/voice/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
-  draft=r.draft||{kind:'note',content:text,target:'',dueDate:''};
+  draft=await interpretText(text);
   if(!draft.content)draft.content=text;
-  if(!draft.target){
+  if(['note','appointment'].includes(draft.kind)&&!draft.target){
     stage='target';
-    speak('Gerne. Für welchen Kunden oder welche Baustelle ist das?',true);
+    speak(draft.kind==='appointment'?'Gerne. Bei wem oder auf welcher Baustelle ist der Termin?':'Gerne. Für welchen Kunden oder welche Baustelle ist die Notiz?',true);
     return;
   }
-  await resolveDraftTarget();
+  if(draft.target){await resolveDraftTarget();return}
+  await ensureComplete();
 }
 async function resolveDraftTarget(){
   const m=matchJob(draft.target);
-  if(!m.job){
-    stage='target';
-    speak('Die Baustelle habe ich noch nicht gefunden. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);
-    return;
+  if(!m.job){stage='target';speak('Die Baustelle habe ich noch nicht eindeutig gefunden. Sag bitte die Baustellennummer oder den Namen noch einmal.',true);return}
+  if(!m.confident){candidateJob=m.job;stage='targetConfirm';speak('Meinst du '+(m.job.name||('Baustelle '+m.job.jobId))+'? Sag ja oder nein.',true);return}
+  draft.job=m.job;await ensureComplete();
+}
+async function ensureComplete(){
+  if(draft.kind==='appointment'){
+    if(!draft.date){stage='appointmentDate';speak('An welchem Tag ist der Termin?',true);return}
+    if(!draft.from){stage='appointmentTime';speak('Um wie viel Uhr beginnt der Termin?',true);return}
+    if(!draft.to)draft.to=addMinutes(draft.from,60);
   }
-  if(!m.confident){
-    candidateJob=m.job;stage='targetConfirm';
-    speak('Meinst du '+(m.job.name||('Baustelle '+m.job.jobId))+'? Sag einfach ja oder nein.',true);
-    return;
-  }
-  draft.job=m.job;
-  return confirmDraft();
+  confirmDraft();
 }
 function confirmDraft(){
   stage='confirm';
-  const kindLabel=draft.kind==='task'?'Aufgabe':draft.kind==='appointment'?'Terminwunsch':draft.kind==='reminder'?'Erinnerung':'Notiz';
-  const due=draft.dueDate?(' Fällig '+new Date(draft.dueDate+'T12:00:00').toLocaleDateString('de-AT')+'.'):'';
-  speak('Ich habe '+(draft.job.name||('Baustelle '+draft.job.jobId))+' gefunden. '+kindLabel+': '+draft.content+'.'+due+' Soll ich das so anlegen?',true);
+  const site=draft.job?(draft.job.name||('Baustelle '+draft.job.jobId)):'ohne Baustelle';
+  let sentence='';
+  if(draft.kind==='appointment')sentence='Termin bei '+site+': '+draft.content+'. '+germanDate(draft.date)+' von '+draft.from+' bis '+draft.to+'.';
+  else if(draft.kind==='note')sentence='Gesprächsnotiz bei '+site+': '+draft.content+'.';
+  else if(draft.kind==='reminder')sentence='Erinnerung'+(draft.job?' bei '+site:'')+': '+draft.content+(draft.dueDate?'. Fällig '+germanDate(draft.dueDate):'')+'.';
+  else sentence='Aufgabe'+(draft.job?' bei '+site:'')+': '+draft.content+(draft.dueDate?'. Fällig '+germanDate(draft.dueDate):'')+'.';
+  speak('Ich habe verstanden: '+sentence+' Soll ich das so anlegen?',true);
 }
 
 function alexEmployee(){
   return employees.find(e=>/\balex(ander)?\b/i.test(String(e.name||'')))||employees.find(e=>/krista/i.test(String(e.name||'')))||null;
 }
 async function saveDraft(){
-  if(!draft?.job)return;
   processing=true;setUi('Speichere','Kristine legt es jetzt ab.','processing');
   try{
     if(draft.kind==='note'){
       await api('/kristine/api/voice/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:draft.job.jobId,title:'Gesprächsnotiz',detail:draft.content,rawText:draft.rawText||''})});
     }else{
-      const boot=await api('/kristine/api/bootstrap');
-      const tasks=Array.isArray(boot.tasks)?boot.tasks:[];
       const alex=alexEmployee();
-      const needsReview=['appointment','reminder'].includes(draft.kind);
-      tasks.push({
-        id:'voice_'+Date.now().toString(36),
-        title:(draft.kind==='appointment'?'Termin: ':draft.kind==='reminder'?'Erinnerung: ':'')+draft.content,
-        assigneeId:alex?String(alex.id):'',
-        assigneeName:alex?String(alex.name):'Alex',
-        jobId:String(draft.job.jobId),
-        jobName:String(draft.job.name||''),
-        dueDate:String(draft.dueDate||'').slice(0,10),
-        reminder:needsReview?'Aus Fahrmodus – im Büro prüfen/weiterverarbeiten':'Aus Fahrmodus',
-        status:'open',
-        createdAt:new Date().toISOString()
-      });
-      await api('/kristine/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks})});
+      const appointment=draft.kind==='appointment'?{date:draft.date,from:draft.from,to:draft.to,calendarOwner:'alex',calendarAccount:'alexander.krista@krista.at'}:null;
+      const taskResult=await api('/kristine/api/voice/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        title:draft.kind==='appointment'?draft.content:(draft.kind==='reminder'?'Erinnerung: ':'')+draft.content,
+        taskType:draft.kind==='appointment'?'Termin':'Sonstiges',
+        assigneeId:alex?String(alex.id||alex.employeeId||''):'',
+        assigneeName:alex?String(alex.name||'Alexander'):'Alexander',
+        jobId:draft.job?String(draft.job.jobId):'',
+        jobName:draft.job?String(draft.job.name||''):'',
+        address:draft.job?jobAddress(draft.job):'',
+        dueDate:draft.dueDate||'',
+        reminder:'Aus Sprechmodus',
+        appointment
+      })});
+      if(draft.kind==='appointment'){
+        const task=taskResult.task;
+        const outlook=await api('/kristine/api/appointments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          requestId:'voice-'+task.id,taskId:task.id,title:task.title,
+          date:draft.date,from:draft.from,to:draft.to,allDay:false,
+          location:task.address||task.jobName||'',
+          details:'Über Kristine Sprechmodus angelegt.',
+          jobId:task.jobId||'',jobName:task.jobName||'',address:task.address||''
+        })});
+        if(!outlook.outlookSynced)setUi('Termin gespeichert','Der Termin ist in Kristine gespeichert. Outlook ist noch nicht verbunden.');
+      }
     }
-    const label=draft.job.name||('Baustelle '+draft.job.jobId);
-    draft=null;stage='idle';awaitingAnother=true;
-    setUi('Gespeichert','Alles ist abgelegt.');
-    speak('Erledigt. Es liegt bei '+label+'. Noch etwas?',true);
+    const label=draft.job?(draft.job.name||('Baustelle '+draft.job.jobId)):'Kristine';
+    const wasAppointment=draft.kind==='appointment';
+    draft=null;stage='idle';awaitingAnother=true;candidateJob=null;
+    if(statusTitle.textContent!=='Termin gespeichert')setUi('Gespeichert',wasAppointment?'Termin und Aufgabe sind angelegt.':'Alles ist abgelegt.');
+    speak((wasAppointment?'Erledigt. Der Termin ist angelegt. ':'Erledigt. Es liegt bei '+label+'. ')+'Noch etwas?',true);
   }catch(err){
     setUi('Speichern fehlgeschlagen',String(err.message||err));
-    speak('Beim Speichern ist etwas schief gegangen. Ich habe noch nichts verworfen. Versuch es bitte noch einmal.',false);
-  }finally{processing=false}
+    speak('Beim Speichern ist etwas schief gegangen. Versuch es bitte noch einmal.',false);
+  }finally{processing=false;voiceCard.disabled=false}
 }
+
 function speak(text,continueListening){
   if(!('speechSynthesis'in window)){if(continueListening)setTimeout(startListening,300);return}
   speechSynthesis.cancel();
