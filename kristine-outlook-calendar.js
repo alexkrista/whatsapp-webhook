@@ -25,7 +25,7 @@ function installOutlookCalendar(app, deps = {}) {
   const tokenFile = path.join(root, "outlook-token.enc.json");
   const departureOriginHint = String(deps.departureOriginHint || process.env.KRISTINE_DEPARTURE_ORIGIN_HINT || "Frastanz").trim();
   const departureDefaultTravelMinutes = Math.max(5, Math.min(180, Number(deps.departureDefaultTravelMinutes || process.env.KRISTINE_DEPARTURE_DEFAULT_TRAVEL_MINUTES || 35)));
-  const departureBufferMinutes = Math.max(0, Math.min(30, Number(deps.departureBufferMinutes || process.env.KRISTINE_DEPARTURE_BUFFER_MINUTES || 5)));
+  const departureBufferMinutes = Math.max(15, Math.min(60, Number(deps.departureBufferMinutes || process.env.KRISTINE_DEPARTURE_BUFFER_MINUTES || 15)));
   const loginSessions = new Map();
   let writeQueue = Promise.resolve();
 
@@ -314,6 +314,85 @@ function installOutlookCalendar(app, deps = {}) {
     return event;
   }
 
+
+  function appointmentStartDate(appointment) {
+    if (appointment.allDay || !appointment.date || !appointment.from) return null;
+    const value = new Date(`${appointment.date}T${appointment.from}:00`);
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  function localDateTime(value) {
+    const yyyy = value.getFullYear();
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    const hh = String(value.getHours()).padStart(2, "0");
+    const min = String(value.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}:00`;
+  }
+
+  function departureBlockPayload(appointment, { includeTransactionId = false } = {}) {
+    const appointmentStart = appointmentStartDate(appointment);
+    if (!appointmentStart) return null;
+    const leadMinutes = Math.max(15, Math.min(240, Number(appointment.departureLeadMinutes || departureDefaultTravelMinutes + departureBufferMinutes)));
+    const blockStart = new Date(appointmentStart.getTime() - leadMinutes * 60000);
+    const departureLink = signedDepartureLink(appointment.taskId);
+    const travel = Math.max(0, Number(appointment.travelMinutes || 0));
+    const buffer = Math.max(15, Number(appointment.departureBufferMinutes || departureBufferMinutes));
+    const event = {
+      subject:`Anfahrt & Vorbereitung · ${appointment.title}`,
+      body:{
+        contentType:"text",
+        content:[
+          "Automatisch von Kristine blockiert.",
+          travel ? `Fahrzeit: ca. ${travel} Min.` : "",
+          `Vorbereitung/Puffer: mindestens ${buffer} Min.`,
+          appointment.location ? `Ziel: ${appointment.location}` : "",
+          `Fahrmodus öffnen: ${departureLink}`,
+        ].filter(Boolean).join("\n"),
+      },
+      showAs:"busy",
+      isReminderOn:false,
+      start:{ dateTime:localDateTime(blockStart), timeZone:TIME_ZONE },
+      end:{ dateTime:localDateTime(appointmentStart), timeZone:TIME_ZONE },
+      location:appointment.location ? { displayName:appointment.location } : undefined,
+    };
+    if (includeTransactionId) event.transactionId = `${appointment.id}-departure`;
+    if (!event.location) delete event.location;
+    return event;
+  }
+
+  async function graphCreateDepartureBlock(appointment) {
+    const event = departureBlockPayload(appointment, { includeTransactionId:true });
+    if (!event) return null;
+    const response = await fetch(`${GRAPH_ROOT}/me/calendar/events`, {
+      method:"POST",
+      headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone="${TIME_ZONE}"` },
+      body:JSON.stringify(event),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+    await audit("departure_block_created", { appointmentId:appointment.id, taskId:appointment.taskId, eventId:String(body.id || "") });
+    return body;
+  }
+
+  async function graphUpdateDepartureBlock(appointment) {
+    const eventId = String(appointment?.outlook?.departureBlockEventId || "");
+    if (!eventId) return graphCreateDepartureBlock(appointment);
+    const event = departureBlockPayload(appointment);
+    if (!event) return null;
+    const response = await fetch(`${GRAPH_ROOT}/me/events/${encodeURIComponent(eventId)}`, {
+      method:"PATCH",
+      headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json", Prefer:`outlook.timezone="${TIME_ZONE}"` },
+      body:JSON.stringify(event),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+    }
+    await audit("departure_block_updated", { appointmentId:appointment.id, taskId:appointment.taskId, eventId });
+    return { id:eventId };
+  }
+
   async function graphCreate(appointment) {
     const event = graphEventPayload(appointment, { includeTransactionId:true });
     try {
@@ -480,6 +559,16 @@ function installOutlookCalendar(app, deps = {}) {
         const latest = await readJson(appointmentsFile, []);
         const row = latest.find(item => item.id === id);
         Object.assign(row.outlook, { status:"synced", eventId:String(event.id || ""), webLink:String(event.webLink || ""), error:"", syncedAt:new Date().toISOString(), lastAttemptAt:new Date().toISOString(), attempts:Number(row.outlook.attempts || 0) + 1 });
+        try {
+          const block = await graphCreateDepartureBlock(row);
+          row.outlook.departureBlockEventId = String(block?.id || "");
+          row.outlook.departureBlockStatus = block?.id ? "synced" : "not_needed";
+          row.outlook.departureBlockError = "";
+        } catch (blockError) {
+          row.outlook.departureBlockStatus = "failed";
+          row.outlook.departureBlockError = String(blockError?.message || blockError).slice(0, 1000);
+          await audit("departure_block_error", { appointmentId:id, taskId:row.taskId, error:row.outlook.departureBlockError });
+        }
         await atomicJson(appointmentsFile, latest); await audit("outlook_synced", { appointmentId:id, taskId:row.taskId, eventId:row.outlook.eventId }); return row;
       });
     } catch (error) {
@@ -664,6 +753,16 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
             const rows = await readJson(appointmentsFile, []);
             const row = rows.find(item => item.id === id);
             Object.assign(row.outlook, { status:"synced", error:"", syncedAt:new Date().toISOString(), lastAttemptAt:new Date().toISOString(), attempts:Number(row.outlook.attempts || 0) + 1 });
+            try {
+              const block = await graphUpdateDepartureBlock(row);
+              if (block?.id) row.outlook.departureBlockEventId = String(block.id);
+              row.outlook.departureBlockStatus = block ? "synced" : "not_needed";
+              row.outlook.departureBlockError = "";
+            } catch (blockError) {
+              row.outlook.departureBlockStatus = "failed";
+              row.outlook.departureBlockError = String(blockError?.message || blockError).slice(0, 1000);
+              await audit("departure_block_error", { appointmentId:id, taskId:row.taskId, error:row.outlook.departureBlockError });
+            }
             await atomicJson(appointmentsFile, rows);
             return row;
           });
