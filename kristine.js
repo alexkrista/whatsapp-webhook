@@ -1275,8 +1275,12 @@ const open = taskId
       if (!audioBuffer.length) return res.status(400).json({ ok:false, error:"Audio ist leer." });
       if (audioBuffer.length > 12 * 1024 * 1024) return res.status(413).json({ ok:false, error:"Audio ist zu groß." });
       const ext = /webm/i.test(mimeType) ? "webm" : /ogg/i.test(mimeType) ? "ogg" : /wav/i.test(mimeType) ? "wav" : "m4a";
-      const text = await transcribeAudio({ audioBuffer, filename:`fahrmodus.${ext}`, mimeType });
-      res.json({ ok:true, text:String(text || "").trim() });
+      const text = String(await transcribeAudio({ audioBuffer, filename:`fahrmodus.${ext}`, mimeType }) || "").trim();
+      let draft = null;
+      if (text && typeof interpretVoiceText === "function") {
+        try { draft = await interpretVoiceText(text); } catch {}
+      }
+      res.json({ ok:true, text, draft });
     } catch (error) {
       res.status(500).json({ ok:false, error:String(error?.message || error) });
     }

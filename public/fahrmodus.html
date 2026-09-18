@@ -147,7 +147,20 @@ function stopListening(){
   sourceNode=null;analyser=null;
   if(recorder&&recorder.state!=='inactive')recorder.stop();
 }
+let speechUnlocked=false;
+function unlockSpeech(){
+  if(speechUnlocked||!("speechSynthesis" in window))return;
+  try{
+    const u=new SpeechSynthesisUtterance(".");
+    u.lang="de-AT";
+    u.volume=0;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+    speechUnlocked=true;
+  }catch{}
+}
 function toggleVoice(){
+  unlockSpeech();
   if(processing)return;
   if(voiceRunning){stopListening();return}
   keepConversation=true;
@@ -170,7 +183,7 @@ async function handleRecording(){
     const text=String(r.text||'').trim();
     if(!text)throw new Error('Ich habe nichts verstanden.');
     setUi('Verstanden',text);
-    await handleTranscript(text);
+    await handleTranscript(text,r.draft||null);
   }catch(err){
     setUi('Nicht verstanden',String(err.message||err));
     speak('Das habe ich nicht sauber verstanden. Sag es bitte noch einmal.',true);
@@ -209,9 +222,9 @@ function wantsEnd(t){return /^(nein|nichts|fertig|schluss|das wars|das war s|end
 function addMinutes(time,minutes){const m=String(time||'').match(/^(\d{2}):(\d{2})$/);if(!m)return'';const total=(Number(m[1])*60+Number(m[2])+minutes)%(24*60);return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0')}
 function germanDate(value){if(!value)return'';try{return new Intl.DateTimeFormat('de-AT',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(value+'T12:00:00'))}catch{return value}}
 function jobAddress(j){return [j?.street,j?.houseNumber,[j?.postalCode,j?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
-async function interpretText(text){const r=await api('/kristine/api/voice/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});return r.draft||{kind:'note',target:'',content:text,dueDate:'',date:'',from:'',to:'',rawText:text}}
+async function interpretText(text){setUi('Ich ordne zu','Kunde, Baustelle und Aktion werden geprüft.','processing');const r=await api('/kristine/api/voice/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});return r.draft||{kind:'note',target:'',content:text,dueDate:'',date:'',from:'',to:'',rawText:text}}
 
-async function handleTranscript(text){
+async function handleTranscript(text,preDraft=null){
   if(awaitingAnother){
     awaitingAnother=false;
     if(wantsEnd(text)){finishSession('Passt. Bis später.');return}
@@ -235,7 +248,7 @@ async function handleTranscript(text){
     await ensureComplete();return;
   }
 
-  draft=await interpretText(text);
+  draft=preDraft||await interpretText(text);
   if(!draft.content)draft.content=text;
   if(['note','appointment'].includes(draft.kind)&&!draft.target){
     stage='target';
