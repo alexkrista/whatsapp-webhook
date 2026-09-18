@@ -515,10 +515,9 @@ function installOutlookCalendar(app, deps = {}) {
 
   async function refreshOutlookLink(appointment) {
     if (!appointment?.outlook?.eventId) throw new Error("Outlook-Event-ID fehlt.");
-    const link = signedKgoLink(appointment.taskId);
-    const content = [appointment.details, appointment.location ? `Ort: ${appointment.location}` : "", `Direkt in KGO öffnen: ${link}`].filter(Boolean).join("\n\n");
+    const payload = graphEventPayload(appointment);
     const response = await fetch(`${GRAPH_ROOT}/me/events/${encodeURIComponent(appointment.outlook.eventId)}`, {
-      method:"PATCH", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json" }, body:JSON.stringify({ body:{ contentType:"text", content } }),
+      method:"PATCH", headers:{ Authorization:`Bearer ${await accessToken()}`, "Content-Type":"application/json" }, body:JSON.stringify({ body:payload.body }),
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -558,7 +557,26 @@ function installOutlookCalendar(app, deps = {}) {
     const rows = await readJson(appointmentsFile, []);
     const current = rows.find(row => row.id === id);
     if (!current) throw new Error("KRISTINE-Termin nicht gefunden.");
-    if (current.outlook?.status === "synced" && current.outlook.eventId) return current;
+    if (current.outlook?.status === "synced" && current.outlook.eventId) {
+      if (!current.allDay && (!current.outlook.departureBlockEventId || current.outlook.departureBlockStatus !== "synced")) {
+        try {
+          const block = await graphCreateDepartureBlock(current);
+          return serialized(async () => {
+            const latest = await readJson(appointmentsFile, []);
+            const row = latest.find(item => item.id === id);
+            if (!row) return current;
+            row.outlook.departureBlockEventId = String(block?.id || "");
+            row.outlook.departureBlockStatus = block?.id ? "synced" : "not_needed";
+            row.outlook.departureBlockError = "";
+            await atomicJson(appointmentsFile, latest);
+            return row;
+          });
+        } catch (blockError) {
+          await audit("departure_block_error", { appointmentId:id, taskId:current.taskId, error:String(blockError?.message || blockError).slice(0, 1000) });
+        }
+      }
+      return current;
+    }
     try {
       const event = await graphCreate(current);
       return serialized(async () => {
@@ -730,7 +748,7 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
         const rows = await readJson(appointmentsFile, []);
         const existing = rows.find(row => (requestId && row.requestId === requestId) || appointmentFingerprint(row) === fingerprint);
         if (existing) { await audit("appointment_duplicate_prevented", { appointmentId:existing.id, taskId:input.taskId, requestId }); return { appointment:existing, created:false }; }
-        const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, fingerprint, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null } };
+        const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, fingerprint, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null, departureBlockEventId:"", departureBlockStatus:"pending", departureBlockError:"" } };
         rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return { appointment:row, created:true };
       });
       const synced = await syncAppointment(saved.appointment.id); res.status(saved.created ? 201 : 200).json({ ok:true, appointment:synced, internalSaved:true, duplicatePrevented:!saved.created, outlookSynced:synced.outlook.status === "synced" });
