@@ -9,6 +9,8 @@ const { readCustomerInvoices, invoiceView } = require("./customer-portal-invoice
 const { registerCustomerExports } = require("./customer-portal-export");
 const { pointTitle, customerPointView } = require("./customer-portal-points");
 const { OFFER_TERMS } = require("./offer-terms");
+const { PDFDocument } = require("pdf-lib");
+const { PDFParse } = require("pdf-parse");
 const safeId = id => /^[A-Za-z0-9_-]{1,80}$/.test(String(id || ""));
 const hash = text => crypto.createHash("sha256").update(String(text)).digest("hex");
 const random = () => crypto.randomBytes(32).toString("base64url");
@@ -43,6 +45,26 @@ function registerCustomerAccess(app, options) {
   const offerPdfName=(number,revision)=>`angebot-${String(number).replace(/[^A-Za-z0-9_-]/g,"")}-v${Math.max(1,Number(revision)||1)}.pdf`;
   const offerPdfSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",offerPdfName(number,revision));
   const offerPdfManifestPath=(jobId,number,revision)=>offerPdfSnapshotPath(jobId,number,revision)+".json";
+  const writeBuffer=(file,buffer)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+"."+crypto.randomUUID()+".tmp";try{fs.writeFileSync(tmp,buffer);fs.renameSync(tmp,file)}finally{fs.rmSync(tmp,{force:true})}};
+  async function separateLegacyOfferLegalAnnex(jobId,offer,storedName,source,manifest={}) {
+    if(source!=="offer-browser-render"||offer?.acceptance||manifest.legalAnnexCheckedAt)return manifest;
+    const snapshot=offerPdfSnapshotPath(jobId,offer.number,offer.revision),buffer=secureFile(jobId,"_offers/"+storedName)&&fs.readFileSync(snapshot);if(!buffer)return manifest;
+    let parsed;
+    const parser=new PDFParse({data:buffer});
+    try{parsed=await parser.getText()}catch{return manifest}finally{await parser.destroy().catch(()=>{})}
+    const annexIndex=(parsed.pages||[]).findIndex(page=>/ALLGEMEINE\s+GESCH(?:Ä|AE)FTSBEDINGUNGEN/i.test(String(page?.text||"")));
+    const checkedAt=new Date(now()).toISOString(),nextManifest={...manifest,offerNumber:offer.number,offerRevision:offer.revision,storedName,source,legalAnnexCheckedAt:checkedAt};
+    if(annexIndex>0){
+      const pdf=await PDFDocument.load(buffer),originalPageCount=pdf.getPageCount();
+      if(annexIndex<originalPageCount){
+        const historyDir=path.join(dataDir,jobId,"_offers/history"),stamp=checkedAt.replace(/[:.]/g,"-");fs.mkdirSync(historyDir,{recursive:true});fs.copyFileSync(snapshot,path.join(historyDir,`${path.basename(storedName,".pdf")}-mit-agb-${stamp}.pdf`));
+        for(let index=originalPageCount-1;index>=annexIndex;index--)pdf.removePage(index);
+        const offerOnly=Buffer.from(await pdf.save()),documentation=secureFile(jobId,"_documentation/"+storedName);writeBuffer(snapshot,offerOnly);if(documentation)writeBuffer(documentation,offerOnly);
+        Object.assign(nextManifest,{legalAnnexSeparatedAt:checkedAt,originalPageCount,offerPageCount:annexIndex});
+      }
+    }
+    write(offerPdfManifestPath(jobId,offer.number,offer.revision),nextManifest);return nextManifest;
+  }
   const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
   async function mainId(id) {
     if(!safeId(id))throw fail(404,"Akte nicht gefunden.");
@@ -242,12 +264,12 @@ function registerCustomerAccess(app, options) {
     const storedName=offerPdfName(offer.number,offer.revision),rows=await readDocumentation(ctx.jobId),matching=rows.filter(row=>row?.type==="offer"&&(row?.storedName===storedName||row?.offerNumber===offer.number&&Number(row?.offerRevision||1)===offer.revision));
     const snapshot=secureFile(ctx.jobId,"_offers/"+storedName);
     const approvedSources=new Set(["offer-approved-original","offer-approved-correction","offer-browser-render"]),manifest=read(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),null);
-    if(snapshot&&approvedSources.has(manifest?.source))return{type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:manifest.source,storage:"offers"};
+    if(snapshot&&approvedSources.has(manifest?.source)){await separateLegacyOfferLegalAnnex(ctx.jobId,offer,storedName,manifest.source,manifest);return{type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:manifest.source,storage:"offers"}}
     const exact=matching.find(row=>row.customerVisible===true&&approvedSources.has(row.source)&&row.storedName&&secureFile(ctx.jobId,"_documentation/"+row.storedName));
     const source=exact&&secureFile(ctx.jobId,"_documentation/"+exact.storedName);
     // Die beim Versand verwendete PDF wird unveränderlich in _offers gesichert.
     // Ein verlorener Dokumentenindex darf sie niemals aus dem Portal entfernen.
-    if(source){const target=offerPdfSnapshotPath(ctx.jobId,offer.number,offer.revision);fs.mkdirSync(path.dirname(target),{recursive:true});if(!fs.existsSync(target))fs.copyFileSync(source,target);write(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),{offerNumber:offer.number,offerRevision:offer.revision,storedName,source:exact.source,approvedAt:exact.approvedAt||exact.importedAt||new Date(now()).toISOString()});return{...(exact||{}),type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:exact.source,storage:"offers"}}
+    if(source){const target=offerPdfSnapshotPath(ctx.jobId,offer.number,offer.revision),nextManifest={offerNumber:offer.number,offerRevision:offer.revision,storedName,source:exact.source,approvedAt:exact.approvedAt||exact.importedAt||new Date(now()).toISOString()};fs.mkdirSync(path.dirname(target),{recursive:true});if(!fs.existsSync(target))fs.copyFileSync(source,target);write(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),nextManifest);await separateLegacyOfferLegalAnnex(ctx.jobId,offer,storedName,exact.source,nextManifest);return{...(exact||{}),type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:exact.source,storage:"offers"}}
     return null;
   }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{

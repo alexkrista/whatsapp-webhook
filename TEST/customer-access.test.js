@@ -1,6 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path"),express=require("express");
 const {registerCustomerAccess,mergePortalTasks}=require("../customer-portal-access");
+const {PDFDocument,StandardFonts}=require("pdf-lib");
 async function fixture(t,withOffice=false){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"customer-access-"));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const write=(file,value)=>{fs.mkdirSync(path.dirname(path.join(dir,file)),{recursive:true});fs.writeFileSync(path.join(dir,file),typeof value==="string"?value:JSON.stringify(value))};
@@ -82,6 +83,14 @@ test("the stored browser-rendered dispatch PDF is shown once and replaces the wi
  const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie},project=await(await f.request("/kundenportal/api/project",{headers})).json();
  assert(project.offer.pdfUrl,"Die gespeicherte Versand-PDF wird statt der breiten Ersatzliste angeboten");assert.equal(project.files.filter(row=>row.name==="Angebot 2609003.pdf").length,1,"Das Angebot erscheint in Dokumente nur einmal");
  const pdf=await f.request(project.offer.pdfUrl,{headers});assert.equal(pdf.status,200);assert.equal((await pdf.arrayBuffer()).byteLength>500,true);
+});
+test("legacy AGB pages are separated from an unaccepted browser-rendered offer PDF",async t=>{
+ const f=await fixture(t),draft={offerNumber:"2609003",offerRevision:2,positions:[{text:"Malerarbeiten",quantity:1,unit:"PA",unitPrice:1000}],financials:{vatRate:20}},pdf=await PDFDocument.create(),font=await pdf.embedFont(StandardFonts.Helvetica);
+ for(const text of ["Angebot 2609003 Seite 1","Angebot 2609003 Seite 2","ALLGEMEINE GESCHAEFTSBEDINGUNGEN","Muster-Widerrufsformular"]){const page=pdf.addPage();page.drawText(text,{x:40,y:760,size:12,font})}
+ const bytes=Buffer.from(await pdf.save()),stored="angebot-2609003-v2.pdf";f.write("24177/.offer-draft.json",draft);f.write("24177/_offers/offer-2609003-v2.json",draft);fs.mkdirSync(path.join(f.dir,"24177/_documentation"),{recursive:true});fs.writeFileSync(path.join(f.dir,"24177/_documentation",stored),bytes);
+ f.setDocumentation("24177",[{id:"offer-current",type:"offer",name:"Angebot 2609003.pdf",offerNumber:"2609003",offerRevision:2,customerVisible:true,storedName:stored,source:"offer-browser-render"}]);
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie},project=await(await f.request("/kundenportal/api/project",{headers})).json(),response=await f.request(project.offer.pdfUrl,{headers}),offerOnly=await PDFDocument.load(await response.arrayBuffer());
+ assert.equal(offerOnly.getPageCount(),2,"Im Portal bleiben nur die beiden Angebotsseiten");assert.equal((await PDFDocument.load(fs.readFileSync(path.join(f.dir,"24177/_documentation",stored)))).getPageCount(),2,"Auch die Dokumentkarte öffnet dieselbe Angebotsfassung");assert.equal(fs.readdirSync(path.join(f.dir,"24177/_offers/history")).length,1,"Die alte PDF mit AGB bleibt intern gesichert");
 });
 test("an unfinished offer draft stays hidden in a normal portal link",async t=>{
  const f=await fixture(t);f.write("24177/.offer-draft.json",{offerNumber:"DRAFT",offerRevision:1,positions:[]});
