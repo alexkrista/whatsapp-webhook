@@ -282,7 +282,7 @@ function installOutlookCalendar(app, deps = {}) {
     const link = signedKgoLink(appointment.taskId);
     const departureLink = signedDepartureLink(appointment.taskId);
     const departureInfo = !appointment.allDay && appointment.departureLeadMinutes
-      ? `Abfahrt: ca. ${appointment.travelMinutes || "?"} Min. Fahrt + ${appointment.departureBufferMinutes || 0} Min. Puffer · Outlook erinnert ${appointment.departureLeadMinutes} Min. vor dem Termin.`
+      ? `Kristine blockiert ${appointment.departureLeadMinutes} Min. vor dem Termin für Anfahrt und Vorbereitung (ca. ${appointment.travelMinutes || "?"} Min. Fahrt + mindestens ${appointment.departureBufferMinutes || departureBufferMinutes} Min. Puffer).`
       : "";
     const content = [
       appointment.details,
@@ -297,8 +297,9 @@ function installOutlookCalendar(app, deps = {}) {
       location:appointment.location ? { displayName:appointment.location } : undefined,
     };
     if (!appointment.allDay) {
-      event.isReminderOn = true;
-      event.reminderMinutesBeforeStart = Math.max(5, Math.min(240, Math.round(Number(appointment.departureLeadMinutes || departureDefaultTravelMinutes + departureBufferMinutes))));
+      // Die eigentliche "Jetzt los"-Erinnerung sitzt auf dem davor liegenden
+      // Anfahrts-/Vorbereitungsblock. So gibt es keine doppelte Outlook-Meldung.
+      event.isReminderOn = false;
     }
     if (includeTransactionId) event.transactionId = appointment.id;
     if (appointment.allDay) {
@@ -338,20 +339,25 @@ function installOutlookCalendar(app, deps = {}) {
     const departureLink = signedDepartureLink(appointment.taskId);
     const travel = Math.max(0, Number(appointment.travelMinutes || 0));
     const buffer = Math.max(15, Number(appointment.departureBufferMinutes || departureBufferMinutes));
+    const navigation = appointment.location
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(appointment.location)}&travelmode=driving`
+      : "";
     const event = {
-      subject:`Anfahrt & Vorbereitung · ${appointment.title}`,
+      subject:`🚗 Jetzt los · ${appointment.title}`,
       body:{
         contentType:"text",
         content:[
-          "Automatisch von Kristine blockiert.",
+          "Automatisch von Kristine blockiert: Anfahrt & Vorbereitung.",
           travel ? `Fahrzeit: ca. ${travel} Min.` : "",
           `Vorbereitung/Puffer: mindestens ${buffer} Min.`,
           appointment.location ? `Ziel: ${appointment.location}` : "",
+          navigation ? `Navigation starten: ${navigation}` : "",
           `Fahrmodus öffnen: ${departureLink}`,
         ].filter(Boolean).join("\n"),
       },
       showAs:"busy",
-      isReminderOn:false,
+      isReminderOn:true,
+      reminderMinutesBeforeStart:0,
       start:{ dateTime:localDateTime(blockStart), timeZone:TIME_ZONE },
       end:{ dateTime:localDateTime(appointmentStart), timeZone:TIME_ZONE },
       location:appointment.location ? { displayName:appointment.location } : undefined,
