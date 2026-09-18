@@ -91,7 +91,7 @@ async function api(p,opts={}){
 
 async function bootstrap(){
   try{
-    const [j,e]=await Promise.all([api('/admin/api/jobs'),api('/admin/api/employees')]);
+    const [j,e]=await Promise.all([api('/kristine/api/voice/jobs'),api('/admin/api/employees')]);
     jobs=j.jobs||[];employees=(e.employees||[]).filter(x=>x.active!==false);
   }catch(err){
     setUi('Nicht verbunden',String(err.message||err));
