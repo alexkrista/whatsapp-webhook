@@ -54,7 +54,7 @@
       const retailLabel = document.getElementById("wallRetailFile")?.closest(".filebox")?.querySelector("b");
       if (retailLabel) retailLabel.textContent = "Tapeten Retail / RRP";
       const retailImport = document.getElementById("wallRetailImport");
-      if (retailImport) retailImport.textContent = "Retail-PDF importieren";
+      if (retailImport) retailImport.textContent = "Tapeten-Retail-PDF importieren";
     }
   }
 

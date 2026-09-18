@@ -60,10 +60,10 @@ function registerPaintHtmlHotfix(app, publicDir) {
       );
 
       if (!fixed.includes("/public/paint-inventory-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-inventory-ui.js?v=20260918-pricelists-1"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-wallpaper-order-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-wallpaper-order-ui.js"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-wallpaper-order-ui.js?v=20260918-pricelists-1"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-camera-scan.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-camera-scan.js"></script>\n</body>');
