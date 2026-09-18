@@ -273,7 +273,7 @@ function registerCustomerAccess(app, options) {
   }));
   app.post("/kundenportal/api/point",guard(async(req,res)=>{
     sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
-    const module=req.body?.module;if(!["communication","projectPoints"].includes(module)||!ctx.portal.modules[module])throw fail(403,"Dieser Bereich ist nicht freigegeben.");
+    const module=req.body?.module,offerQuestion=module==="communication"&&req.body?.offerQuestion===true&&customerOffer(ctx)?.available;if(!["communication","projectPoints"].includes(module)||(!ctx.portal.modules[module]&&!offerQuestion))throw fail(403,"Dieser Bereich ist nicht freigegeben.");
     const point=await createPoint({jobId:ctx.jobId,meta:ctx.meta,portal:ctx.portal,contact:ctx.grant.contact,source:"customer",creatorName:ctx.portal.customerName||ctx.meta.name,body:req.body});
     res.status(201).json({ok:true,id:point.id,point});
   }));
