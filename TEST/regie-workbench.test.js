@@ -325,8 +325,16 @@ function invoke(handler, req) {
   assert.equal(suggestions.body.suggestions.length, 1);
   assert.equal(suggestions.body.suggestions[0].name, "Max Muster");
   assert.equal(suggestions.body.suggestions[0].hours, 8.25);
+  assert.equal(suggestions.body.suggestions[0].source, "stamped");
+  assert.deepEqual(suggestions.body.stampedSuggestions, suggestions.body.suggestions);
   assert.equal(suggestions.body.suggestions[0].timeLabel, "07:45–12:00 / 12:30–16:30");
   assert.deepEqual(suggestions.body.suggestions[0].blocks, [{ from:"07:45", to:"12:00" }, { from:"12:30", to:"16:30" }]);
+
+  const workbench = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
+  assert.match(workbench, /Gestempelte Stunden dieser Baustelle/);
+  assert.match(workbench, /data\.stampedSuggestions/);
+  assert.match(workbench, /\/kristool-preview\/\?date=/);
+  assert.match(workbench, /✓ Gestempelte Stunden übernommen/);
 
   const print = routes.get("GET /kristine/regie-report/:id/print");
   const printed = await invoke(print, { params: { id: first.body.report.id } });

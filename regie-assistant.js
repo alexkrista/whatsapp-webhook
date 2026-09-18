@@ -693,9 +693,9 @@ function registerRegieAssistant(app, options) {
         || employeeMaster.find(employee => normName(employee.name) === normName(rawName));
       return { ...row, id: clean(found?.id || rawId, 100), name: clean(found?.name || rawName || rawId, 180) };
     };
-    const assigned = assignments.filter(row => String(row.jobId) === jobId && String(row.date) === date).map(row => resolveEmployee(normalizeEmployee({ id: row.employeeId, name: row.employeeName, from: row.from || "07:00", to: row.to || "", hours: row.hours || row.durationHours })));
+    const assigned = assignments.filter(row => String(row.jobId) === jobId && String(row.date) === date).map(row => ({ ...resolveEmployee(normalizeEmployee({ id: row.employeeId, name: row.employeeName, from: row.from || "07:00", to: row.to || "", hours: row.hours || row.durationHours })), source: "planning" }));
     const ids = [...new Set(events.filter(row => String(row.jobId) === jobId && String(row.date) === date).map(row => String(row.employeeId || "")).filter(Boolean))];
-    const eventRows = ids.flatMap(id => buildSegments(events, id, date)).filter(row => String(row.jobId) === jobId).map(row => resolveEmployee(normalizeEmployee(row)));
+    const eventRows = ids.flatMap(id => buildSegments(events, id, date)).filter(row => String(row.jobId) === jobId).map(row => ({ ...resolveEmployee(normalizeEmployee(row)), source: "stamped" }));
     const actualEmployeeIds = new Set(eventRows.map(row => String(row.id || normName(row.name))).filter(Boolean));
     const fallbackRows = assigned.filter(row => !actualEmployeeIds.has(String(row.id || normName(row.name))));
     const grouped = new Map();
@@ -716,7 +716,8 @@ function registerRegieAssistant(app, options) {
       }
     }
     const suggestions = [...grouped.values()];
-    res.json({ ok: true, suggestions });
+    const stampedSuggestions = suggestions.filter(row => row.source === "stamped");
+    res.json({ ok: true, suggestions, stampedSuggestions });
   });
   app.get("/kristine/api/regie-reports/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
