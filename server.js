@@ -1847,6 +1847,30 @@ console.log("ðŸ“¡ WhatsApp-Sender-Konfiguration", {
   priority: LAST_WHATSAPP_PHONE_NUMBER_ID ? "letzter Kristine-Webhook" : "Render-ENV/Fallback",
 });
 
+// Leichte Baustellenliste für den Sprechmodus. Absichtlich ohne Kalkulation,
+ // Dokument- und Stundenabfragen: iPhone/iPad sollen sofort bereit sein.
+async function readKristineVoiceJobs() {
+  const entries = await fsp.readdir(DATA_DIR, { withFileTypes:true }).catch(() => []);
+  const rows = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === "unknown" || entry.name.startsWith("_") || !isSafeJobId(entry.name) || jobAliases.isAlias(entry.name) || isInternalJobId(entry.name)) continue;
+    const meta = await readJobMeta(entry.name);
+    rows.push({
+      jobId:entry.name,
+      name:meta.name || entry.name,
+      street:meta.street || "",
+      houseNumber:meta.houseNumber || "",
+      postalCode:meta.postalCode || "",
+      city:meta.city || "",
+      contactName:meta.contactName || "",
+      contactPhone:meta.contactPhone || "",
+      contactEmail:meta.contactEmail || "",
+      status:meta.status || "",
+    });
+  }
+  return rows;
+}
+
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
 kristine = registerKristine(app, {
   dataDir: DATA_DIR,
@@ -1857,6 +1881,7 @@ kristine = registerKristine(app, {
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
   readEmployees,
   readJobMeta,
+  readVoiceJobs: readKristineVoiceJobs,
   transcribeAudio,
   interpretVoiceText: interpretKristineVoice,
   appendJobHistory,
