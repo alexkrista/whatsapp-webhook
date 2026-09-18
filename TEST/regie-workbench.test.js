@@ -330,11 +330,26 @@ function invoke(handler, req) {
   assert.equal(suggestions.body.suggestions[0].timeLabel, "07:45–12:00 / 12:30–16:30");
   assert.deepEqual(suggestions.body.suggestions[0].blocks, [{ from:"07:45", to:"12:00" }, { from:"12:30", to:"16:30" }]);
 
+  fs.writeFileSync(path.join(temporaryRoot, "_kristine", "project-time-archive.json"), JSON.stringify([{
+    employeeId: "ma-real", employeeName: "Max Muster", date: "2026-09-03",
+    segments: [
+      { type: "work", jobId: "26096", from: "08:00", to: "12:00" },
+      { type: "lunch", from: "12:00", to: "12:30" },
+      { type: "work", jobId: "26096", from: "12:30", to: "15:30" },
+    ],
+  }]));
+  const archivedSuggestions = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
+  assert.equal(archivedSuggestions.body.stampedSuggestions.length, 1);
+  assert.equal(archivedSuggestions.body.stampedSuggestions[0].hours, 7, "Baustellenarchiv muss nach Tagesfreigabe Vorrang haben");
+  assert.equal(archivedSuggestions.body.stampedSuggestions[0].sourceSystem, "project-time-archive");
+  assert.equal(archivedSuggestions.body.stampedSuggestions[0].timeLabel, "08:00–12:00 / 12:30–15:30");
+  fs.writeFileSync(path.join(temporaryRoot, "_kristine", "project-time-archive.json"), "[]");
+
   const workbench = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
-  assert.match(workbench, /Gestempelte Stunden dieser Baustelle/);
+  assert.match(workbench, /Baustellenzeiten dieses Tages/);
   assert.match(workbench, /data\.stampedSuggestions/);
   assert.match(workbench, /\/kristool-preview\/\?date=/);
-  assert.match(workbench, /✓ Gestempelte Stunden übernommen/);
+  assert.match(workbench, /Baustellenzeiten übernehmen/);
 
   const print = routes.get("GET /kristine/regie-report/:id/print");
   const printed = await invoke(print, { params: { id: first.body.report.id } });

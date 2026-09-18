@@ -25,6 +25,7 @@ function registerRegieAssistant(app, options) {
   const REPORTS = path.join(ROOT, "regie-reports.json");
   const CONFIRMATIONS = path.join(ROOT, "regie-confirmations.json");
   const TIME_EVENTS = path.join(ROOT, "time-events.json");
+  const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const EMPLOYEES = path.join(ROOT, "employees.json");
   const SYSTEM_EMPLOYEES = path.join(dataDir, "_system", "employees.json");
@@ -503,7 +504,7 @@ function registerRegieAssistant(app, options) {
   }
 
   async function hourSources() {
-    const [events,archive,system,legacy]=await Promise.all([readJson(TIME_EVENTS,[]),readJson(path.join(ROOT,'project-time-archive.json'),[]),readJson(SYSTEM_EMPLOYEES,[]),readJson(EMPLOYEES,[])]);
+    const [events,archive,system,legacy]=await Promise.all([readJson(TIME_EVENTS,[]),readJson(PROJECT_TIME_ARCHIVE,[]),readJson(SYSTEM_EMPLOYEES,[]),readJson(EMPLOYEES,[])]);
     return [events,archive,[...system,...legacy]];
   }
   async function checkHours(report,reports,sources) {
@@ -684,7 +685,7 @@ function registerRegieAssistant(app, options) {
   app.get("/kristine/api/regie-reports/time-suggestions", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const jobId = safeId(req.query.jobId), date = clean(req.query.date, 10);
-    const [events, assignments, systemEmployees, legacyEmployees] = await Promise.all([readJson(TIME_EVENTS, []), readJson(ASSIGNMENTS, []), readJson(SYSTEM_EMPLOYEES, []), readJson(EMPLOYEES, [])]);
+    const [events, projectArchive, assignments, systemEmployees, legacyEmployees] = await Promise.all([readJson(TIME_EVENTS, []), readJson(PROJECT_TIME_ARCHIVE, []), readJson(ASSIGNMENTS, []), readJson(SYSTEM_EMPLOYEES, []), readJson(EMPLOYEES, [])]);
     const employeeMaster = [...systemEmployees, ...legacyEmployees];
     const normName = value => clean(value, 180).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const resolveEmployee = row => {
@@ -694,12 +695,36 @@ function registerRegieAssistant(app, options) {
       return { ...row, id: clean(found?.id || rawId, 100), name: clean(found?.name || rawName || rawId, 180) };
     };
     const assigned = assignments.filter(row => String(row.jobId) === jobId && String(row.date) === date).map(row => ({ ...resolveEmployee(normalizeEmployee({ id: row.employeeId, name: row.employeeName, from: row.from || "07:00", to: row.to || "", hours: row.hours || row.durationHours })), source: "planning" }));
+    // Nach der Tagesfreigabe wird die Baustellenzuordnung absichtlich aus der
+    // persönlichen KRISZEIT-Karte entfernt. Das unveränderliche
+    // project-time-archive ist dann die Wahrheit für das Baustellenleben.
+    const archivedDayRows = projectArchive.filter(row => String(row.date) === date);
+    const archivedEmployeeKeys = new Set(archivedDayRows.map(row => {
+      const employee = resolveEmployee({ id: row.employeeId, name: row.employeeName });
+      return String(employee.id || normName(employee.name));
+    }).filter(Boolean));
+    const archivedRows = archivedDayRows.flatMap(row => (row.segments || [])
+      .filter(segment => segment.type === "work" && String(segment.jobId) === jobId)
+      .map(segment => ({
+        ...resolveEmployee(normalizeEmployee({
+          id: row.employeeId,
+          name: row.employeeName,
+          from: segment.from,
+          to: segment.to,
+        })),
+        source: "stamped",
+        sourceSystem: "project-time-archive",
+      })));
     const ids = [...new Set(events.filter(row => String(row.jobId) === jobId && String(row.date) === date).map(row => String(row.employeeId || "")).filter(Boolean))];
-    const eventRows = ids.flatMap(id => buildSegments(events, id, date)).filter(row => String(row.jobId) === jobId).map(row => ({ ...resolveEmployee(normalizeEmployee(row)), source: "stamped" }));
-    const actualEmployeeIds = new Set(eventRows.map(row => String(row.id || normName(row.name))).filter(Boolean));
+    const eventRows = ids.flatMap(id => buildSegments(events, id, date))
+      .filter(row => String(row.jobId) === jobId)
+      .map(row => ({ ...resolveEmployee(normalizeEmployee(row)), source: "stamped", sourceSystem: "time-events" }))
+      .filter(row => !archivedEmployeeKeys.has(String(row.id || normName(row.name))));
+    const actualRows = [...archivedRows, ...eventRows];
+    const actualEmployeeIds = new Set(actualRows.map(row => String(row.id || normName(row.name))).filter(Boolean));
     const fallbackRows = assigned.filter(row => !actualEmployeeIds.has(String(row.id || normName(row.name))));
     const grouped = new Map();
-    for (const row of [...eventRows, ...fallbackRows].filter(row => row.name && row.hours > 0)) {
+    for (const row of [...actualRows, ...fallbackRows].filter(row => row.name && row.hours > 0)) {
       const key = String(row.id || normName(row.name));
       const current = grouped.get(key);
       if (!current) grouped.set(key, { ...row });
