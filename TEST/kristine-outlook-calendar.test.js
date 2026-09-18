@@ -19,9 +19,13 @@ function appHarness() {
 
 function response() {
   return {
-    statusCode:200, body:null,
+    statusCode:200, body:null, headers:{}, redirectedTo:"",
     status(code) { this.statusCode = code; return this; },
     json(value) { this.body = value; return this; },
+    send(value) { this.body = value; return this; },
+    type(value) { this.headers["content-type"] = value; return this; },
+    setHeader(name, value) { this.headers[String(name).toLowerCase()] = value; return this; },
+    redirect(code, value) { this.statusCode = Number(code) || 302; this.redirectedTo = value; return this; },
   };
 }
 
@@ -44,15 +48,31 @@ function jwt(account) {
   installOutlookCalendar(app, { dataDir:temporary, requireAdmin:() => true, publicBaseUrl:"https://protokoll.krista.at", logger:{ log(){}, error(){} } });
 
   try {
+    const kristineRoot = path.join(temporary, "_kristine");
+    await fsp.mkdir(path.join(kristineRoot, "vehicle-tracking"), { recursive:true });
+    await fsp.writeFile(path.join(kristineRoot, "tasks.json"), JSON.stringify([{
+      id:"task-42", title:"Kundentermin", jobId:"26099", jobName:"Kunde Bregenz",
+      address:"Musterstraße 1, 6900 Bregenz", contactPhone:"+43 660 1234567",
+    }], null, 2));
+    await fsp.writeFile(path.join(kristineRoot, "vehicle-tracking", "rides.json"), JSON.stringify([{
+      id:"ride-1", startedAt:"2026-09-01T07:00:00.000Z", closedAt:"2026-09-01T07:35:00.000Z",
+      startPosition:{ address:"Hauptstraße 12, 6820 Frastanz" },
+      lastPosition:{ address:"Musterstraße 8, 6900 Bregenz" },
+    }], null, 2));
+
     global.fetch = async () => { throw new Error("network unavailable"); };
     const create = await call(routes, "POST", "/kristine/api/appointments", { body:{
       requestId:"request-1", taskId:"task-42", title:"Kundentermin", date:"2026-09-03", allDay:false,
-      from:"14:00", to:"14:30", location:"Musterstraße 1", details:"Besprechung vor Ort",
+      from:"14:00", to:"14:30", location:"Musterstraße 1, 6900 Bregenz", details:"Besprechung vor Ort",
     } });
     assert.equal(create.statusCode, 201);
     assert.equal(create.body.internalSaved, true);
     assert.equal(create.body.outlookSynced, false);
     assert.equal(create.body.appointment.outlook.status, "failed");
+    assert.equal(create.body.appointment.jobId, "26099");
+    assert.equal(create.body.appointment.travelSource, "krisdrive");
+    assert.equal(create.body.appointment.travelMinutes, 35);
+    assert.equal(create.body.appointment.departureLeadMinutes, 40);
 
     let graphPayload = null;
     global.fetch = async (url, options = {}) => {
@@ -98,7 +118,18 @@ function jwt(account) {
     assert.equal(retry.body.outlookSynced, true);
     assert.equal(retry.body.appointment.outlook.eventId, "outlook-event-123");
     assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/outlook-entry\?task=task-42&sig=/);
+    assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/departure-entry\?task=task-42&sig=/);
+    assert.match(graphPayload.body.content, /Outlook erinnert 40 Min\. vor dem Termin/);
+    assert.equal(graphPayload.isReminderOn, true);
+    assert.equal(graphPayload.reminderMinutesBeforeStart, 40);
     assert.equal(graphPayload.transactionId, create.body.appointment.id);
+
+    const departurePage = await call(routes, "GET", "/kristine/departure", { query:{ task:"task-42" } });
+    assert.equal(departurePage.statusCode, 200);
+    assert.match(String(departurePage.body), /Jetzt los/);
+    assert.match(String(departurePage.body), /Navigation starten/);
+    assert.match(String(departurePage.body), /\/admin\/akte\/26099/);
+    assert.match(String(departurePage.body), /ca\. 35 Min\. Fahrt/);
 
     const updated = await call(routes, "PATCH", "/kristine/api/appointments/:id", { params:{ id:create.body.appointment.id }, body:{
       taskId:"task-42", title:"Kundentermin geändert", date:"2026-09-04", allDay:false,
@@ -125,7 +156,7 @@ function jwt(account) {
     assert.equal(stored[0].outlook.eventId, "outlook-event-123");
     const audit = fs.readFileSync(path.join(temporary, "_kristine", "outlook-calendar.jsonl"), "utf8");
     for (const event of ["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error", "appointment_duplicate_prevented"]) assert.match(audit, new RegExp(`\"type\":\"${event}\"`));
-    console.log("OK: internal save survives Graph failure; login, retry, deduplication, Event-ID and KGO link work");
+    console.log("OK: Outlook save/retry, departure reminder, KrisDrive estimate, Fahrmodus link and deduplication work");
   } finally {
     global.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.KRISTINE_OUTLOOK_TOKEN_KEY; else process.env.KRISTINE_OUTLOOK_TOKEN_KEY = originalKey;
