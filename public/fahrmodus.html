@@ -302,6 +302,7 @@ async function saveDraft(){
           details:'Über Kristine Sprechmodus angelegt.',
           jobId:task.jobId||'',jobName:task.jobName||'',address:task.address||''
         })});
+        await api('/kristine/api/voice/task/'+encodeURIComponent(task.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({appointment:{id:outlook.appointment?.id||'',date:draft.date,from:draft.from,to:draft.to,calendarOwner:'alex',calendarAccount:'alexander.krista@krista.at',outlook:outlook.appointment?.outlook||null}})});
         if(!outlook.outlookSynced)setUi('Termin gespeichert','Der Termin ist in Kristine gespeichert. Outlook ist noch nicht verbunden.');
       }
     }
