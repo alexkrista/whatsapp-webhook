@@ -619,70 +619,6 @@ async function polishGermanTranscript(rawText) {
   return (txt || "").trim() || String(rawText || "").trim();
 }
 
-async function interpretKristineVoice(rawText) {
-  const source = String(rawText || "").trim();
-  if (!source) return { kind:"unknown", target:"", content:"", dueDate:"", date:"", from:"", to:"", rawText:source };
-  if (!OPENAI_API_KEY) return { kind:"note", target:"", content:source, dueDate:"", date:"", from:"", to:"", rawText:source };
-
-  const today = todayISO();
-  const weekday = new Intl.DateTimeFormat("de-AT", { weekday:"long" }).format(new Date());
-  const payload = {
-    model: OPENAI_TEXT_MODEL,
-    input: [
-      {
-        role: "system",
-        content:
-          "Du strukturierst kurze gesprochene Anweisungen für Kristine, ein internes Baustellen- und Kundenakten-System. " +
-          "Gib ausschließlich ein JSON-Objekt zurück, ohne Markdown. Felder: kind, target, content, dueDate, date, from, to. " +
-          "kind ist task, note, appointment, reminder oder unknown. " +
-          "target enthält nur den genannten Kunden, die Baustelle oder Baustellennummer, sonst leer. " +
-          "content enthält den eigentlichen Inhalt oder bei einem Termin eine kurze Terminbezeichnung; keine erfundenen Details. " +
-          "dueDate ist YYYY-MM-DD nur für Aufgaben/Erinnerungen, wenn ein Fälligkeitsdatum eindeutig ist, sonst leer. " +
-          "date ist YYYY-MM-DD nur für echte Termine/Meetings. from und to sind HH:MM. " +
-          "Wenn bei einem Termin nur eine Startzeit genannt ist, lass to leer; Kristine setzt dann standardmäßig 60 Minuten. " +
-          "Wenn jemand sagt 'Erinnerung ... mitbringen/anrufen/erledigen', ist das eine task. " +
-          "appointment nur bei einem echten Termin, Besuch, Besprechung oder Meeting. " +
-          "note für Gesprächsnotizen oder Informationen ohne Aufgabe. reminder nur für eine reine Erinnerung ohne eigene Arbeitsaufgabe. " +
-          "Relative Datumsangaben wie heute, morgen, nächsten Dienstag oder Freitag sind anhand des heutigen Datums aufzulösen. " +
-          `Heute ist ${today} (${weekday}).`
-      },
-      { role:"user", content:source },
-    ],
-  };
-
-  const r = await fetch("https://api.openai.com/v1/responses", {
-    method:"POST",
-    headers:{ Authorization:`Bearer ${OPENAI_API_KEY}`, "Content-Type":"application/json" },
-    body:JSON.stringify(payload),
-  });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`OpenAI voice interpretation failed (${r.status}): ${t}`);
-  }
-
-  const j = await r.json();
-  const out = extractResponsesText(j).trim().replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-  let parsed = {};
-  try { parsed = JSON.parse(out); }
-  catch { return { kind:"note", target:"", content:source, dueDate:"", date:"", from:"", to:"", rawText:source }; }
-
-  const allowed = new Set(["task","note","appointment","reminder","unknown"]);
-  const time = value => /^\d{2}:\d{2}$/.test(String(value || "")) ? String(value) : "";
-  const iso = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : "";
-  const kind = allowed.has(String(parsed.kind || "").toLowerCase()) ? String(parsed.kind).toLowerCase() : "unknown";
-  const date = iso(parsed.date || (kind === "appointment" ? parsed.dueDate : ""));
-  return {
-    kind,
-    target:String(parsed.target || "").trim().slice(0, 180),
-    content:String(parsed.content || source).trim().slice(0, 1000),
-    dueDate:kind === "appointment" ? "" : iso(parsed.dueDate),
-    date,
-    from:time(parsed.from),
-    to:time(parsed.to),
-    rawText:source.slice(0, 2000),
-  };
-}
-
 // ===================== Mail (SMTP) =====================
 function makeMailer() {
   return nodemailer.createTransport({
@@ -1847,30 +1783,6 @@ console.log("ðŸ“¡ WhatsApp-Sender-Konfiguration", {
   priority: LAST_WHATSAPP_PHONE_NUMBER_ID ? "letzter Kristine-Webhook" : "Render-ENV/Fallback",
 });
 
-// Leichte Baustellenliste für den Sprechmodus. Absichtlich ohne Kalkulation,
- // Dokument- und Stundenabfragen: iPhone/iPad sollen sofort bereit sein.
-async function readKristineVoiceJobs() {
-  const entries = await fsp.readdir(DATA_DIR, { withFileTypes:true }).catch(() => []);
-  const rows = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === "unknown" || entry.name.startsWith("_") || !isSafeJobId(entry.name) || jobAliases.isAlias(entry.name) || isInternalJobId(entry.name)) continue;
-    const meta = await readJobMeta(entry.name);
-    rows.push({
-      jobId:entry.name,
-      name:meta.name || entry.name,
-      street:meta.street || "",
-      houseNumber:meta.houseNumber || "",
-      postalCode:meta.postalCode || "",
-      city:meta.city || "",
-      contactName:meta.contactName || "",
-      contactPhone:meta.contactPhone || "",
-      contactEmail:meta.contactEmail || "",
-      status:meta.status || "",
-    });
-  }
-  return rows;
-}
-
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
 kristine = registerKristine(app, {
   dataDir: DATA_DIR,
@@ -1881,10 +1793,6 @@ kristine = registerKristine(app, {
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
   readEmployees,
   readJobMeta,
-  readVoiceJobs: readKristineVoiceJobs,
-  transcribeAudio,
-  interpretVoiceText: interpretKristineVoice,
-  appendJobHistory,
   markJobRunning: async (jobId, source = "system") => {
     const id = String(jobId || "").trim();
     if (!/^\d{5}$/.test(id) || !fs.existsSync(path.join(DATA_DIR, id))) return false;
