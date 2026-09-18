@@ -560,7 +560,7 @@ function installOutlookCalendar(app, deps = {}) {
     if (current.outlook?.status === "synced" && current.outlook.eventId) {
       if (!current.allDay && (!current.outlook.departureBlockEventId || current.outlook.departureBlockStatus !== "synced")) {
         try {
-          const block = await graphCreateDepartureBlock(current);
+          const block = await graphUpdateDepartureBlock(current);
           return serialized(async () => {
             const latest = await readJson(appointmentsFile, []);
             const row = latest.find(item => item.id === id);
