@@ -3040,6 +3040,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         contactName: meta.contactName || "",
         contactPhone: meta.contactPhone || "",
         contactEmail: meta.contactEmail || "",
+        customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
         projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
         wwProjectIndex: Number(meta.wwProjectIndex || 0),
         wwProjectNumber: meta.wwProjectNumber || "",

@@ -48,7 +48,8 @@ for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Über
 for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","counter(page) ' / 3'","offerPageModeCss"])
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
 assert.ok(!ui.includes("Übertrag von Seite 2:"),"Nach der Angebotssumme wird auf der Abschlussseite kein Übertrag mehr gedruckt");
-for(const text of ["groupName","groupSummary","enhanceGroupTotals","Rabatte Räume/Bauteile","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
+for(const text of ["groupName","groupSummary","enhanceGroupTotals",">Rabatt<","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
+assert.ok(server.includes('customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null'),"WinWorker-Kundenadresse wird an den Angebotsdruck übergeben");
 assert.ok(ui.includes('rooms.join(", ")'),"Der Leistungsumfang führt nur Räume und Bauteile an");
 assert.ok(ui.includes('groupName:p.groupName||""'),"Geänderte Raumnamen werden vollständig in die Positionsgruppen übernommen");
 assert.ok(ui.includes("normalizeLoadedGroups"),"Bereits gespeicherte Regie- und Materialpositionen werden wieder zu einem Raumblock zusammengeführt");
