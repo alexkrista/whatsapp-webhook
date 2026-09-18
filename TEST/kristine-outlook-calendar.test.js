@@ -72,9 +72,11 @@ function jwt(account) {
     assert.equal(create.body.appointment.jobId, "26099");
     assert.equal(create.body.appointment.travelSource, "krisdrive");
     assert.equal(create.body.appointment.travelMinutes, 35);
-    assert.equal(create.body.appointment.departureLeadMinutes, 40);
+    assert.equal(create.body.appointment.departureBufferMinutes, 15);
+    assert.equal(create.body.appointment.departureLeadMinutes, 50);
 
     let graphPayload = null;
+    let departurePayload = null;
     global.fetch = async (url, options = {}) => {
       if (String(url).endsWith("/devicecode")) return new Response(JSON.stringify({ device_code:"device", user_code:"ABCD-EFGH", verification_uri:"https://login.microsoft.com/device", expires_in:900, interval:1 }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).endsWith("/token")) return new Response(JSON.stringify({ access_token:"access", refresh_token:"refresh", id_token:jwt("alexander.krista@krista.at"), expires_in:3600, scope:"Calendars.ReadWrite Calendars.ReadWrite.Shared Mail.Read Mail.Read.Shared" }), { status:200, headers:{ "Content-Type":"application/json" } });
@@ -87,8 +89,13 @@ function jwt(account) {
         { subject:"Nur in Frei/Belegt", status:"busy", start:{ dateTime:"2026-09-18T13:00:00.0000000" }, end:{ dateTime:"2026-09-18T14:00:00.0000000" } },
       ] }] }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).includes("graph.microsoft.com")) {
-        graphPayload = JSON.parse(options.body);
-        return new Response(JSON.stringify({ id:"outlook-event-123", webLink:"https://outlook.example/event/123" }), { status:201, headers:{ "Content-Type":"application/json" } });
+        const payload = options.body ? JSON.parse(options.body) : {};
+        if (String(payload.subject || "").startsWith("🚗 Jetzt los")) {
+          departurePayload = payload;
+          return new Response(JSON.stringify({ id:"outlook-departure-123", webLink:"https://outlook.example/event/departure" }), { status:200, headers:{ "Content-Type":"application/json" } });
+        }
+        graphPayload = payload;
+        return new Response(JSON.stringify({ id:"outlook-event-123", webLink:"https://outlook.example/event/123" }), { status:200, headers:{ "Content-Type":"application/json" } });
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
@@ -119,10 +126,18 @@ function jwt(account) {
     assert.equal(retry.body.appointment.outlook.eventId, "outlook-event-123");
     assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/outlook-entry\?task=task-42&sig=/);
     assert.match(graphPayload.body.content, /https:\/\/protokoll\.krista\.at\/kristine\/departure-entry\?task=task-42&sig=/);
-    assert.match(graphPayload.body.content, /Outlook erinnert 40 Min\. vor dem Termin/);
-    assert.equal(graphPayload.isReminderOn, true);
-    assert.equal(graphPayload.reminderMinutesBeforeStart, 40);
+    assert.match(graphPayload.body.content, /Kristine blockiert 50 Min\. vor dem Termin/);
+    assert.equal(graphPayload.isReminderOn, false);
     assert.equal(graphPayload.transactionId, create.body.appointment.id);
+    assert(departurePayload, "departure block must be created");
+    assert.equal(departurePayload.subject, "🚗 Jetzt los · Kundentermin");
+    assert.equal(departurePayload.isReminderOn, true);
+    assert.equal(departurePayload.reminderMinutesBeforeStart, 0);
+    assert.equal(departurePayload.start.dateTime, "2026-09-03T13:10:00");
+    assert.equal(departurePayload.end.dateTime, "2026-09-03T14:00:00");
+    assert.match(departurePayload.body.content, /Vorbereitung\/Puffer: mindestens 15 Min\./);
+    assert.match(departurePayload.body.content, /Navigation starten:/);
+    assert.match(departurePayload.body.content, /Fahrmodus öffnen:/);
 
     const departurePage = await call(routes, "GET", "/kristine/departure", { query:{ task:"task-42" } });
     assert.equal(departurePage.statusCode, 200);
@@ -154,6 +169,8 @@ function jwt(account) {
     assert.equal(stored.length, 1, "Idempotent request must only create one internal appointment");
     assert.equal(stored[0].outlook.status, "synced");
     assert.equal(stored[0].outlook.eventId, "outlook-event-123");
+    assert.equal(stored[0].outlook.departureBlockEventId, "outlook-departure-123");
+    assert.equal(stored[0].outlook.departureBlockStatus, "synced");
     const audit = fs.readFileSync(path.join(temporary, "_kristine", "outlook-calendar.jsonl"), "utf8");
     for (const event of ["auth_success", "token_cache_saved", "token_cache_loaded", "graph_create_event_error", "appointment_duplicate_prevented"]) assert.match(audit, new RegExp(`\"type\":\"${event}\"`));
     console.log("OK: Outlook save/retry, departure reminder, KrisDrive estimate, Fahrmodus link and deduplication work");
