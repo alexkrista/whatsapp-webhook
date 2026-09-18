@@ -16,7 +16,9 @@ function historyRows(row){
 function customerPointView(row,task){
   const history=historyRows(row),current=status(task);
   if(history.at(-1).status!==current)history.push({kind:"status",status:current,date:current==="done"?timestamp(task?.completedAt):null});
-  return {id:row.id,module:row.module,title:pointTitle(row),text:text(row.text),area:text(row.area,140),date:timestamp(row.date),status:current,history};
+  const responsibility=row.responsibility==="bauherr"?"bauherr":"krista";
+  const photos=(Array.isArray(row.photos)?row.photos:[]).filter(photo=>photo&&/^[a-f0-9-]{36}$/.test(photo.id||"")).map(photo=>({id:photo.id,name:text(photo.name,180)||"Foto",type:text(photo.type,80),url:`/kundenportal/api/point-photo/${encodeURIComponent(row.id)}/${encodeURIComponent(photo.id)}`}));
+  return {id:row.id,module:row.module,title:pointTitle(row),text:text(row.text),area:text(row.area,140),responsibility,photos,date:timestamp(row.date),status:current,history};
 }
 
 // Capture transitions when office tasks are saved, even while the customer is

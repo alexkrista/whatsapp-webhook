@@ -165,7 +165,37 @@ function registerCustomerAccess(app, options) {
   function pointRows(ctx) {
     const folder=path.join(dataDir,ctx.jobId,"_customer-portal"),rows=fs.existsSync(folder)?fs.readdirSync(folder).filter(name=>/^[a-f0-9-]+\.json$/.test(name)).map(name=>read(path.join(folder,name),null)).filter(Boolean):[];
     const tasks=new Map(mergePortalTasks(dataDir,read(path.join(dataDir,"_kristine/tasks.json"),[])).map(task=>[task.id,task]));
-    return rows.filter(row=>row.contact===ctx.grant.contact&&ctx.portal.modules[row.module]).map(row=>customerPointView(row,tasks.get(row.taskId))).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return rows.filter(row=>(row.source==="office"||row.contact===ctx.grant.contact)&&ctx.portal.modules[row.module]).map(row=>customerPointView(row,tasks.get(row.taskId))).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  }
+  function storedPointRows(jobId) {
+    const folder=path.join(dataDir,jobId,"_customer-portal"),rows=fs.existsSync(folder)?fs.readdirSync(folder).filter(name=>/^[a-f0-9-]+\.json$/.test(name)).map(name=>read(path.join(folder,name),null)).filter(Boolean):[];
+    const tasks=new Map(mergePortalTasks(dataDir,read(path.join(dataDir,"_kristine/tasks.json"),[])).map(task=>[task.id,task]));
+    return rows.map(row=>customerPointView(row,tasks.get(row.taskId))).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  }
+  function pointPhotos(value,jobId,pointId) {
+    const rows=Array.isArray(value)?value:[];
+    if(rows.length>6)throw fail(400,"Bitte höchstens 6 Fotos pro Punkt auswählen.");
+    let total=0;
+    return rows.map(row=>{
+      const match=String(row?.data||"").match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+      if(!match)throw fail(400,"Ein Foto hat ein nicht unterstütztes Format.");
+      const buffer=Buffer.from(match[2],"base64");total+=buffer.length;
+      if(!buffer.length||buffer.length>5*1024*1024||total>15*1024*1024)throw fail(400,"Die Fotos sind zu groß. Maximal 5 MB je Foto und 15 MB insgesamt.");
+      const id=crypto.randomUUID(),extension={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif"}[match[1]],relative=path.join("_customer-portal","_files",pointId,id+"."+extension);
+      const file=path.join(dataDir,jobId,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,buffer,{mode:0o600});
+      return {id,name:clean(row?.name,180)||"Foto",type:match[1],file:relative.replace(/\\/g,"/")};
+    });
+  }
+  async function createPoint({jobId,meta,portal,contact,source,creatorName,body}) {
+    const module=body?.module;if(!["communication","projectPoints"].includes(module))throw fail(400,"Ungültiger Bereich.");
+    const text=clean(body?.text,5000),area=clean(body?.area,140),title=pointTitle({title:clean(body?.title,140),text,area});if(!text)throw fail(400,"Bitte eine Nachricht eingeben.");
+    const responsibility=body?.responsibility==="bauherr"?"bauherr":"krista",id=crypto.randomUUID(),taskId="customer_"+id,date=new Date(now()).toISOString();
+    let photos=[];try{photos=pointPhotos(body?.photos,jobId,id)}catch(error){fs.rmSync(path.join(dataDir,jobId,"_customer-portal","_files",id),{recursive:true,force:true});throw error}
+    const employees=typeof readEmployees==="function"?await readEmployees():[],owner=employees.find(row=>/^alexander krista$/i.test(row.name||""));
+    const task={id:taskId,title:(module==="communication"?"Kundennachricht":"Kundenpunkt prüfen")+" · "+meta.name+" · "+title.slice(0,70),jobId,jobName:meta.name,assigneeId:owner?.id||"admin",assigneeName:owner?.name||"Alexander Krista",taskType:"Sonstiges",priority:"normal",creatorId:source==="office"?"krista-office":"customer-portal",creatorName:creatorName||portal.customerName||meta.name,contactName:portal.customerName,contactPhone:portal.customerPhone,contactEmail:portal.customerEmail,customerResponsibility:responsibility,reminder:text.slice(0,500),status:"open",createdAt:date,completedAt:null};
+    write(path.join(dataDir,jobId,"_customer-portal",id+".json"),{id,taskId,module,title,text,area,responsibility,photos,date,contact,source,history:[{kind:"submitted",status:"open",date}]});
+    write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
+    return customerPointView({id,taskId,module,title,text,area,responsibility,photos,date,history:[{kind:"submitted",status:"open",date}]},task);
   }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
     const ctx=await context(req),data=await catalog(ctx);
@@ -189,16 +219,27 @@ function registerCustomerAccess(app, options) {
     if(!file)throw fail(404,"Datei nicht freigegeben.");
     res.sendFile(file.physical,{headers:{"Cache-Control":"private, no-store"}});
   }));
+  app.get("/kundenportal/api/point-photo/:pointId/:photoId",guard(async(req,res)=>{
+    const ctx=await context(req);if(!/^[a-f0-9-]{36}$/.test(req.params.pointId)||!/^[a-f0-9-]{36}$/.test(req.params.photoId))throw fail(404,"Foto nicht gefunden.");
+    const point=read(path.join(dataDir,ctx.jobId,"_customer-portal",req.params.pointId+".json"),null);
+    if(!point||(point.source!=="office"&&point.contact!==ctx.grant.contact)||!ctx.portal.modules[point.module])throw fail(404,"Foto nicht freigegeben.");
+    const photo=(point.photos||[]).find(row=>row.id===req.params.photoId),file=photo&&secureFile(ctx.jobId,photo.file);
+    if(!file)throw fail(404,"Foto nicht gefunden.");
+    res.type(photo.type).sendFile(file,{headers:{"Cache-Control":"private, no-store"}});
+  }));
+  app.get("/admin/api/job/:jobId/customer-portal/points",guard(async(req,res)=>{
+    if(!requireAdmin(req,res))return;const jobId=await mainId(req.params.jobId);await readJobMeta(jobId);res.json({ok:true,points:storedPointRows(jobId)});
+  }));
+  app.post("/admin/api/job/:jobId/customer-portal/points",guard(async(req,res)=>{
+    if(!requireAdmin(req,res))return;const jobId=await mainId(req.params.jobId),meta=await readJobMeta(jobId),portal=sanitizeCustomerPortal(meta.customerPortal);
+    const point=await createPoint({jobId,meta,portal,contact:fingerprint(portal),source:"office",creatorName:"Farben Krista · Besprechungsprotokoll",body:{...req.body,module:"projectPoints"}});
+    res.status(201).json({ok:true,point});
+  }));
   app.post("/kundenportal/api/point",guard(async(req,res)=>{
     sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
     const module=req.body?.module;if(!["communication","projectPoints"].includes(module)||!ctx.portal.modules[module])throw fail(403,"Dieser Bereich ist nicht freigegeben.");
-    const text=clean(req.body?.text,5000),area=clean(req.body?.area,140),title=pointTitle({title:clean(req.body?.title,140),text,area});if(!text)throw fail(400,"Bitte eine Nachricht eingeben.");
-    const id=crypto.randomUUID(),taskId="customer_"+id,date=new Date(now()).toISOString();
-    const employees=typeof readEmployees==="function"?await readEmployees():[],owner=employees.find(row=>/^alexander krista$/i.test(row.name||""));
-    const task={id:taskId,title:(module==="communication"?"Kundennachricht":"Kundenpunkt prüfen")+" · "+ctx.meta.name+" · "+title.slice(0,70),jobId:ctx.jobId,jobName:ctx.meta.name,assigneeId:owner?.id||"admin",assigneeName:owner?.name||"Alexander Krista",taskType:"Sonstiges",priority:"normal",creatorId:"customer-portal",creatorName:ctx.portal.customerName||ctx.meta.name,contactName:ctx.portal.customerName,contactPhone:ctx.portal.customerPhone,contactEmail:ctx.portal.customerEmail,reminder:text.slice(0,500),status:"open",createdAt:date,completedAt:null};
-    write(path.join(dataDir,ctx.jobId,"_customer-portal",id+".json"),{id,taskId,module,title,text,area,date,contact:ctx.grant.contact,history:[{kind:"submitted",status:"open",date}]});
-    write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
-    res.status(201).json({ok:true,id});
+    const point=await createPoint({jobId:ctx.jobId,meta:ctx.meta,portal:ctx.portal,contact:ctx.grant.contact,source:"customer",creatorName:ctx.portal.customerName||ctx.meta.name,body:req.body});
+    res.status(201).json({ok:true,id:point.id,point});
   }));
   registerCustomerExports(app,{dataDir,context,catalog,readJobMeta,pointRows,readInvoicePdf:options.readInvoicePdf,origin,now,
     closePortal:options.writeJobMeta?async ctx=>{

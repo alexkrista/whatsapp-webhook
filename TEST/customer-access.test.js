@@ -52,6 +52,17 @@ test("invalid secrets, cross-origin posts and preview writes are rejected; custo
  const preview=await f.invite(true),previewCookie=await f.login(preview.portalUrl),previewData=await(await f.request("/kundenportal/api/project",{headers:{Cookie:previewCookie}})).json();assert.equal(previewData.preview,true);
  assert.equal((await f.request("/kundenportal/api/point",{method:"POST",headers:{Cookie:previewCookie,"x-csrf-token":previewData.csrf},body:JSON.stringify({module:"communication",text:"Preview"})})).status,403);
 });
+test("office meeting notes keep responsibility and private photos in the customer portal",async t=>{
+ const f=await fixture(t),image=Buffer.from("private-photo").toString("base64"),route="/admin/api/job/24177/customer-portal/points";
+ assert.equal((await f.request(route)).status,401);
+ const created=await f.request(route,{method:"POST",headers:{"x-test-admin":"yes"},body:JSON.stringify({title:"Fenster prüfen",area:"Wohnzimmer",text:"Bauherr kontrolliert die Farbe.",responsibility:"bauherr",photos:[{name:"fenster.jpg",data:"data:image/jpeg;base64,"+image}]})}),createdBody=await created.json();
+ assert.equal(created.status,201,JSON.stringify(createdBody));const point=createdBody.point;assert.equal(point.responsibility,"bauherr");assert.equal(point.photos.length,1);
+ const adminRows=await(await f.request(route,{headers:{"x-test-admin":"yes"}})).json();assert.equal(adminRows.points[0].title,"Fenster prüfen");
+ const cookie=await f.login((await f.invite()).portalUrl),project=await(await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).json(),visible=project.points.find(row=>row.id===point.id);
+ assert.equal(visible.responsibility,"bauherr");assert.equal(visible.photos.length,1);assert.equal((await f.request(visible.photos[0].url)).status,401);
+ const photo=await f.request(visible.photos[0].url,{headers:{Cookie:cookie}});assert.equal(photo.headers.get("content-type"),"image/jpeg");assert.equal(await photo.text(),"private-photo");
+ const task=mergePortalTasks(f.dir,[]).find(row=>row.id==="customer_"+point.id);assert.equal(task.customerResponsibility,"bauherr");assert.equal(task.creatorId,"krista-office");
+});
 test("single-project access ignores unrelated project-number parameters and ungranted files",async t=>{
  const f=await fixture(t);f.metas["24177"].customerPortal.mode="single";f.metas["24177"].customerPortal.modules.projectFile=false;f.metas["24177"].customerPortal.modules.regie=false;
  const cookie=await f.login((await f.invite()).portalUrl),data=await(await f.request("/kundenportal/api/project?project=25018",{headers:{Cookie:cookie}})).json();assert.equal(data.projects.length,1);assert.equal(data.files.length,0);assert.equal(data.materials.length,0);
