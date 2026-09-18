@@ -1358,6 +1358,24 @@ const open = taskId
     }
   });
 
+  app.patch("/kristine/api/voice/task/:id", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const id = String(req.params.id || "");
+      const tasks = await readJson(TASKS, []);
+      const row = tasks.find(item => String(item?.id || "") === id);
+      if (!row) return res.status(404).json({ ok:false, error:"Aufgabe nicht gefunden." });
+      if (req.body?.appointment && typeof req.body.appointment === "object") {
+        row.appointment = { ...(row.appointment || {}), ...req.body.appointment };
+      }
+      row.updatedAt = new Date().toISOString();
+      await writeJson(TASKS, tasks);
+      res.json({ ok:true, task:row });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
+  });
+
   // Dieselbe Baustellen-Oberfläche und Datenlogik, jetzt unter KRISTINE.
   app.get(["/kristine/baustellen", "/kristine/baustellen/"], (req, res) => {
     if (!requireAdmin(req, res)) return;
