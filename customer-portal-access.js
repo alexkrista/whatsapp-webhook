@@ -154,12 +154,13 @@ function registerCustomerAccess(app, options) {
         if(doc?.storedName&&path.basename(doc.storedName)===doc.storedName)add(jobId,"pdf",doc.name||"Auftrag",secureFile(jobId,"_auftrag/"+doc.storedName),"documents");
         const visibleDocuments=documents.filter(row=>row.customerVisible===true&&row.type!=="regie_report"),seenOffers=new Set();
         for(const row of visibleDocuments){
-          if(row.type==="offer"){
-            const offerKey=`${clean(row.offerNumber,20)||clean(row.name,180)}|${Math.max(1,Number(row.offerRevision)||1)}`;
+          const documentName=clean(row.name,180),numberFromName=documentName.match(/^Angebot\s+(\d+)\.pdf$/i)?.[1]||"";
+          if(row.type==="offer"||numberFromName){
+            const offerKey=clean(row.offerNumber,20)||numberFromName||documentName.toLowerCase();
             if(seenOffers.has(offerKey))continue;
             seenOffers.add(offerKey);
           }
-          if(row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName))add(jobId,"pdf",row.name||"Dokument",secureFile(jobId,"_documentation/"+row.storedName),"documents");
+          if(row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName))add(jobId,"pdf",documentName||"Dokument",secureFile(jobId,"_documentation/"+row.storedName),"documents");
         }
         for(const row of await listJobMedia({dataDir,jobId,includeCollection:false})) {
           if(!/\.(jpe?g|png|webp|gif|mp4|mov|webm)$/i.test(row.file||""))continue;
