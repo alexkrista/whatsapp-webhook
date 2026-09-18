@@ -146,14 +146,15 @@
     return servicesHealthy?"green":"red";
   }
 
-  function gateColor(d){
-    if(!d?.online)return"red";
-    const entries=Object.entries(d.services||{});
-    const gate=entries.find(([key,x])=>{
-      const text=`${key} ${x?.label||""} ${x?.detail||""}`.toLowerCase();
-      return text.includes("garagentor")||text.includes("garage")||text.includes("gate");
-    });
-    return gate&&gate[1]?.state==="bad"?"red":"green";
+  function gateVisual(d){
+    const g=d?.gatePosition;
+    const age=Date.now()-Number(g?.checkedAt||0);
+    if(!d?.online||!g?.ok||g.unreachable||!Number.isFinite(age)||age< -60000||age>60000)
+      return {color:"yellow",state:"?",title:"Torposition unbekannt · keine aktuelle Sensorauskunft"};
+    const suffix=g.lowBattery?" · Sensorbatterie schwach":"";
+    if(g.position==="OPEN")return {color:"red",state:"OFFEN",title:"Magnetkontakt meldet Tor offen"+suffix};
+    if(g.position==="CLOSED")return {color:"green",state:"ZU",title:"Magnetkontakt meldet Tor geschlossen"+suffix};
+    return {color:"yellow",state:"?",title:"Torposition unbekannt"};
   }
 
   function applyDoorHolds(d){
@@ -195,8 +196,9 @@
     const taskActive=location.pathname.toLowerCase().includes("/kristine")&&location.hash.toLowerCase()==="#tasks";
     let h=`<a class="krista-quick-task${taskActive?" active":""}" href="${taskUrl()}" title="Aufgaben öffnen"><span aria-hidden="true">📌</span><span>Aufgaben</span></a>`;
     const gateLocked=Date.now()<gateLockedUntil;
-    const gateLamp=gateLocked?"yellow":gateColor(d);
-    h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":gateLamp==="green"?"Torsteuerung bereit · Klick: Tor-Impuls":"Torsteuerung nicht erreichbar"}"><span class="krista-dot ${gateLamp}"></span><span>TOR</span></button>`;
+    const gateView=gateVisual(d);
+    const gateLamp=gateLocked?"yellow":gateView.color;
+    h+=`<button class="krista-gate-lamp${gateLocked?" syncing":""}" data-gate title="${gateLocked?"Tor-Impuls gesendet · kurz warten":gateView.title+" · Klick: Tor-Impuls"}"><span class="krista-dot ${gateLamp}"></span><span>TOR ${gateView.state}</span></button>`;
 
     const doors=d?.gantner?.doors||{};
     const labels={1:"Eingang",2:"Lager",3:"Büro"};
