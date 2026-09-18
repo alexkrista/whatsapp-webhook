@@ -8,6 +8,7 @@
   let currentJobId = "";
   let readyJobId = "";
   let portalUrl = "";
+  let contactSelectionKey = "";
 
   const style = document.createElement("style");
   style.textContent = `.customer-portal-button{display:inline-flex;align-items:center;gap:7px;cursor:pointer}.customer-portal-button::before{content:"";width:8px;height:8px;border-radius:50%;background:#9a9e9a}.customer-portal-button.portal-prepared::before{background:#e49a31}.customer-portal-button.portal-active::before{background:#43b878}.customer-portal-link small{display:block;margin-top:3px;color:#737873;font-size:10px}.cp-backdrop{position:fixed;inset:0;z-index:900;background:rgba(16,24,19,.56);display:none;align-items:center;justify-content:center;padding:16px}.cp-backdrop.open{display:flex}.cp-dialog{width:min(980px,100%);max-height:92vh;overflow:auto;background:#fffefa;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.28)}.cp-head{display:flex;justify-content:space-between;gap:12px;padding:18px 20px;background:#17211b;color:#fff}.cp-head h2{font-size:20px;margin:0}.cp-head p{margin:3px 0 0;color:rgba(255,255,255,.68);font-size:12px}.cp-close{border:0;background:transparent;color:#fff;font-size:24px;cursor:pointer}.cp-body{padding:20px}.cp-inline-host{background:transparent!important}.cp-inline-host .cp-body{padding:0}.cp-inline-title{display:none;margin:0 0 12px;font-size:20px}.cp-inline-host .cp-inline-title{display:block}.cp-factbox{padding:18px;border:1px solid #ddd9cf;border-radius:15px;background:#fffefa;box-shadow:0 5px 18px rgba(23,33,27,.05)}.cp-meeting{margin-top:16px;padding:18px;border:1px solid #ddd9cf;border-radius:15px;background:#fffefa;box-shadow:0 5px 18px rgba(23,33,27,.05)}.cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cp-field{display:grid;gap:5px;font-size:12px;font-weight:800;color:#626862}.cp-field input,.cp-field select,.cp-field textarea{font:inherit;font-weight:500;min-height:42px;border:1px solid #d6d3ca;border-radius:10px;padding:9px;background:#fff}.cp-field textarea{min-height:100px;resize:vertical}.cp-field-wide{grid-column:1/-1}.cp-internal-photo{grid-column:1/-1;display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border:1px solid #e0c77c;border-radius:10px;background:#fff8dc;color:#554718;font-size:12px;cursor:pointer}.cp-internal-photo input{width:auto;min-height:0;margin:2px 0 0;padding:0}.cp-internal-photo span{display:grid;gap:2px}.cp-internal-photo small{font-weight:500}.cp-section{margin-top:18px;padding-top:16px;border-top:1px solid #e7e3da}.cp-section h3{margin:0 0 4px;font-size:15px}.cp-help{margin:0 0 11px;color:#747a74;font-size:12px}.cp-option{display:flex;gap:10px;align-items:flex-start;border:1px solid #e2ded5;border-radius:11px;padding:11px;margin:8px 0;font-size:13px;font-weight:750;background:#fbfaf6}.cp-option input{margin-top:2px}.cp-jobs{display:none;margin-top:10px;max-height:180px;overflow:auto;border:1px solid #e2ded5;border-radius:11px;padding:7px}.cp-jobs.open{display:block}.cp-point-form{padding:14px;border:1px solid #d8ded7;border-radius:12px;background:#f7faf7}.cp-point-list{display:grid;gap:7px;margin-top:12px}.cp-point-row{padding:9px 11px;border-left:4px solid #397b4b;background:#fff;border-radius:7px;font-size:12px}.cp-point-row strong{display:block;color:#25352a}.cp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.cp-actions button,.cp-actions a,.cp-point-form button{border:1px solid #cfcac0;border-radius:10px;padding:10px 13px;background:#fff;color:#293029;text-decoration:none;font:800 12px system-ui;cursor:pointer}.cp-actions .primary,.cp-point-form .primary{background:#2f7d4a;border-color:#2f7d4a;color:#fff}.cp-actions .customer-view{background:#17211b;border-color:#17211b;color:#fff}.cp-status{min-height:18px;margin-top:10px;font-size:12px;color:#667066}.cp-status.error{color:#a84540}@media(max-width:650px){.cp-grid{grid-template-columns:1fr}.cp-field-wide,.cp-internal-photo{grid-column:auto}.cp-dialog{max-height:96vh}.cp-actions>*{flex:1;text-align:center}}`;
@@ -92,14 +93,19 @@
       if (currentJobId !== jobId) return;
       const portal = data.portal || {};
       const contacts = data.contactDefaults || {};
+      contactSelectionKey = contacts.selectionKey || "";
       portalUrl = data.portalUrl || "";
       const job = (window.kristineCustomerPortalJobs || []).find(item => String(item.jobId) === currentJobId) || {};
       document.getElementById("cpSubtitle").textContent = `Baustelle #${currentJobId}`;
       document.getElementById("cpInlineSubtitle").textContent = `Baustelle #${currentJobId}`;
       document.getElementById("cpStatus").value = portal.status || "off";
-      document.getElementById("cpName").value = portal.customerName || contacts.customerName || job.contactName || job.name || "";
-      document.getElementById("cpEmail").value = portal.customerEmail || contacts.customerEmail || "";
-      document.getElementById("cpPhone").value = portal.customerPhone || contacts.customerPhone || "";
+      const trackedSelection = Boolean(portal.contactSelectionKey);
+      const changedSelection = trackedSelection && portal.contactSelectionKey !== contactSelectionKey;
+      const newlySelectedExternalRecipient = !trackedSelection && contacts.selectionExplicit && (contacts.selectedGroups || []).some(group => group !== "owner");
+      const useFreshContacts = changedSelection || newlySelectedExternalRecipient;
+      document.getElementById("cpName").value = (useFreshContacts ? contacts.customerName : portal.customerName) || contacts.customerName || job.contactName || job.name || "";
+      document.getElementById("cpEmail").value = (useFreshContacts ? contacts.customerEmail : portal.customerEmail) || contacts.customerEmail || "";
+      document.getElementById("cpPhone").value = (useFreshContacts ? contacts.customerPhone : portal.customerPhone) || contacts.customerPhone || "";
       for (const [id, values] of [["cpEmail", contacts.emails], ["cpPhone", contacts.phones]]) {
         const input = document.getElementById(id);
         let choices = document.getElementById(id + "Choices");
@@ -155,6 +161,7 @@
       customerName: document.getElementById("cpName").value,
       customerEmail: document.getElementById("cpEmail").value,
       customerPhone: document.getElementById("cpPhone").value,
+      contactSelectionKey,
       modules,
       includedJobIds: [...portalQueryAll("[data-cp-job]:checked")].map(input => input.dataset.cpJob),
     };

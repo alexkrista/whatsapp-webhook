@@ -7,8 +7,10 @@ for(const text of ['purpose==="offer"','90*86400000','QRCode.toString','offerNum
 for(const text of ['offer:"Angebot"','Angebot verbindlich beauftragen','offerConfirm','offer/accept','window.confirm'])assert.ok(ui.includes(text),`Kundenportal zeigt und bestätigt das Angebot: ${text}`);
 assert.ok(html.includes("20260918-offer-original-agb-2"),"Kundenportal lädt Original-PDF und vollständige AGB ohne Alt-Cache");
 for(const text of ["Muster-Widerrufsformular","vierzehn Tagen","zuzüglich allfälliger beauftragter Nachträge","Feldkircherstraße 45","FN 15539b","FN 77707a"])assert.ok(terms.includes(text),`Rechtliche Angebotsanlage enthält ${text}`);
-assert.ok(pdf.includes("appendOfferLegalAnnex"),"AGB und Rücktrittsunterlagen werden an die verbindliche PDF angehängt");
-assert.ok(server.includes("offer-approved-original")&&server.includes("appendOfferLegalAnnex(originalPdf)"),"Freigegebene Originalseiten bleiben Grundlage der Kunden-PDF");
+assert.ok(pdf.includes("appendOfferLegalAnnex"),"Die separate AGB-PDF-Erzeugung bleibt verfügbar");
+assert.ok(server.includes("offer-approved-original")&&server.includes("const pdf=originalPdf"),"Die freigegebene Angebots-PDF wird unverändert übernommen");
+assert.ok(!server.includes("appendOfferLegalAnnex(originalPdf)"),"AGB werden nicht an das Angebots-PDF angehängt");
+assert.ok(server.includes("AGB separat im Kundenportal bestätigt"),"Die getrennte AGB-Bestätigung wird protokolliert");
 assert.ok(server.includes('"x-approved-pdf-correction"')&&server.includes("offer_pdf_corrected_after_acceptance")&&server.includes("customerAcceptanceUnchanged:accepted"),"Eine freigegebene PDF kann nach Annahme nur protokolliert korrigiert werden; der Auftrag bleibt unverändert");
 assert.ok(access.includes('new Set(["offer-approved-original","offer-approved-correction"])'),"Das Kundenportal akzeptiert keine automatisch nachgebaute PDF als verbindliches Angebot");
 console.log("OK: Kundenportal-QR und verbindliche Angebotsbeauftragung sind verdrahtet.");

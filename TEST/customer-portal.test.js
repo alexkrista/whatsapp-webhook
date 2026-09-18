@@ -52,6 +52,25 @@ test("portal contact defaults come from customer data, without guessing between 
   assert.equal(contact.customerEmail, "selected@example.test");
 });
 
+test("portal contact defaults follow the offer delivery recipient selected in master data", () => {
+  const { customerContactDefaults, sanitizeCustomerPortal } = require("../customer-portal");
+  const contact = customerContactDefaults({
+    contactName: "Frau Karin Zangerle und Herr Jürgen Zangerle",
+    projectContacts: {
+      owner: { womanEmail: "karin@example.test", manEmail: "juergen@example.test" },
+      architect: { company: "Büro", firstName: "Lisi", lastName: "Böckle", phone: "+436643825094", email: "lisi.boeckle@hotmail.com" },
+      deliveryRecipients: { offer: { owner: false, siteManager: false, architect: true } },
+    },
+  });
+  assert.equal(contact.customerName, "Lisi Böckle");
+  assert.equal(contact.customerEmail, "lisi.boeckle@hotmail.com");
+  assert.equal(contact.customerPhone, "+436643825094");
+  assert.deepEqual(contact.selectedGroups, ["architect"]);
+  assert.equal(contact.selectionExplicit, true);
+  assert.match(contact.selectionKey, /architect/);
+  assert.equal(sanitizeCustomerPortal({ contactSelectionKey: contact.selectionKey }).contactSelectionKey, contact.selectionKey);
+});
+
 test("opening portal settings reads fresh main-file contacts without saving or replacing portal choices", async t => {
   const fs = require("node:fs/promises"), os = require("node:os"), path = require("node:path");
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "portal-defaults-")); t.after(() => fs.rm(dataDir, { recursive: true, force: true }));

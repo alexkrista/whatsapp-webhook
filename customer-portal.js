@@ -8,13 +8,34 @@ function customerContactDefaults(meta = {}) {
   const master = meta.customerMaster || {}, owner = meta.projectContacts?.owner || {};
   const clean = value => String(value || "").trim();
   const unique = values => [...new Set(values.map(clean).filter(Boolean))];
-  const emails = unique([meta.contactEmail, master.email, owner.womanEmail, owner.manEmail, owner.email]);
-  const phones = unique([meta.contactPhone, master.phone, owner.phoneOwnerWoman, owner.phoneOwnerMan]);
+  const personName = person => clean([person?.title, person?.firstName, person?.lastName].map(clean).filter(Boolean).join(" ") || person?.company);
+  const ownerNames = unique([
+    [owner.womanTitle, owner.womanFirstName || owner.firstName, owner.womanLastName || owner.sharedLastName].map(clean).filter(Boolean).join(" "),
+    [owner.manTitle, owner.manFirstName, owner.manLastName || owner.sharedLastName].map(clean).filter(Boolean).join(" "),
+  ]);
+  const recipients = meta.projectContacts?.deliveryRecipients?.offer;
+  const selectionExplicit = !!(recipients && typeof recipients === "object");
+  const selectedGroups = ["owner", "siteManager", "architect"].filter(group => recipients?.[group] ?? (group === "owner"));
+  const groups = selectedGroups.length ? selectedGroups : ["owner"];
+  const contacts = [];
+  if (groups.includes("owner")) contacts.push({
+    names: ownerNames.length ? ownerNames : [clean(meta.contactName || master.name || owner.customer || meta.name)],
+    emails: unique([owner.womanEmail, owner.manEmail, owner.email, meta.contactEmail, master.email]),
+    phones: unique([owner.phoneOwnerWoman, owner.phoneOwnerMan, meta.contactPhone, master.phone]),
+  });
+  for (const group of ["siteManager", "architect"]) if (groups.includes(group)) {
+    const person = meta.projectContacts?.[group] || {};
+    contacts.push({ names: [personName(person)], emails: [clean(person.email)], phones: [clean(person.phone)] });
+  }
+  const names = unique(contacts.flatMap(contact => contact.names));
+  const emails = unique(contacts.flatMap(contact => contact.emails));
+  const phones = unique(contacts.flatMap(contact => contact.phones));
+  const selectionKey = JSON.stringify({ groups, names, emails, phones });
   return {
-    customerName: clean(meta.contactName || master.name || owner.customer || meta.name),
-    customerEmail: clean(meta.contactEmail || master.email) || (emails.length === 1 ? emails[0] : ""),
-    customerPhone: clean(meta.contactPhone || master.phone) || (phones.length === 1 ? phones[0] : ""),
-    emails, phones,
+    customerName: names.join(" und ") || clean(meta.contactName || master.name || owner.customer || meta.name),
+    customerEmail: (!selectionExplicit && clean(meta.contactEmail || master.email)) || (emails.length === 1 ? emails[0] : ""),
+    customerPhone: (!selectionExplicit && clean(meta.contactPhone || master.phone)) || (phones.length === 1 ? phones[0] : ""),
+    emails, phones, selectedGroups: groups, selectionExplicit, selectionKey,
   };
 }
 
@@ -37,6 +58,7 @@ function sanitizeCustomerPortal(value = {}, existing = {}) {
     customerName: String(source.customerName ?? old.customerName ?? "").trim().slice(0, 120),
     customerEmail: String(source.customerEmail ?? old.customerEmail ?? "").trim().slice(0, 180),
     customerPhone: String(source.customerPhone ?? old.customerPhone ?? "").trim().slice(0, 60),
+    contactSelectionKey: String(source.contactSelectionKey ?? old.contactSelectionKey ?? "").slice(0, 1000),
     updatedAt: source.updatedAt ?? old.updatedAt ?? null,
   };
 }
