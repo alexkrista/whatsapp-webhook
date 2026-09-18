@@ -9,7 +9,7 @@ const path = require("path");
 const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
 const { financeTaskWhatsAppDetail } = require("./finance-task-whatsapp");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta, transcribeAudio, interpretVoiceText, appendJobHistory }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta, readVoiceJobs, transcribeAudio, interpretVoiceText, appendJobHistory }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -1240,6 +1240,16 @@ const open = taskId
   app.get(["/kristine/app", "/kristine/app/"], (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kristine.html"), { headers:{ "Cache-Control":"no-store" } });
+  });
+
+  app.get("/kristine/api/voice/jobs", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const jobs = typeof readVoiceJobs === "function" ? await readVoiceJobs() : [];
+      res.json({ ok:true, jobs:Array.isArray(jobs) ? jobs : [] });
+    } catch (error) {
+      res.status(500).json({ ok:false, error:String(error?.message || error) });
+    }
   });
 
   app.post("/kristine/api/voice/transcribe", async (req, res) => {
