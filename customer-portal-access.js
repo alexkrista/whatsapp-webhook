@@ -152,7 +152,15 @@ function registerCustomerAccess(app, options) {
       if(ctx.portal.modules.projectFile) {
         const calc=read(path.join(dataDir,jobId,".order-calculation.json"),{}),doc=calc.sourceDocument;
         if(doc?.storedName&&path.basename(doc.storedName)===doc.storedName)add(jobId,"pdf",doc.name||"Auftrag",secureFile(jobId,"_auftrag/"+doc.storedName),"documents");
-        for(const row of documents.filter(row=>row.customerVisible===true&&row.type!=="regie_report"))if(row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName))add(jobId,"pdf",row.name||"Dokument",secureFile(jobId,"_documentation/"+row.storedName),"documents");
+        const visibleDocuments=documents.filter(row=>row.customerVisible===true&&row.type!=="regie_report"),seenOffers=new Set();
+        for(const row of visibleDocuments){
+          if(row.type==="offer"){
+            const offerKey=`${clean(row.offerNumber,20)||clean(row.name,180)}|${Math.max(1,Number(row.offerRevision)||1)}`;
+            if(seenOffers.has(offerKey))continue;
+            seenOffers.add(offerKey);
+          }
+          if(row.storedName&&path.basename(row.storedName)===row.storedName&&/\.pdf$/i.test(row.storedName))add(jobId,"pdf",row.name||"Dokument",secureFile(jobId,"_documentation/"+row.storedName),"documents");
+        }
         for(const row of await listJobMedia({dataDir,jobId,includeCollection:false})) {
           if(!/\.(jpe?g|png|webp|gif|mp4|mov|webm)$/i.test(row.file||""))continue;
           const normalized=String(row.file).replace(/\\/g,"/"),first=normalized.split("/")[0];
@@ -232,7 +240,7 @@ function registerCustomerAccess(app, options) {
     if(!offer?.available||typeof readDocumentation!=="function"||typeof writeDocumentation!=="function")return null;
     const storedName=offerPdfName(offer.number,offer.revision),rows=await readDocumentation(ctx.jobId),matching=rows.filter(row=>row?.type==="offer"&&(row?.storedName===storedName||row?.offerNumber===offer.number&&Number(row?.offerRevision||1)===offer.revision));
     const snapshot=secureFile(ctx.jobId,"_offers/"+storedName);
-    const approvedSources=new Set(["offer-approved-original","offer-approved-correction"]),manifest=read(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),null);
+    const approvedSources=new Set(["offer-approved-original","offer-approved-correction","offer-browser-render"]),manifest=read(offerPdfManifestPath(ctx.jobId,offer.number,offer.revision),null);
     if(snapshot&&approvedSources.has(manifest?.source))return{type:"offer",storedName,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,source:manifest.source,storage:"offers"};
     const exact=matching.find(row=>row.customerVisible===true&&approvedSources.has(row.source)&&row.storedName&&secureFile(ctx.jobId,"_documentation/"+row.storedName));
     const source=exact&&secureFile(ctx.jobId,"_documentation/"+exact.storedName);

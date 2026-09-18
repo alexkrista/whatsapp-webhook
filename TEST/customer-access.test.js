@@ -75,6 +75,14 @@ test("a finalized offer is visible and commissionable through an existing normal
  const refreshed=await(await f.request("/kundenportal/api/project",{headers})).json();assert.equal(refreshed.offer.acceptance.status,"accepted");assert.equal(refreshed.offer.acceptance.paymentLabel,"2 % Skonto bei Zahlung binnen 5 Tagen");assert.equal(refreshed.offer.acceptance.preferredDate,"2026-10-10");assert.equal(f.metas["24177"].status,"Auftrag");
  f.setDocumentation("24177",[]);const afterIndexLoss=await(await f.request("/kundenportal/api/project",{headers})).json();assert(afterIndexLoss.offer.pdfUrl,"Angenommene Angebots-PDF bleibt auch ohne Dokumentenindex sichtbar");const preserved=await f.request(afterIndexLoss.offer.pdfUrl,{headers});assert.equal(preserved.status,200);assert.equal((await preserved.arrayBuffer()).byteLength>500,true);
 });
+test("the stored browser-rendered dispatch PDF is shown once and replaces the wide fallback",async t=>{
+ const f=await fixture(t),draft={offerNumber:"2609003",offerRevision:2,positions:[{text:"Regiearbeiten",quantity:18,unit:"Std",unitPrice:75}],financials:{vatRate:20}};
+ f.write("24177/.offer-draft.json",draft);f.write("24177/_offers/offer-2609003-v2.json",draft);f.write("24177/_documentation/angebot-2609003-v2.pdf","%PDF-browser-render"+"x".repeat(600));f.write("24177/_documentation/angebot-2609003-v2-copy.pdf","%PDF-duplicate"+"x".repeat(600));
+ f.setDocumentation("24177",[{id:"offer-current",type:"offer",name:"Angebot 2609003.pdf",offerNumber:"2609003",offerRevision:2,customerVisible:true,storedName:"angebot-2609003-v2.pdf",source:"offer-browser-render"},{id:"offer-duplicate",type:"offer",name:"Angebot 2609003.pdf",offerNumber:"2609003",offerRevision:2,customerVisible:true,storedName:"angebot-2609003-v2-copy.pdf",source:"offer-browser-render"}]);
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie},project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ assert(project.offer.pdfUrl,"Die gespeicherte Versand-PDF wird statt der breiten Ersatzliste angeboten");assert.equal(project.files.filter(row=>row.name==="Angebot 2609003.pdf").length,1,"Das Angebot erscheint in Dokumente nur einmal");
+ const pdf=await f.request(project.offer.pdfUrl,{headers});assert.equal(pdf.status,200);assert.equal((await pdf.arrayBuffer()).byteLength>500,true);
+});
 test("an unfinished offer draft stays hidden in a normal portal link",async t=>{
  const f=await fixture(t);f.write("24177/.offer-draft.json",{offerNumber:"DRAFT",offerRevision:1,positions:[]});
  const cookie=await f.login((await f.invite()).portalUrl),project=await(await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).json();assert.equal(project.offer,null);

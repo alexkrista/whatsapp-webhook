@@ -12,5 +12,6 @@ assert.ok(server.includes("offer-approved-original")&&server.includes("const pdf
 assert.ok(!server.includes("appendOfferLegalAnnex(originalPdf)"),"AGB werden nicht an das Angebots-PDF angehängt");
 assert.ok(server.includes("AGB separat im Kundenportal bestätigt"),"Die getrennte AGB-Bestätigung wird protokolliert");
 assert.ok(server.includes('"x-approved-pdf-correction"')&&server.includes("offer_pdf_corrected_after_acceptance")&&server.includes("customerAcceptanceUnchanged:accepted"),"Eine freigegebene PDF kann nach Annahme nur protokolliert korrigiert werden; der Auftrag bleibt unverändert");
-assert.ok(access.includes('new Set(["offer-approved-original","offer-approved-correction"])'),"Das Kundenportal akzeptiert keine automatisch nachgebaute PDF als verbindliches Angebot");
+assert.ok(access.includes('new Set(["offer-approved-original","offer-approved-correction","offer-browser-render"])'),"Das Kundenportal akzeptiert die unveränderlich gespeicherte Versand-PDF unabhängig vom Erstellungsweg");
+assert.ok(access.includes("seenOffers.has(offerKey)"),"Angebote werden in den Kundendokumenten nur einmal angezeigt");
 console.log("OK: Kundenportal-QR und verbindliche Angebotsbeauftragung sind verdrahtet.");
