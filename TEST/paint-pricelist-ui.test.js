@@ -13,6 +13,8 @@ assert.ok(html.includes("document.getElementById('priceImport')?.addEventListene
 assert.ok(html.includes("Bitte zuerst eine Farben-Preisliste auswählen."),"Farben-Import meldet eine fehlende Datei sichtbar");
 assert.ok(commercial.includes("/(wallpaper|tapete)/i.test(name)"),"Tapetenlisten werden im Farben-Import abgewiesen");
 for(const text of ["Tapeten · Retail-Preisliste","Hier nur Tapeten hochladen","Tapeten Retail · fehlt","wallpaper-pricelist/status","Aktive Tapetenliste"])
-  assert.ok(inventory.includes(text),`Tapeten-Preisliste ist eindeutig sichtbar: ${text}`);
+  assert.ok(html.includes(text)||inventory.includes(text),`Tapeten-Preisliste ist eindeutig sichtbar: ${text}`);
+for(const id of ['id="wallpaperPriceAdmin"','id="wallRetailFile"','id="wallRetailImport"','id="wallTradeFile"','id="wallTradeImport"'])
+  assert.ok(html.includes(id),`Tapeten-Upload ist fest in der Seite vorhanden: ${id}`);
 assert.ok(!html.includes("window.open('/public/lg-retail-preisliste-2025.html'"),"Der Retail-Button öffnet nicht länger die fest eingebaute Alt-Liste");
 console.log("OK: Farben- und Tapetenpreislisten sind getrennt hochladbar und sichtbar.");
