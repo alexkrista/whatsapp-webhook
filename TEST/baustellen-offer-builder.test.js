@@ -38,6 +38,11 @@ for(const text of ["financials","priceMode","vatRate","discountPercent","skontoE
 for(const text of ["#kofferRooms:not(:has(.koffer-room))","#kofferRegieMaterial{display:flex","#kofferRegieMaterial>.koffer-calc{display:flex"])assert.ok(ui.includes(text),`Kompakte einzeilige Darstellung enthält ${text}`);
 for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-recipient","koffer-paper-project","Projekt:"])assert.ok(ui.includes(text),`Angebotsbriefkopf enthält ${text}`);
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
+for(const text of ["splitOfferAddress","offerRecipientNames",'kind==="woman"?"Frau":"Herr"','\\d{4,6}',"all.indexOf(name)===index",'manRole=role.includes("bauherr")&&!womanRole'])
+  assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
+assert.ok(top.includes("20260918-offer-portal-3"),"Geänderter Angebotsbriefkopf und Portal-QR werden ohne alten Browser-Cache geladen");
+for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
+  assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
   assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);

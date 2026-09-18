@@ -1,6 +1,6 @@
 "use strict";
 
-const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
+const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto"), QRCode = require("qrcode");
 const { sanitizeCustomerPortal } = require("./customer-portal");
 const { createAliasResolver } = require("./job-renumber");
 const { dedupeReports } = require("./public/ui/regie-billing-state");
@@ -32,11 +32,13 @@ function mergePortalTasks(dataDir, tasks) {
 }
 
 function registerCustomerAccess(app, options) {
-  const {dataDir,requireAdmin,readJobMeta,collectionMembers,readDocumentation,listJobMedia,readEmployees}=options;
+  const {dataDir,requireAdmin,readJobMeta,writeJobMeta,appendJobHistory,collectionMembers,readDocumentation,listJobMedia,readEmployees}=options;
   const root=path.join(dataDir,"_system/customer-access"), origin=new URL(options.publicBaseUrl || "https://protokoll.krista.at").origin;
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
   const grantPath=id=>path.join(root,"invitations",id+".json");
   const sessionPath=value=>path.join(root,"sessions",hash(value)+".json");
+  const offerPath=jobId=>path.join(dataDir,jobId,".offer-draft.json");
+  const offerSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",`offer-${number}-v${revision}.json`);
   const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
   async function mainId(id) {
     if(!safeId(id))throw fail(404,"Akte nicht gefunden.");
@@ -89,13 +91,23 @@ function registerCustomerAccess(app, options) {
   });
   app.post("/admin/api/job/:jobId/customer-portal/invitation",guard(async(req,res)=>{
     if(!requireAdmin(req,res))return;
-    const current=await scope(req.params.jobId);
+    const jobId=await mainId(req.params.jobId),purpose=req.body?.purpose==="offer"?"offer":"portal";
+    if(purpose==="offer"){
+      const meta=await readJobMeta(jobId),draft=read(offerPath(jobId),null),offerNumber=clean(req.body?.offerNumber,20),offerRevision=Math.max(1,Number(req.body?.offerRevision)||1);
+      if(!draft||draft.offerNumber!==offerNumber||Number(draft.offerRevision||1)!==offerRevision)throw fail(409,"Das Angebot wurde inzwischen geändert. Bitte die Druckansicht neu erzeugen.");
+      const snapshot=offerSnapshotPath(jobId,offerNumber,offerRevision);if(!read(snapshot,null))write(snapshot,draft);
+      const before=sanitizeCustomerPortal(meta.customerPortal),portal=sanitizeCustomerPortal({...before,status:before.status==="active"?"active":"prepared",modules:{...before.modules,projectFile:true}},before);
+      if(typeof writeJobMeta!=="function")throw fail(503,"Kundenportal kann derzeit nicht vorbereitet werden.");
+      await writeJobMeta(jobId,{customerPortal:{...portal,updatedAt:new Date(now()).toISOString()}});
+    }
+    const current=await scope(jobId);
     if(!Object.values(current.portal.modules).some(Boolean))throw fail(400,"Bitte mindestens einen Bereich freigeben.");
-    const id=crypto.randomBytes(16).toString("hex"),secret=random(),preview=req.body?.preview===true;
-    const grant={id,jobId:current.jobId,jobIds:current.jobIds,contact:fingerprint(current.portal),secretHash:hash(secret),createdAt:now(),expiresAt:now()+(preview?600000:7*86400000),preview};
+    const id=crypto.randomBytes(16).toString("hex"),secret=random(),preview=req.body?.preview===true,offerNumber=purpose==="offer"?clean(req.body?.offerNumber,20):"",offerRevision=purpose==="offer"?Math.max(1,Number(req.body?.offerRevision)||1):0;
+    const grant={id,jobId:current.jobId,jobIds:current.jobIds,contact:fingerprint(current.portal),secretHash:hash(secret),createdAt:now(),expiresAt:now()+(preview?600000:purpose==="offer"?90*86400000:7*86400000),preview,purpose,offerNumber,offerRevision};
     write(grantPath(id),grant);
     // Secrets stay in the fragment: neither access logs nor referrers receive it.
-    res.setHeader("Cache-Control","no-store");res.json({ok:true,portalUrl:origin+"/kundenportal#zugang="+id+"."+secret,expiresAt:new Date(grant.expiresAt).toISOString(),jobId:current.jobId});
+    const portalUrl=origin+"/kundenportal#zugang="+id+"."+secret,qrSvg=purpose==="offer"?await QRCode.toString(portalUrl,{type:"svg",errorCorrectionLevel:"M",margin:1,width:220,color:{dark:"#17211b",light:"#ffffff"}}):"";
+    res.setHeader("Cache-Control","no-store");res.json({ok:true,portalUrl,qrSvg,expiresAt:new Date(grant.expiresAt).toISOString(),jobId:current.jobId,purpose,offerNumber,offerRevision});
   }));
   app.post("/kundenportal/api/session",guard(async(req,res)=>{
     sameOrigin(req);throttle(req);
@@ -197,10 +209,28 @@ function registerCustomerAccess(app, options) {
     write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
     return customerPointView({id,taskId,module,title,text,area,responsibility,photos,date,history:[{kind:"submitted",status:"open",date}]},task);
   }
+  function customerOffer(ctx) {
+    if(ctx.grant.purpose!=="offer")return null;
+    const wantedNumber=clean(ctx.grant.offerNumber,20),wantedRevision=Math.max(1,Number(ctx.grant.offerRevision)||1),draft=read(offerSnapshotPath(ctx.jobId,wantedNumber,wantedRevision),null)||read(offerPath(ctx.jobId),null);
+    if(!draft||draft.offerNumber!==wantedNumber||Number(draft.offerRevision||1)!==wantedRevision)return{available:false,number:wantedNumber,revision:wantedRevision,message:"Dieses Angebot wurde inzwischen überarbeitet. Bitte fordern Sie die aktuelle Fassung bei Farben Krista an."};
+    const positions=(Array.isArray(draft.positions)?draft.positions:[]).filter(row=>row?.isAlternative!==true&&Number(row?.quantity)>0).map(row=>({text:clean(row.text,1000),quantity:Math.max(0,Number(row.quantity)||0),unit:clean(row.unit,20),unitPrice:Math.max(0,Number(row.unitPrice)||0),groupName:clean(row.groupName,160)}));
+    const base=positions.reduce((sum,row)=>sum+row.quantity*row.unitPrice,0),discounts=draft.groupDiscounts&&typeof draft.groupDiscounts==="object"?draft.groupDiscounts:{},groups=[...new Set(positions.map(row=>row.groupName).filter(Boolean))],groupDiscount=groups.reduce((sum,group)=>{const subtotal=positions.filter(row=>row.groupName===group).reduce((value,row)=>value+row.quantity*row.unitPrice,0);return sum+subtotal*Math.max(0,Math.min(100,Number(discounts[group])||0))/100},0),finance=draft.financials||{},afterGroups=Math.max(0,base-groupDiscount),globalDiscount=afterGroups*Math.max(0,Math.min(100,Number(finance.discountPercent)||0))/100,after=Math.max(0,afterGroups-globalDiscount),vatRate=Math.max(0,Math.min(100,Number(finance.vatRate??20)||0)),net=finance.priceMode==="gross"?after/(1+vatRate/100):after,vat=finance.priceMode==="gross"?after-net:net*vatRate/100,gross=finance.priceMode==="gross"?after:net+vat,acceptance=draft.customerAcceptance?.offerNumber===draft.offerNumber&&Number(draft.customerAcceptance?.offerRevision)===Number(draft.offerRevision)?draft.customerAcceptance:null;
+    return{available:true,number:draft.offerNumber,revision:Number(draft.offerRevision||1),createdAt:draft.offerCreatedAt||draft.updatedAt||"",intro:clean(draft.intro,1000),scopeDescription:clean(draft.scopeDescription,2000),positions,totals:{base,groupDiscount,globalDiscount,net,vat,vatRate,gross},acceptance:acceptance?{status:"accepted",acceptedAt:acceptance.acceptedAt,customerName:acceptance.customerName}:null};
+  }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
     const ctx=await context(req),data=await catalog(ctx);
     const billing = ctx.portal.modules.projectFile ? await readCustomerInvoices(dataDir, await Promise.all(ctx.jobIds.map(async jobId=>({...await readJobMeta(jobId),jobId})))) : {entries:[],complete:true,unavailable:[],syncedAt:null};
-    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,offer:customerOffer(ctx),projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+  }));
+  app.post("/kundenportal/api/offer/accept",guard(async(req,res)=>{
+    sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
+    const offer=customerOffer(ctx);if(!offer?.available)throw fail(409,offer?.message||"Dieses Angebot ist nicht mehr verfügbar.");
+    const file=offerSnapshotPath(ctx.jobId,offer.number,offer.revision),draft=read(file,null);if(!draft)throw fail(409,"Die verbindliche Angebotsfassung ist nicht mehr verfügbar.");if(draft.customerAcceptance?.offerNumber===offer.number&&Number(draft.customerAcceptance?.offerRevision)===offer.revision)return res.json({ok:true,acceptance:draft.customerAcceptance,alreadyAccepted:true});
+    if(req.body?.confirmed!==true)throw fail(400,"Bitte bestätigen Sie die verbindliche Beauftragung.");
+    const acceptedAt=new Date(now()).toISOString(),acceptance={status:"accepted",acceptedAt,offerNumber:offer.number,offerRevision:offer.revision,customerName:ctx.portal.customerName||ctx.meta.name,grantId:ctx.grant.id};draft.customerAcceptance=acceptance;write(file,draft);const current=read(offerPath(ctx.jobId),null);if(current?.offerNumber===offer.number&&Number(current.offerRevision||1)===offer.revision){current.customerAcceptance=acceptance;write(offerPath(ctx.jobId),current)}
+    if(typeof writeJobMeta==="function")await writeJobMeta(ctx.jobId,{status:"Auftrag"});
+    if(typeof appendJobHistory==="function")await appendJobHistory(ctx.jobId,{type:"offer_customer_accepted",title:`Angebot ${offer.number} verbindlich beauftragt`,detail:`Kundenportal · Version ${offer.revision} · ${acceptance.customerName}`,source:"Kundenportal",data:{offerNumber:offer.number,offerRevision:offer.revision,acceptedAt}});
+    res.json({ok:true,acceptance});
   }));
   app.get("/kundenportal/api/invoice/:jobId/:id",guard(async(req,res)=>{
     const ctx=await context(req),jobId=req.params.jobId;
