@@ -1239,6 +1239,15 @@ const open = taskId
 
   app.get(["/kristine/app", "/kristine/app/"], (req, res) => {
     if (!requireAdmin(req, res)) return;
+    const ua = String(req.headers["user-agent"] || "");
+    const mobileApple = /iPhone|iPad|iPod/i.test(ua);
+    const mobileAndroid = /Android/i.test(ua);
+    const explicitlyNormal = String(req.query.normal || "") === "1";
+    if ((mobileApple || mobileAndroid) && !explicitlyNormal) {
+      const token = String(req.query.token || "");
+      const suffix = token ? `?token=${encodeURIComponent(token)}` : "";
+      return res.redirect(302, `/kristine${suffix}`);
+    }
     res.sendFile(path.join(publicDir, "kristine.html"), { headers:{ "Cache-Control":"no-store" } });
   });
 
