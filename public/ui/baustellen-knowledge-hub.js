@@ -10,6 +10,112 @@
   let loadSerial=0;
   let cache={jobs:null,bootstrap:null,employees:null};
 
+  // Aktuelle, adressierbare Vorarlberger Postleitzahlen (RTR Open Data),
+  // ergaenzt um gebräuchliche Ortsnamen bei gemeinsam verwendeten PLZ.
+  const VORARLBERG_POSTAL_PLACES=`
+6700|Bludenz
+6706|Bürs
+6707|Bürserberg
+6708|Brand
+6710|Nenzing
+6712|Thüringen
+6713|Ludesch
+6714|Nüziders
+6719|Bludesch
+6721|Thüringerberg
+6722|St. Gerold
+6723|Blons
+6731|Sonntag
+6733|Fontanella
+6741|Raggal
+6751|Braz
+6752|Dalaas
+6754|Klösterle
+6762|Stuben
+6763|Zürs
+6764|Lech
+6767|Warth
+6771|St. Anton im Montafon
+6773|Vandans
+6774|Tschagguns
+6780|Schruns
+6781|Bartholomäberg
+6782|Silbertal
+6787|Gargellen
+6791|St. Gallenkirch
+6793|Gaschurn
+6794|Partenen
+6800|Feldkirch
+6811|Göfis
+6812|Meiningen
+6820|Frastanz|Beschling|Gurtis
+6822|Satteins|Düns|Dünserberg|Röns|Schnifis
+6824|Schlins
+6830|Rankweil
+6832|Sulz|Röthis
+6833|Klaus|Weiler|Fraxern
+6834|Übersaxen
+6835|Zwischenwasser
+6836|Viktorsberg
+6837|Weiler
+6840|Götzis
+6841|Mäder
+6842|Koblach
+6844|Altach
+6845|Hohenems
+6850|Dornbirn
+6858|Schwarzach
+6861|Alberschwende
+6863|Egg
+6866|Andelsbuch
+6867|Schwarzenberg
+6870|Bezau
+6874|Bizau
+6881|Mellau
+6882|Schnepfau
+6883|Au
+6884|Damüls
+6886|Schoppernau
+6888|Schröcken
+6890|Lustenau
+6900|Bregenz
+6911|Lochau
+6912|Hörbranz
+6914|Hohenweiler
+6921|Kennelbach
+6922|Wolfurt
+6923|Lauterach
+6932|Langen bei Bregenz
+6933|Doren
+6934|Sulzberg
+6941|Langenegg
+6942|Krumbach
+6943|Riefensberg
+6951|Lingenau
+6952|Hittisau
+6960|Wolfurt-Bahnhof
+6971|Hard
+6972|Fußach
+6973|Höchst
+6974|Gaißau
+6991|Riezlern
+6992|Hirschegg
+6993|Mittelberg`.trim().split("\n").map(line=>{const [postal,...cities]=line.split("|");return{postal,cities}});
+  const normalizePlace=value=>String(value||"").trim().toLocaleLowerCase("de-AT");
+  function installVorarlbergAddressAssist(postalId,cityId){
+    const postal=document.getElementById(postalId),city=document.getElementById(cityId);if(!postal||!city)return;
+    let postalList=document.getElementById("bkVorarlbergPostalList"),cityList=document.getElementById("bkVorarlbergCityList");
+    if(!postalList){postalList=document.createElement("datalist");postalList.id="bkVorarlbergPostalList";postalList.innerHTML=VORARLBERG_POSTAL_PLACES.map(row=>`<option value="${row.postal}">${esc(row.cities.join(" · "))}</option>`).join("");document.body.appendChild(postalList)}
+    if(!cityList){cityList=document.createElement("datalist");cityList.id="bkVorarlbergCityList";cityList.innerHTML=VORARLBERG_POSTAL_PLACES.flatMap(row=>row.cities.map(place=>`<option value="${esc(place)}">${row.postal}</option>`)).join("");document.body.appendChild(cityList)}
+    postal.setAttribute("list",postalList.id);postal.setAttribute("inputmode","numeric");postal.setAttribute("maxlength","4");postal.setAttribute("autocomplete","postal-code");
+    city.setAttribute("list",cityList.id);city.setAttribute("autocomplete","address-level2");
+    let syncing=false;
+    const write=(input,value)=>{if(input.value===value)return;input.value=value;input.dataset.vbgAutoValue=value;input.dispatchEvent(new Event("input",{bubbles:true}))};
+    const fromPostal=()=>{if(syncing)return;const row=VORARLBERG_POSTAL_PLACES.find(item=>item.postal===postal.value.trim());if(!row)return;const current=city.value.trim();if(current&&current!==city.dataset.vbgAutoValue)return;syncing=true;write(city,row.cities[0]);syncing=false};
+    const fromCity=()=>{if(syncing)return;const wanted=normalizePlace(city.value),matches=VORARLBERG_POSTAL_PLACES.filter(row=>row.cities.some(place=>normalizePlace(place)===wanted));if(matches.length!==1)return;const current=postal.value.trim();if(current&&current!==postal.dataset.vbgAutoValue)return;syncing=true;write(postal,matches[0].postal);syncing=false};
+    postal.addEventListener("input",fromPostal);postal.addEventListener("change",fromPostal);city.addEventListener("input",fromCity);city.addEventListener("change",fromCity);fromPostal();
+  }
+
   const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
   const money=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num(v));
@@ -275,7 +381,7 @@
     const personFields=(prefix,p)=>`${field("Firma / Büro",prefix+"Company",p.company,true)}${field("Titel",prefix+"Title",p.title)}${field("Vorname",prefix+"FirstName",p.firstName)}${field("Nachname",prefix+"LastName",p.lastName)}${field("Telefon",prefix+"Phone",p.phone)}${field("E-Mail",prefix+"Email",p.email,false,"email")}`;
     const extras={owner:[...(owner.extraLines||[]).filter(row=>String(row.value||"")!==String(legacyManMail||"")||!legacyManMail)],siteManager:[...(siteManager.extraLines||[])],architect:[...(architect.extraLines||[])]};
     const el=document.getElementById("bkMasterData");el.className="";el.innerHTML=`<div class="bk-master-form">
-      <div class="bk-card"><div class="bk-section-title"><div><h3>Baustelle</h3><div class="bk-note">Die Baustellenadresse ist unabhängig von der Wohnadresse der Bauherrschaft.</div></div><div class="bk-actions"><a id="bkSiteMaps" href="${esc(masterMapsUrl(j.street,j.houseNumber,j.postalCode,j.city))}" target="_blank" rel="noopener">🚩 Maps</a><span class="bk-badge">#${esc(j.jobId)}</span></div></div><div class="bk-form-grid">${field("Bezeichnung","bkJobName",j.name,true)}${field("Straße","bkSiteStreet",j.street,true)}${field("Hausnummer","bkSiteHouse",j.houseNumber)}${field("PLZ","bkSitePostal",j.postalCode)}${field("Ort","bkSiteCity",j.city,true)}${field("Adresszusatz / Zufahrt","bkSiteExtra",j.addressExtra,true)}</div></div>
+      <div class="bk-card"><div class="bk-section-title"><div><h3>Baustelle</h3><div class="bk-note">Die Baustellenadresse ist unabhängig von der Wohnadresse der Bauherrschaft.</div></div><div class="bk-actions"><a id="bkSiteMaps" href="${esc(masterMapsUrl(j.street,j.houseNumber,j.postalCode,j.city))}" target="_blank" rel="noopener">🚩 Maps</a><span class="bk-badge">#${esc(j.jobId)}</span></div></div><div class="bk-form-grid">${field("Bezeichnung","bkJobName",j.name,true)}${field("Straße","bkSiteStreet",j.street,true)}${field("Hausnummer","bkSiteHouse",j.houseNumber)}${field("PLZ","bkSitePostal",j.postalCode)}${field("Ort","bkSiteCity",j.city,true)}${field("Adresszusatz / Zufahrt","bkSiteExtra",j.addressExtra,true)}<div class="bk-note bk-wide">Vorarlberg: PLZ und Ort ergänzen sich automatisch. Die Eingabe kann jederzeit überschrieben werden.</div></div></div>
       <div class="bk-card"><div class="bk-section-title"><h3>Bauherrschaft</h3><span class="bk-badge blue">Kunde</span></div><div class="bk-form-grid"><label>Bauherr / Bauherrin<select id="bkOwnerRole">${["Bauherrschaft","Bauherrin","Bauherr","Familie","Firma"].map(x=>`<option value="${x}" ${x===(owner.ownerRole||"Bauherrschaft")?'selected':''}>${x}</option>`).join('')}</select></label>${field("Kunde / Firma","bkOwnerCustomer",owner.customer,true)}${field("Anrede Bauherrin","bkOwnerWomanTitle",owner.womanTitle)}${field("Vorname Bauherrin","bkOwnerWomanFirstName",owner.womanFirstName||owner.firstName)}${field("Nachname Bauherrin","bkOwnerWomanLastName",owner.womanLastName||owner.sharedLastName||owner.customer)}${field("E-Mail Bauherrin","bkOwnerWomanEmail",womanEmail,false,"email")}${field("Anrede Bauherr","bkOwnerManTitle",owner.manTitle)}${field("Vorname Bauherr","bkOwnerManFirstName",owner.manFirstName)}${field("Nachname Bauherr","bkOwnerManLastName",owner.manLastName||owner.sharedLastName||owner.customer)}${field("E-Mail Bauherr","bkOwnerManEmail",manEmail,false,"email")}${field("Wohnstraße","bkHomeStreet",owner.residentialStreet,true)}${field("Hausnummer","bkHomeHouse",owner.residentialHouseNumber)}${field("PLZ","bkHomePostal",owner.residentialPostalCode)}${field("Wohnort","bkHomeCity",owner.residentialCity,true)}${field("Telefon Bauherrin","bkOwnerWomanPhone",owner.phoneOwnerWoman)}${field("Telefon Bauherr","bkOwnerManPhone",owner.phoneOwnerMan)}</div><div id="bkOwnerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddOwnerExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Bauleitung</h3><div class="bk-note">Nur mit diesem Projekt verknüpft – nicht fest mit der Bauherrschaft.</div></div><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkSiteManager",siteManager)}</div><div id="bkSiteManagerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddSiteManagerExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Architekt</h3><div class="bk-note">Nur mit diesem Projekt verknüpft – nicht fest mit der Bauherrschaft.</div></div><span class="bk-badge blue">eigene Maske</span></div><div class="bk-form-grid">${personFields("bkArchitect",architect)}</div><div id="bkArchitectExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddArchitectExtra">+ freie Kontaktzeile</button></div></div>
@@ -288,6 +394,8 @@
     document.getElementById("bkSiteManagerEmail")?.closest("label")?.insertAdjacentHTML("afterend",`<label><span><input id="bkSiteManagerAlsoArchitect" type="checkbox" ${siteManager.alsoArchitect?'checked':''}> auch Architekt</span></label>`);
     const val=id=>document.getElementById(id)?.value?.trim()||"",cleanExtras=key=>extras[key].map(row=>({label:String(row.label||'').trim(),value:String(row.value||'').trim()})).filter(row=>row.label||row.value);
     const syncSiteMaps=()=>{const link=document.getElementById("bkSiteMaps");if(link)link.href=masterMapsUrl(val("bkSiteStreet"),val("bkSiteHouse"),val("bkSitePostal"),val("bkSiteCity"))};for(const id of ["bkSiteStreet","bkSiteHouse","bkSitePostal","bkSiteCity"])document.getElementById(id)?.addEventListener("input",syncSiteMaps);
+    installVorarlbergAddressAssist("bkSitePostal","bkSiteCity");
+    installVorarlbergAddressAssist("bkHomePostal","bkHomeCity");
     document.getElementById("bkCancelMaster").onclick=()=>renderMasterData(j);
     document.getElementById("bkSaveMaster").onclick=async()=>{const button=document.getElementById("bkSaveMaster"),status=document.getElementById("bkMasterSaveStatus"),projectContacts={owner:{customer:val("bkOwnerCustomer"),ownerRole:val("bkOwnerRole"),womanTitle:val("bkOwnerWomanTitle"),womanFirstName:val("bkOwnerWomanFirstName"),womanLastName:val("bkOwnerWomanLastName"),womanEmail:val("bkOwnerWomanEmail"),manTitle:val("bkOwnerManTitle"),manFirstName:val("bkOwnerManFirstName"),manLastName:val("bkOwnerManLastName"),manEmail:val("bkOwnerManEmail"),residentialStreet:val("bkHomeStreet"),residentialHouseNumber:val("bkHomeHouse"),residentialPostalCode:val("bkHomePostal"),residentialCity:val("bkHomeCity"),phoneOwnerWoman:val("bkOwnerWomanPhone"),phoneOwnerMan:val("bkOwnerManPhone"),email:val("bkOwnerWomanEmail"),extraLines:cleanExtras("owner")},siteManager:{company:val("bkSiteManagerCompany"),firstName:val("bkSiteManagerFirstName"),lastName:val("bkSiteManagerLastName"),phone:val("bkSiteManagerPhone"),email:val("bkSiteManagerEmail"),alsoArchitect:!!document.getElementById("bkSiteManagerAlsoArchitect")?.checked,extraLines:cleanExtras("siteManager")},architect:{company:val("bkArchitectCompany"),firstName:val("bkArchitectFirstName"),lastName:val("bkArchitectLastName"),phone:val("bkArchitectPhone"),email:val("bkArchitectEmail"),extraLines:cleanExtras("architect")}};button.disabled=true;status.textContent="Stammdaten werden gespeichert …";try{const ownerName=[[projectContacts.owner.womanFirstName,projectContacts.owner.womanLastName].filter(Boolean).join(" "),[projectContacts.owner.manFirstName,projectContacts.owner.manLastName].filter(Boolean).join(" ")].filter(Boolean).join(" + ")||projectContacts.owner.customer,payload={name:val("bkJobName"),street:val("bkSiteStreet"),houseNumber:val("bkSiteHouse"),postalCode:val("bkSitePostal"),city:val("bkSiteCity"),addressExtra:val("bkSiteExtra"),contactName:ownerName,contactPhone:projectContacts.owner.phoneOwnerWoman||projectContacts.owner.phoneOwnerMan,contactEmail:projectContacts.owner.womanEmail||projectContacts.owner.manEmail,projectContacts},result=await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/meta`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});Object.assign(j,result.meta||{});const cached=jobById(j.jobId);if(cached&&cached!==j)Object.assign(cached,result.meta||{});renderMasterData(j)}catch(error){button.disabled=false;status.textContent="Speichern nicht möglich: "+error.message}};
   }

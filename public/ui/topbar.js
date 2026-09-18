@@ -163,7 +163,7 @@
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
     loadScriptOnce("/public/ui/regie-billing-state.js?v=20260915-progress-6", "data-krista-regie-billing-state");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260915-progress-2&b=20260918-customer-portal-1", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20260915-progress-2&b=20260918-vorarlberg-address-1", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260914-progress-1", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260912-lg-surface-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
@@ -175,7 +175,7 @@
     // Auf dem neuen KRISTINE-Pfad müssen sie ausdrücklich mitgeladen werden.
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260914-position-sum-1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-offer-positions-1", "data-krista-kalkulation-grid-v2");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260918-offer-portal-3", "data-krista-angebot-v7");
+    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260918-offer-pdf-dispatch-1", "data-krista-angebot-v7");
   }
 
   function loadTowerSignals() {

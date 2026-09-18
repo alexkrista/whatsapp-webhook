@@ -40,9 +40,11 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 for(const text of ["splitOfferAddress","offerRecipientNames",'kind==="woman"?"Frau":"Herr"','\\d{4,6}',"all.indexOf(name)===index",'manRole=role.includes("bauherr")&&!womanRole'])
   assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
-assert.ok(top.includes("20260918-offer-portal-3"),"Geänderter Angebotsbriefkopf und Portal-QR werden ohne alten Browser-Cache geladen");
+assert.ok(top.includes("20260918-offer-pdf-dispatch-1"),"Geänderter Angebotsbriefkopf, PDF und Versand werden ohne alten Browser-Cache geladen");
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
+for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","E-Mail ist geöffnet. Der WhatsApp-Vorschlag bleibt hier fertig vorbereitet."])
+  assert.ok(ui.includes(text),`Angebotsversand bereitet E-Mail und WhatsApp gemeinsam vor: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
   assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);
@@ -50,8 +52,10 @@ for(const text of ["koffer-paper-group-number","${groupNumber}.0","${groupNumber
   assert.ok(ui.includes(text),`Hierarchische Drucknummerierung enthält ${text}`);
 for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Übertrag","koffer-paper-net","companyPrintFooter","NEUE BANKVERBINDUNG","AT82 5800 0104 9932 3013","Firmenbuchgericht Feldkirch"])
   assert.ok(ui.includes(text),`Mehrseitiger Firmendruck enthält ${text}`);
-for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","counter(page) ' / 3'","offerPageModeCss"])
+for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","offerPageModeCss"])
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
+for(const text of ["fixedOfferPagesCss","koffer-paper-page-one","koffer-paper-page-two","koffer-paper-page-logo","companyPrintFooter(\"1 / 2\")","companyPrintFooter(\"2 / 2\")","koffer-paper-footer-page","width:270px"])
+  assert.ok(ui.includes(text),`Zweiseitiger Angebotsdruck enthält ${text}`);
 assert.ok(!ui.includes("Übertrag von Seite 2:"),"Nach der Angebotssumme wird auf der Abschlussseite kein Übertrag mehr gedruckt");
 for(const text of ["groupName","groupSummary","enhanceGroupTotals",">Rabatt<","koffer-paper-subtotal","Summe ${esc(group)}"])assert.ok(ui.includes(text),`Raum- und Bauteilsummen enthalten ${text}`);
 assert.ok(server.includes('customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null'),"WinWorker-Kundenadresse wird an den Angebotsdruck übergeben");
