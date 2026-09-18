@@ -8,6 +8,7 @@ const { readMaterialSources, collectCustomerMaterials } = require("./customer-po
 const { readCustomerInvoices, invoiceView } = require("./customer-portal-invoices");
 const { registerCustomerExports } = require("./customer-portal-export");
 const { pointTitle, customerPointView } = require("./customer-portal-points");
+const { createCustomerOfferPdf } = require("./customer-offer-pdf");
 const safeId = id => /^[A-Za-z0-9_-]{1,80}$/.test(String(id || ""));
 const hash = text => crypto.createHash("sha256").update(String(text)).digest("hex");
 const random = () => crypto.randomBytes(32).toString("base64url");
@@ -32,13 +33,14 @@ function mergePortalTasks(dataDir, tasks) {
 }
 
 function registerCustomerAccess(app, options) {
-  const {dataDir,requireAdmin,readJobMeta,writeJobMeta,appendJobHistory,collectionMembers,readDocumentation,listJobMedia,readEmployees}=options;
+  const {dataDir,requireAdmin,readJobMeta,writeJobMeta,appendJobHistory,collectionMembers,readDocumentation,writeDocumentation,listJobMedia,readEmployees}=options;
   const root=path.join(dataDir,"_system/customer-access"), origin=new URL(options.publicBaseUrl || "https://protokoll.krista.at").origin;
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
   const grantPath=id=>path.join(root,"invitations",id+".json");
   const sessionPath=value=>path.join(root,"sessions",hash(value)+".json");
   const offerPath=jobId=>path.join(dataDir,jobId,".offer-draft.json");
   const offerSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",`offer-${number}-v${revision}.json`);
+  const offerPdfName=(number,revision)=>`angebot-${String(number).replace(/[^A-Za-z0-9_-]/g,"")}-v${Math.max(1,Number(revision)||1)}.pdf`;
   const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
   async function mainId(id) {
     if(!safeId(id))throw fail(404,"Akte nicht gefunden.");
@@ -81,7 +83,7 @@ function registerCustomerAccess(app, options) {
     }
   }
   app.use("/kundenportal",(req,res,next)=>{
-    res.setHeader("Cache-Control","private, no-store");res.setHeader("Referrer-Policy","no-referrer");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("X-Frame-Options","DENY");
+    res.setHeader("Cache-Control","private, no-store");res.setHeader("Referrer-Policy","no-referrer");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("X-Frame-Options","SAMEORIGIN");
     res.setHeader("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");next();
   });
   app.get("/kundenportal",(_req,res)=>res.sendFile(path.join(options.publicDir,"kundenportal.html")));
@@ -221,21 +223,38 @@ function registerCustomerAccess(app, options) {
     if(!draft||draft.offerNumber!==wantedNumber||Number(draft.offerRevision||1)!==wantedRevision)return{available:false,number:wantedNumber,revision:wantedRevision,message:"Dieses Angebot wurde inzwischen überarbeitet. Bitte fordern Sie die aktuelle Fassung bei Farben Krista an."};
     const positions=(Array.isArray(draft.positions)?draft.positions:[]).filter(row=>row?.isAlternative!==true&&Number(row?.quantity)>0).map(row=>({text:clean(row.text,1000),quantity:Math.max(0,Number(row.quantity)||0),unit:clean(row.unit,20),unitPrice:Math.max(0,Number(row.unitPrice)||0),groupName:clean(row.groupName,160)}));
     const base=positions.reduce((sum,row)=>sum+row.quantity*row.unitPrice,0),discounts=draft.groupDiscounts&&typeof draft.groupDiscounts==="object"?draft.groupDiscounts:{},groups=[...new Set(positions.map(row=>row.groupName).filter(Boolean))],groupDiscount=groups.reduce((sum,group)=>{const subtotal=positions.filter(row=>row.groupName===group).reduce((value,row)=>value+row.quantity*row.unitPrice,0);return sum+subtotal*Math.max(0,Math.min(100,Number(discounts[group])||0))/100},0),finance=draft.financials||{},afterGroups=Math.max(0,base-groupDiscount),globalDiscount=afterGroups*Math.max(0,Math.min(100,Number(finance.discountPercent)||0))/100,after=Math.max(0,afterGroups-globalDiscount),vatRate=Math.max(0,Math.min(100,Number(finance.vatRate??20)||0)),net=finance.priceMode==="gross"?after/(1+vatRate/100):after,vat=finance.priceMode==="gross"?after-net:net*vatRate/100,gross=finance.priceMode==="gross"?after:net+vat,acceptance=draft.customerAcceptance?.offerNumber===draft.offerNumber&&Number(draft.customerAcceptance?.offerRevision)===Number(draft.offerRevision)?draft.customerAcceptance:null;
-    return{available:true,number:draft.offerNumber,revision:Number(draft.offerRevision||1),createdAt:draft.offerCreatedAt||draft.updatedAt||"",intro:clean(draft.intro,1000),scopeDescription:clean(draft.scopeDescription,2000),positions,totals:{base,groupDiscount,globalDiscount,net,vat,vatRate,gross},acceptance:acceptance?{status:"accepted",acceptedAt:acceptance.acceptedAt,customerName:acceptance.customerName}:null};
+    const createdAt=draft.offerCreatedAt||draft.updatedAt||"",validUntil=Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+30*86400000).toISOString():"";
+    return{available:true,number:draft.offerNumber,revision:Number(draft.offerRevision||1),createdAt,validUntil,intro:clean(draft.intro,1000),scopeDescription:clean(draft.scopeDescription,2000),positions,totals:{base,groupDiscount,globalDiscount,net,vat,vatRate,gross},acceptance:acceptance?{status:"accepted",acceptedAt:acceptance.acceptedAt,customerName:acceptance.customerName,paymentTerm:acceptance.paymentTerm,paymentLabel:acceptance.paymentLabel,preferredDate:acceptance.preferredDate||"",termsAcceptedAt:acceptance.termsAcceptedAt||acceptance.acceptedAt}:null};
+  }
+  async function ensureOfferPdf(ctx,offer) {
+    if(!offer?.available||typeof readDocumentation!=="function"||typeof writeDocumentation!=="function")return null;
+    const storedName=offerPdfName(offer.number,offer.revision),dir=path.join(dataDir,ctx.jobId,"_documentation"),physical=path.join(dir,storedName),snapshot=read(offerSnapshotPath(ctx.jobId,offer.number,offer.revision),null);
+    if(!snapshot)return null;
+    if(!fs.existsSync(physical)){fs.mkdirSync(dir,{recursive:true});const pdf=await createCustomerOfferPdf({draft:snapshot,meta:{...ctx.meta,jobId:ctx.jobId},logoPath:path.join(options.publicDir,"krista-logo.png")}),tmp=physical+"."+crypto.randomUUID()+".tmp";try{fs.writeFileSync(tmp,pdf);fs.renameSync(tmp,physical)}finally{fs.rmSync(tmp,{force:true})}}
+    const rows=await readDocumentation(ctx.jobId),id=`offer-${hash(`${ctx.jobId}|${offer.number}|${offer.revision}`).slice(0,20)}`,name=`Angebot ${offer.number}.pdf`,existing=rows.find(row=>row?.id===id||row?.storedName===storedName),item={...(existing||{}),id,type:"offer",name,offerNumber:offer.number,offerRevision:offer.revision,customerVisible:true,storedName,importedAt:existing?.importedAt||new Date(now()).toISOString(),url:`/admin/api/job/${encodeURIComponent(ctx.jobId)}/documentation/file?name=${encodeURIComponent(storedName)}`};
+    if(!existing||existing.customerVisible!==true||existing.name!==name){const next=rows.filter(row=>row?.id!==id&&row?.storedName!==storedName);next.unshift(item);await writeDocumentation(ctx.jobId,next.slice(0,1000))}
+    return item;
   }
   app.get("/kundenportal/api/project",guard(async(req,res)=>{
-    const ctx=await context(req),data=await catalog(ctx);
+    const ctx=await context(req),offer=customerOffer(ctx),offerPdf=await ensureOfferPdf(ctx,offer),data=await catalog(ctx);
     const billing = ctx.portal.modules.projectFile ? await readCustomerInvoices(dataDir, await Promise.all(ctx.jobIds.map(async jobId=>({...await readJobMeta(jobId),jobId})))) : {entries:[],complete:true,unavailable:[],syncedAt:null};
-    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,offer:customerOffer(ctx),projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+    res.json({ok:true,name:ctx.meta.name,customerName:ctx.portal.customerName,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,offer:offer?{...offer,pdfUrl:offerPdf?"/kundenportal/api/offer/pdf":""}:offer,projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
+  }));
+  app.get("/kundenportal/api/offer/pdf",guard(async(req,res)=>{
+    const ctx=await context(req),offer=customerOffer(ctx),item=await ensureOfferPdf(ctx,offer),file=item&&secureFile(ctx.jobId,"_documentation/"+item.storedName);if(!file)throw fail(404,"Angebots-PDF nicht verfügbar.");
+    res.type("application/pdf").setHeader("Content-Disposition",`inline; filename="Angebot-${String(offer.number).replace(/[^A-Za-z0-9_-]/g,"")}.pdf"`);res.sendFile(file,{headers:{"Cache-Control":"private, no-store"}});
   }));
   app.post("/kundenportal/api/offer/accept",guard(async(req,res)=>{
     sameOrigin(req);const ctx=await context(req);if(req.headers["x-csrf-token"]!==ctx.session.csrf||ctx.grant.preview)throw fail(403,"Diese Aktion ist nicht erlaubt.");
     const offer=customerOffer(ctx);if(!offer?.available)throw fail(409,offer?.message||"Dieses Angebot ist nicht mehr verfügbar.");
     const file=offerSnapshotPath(ctx.jobId,offer.number,offer.revision),draft=read(file,null);if(!draft)throw fail(409,"Die verbindliche Angebotsfassung ist nicht mehr verfügbar.");if(draft.customerAcceptance?.offerNumber===offer.number&&Number(draft.customerAcceptance?.offerRevision)===offer.revision)return res.json({ok:true,acceptance:draft.customerAcceptance,alreadyAccepted:true});
     if(req.body?.confirmed!==true)throw fail(400,"Bitte bestätigen Sie die verbindliche Beauftragung.");
-    const acceptedAt=new Date(now()).toISOString(),acceptance={status:"accepted",acceptedAt,offerNumber:offer.number,offerRevision:offer.revision,customerName:ctx.portal.customerName||ctx.meta.name,grantId:ctx.grant.id};draft.customerAcceptance=acceptance;write(file,draft);const current=read(offerPath(ctx.jobId),null);if(current?.offerNumber===offer.number&&Number(current.offerRevision||1)===offer.revision){current.customerAcceptance=acceptance;write(offerPath(ctx.jobId),current)}
+    if(req.body?.termsAccepted!==true)throw fail(400,"Bitte bestätigen Sie die AGB.");
+    const paymentLabels={net14:"14 Tage netto",skonto5_2:"2 % Skonto bei Zahlung binnen 5 Tagen",deposit50:"50 % Anzahlung bei Auftragserteilung; Restzahlung nach Schlussrechnung"},paymentTerm=clean(req.body?.paymentTerm,30),paymentLabel=paymentLabels[paymentTerm];if(!paymentLabel)throw fail(400,"Bitte wählen Sie eine Zahlungsbedingung.");
+    const preferredDate=clean(req.body?.preferredDate,10);if(preferredDate&&!/^\d{4}-\d{2}-\d{2}$/.test(preferredDate))throw fail(400,"Bitte einen gültigen Wunschtermin wählen.");
+    const acceptedAt=new Date(now()).toISOString(),acceptance={status:"accepted",acceptedAt,offerNumber:offer.number,offerRevision:offer.revision,customerName:ctx.portal.customerName||ctx.meta.name,grantId:ctx.grant.id,paymentTerm,paymentLabel,preferredDate,termsAcceptedAt:acceptedAt};draft.customerAcceptance=acceptance;write(file,draft);const current=read(offerPath(ctx.jobId),null);if(current?.offerNumber===offer.number&&Number(current.offerRevision||1)===offer.revision){current.customerAcceptance=acceptance;write(offerPath(ctx.jobId),current)}
     if(typeof writeJobMeta==="function")await writeJobMeta(ctx.jobId,{status:"Auftrag"});
-    if(typeof appendJobHistory==="function")await appendJobHistory(ctx.jobId,{type:"offer_customer_accepted",title:`Angebot ${offer.number} verbindlich beauftragt`,detail:`Kundenportal · Version ${offer.revision} · ${acceptance.customerName}`,source:"Kundenportal",data:{offerNumber:offer.number,offerRevision:offer.revision,acceptedAt}});
+    if(typeof appendJobHistory==="function")await appendJobHistory(ctx.jobId,{type:"offer_customer_accepted",title:`Angebot ${offer.number} verbindlich beauftragt`,detail:`${acceptance.customerName} · ${paymentLabel}${preferredDate?` · Wunschtermin ${preferredDate}`:""}`,source:"Kundenportal",data:{offerNumber:offer.number,offerRevision:offer.revision,acceptedAt,paymentTerm,paymentLabel,preferredDate,termsAcceptedAt:acceptedAt}});
     res.json({ok:true,acceptance});
   }));
   app.get("/kundenportal/api/invoice/:jobId/:id",guard(async(req,res)=>{

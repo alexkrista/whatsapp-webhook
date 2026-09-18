@@ -4314,7 +4314,7 @@ registerRegieAssistant(app, {
   sendRegieMail: sendMailWithAttachment,
 });
 const customerAccess = registerCustomerAccess(app, {
-  dataDir: DATA_DIR, requireAdmin, readJobMeta, writeJobMeta, appendJobHistory, readDocumentation, listJobMedia, readEmployees, listDaysForJob, regiePathForDay,
+  dataDir: DATA_DIR, requireAdmin, readJobMeta, writeJobMeta, appendJobHistory, readDocumentation, writeDocumentation, listJobMedia, readEmployees, listDaysForJob, regiePathForDay,
   readInvoicePdf: require("./customer-portal-invoices").createInvoicePdfReader({ dataDir:DATA_DIR, baseUrl:"https://pc-alex02.tail610122.ts.net", createPermit:createBrainPermit }),
   publicDir: path.join(process.cwd(), "public"), publicBaseUrl: PUBLIC_BASE_URL,
   collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
