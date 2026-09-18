@@ -78,6 +78,7 @@
         <button data-bk-tab="protocols">Dokumentation</button>
         <button data-bk-tab="regie">Regie</button>
         <button data-bk-tab="invoices">Rechnungen</button>
+        <button data-bk-tab="customerPortal">Kundenportal</button>
       </div>
       <section class="bk-panel active" data-bk-panel="overview"><div id="bkOverviewHost"></div></section>
       <section class="bk-panel" data-bk-panel="master"><div id="bkMasterData" class="bk-loading">Stammdaten werden geladen …</div></section>
@@ -86,7 +87,8 @@
       <section class="bk-panel" data-bk-panel="planning"><div id="bkPlanning" class="bk-loading">Planung wird geladen …</div></section>
       <section class="bk-panel" data-bk-panel="protocols"><div id="bkProtocols" class="bk-loading">Protokolle, Fotos, Pläne und E-Mails werden geladen …</div></section>
       <section class="bk-panel" data-bk-panel="regie"><div id="bkRegie" class="bk-loading">Regieberichte werden geladen …</div></section>
-      <section class="bk-panel" data-bk-panel="invoices"><div id="bkInvoices" class="bk-loading">Rechnungsstand wird geladen …</div></section>`;
+      <section class="bk-panel" data-bk-panel="invoices"><div id="bkInvoices" class="bk-loading">Rechnungsstand wird geladen …</div></section>
+      <section class="bk-panel" data-bk-panel="customerPortal"><div id="bkCustomerPortal" class="bk-loading">Kundenportal wird geladen …</div></section>`;
     if(existing)body.insertBefore(hub,existing);else body.appendChild(hub);
     const overview=hub.querySelector("#bkOverviewHost");if(existing)overview.appendChild(existing);
     hub.querySelectorAll("[data-bk-tab]").forEach(b=>b.addEventListener("click",()=>selectTab(b.dataset.bkTab)));
@@ -95,6 +97,13 @@
   function selectTab(name){
     document.querySelectorAll("[data-bk-tab]").forEach(b=>b.classList.toggle("active",b.dataset.bkTab===name));
     document.querySelectorAll("[data-bk-panel]").forEach(p=>p.classList.toggle("active",p.dataset.bkPanel===name));
+    if(name==="customerPortal"){
+      const jobId=currentJobId||decodeURIComponent(location.hash.slice(1))||"";
+      setTimeout(()=>{
+        if(window.KristaCustomerPortal?.openInline)window.KristaCustomerPortal.openInline(jobId);
+        else window.dispatchEvent(new CustomEvent("krista:customer-portal-inline",{detail:{jobId}}));
+      },0);
+    }
   }
 
   function openMasterTab(event){
