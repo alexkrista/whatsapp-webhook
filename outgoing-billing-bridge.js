@@ -1,5 +1,7 @@
 "use strict";
 
+const fs = require("node:fs/promises");
+const path = require("node:path");
 const DEFAULT_CONNECTOR = "http://127.0.0.1:5051";
 
 function number(value) {
@@ -116,6 +118,46 @@ function buildBillingSummary(project, runDetails) {
   };
 }
 
+async function addLocalPrepaymentDraft(billing, dataDir, jobId) {
+  if (!dataDir) return billing;
+  const draft = await fs.readFile(path.join(dataDir, String(jobId), ".prepayment-invoice-draft.json"), "utf8").then(JSON.parse).catch(() => null);
+  if (!draft || draft.status !== "draft") return billing;
+  const sourceId = String(draft.id || `vorkassa-${jobId}`);
+  if ((billing.invoices || []).some(row => row.sourceId === sourceId)) return billing;
+  const invoice = {
+    id: `local:${sourceId}`,
+    runId: 0,
+    invoiceNumber: "Entwurf",
+    status: "draft",
+    kind: "TR",
+    issueDate: String(draft.createdAt || "").slice(0, 10),
+    dueDate: "",
+    net: roundMoney(draft.netAmount),
+    vat: roundMoney(draft.vatAmount),
+    gross: roundMoney(draft.grossAmount),
+    paidGross: 0,
+    openGross: 0,
+    source: "KRISTINE",
+    sourceId,
+    localDraft: true,
+    subject: String(draft.subject || "Vorkassa-Rechnungsentwurf"),
+  };
+  const invoices = [...(billing.invoices || []), invoice];
+  return {
+    ...billing,
+    found: true,
+    projectNumber: String(billing.projectNumber || jobId),
+    invoices,
+    summary: {
+      ...(billing.summary || {}),
+      draftCount: number(billing.summary?.draftCount) + 1,
+      documentCount: number(billing.summary?.documentCount) + 1,
+      draftNet: roundMoney(number(billing.summary?.draftNet) + invoice.net),
+      draftGross: roundMoney(number(billing.summary?.draftGross) + invoice.gross),
+    },
+  };
+}
+
 function registerOutgoingBillingBridge(app, options = {}) {
   const requireAdmin = options.requireAdmin;
   const connector = cleanConnector(
@@ -152,15 +194,16 @@ function registerOutgoingBillingBridge(app, options = {}) {
       const matches = (Array.isArray(search.projects) ? search.projects : [])
         .filter((project) => String(project.projectNumber || "").trim() === jobId);
       if (!matches.length) {
+        const billing = await addLocalPrepaymentDraft({
+          found: false,
+          projectNumber: jobId,
+          projectIndex: 0,
+          summary: { invoiceCount: 0, draftCount: 0, documentCount: 0, draftNet: 0, draftGross: 0, billedNet: 0, billedGross: 0, paidGross: 0, openGross: 0 },
+          invoices: [], payments: [], runs: [],
+        }, options.dataDir, jobId);
         return res.json({
           ok: true,
-          billing: {
-            found: false,
-            projectNumber: jobId,
-            projectIndex: 0,
-            summary: { invoiceCount: 0, billedNet: 0, billedGross: 0, paidGross: 0, openGross: 0 },
-            invoices: [], payments: [], runs: [],
-          },
+          billing,
         });
       }
       if (matches.length > 1) {
@@ -178,7 +221,7 @@ function registerOutgoingBillingBridge(app, options = {}) {
       const runDetails = await Promise.all((runList.runs || []).map((run) =>
         brainJson(`/api/outgoing/runs/${number(run.id)}`)
       ));
-      const billing = buildBillingSummary(project, runDetails);
+      const billing = await addLocalPrepaymentDraft(buildBillingSummary(project, runDetails), options.dataDir, jobId);
       if (typeof options.onIssuedProgressInvoices === "function") {
         await options.onIssuedProgressInvoices({
           jobId,
@@ -196,5 +239,4 @@ function registerOutgoingBillingBridge(app, options = {}) {
   });
 }
 
-module.exports = { buildBillingSummary, cleanProgressBilling, registerOutgoingBillingBridge };
-
+module.exports = { buildBillingSummary, cleanProgressBilling, addLocalPrepaymentDraft, registerOutgoingBillingBridge };

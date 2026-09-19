@@ -104,6 +104,7 @@ test("actual offer API stores blocks and factor bindings, reads them back and re
   const routes = source.slice(source.indexOf('app.get("/admin/api/job/:jobId/offer-draft",'), source.indexOf('app.post("/admin/api/job/:jobId/offer-draft/finalize"'));
   const helper = source.slice(source.indexOf("function sanitizeOfferCalculationNote("), source.indexOf("const offerCounterPath="));
   vm.runInNewContext(helper + routes, { app, fsp, path, DATA_DIR: dir, offerNotepad: core,
+    positionId: require("../offer-order-workflow").positionId,
     requireAdmin(req, res) { if (req.get("x-test-admin") === "yes") return true; res.status(403).json({ ok: false }); return false; },
     isSafeJobId: id => /^[A-Za-z0-9_-]+$/.test(id), offerDraftPath: id => path.join(dir, id, ".offer-draft.json"),
     ensureDir: folder => fsp.mkdir(folder, { recursive: true }), appendJobHistory: async () => {},

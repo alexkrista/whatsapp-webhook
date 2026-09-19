@@ -8,8 +8,9 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { createKriszeitMonthlyPdf } = require("./kriszeit-monthly-pdf");
 const { financeTaskWhatsAppDetail } = require("./finance-task-whatsapp");
+const { structuredAddress, projectContactsFromMaster } = require("./workflow-contacts");
 
-function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta }) {
+function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunning, sendWhatsApp, chefPhoneNumber, phoneNumberId, readEmployees, readJobMeta, notifyCustomerPoint }) {
   const ROOT = path.join(dataDir, "_kristine");
   const ASSIGNMENTS = path.join(ROOT, "assignments.json");
   const STATES = path.join(ROOT, "states.json");
@@ -48,8 +49,13 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     await ensureRoot();
     const previousPortalTasks = file === TASKS ? await readJson(TASKS, []) : null;
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
+    const customerPointChanges = file === TASKS ? require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value) : [];
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
-    if (file === TASKS) require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value);
+    if (typeof notifyCustomerPoint === "function") for (const change of customerPointChanges.filter(row => row.type === "internal_done")) {
+      try { change.notification = await notifyCustomerPoint(change); }
+      catch (error) { change.notification = { sent:false, error:String(error?.message || error) }; }
+    }
+    return customerPointChanges;
   }
 
 
@@ -3079,6 +3085,11 @@ const open = taskId
         if (jobId && typeof readJobMeta === "function") {
           try { jobMeta = await readJobMeta(jobId) || {}; } catch {}
         }
+        const taskAddress = String(t.address || [jobMeta.street, jobMeta.houseNumber, [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "").trim().slice(0, 300);
+        const rawMaster = t.customerMaster && typeof t.customerMaster === "object" ? t.customerMaster : null;
+        const masterAddressText = taskAddress || String(rawMaster?.address || "").trim().slice(0, 300);
+        const taskAddressWasEdited = Boolean(rawMaster && taskAddress && taskAddress !== String(rawMaster.address || "").trim());
+        const masterAddress = rawMaster ? structuredAddress(taskAddressWasEdited ? { address: taskAddress } : { ...rawMaster, address: masterAddressText }, masterAddressText) : null;
         const row = {
           id: String(t.id || `t_${Date.now()}_${index}`),
           title: String(t.title || "").trim().slice(0, 180),
@@ -3090,16 +3101,18 @@ const open = taskId
           priority: ["normal","heute","sofort"].includes(String(t.priority || "")) ? String(t.priority) : "normal",
           creatorId: String(t.creatorId || "admin").slice(0, 100),
           creatorName: String(t.creatorName || "Chef / Büro").trim().slice(0, 140),
-          address: String(t.address || [jobMeta.street, jobMeta.houseNumber, [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "").trim().slice(0, 300),
+          address: taskAddress,
           contactName: String(t.contactName || jobMeta.contactName || "").trim().slice(0, 140),
           contactPhone: String(t.contactPhone || jobMeta.contactPhone || "").trim().slice(0, 60),
           contactEmail: String(t.contactEmail || jobMeta.contactEmail || jobMeta.email || "").trim().slice(0, 180),
-          customerMaster: t.customerMaster && typeof t.customerMaster === "object" ? {
-            status: ["linked","provisional","unchecked"].includes(String(t.customerMaster.status || "")) ? String(t.customerMaster.status) : "unchecked",
-            wwAddressId: String(t.customerMaster.wwAddressId || "").slice(0, 80), wwCustomerNumber: String(t.customerMaster.wwCustomerNumber || "").slice(0, 80), wwKey: String(t.customerMaster.wwKey || "").slice(0, 140),
-            role: ["customer","architect","site_manager","supplier","other"].includes(String(t.customerMaster.role || "")) ? String(t.customerMaster.role) : "customer",
-            name: String(t.customerMaster.name || t.contactName || "").trim().slice(0, 180), phone: String(t.customerMaster.phone || t.contactPhone || "").trim().slice(0, 80), email: String(t.customerMaster.email || t.contactEmail || "").trim().slice(0, 180), address: String(t.customerMaster.address || t.address || "").trim().slice(0, 300),
+          customerMaster: rawMaster ? {
+            status: ["linked","provisional","unchecked"].includes(String(rawMaster.status || "")) ? String(rawMaster.status) : "unchecked",
+            wwAddressId: String(rawMaster.wwAddressId || "").slice(0, 80), wwCustomerNumber: String(rawMaster.wwCustomerNumber || "").slice(0, 80), wwKey: String(rawMaster.wwKey || "").slice(0, 140),
+            role: ["customer","architect","site_manager","supplier","other"].includes(String(rawMaster.role || "")) ? String(rawMaster.role) : "customer",
+            name: String(rawMaster.name || t.contactName || "").trim().slice(0, 180), phone: String(rawMaster.phone || t.contactPhone || "").trim().slice(0, 80), email: String(rawMaster.email || t.contactEmail || "").trim().slice(0, 180), address: masterAddressText,
+            ...masterAddress,
           } : null,
+          projectContacts: rawMaster ? projectContactsFromMaster(rawMaster, { projectContacts: t.projectContacts || jobMeta.projectContacts, name: t.contactName, phone: t.contactPhone, email: t.contactEmail }) : (t.projectContacts && typeof t.projectContacts === "object" ? t.projectContacts : null),
           dueDate: String(t.dueDate || "").slice(0, 10),
           reminder: String(t.reminder || "").trim().slice(0, 500),
           appointment: t.appointment && typeof t.appointment === "object" ? t.appointment : null,
@@ -3107,10 +3120,20 @@ const open = taskId
           status: t.status === "done" ? "done" : "open",
           createdAt: t.createdAt || new Date().toISOString(),
           completedAt: t.completedAt || null,
+          customerPointId: /^[a-f0-9-]{36}$/.test(String(t.customerPointId || "")) ? String(t.customerPointId) : null,
+          customerPointSource: t.customerPointSource === "office" ? "office" : (t.customerPointSource === "customer" ? "customer" : null),
+          customerPointState: ["captured","received","sent","read","assigned","awaiting_confirmation","confirmed","reopened","legacy_done"].includes(String(t.customerPointState || "")) ? String(t.customerPointState) : null,
+          customerPointAssignedAt: t.customerPointAssignedAt || null,
+          customerPointUpdatedAt: t.customerPointUpdatedAt || null,
+          customerPointConfirmedAt: t.customerPointConfirmedAt || null,
+          customerPointNotificationSentAt: t.customerPointNotificationSentAt || null,
+          customerPointNotificationError: String(t.customerPointNotificationError || "").slice(0, 500),
+          customerPointResponse: String(t.customerPointResponse || "").slice(0, 1000),
+          customerPointRevision: Math.max(0, Math.floor(Number(t.customerPointRevision) || 0)),
         };
         if (row.title) clean.push(row);
       }
-      await writeJson(TASKS, clean);
+      const customerPointChanges = await writeJson(TASKS, clean);
 
       const notifications = [];
       const newOpenTasks = clean.filter(t => !previousIds.has(String(t.id)) && t.status !== "done");
@@ -3183,7 +3206,7 @@ const open = taskId
           });
         }
       }
-      res.json({ ok: true, tasks: clean, notifications });
+      res.json({ ok: true, tasks: clean, notifications, customerPointChanges });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

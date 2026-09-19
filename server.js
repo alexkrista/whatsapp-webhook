@@ -82,15 +82,20 @@ const { sanitizeCustomerPortal, registerCustomerPortal } = require("./customer-p
 const { registerCustomerAccess } = require("./customer-portal-access");
 const { renderOfferHtmlPdf } = require("./offer-html-pdf");
 const { OFFER_TERMS } = require("./offer-terms");
+const { structuredAddress, projectContactsFromMaster } = require("./workflow-contacts");
+const { positionId, applyAcceptedPaymentTerm, buildAcceptedOrder, buildOrderCalculation, buildPrepaymentInvoiceDraft } = require("./offer-order-workflow");
+const { cleanDate: cleanOrderScheduleDate, scheduleBase, requestSchedule, proposeSchedule, confirmSchedule, declineProposal, buildPlanningAssignments, customerScheduleView } = require("./order-schedule-workflow");
+const { registerKristineActivityAudit } = require("./kristine-activity-audit");
+const { createContactMasterStore } = require("./contact-master");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
-const APP_VERSION = "3.5.30";
-const APP_BUILD = "0031.35-photo-job-label";
-const APP_STATUS = "Fotoeingang mit Stempelungsvorschlag und Sammelaufgabe";
-const APP_BUILD_DATE = "2026-09-12";
+const APP_VERSION = "3.6.0";
+const APP_BUILD = "0032.11-contact-knowledge";
+const APP_STATUS = "Kontaktwissen, Stammdatensuche und Regie-Sollstunden aus angenommenen Angeboten";
+const APP_BUILD_DATE = "2026-09-18";
 
 // Static files for Admin UI
 app.use("/public", express.static("public", {
@@ -117,6 +122,11 @@ app.use((req, _res, next) => {
   next();
 });
 const collectionStore = createCollectionStore({ dataDir: DATA_DIR });
+const contactMasterStore = createContactMasterStore({
+  dataDir: DATA_DIR,
+  readJobMeta: jobId => readJobMeta(jobId),
+  isJobId: jobId => isSafeJobId(jobId) && !isInternalJobId(jobId),
+});
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
@@ -363,6 +373,12 @@ function requireAdmin(req, res) {
   return true;
 }
 
+registerKristineActivityAudit(app, {
+  dataDir: DATA_DIR,
+  requireAdmin,
+  readEmployees,
+});
+
 require("./bauprojekt").registerBauprojekt(app, { dataDir: DATA_DIR, requireAdmin, adminToken: ADMIN_TOKEN });
 
 app.use("/admin/api/job/:jobId", collectionWriteGuard(collectionStore, requireAdmin));
@@ -462,7 +478,7 @@ async function readVisitWorkflows(){let rows=[],fileExists=false;try{rows=JSON.p
 async function writeVisitWorkflows(rows){await ensureDir(path.dirname(visitWorkflowFile));await fsp.writeFile(visitWorkflowFile,JSON.stringify(rows,null,2),"utf8")}
 app.get(["/kristool","/kristool-workflow"],(req,res)=>{if(!requireAdmin(req,res))return;res.sendFile(path.join(process.cwd(),"public","kristool-workflow.html"))});
 app.get("/kristool/api/workflows",async(req,res)=>{if(!requireAdmin(req,res))return;const workflows=await readVisitWorkflows(),tasks=await fsp.readFile(path.join(DATA_DIR,"_kristine","tasks.json"),"utf8").then(JSON.parse).catch(()=>[]),byId=new Map(tasks.map(t=>[String(t.id),t]));res.json({ok:true,workflows:workflows.map(row=>{const task=byId.get(String(row.taskId))||{};return {...row,customer:row.customer||task.contactName||"",contactPhone:row.contactPhone||task.contactPhone||"",contactEmail:row.contactEmail||task.contactEmail||"",address:row.address||task.address||""}})})});
-app.post("/kristool/api/workflows",async(req,res)=>{if(!requireAdmin(req,res))return;try{const body=req.body||{},taskId=String(body.taskId||"").slice(0,120),target=body.target==="order"?"order":"offer";if(!taskId)return res.status(400).json({ok:false,error:"Aufgabe fehlt."});const rows=await readVisitWorkflows(),now=new Date().toISOString(),key=`${taskId}:${target}`;let row=rows.find(x=>x.key===key);if(!row){row={id:`workflow-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,key,taskId,target,status:target==="order"?"order_ready_for_approval":"offer_protocol_open",createdAt:now,timeline:[]};rows.push(row)}const cm=body.customerMaster&&typeof body.customerMaster==="object"?body.customerMaster:{};Object.assign(row,{title:String(body.title||"Terminprotokoll").slice(0,240),customer:String(body.customer||cm.name||"").slice(0,240),contactPhone:String(body.contactPhone||cm.phone||"").slice(0,80),contactEmail:String(body.contactEmail||cm.email||"").slice(0,180),address:String(body.address||cm.address||"").slice(0,500),customerMaster:{...cm,status:cm.wwAddressId?"linked":(cm.status==="provisional"?"provisional":"unchecked"),pendingWwCreate:!cm.wwAddressId},appointment:body.appointment||null,protocol:body.protocol||{},updatedAt:now});if(!row.timeline.length){row.timeline=[{type:"call",label:"Anruf / Anfrage",at:body.createdAt||now},{type:"appointment",label:"Termin",at:body.appointment?.date||now},{type:"protocol",label:"Vor-Ort-Protokoll",at:now},{type:target,label:target==="order"?"Auftragsmappe vorbereitet":"Angebotsprotokoll offen",at:now}]}await writeVisitWorkflows(rows);res.status(201).json({ok:true,workflow:row})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
+app.post("/kristool/api/workflows",async(req,res)=>{if(!requireAdmin(req,res))return;try{const body=req.body||{},taskId=String(body.taskId||"").slice(0,120),target=body.target==="order"?"order":"offer";if(!taskId)return res.status(400).json({ok:false,error:"Aufgabe fehlt."});const rows=await readVisitWorkflows(),now=new Date().toISOString(),key=`${taskId}:${target}`;let row=rows.find(x=>x.key===key);if(!row){row={id:`workflow-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,key,taskId,target,status:target==="order"?"order_ready_for_approval":"offer_protocol_open",createdAt:now,timeline:[]};rows.push(row)}const cm=body.customerMaster&&typeof body.customerMaster==="object"?body.customerMaster:{},address=String(body.address||cm.address||"").slice(0,500),location=structuredAddress({...cm,address},address),customer=String(body.customer||cm.name||"").slice(0,240),contactPhone=String(body.contactPhone||cm.phone||"").slice(0,80),contactEmail=String(body.contactEmail||cm.email||"").slice(0,180),customerMaster={...cm,name:customer,phone:contactPhone,email:contactEmail,address:address||location.formatted,...location,status:cm.wwAddressId?"linked":(cm.status==="provisional"?"provisional":"unchecked"),pendingWwCreate:!cm.wwAddressId};Object.assign(row,{title:String(body.title||"Terminprotokoll").slice(0,240),customer,contactPhone,contactEmail,address:address||location.formatted,customerMaster,projectContacts:projectContactsFromMaster(customerMaster,{projectContacts:body.projectContacts}),appointment:body.appointment||null,protocol:body.protocol||{},updatedAt:now});if(!row.timeline.length){row.timeline=[{type:"call",label:"Anruf / Anfrage",at:body.createdAt||now},{type:"appointment",label:"Termin",at:body.appointment?.date||now},{type:"protocol",label:"Vor-Ort-Protokoll",at:now},{type:target,label:target==="order"?"Auftragsmappe vorbereitet":"Angebotsprotokoll offen",at:now}]}await writeVisitWorkflows(rows);res.status(201).json({ok:true,workflow:row})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
 app.put("/kristool/api/workflows/:id/status",async(req,res)=>{if(!requireAdmin(req,res))return;const rows=await readVisitWorkflows(),row=rows.find(x=>x.id===String(req.params.id));if(!row)return res.status(404).json({ok:false,error:"Workflow nicht gefunden"});const status=String(req.body?.status||"").slice(0,80),now=new Date().toISOString();row.status=status;row.updatedAt=now;row.timeline.push({type:status,label:status==="offer_draft"?"Angebot wird erstellt":status==="order_approved"?"Auftrag freigegeben":status,at:now});await writeVisitWorkflows(rows);res.json({ok:true,workflow:row})});
 app.delete("/kristool/api/workflows/:id",async(req,res)=>{if(!requireAdmin(req,res))return;const rows=await readVisitWorkflows(),id=String(req.params.id),index=rows.findIndex(x=>x.id===id);if(index<0)return res.status(404).json({ok:false,error:"Mappe nicht gefunden."});const [removed]=rows.splice(index,1);await writeVisitWorkflows(rows);res.json({ok:true,removed:{id:removed.id,title:removed.title||""}})});
 app.post("/kristool/api/workflows/:id/create-job",async(req,res)=>{
@@ -476,13 +492,13 @@ app.post("/kristool/api/workflows/:id/create-job",async(req,res)=>{
     const taskRows=await fsp.readFile(path.join(DATA_DIR,"_kristine","tasks.json"),"utf8").then(JSON.parse).catch(()=>[]),task=taskRows.find(t=>String(t.id)===String(row.taskId))||{};
     const customer=String(body.customer||row.customer||task.contactName||"").trim(),address=String(body.address||row.address||task.address||"").trim(),contactPhone=String(body.contactPhone||row.contactPhone||task.contactPhone||"").trim(),contactEmail=String(body.contactEmail||row.contactEmail||task.contactEmail||"").trim();
     const missing=[];if(!customer)missing.push("Kunde/Kontakt");if(row.target==="order"&&!address)missing.push("Baustellenadresse");if(missing.length)return res.status(400).json({ok:false,error:`Vor ${row.target==="offer"?"Angebotserstellung":"Auftragserstellung"} bitte ergänzen: ${missing.join(", ")}.`});
-    const parts=address.split(",").map(x=>x.trim()).filter(Boolean),streetLine=parts[0]||"",streetMatch=streetLine.match(/^(.*?)(?:\s+(\d+[A-Za-z]?))?$/),cityLine=parts.slice(1).join(" "),cityMatch=cityLine.match(/^(\d{4,6})\s+(.+)$/),customerMaster={...(task.customerMaster||{}),...(row.customerMaster||{}),name:customer,address,phone:contactPhone,email:contactEmail};
+    const oldMaster={...(task.customerMaster||{}),...(row.customerMaster||{})},addressWasEdited=!!address&&address!==String(oldMaster.address||"").trim(),location=structuredAddress(addressWasEdited?{address}:{...oldMaster,address},address),customerMaster={...oldMaster,name:customer,address:address||location.formatted,phone:contactPhone,email:contactEmail,...location},projectContacts=projectContactsFromMaster(customerMaster,{projectContacts:row.projectContacts||task.projectContacts});
     const yy=String(new Date().getFullYear()).slice(-2),entries=await fsp.readdir(DATA_DIR).catch(()=>[]),nums=entries.filter(id=>new RegExp(`^${yy}\\d{3}$`).test(String(id))).map(Number),jobId=String(nums.length?Math.max(...nums)+1:Number(`${yy}001`)).padStart(5,"0"),protocol=row.protocol||{},contractAmount=Math.max(0,Number(body.contractAmount||0)),transcripts=(protocol.recordings||[]).map(r=>r.transcript).filter(Boolean).join("\n\n"),notes=[protocol.discussion,protocol.work,protocol.nextSteps,transcripts].filter(Boolean).join("\n\n");
     await ensureDir(path.join(DATA_DIR,jobId));
     const jobName=String(`${customer} · ${row.title||"Auftrag"}`).slice(0,120);
-    await writeJobMeta(jobId,{name:jobName,status:row.target==="offer"?"Angebot":"Auftrag",street:String(streetMatch?.[1]||streetLine).trim(),houseNumber:String(streetMatch?.[2]||"").trim(),postalCode:String(cityMatch?.[1]||"").trim(),city:String(cityMatch?.[2]||cityLine).trim(),addressExtra:address,contactName:customer,contactPhone,contactEmail,customerMaster,wwAddressId:String(customerMaster.wwAddressId||""),wwCustomerNumber:String(customerMaster.wwCustomerNumber||""),customerMasterStatus:customerMaster.wwAddressId?"linked":"pending_ww_create",contractAmount,startDate:row.target==="order"?startDate:"",notes:notes.slice(0,1000),intakeProtocol:protocol,intakeAppointment:row.appointment||task.appointment||null,intakeTimeline:Array.isArray(row.timeline)?row.timeline:[],sourceWorkflowId:row.id,sourceTaskId:row.taskId,createdAt:new Date().toISOString()});
-    if(task.id){Object.assign(task,{jobId,jobName,address,contactName:customer,contactPhone,contactEmail,customerMaster});await fsp.writeFile(path.join(DATA_DIR,"_kristine","tasks.json"),JSON.stringify(taskRows,null,2),"utf8")}
-    if(row.target==="order"&&startDate&&employeeId){const assignmentPath=path.join(DATA_DIR,"_kristine","assignments.json"),assignments=await fsp.readFile(assignmentPath,"utf8").then(JSON.parse).catch(()=>[]);assignments.push({id:`a_${Date.now()}_workflow`,date:startDate,cardType:"arbeit",jobId,jobName,city:String(cityMatch?.[2]||cityLine).trim(),address,contactName:customer,contactPhone,employeeId,employeeName,from:"07:00",to:"",note:"Baustellenstart · aus Auftragsmappe"});await fsp.writeFile(assignmentPath,JSON.stringify(assignments,null,2),"utf8")}
+    await writeJobMeta(jobId,{name:jobName,status:row.target==="offer"?"Angebot":"Auftrag",street:location.street,houseNumber:location.houseNumber,postalCode:location.postalCode,city:location.city,addressExtra:location.addressExtra,contactName:customer,contactPhone,contactEmail,customerMaster,projectContacts,wwAddressId:String(customerMaster.wwAddressId||""),wwCustomerNumber:String(customerMaster.wwCustomerNumber||""),customerMasterStatus:customerMaster.wwAddressId?"linked":"pending_ww_create",contractAmount,startDate:row.target==="order"?startDate:"",notes:notes.slice(0,1000),intakeProtocol:protocol,intakeAppointment:row.appointment||task.appointment||null,intakeTimeline:Array.isArray(row.timeline)?row.timeline:[],sourceWorkflowId:row.id,sourceTaskId:row.taskId,createdAt:new Date().toISOString()});
+    if(task.id){Object.assign(task,{jobId,jobName,address:address||location.formatted,contactName:customer,contactPhone,contactEmail,customerMaster,projectContacts});await fsp.writeFile(path.join(DATA_DIR,"_kristine","tasks.json"),JSON.stringify(taskRows,null,2),"utf8")}
+    if(row.target==="order"&&startDate&&employeeId){const assignmentPath=path.join(DATA_DIR,"_kristine","assignments.json"),assignments=await fsp.readFile(assignmentPath,"utf8").then(JSON.parse).catch(()=>[]);assignments.push({id:`a_${Date.now()}_workflow`,date:startDate,cardType:"arbeit",jobId,jobName,city:location.city,address:address||location.formatted,contactName:customer,contactPhone,employeeId,employeeName,from:"07:00",to:"",note:"Baustellenstart · aus Auftragsmappe"});await fsp.writeFile(assignmentPath,JSON.stringify(assignments,null,2),"utf8")}
     const now=new Date().toISOString(),isOffer=row.target==="offer";Object.assign(row,{jobId,status:isOffer?"offer_job_created":"order_job_created",contractAmount,startDate:isOffer?"":startDate,startEmployeeId:isOffer?"":employeeId,startEmployeeName:isOffer?"":employeeName,updatedAt:now});row.timeline.push({type:isOffer?"offer_created":"job_created",label:isOffer?`Angebotsmappe #${jobId} angelegt`:`Baustellenmappe #${jobId} angelegt`,at:now});if(!isOffer&&startDate)row.timeline.push({type:"start_planned",label:`Start ${startDate}${employeeName?` · ${employeeName}`:""}`,at:now});await writeVisitWorkflows(rows);res.status(201).json({ok:true,jobId,workflow:row,needsStartAppointment:!isOffer&&!startDate});
   }catch(e){console.error("Create job from workflow failed",e);res.status(500).json({ok:false,error:String(e?.message||e)})}
 });
@@ -1784,6 +1800,7 @@ console.log("ðŸ“¡ WhatsApp-Sender-Konfiguration", {
 });
 
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
+let customerAccess = null;
 kristine = registerKristine(app, {
   dataDir: DATA_DIR,
   requireAdmin,
@@ -1793,6 +1810,10 @@ kristine = registerKristine(app, {
   phoneNumberId: KRISTINE_PHONE_NUMBER_ID,
   readEmployees,
   readJobMeta,
+  notifyCustomerPoint: async change => {
+    if (!customerAccess) throw new Error("Kundenportal ist noch nicht bereit.");
+    return customerAccess.notifyPoint({ jobId:change.jobId, pointId:change.pointId, reason:"confirmation" });
+  },
   markJobRunning: async (jobId, source = "system") => {
     const id = String(jobId || "").trim();
     if (!/^\d{5}$/.test(id) || !fs.existsSync(path.join(DATA_DIR, id))) return false;
@@ -2417,12 +2438,21 @@ function sanitizeProjectContacts(value, fallback = {}) {
   const person = input => {
     const row = input && typeof input === "object" ? input : {};
     return {
+      masterContactId: text(row.masterContactId, 80),
       company: text(row.company),
       title: text(row.title, 40),
       firstName: text(row.firstName, 100),
       lastName: text(row.lastName, 120),
       phone: text(row.phone, 80),
       email: text(row.email, 180),
+      street: text(row.street, 140),
+      houseNumber: text(row.houseNumber, 40),
+      postalCode: text(row.postalCode, 20),
+      city: text(row.city, 100),
+      source: text(row.source, 30),
+      wwAddressId: text(row.wwAddressId, 80),
+      wwCustomerNumber: text(row.wwCustomerNumber, 80),
+      wwKey: text(row.wwKey, 120),
       extraLines: cleanProjectContactExtras(row.extraLines),
     };
   };
@@ -2435,6 +2465,7 @@ function sanitizeProjectContacts(value, fallback = {}) {
   }
   return {
     owner: {
+      masterContactId: text(owner.masterContactId, 80),
       customer: text(own(owner, "customer", legacyMaster.name || fallback.contactName || "")),
       firstName: text(owner.firstName, 100),
       sharedLastName: text(own(owner, "sharedLastName", own(owner, "customer", legacyMaster.name || fallback.contactName || "")), 120),
@@ -2454,6 +2485,10 @@ function sanitizeProjectContacts(value, fallback = {}) {
       womanEmail: text(own(owner, "womanEmail", own(owner, "email", legacyMaster.email || fallback.contactEmail || "")), 180),
       manEmail: text(owner.manEmail, 180),
       email: text(own(owner, "email", own(owner, "womanEmail", legacyMaster.email || fallback.contactEmail || "")), 180),
+      source: text(owner.source, 30),
+      wwAddressId: text(own(owner, "wwAddressId", fallback.wwAddressId || legacyMaster.wwAddressId || ""), 80),
+      wwCustomerNumber: text(own(owner, "wwCustomerNumber", fallback.wwCustomerNumber || legacyMaster.wwCustomerNumber || ""), 80),
+      wwKey: text(own(owner, "wwKey", legacyMaster.wwKey || ""), 120),
       extraLines: cleanProjectContactExtras(owner.extraLines),
     },
     siteManager: { ...person(source.siteManager), alsoArchitect: !!source.siteManager?.alsoArchitect },
@@ -2470,6 +2505,18 @@ function cleanOperationalDate(value) {
   const date = new Date(`${day}T12:00:00`);
   if (Number.isNaN(date.getTime()) || date.getFullYear() !== year || date.getMonth() + 1 !== Number(match[2]) || date.getDate() !== Number(match[3])) return "";
   return day;
+}
+
+function cleanOrderScheduleMeta(value) {
+  const row = scheduleBase(value || {});
+  return {
+    ...customerScheduleView(row),
+    employees: row.employees,
+    appointmentId: row.appointmentId,
+    outlook: row.outlook,
+    notification: row.notification,
+    revision: row.revision,
+  };
 }
 
 function cleanSurfaceMaterialMeta(value) {
@@ -2517,7 +2564,7 @@ function cleanWwProjectLinks(value) {
 async function readJobMeta(jobId) {
   try {
     const p = metaPathForJob(jobId);
-    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    if (!fs.existsSync(p)) return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), orderSchedule: cleanOrderScheduleMeta({}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
     const meta = JSON.parse(await fsp.readFile(p, "utf8"));
     return {
       name: String(meta.name || "").trim(),
@@ -2544,6 +2591,7 @@ async function readJobMeta(jobId) {
       sourceTaskId: String(meta.sourceTaskId || ""),
       customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
       projectContacts: sanitizeProjectContacts(meta.projectContacts, meta),
+      orderSchedule: cleanOrderScheduleMeta(meta.orderSchedule),
       wwProjectIndex: Math.max(0, Math.trunc(Number(meta.wwProjectIndex || 0))),
       wwProjectNumber: String(meta.wwProjectNumber || ""),
       previousJobIds: Array.isArray(meta.previousJobIds) ? meta.previousJobIds.map(String) : [],
@@ -2568,7 +2616,7 @@ async function readJobMeta(jobId) {
       updatedAt: meta.updatedAt || null,
     };
   } catch {
-    return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
+    return { name: "", favorite: false, notes: "", status: "Angebot", towerBillingHidden: false, street: "", houseNumber: "", postalCode: "", city: "", addressExtra: "", contactName: "", contactPhone: "", contactEmail: "", projectContacts: sanitizeProjectContacts({}, {}), orderSchedule: cleanOrderScheduleMeta({}), billingRate: 0, contractAmount: 0, externalServices: 0, materialPercent: 0, regieHourlyRate: 75, regieMaterialMarkup: 80, plannedRegieHours: 0, surfaceMaterialMeta: [], collectionMemberJobIds: [], wwProjectLinks: [], hoursCutoverDate: "", hoursOverlapExcludedWwKeys: [], hoursOverlapResolvedAt: null };
   }
 }
 function historyPathForJob(jobId) {
@@ -2616,6 +2664,7 @@ async function writeJobMeta(jobId, patch) {
     contactName: String(patch.contactName ?? existing.contactName ?? "").trim().slice(0, 120),
     contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
     contactEmail: String(patch.contactEmail ?? existing.contactEmail ?? "").trim().slice(0, 180),
+    customerMaster: patch.customerMaster && typeof patch.customerMaster === "object" ? patch.customerMaster : (existing.customerMaster || null),
     wwProjectIndex: Math.max(0, Math.trunc(Number(patch.wwProjectIndex ?? existing.wwProjectIndex ?? 0))),
     wwProjectNumber: String(patch.wwProjectNumber ?? existing.wwProjectNumber ?? "").trim().slice(0, 80),
     wwAddressId: String(patch.wwAddressId ?? existing.wwAddressId ?? "").trim().slice(0, 80),
@@ -2625,6 +2674,7 @@ async function writeJobMeta(jobId, patch) {
     collectionMemberJobIds: cleanCollectionMemberJobIds(patch.collectionMemberJobIds ?? existing.collectionMemberJobIds, jobId),
     wwProjectLinks: cleanWwProjectLinks(patch.wwProjectLinks ?? existing.wwProjectLinks),
     projectContacts: sanitizeProjectContacts(patch.projectContacts ?? existing.projectContacts, { ...existing, ...patch }),
+    orderSchedule: cleanOrderScheduleMeta(patch.orderSchedule ?? existing.orderSchedule),
     startDate: cleanOperationalDate(patch.startDate ?? existing.startDate),
     createdAt: patch.createdAt ?? existing.createdAt ?? null,
     intakeProtocol: patch.intakeProtocol && typeof patch.intakeProtocol === "object" ? patch.intakeProtocol : (existing.intakeProtocol || {}),
@@ -2646,6 +2696,10 @@ async function writeJobMeta(jobId, patch) {
     customerPortal: sanitizeCustomerPortal(patch.customerPortal, existing.customerPortal),
     updatedAt: new Date().toISOString(),
   };
+  const masterContactIds = await contactMasterStore.captureJob(jobId, next);
+  for (const role of ["owner", "siteManager", "architect"]) {
+    if (masterContactIds[role] && next.projectContacts?.[role]) next.projectContacts[role].masterContactId = masterContactIds[role];
+  }
   await ensureDir(path.join(DATA_DIR, String(jobId)));
   await fsp.writeFile(metaPathForJob(jobId), JSON.stringify(next, null, 2), "utf8");
   return next;
@@ -2876,6 +2930,18 @@ function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
 }
 
 // Admin API: nÃ¤chste regulÃ¤re Baustellennummer (JJ + 3-stellig)
+app.get("/admin/api/contact-master", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const query = String(req.query.q || "").trim();
+    const role = String(req.query.role || "").trim();
+    const contacts = await contactMasterStore.search(query, role, req.query.limit);
+    res.json({ ok: true, contacts });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
 app.get("/admin/api/jobs/next-number", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -2915,6 +2981,7 @@ app.post("/admin/api/jobs", async (req, res) => {
       contactPhone: String(body.contactPhone || ""),
       contactEmail: String(body.contactEmail || ""),
       customerMaster: body.customerMaster && typeof body.customerMaster === "object" ? body.customerMaster : null,
+      projectContacts: body.projectContacts && typeof body.projectContacts === "object" ? body.projectContacts : undefined,
       wwProjectIndex: Math.max(0, Math.trunc(Number(body.wwProjectIndex || 0))),
       wwProjectNumber: String(body.wwProjectNumber || ""),
       wwAddressId: String(body.wwAddressId || body.customerMaster?.wwAddressId || ""),
@@ -3045,6 +3112,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         contactEmail: meta.contactEmail || "",
         customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
         projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
+        orderSchedule: meta.orderSchedule || cleanOrderScheduleMeta({}),
         wwProjectIndex: Number(meta.wwProjectIndex || 0),
         wwProjectNumber: meta.wwProjectNumber || "",
         previousJobIds: meta.previousJobIds || [],
@@ -3181,6 +3249,10 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       contactName: req.body?.contactName,
       contactPhone: req.body?.contactPhone,
       contactEmail: req.body?.contactEmail,
+      customerMaster: req.body?.customerMaster,
+      wwAddressId: req.body?.wwAddressId,
+      wwCustomerNumber: req.body?.wwCustomerNumber,
+      customerMasterStatus: req.body?.customerMasterStatus,
       projectContacts: req.body?.projectContacts,
       billingRate: req.body?.billingRate,
       contractAmount: req.body?.contractAmount,
@@ -3193,9 +3265,10 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
+    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","wwAddressId","wwCustomerNumber","customerMasterStatus","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
+    if (JSON.stringify(before.customerMaster || {}) !== JSON.stringify(meta.customerMaster || {})) changed.push("customerMaster");
     if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
     if (JSON.stringify(before.surfaceMaterialMeta || []) !== JSON.stringify(meta.surfaceMaterialMeta || [])) changed.push("surfaceMaterialMeta");
     if (changed.length) {
@@ -3243,6 +3316,136 @@ app.put("/admin/api/sammelmappe/:id/status", async (req, res) => {
 
 const offerNotepad = require("./public/ui/offer-notepad");
 function offerDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".offer-draft.json"); }
+function acceptedOrderPath(jobId) { return path.join(DATA_DIR, String(jobId), ".accepted-order.json"); }
+function acceptedOrderCalculationPath(jobId) { return path.join(DATA_DIR, String(jobId), ".order-calculation.json"); }
+function prepaymentInvoiceDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".prepayment-invoice-draft.json"); }
+function orderSchedulePath(jobId) { return path.join(DATA_DIR, String(jobId), ".order-schedule.json"); }
+let orderScheduleWriteQueue = Promise.resolve();
+function serializedOrderSchedule(action) {
+  const result = orderScheduleWriteQueue.then(action, action);
+  orderScheduleWriteQueue = result.catch(() => {});
+  return result;
+}
+async function readOrderSchedule(jobId) {
+  const stored = await fsp.readFile(orderSchedulePath(jobId), "utf8").then(JSON.parse).catch(() => null);
+  if (stored) return scheduleBase(stored, jobId);
+  const meta = await readJobMeta(jobId);
+  return scheduleBase(meta.orderSchedule || {}, jobId);
+}
+async function persistOrderSchedule(jobId, value, options = {}) {
+  const schedule = scheduleBase(value, jobId);
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  const file = orderSchedulePath(jobId), temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(temporary, JSON.stringify(schedule, null, 2), "utf8");
+  await fsp.rename(temporary, file);
+  const patch = { orderSchedule:cleanOrderScheduleMeta(schedule) };
+  if (options.startDate !== undefined) patch.startDate = options.startDate;
+  await writeJobMeta(jobId, patch);
+  return schedule;
+}
+function orderScheduleActor(req, fallback = "Alex / Büro") {
+  return { id:String(req?.headers?.["x-krista-user-id"] || "admin").slice(0, 100), name:String(req?.headers?.["x-krista-user-name"] || fallback).slice(0, 160) };
+}
+async function selectedOrderEmployees(employeeIds) {
+  const ids = [...new Set((Array.isArray(employeeIds) ? employeeIds : []).map(String).filter(Boolean))].slice(0, 50);
+  if (!ids.length) return [];
+  const employees = await readEmployees();
+  const selected = ids.map(id => employees.find(row => String(row.id || row.employeeId || "") === id)).filter(Boolean).map(row => ({ id:String(row.id || row.employeeId), name:String(row.name || row.employeeName || row.id) }));
+  if (selected.length !== ids.length) throw Object.assign(new Error("Mindestens ein ausgewählter Mitarbeiter ist nicht mehr im Personalstamm."), { status:400 });
+  return selected;
+}
+async function replaceOrderScheduleAssignments(jobId, rows) {
+  const file = path.join(DATA_DIR, "_kristine", "assignments.json");
+  await ensureDir(path.dirname(file));
+  const current = await fsp.readFile(file, "utf8").then(JSON.parse).catch(() => []);
+  const keep = (Array.isArray(current) ? current : []).filter(row => !(String(row?.source || "") === "order_schedule" && String(row?.orderScheduleJobId || row?.jobId || "") === String(jobId)));
+  await fsp.writeFile(file, JSON.stringify([...keep, ...rows], null, 2), "utf8");
+  return rows;
+}
+function orderScheduleAddress(meta) {
+  return [[meta.street, meta.houseNumber].filter(Boolean).join(" "), [meta.postalCode, meta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+function formatOrderScheduleDate(date) {
+  if (!cleanOrderScheduleDate(date)) return String(date || "");
+  return new Intl.DateTimeFormat("de-AT", { timeZone:"Europe/Vienna", weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" }).format(new Date(`${date}T12:00:00+02:00`));
+}
+async function sendOrderScheduleNotice(jobId, schedule, kind) {
+  const meta = await readJobMeta(jobId), portal = sanitizeCustomerPortal(meta.customerPortal), name = String(portal.customerName || meta.contactName || meta.customerMaster?.name || "").trim();
+  const phone = String(portal.customerPhone || meta.contactPhone || "").trim(), email = String(portal.customerEmail || meta.contactEmail || "").trim(), greeting = name ? `Guten Tag ${name},` : "Guten Tag,";
+  let portalUrl = "";
+  if (kind === "proposal" && customerAccess && portal.status !== "off") {
+    try { portalUrl = (await customerAccess.createInvitation(jobId, {})).portalUrl || ""; } catch {}
+  }
+  const date = kind === "proposal" ? schedule.proposedDate : schedule.confirmedDate, from = kind === "proposal" ? schedule.proposedFrom : schedule.confirmedFrom, to = kind === "proposal" ? schedule.proposedTo : schedule.confirmedTo;
+  const when = `${formatOrderScheduleDate(date)}${from && to ? `, ${from}–${to} Uhr` : ""}`;
+  const message = kind === "proposal"
+    ? `${greeting}\n\nzu Ihrem Auftrag #${jobId} schlagen wir folgenden Termin vor:\n${when}\n\n${portalUrl ? `Bitte bestätigen Sie den Termin kurz in Ihrer Projektakte:\n${portalUrl}` : "Bitte geben Sie uns kurz Bescheid, ob dieser Termin für Sie passt."}\n\nFreundliche Grüße\nFarben Krista`
+    : `${greeting}\n\nIhr Termin für den Auftrag #${jobId} ist bestätigt:\n${when}${orderScheduleAddress(meta) ? `\n${orderScheduleAddress(meta)}` : ""}\n\nFreundliche Grüße\nFarben Krista`;
+  const channels = [], errors = [];
+  if (phone) try { await sendWhatsAppKristineReply({ to:phone, reply:message }); channels.push("WhatsApp"); } catch (error) { errors.push(`WhatsApp: ${String(error?.message || error)}`); }
+  if (!channels.length && email) {
+    try { const sent = await sendMailWithLink({ to:email, subject:kind === "proposal" ? `Terminvorschlag zu Auftrag #${jobId}` : `Terminbestätigung zu Auftrag #${jobId}`, text:message }); if (sent) channels.push("E-Mail"); else errors.push("E-Mail konnte nicht versendet werden."); }
+    catch (error) { errors.push(`E-Mail: ${String(error?.message || error)}`); }
+  }
+  return { sent:channels.length > 0, channels, error:errors.join(" · ") || (!phone && !email ? "Beim Kunden fehlt Telefon und E-Mail." : ""), sentAt:new Date().toISOString() };
+}
+async function recordOrderScheduleRequest(jobId, date, actor = {}, source = "office") {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId), schedule = requestSchedule(current, { jobId, date, actor, source });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_requested", title:`Terminwunsch ${formatOrderScheduleDate(schedule.requestedDate)} erfasst`, detail:"Noch nicht bestätigt und noch nicht fix eingeplant.", source:source === "customer" ? "Kundenportal" : "KRISTINE Auftrag", data:{ requestedDate:schedule.requestedDate } });
+    return schedule;
+  });
+}
+async function confirmOrderScheduleForJob(jobId, input = {}, options = {}) {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId);
+    if (current.status === "confirmed") return current;
+    const meta = await readJobMeta(jobId), employees = await selectedOrderEmployees(input.employeeIds), date = cleanOrderScheduleDate(input.date || current.proposedDate || current.requestedDate), from = String(input.from || current.proposedFrom || "07:00"), to = String(input.to || current.proposedTo || "17:00"), actor = input.actor || { id:"admin", name:"Alex / Büro" };
+    if (!date) throw Object.assign(new Error("Bitte einen gültigen Termin auswählen."), { status:400 });
+    const planning = buildPlanningAssignments({ jobId, job:meta, date, from, to, employees, scheduleRevision:current.revision + 1 });
+    await replaceOrderScheduleAssignments(jobId, planning);
+    const result = await kristineOutlook.createAppointment({
+      requestId:`order-schedule-${jobId}-r${current.revision + 1}`,
+      taskId:`job:${jobId}`,
+      title:`Baustellenstart #${jobId} · ${meta.name || "Auftrag"}`,
+      date, from, to, allDay:false,
+      location:orderScheduleAddress(meta),
+      details:[`Bestätigter Auftragstermin`, meta.contactName ? `Kunde: ${meta.contactName}` : "", employees.length ? `Eingeteilt: ${employees.map(row => row.name).join(", ")}` : "Mitarbeitereinteilung noch offen"].filter(Boolean).join("\n"),
+    });
+    let schedule = confirmSchedule(current, { date, from, to, employees, assignments:planning, appointment:result.appointment, actor, customerConfirmedAt:options.customerConfirmedAt || null });
+    await persistOrderSchedule(jobId, schedule, { startDate:date });
+    await appendJobHistory(jobId, { type:"order_schedule_confirmed", title:`Auftragstermin ${formatOrderScheduleDate(date)} bestätigt`, detail:`${from}–${to} Uhr · ${employees.length ? employees.map(row => row.name).join(", ") : "Mitarbeitereinteilung noch offen"} · Outlook ${schedule.outlook.status === "synced" ? "synchronisiert" : "in KRISTINE gespeichert; Synchronisierung offen"}`, source:options.customerConfirmedAt ? "Kundenportal" : "KRISTINE Auftrag", data:{ date, from, to, employeeIds:employees.map(row => row.id), appointmentId:schedule.appointmentId } });
+    if (options.notifyCustomer !== false) {
+      schedule = { ...schedule, notification:await sendOrderScheduleNotice(jobId, schedule, "confirmation") };
+      await persistOrderSchedule(jobId, schedule, { startDate:date });
+    }
+    return schedule;
+  });
+}
+async function proposeOrderScheduleForJob(jobId, input = {}) {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId), employees = await selectedOrderEmployees(input.employeeIds), actor = input.actor || { id:"admin", name:"Alex / Büro" };
+    let schedule = proposeSchedule(current, { date:input.date, from:input.from, to:input.to, employees, actor });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_proposed", title:`Alternativtermin ${formatOrderScheduleDate(schedule.proposedDate)} vorgeschlagen`, detail:`${schedule.proposedFrom}–${schedule.proposedTo} Uhr · Kundenbestätigung offen`, source:"KRISTINE Auftrag", data:{ date:schedule.proposedDate, from:schedule.proposedFrom, to:schedule.proposedTo } });
+    schedule = { ...schedule, notification:await sendOrderScheduleNotice(jobId, schedule, "proposal") };
+    await persistOrderSchedule(jobId, schedule);
+    return schedule;
+  });
+}
+async function respondToOrderScheduleProposal({ jobId, confirmed, comment = "", customerName = "Kunde" } = {}) {
+  const current = await readOrderSchedule(jobId);
+  if (current.status !== "proposed") throw Object.assign(new Error("Dieser Terminvorschlag ist nicht mehr offen."), { status:409 });
+  const actor = { id:"customer-portal", name:String(customerName || "Kunde").slice(0, 160) }, at = new Date().toISOString();
+  if (confirmed) return confirmOrderScheduleForJob(jobId, { date:current.proposedDate, from:current.proposedFrom, to:current.proposedTo, employeeIds:current.employees.map(row => row.id), actor }, { customerConfirmedAt:at, notifyCustomer:false });
+  return serializedOrderSchedule(async () => {
+    const latest = await readOrderSchedule(jobId), schedule = declineProposal(latest, { comment, at, actor });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_proposal_declined", title:"Kunde hat den Alternativtermin nicht bestätigt", detail:schedule.customerResponse || "Kunde bittet um weitere Abstimmung.", source:"Kundenportal", data:{ proposedDate:schedule.proposedDate } });
+    return schedule;
+  });
+}
 function sanitizeOfferCalculationNote(value) {
   const note = value && typeof value === "object" ? value : {};
   const number = (input, max = 100000000) => Math.max(0, Math.min(max, Number(input) || 0));
@@ -3279,19 +3482,84 @@ app.put("/admin/api/job/:jobId/offer-draft", async (req, res) => {
     const clean=(key,allowed)=>(Array.isArray(body[key])?body[key]:[]).map(String).filter(x=>allowed.has(x));
     const bathroomCalc={};for(const key of ["length","width","height","wallDeduction","floorDeduction","ceilingDeduction","showerWallLength","showerWallHeight","limeWallLength"])bathroomCalc[key]=Math.max(0,Math.min(10000,Number(body.bathroomCalc?.[key]||0)));
     const measurement={mode:body.measurement?.mode==="estimate"?"estimate":"exact"};for(const key of ["floorArea","wallArea","ceilingArea","roomLength","roomWidth","roomHeight","openingsDeduction","facadeArea","woodArea","undersideArea","perimeter","doors","windows","radiators","hours","months","hourlyRate","regieMaterialRate"])measurement[key]=Math.max(0,Math.min(1000000,Number(body.measurement?.[key]??(key==="hourlyRate"?75:key==="regieMaterialRate"?20:0))));measurement.materialMarkupPct=Math.max(-100,Math.min(10000,Number(body.measurement?.materialMarkupPct??body.measurement?.materialPercent??80)));measurement.regieMaterialMode=body.measurement?.regieMaterialMode==="per_hour"?"per_hour":"percent";
-    const draft={version:3,intro:String(body.intro||"").trim().slice(0,1000),scopeDescription:String(body.scopeDescription||"").trim().slice(0,2000),inspectionDate:/^\d{4}-\d{2}-\d{2}$/.test(String(body.inspectionDate||""))?String(body.inspectionDate):"",offerType:["interior","facade","bathroom","bathroom_compact","lime_plaster","wdvs"].includes(body.offerType)?body.offerType:"regie_material",showQuantities:body.showQuantities!==false,parts:clean("parts",allowedParts),steps:clean("steps",allowedSteps),coverSteps:clean("coverSteps",allowedCover),facadeSteps:clean("facadeSteps",allowedFacade),bathroomSteps:clean("bathroomSteps",allowedBathroom),bathroomCompactSteps:clean("bathroomCompactSteps",allowedBathroomCompact),limeSteps:clean("limeSteps",allowedLime),wdvsSteps:clean("wdvsSteps",allowedWdvs),bathroomCalc,measurement,positions:(Array.isArray(body.positions)?body.positions:[]).slice(0,120).map((p,i)=>({number:i+1,text:String(p?.text||"").trim().slice(0,1000),quantity:Math.max(0,Number(p?.quantity||0)),unit:String(p?.unit||"").trim().slice(0,20),unitPrice:Math.max(0,Number(p?.unitPrice||0)),workSteps:(Array.isArray(p?.workSteps)?p.workSteps:[]).slice(0,50).map(s=>({text:String(s?.text||"").trim().slice(0,200),minutes:Math.max(0,Math.min(100000,Number(s?.minutes||0)))})).filter(s=>s.text||s.minutes),materials:(Array.isArray(p?.materials)?p.materials:[]).slice(0,50).map(m=>({materialId:String(m?.materialId||"").slice(0,120),name:String(m?.name||"").trim().slice(0,240),unit:String(m?.unit||"").trim().slice(0,30),unitPrice:Math.max(0,Math.min(1000000,Number(m?.unitPrice||0))),consumption:Math.max(0,Math.min(1000000,Number(m?.consumption||0)))})).filter(m=>m.name),laborHoursPerUnit:Math.max(0,Math.min(10000,Number(p?.laborHoursPerUnit||0))),hourlyRate:Math.max(0,Math.min(10000,Number(p?.hourlyRate??measurement.hourlyRate))),hourlyRateOverridden:p?.hourlyRateOverridden===true,materialCostPerUnit:Math.max(0,Math.min(1000000,Number(p?.materialCostPerUnit||0))),materialMarkupPct:Math.max(-100,Math.min(10000,Number(p?.materialMarkupPct??measurement.materialMarkupPct))),materialMarkupOverridden:p?.materialMarkupOverridden===true,adjustmentPct:Math.max(-100,Math.min(10000,Number(p?.adjustmentPct||0)))})),updatedAt:new Date().toISOString()};
+    const draft={version:3,intro:String(body.intro||"").trim().slice(0,1000),scopeDescription:String(body.scopeDescription||"").trim().slice(0,2000),inspectionDate:/^\d{4}-\d{2}-\d{2}$/.test(String(body.inspectionDate||""))?String(body.inspectionDate):"",offerType:["interior","facade","bathroom","bathroom_compact","lime_plaster","wdvs"].includes(body.offerType)?body.offerType:"regie_material",showQuantities:body.showQuantities!==false,parts:clean("parts",allowedParts),steps:clean("steps",allowedSteps),coverSteps:clean("coverSteps",allowedCover),facadeSteps:clean("facadeSteps",allowedFacade),bathroomSteps:clean("bathroomSteps",allowedBathroom),bathroomCompactSteps:clean("bathroomCompactSteps",allowedBathroomCompact),limeSteps:clean("limeSteps",allowedLime),wdvsSteps:clean("wdvsSteps",allowedWdvs),bathroomCalc,measurement,positions:(Array.isArray(body.positions)?body.positions:[]).slice(0,120).map((p,i)=>({id:positionId(p,i),number:i+1,text:String(p?.text||"").trim().slice(0,1000),quantity:Math.max(0,Number(p?.quantity||0)),unit:String(p?.unit||"").trim().slice(0,20),unitPrice:Math.max(0,Number(p?.unitPrice||0)),workSteps:(Array.isArray(p?.workSteps)?p.workSteps:[]).slice(0,50).map(s=>({text:String(s?.text||"").trim().slice(0,200),minutes:Math.max(0,Math.min(100000,Number(s?.minutes||0)))})).filter(s=>s.text||s.minutes),materials:(Array.isArray(p?.materials)?p.materials:[]).slice(0,50).map(m=>({materialId:String(m?.materialId||"").slice(0,120),name:String(m?.name||"").trim().slice(0,240),unit:String(m?.unit||"").trim().slice(0,30),unitPrice:Math.max(0,Math.min(1000000,Number(m?.unitPrice||0))),consumption:Math.max(0,Math.min(1000000,Number(m?.consumption||0)))})).filter(m=>m.name),laborHoursPerUnit:Math.max(0,Math.min(10000,Number(p?.laborHoursPerUnit||0))),hourlyRate:Math.max(0,Math.min(10000,Number(p?.hourlyRate??measurement.hourlyRate))),hourlyRateOverridden:p?.hourlyRateOverridden===true,materialCostPerUnit:Math.max(0,Math.min(1000000,Number(p?.materialCostPerUnit||0))),materialMarkupPct:Math.max(-100,Math.min(10000,Number(p?.materialMarkupPct??measurement.materialMarkupPct))),materialMarkupOverridden:p?.materialMarkupOverridden===true,adjustmentPct:Math.max(-100,Math.min(10000,Number(p?.adjustmentPct||0)))})),updatedAt:new Date().toISOString()};
     draft.version=5;draft.scopeAuto=body.scopeAuto!==false;draft.priceSnapshotAt=/^\d{4}-\d{2}-\d{2}T/.test(String(body.priceSnapshotAt||""))?String(body.priceSnapshotAt):new Date().toISOString();draft.rooms=(Array.isArray(body.rooms)?body.rooms:[]).slice(0,50).map((r,i)=>({id:String(r?.id||`room-${i+1}`).slice(0,80),name:String(r?.name||`Raum ${i+1}`).trim().slice(0,160),description:String(r?.description||"").trim().slice(0,1500),mode:r?.mode==="estimate"?"estimate":"exact",floorArea:Math.max(0,Math.min(10000,Number(r?.floorArea||0))),length:Math.max(0,Math.min(1000,Number(r?.length||0))),width:Math.max(0,Math.min(1000,Number(r?.width||0))),height:Math.max(0,Math.min(100,Number(r?.height||0))),openingsDeduction:Math.max(0,Math.min(10000,Number(r?.openingsDeduction||0))),includeWalls:r?.includeWalls!==false,includeCeiling:r?.includeCeiling!==false,includeFloor:r?.includeFloor===true,includeRegie:r?.includeRegie===true,regieHours:Math.max(0,Math.min(10000,Number(r?.regieHours||0))),calculationNote:sanitizeOfferCalculationNote(r?.calculationNote),measureLines:(Array.isArray(r?.measureLines)?r.measureLines:[]).slice(0,50).map(line=>({label:String(line?.label||"").trim().slice(0,160),quantity:Math.max(0,Math.min(1000000,Number(line?.quantity||0))),unit:String(line?.unit||"m²").trim().slice(0,20)})).filter(line=>line.label||line.quantity)}));
     draft.positions=draft.positions.map((p,i)=>({...p,groupId:String(body.positions?.[i]?.groupId||"").trim().slice(0,120),groupName:String(body.positions?.[i]?.groupName||"").trim().slice(0,160),isCustom:body.positions?.[i]?.isCustom===true,isAlternative:body.positions?.[i]?.isAlternative===true,autoQuantityOverridden:body.positions?.[i]?.autoQuantityOverridden===true}));
     draft.groupDiscounts={};for(const [group,value] of Object.entries(body.groupDiscounts&&typeof body.groupDiscounts==="object"?body.groupDiscounts:{}).slice(0,100)){const key=String(group).trim().slice(0,160);if(key)draft.groupDiscounts[key]=Math.max(0,Math.min(100,Number(value||0)))}
     const existingDraft=await fsp.readFile(offerDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null);offerNotepad.prepareForSave(draft,body,existingDraft);draft.offerNumber=/^\d{7}$/.test(String(existingDraft?.offerNumber||""))?String(existingDraft.offerNumber):"";draft.offerCreatedAt=draft.offerNumber?String(existingDraft?.offerCreatedAt||draft.updatedAt):"";draft.offerRevision=draft.offerNumber?Math.max(1,Number(existingDraft?.offerRevision||1)+1):0;draft.customerAcceptance=existingDraft?.customerAcceptance&&typeof existingDraft.customerAcceptance==="object"?existingDraft.customerAcceptance:null;
-    const finance=body.financials||{},prepaymentEnabled=finance.prepaymentEnabled===true;draft.financials={priceMode:finance.priceMode==="gross"?"gross":"net",vatRate:Math.max(0,Math.min(100,Number(finance.vatRate??20))),discountPercent:Math.max(0,Math.min(100,Number(finance.discountPercent||0))),skontoEnabled:!prepaymentEnabled&&finance.skontoEnabled===true,skontoPercent:Math.max(0,Math.min(100,Number(finance.skontoPercent||0))),skontoDays:Math.max(0,Math.min(365,Math.round(Number(finance.skontoDays||0)))),prepaymentEnabled,prepaymentPercent:Math.max(0,Math.min(100,Number(finance.prepaymentPercent||0)))};
+    const finance=body.financials||{},prepaymentEnabled=finance.prepaymentEnabled===true;draft.financials={priceMode:finance.priceMode==="gross"?"gross":"net",vatRate:Math.max(0,Math.min(100,Number(finance.vatRate??20))),discountPercent:Math.max(0,Math.min(100,Number(finance.discountPercent||0))),skontoEnabled:!prepaymentEnabled&&finance.skontoEnabled===true,skontoPercent:Math.max(0,Math.min(100,Number(finance.skontoPercent||0))),skontoDays:Math.max(0,Math.min(365,Math.round(Number(finance.skontoDays||0)))),prepaymentEnabled,prepaymentPercent:prepaymentEnabled?50:0};
     await ensureDir(path.join(DATA_DIR,jobId));await fsp.writeFile(offerDraftPath(jobId),JSON.stringify(draft,null,2),"utf8");
     await appendJobHistory(jobId,{type:"offer_draft_saved",title:"Angebotsentwurf gespeichert",detail:`${draft.positions.length} Position(en)`,source:"KRISTINE Angebot"});
     res.json({ok:true,jobId,draft});
   }catch(e){res.status(e.status===400?400:500).json({ok:false,error:String(e?.message||e)})}
 });
 
-app.post("/admin/api/job/:jobId/offer-draft/finalize",async(req,res)=>{if(!requireAdmin(req,res))return;try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const file=offerDraftPath(jobId),draft=await fsp.readFile(file,"utf8").then(JSON.parse).catch(()=>null);if(!draft)return res.status(404).json({ok:false,error:"Angebotsentwurf fehlt."});if(!/^\d{7}$/.test(String(draft.offerNumber||""))){draft.offerNumber=await nextOfferNumber();draft.offerCreatedAt=new Date().toISOString();draft.offerRevision=1;await fsp.writeFile(file,JSON.stringify(draft,null,2),"utf8");await appendJobHistory(jobId,{type:"offer_finalized",title:`Angebot ${draft.offerNumber} erstellt`,detail:"Angebot für Druck/PDF verbindlich nummeriert",source:"KRISTINE Angebot"})}res.json({ok:true,jobId,draft,offerNumber:draft.offerNumber,offerRevision:Math.max(1,Number(draft.offerRevision||1))})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
+async function finalizeOfferDraft(jobId) {
+  const file=offerDraftPath(jobId),draft=await fsp.readFile(file,"utf8").then(JSON.parse).catch(()=>null);
+  if(!draft){const error=new Error("Angebotsentwurf fehlt.");error.status=404;throw error}
+  if(!/^\d{7}$/.test(String(draft.offerNumber||""))){draft.offerNumber=await nextOfferNumber();draft.offerCreatedAt=new Date().toISOString();draft.offerRevision=1;await fsp.writeFile(file,JSON.stringify(draft,null,2),"utf8");await appendJobHistory(jobId,{type:"offer_finalized",title:`Angebot ${draft.offerNumber} erstellt`,detail:"Angebot für Druck/PDF verbindlich nummeriert",source:"KRISTINE Angebot"})}
+  return draft;
+}
+
+async function persistAcceptedOffer(jobId, order) {
+  const calculation=buildOrderCalculation(order),invoiceDraft=buildPrepaymentInvoiceDraft(order);
+  await fsp.writeFile(acceptedOrderCalculationPath(jobId),JSON.stringify(calculation,null,2),"utf8");
+  if(invoiceDraft)await fsp.writeFile(prepaymentInvoiceDraftPath(jobId),JSON.stringify(invoiceDraft,null,2),"utf8");
+  const regieRows=calculation.positions.filter(row=>row.kind==="regie"),plannedRegieHours=regieRows.reduce((sum,row)=>sum+Math.max(0,Number(row.plannedHours||0)),0),regieLaborNet=regieRows.filter(row=>Number(row.plannedHours||0)>0).reduce((sum,row)=>sum+Math.max(0,Number(row.amount||0)),0),regieHourlyRate=plannedRegieHours>0?regieLaborNet/plannedRegieHours:0;
+  await writeJobMeta(jobId,{status:"Auftrag",contractAmount:order.totals.net,plannedRegieHours,...(regieHourlyRate>0?{regieHourlyRate}:{})});
+  return {calculation,invoiceDraft};
+}
+
+async function persistCustomerAcceptedOffer({ jobId, draft, acceptance }) {
+  const safeJobId=String(jobId||"");
+  if(!isSafeJobId(safeJobId))throw Object.assign(new Error("Invalid jobId"),{status:400});
+  if(!draft||String(draft.offerNumber||"")!==String(acceptance?.offerNumber||"")||Number(draft.offerRevision||1)!==Number(acceptance?.offerRevision||1))throw Object.assign(new Error("Die angenommene Angebotsfassung stimmt nicht mehr mit dem Kundenauftrag überein."),{status:409});
+  await ensureDir(path.join(DATA_DIR,safeJobId));
+  let existing=await fsp.readFile(acceptedOrderPath(safeJobId),"utf8").then(JSON.parse).catch(()=>null),created=false,order=existing;
+  if(existing&&(String(existing.offerNumber||"")!==String(acceptance.offerNumber||"")||Number(existing.offerRevision||1)!==Number(acceptance.offerRevision||1)))throw Object.assign(new Error("Für diese Baustelle besteht bereits ein Auftrag aus einer anderen Angebotsfassung."),{status:409});
+  if(!order){
+    const acceptedDraft=applyAcceptedPaymentTerm(draft,acceptance.paymentTerm,acceptance.paymentLabel),meta=await readJobMeta(safeJobId),acceptedBy={id:`customer-portal:${String(acceptance.grantId||"customer").slice(0,80)}`,name:String(acceptance.customerName||meta.contactName||meta.customerMaster?.name||meta.name||"Kunde").slice(0,160)};
+    order=buildAcceptedOrder({draft:acceptedDraft,jobId:safeJobId,customer:meta.contactName||meta.customerMaster?.name||acceptance.customerName||meta.name,selectedAlternativeIds:[],acceptedAt:acceptance.acceptedAt,acceptedBy,requestedDate:acceptance.preferredDate,requestedBy:acceptedBy});
+    if(!order.positions.length||order.totals.net<=0)throw Object.assign(new Error("Das angenommene Angebot enthält keine verrechenbare Position."),{status:400});
+    let handle;
+    try{handle=await fsp.open(acceptedOrderPath(safeJobId),"wx");await handle.writeFile(JSON.stringify(order,null,2),"utf8");created=true}
+    catch(error){if(error.code!=="EEXIST")throw error;order=await fsp.readFile(acceptedOrderPath(safeJobId),"utf8").then(JSON.parse)}
+    finally{await handle?.close().catch(()=>{})}
+    if(String(order.offerNumber||"")!==String(acceptance.offerNumber||"")||Number(order.offerRevision||1)!==Number(acceptance.offerRevision||1))throw Object.assign(new Error("Der inzwischen angelegte Auftrag gehört zu einer anderen Angebotsfassung."),{status:409});
+  }
+  const persisted=await persistAcceptedOffer(safeJobId,order),requestedDate=cleanOrderScheduleDate(acceptance.preferredDate),actor=order.acceptedBy||{id:"customer",name:acceptance.customerName||"Kunde"};
+  let schedule=await readOrderSchedule(safeJobId);
+  if(requestedDate&&["none","requested"].includes(schedule.status)&&(schedule.status!=="requested"||schedule.requestedDate!==requestedDate))schedule=await recordOrderScheduleRequest(safeJobId,requestedDate,actor,"customer");
+  if(created)await appendJobHistory(safeJobId,{type:"offer_accepted",title:`Angebot ${order.offerNumber} automatisch als Auftrag angelegt`,detail:`${order.positions.length} Position(en) · ${order.totals.net.toLocaleString("de-AT",{style:"currency",currency:"EUR"})} netto · ${order.financials.paymentLabel||acceptance.paymentLabel}${persisted.invoiceDraft?` · Vorkassa-Entwurf ${persisted.invoiceDraft.netAmount.toLocaleString("de-AT",{style:"currency",currency:"EUR"})} netto`:""}`,source:"Kundenportal",data:{offerNumber:order.offerNumber,offerRevision:order.offerRevision,paymentTerm:order.financials.paymentTerm,prepaymentInvoiceDraft:!!persisted.invoiceDraft}});
+  return {created,order,schedule,...persisted};
+}
+
+app.post("/admin/api/job/:jobId/offer-draft/finalize",async(req,res)=>{if(!requireAdmin(req,res))return;try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const draft=await finalizeOfferDraft(jobId);res.json({ok:true,jobId,draft,offerNumber:draft.offerNumber,offerRevision:Math.max(1,Number(draft.offerRevision||1))})}catch(e){res.status(e.status||500).json({ok:false,error:String(e?.message||e)})}});
+
+app.get("/admin/api/job/:jobId/accepted-order",async(req,res)=>{if(!requireAdmin(req,res))return;const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null),invoiceDraft=await fsp.readFile(prepaymentInvoiceDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null),schedule=await readOrderSchedule(jobId);res.json({ok:true,jobId,order,invoiceDraft,schedule})});
+
+app.post("/admin/api/job/:jobId/offer-draft/accept",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try{
+    const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
+    await ensureDir(path.join(DATA_DIR,jobId));
+    let existing=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);
+    if(existing){const persisted=await persistAcceptedOffer(jobId,existing),requestedDate=cleanOrderScheduleDate(req.body?.requestedDate||req.body?.desiredDate||req.body?.customerRequestedDate||req.body?.wunschtermin);let schedule=await readOrderSchedule(jobId);if(requestedDate&&schedule.status!=="confirmed")schedule=await recordOrderScheduleRequest(jobId,requestedDate,orderScheduleActor(req),"customer");return res.json({ok:true,jobId,alreadyAccepted:true,order:existing,schedule,...persisted})}
+    const draft=await finalizeOfferDraft(jobId),selectedAlternativeIds=[...new Set((Array.isArray(req.body?.selectedAlternativeIds)?req.body.selectedAlternativeIds:[]).map(value=>String(value).slice(0,80)))],knownAlternatives=new Set((draft.positions||[]).map((row,index)=>row?.isAlternative===true?positionId(row,index):null).filter(Boolean));
+    const unknown=selectedAlternativeIds.filter(id=>!knownAlternatives.has(id));if(unknown.length)return res.status(400).json({ok:false,error:"Eine gewählte Alternativposition ist nicht mehr im Angebot vorhanden. Bitte Angebot neu laden."});
+    const actorId=String(req.headers["x-krista-user-id"]||"").slice(0,100),employees=actorId?await readEmployees().catch(()=>[]):[],actor=employees.find(row=>String(row.id||"")===actorId)||{};
+    const requestedDate=cleanOrderScheduleDate(req.body?.requestedDate||req.body?.desiredDate||req.body?.customerRequestedDate||req.body?.wunschtermin),meta=await readJobMeta(jobId),acceptedBy={id:actorId,name:actor.name||actor.employeeName||""},order=buildAcceptedOrder({draft,jobId,customer:meta.contactName||meta.customerMaster?.name||meta.name,selectedAlternativeIds,acceptedBy,requestedDate,requestedBy:acceptedBy});
+    if(!order.positions.length||order.totals.net<=0)return res.status(400).json({ok:false,error:"Das angenommene Angebot enthält keine verrechenbare Position."});
+    let created=false,handle;
+    try{handle=await fsp.open(acceptedOrderPath(jobId),"wx");await handle.writeFile(JSON.stringify(order,null,2),"utf8");created=true}
+    catch(error){if(error.code!=="EEXIST")throw error;existing=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse)}
+    finally{await handle?.close().catch(()=>{})}
+    const savedOrder=created?order:existing,persisted=await persistAcceptedOffer(jobId,savedOrder);let schedule=await readOrderSchedule(jobId);
+    if(requestedDate&&schedule.status!=="confirmed")schedule=await recordOrderScheduleRequest(jobId,requestedDate,acceptedBy,"customer");
+    if(created)await appendJobHistory(jobId,{type:"offer_accepted",title:`Angebot ${savedOrder.offerNumber} als Auftrag übernommen`,detail:`${savedOrder.positions.length} Position(en) · ${savedOrder.totals.net.toLocaleString("de-AT",{style:"currency",currency:"EUR"})} netto${persisted.invoiceDraft?` · Vorkassa-Entwurf ${persisted.invoiceDraft.netAmount.toLocaleString("de-AT",{style:"currency",currency:"EUR"})} netto`:""}`,source:"KRISTINE Angebot",data:{offerNumber:savedOrder.offerNumber,selectedAlternativeIds:savedOrder.selectedAlternativeIds,prepaymentInvoiceDraft:!!persisted.invoiceDraft}});
+    res.status(created?201:200).json({ok:true,jobId,alreadyAccepted:!created,order:savedOrder,schedule,...persisted});
+  }catch(e){res.status(e.status||500).json({ok:false,error:String(e?.message||e)})}
+});
 
 app.post("/admin/api/job/:jobId/offer-pdf/render",express.text({type:"text/html",limit:"5mb"}),async(req,res)=>{if(!requireAdmin(req,res))return;try{
   const jobId=String(req.params.jobId||""),number=String(req.headers["x-offer-number"]||"").trim(),revision=Math.max(1,Number(req.headers["x-offer-revision"]||1));if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
@@ -3308,6 +3576,25 @@ app.post("/admin/api/job/:jobId/offer-pdf/upload",express.raw({type:["applicatio
   const pdf=originalPdf,storedName=`angebot-${number}-v${revision}.pdf`,dir=documentationDir(jobId),file=path.join(dir,storedName),immutableDir=path.join(DATA_DIR,jobId,"_offers"),immutableFile=path.join(immutableDir,storedName),source=accepted?"offer-approved-correction":"offer-approved-original",approvedAt=new Date().toISOString();await ensureDir(dir);await ensureDir(immutableDir);if(accepted){const historyDir=path.join(immutableDir,"history"),stamp=approvedAt.replace(/[:.]/g,"-");await ensureDir(historyDir);if(await fsp.stat(immutableFile).then(()=>true).catch(()=>false))await fsp.copyFile(immutableFile,path.join(historyDir,`angebot-${number}-v${revision}-vor-korrektur-${stamp}.pdf`));}const tmp=file+"."+crypto.randomUUID()+".tmp";try{await fsp.writeFile(tmp,pdf);await fsp.rename(tmp,file);await fsp.copyFile(file,immutableFile);await fsp.writeFile(immutableFile+".json",JSON.stringify({offerNumber:number,offerRevision:revision,storedName,source,approvedAt,sha256:crypto.createHash("sha256").update(pdf).digest("hex")},null,2),"utf8")}finally{await fsp.rm(tmp,{force:true}).catch(()=>{})}
   const rows=await readDocumentation(jobId),id=`offer-${crypto.createHash("sha256").update(`${jobId}|${number}|${revision}`).digest("hex").slice(0,20)}`,item={id,type:"offer",name:`Angebot ${number}.pdf`,offerNumber:number,offerRevision:revision,customerVisible:true,storedName,source,termsVersion:OFFER_TERMS.version,approvedAt,importedAt:approvedAt,url:`/admin/api/job/${encodeURIComponent(jobId)}/documentation/file?name=${encodeURIComponent(storedName)}`},next=rows.filter(row=>row?.id!==id&&row?.storedName!==storedName);next.unshift(item);await writeDocumentation(jobId,next.slice(0,1000));await appendJobHistory(jobId,{type:accepted?"offer_pdf_corrected_after_acceptance":"offer_pdf_approved",title:accepted?`Freigegebene PDF zu Angebot ${number} korrigiert`:`Freigegebene Original-PDF für Angebot ${number} übernommen`,detail:`Version ${revision} · freigegebene PDF unverändert übernommen · AGB separat im Kundenportal bestätigt${accepted?" · Kundenauftrag und Annahmezeitpunkt unverändert":""}`,source:"KRISTINE Angebot",data:{number,revision,storedName,bytes:pdf.length,termsVersion:OFFER_TERMS.version,customerAcceptanceUnchanged:accepted}}).catch(()=>{});res.json({ok:true,item,pdfUrl:item.url,correctedAfterAcceptance:accepted});
 }catch(e){res.status(500).json({ok:false,error:`Original-PDF konnte nicht gespeichert werden: ${String(e?.message||e)}`})}});
+app.put("/admin/api/job/:jobId/order-schedule/request",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!order)return res.status(409).json({ok:false,error:"Bitte zuerst das Angebot als Auftrag übernehmen."});const schedule=await recordOrderScheduleRequest(jobId,req.body?.date,orderScheduleActor(req),req.body?.source==="customer"?"customer":"office");res.json({ok:true,jobId,schedule});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+});
+
+app.post("/admin/api/job/:jobId/order-schedule/confirm",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!order)return res.status(409).json({ok:false,error:"Bitte zuerst das Angebot als Auftrag übernehmen."});const schedule=await confirmOrderScheduleForJob(jobId,{date:req.body?.date,from:req.body?.from,to:req.body?.to,employeeIds:req.body?.employeeIds,actor:orderScheduleActor(req)});res.json({ok:true,jobId,schedule,planningCreated:schedule.assignmentIds.length,outlookSynced:schedule.outlook.status==="synced"});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+});
+
+app.post("/admin/api/job/:jobId/order-schedule/propose",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!order)return res.status(409).json({ok:false,error:"Bitte zuerst das Angebot als Auftrag übernehmen."});const schedule=await proposeOrderScheduleForJob(jobId,{date:req.body?.date,from:req.body?.from,to:req.body?.to,employeeIds:req.body?.employeeIds,actor:orderScheduleActor(req)});res.json({ok:true,jobId,schedule});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+});
+
+app.post("/admin/api/job/:jobId/order-schedule/retry-outlook",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});let schedule=await readOrderSchedule(jobId);if(schedule.status!=="confirmed"||!schedule.appointmentId)return res.status(409).json({ok:false,error:"Für diesen Auftrag gibt es noch keinen bestätigten Outlook-Termin."});const appointment=await kristineOutlook.syncAppointment(schedule.appointmentId);schedule={...schedule,outlook:appointment.outlook,updatedAt:new Date().toISOString()};await persistOrderSchedule(jobId,schedule,{startDate:schedule.confirmedDate});res.json({ok:true,jobId,schedule,outlookSynced:schedule.outlook.status==="synced"});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+});
 
 app.put("/admin/api/job/:jobId/hours-cutover", async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -4332,11 +4619,43 @@ registerRegieAssistant(app, {
   writeDocumentation,
   sendRegieMail: sendMailWithAttachment,
 });
-const customerAccess = registerCustomerAccess(app, {
+customerAccess = registerCustomerAccess(app, {
   dataDir: DATA_DIR, requireAdmin, readJobMeta, writeJobMeta, appendJobHistory, readDocumentation, writeDocumentation, listJobMedia, readEmployees, listDaysForJob, regiePathForDay,
+  readOrderSchedule,
+  respondToOrderScheduleProposal,
+  onCustomerOfferAccepted:persistCustomerAcceptedOffer,
   readInvoicePdf: require("./customer-portal-invoices").createInvoicePdfReader({ dataDir:DATA_DIR, baseUrl:"https://pc-alex02.tail610122.ts.net", createPermit:createBrainPermit }),
   publicDir: path.join(process.cwd(), "public"), publicBaseUrl: PUBLIC_BASE_URL,
   collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
+  sendPortalInvitation: async ({jobId,portalUrl,recipient}) => {
+    const name=String(recipient?.name||"").trim(),phone=String(recipient?.phone||"").trim(),email=String(recipient?.email||"").trim(),role=String(recipient?.roleLabel||"Empfänger").trim();
+    const greeting=name?`Guten Tag ${name},`:`Guten Tag,`,message=`${greeting}\n\nhier ist Ihr persönlicher Zugang zur Projektakte #${jobId} als ${role}:\n${portalUrl}\n\nDer Einladungslink gilt 7 Tage.\n\nFreundliche Grüße\nFarben Krista`,channels=[],errors=[];
+    if(phone)try{await sendWhatsAppKristineReply({to:phone,reply:message});channels.push("WhatsApp")}catch(error){errors.push(`WhatsApp: ${String(error?.message||error)}`)}
+    if(!channels.length&&email){const info=await sendMailWithLink({to:email,subject:`Ihre KRISTINE Projektakte #${jobId}`,text:message});if(info)channels.push("E-Mail");else errors.push("E-Mail konnte nicht versendet werden.")}
+    return {sent:channels.length>0,channels,error:errors.join(" · ")||(!phone&&!email?"Beim Empfänger fehlt WhatsApp/Telefon und E-Mail.":"")};
+  },
+  sendCustomerPointNotice: async ({title,reason,portalUrl,customerName,customerPhone,customerEmail}) => {
+    const greeting=customerName?`Guten Tag ${customerName},`:`Guten Tag,`;
+    const message=reason==="confirmation"
+      ? `${greeting}\n\nwir haben den Punkt „${title}“ als erledigt gemeldet. Bitte bestätigen Sie kurz, ob wirklich alles passt:\n${portalUrl}\n\nFreundliche Grüße\nFarben Krista`
+      : `${greeting}\n\nwir haben den Punkt „${title}“ in Ihrer Projektakte erfasst. Hier sehen Sie den aktuellen Stand:\n${portalUrl}\n\nFreundliche Grüße\nFarben Krista`;
+    const channels=[],errors=[];
+    if(customerPhone){
+      try{await sendWhatsAppKristineReply({to:customerPhone,reply:message});channels.push("WhatsApp");}
+      catch(error){errors.push(`WhatsApp: ${String(error?.message||error)}`);}
+    }
+    if(!channels.length&&customerEmail){
+      const subject=reason==="confirmation"?`Bitte Erledigung bestätigen: ${title}`:`Neuer Punkt in Ihrer Projektakte: ${title}`;
+      const info=await sendMailWithLink({to:customerEmail,subject,text:message});
+      if(info)channels.push("E-Mail");else errors.push("E-Mail konnte nicht versendet werden.");
+    }
+    return {sent:channels.length>0,channels,error:errors.join(" · ")||(!customerPhone&&!customerEmail?"Beim Kunden fehlt WhatsApp/Telefon und E-Mail.":"")};
+  },
+  onCustomerPointReopened: async ({title,comment,task}) => {
+    const employees=await readEmployees(),employee=employees.find(row=>String(row.id)===String(task?.assigneeId||"")),phone=employee?.phone;
+    if(!phone)return;
+    await sendWhatsAppKristineReply({to:phone,reply:`❗ Kunde hat den Punkt wieder geöffnet\n\n*${title}*\n${comment}`,buttons:[{id:`task_call:${task.id}`,title:"Anrufen"},{id:`task_done:${task.id}`,title:"Erledigt"}]});
+  },
 });
 registerCustomerPortal(app, {
   dataDir: DATA_DIR,
@@ -4347,6 +4666,7 @@ registerCustomerPortal(app, {
   collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
   portalBaseUrl: CUSTOMER_PORTAL_URL,
   revokeAccess: jobId => customerAccess.revoke(jobId),
+  listInvitations: jobId => customerAccess.listInvitations(jobId),
 });
 console.log("âœ… KRISTINE Materialsystem registriert");
 
@@ -4408,6 +4728,7 @@ console.log("KRISTINE Archivsuche registriert");
 
 // ==================== KRISTINE Ausgangsrechnungen je Baustelle ====================
 registerOutgoingBillingBridge(app, {
+  dataDir: DATA_DIR,
   requireAdmin,
   onIssuedProgressInvoices: async ({ jobId, invoices }) => {
     for (const invoice of Array.isArray(invoices) ? invoices : []) {
@@ -4566,4 +4887,3 @@ async function startServer() {
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }
 startServer();
-

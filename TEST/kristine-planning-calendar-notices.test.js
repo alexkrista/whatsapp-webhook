@@ -18,6 +18,10 @@ assert.match(html, /Baustellenstart/);
 assert.match(html, /function sharedCalendarAbsences\(date\)/);
 assert.match(html, /\['urlaub','krank'\]\.includes\(cardTypeOf\(a\)\)/);
 assert.match(html, /Gemeinsamer Kalender: nur Krank, Urlaub, Geburtstage, Eintrittsjahrestage und jeder Baustellenstart genau einmal/);
+assert.match(html, /function orderScheduleNotice\(job\)/);
+assert.match(html, /Terminwunsch unbestätigt/);
+assert.match(html, /Kundenbestätigung offen/);
+assert.match(html, /Termin bestätigt/);
 for (const script of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)) {
   if (script[1].trim()) new Function(script[1]);
 }

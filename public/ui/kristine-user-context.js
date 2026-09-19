@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-0940";
+  const VERSION="2026-09-18-audit1";
   const USER_KEY="kristaCurrentUserIdV2";
   const SESSION_USER_KEY="kristaCurrentSessionUserIdV2";
   const TASK_VIEW_KEY="kristaTaskOwnerView";
@@ -12,6 +12,8 @@
   let accessSnapshot=null;
   let accessLoadedAt=0;
   let actorHeaderInstalled=false;
+  const pageVisitId=(window.crypto?.randomUUID?.()||`visit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const entrySentFor=new Set();
 
   const norm=v=>String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
@@ -20,7 +22,8 @@
 
   function employees(){
     try{
-      const rows=typeof masterEmployees!=="undefined"&&Array.isArray(masterEmployees)?masterEmployees:(Array.isArray(data?.employees)?data.employees:[]);
+      const localRows=typeof masterEmployees!=="undefined"&&Array.isArray(masterEmployees)?masterEmployees:(typeof data!=="undefined"&&Array.isArray(data?.employees)?data.employees:[]);
+      const rows=localRows.length?localRows:(Array.isArray(accessSnapshot?.users)?accessSnapshot.users.map(row=>({id:row.employeeId,name:row.employeeName,employeeName:row.employeeName,active:true,userRole:row.role})):[]);
       return rows.filter(e=>e&&e.active!==false&&employeeId(e));
     }catch{return []}
   }
@@ -80,7 +83,8 @@
       try{
         const url=new URL(typeof input==="string"?input:input?.url||"",location.href);
         const method=String(init?.method||input?.method||"GET").toUpperCase();
-        if(url.origin===location.origin&&method==="PUT"&&(url.pathname==="/kristine/api/tasks"||url.pathname==="/kristine/api/user-access")&&currentId()){
+        const internalApi=url.pathname.startsWith("/kristine/api/")||url.pathname.startsWith("/admin/api/")||url.pathname.startsWith("/kristool/api/")||url.pathname.startsWith("/api/");
+        if(url.origin===location.origin&&["POST","PUT","PATCH","DELETE"].includes(method)&&internalApi&&currentId()){
           const headers=new Headers(init.headers||input?.headers||{});
           headers.set("X-Krista-User-Id",currentId());
           init={...init,headers};
@@ -88,6 +92,15 @@
       }catch{}
       return originalFetch(input,init);
     };
+  }
+
+  async function recordEntry(){
+    const id=currentId();
+    if(!id||entrySentFor.has(id))return;
+    entrySentFor.add(id);
+    try{
+      await fetch(tokenUrl("/kristine/api/activity/session"),{method:"POST",headers:{"Content-Type":"application/json","X-Krista-User-Id":id},body:JSON.stringify({page:location.pathname+location.hash,title:document.title,sessionId:pageVisitId})});
+    }catch{}
   }
 
   function resolveInitialUser(){
@@ -118,6 +131,7 @@
     }
     if(changed)localStorage.setItem(TASK_VIEW_KEY,"me");
     updateCreatorField();renderIdentity();ensureTaskViewFilter();
+    void recordEntry();
     if(changed){
       window.dispatchEvent(new CustomEvent("krista:userchange",{detail:{id:currentUserId,name:employeeName(e),role:roleFor(e),remember:remember?"device":"session"}}));
       if(typeof window.renderTasks==="function")setTimeout(()=>window.renderTasks(),0);
@@ -264,8 +278,8 @@
   }
 
   async function refresh(){
-    if(!employees().length)return;
     await loadAccess(false);
+    if(!employees().length)return;
     if(!currentUserId){
       const resolved=resolveInitialUser();
       if(resolved)setCurrentUser(resolved,{remember:rememberMode()!=="session",force:true});
@@ -278,10 +292,11 @@
       currentUserId="";sessionStorage.removeItem(SESSION_USER_KEY);localStorage.removeItem(USER_KEY);promptShown=false;return refresh();
     }
     installStyle();renderIdentity();updateCreatorField();ensureTaskViewFilter();installRenderScope();installModalScope();installTaskCreatorHooks();guardFinanceActions();
+    void recordEntry();
   }
 
   function boot(){
-    if(booted||!location.pathname.toLowerCase().includes("/kristine"))return;booted=true;
+    if(booted)return;booted=true;
     installStyle();installActorHeader();
     setInterval(refresh,1200);
     window.addEventListener("hashchange",()=>setTimeout(refresh,0));

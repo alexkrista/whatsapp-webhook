@@ -604,6 +604,19 @@ function installOutlookCalendar(app, deps = {}) {
     }
   }
 
+  async function createAppointment(body = {}) {
+    const input = await enrichDeparture(cleanInput(body)); const requestId = String(body.requestId || "").slice(0, 100); const fingerprint = appointmentFingerprint(input);
+    const saved = await serialized(async () => {
+      const rows = await readJson(appointmentsFile, []);
+      const existing = rows.find(row => (requestId && row.requestId === requestId) || appointmentFingerprint(row) === fingerprint);
+      if (existing) { await audit("appointment_duplicate_prevented", { appointmentId:existing.id, taskId:input.taskId, requestId }); return { appointment:existing, created:false }; }
+      const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, fingerprint, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null, departureBlockEventId:"", departureBlockStatus:"pending", departureBlockError:"" } };
+      rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return { appointment:row, created:true };
+    });
+    const synced = await syncAppointment(saved.appointment.id);
+    return { appointment:synced, created:saved.created, internalSaved:true, duplicatePrevented:!saved.created, outlookSynced:synced.outlook.status === "synced" };
+  }
+
   app.get("/kristine/api/outlook/status", async (req, res) => {
     if (!allowed(req, res)) return;
     try {
@@ -647,7 +660,8 @@ function installOutlookCalendar(app, deps = {}) {
     if (!adminToken || !task || !valid) return res.status(403).send("Forbidden");
     const browserSession = crypto.createHmac("sha256", adminToken).update("kristine-browser-session-v1").digest("base64url");
     res.setHeader("Set-Cookie", `kristine_session=${browserSession}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
-    res.redirect(302, `/kristine?task=${encodeURIComponent(task)}#tasks`);
+    const jobId = task.startsWith("job:") ? task.slice(4) : "";
+    res.redirect(302, /^[A-Za-z0-9_-]{1,80}$/.test(jobId) ? `/public/baustellen.html#${encodeURIComponent(jobId)}` : `/kristine?task=${encodeURIComponent(task)}#tasks`);
   });
 
   app.get("/kristine/departure-entry", (req, res) => {
@@ -743,15 +757,8 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
   app.post("/kristine/api/appointments", async (req, res) => {
     if (!allowed(req, res)) return;
     try {
-      const input = await enrichDeparture(cleanInput(req.body || {})); const requestId = String(req.body?.requestId || "").slice(0, 100); const fingerprint = appointmentFingerprint(input);
-      const saved = await serialized(async () => {
-        const rows = await readJson(appointmentsFile, []);
-        const existing = rows.find(row => (requestId && row.requestId === requestId) || appointmentFingerprint(row) === fingerprint);
-        if (existing) { await audit("appointment_duplicate_prevented", { appointmentId:existing.id, taskId:input.taskId, requestId }); return { appointment:existing, created:false }; }
-        const now = new Date().toISOString(); const row = { id:`kristine-appt-${crypto.randomUUID()}`, requestId, fingerprint, ...input, createdAt:now, updatedAt:now, outlook:{ status:"pending", eventId:"", webLink:"", error:"", attempts:0, lastAttemptAt:null, syncedAt:null, departureBlockEventId:"", departureBlockStatus:"pending", departureBlockError:"" } };
-        rows.push(row); await atomicJson(appointmentsFile, rows); await audit("appointment_saved", { appointmentId:row.id, taskId:row.taskId }); return { appointment:row, created:true };
-      });
-      const synced = await syncAppointment(saved.appointment.id); res.status(saved.created ? 201 : 200).json({ ok:true, appointment:synced, internalSaved:true, duplicatePrevented:!saved.created, outlookSynced:synced.outlook.status === "synced" });
+      const result = await createAppointment(req.body || {});
+      res.status(result.created ? 201 : 200).json({ ok:true, ...result });
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 
@@ -829,7 +836,7 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 
-  return { syncAppointment, accessToken };
+  return { syncAppointment, createAppointment, accessToken };
 }
 
 module.exports = { installOutlookCalendar };

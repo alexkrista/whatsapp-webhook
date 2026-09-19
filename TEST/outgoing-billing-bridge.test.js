@@ -2,7 +2,10 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildBillingSummary, registerOutgoingBillingBridge } = require("../outgoing-billing-bridge");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { buildBillingSummary, addLocalPrepaymentDraft, registerOutgoingBillingBridge } = require("../outgoing-billing-bridge");
 
 test("summarizes booked WinWorker invoice and payment for a job", () => {
   const billing = buildBillingSummary(
@@ -71,4 +74,15 @@ test("only an issued KRISTINE invoice hands its linked reports back as billed", 
   assert.equal(body.ok, true);
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].invoices.map((invoice) => invoice.progressBilling.reportIdsToBill), [["issued-report"]]);
+});
+
+test("local Vorkassa draft is visible in the ordinary job billing summary", async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vorkassa-billing-"));
+  t.after(() => fs.rm(dir, { recursive:true, force:true }));
+  await fs.mkdir(path.join(dir, "26001"), { recursive:true });
+  await fs.writeFile(path.join(dir, "26001", ".prepayment-invoice-draft.json"), JSON.stringify({
+    id:"vorkassa-26001-2609001", status:"draft", subject:"Vorkassa", netAmount:1250, vatAmount:250, grossAmount:1500, createdAt:"2026-09-18T10:00:00Z",
+  }));
+  const billing = await addLocalPrepaymentDraft({found:false,projectNumber:"26001",summary:{draftCount:0,documentCount:0,draftNet:0,draftGross:0},invoices:[],payments:[],runs:[]}, dir, "26001");
+  assert.equal(billing.found,true);assert.equal(billing.summary.draftCount,1);assert.equal(billing.summary.draftNet,1250);assert.equal(billing.invoices[0].localDraft,true);
 });

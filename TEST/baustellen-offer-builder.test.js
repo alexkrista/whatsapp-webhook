@@ -56,7 +56,7 @@ for(const text of ["TitilliumWeb-Regular.ttf","TitilliumWeb-SemiBold.ttf","Über
   assert.ok(ui.includes(text),`Mehrseitiger Firmendruck enthält ${text}`);
 for(const text of ["handwrittenPrintCorrectionsCss","border-bottom-width:3px","font-size:8px","Frastanz, ","koffer-paper-continuation","Übertrag von Seite 1:","offerPageModeCss"])
   assert.ok(ui.includes(text),`Handschriftliche Druckkorrekturen enthalten ${text}`);
-for(const text of ["fixedOfferPagesCss","koffer-paper-page-one","koffer-paper-page-two","koffer-paper-page-logo","companyPrintFooter(\"1 / 2\")","companyPrintFooter(\"2 / 2\")","koffer-paper-footer-page","width:270px"])
+for(const text of ["fixedOfferPagesCss","koffer-paper-page-one","koffer-paper-page-two","koffer-paper-page-logo","companyPrintFooter(\"1 / 2\")","companyPrintFooter(\"2 / 2\")","koffer-paper-footer-page","width:276px"])
   assert.ok(ui.includes(text),`Zweiseitiger Angebotsdruck enthält ${text}`);
 for(const text of ["size:A4 portrait","width:210mm!important","max-width:210mm!important","height:297mm!important","table-layout:fixed!important","white-space:normal!important"])
   assert.ok(ui.includes(text),`Angebotsdruck bleibt maßhaltig im A4-Hochformat: ${text}`);
@@ -71,5 +71,11 @@ for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(
 for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
 for(const text of ["Drucken / PDF","printOffer","printDocumentHtml","storeCanonicalOfferPdf","offer-pdf/upload","offerDocumentMeta"])assert.ok(ui.includes(text),`Angebotsdruck enthält ${text}`);
 for(const text of ["offerNumberPrefix","nextOfferNumber","offer-number-counter.json","offer-draft/finalize","offerRevision"])assert.ok(server.includes(text),`Angebotsnummernkreis enthält ${text}`);
+for(const text of ["Terminwunsch des Kunden","Terminwunsch speichern","Termin bestätigen","Anderen Termin vorschlagen","retry-outlook"])
+  assert.ok(ui.includes(text),`Auftragstermin enthält ${text}`);
+for(const text of ["order-schedule/request","order-schedule/confirm","order-schedule/propose","order-schedule/retry-outlook"])
+  assert.ok(server.includes(text),`Auftragstermin-API enthält ${text}`);
+for(const text of ["Als Auftrag übernehmen","kofferAcceptTop","offer-draft/accept"])
+  assert.ok(ui.includes(text),`Auftragsübernahme ist oben beim Angebot sichtbar: ${text}`);
 for(const text of ['hourlyRate:Number(job?.billingRate||job?.calculation?.billingRate||75)','materialMarkupPct:Number(job?.materialPercent||job?.calculation?.materialPercent||80)','regieMaterialMode:"percent"','regieMaterialRate:20'])assert.ok(ui.includes(text),`Standard-Faktbox liefert ${text}`);
 console.log("OK: Angebotsbaukasten enthält Vorlagen, Detailkalkulation und Aufmaß je Raum.");

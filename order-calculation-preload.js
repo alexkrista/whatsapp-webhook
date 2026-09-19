@@ -67,8 +67,14 @@ function sanitizeSourceDocument(value) {
 }
 function sanitizePosition(row, index) {
   const source = row && typeof row === "object" ? row : {};
-  const kind = VALID_KINDS.has(source.kind) ? source.kind : "auftrag";
-  const suggestedKind = VALID_KINDS.has(source.suggestedKind) ? source.suggestedKind : "";
+  const originalKind = VALID_KINDS.has(source.kind) ? source.kind : "auftrag";
+  const regieText = /\bregie/i.test(`${source.title || ""} ${source.shortText || ""} ${source.description || ""}`);
+  const acceptedRegie = source.source === "accepted_offer" && regieText;
+  const kind = acceptedRegie && originalKind === "auftrag" ? "regie" : originalKind;
+  const suggestedKind = VALID_KINDS.has(source.suggestedKind) ? source.suggestedKind : (acceptedRegie ? "regie" : "");
+  const quantity = cleanNumber(source.quantity);
+  const unit = cleanText(source.unit, 24);
+  const plannedHours = cleanNumber(source.plannedHours) || (kind === "regie" && /^std\.?$/i.test(unit) ? quantity : 0);
   return {
     id: cleanText(source.id || `pos_${index + 1}`, 80).replace(/[^A-Za-z0-9_.:-]/g, "_") || `pos_${index + 1}`,
     number: cleanText(source.number, 40),
@@ -76,11 +82,11 @@ function sanitizePosition(row, index) {
     title: cleanText(source.title, 220),
     shortText: cleanText(source.shortText || source.title || source.description, 220),
     description: cleanText(source.description, 1800),
-    quantity: cleanNumber(source.quantity),
-    unit: cleanText(source.unit, 24),
+    quantity,
+    unit,
     unitPrice: cleanNumber(source.unitPrice),
     amount: cleanNumber(source.amount),
-    plannedHours: cleanNumber(source.plannedHours),
+    plannedHours,
     kind,
     suggestedKind,
     needsReview: !!source.needsReview,

@@ -1,9 +1,11 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-08-24-users-2";
+  const VERSION="2026-09-18-audit1";
   const USER_KEY="kristaCurrentUserIdV2";
   let snapshot=null;
+  let activityEntries=null;
+  let activityError="";
 
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const token=()=>new URLSearchParams(location.search).get("token")||"";
@@ -23,7 +25,7 @@
   function installCss(){
     if(document.getElementById("krisadminUserCss"))return;
     const s=document.createElement("style");s.id="krisadminUserCss";s.textContent=`
-      .kau-bg{position:fixed;inset:0;z-index:60020;background:rgba(0,0,0,.52);display:none;place-items:center;padding:18px}.kau-bg.open{display:grid}.kau-modal{width:min(1040px,100%);max-height:92vh;overflow:auto;background:#f7f5ef;border-radius:18px;box-shadow:0 25px 90px rgba(0,0,0,.3);padding:18px}.kau-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.kau-head h2{margin:0}.kau-sub{font-size:12px;color:#707070;margin-top:4px}.kau-list{display:grid;gap:8px;margin-top:15px}.kau-row{display:grid;grid-template-columns:minmax(170px,1.2fr) 150px minmax(0,2.3fr);gap:10px;align-items:center;background:#fff;border:1px solid #dedad1;border-radius:12px;padding:11px}.kau-person strong{display:block}.kau-person small{color:#777}.kau-perms{display:flex;gap:7px 12px;flex-wrap:wrap}.kau-perms label{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:#3e433e;margin:0}.kau-perms input{width:auto}.kau-lock{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#eef4ee;color:#27633b;padding:4px 8px;font-size:10px;font-weight:850}.kau-actions{display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-top:14px}.kau-status{margin-right:auto;font-size:12px;font-weight:750}.kau-status.ok{color:#21602f}.kau-status.error{color:#9d2525}.kau-blocked{padding:18px;border-radius:12px;background:#fff3d6;color:#765300;margin-top:14px}.kau-role{width:100%;padding:8px}.kau-role:disabled{background:#eee;color:#555}@media(max-width:800px){.kau-row{grid-template-columns:1fr}.kau-actions{flex-wrap:wrap}.kau-actions button{flex:1}.kau-status{width:100%}}
+      .kau-bg{position:fixed;inset:0;z-index:60020;background:rgba(0,0,0,.52);display:none;place-items:center;padding:18px}.kau-bg.open{display:grid}.kau-modal{width:min(1040px,100%);max-height:92vh;overflow:auto;background:#f7f5ef;border-radius:18px;box-shadow:0 25px 90px rgba(0,0,0,.3);padding:18px}.kau-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.kau-head h2{margin:0}.kau-sub{font-size:12px;color:#707070;margin-top:4px}.kau-list{display:grid;gap:8px;margin-top:15px}.kau-row{display:grid;grid-template-columns:minmax(170px,1.2fr) 150px minmax(0,2.3fr);gap:10px;align-items:center;background:#fff;border:1px solid #dedad1;border-radius:12px;padding:11px}.kau-person strong{display:block}.kau-person small{color:#777}.kau-perms{display:flex;gap:7px 12px;flex-wrap:wrap}.kau-perms label{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:#3e433e;margin:0}.kau-perms input{width:auto}.kau-lock{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#eef4ee;color:#27633b;padding:4px 8px;font-size:10px;font-weight:850}.kau-actions{display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-top:14px}.kau-status{margin-right:auto;font-size:12px;font-weight:750}.kau-status.ok{color:#21602f}.kau-status.error{color:#9d2525}.kau-blocked{padding:18px;border-radius:12px;background:#fff3d6;color:#765300;margin-top:14px}.kau-role{width:100%;padding:8px}.kau-role:disabled{background:#eee;color:#555}.kau-activity{margin-top:20px;border-top:1px solid #d9d4ca;padding-top:16px}.kau-activity-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.kau-activity-head h3{margin:0}.kau-activity-list{display:grid;gap:6px;margin-top:10px}.kau-activity-row{display:grid;grid-template-columns:145px minmax(130px,.7fr) minmax(240px,2fr) 72px;gap:10px;align-items:center;background:#fff;border:1px solid #e3ded4;border-radius:10px;padding:9px 10px;font-size:12px}.kau-activity-row small{color:#777}.kau-activity-result{font-weight:800;color:#21602f}.kau-activity-result.failed{color:#9d2525}@media(max-width:800px){.kau-row{grid-template-columns:1fr}.kau-actions{flex-wrap:wrap}.kau-actions button{flex:1}.kau-status{width:100%}.kau-activity-row{grid-template-columns:1fr 1fr}.kau-activity-action{grid-column:1/-1}.kau-activity-result{text-align:right}}
     `;document.head.appendChild(s);
   }
 
@@ -42,6 +44,17 @@
     const locked=key==="financeApproval"||key==="userAdmin";
     if(locked)return `<span class="kau-lock">🔒 ${esc(label)}: ${user.permissions?.[key]?"Ja":"Nein"}</span>`;
     return `<label><input type="checkbox" data-perm="${esc(key)}" ${user.permissions?.[key]?"checked":""}>${esc(label)}</label>`;
+  }
+
+  function dateTime(value){
+    const date=new Date(value);return Number.isNaN(date.getTime())?String(value||""):date.toLocaleString("de-AT",{dateStyle:"short",timeStyle:"medium"});
+  }
+
+  function activitySection(){
+    if(activityError)return `<section class="kau-activity"><div class="kau-activity-head"><div><h3>Aktivitätsprotokoll</h3><div class="kau-sub">Einstiege und gespeicherte Änderungen, ohne Dokument- oder Nachrichteninhalte.</div></div><button type="button" class="secondary" id="kauActivityRefresh">Neu laden</button></div><div class="kau-blocked">${esc(activityError)}</div></section>`;
+    if(activityEntries===null)return `<section class="kau-activity"><div class="kau-activity-head"><div><h3>Aktivitätsprotokoll</h3><div class="kau-sub">Einstiege und gespeicherte Änderungen, ohne Dokument- oder Nachrichteninhalte.</div></div></div><div class="kau-blocked">Lade Aktivitäten …</div></section>`;
+    const rows=activityEntries.length?activityEntries.map(entry=>`<div class="kau-activity-row"><div><strong>${esc(dateTime(entry.at))}</strong><br><small>${entry.type==="session"?"Einstieg":esc(entry.method||"Aktion")}</small></div><div><strong>${esc(entry.actorName||entry.actorId)}</strong></div><div class="kau-activity-action">${esc(entry.action)}${entry.page?`<br><small>${esc(entry.page)}</small>`:""}</div><div class="kau-activity-result ${entry.status==="failed"?"failed":""}">${entry.status==="failed"?`Fehler ${esc(entry.statusCode||"")}`:"Erfolgreich"}</div></div>`).join(""):'<div class="kau-blocked">Noch keine Aktivitäten erfasst.</div>';
+    return `<section class="kau-activity"><div class="kau-activity-head"><div><h3>Aktivitätsprotokoll</h3><div class="kau-sub">Letzte 100 Einstiege und Änderungen. Inhalte und Zugangsdaten werden nicht protokolliert.</div></div><button type="button" class="secondary" id="kauActivityRefresh">Neu laden</button></div><div class="kau-activity-list">${rows}</div></section>`;
   }
 
   function render(){
@@ -65,8 +78,9 @@
           ${permissionControl(user,'financeApproval','Freigaben')}
           ${permissionControl(user,'userAdmin','Benutzerverwaltung')}
         </div>
-      </div>`).join("")}</div><div class="kau-actions"><span id="kauStatus" class="kau-status"></span><button type="button" class="secondary" data-close>Abbrechen</button><button type="button" class="green" id="kauSave">💾 Rechte speichern</button></div>`;
+      </div>`).join("")}</div><div class="kau-actions"><span id="kauStatus" class="kau-status"></span><button type="button" class="secondary" data-close>Abbrechen</button><button type="button" class="green" id="kauSave">💾 Rechte speichern</button></div>${activitySection()}`;
     content.querySelector("#kauSave").onclick=save;
+    const refresh=content.querySelector("#kauActivityRefresh");if(refresh)refresh.onclick=loadActivity;
     content.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>document.getElementById("krisadminUserBg")?.classList.remove("open"));
   }
 
@@ -89,10 +103,17 @@
     finally{const b=document.getElementById("kauSave");if(b)b.disabled=false}
   }
 
+  async function loadActivity(){
+    activityEntries=null;activityError="";render();
+    try{const result=await api("/kristine/api/activity?limit=100");activityEntries=Array.isArray(result?.entries)?result.entries:[]}
+    catch(error){activityEntries=[];activityError=error.message||String(error)}
+    render();
+  }
+
   async function open(){
     installCss();const bg=ensureModal();bg.classList.add("open");
     document.getElementById("kauContent").innerHTML='<div class="kau-blocked">Lade Benutzer und Rechte …</div>';
-    try{snapshot=await api("/kristine/api/user-access");render()}
+    try{snapshot=await api("/kristine/api/user-access");render();if(currentActor()?.isAlexander)await loadActivity()}
     catch(error){document.getElementById("kauContent").innerHTML=`<div class="kau-blocked"><strong>Benutzerverwaltung konnte nicht geladen werden.</strong><br>${esc(error.message||error)}</div>`}
   }
 

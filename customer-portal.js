@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { portalRecipientOptions, sanitizePortalRecipient } = require("./workflow-contacts");
 
 const PORTAL_STATUSES = new Set(["off", "prepared", "active"]);
 const PORTAL_MODULES = ["projectFile", "regie", "communication", "projectPoints"];
@@ -50,6 +51,15 @@ function sanitizeCustomerPortal(value = {}, existing = {}) {
   const mode = source.mode === "collection" ? "collection" : (source.mode === "single" ? "single" : (old.mode === "collection" ? "collection" : "single"));
   const rawIncluded = Array.isArray(source.includedJobIds) ? source.includedJobIds : (Array.isArray(old.includedJobIds) ? old.includedJobIds : []);
   const includedJobIds = [...new Set(rawIncluded.map(id => String(id || "").trim()).filter(id => /^[A-Za-z0-9_-]+$/.test(id)))].slice(0, 50);
+  const rawRecipients = Array.isArray(source.recipients) ? source.recipients : (Array.isArray(old.recipients) ? old.recipients : []);
+  const recipientMap = new Map();
+  for (const value of rawRecipients.slice(0, 20)) {
+    const recipient = sanitizePortalRecipient(value);
+    if (recipient.id && (recipient.name || recipient.email || recipient.phone)) recipientMap.set(recipient.id, recipient);
+  }
+  const recipients = [...recipientMap.values()];
+  const rawSelected = Array.isArray(source.selectedRecipientIds) ? source.selectedRecipientIds : (Array.isArray(old.selectedRecipientIds) ? old.selectedRecipientIds : []);
+  const selectedRecipientIds = [...new Set(rawSelected.map(id => String(id || "").replace(/[^A-Za-z0-9_-]/g, "")).filter(id => recipientMap.has(id)))].slice(0, 20);
   return {
     status,
     mode,
@@ -59,8 +69,17 @@ function sanitizeCustomerPortal(value = {}, existing = {}) {
     customerEmail: String(source.customerEmail ?? old.customerEmail ?? "").trim().slice(0, 180),
     customerPhone: String(source.customerPhone ?? old.customerPhone ?? "").trim().slice(0, 60),
     contactSelectionKey: String(source.contactSelectionKey ?? old.contactSelectionKey ?? "").slice(0, 1000),
+    recipients,
+    selectedRecipientIds,
     updatedAt: source.updatedAt ?? old.updatedAt ?? null,
   };
+}
+
+function customerPortalRecipientOptions(meta = {}, portalValue = {}) {
+  const portal = sanitizeCustomerPortal(portalValue);
+  const options = new Map(portalRecipientOptions(meta).map(row => [row.id, sanitizePortalRecipient(row)]));
+  for (const recipient of portal.recipients) if (!options.has(recipient.id) || recipient.role === "manual") options.set(recipient.id, recipient);
+  return [...options.values()];
 }
 
 function registerCustomerPortal(app, options) {
@@ -76,7 +95,8 @@ function registerCustomerPortal(app, options) {
       const jobId = String(req.params.jobId || "");
       if (!isSafeJobId(jobId) || !jobExists(jobId)) return res.status(404).json({ ok: false, error: "Baustelle nicht gefunden." });
       const meta = await readJobMeta(jobId);
-      res.json({ ok: true, jobId, portal: sanitizeCustomerPortal(meta.customerPortal), contactDefaults: customerContactDefaults(meta), portalUrl: portalUrl(jobId) });
+      const portal=sanitizeCustomerPortal(meta.customerPortal),recipientOptions=customerPortalRecipientOptions(meta,portal),invitationStatuses=await options.listInvitations?.(jobId) || [];
+      res.json({ ok: true, jobId, portal, contactDefaults: customerContactDefaults(meta), recipientOptions, invitationStatuses, portalUrl: portalUrl(jobId) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
     }
@@ -97,7 +117,8 @@ function registerCustomerPortal(app, options) {
       portal.includedJobIds = portal.mode === "collection" ? collectionMemberJobIds : [];
       portal.updatedAt = new Date().toISOString();
       await writeJobMeta(jobId, { customerPortal: portal });
-      if(portal.status === "off" || ["customerName","customerPhone","customerEmail"].some(key => portal[key] !== sanitizeCustomerPortal(beforeMeta.customerPortal)[key])) await options.revokeAccess?.(jobId);
+      const beforePortal=sanitizeCustomerPortal(beforeMeta.customerPortal);
+      if(portal.status === "off" || ["customerName","customerPhone","customerEmail"].some(key => portal[key] !== beforePortal[key]) || JSON.stringify(portal.recipients)!==JSON.stringify(beforePortal.recipients) || JSON.stringify(portal.selectedRecipientIds)!==JSON.stringify(beforePortal.selectedRecipientIds)) await options.revokeAccess?.(jobId);
       await appendJobHistory(jobId, {
         type: "customer_portal_updated",
         title: "Kundenportal aktualisiert",
@@ -112,4 +133,4 @@ function registerCustomerPortal(app, options) {
   });
 }
 
-module.exports = { PORTAL_MODULES, sanitizeCustomerPortal, customerContactDefaults, registerCustomerPortal };
+module.exports = { PORTAL_MODULES, sanitizeCustomerPortal, customerContactDefaults, customerPortalRecipientOptions, registerCustomerPortal };

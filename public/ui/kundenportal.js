@@ -2,29 +2,76 @@
   "use strict";
   const $=id=>document.getElementById(id),esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char])),labels={offer:"Angebot",projectFile:"Projektakte",regie:"Regieberichte",communication:"Nachrichten",projectPoints:"Punkte & Wünsche"};
   const number=value=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:2}).format(Number(value)||0),money=value=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR"}).format(Number(value)||0);
-  let ticket=new URLSearchParams(location.hash.slice(1)).get("zugang")||"",data=null,selected="";
+  const fragment=new URLSearchParams(location.hash.slice(1));
+  let ticket=fragment.get("zugang")||"",focusPoint=fragment.get("punkt")||"",data=null,selected="";
   history.replaceState(null,"",location.pathname);
   const api=async(path,options={})=>{const response=await fetch("/kundenportal/api/"+path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}}),body=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(body.error||"Das hat nicht funktioniert. Bitte erneut versuchen."),{status:response.status});return body};
   const fileData=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data:reader.result});reader.onerror=()=>reject(Error(`Foto ${file.name} konnte nicht gelesen werden.`));reader.readAsDataURL(file)});
   const access=message=>{$("project").hidden=true;$("access").hidden=false;$("logout").hidden=true;$("accessMessage").textContent=message;$("enter").hidden=!ticket};
   async function load(){
-    try{data=await api("project");$("access").hidden=true;$("project").hidden=false;$("logout").hidden=false;$("preview").hidden=!data.preview;$("closeProject").disabled=!!data.preview;$("downloadCloseProject").disabled=!!data.preview;$("number").textContent=(data.number.startsWith("S")?"Sammelmappe ":"Baustelle ")+data.number;$("name").textContent=data.name;$("greeting").textContent="Willkommen"+(data.customerName?", "+data.customerName:"")+". Hier finden Sie Ihre freigegebenen Unterlagen.";
-      const enabled=Object.keys(labels).filter(key=>key==="offer"?Boolean(data.offer):data.modules[key]);if(!enabled.includes(selected))selected=enabled[0]||"";
+    try{data=await api("project");$("access").hidden=true;$("project").hidden=false;$("logout").hidden=false;$("preview").hidden=!data.preview;$("closeProject").disabled=!!data.preview;$("downloadCloseProject").disabled=!!data.preview;$("number").textContent=(data.number.startsWith("S")?"Sammelmappe ":"Baustelle ")+data.number;$("name").textContent=data.name;$("greeting").textContent="Willkommen"+(data.customerName?", "+data.customerName:"")+". Hier finden Sie Ihre freigegebenen Unterlagen.";renderOrderSchedule();
+      const enabled=Object.keys(labels).filter(key=>key==="offer"?Boolean(data.offer):data.modules[key]);if(focusPoint&&enabled.includes("projectPoints"))selected="projectPoints";else if(!enabled.includes(selected))selected=enabled[0]||"";
       $("tabs").innerHTML=enabled.map(key=>`<button data-tab="${key}" aria-current="${key===selected}">${labels[key]}</button>`).join("");$("tabs").querySelectorAll("button").forEach(button=>button.onclick=()=>{selected=button.dataset.tab;render();for(const row of $("tabs").querySelectorAll("button"))row.setAttribute("aria-current",String(row===button))});render();
+      if(focusPoint){const point=data.points.find(row=>row.id===focusPoint);focusPoint="";if(point)setTimeout(()=>openPoint(point),0);}
     }catch(e){access(e.message)}
   }
   function fileLink(file){return `<a class="button" href="${esc(file.url)}" target="_blank" rel="noopener">${esc(file.name||"PDF öffnen")}</a>`}
   const date=value=>/^\d{4}-\d{2}-\d{2}/.test(value||"")?String(value).slice(0,10).split("-").reverse().join("."):"";
+  const scheduleWhen=(day,from,to)=>`${date(day)}${from&&to?` · ${from}–${to} Uhr`:""}`;
+  function renderOrderSchedule(){
+    const host=$("orderScheduleCard"),schedule=data?.orderSchedule||{},status=schedule.status||"none";if(!host)return;
+    if(status==="none"){host.hidden=true;host.replaceChildren();return}
+    host.hidden=false;
+    if(status==="requested")host.innerHTML=`<p class="eyebrow">Auftragstermin</p><h2>Ihr Terminwunsch: ${esc(date(schedule.requestedDate))}</h2><p class="notice">Der Terminwunsch ist bei uns eingegangen, aber noch nicht fix bestätigt oder eingeplant.</p>`;
+    else if(status==="confirmed")host.innerHTML=`<p class="eyebrow">Auftragstermin</p><h2>✓ Termin bestätigt</h2><p><strong>${esc(scheduleWhen(schedule.confirmedDate,schedule.confirmedFrom,schedule.confirmedTo))}</strong></p><p class="meta">Dieser Termin wurde von Farben Krista bestätigt und in die Planung übernommen.</p>`;
+    else if(status==="proposal_declined")host.innerHTML=`<p class="eyebrow">Auftragstermin</p><h2>Weitere Terminabstimmung läuft</h2><p>Ihre Rückmeldung ist bei uns eingegangen. Wir melden uns mit einem neuen Vorschlag.</p>${schedule.customerResponse?`<p class="text">${esc(schedule.customerResponse)}</p>`:""}`;
+    else if(status==="proposed"){
+      host.innerHTML=`<p class="eyebrow">Auftragstermin</p><h2>Neuer Terminvorschlag</h2>${schedule.requestedDate?`<p class="meta">Ihr ursprünglicher Wunsch: ${esc(date(schedule.requestedDate))}</p>`:""}<p><strong>${esc(scheduleWhen(schedule.proposedDate,schedule.proposedFrom,schedule.proposedTo))}</strong></p><p>Passt dieser Termin für Sie?</p><div class="portal-tools"><button id="acceptSchedule" class="primary" ${data.preview?"disabled":""}>✓ Termin passt</button><button id="declineSchedule" ${data.preview?"disabled":""}>Anderen Termin abstimmen</button></div><form id="declineScheduleForm" hidden><label>Welche Tage oder Zeiten passen besser?<textarea name="comment" maxlength="1000" required></textarea></label><button class="primary" type="submit">Rückmeldung senden</button></form><p id="scheduleResponseStatus" class="meta" role="status"></p>`;
+      $("acceptSchedule").onclick=()=>respondOrderSchedule(true,"");
+      $("declineSchedule").onclick=()=>{$("declineScheduleForm").hidden=false;$("declineScheduleForm").elements.comment.focus()};
+      $("declineScheduleForm").onsubmit=event=>{event.preventDefault();respondOrderSchedule(false,event.currentTarget.elements.comment.value)};
+    }
+  }
+  async function respondOrderSchedule(confirmed,comment){
+    const host=$("orderScheduleCard"),status=$("scheduleResponseStatus");host.querySelectorAll("button,textarea").forEach(control=>control.disabled=true);if(status)status.textContent="Wird gespeichert …";
+    try{const result=await api("order-schedule/response",{method:"POST",headers:{"x-csrf-token":data.csrf},body:JSON.stringify({confirmed,comment})});data.orderSchedule=result.orderSchedule;renderOrderSchedule();$("status").textContent=confirmed?"Danke. Der Termin ist bestätigt.":"Danke. Ihre Rückmeldung ist bei Farben Krista eingegangen.";}
+    catch(error){host.querySelectorAll("button,textarea").forEach(control=>control.disabled=false);if(status)status.textContent=error.message;}
+  }
   const pointTitle=row=>row.title||String(row.text||"").split(/\r?\n/)[0].slice(0,100)||row.area||"Punkt oder Wunsch";
-  const pointStatus=row=>row.status==="done"?"Erledigt":row.history?.some(event=>event.status==="done")?"Wieder offen":"Eingegangen";
+  const pointStatus=row=>({captured:"Erfasst",received:"Eingegangen",sent:"Versendet",read:"Gelesen",assigned:"Eingeteilt",awaiting_confirmation:"Kundenbestätigung offen",confirmed:"Vom Kunden als erledigt bestätigt",reopened:"Wieder offen",legacy_done:"Erledigt · Altbestand"}[row.state]||"Eingegangen");
+  const pointClass=row=>["confirmed","legacy_done"].includes(row.state)?"done":row.state==="awaiting_confirmation"?"confirm":"";
   const pointTime=value=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString("de-AT",{dateStyle:"medium",timeStyle:"short"}):"Zeitpunkt nicht gespeichert";
+  const eventLabel=event=>{
+    if(event.kind==="submitted")return"Vom Kunden eingegangen";
+    if(event.kind==="captured")return"Von Farben Krista erfasst";
+    if(event.kind==="sent")return event.reason==="confirmation"?"Bitte um Kundenbestätigung versendet":"An den Kunden versendet";
+    if(event.kind==="read")return"Vom Kunden gelesen";
+    if(event.kind==="assigned")return`Eingeteilt${event.assigneeName?" · "+event.assigneeName:""}${event.dueDate?" · Termin "+date(event.dueDate):""}`;
+    if(event.kind==="internal_done")return"Von Farben Krista als erledigt gemeldet";
+    if(event.kind==="customer_confirmed")return"Vom Kunden als erledigt bestätigt";
+    if(event.kind==="customer_reopened")return"Vom Kunden wieder geöffnet";
+    if(event.kind==="office_reopened")return"Von Farben Krista wieder geöffnet";
+    if(event.kind==="legacy_done")return"Erledigt · ohne damalige Kundenbestätigung";
+    return"Wieder geöffnet";
+  };
   function pointTable(rows){
-    return `<section class="card point-list"><div class="point-list-head"><h3>Ihre Punkte & Wünsche</h3><button id="refreshPoints" type="button">Aktualisieren</button></div>${rows.length?`<p class="meta">${rows.length} ${rows.length===1?"Eintrag":"Einträge"} · Neueste zuerst · Zum Öffnen auf eine Zeile klicken.</p><div class="point-table-wrap"><table class="point-table"><caption class="sr-only">Punkte und Wünsche mit Datum, Status und Überschrift</caption><thead><tr><th scope="col">Datum</th><th scope="col">Status</th><th scope="col">Überschrift</th></tr></thead><tbody>${rows.map(row=>`<tr data-point="${esc(row.id)}" class="${row.status==="done"?"done":""}"><td><time datetime="${esc(row.date)}">${esc(date(row.date)||"–")}</time></td><td><span class="point-badge ${row.status==="done"?"done":""}">${pointStatus(row)}</span></td><td><button class="point-title" type="button" aria-haspopup="dialog">${esc(pointTitle(row))}</button>${row.area?`<span class="meta point-area">${esc(row.area)}</span>`:""}</td></tr>`).join("")}</tbody></table></div>`:'<p class="meta">Noch keine Punkte oder Wünsche erfasst.</p>'}</section><dialog id="pointDetail" class="point-detail" aria-labelledby="pointDetailTitle"></dialog>`;
+    return `<section class="card point-list"><div class="point-list-head"><h3>Ihre Punkte & Wünsche</h3><button id="refreshPoints" type="button">Aktualisieren</button></div>${rows.length?`<p class="meta">${rows.length} ${rows.length===1?"Eintrag":"Einträge"} · Neueste zuerst · Zum Öffnen auf eine Zeile klicken.</p><div class="point-table-wrap"><table class="point-table"><caption class="sr-only">Punkte und Wünsche mit Datum, Status und Überschrift</caption><thead><tr><th scope="col">Datum</th><th scope="col">Status</th><th scope="col">Überschrift</th></tr></thead><tbody>${rows.map(row=>`<tr data-point="${esc(row.id)}" class="${pointClass(row)}"><td><time datetime="${esc(row.date)}">${esc(date(row.date)||"–")}</time></td><td><span class="point-badge ${pointClass(row)}">${pointStatus(row)}</span></td><td><button class="point-title" type="button" aria-haspopup="dialog">${esc(pointTitle(row))}</button>${row.area?`<span class="meta point-area">${esc(row.area)}</span>`:""}</td></tr>`).join("")}</tbody></table></div>`:'<p class="meta">Noch keine Punkte oder Wünsche erfasst.</p>'}</section><dialog id="pointDetail" class="point-detail" aria-labelledby="pointDetailTitle"></dialog>`;
   }
   function openPoint(row){
     const dialog=$("pointDetail"),events=row.history?.length?row.history:[{kind:"submitted",status:"open",date:row.date}];
-    dialog.innerHTML=`<div class="point-detail-head"><p class="eyebrow">Punkt & Wunsch</p><button type="button" id="closePointDetail" autofocus>Schließen</button></div><h2 id="pointDetailTitle">${esc(pointTitle(row))}</h2><p><span class="point-badge ${row.status==="done"?"done":""}">${pointStatus(row)}</span> <span class="point-badge responsibility">Zuständig: ${row.responsibility==="bauherr"?"Bauherr":"Farben Krista"}</span></p><p class="meta">Erfasst ${esc(pointTime(row.date))}${row.area?" · "+esc(row.area):""}</p><h3>Beschreibung</h3><p class="text">${esc(row.text)}</p>${row.photos?.length?`<h3>Fotos</h3><div class="point-photos">${row.photos.map(photo=>`<a href="${esc(photo.url)}" target="_blank" rel="noopener"><img src="${esc(photo.url)}" alt="${esc(photo.name)}" loading="lazy"></a>`).join("")}</div>`:""}<h3>Verlauf</h3><ol class="point-history">${events.map(event=>`<li><strong>${event.kind==="submitted"?"Erfasst und an Farben Krista übergeben":event.status==="done"?"Erledigt":"Wieder geöffnet"}</strong><br><time class="meta"${event.date?` datetime="${esc(event.date)}"`:""}>${esc(pointTime(event.date))}</time></li>`).join("")}</ol>`;
+    const confirmation=row.canConfirm&&!data.preview?`<section class="point-confirmation"><h3>Bitte kurz bestätigen</h3><p>Wir haben diesen Punkt als erledigt gemeldet. Passt alles?</p><div class="point-confirm-actions"><button class="primary" id="confirmPointDone" type="button">✓ Erledigt bestätigen</button><button id="rejectPointDone" type="button">Noch nicht erledigt</button></div><form id="pointReopenForm" hidden><label>Was fehlt noch?<textarea name="comment" maxlength="1000" required></textarea></label><button class="primary" type="submit">Zurückmelden</button></form><p id="pointConfirmStatus" class="meta" role="status"></p></section>`:"";
+    dialog.innerHTML=`<div class="point-detail-head"><p class="eyebrow">Punkt & Wunsch</p><button type="button" id="closePointDetail" autofocus>Schließen</button></div><h2 id="pointDetailTitle">${esc(pointTitle(row))}</h2><p><span class="point-badge ${pointClass(row)}">${pointStatus(row)}</span> <span class="point-badge responsibility">Zuständig: ${row.responsibility==="bauherr"?"Bauherr":"Farben Krista"}</span></p><p class="meta">Erfasst ${esc(pointTime(row.date))}${row.area?" · "+esc(row.area):""}</p><h3>Beschreibung</h3><p class="text">${esc(row.text)}</p>${row.photos?.length?`<h3>Fotos</h3><div class="point-photos">${row.photos.map(photo=>`<a href="${esc(photo.url)}" target="_blank" rel="noopener"><img src="${esc(photo.url)}" alt="${esc(photo.name)}" loading="lazy"></a>`).join("")}</div>`:""}${confirmation}<h3>Verlauf</h3><ol class="point-history">${events.map(event=>`<li><strong>${esc(eventLabel(event))}</strong>${event.comment?`<p class="text">${esc(event.comment)}</p>`:""}<br><time class="meta"${event.date?` datetime="${esc(event.date)}"`:""}>${esc(pointTime(event.date))}${event.channel?" · "+esc(event.channel):""}</time></li>`).join("")}</ol>`;
     $("closePointDetail").onclick=()=>dialog.close();dialog.showModal();
+    if($("confirmPointDone"))$("confirmPointDone").onclick=()=>confirmPoint(row,true,"");
+    if($("rejectPointDone"))$("rejectPointDone").onclick=()=>{$("pointReopenForm").hidden=false;$("pointReopenForm").elements.comment.focus();};
+    if($("pointReopenForm"))$("pointReopenForm").onsubmit=event=>{event.preventDefault();confirmPoint(row,false,event.currentTarget.elements.comment.value);};
+    const latestSent=events.map(event=>event.kind).lastIndexOf("sent"),readAfter=latestSent>=0&&events.slice(latestSent+1).some(event=>event.kind==="read");
+    if(latestSent>=0&&!readAfter&&!data.preview)api(`point/${encodeURIComponent(row.id)}/read`,{method:"POST",headers:{"x-csrf-token":data.csrf},body:"{}"}).then(result=>Object.assign(row,result.point)).catch(()=>{});
+  }
+  async function confirmPoint(row,confirmed,comment){
+    const status=$("pointConfirmStatus"),buttons=$("pointDetail").querySelectorAll("button");buttons.forEach(button=>button.disabled=true);status.textContent="Wird gespeichert …";
+    try{const result=await api(`point/${encodeURIComponent(row.id)}/confirmation`,{method:"POST",headers:{"x-csrf-token":data.csrf},body:JSON.stringify({confirmed,comment})}),index=data.points.findIndex(point=>point.id===row.id);if(index>=0)data.points[index]=result.point;$("pointDetail").close();render();$("status").textContent=confirmed?"Danke. Der Punkt ist jetzt endgültig geschlossen.":"Danke. Der Punkt ist wieder offen und liegt Farben Krista erneut als Aufgabe vor.";}
+    catch(error){buttons.forEach(button=>button.disabled=false);status.textContent=error.message;}
   }
   function renderMaterials(){
     const rows=data.materials||[],partial=data.materialStatus?.complete===false;

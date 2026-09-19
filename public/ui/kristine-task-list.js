@@ -254,6 +254,10 @@ ${voicemailBlock}
       .krista-task-editor-actions{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:16px}
       .krista-task-editor-note{margin-right:auto;font-size:12px;font-weight:750;color:#27713d}
       .krista-task-editor-note.error{color:#9c2f25}
+      .krista-customer-point-panel{margin-top:14px;padding:13px;border:1px solid #e2c48a;border-left:5px solid #dd941f;border-radius:12px;background:#fff9eb}
+      .krista-customer-point-panel h5{margin:0 0 8px;font-size:14px}.krista-customer-point-panel p{font-size:12px;margin:6px 0}
+      .krista-customer-assignment{display:grid;grid-template-columns:1fr 150px auto;gap:8px;align-items:end;margin-top:10px}.krista-customer-assignment label{display:grid;gap:4px;font-size:11px;font-weight:800}.krista-customer-assignment select,.krista-customer-assignment input{min-height:36px;border:1px solid #cfc8b9;border-radius:8px;padding:6px;background:#fff}
+      .krista-customer-response{padding:9px;border-radius:8px;background:#fff;border:1px solid #dfd4bd}.krista-customer-warning{color:#9b332c}
       @media(max-width:900px){
         #taskList .krista-task-row{grid-template-columns:minmax(180px,1fr) auto}
         #taskList .krista-task-row>.krista-task-cell:nth-child(2),
@@ -263,6 +267,7 @@ ${voicemailBlock}
         .krista-task-attachment-links{justify-content:flex-start}
         .krista-task-editor-grid{grid-template-columns:1fr}
         .krista-task-editor-grid .full{grid-column:auto}
+        .krista-customer-assignment{grid-template-columns:1fr}
       }
     `;
     document.head.appendChild(style);
@@ -372,12 +377,33 @@ ${voicemailBlock}
     });
   }
 
+  function customerPointStateLabel(state) {
+    return ({captured:"Erfasst",received:"Eingegangen",sent:"Versendet",read:"Gelesen",assigned:"Eingeteilt",awaiting_confirmation:"Kundenbestätigung offen",confirmed:"Vom Kunden als erledigt bestätigt",reopened:"Wieder offen",legacy_done:"Erledigt · Altbestand"})[state] || "Offen";
+  }
+
+  function renderCustomerPointPanel(taskId) {
+    const task=(data?.tasks||[]).find(row=>String(row.id)===String(taskId));
+    if(!task?.customerPointId)return;
+    const host=attachmentPanelHost();if(!host)return;
+    host.querySelector(".krista-customer-point-panel")?.remove();
+    const panel=document.createElement("section");panel.className="krista-customer-point-panel";
+    const loadedEmployees=typeof masterEmployees!=="undefined"?(masterEmployees||[]):window.kristineCustomerPortalEmployees||[],employees=loadedEmployees.length?loadedEmployees:[{id:task.assigneeId,name:task.assigneeName||task.assigneeId||"Alex / Büro"}];
+    const canAssign=!['awaiting_confirmation','confirmed','legacy_done'].includes(task.customerPointState);
+    panel.innerHTML=`<h5>👤 Kundenpunkt</h5><p><strong>${esc(customerPointStateLabel(task.customerPointState))}</strong></p>${task.customerPointState==="awaiting_confirmation"?'<p>Von uns fertiggemeldet. Der Punkt bleibt sichtbar, bis der Kunde bestätigt oder ihn wieder öffnet.</p>':""}${task.customerPointResponse?`<p class="krista-customer-response"><strong>Rückmeldung des Kunden:</strong><br>${esc(task.customerPointResponse)}</p>`:""}${task.customerPointNotificationError?`<p class="krista-customer-warning">Automatischer Kundenhinweis: ${esc(task.customerPointNotificationError)}</p>`:""}${canAssign?`<div class="krista-customer-assignment"><label>Eingeteilt an<select data-customer-assignee>${employees.map(employee=>`<option value="${esc(employee.id)}" ${String(employee.id)===String(task.assigneeId)?"selected":""}>${esc(employee.name)}</option>`).join("")}</select></label><label>Termin<input data-customer-due type="date" value="${esc(task.dueDate||"")}"></label><button type="button" class="secondary" data-customer-assign>Speichern & einteilen</button></div>`:""}`;
+    const actions=host.querySelector(":scope > .actions");if(actions)host.insertBefore(panel,actions);else host.appendChild(panel);
+    const button=panel.querySelector("[data-customer-assign]");if(button)button.onclick=async()=>{
+      const select=panel.querySelector("[data-customer-assignee]"),employee=employees.find(row=>String(row.id)===String(select.value));
+      task.assigneeId=select.value;task.assigneeName=employee?.name||task.assigneeName;task.dueDate=panel.querySelector("[data-customer-due]").value;task.customerPointAssignedAt=new Date().toISOString();button.disabled=true;
+      try{await persistTasks();openTaskListModal(task.id);}catch(error){button.disabled=false;alert("Einteilung konnte nicht gespeichert werden: "+error.message);}
+    };
+  }
+
   function installTaskModalHook() {
     if (typeof window.openTaskListModal !== "function" || window.openTaskListModal.__kristaAttachments) return;
     const original = window.openTaskListModal;
     const wrapped = function (focusId = "") {
       const result = original.apply(this, arguments);
-      if (focusId) setTimeout(() => loadAttachmentPanel(String(focusId), { force: true }), 0);
+      if (focusId) setTimeout(() => { loadAttachmentPanel(String(focusId), { force: true }); renderCustomerPointPanel(String(focusId)); }, 0);
       return result;
     };
     wrapped.__kristaAttachments = true;
@@ -525,11 +551,13 @@ ${voicemailBlock}
 
   function compactRenderTasks() {
     let tasks = [...(data?.tasks || [])];
+    const isPendingCustomerConfirmation = task => task?.customerPointState === "awaiting_confirmation";
+    const isDoneForList = task => task?.status === "done" && !isPendingCustomerConfirmation(task);
 
     if (taskFilter === "newest" || taskFilter === "open") {
-      tasks = tasks.filter((task) => task.status !== "done");
+      tasks = tasks.filter((task) => !isDoneForList(task));
     } else if (taskFilter === "done") {
-      tasks = tasks.filter((task) => task.status === "done");
+      tasks = tasks.filter((task) => isDoneForList(task));
     }
 
     if (taskFilter === "done") {
@@ -546,17 +574,19 @@ ${voicemailBlock}
     const taskRowHtml = (task) => {
       const job = (masterJobs || []).find((row) => String(row.jobId) === String(task.jobId));
       const priority = task.priority === "sofort" ? "🔴 Sofort" : task.priority === "heute" ? "🟡 Heute" : "🟢 Normal";
-      const statusTime = task.status === "done"
+      const pointStateLabel = ({captured:"Erfasst",received:"Eingegangen",sent:"Versendet",read:"Gelesen",assigned:"Eingeteilt",awaiting_confirmation:"Kundenbestätigung offen",confirmed:"Vom Kunden bestätigt",reopened:"Wieder offen",legacy_done:"Erledigt · Altbestand"})[task.customerPointState];
+      const done = isDoneForList(task);
+      const statusTime = isPendingCustomerConfirmation(task) ? "Bestätigung offen" : task.status === "done"
         ? (task.completedAt ? new Date(task.completedAt).toLocaleString("de-AT", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "erledigt")
         : (typeof taskDueLabel === "function" ? taskDueLabel(task.dueDate || task.appointment?.date) : (task.dueDate || task.appointment?.date || "–"));
       const site = task.jobName || job?.name || "";
       const editable = !["invoice", "regie"].includes(taskGroupKey(task));
-      return `<div class="krista-task-row ${task.status === "done" ? "done" : ""}">
-        <div class="krista-task-cell"><div class="krista-task-title">${esc(task.title || "Aufgabe")}</div><div class="krista-task-sub"><span class="krista-task-badge">${esc(task.taskType || "Aufgabe")}</span><span class="krista-task-badge">${priority}</span>${task.reminder ? ` ${esc(task.reminder)}` : ""}</div></div>
+      return `<div class="krista-task-row ${done ? "done" : ""}">
+        <div class="krista-task-cell"><div class="krista-task-title">${esc(task.title || "Aufgabe")}</div><div class="krista-task-sub"><span class="krista-task-badge">${esc(task.taskType || "Aufgabe")}</span><span class="krista-task-badge">${priority}</span>${pointStateLabel?`<span class="krista-task-badge">${esc(pointStateLabel)}</span>`:""}${task.reminder ? ` ${esc(task.reminder)}` : ""}</div></div>
         <div class="krista-task-cell"><strong>${esc(task.assigneeName || task.assigneeId || "–")}</strong><div class="krista-task-sub">für</div></div>
         <div class="krista-task-cell"><strong>${esc(site || "–")}</strong><div class="krista-task-sub">Baustelle</div></div>
-        <div class="krista-task-cell"><strong>${esc(statusTime)}</strong><div class="krista-task-sub">${task.status === "done" ? "erledigt" : "fällig"}</div></div>
-        <div class="krista-task-actions"><button type="button" class="secondary krista-task-attachment-button" data-task-attachments="${esc(String(task.id || ""))}" hidden>📎</button><button class="secondary" onclick="openTaskListModal('${task.id}')">Details</button>${editable ? `<button type="button" class="secondary" title="Aufgabe bearbeiten" onclick="openKristaTaskEditor('${task.id}')">✏</button>` : ""}${task.status !== "done" ? `<button class="green" onclick="markTaskDone('${task.id}')">✓</button>` : ""}<button class="danger" onclick="removeTask('${task.id}')">×</button></div>
+        <div class="krista-task-cell"><strong>${esc(statusTime)}</strong><div class="krista-task-sub">${isPendingCustomerConfirmation(task) ? "wartet auf Kunde" : task.status === "done" ? "erledigt" : "fällig"}</div></div>
+        <div class="krista-task-actions"><button type="button" class="secondary krista-task-attachment-button" data-task-attachments="${esc(String(task.id || ""))}" hidden>📎</button><button class="secondary" onclick="openTaskListModal('${task.id}')">Details</button>${editable ? `<button type="button" class="secondary" title="Aufgabe bearbeiten" onclick="openKristaTaskEditor('${task.id}')">✏</button>` : ""}${task.status !== "done" ? `<button class="green" onclick="markTaskDone('${task.id}')">${task.customerPointId?"Fertigmelden":"✓"}</button>` : ""}<button class="danger" onclick="removeTask('${task.id}')">×</button></div>
       </div>`;
     };
     const groupDefinitions = [

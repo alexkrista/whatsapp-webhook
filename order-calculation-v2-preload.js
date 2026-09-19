@@ -121,7 +121,10 @@ function effectiveLine(row, stored, index) {
   const sourcePlannedHours = number(row?.plannedHours);
   const componentType = meta.componentType || inferComponent(row, { ...parsed, unit });
   const amount = quantity > 0 && unitPrice > 0 ? roundMoney(quantity * unitPrice) : number(row?.amount || parsed.total);
-  const isRegie = row?.kind === "regie" || row?.kind === "nachtrag_regie";
+  const regieText = /\bregie/i.test(`${row?.title || ""} ${row?.shortText || ""} ${row?.description || ""}`);
+  const inferredAcceptedRegie = row?.source === "accepted_offer" && regieText;
+  const isRegie = row?.kind === "regie" || row?.kind === "nachtrag_regie" || row?.suggestedKind === "regie" || inferredAcceptedRegie;
+  const effectiveKind = inferredAcceptedRegie && row?.kind === "auftrag" ? "regie" : row?.kind;
   const plannedHours = isRegie && (componentType === "arbeit" || sourcePlannedHours > 0)
     ? (sourcePlannedHours || (/^std$/i.test(unit) ? quantity : 0))
     : 0;
@@ -133,6 +136,8 @@ function effectiveLine(row, stored, index) {
     unitPrice,
     amount,
     componentType,
+    kind: effectiveKind,
+    suggestedKind: isRegie ? (row?.suggestedKind || effectiveKind || "regie") : row?.suggestedKind,
     calcIncluded: typeof matched.calcIncluded === "boolean" ? matched.calcIncluded : row?.calcIncluded !== false,
     plannedHours,
     index,
