@@ -15,5 +15,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --check server.js && node --check kristine.js && node --check kgo-office-core.js && node --check job-merge-audit.js
       - run: node TEST/office-time.test.js && node TEST/released-time-separation.test.js
