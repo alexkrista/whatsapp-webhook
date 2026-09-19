@@ -87,6 +87,15 @@ function readerFor(buffer) {
   return new MsgReader(buffer);
 }
 
+function senderAddress(info = {}) {
+  const header = String(info.headers || "").replace(/\r?\n[ \t]+/g, " ").match(/^From:\s*([^\r\n]*)/im)?.[1] || "";
+  for (const value of [info.senderSmtpAddress, info.senderEmail, info.sentRepresentingSmtpAddress, header]) {
+    const email = String(value || "").match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+    if (email) return email;
+  }
+  return cleanText(info.senderEmail || "");
+}
+
 function parseMsg(buffer) {
   const reader = readerFor(buffer);
   const info = reader.getFileData() || {};
@@ -95,7 +104,7 @@ function parseMsg(buffer) {
   const cc = recipients.filter((row) => row?.recipType === "cc").map(person).filter((row) => row.label);
   const bcc = recipients.filter((row) => row?.recipType === "bcc").map(person).filter((row) => row.label);
   const senderName = cleanText(info.senderName || "");
-  const senderEmail = cleanText(info.senderEmail || "");
+  const senderEmail = senderAddress(info);
   const subject = cleanText(info.subject || "");
   const bodyHtml = String(info.bodyHtml || "").trim();
   const body = cleanText(info.body || "") || htmlToText(bodyHtml);
@@ -161,4 +170,4 @@ function available() {
   return Boolean(MsgReader);
 }
 
-module.exports = { parseMsg, getMsgAttachment, available, htmlToText };
+module.exports = { parseMsg, getMsgAttachment, available, htmlToText, senderAddress };

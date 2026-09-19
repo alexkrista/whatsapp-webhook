@@ -107,7 +107,7 @@ function portalRecipientOptions(meta = {}) {
     clean([owner.womanTitle, owner.womanFirstName || owner.firstName, owner.womanLastName || ((owner.womanFirstName || owner.firstName) ? owner.sharedLastName : "")].filter(Boolean).join(" "), 180),
     clean([owner.manTitle, owner.manFirstName, owner.manLastName || (owner.manFirstName ? owner.sharedLastName : "")].filter(Boolean).join(" "), 180),
   ].filter(Boolean);
-  const ownerName = ownerNames.join(" und ") || clean(owner.customer || owner.sharedLastName || meta.contactName || meta.customerMaster?.name || meta.name, 180);
+  const ownerName = (owner.ownerRole === "Firma" ? clean(owner.customer, 180) : ownerNames.join(" und ")) || clean(owner.customer || owner.sharedLastName || meta.contactName || meta.customerMaster?.name || meta.name, 180);
   const options = [
     {
       id: "owner",

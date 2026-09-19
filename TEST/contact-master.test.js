@@ -76,3 +76,11 @@ test("Kontaktstamm wird dauerhaft geschrieben und anschließend durchsuchbar", a
   const stored = JSON.parse(await fsp.readFile(path.join(dataDir, "_kristine", "contact-master.json"), "utf8"));
   assert.equal(stored.length, 1);
 });
+
+test("Firmendaten samt UID und Quelle werden im Kontaktstamm wiederverwendet",()=>{
+  const first=mergeCandidates([],candidatesFromMeta("26101",{projectContacts:{owner:{ownerRole:"Firma",customer:"Beispiel GmbH",uid:"ATU12345678",sourceUrl:"https://example.at/impressum",womanEmail:"person@example.at",wwAddressId:"4711"}}}));
+  const found=searchContacts(first.contacts,"Beispiel","owner")[0];
+  assert.equal(found.roleData.owner.uid,"ATU12345678");assert.equal(found.roleData.owner.sourceUrl,"https://example.at/impressum");assert.equal(found.roleData.owner.manLastName,"");
+  const next=mergeCandidates(first.contacts,candidatesFromMeta("26102",{projectContacts:{owner:{...found.roleData.owner,womanEmail:"neu@example.at"}}}));
+  assert.equal(next.contacts.length,1);assert.equal(next.contacts[0].email,"neu@example.at");assert.equal(next.contacts[0].wwAddressId,"4711");
+});
