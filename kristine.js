@@ -3222,7 +3222,7 @@ const open = taskId
     });
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
-  return { handleMessage, localDateISO, startupReady };
+  return { handleMessage, localDateISO, startupReady, getHoursBootstrap:async()=>{const b=await getBootstrap();return {states:b.states,timeEvents:b.timeEvents,projectTimeArchive:b.projectTimeArchive,employees:b.employees,today:localDateISO()}} };
 }
 
 module.exports = { registerKristine };

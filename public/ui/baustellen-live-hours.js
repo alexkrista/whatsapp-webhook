@@ -6,6 +6,9 @@
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
   const token=new URLSearchParams(location.search).get("token")||"";
+  const H=window.BaustellenHoursCore;
+  const {parseWwHours,combineWw}=H;
+  let engine=null,canonicalHours=null;
   let jobs=[];
   let bootstrap={};
   let liveByJob=new Map();
@@ -37,15 +40,6 @@
   async function loadWwHours(jobId,ownerId=jobId){
     const d=await window.BaustellenSources.ww("hours",{jobId:String(ownerId),projectNumber:String(jobId)});
     return parseWwHours(d,jobId);
-  }
-  function parseWwHours(d,jobId){
-    const payload=d.hours||{},days=new Map((payload.days||[]).map(row=>[String(row.date||"").slice(0,10),num(row.hours)])),grouped=new Map();
-    const sourceRows=(payload.rows||[]).length?payload.rows:(payload.days||[]).map(row=>({date:row.date,hours:row.hours,employeeName:"WinWorker gesamt"}));
-    for(const row of sourceRows){const date=String(row.date||"").slice(0,10),fink=String(row.finkNumber||"").trim(),employeeName=String(row.employeeName||"WinWorker gesamt").trim(),personIdentity=identity(fink,employeeName,row.maIndex),key=`${date}|${personIdentity}`,current=grouped.get(key)||{key,date,identity:personIdentity,finkNumber:fink,maIndex:row.maIndex??null,employeeName,hours:0,sourceProjectNumber:String(jobId)};current.hours+=num(row.hours??row.netHours);grouped.set(key,current)}
-    // Der Brain Connector liefert bereits produktive WW-Stunden nach Pausenabzug.
-    // Hier kein zweites Mal 0,25 h je Mitarbeiter/Tag abziehen.
-    const rows=[...grouped.values()].map(row=>({...row,hours:Math.max(0,row.hours)})).sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")),netDays=new Map();for(const row of rows)netDays.set(row.date,num(netDays.get(row.date))+row.hours);
-    return {found:!!payload.found,totalHours:rows.reduce((sum,row)=>sum+row.hours,0),days:netDays,rows,pauseDeductionHours:num(payload.pauseDeductionHours),cached:d.cached,syncedAt:d.syncedAt,saved:d.saved!==false};
   }
 
   function combineRefs(refs){
@@ -90,14 +84,8 @@
     const result=combineRefs(refs),missing=result.missing;
     if(generation===refreshSerial){if(missing.length)wwErrors.set(String(j.jobId),`${refs.length-missing.length}/${refs.length} WW-Akten aktuell. Abgleich fehlt: ${missing.join(", ")}. Gespeicherte Stunden bleiben sichtbar.`);
     else wwErrors.delete(String(j.jobId))}
+    canonicalHours=(await api("/admin/api/jobs")).baustellenHours||canonicalHours;
     return result;
-  }
-  function combineWw(found){
-    const days=new Map(),rows=[];let pauseDeductionHours=0;
-    for(const {number,data} of found){pauseDeductionHours+=num(data.pauseDeductionHours);for(const [date,value] of data.days||[])days.set(date,num(days.get(date))+num(value));for(const row of data.rows||[])rows.push({...row,key:`${number}|${row.key}`,sourceProjectNumber:number})}
-    rows.sort((a,b)=>a.date.localeCompare(b.date)||a.employeeName.localeCompare(b.employeeName,"de")||a.sourceProjectNumber.localeCompare(b.sourceProjectNumber,"de"));
-    const stamps=found.map(x=>x.data.syncedAt).filter(Boolean).sort();
-    return {found:found.some(x=>x.data.found),totalHours:rows.reduce((sum,row)=>sum+num(row.hours),0),days,rows,pauseDeductionHours,projectNumbers:found.map(x=>x.number),cached:found.some(x=>x.data.cached),syncedAt:stamps[0]||"",saved:found.every(x=>x.data.saved!==false)};
   }
 
   function hmMinutes(v){const m=String(v||"").match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):null}
@@ -108,113 +96,14 @@
   function oldTotalHours(j){return num(j?.collectionSummary?.actualHours??calc(j).actualHours)}
   function oldOrderHours(j){const c=calc(j);const direct=Number(c.orderHours);return Number.isFinite(direct)?Math.max(0,direct):Math.max(0,oldTotalHours(j)-num(c.actualRegieHours))}
 
-  function buildLiveMaps(){
-    liveByJob=new Map();peopleByJob=new Map();
-    const events=Array.isArray(bootstrap?.timeEvents)?bootstrap.timeEvents:[];
-    const archive=Array.isArray(bootstrap?.projectTimeArchive)?bootstrap.projectTimeArchive:[];
-    const states=bootstrap?.states||{};
-    const employees=new Map((bootstrap?.employees||[]).map(e=>[String(e.id||e.employeeId||""),e]));
-    // Nur ein tatsächlich brauchbarer Baustellenstand darf die Live-Ereignisse
-    // dieses Tages ersetzen. Ein leerer/unvollständiger Archivsatz darf niemals
-    // alle Baustellen aus dem Leitstand verschwinden lassen.
-    const usableArchive=archive.filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||"")==="work"&&String(segment?.jobId||segment?.jobName||"").trim()));
-    const groups=new Map(),archivedPersonDays=new Set(usableArchive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
 
-    const addDuration=({employeeId,date,jobId,name,fink,duration})=>{
-      if(!employeeId||!date||!jobId||duration<=0||duration>18)return;
-      const personIdentity=identity(fink,name,employeeId),current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Map(),dayPeople:new Map()};
-      current.totalHours+=duration;current.segments++;current.days.set(date,num(current.days.get(date))+duration);liveByJob.set(jobId,current);
-      if(!peopleByJob.has(jobId))peopleByJob.set(jobId,new Map());
-      const people=peopleByJob.get(jobId),person=people.get(employeeId)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0,days:new Set()};
-      person.hours+=duration;person.days.add(date);people.set(employeeId,person);
-      if(!current.dayPeople.has(date))current.dayPeople.set(date,new Map());
-      const dayPeople=current.dayPeople.get(date),dayPerson=dayPeople.get(personIdentity)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0};
-      dayPerson.hours+=duration;dayPeople.set(personIdentity,dayPerson);
-    };
-
-    events.forEach((event,index)=>{
-      const employeeId=String(event?.employeeId||"");
-      const date=String(event?.date||"").slice(0,10);
-      const minute=hmMinutes(event?.at);
-      if(!employeeId||!date||minute===null)return;
-      const key=employeeId+"|"+date;
-      if(archivedPersonDays.has(key))return;
-      if(!groups.has(key))groups.set(key,[]);
-      groups.get(key).push({...event,_index:index,_minute:minute});
-    });
-
-    for(const [key,rows] of groups){
-      rows.sort((a,b)=>a._minute-b._minute||String(a.createdAt||"").localeCompare(String(b.createdAt||""))||a._index-b._index);
-      const [employeeId,date]=key.split("|");
-      const state=states?.[employeeId]||{};
-      for(let i=0;i<rows.length;i++){
-        const row=rows[i];
-        if(!["start","weiter"].includes(String(row.type||"").toLowerCase()))continue;
-        const jobId=String(row.jobId||"").trim();
-        if(!jobId)continue;
-        const start=row._minute;
-        const next=rows[i+1];
-        let end=next?._minute??null;
-        if(end===null&&date===String(bootstrap?.today||"")&&["working","pause","lunch"].includes(String(state?.mode||"")))end=nowMinutes();
-        if(end===null||end<=start)continue;
-        const duration=(end-start)/60;
-        if(duration<=0||duration>18)continue;
-
-        const employee=employees.get(employeeId)||{};
-        const name=String(row.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId);
-        addDuration({employeeId,date,jobId,name,fink:finkNumber(employee,row),duration});
-      }
-    }
-    for(const released of usableArchive){
-      const employeeId=String(released?.employeeId||""),date=String(released?.date||"").slice(0,10),employee=employees.get(employeeId)||{},name=String(released?.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId),fink=finkNumber(employee,released);
-      for(const segment of Array.isArray(released?.segments)?released.segments:[]){
-        if(String(segment?.type||"")!=="work")continue;
-        const from=hmMinutes(segment?.from),to=hmMinutes(segment?.to),jobId=String(segment?.jobId||"").trim();
-        if(from===null||to===null||to<=from)continue;
-        addDuration({employeeId,date,jobId,name,fink,duration:(to-from)/60});
-      }
-    }
-    for(const current of liveByJob.values()){
-      current.days=new Map();current.totalHours=0;
-      for(const [date,dayPeople] of current.dayPeople){let dayTotal=0;for(const person of dayPeople.values()){person.hours=Math.max(0,person.hours-.25);dayTotal+=person.hours}current.days.set(date,dayTotal);current.totalHours+=dayTotal}
-    }
-    for(const people of peopleByJob.values())for(const person of people.values())person.hours=Math.max(0,person.hours-.25*person.days.size);
-  }
-
-  function liveOrderHours(j){if(!j)return 0;return collectionJobIds(j).reduce((sum,id)=>sum+num(liveByJob.get(id)?.totalHours),0)}
-  function kristineFor(j){
-    const combined={totalHours:0,days:new Map(),dayPeople:new Map()};
-    for(const id of collectionJobIds(j)){const source=liveByJob.get(id);if(!source)continue;combined.totalHours+=num(source.totalHours);for(const [date,value] of source.days||[])combined.days.set(date,num(combined.days.get(date))+num(value));for(const [date,people] of source.dayPeople||[]){if(!combined.dayPeople.has(date))combined.dayPeople.set(date,new Map());const target=combined.dayPeople.get(date);for(const person of people.values()){const current=target.get(person.identity)||{...person,hours:0};current.hours+=num(person.hours);target.set(person.identity,current)}}}
-    return combined;
-  }
-  function matchingKristinePerson(krDayPeople,wwRow){
-    if(!krDayPeople)return null;
-    if(krDayPeople.has(wwRow.identity))return krDayPeople.get(wwRow.identity);
-    const wanted=nameKey(canonicalPersonName(wwRow.employeeName));return [...krDayPeople.values()].find(person=>(wwRow.finkNumber&&person.finkNumber===wwRow.finkNumber)||(wanted&&nameKey(canonicalPersonName(person.name))===wanted))||null;
-  }
-  function suggestedExclusions(ww,kr){
-    const selected=new Set();for(const row of ww?.rows||[]){if(matchingKristinePerson(kr?.dayPeople?.get(row.date),row))selected.add(row.key)}return selected;
-  }
-  function selectedExclusions(j,ww,kr){
-    const jobId=String(j?.jobId||"");
-    if(reconciliationDrafts.has(jobId))return reconciliationDrafts.get(jobId);
-    if(j?.hoursCutoverDate)return new Set((ww?.rows||[]).filter(row=>row.date>=String(j.hoursCutoverDate)).map(row=>row.key));
-    if(j?.hoursOverlapResolvedAt)return new Set(Array.isArray(j.hoursOverlapExcludedWwKeys)?j.hoursOverlapExcludedWwKeys:[]);
-    return suggestedExclusions(ww,kr);
-  }
-  function singleFusion(j,head=j){
-    j=D.single(j);
-    const jobId=String(j?.jobId||""),ww=wwByMember.get(jobId)||wwByJob.get(jobId),kr=kristineFor(j),kristineDetailTotal=liveOrderHours(j),kristineTotal=Math.max(oldTotalHours(j),kristineDetailTotal);
-    if(!ww?.found)return {total:kristineTotal,ww:0,kristine:kristineTotal,detailTotal:kristineDetailTotal,overlaps:[],excluded:new Set(),source:"KRISTINE"};
-    const krDays=kr?.days||new Map(),rawKr=num(kr?.totalHours),scale=rawKr>0?kristineTotal/rawKr:0;
-    const overlaps=[...ww.days.keys()].filter(day=>krDays.has(day)).sort();
-    const owner=!D.isCollection(head)&&(reconciliationDrafts.has(String(head.jobId))||head.hoursOverlapResolvedAt||head.hoursCutoverDate)?head:j;
-    const rawExcluded=selectedExclusions(owner,ww,kr),excluded=new Set((ww.rows||[]).filter(row=>rawExcluded.has(row.key)||rawExcluded.has(row.key.slice(row.key.indexOf("|")+1))).map(row=>row.key)),legacyCutover=String(owner?.hoursCutoverDate||"");
-    let wwHours=0,kristineHours=0;
-    if(legacyCutover&&!reconciliationDrafts.has(jobId)){for(const [day,value] of ww.days)if(day<legacyCutover)wwHours+=num(value);for(const [day,value] of krDays)if(day>=legacyCutover)kristineHours+=num(value)*scale}
-    else{wwHours=(ww.rows||[]).reduce((sum,row)=>sum+(excluded.has(row.key)?0:num(row.hours)),0);kristineHours=kristineTotal}
-    return {total:wwHours+kristineHours,ww:wwHours,kristine:kristineHours,detailTotal:kristineDetailTotal,overlaps,excluded,source:"WW + KRISTINE",legacyCutover};
-  }
+  function buildLiveMaps(){engine=H.createEngine({jobs,bootstrap,wwByMember,wwByJob,reconciliationDrafts});liveByJob=engine.liveByJob;peopleByJob=engine.peopleByJob}
+  const liveOrderHours=(...args)=>engine.liveOrderHours(...args);
+  const kristineFor=(...args)=>engine.kristineFor(...args);
+  const matchingKristinePerson=(...args)=>engine.matchingKristinePerson(...args);
+  const suggestedExclusions=(...args)=>engine.suggestedExclusions(...args);
+  const selectedExclusions=(...args)=>engine.selectedExclusions(...args);
+  const singleFusion=(...args)=>engine.singleFusion(...args);
   function fusion(j){
     const rows=D.members(j,jobs).map(member=>singleFusion(member,j));
     const out={total:0,ww:0,kristine:0,detailTotal:0,overlaps:[],excluded:new Set(),source:"KRISTINE"};
@@ -243,7 +132,8 @@
   }
 
   function patchTopKpis(){
-    const totalOpen=jobs.filter(j=>!(j.collectionParentJobIds||[]).length).reduce((s,j)=>s+openHours(j),0);
+    if(!canonicalHours)return;
+    const totalOpen=canonicalHours.remainingHours;
     const cap=num(bootstrap?.company?.weeklyProductiveHours||bootstrap?.company?.weeklyCapacityHours)||312;
     const h=document.getElementById("kpiHours"),b=document.getElementById("kpiBacklog"),w=document.getElementById("kpiWeeks");
     if(h)h.textContent=hours(totalOpen);
@@ -288,7 +178,7 @@
     card.innerHTML=`<div class="hr-head"><div><h3>WW / KRISTINE Stundenabgleich</h3><div class="bk-note">Die Daten bleiben je Quelle sichtbar. Nur angehakte WinWorker-Zeilen gelten als doppelt und werden nicht zusätzlich gezählt.</div></div><div class="hr-actions"><button type="button" id="hrRefresh">WW jetzt abgleichen</button>${result.overlaps.length?`<button type="button" class="primary" id="hrSave" ${confirmed&&!dirty?"disabled":""}>${saveLabel}</button>`:""}</div></div>${ranges}${error?`<div class="hr-note warn">WW-Abgleich nicht möglich: ${escapeHtml(error)}</div>`:""}${legacy}${days?`<details class="hr-details" ${confirmed&&!dirty?"":"open"}><summary>Abgleichdetails anzeigen (${result.overlaps.length} Tage)</summary><div class="hr-days">${days}</div></details>`:`<div class="hr-empty">${ww?.found?"Keine Tage mit Stunden in beiden Systemen gefunden.":"Mit „WW jetzt abgleichen“ werden die WinWorker-Stunden für diese Baustelle direkt vom Büro-PC geholt."}</div>`}<div id="hrStatus" class="hr-status">${escapeHtml(saved)}</div>`;
     card.querySelector("#hrRefresh")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus");button.disabled=true;status.textContent="WinWorker wird live gelesen …";try{const fresh=await loadWwHoursForJob(j);if(fresh)wwByJob.set(jobId,fresh);wwErrors.delete(jobId);reconciliationDrafts.delete(jobId);patchAll()}catch(e){wwErrors.set(jobId,e.message);button.disabled=false;status.textContent="Abgleich nicht möglich: "+e.message;card.dataset.signature="";renderHoursReconciliation(j)}});
     card.querySelectorAll("[data-hr-key]").forEach(input=>input.addEventListener("change",()=>{const draft=new Set(reconciliationDrafts.get(jobId)||selected);if(input.checked)draft.add(input.dataset.hrKey);else draft.delete(input.dataset.hrKey);reconciliationDrafts.set(jobId,draft);const button=card.querySelector("#hrSave"),status=card.querySelector("#hrStatus");if(button){button.disabled=false;button.textContent=`Auswahl speichern (${draft.size})`}if(status)status.textContent="Auswahl geändert – bitte speichern.";patchRows();patchTopKpis();patchBaseDetail(jobId);patchCockpit(jobId)}));
-    card.querySelector("#hrSave")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus"),draft=new Set(reconciliationDrafts.get(jobId)||selected),expected=[...draft].sort();button.disabled=true;status.textContent="Auswahl wird gespeichert …";try{const response=await apiWrite(`/admin/api/job/${encodeURIComponent(jobId)}/hours-overlap`,{excludedWwKeys:expected});const savedKeys=Array.isArray(response.excludedWwKeys)?response.excludedWwKeys:[];if(JSON.stringify([...savedKeys].sort())!==JSON.stringify(expected))throw new Error("Der Server hat die Auswahl nicht vollständig übernommen.");j.hoursCutoverDate="";j.hoursOverlapExcludedWwKeys=savedKeys;j.hoursOverlapResolvedAt=response.resolvedAt||new Date().toISOString();reconciliationDrafts.delete(jobId);card.dataset.signature="";patchAll()}catch(e){button.disabled=false;button.textContent=`Auswahl speichern (${draft.size})`;status.textContent="Speichern nicht möglich: "+e.message}});
+    card.querySelector("#hrSave")?.addEventListener("click",async event=>{const button=event.currentTarget,status=card.querySelector("#hrStatus"),draft=new Set(reconciliationDrafts.get(jobId)||selected),expected=[...draft].sort();button.disabled=true;status.textContent="Auswahl wird gespeichert …";try{const response=await apiWrite(`/admin/api/job/${encodeURIComponent(jobId)}/hours-overlap`,{excludedWwKeys:expected});const savedKeys=Array.isArray(response.excludedWwKeys)?response.excludedWwKeys:[];if(JSON.stringify([...savedKeys].sort())!==JSON.stringify(expected))throw new Error("Der Server hat die Auswahl nicht vollständig übernommen.");j.hoursCutoverDate="";j.hoursOverlapExcludedWwKeys=savedKeys;j.hoursOverlapResolvedAt=response.resolvedAt||new Date().toISOString();reconciliationDrafts.delete(jobId);canonicalHours=(await api("/admin/api/jobs")).baustellenHours||canonicalHours;card.dataset.signature="";patchAll()}catch(e){button.disabled=false;button.textContent=`Auswahl speichern (${draft.size})`;status.textContent="Speichern nicht möglich: "+e.message}});
   }
 
   function patchCockpit(id){
@@ -412,7 +302,7 @@
   let refreshSerial=0;
   async function refresh(){
     const serial=++refreshSerial;
-    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=D.catalog(j);bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();await loadSavedHours(serial);if(serial!==refreshSerial)return;patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"));if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
+    try{const [j,b,e]=await Promise.all([api("/admin/api/jobs"),api("/kristine/api/bootstrap"),api("/admin/api/employees").catch(()=>({employees:[]}))]);if(serial!==refreshSerial)return;jobs=D.catalog(j);canonicalHours=j.baustellenHours||null;bootstrap=b||{};costEmployees=e.employees||[];buildLiveMaps();const id=decodeURIComponent(location.hash.slice(1)),current=job(id);patchAll();await loadSavedHours(serial);if(serial!==refreshSerial)return;patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"));if(current){try{const ww=await loadWwHoursForJob(current);if(serial!==refreshSerial)return;if(ww)wwByJob.set(String(id),ww)}catch(e){wwErrors.set(String(id),e.message)}}patchAll();window.dispatchEvent(new CustomEvent("krista:live-hours-updated"))}catch(e){console.warn("Baustellen Live-Stunden",e)}
   }
 
   function sourceStatus(id,{single=false}={}){const j=job(id),refs=D.projects(j,jobs).filter(ref=>!single||ref.jobId===String(id)),data=single?wwByMember.get(String(id)):wwByJob.get(String(id))||wwByMember.get(String(id)),available=!!j&&(!refs.length||!!data&&data.loaded===refs.length);return {label:!j?"Stunden werden geladen":!refs.length?"KRISTINE":!data||!data.loaded?"WW-Abgleich ausstehend":data.saved===false?"WW aktuell · Stand nicht gespeichert":data.cached&&available?"WW: gespeicherter Stand":data.missing?.length?`${data.expected-data.missing.length}/${data.expected} WW-Akten aktuell`:"WW aktuell",complete:!!j&&(!refs.length||!!data&&!data.cached&&!data.missing?.length),available,syncedAt:data?.syncedAt||"",saved:data?.saved!==false}}

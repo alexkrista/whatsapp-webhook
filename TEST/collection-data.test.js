@@ -3,7 +3,7 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const D=require("../public/ui/baustellen-data"),B=require("../public/ui/regie-billing-state"),root=path.resolve(__dirname,"..");
 function job(jobId,target=100,actual=0){return {jobId,status:"Laufend",calculation:{contractAmount:target*85,calculatedHours:target,fixedCalculatedHours:target,laborAmount:target*85,actualHours:actual,orderHours:actual}}}
 function frontend(name,extra={}){
-  const window={BaustellenData:D,KristaRegieBilling:B,addEventListener(){},dispatchEvent(){},...extra.window};
+  const window={BaustellenHoursCore:require("../public/ui/baustellen-hours-core"),BaustellenData:D,KristaRegieBilling:B,addEventListener(){},dispatchEvent(){},...extra.window};
   const document={readyState:"loading",addEventListener(){},dispatchEvent(){},...extra.document};
   const context={window,document,location:{search:"",origin:"https://protokoll.krista.at",pathname:"/kristine/baustellen",hash:""},URL,URLSearchParams,Map,Set,Date,Intl,AbortSignal,CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},console,setTimeout,clearTimeout,queueMicrotask,...extra};
   context.window=window;context.document=document;
@@ -47,8 +47,8 @@ test("39 member sources include every project exactly once and retain report ide
 
 test("live hours do not reconcile the same employee across different member jobs",()=>{
   const name="public/ui/baustellen-live-hours.js",source=fs.readFileSync(path.join(root,name),"utf8");
-  const injected=source.replace('  if(document.readyState===',`  window.testHours={set(rows,ww,kr){jobs=rows;wwByMember=new Map(ww);liveByJob=new Map(kr)},fusion,hoursSummary};\n  if(document.readyState===`);
-  const context={window:{BaustellenData:D},document:{readyState:"loading",addEventListener(){}},location:{search:""},URLSearchParams,Map,Set,Date,Intl,console};vm.runInNewContext(injected,context);
+  const injected=source.replace('  if(document.readyState===',`  window.testHours={set(rows,ww,kr){jobs=rows;wwByMember=new Map(ww);buildLiveMaps();for(const [id,value] of kr)engine.liveByJob.set(id,value)},fusion,hoursSummary};\n  if(document.readyState===`);
+  const context={window:{BaustellenHoursCore:require("../public/ui/baustellen-hours-core"),BaustellenData:D},document:{readyState:"loading",addEventListener(){}},location:{search:""},URLSearchParams,Map,Set,Date,Intl,console};vm.runInNewContext(injected,context);
   const a=job("24177",100,2),b=job("24178",100,0);a.collectionMemberJobIds=[b.jobId];a.collectionSummary={jobIds:[a.jobId,b.jobId],actualHours:2};
   const person={identity:"name:max",name:"Max",hours:2},ww={found:true,rows:[{key:"24178|2026-09-01|name:max",date:"2026-09-01",identity:"name:max",employeeName:"Max",hours:2}],days:new Map([["2026-09-01",2]])};
   const kr={totalHours:2,days:new Map([["2026-09-01",2]]),dayPeople:new Map([["2026-09-01",new Map([[person.identity,person]])]])};
@@ -59,8 +59,8 @@ test("live hours do not reconcile the same employee across different member jobs
 
 function hoursFrontend(rows,extra={}){
   const source=fs.readFileSync(path.join(root,"public/ui/baustellen-live-hours.js"),"utf8");
-  const injected=source.replace('  if(document.readyState===',`  window.testHours={set(rows){jobs=rows},hoursSummary,openHours,patchBaseDetail,patchCockpit,patchEconomy};\n  if(document.readyState===`);
-  const context={window:{BaustellenData:D,BaustellenSources:{performance(){return null}}},document:{readyState:"loading",addEventListener(){},...extra},location:{search:""},URLSearchParams,Map,Set,Date,Intl,console};
+  const injected=source.replace('  if(document.readyState===',`  window.testHours={set(rows){jobs=rows;buildLiveMaps()},hoursSummary,openHours,patchBaseDetail,patchCockpit,patchEconomy};\n  if(document.readyState===`);
+  const context={window:{BaustellenHoursCore:require("../public/ui/baustellen-hours-core"),BaustellenData:D,BaustellenSources:{performance(){return null}}},document:{readyState:"loading",addEventListener(){},...extra},location:{search:""},URLSearchParams,Map,Set,Date,Intl,console};
   vm.runInNewContext(injected,context);context.window.testHours.set(rows);return context.window.testHours;
 }
 
@@ -121,7 +121,7 @@ test("saving a calculation refreshes total actual, current target and open hours
   const head=job("25018",510,468),member=job("keckeis_gabi_harry",0,26);head.collectionMemberJobIds=[member.jobId];
   const elements=Object.fromEntries(["detailAmount","detailHours","detailHoursNote","detailOpen","detailOpenNote","detailProgress","detailProgressNote"].map(id=>[id,{textContent:"",style:{}}]));
   const source=fs.readFileSync(path.join(root,"public/ui/baustellen-calculation-grid-v2.js"),"utf8").replace('  if (document.readyState ===',`  window.testGrid=async id=>{currentJobId=id;await refreshOuterNumbers()};\n  if (document.readyState ===`);
-  const context={window:{BaustellenData:D,BaustellenLiveHours:{summary:()=>({total:494,order:470,target:500,remaining:42})}},document:{readyState:"loading",addEventListener(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[]},location:{search:"",origin:"https://protokoll.krista.at"},fetch:async()=>({ok:true,text:async()=>JSON.stringify({jobs:[head,member]})}),URL,URLSearchParams,Intl,Map,Set,console};
+  const context={window:{BaustellenHoursCore:require("../public/ui/baustellen-hours-core"),BaustellenData:D,BaustellenLiveHours:{summary:()=>({total:494,order:470,target:500,remaining:42})}},document:{readyState:"loading",addEventListener(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[]},location:{search:"",origin:"https://protokoll.krista.at"},fetch:async()=>({ok:true,text:async()=>JSON.stringify({jobs:[head,member]})}),URL,URLSearchParams,Intl,Map,Set,console};
   vm.runInNewContext(source,context);await context.window.testGrid(head.jobId);
   assert.equal(elements.detailHours.textContent,"494 h / 510 h");assert.equal(elements.detailOpen.textContent,"16 h");assert.equal(elements.detailOpenNote.textContent,"510 h Soll − 494 h Ist = 16 h");
 });
@@ -135,7 +135,7 @@ for(const standalone of [false,true])test(`39-source load ${standalone?"S24177":
   const wwHours={24177:300.71,26018:348.62,25047:616.14},reportCounts={24177:1,26018:24,25047:11},stored=new Map(),requests=[];
   const listeners=new Map(),elements=Object.fromEntries(["detailHours","detailHoursNote","detailOpen","detailOpenNote"].map(id=>[id,{textContent:""}]));
   const status={innerHTML:"",querySelector:()=>({open:true})};elements.bkSourceStatus=status;
-  const window={BaustellenData:D,KristaRegieBilling:B,addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn)},dispatchEvent(event){for(const fn of listeners.get(event.type)||[])fn(event)}};
+  const window={BaustellenHoursCore:require("../public/ui/baustellen-hours-core"),BaustellenData:D,KristaRegieBilling:B,addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn)},dispatchEvent(event){for(const fn of listeners.get(event.type)||[])fn(event)}};
   const document={readyState:"loading",addEventListener(){},dispatchEvent(){},getElementById:id=>elements[id]||null,querySelectorAll:()=>[],querySelector:()=>null};
   const response=value=>({ok:true,status:200,json:async()=>value,text:async()=>JSON.stringify(value)});
   const fetch=async(raw,init={})=>{

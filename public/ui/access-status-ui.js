@@ -142,8 +142,16 @@
     return"green";
   }
 
+  function servicesTitle(){
+    if(!servicesHealthy)return "KRISTA Dienste nicht erreichbar oder Fehler";
+    const outlook=window.KristaOutlookServices?.row();
+    return outlook?.level==="green"?"KRISTA Dienste laufen":"Outlook: "+(outlook?.status||"wird geprüft")+" · klicken für Details";
+  }
+
   function servicesColor(){
-    return servicesHealthy?"green":"red";
+    if(!servicesHealthy)return "red";
+    const outlook=window.KristaOutlookServices?.row();
+    return outlook?.level||"yellow";
   }
 
   function gateVisual(d){
@@ -212,7 +220,7 @@
       doorHtml+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
     const svcColor=servicesColor();
-    h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-services-lamp" data-services title="${svcColor==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler"}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
+    h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-services-lamp" data-services title="${servicesTitle()}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
 
     slot.innerHTML=h;
     slot.querySelector("[data-services]")?.addEventListener("click",openServices);
@@ -225,7 +233,7 @@
     let script=document.querySelector('script[data-krista-services-dialog]');
     if(!script){
       script=document.createElement("script");
-      script.src="/public/ui/krisadmin-services.js?v=20260901-lamp1";
+      script.src="/public/ui/krisadmin-services.js?v=20260919-outlook-1";
       script.setAttribute("data-krista-services-dialog","1");
       script.async=false;
       document.head.appendChild(script);
@@ -247,13 +255,14 @@
     const dot=button.querySelector(".krista-dot");
     const color=servicesColor();
     if(dot)dot.className="krista-dot "+color;
-    button.title=color==="green"?"KRISTA Dienste laufen":"KRISTA Dienste nicht erreichbar oder Fehler";
+    button.title=servicesTitle();
   }
 
   async function loadServicesStatus(){
     // Die Kopfleiste verwendet dieselbe Cloud-Gesamtprüfung wie Türen und Tor.
     // Detailabfragen des lokalen Managers dürfen die grüne Lampe nicht flackern lassen.
     if(last)servicesHealthy=overall(last)!=="red";
+    await window.KristaOutlookServices?.refresh();
     updateServicesLamp();
   }
 
@@ -299,6 +308,7 @@
   function start(){
     css();
     if(mount()){
+      window.addEventListener("krista:outlook-status",updateServicesLamp);
       load();loadServicesStatus();
       setInterval(load,5000);setInterval(loadServicesStatus,5000);
       window.addEventListener("hashchange",()=>setTimeout(()=>{load();loadServicesStatus()},50));

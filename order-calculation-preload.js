@@ -138,7 +138,8 @@ function deriveCalculation(calc, fallbackRate = 0) {
   const materialAmount = fixedOwnAmount * materialPercent / 100;
   const laborAmount = Math.max(0, fixedOwnAmount - materialAmount);
   const billingRate = cleanNumber(calc?.billingRate) || cleanNumber(fallbackRate);
-  const calculatedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const explicitFixedHours = rows.filter(row => ["auftrag", "nachtrag_auftrag"].includes(row.kind)).reduce((sum,row)=>sum+cleanNumber(row.plannedHours),0);
+  const calculatedHours = ["accepted_offer","offer_draft"].includes(calc?.sourceType) && explicitFixedHours > 0 ? explicitFixedHours : (billingRate > 0 ? laborAmount / billingRate : 0);
   const plannedRegieHours = rows.reduce((total, row) => total + ((row.kind === "regie" || row.kind === "nachtrag_regie") ? cleanNumber(row.plannedHours) : 0), 0);
   return {
     baseNet,
@@ -157,12 +158,8 @@ function deriveCalculation(calc, fallbackRate = 0) {
   };
 }
 async function readCalculation(jobId) {
-  try {
-    const data = JSON.parse(await fsp.readFile(calcPath(jobId), "utf8"));
-    return sanitizeCalculation(data, data);
-  } catch {
-    return null;
-  }
+  const value = await require("./job-offer-source").readJobCalculation(DATA_DIR, jobId);
+  return value ? sanitizeCalculation(value, value) : null;
 }
 async function writeCalculation(jobId, value) {
   const existing = await readCalculation(jobId);

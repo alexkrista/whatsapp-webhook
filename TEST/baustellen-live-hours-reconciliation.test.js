@@ -5,13 +5,13 @@ const fs=require("fs");
 const path=require("path");
 
 const root=path.resolve(__dirname,"..");
-const ui=fs.readFileSync(path.join(root,"public","ui","baustellen-live-hours.js"),"utf8");
+const ui=fs.readFileSync(path.join(root,"public","ui","baustellen-live-hours.js"),"utf8")+fs.readFileSync(path.join(root,"public","ui","baustellen-hours-core.js"),"utf8");
 const sources=fs.readFileSync(path.join(root,"public","ui","baustellen-sources.js"),"utf8");
 const topbar=fs.readFileSync(path.join(root,"public","ui","topbar.js"),"utf8");
 const baustellen=fs.readFileSync(path.join(root,"public","baustellen.html"),"utf8");
 const leitstand=fs.readFileSync(path.join(root,"public","kristine.html"),"utf8");
-assert.match(topbar,/baustellen-live-hours\.js\?v=20260915-billing-cutoff-1/);
-assert.match(baustellen,/topbar\.js\?v=20260918-address-offer-1/);
+assert.match(topbar,/baustellen-live-hours\.js\?v=20260919-canonical-1/);
+assert.match(baustellen,/topbar\.js\?v=20260919-baustellen-hours-1/);
 assert.match(leitstand,/timeEditorReleased=Boolean\(result\.released\)/);
 assert.match(leitstand,/Produktiv · ohne Baustellenbezug/);
 assert.match(leitstand,/Änderungen wirken nur auf die Mitarbeiterzeit/);

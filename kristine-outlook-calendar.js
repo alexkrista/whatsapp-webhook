@@ -28,6 +28,7 @@ function installOutlookCalendar(app, deps = {}) {
   const departureBufferMinutes = Math.max(15, Math.min(60, Number(deps.departureBufferMinutes || process.env.KRISTINE_DEPARTURE_BUFFER_MINUTES || 15)));
   const loginSessions = new Map();
   let writeQueue = Promise.resolve();
+  let connectionCheck = null, connectionResult = null, connectionCheckedAt = 0;
 
   const allowed = (req, res) => typeof requireAdmin !== "function" ? true : requireAdmin(req, res);
   const encryptionSecret = () => String(process.env.KRISTINE_OUTLOOK_TOKEN_KEY || deps.adminToken || process.env.ADMIN_TOKEN || "");
@@ -179,6 +180,7 @@ function installOutlookCalendar(app, deps = {}) {
   }
 
   async function saveToken(token) {
+    connectionResult = null;
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
     const plaintext = Buffer.from(JSON.stringify({ ...token, stored_at:Date.now() }), "utf8");
@@ -619,13 +621,29 @@ function installOutlookCalendar(app, deps = {}) {
 
   app.get("/kristine/api/outlook/status", async (req, res) => {
     if (!allowed(req, res)) return;
-    try {
-      const token = await loadToken();
-      const account = accountFromToken(token);
-      const connected = Boolean(token && token.refresh_token && account === EXPECTED_ACCOUNT && hasRequiredScopes(token));
-      res.json({ ok:true, configured:Boolean(encryptionSecret()), connected, account:account || "", expectedAccount:EXPECTED_ACCOUNT, scopes:SCOPES });
+    res.setHeader?.("Cache-Control", "no-store");
+    if (!connectionResult || req.query?.refresh==="1" || Date.now()-connectionCheckedAt>=60000) {
+      if (!connectionCheck) connectionCheck=(async()=>{
+        const base={ok:true,configured:Boolean(encryptionSecret()),connected:false,account:"",expectedAccount:EXPECTED_ACCOUNT,scopes:SCOPES};
+        try {
+          const token=await loadToken(),account=accountFromToken(token);
+          base.account=account;
+          if(!token)return {...base,status:"not_connected"};
+          if(!token.refresh_token||account!==EXPECTED_ACCOUNT||!hasRequiredScopes(token))return {...base,status:"expired",error:"Outlook bitte neu verbinden."};
+          // Verify the actual calendar permission, not merely the presence of a
+          // saved refresh token. This also detects revocation before expiry.
+          const response=await fetch(`${GRAPH_ROOT}/me/calendar?$select=id`,{headers:{Authorization:`Bearer ${await accessToken()}`},signal:AbortSignal.timeout(8000)});
+          if(response.status===401||response.status===403)return {...base,status:"expired",error:"Outlook-Anmeldung ist abgelaufen oder wurde widerrufen."};
+          if(!response.ok)return {...base,status:"unavailable",error:"Microsoft-Kalender ist derzeit nicht erreichbar."};
+          return {...base,status:"connected",connected:true};
+        } catch(error) {
+          const expired=["invalid_grant","interaction_required","login_required","consent_required"].includes(error.code)||/abgelaufen|neu anmelden/.test(error.message||"");
+          return {...base,status:expired?"expired":"unavailable",error:expired?"Outlook-Anmeldung ist abgelaufen. Bitte neu verbinden.":"Outlook-Verbindung konnte nicht geprüft werden."};
+        }
+      })().then(result=>{connectionResult={...result,checkedAt:new Date().toISOString()};connectionCheckedAt=Date.now();return connectionResult}).finally(()=>{connectionCheck=null});
+      await connectionCheck;
     }
-    catch (error) { res.json({ ok:true, configured:Boolean(encryptionSecret()), connected:false, account:"", expectedAccount:EXPECTED_ACCOUNT, error:String(error?.message || error) }); }
+    res.json(connectionResult);
   });
 
   app.get("/kristine/api/outlook/day", async (req, res) => {

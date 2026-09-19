@@ -38,7 +38,7 @@ function browser(db,hash,remote={}){
     const res=await db.call(raw,init);return response(res.body,res.code);
   };
   const context={window,document,fetch,location:{hash,search:"",pathname:hash?"/kristine/sammelmappe":"/kristine/baustellen",origin:"https://protokoll.krista.at"},URL,URLSearchParams,Intl,Date,Map,Set,AbortSignal,CustomEvent:class{constructor(type){this.type=type}},console,setTimeout,clearTimeout,queueMicrotask};
-  for(const file of ["baustellen-sources.js","baustellen-live-hours.js"])vm.runInNewContext(fs.readFileSync(path.join(root,"public/ui",file),"utf8"),context);
+  for(const file of ["baustellen-sources.js","baustellen-hours-core.js","baustellen-live-hours.js"])vm.runInNewContext(fs.readFileSync(path.join(root,"public/ui",file),"utf8"),context);
   return {api:window.BaustellenLiveHours,window,calls,events,nodes};
 }
 test("open, close and reopen: both collections reuse server hours in the list before any office request",async t=>{

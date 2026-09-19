@@ -78,7 +78,7 @@
   function ensureModal(){
     let bg=document.getElementById("kristaServicesBg");if(bg)return bg;
     bg=document.createElement("div");bg.id="kristaServicesBg";bg.className="ksvc-bg";
-    bg.innerHTML=`<section class="ksvc-modal" role="dialog" aria-modal="true" aria-labelledby="kristaServicesTitle"><div class="ksvc-head"><div><h2 id="kristaServicesTitle">🩺 KRISTA Dienste</h2><small>Was läuft · welche Version · welcher Git-Stand · Neustart direkt von hier</small></div><div class="ksvc-head-actions"><button type="button" class="secondary" id="kristaServicesRefresh">↻ Aktualisieren</button><button type="button" class="secondary" data-close>✕</button></div></div><div class="ksvc-body"><div id="kristaServicesContent" class="ksvc-empty">Dienste werden geprüft …</div><div id="kristaServicesMsg" class="ksvc-msg"></div></div></section>`;
+    bg.innerHTML=`<section class="ksvc-modal" role="dialog" aria-modal="true" aria-labelledby="kristaServicesTitle"><div class="ksvc-head"><div><h2 id="kristaServicesTitle">🩺 KRISTA Dienste</h2><small>Was läuft · welche Version · welcher Git-Stand · Neustart direkt von hier</small></div><div class="ksvc-head-actions"><button type="button" class="secondary" id="kristaServicesRefresh">↻ Aktualisieren</button><button type="button" class="secondary" data-close>✕</button></div></div><div class="ksvc-body"><div id="kristaServicesContent" class="ksvc-empty">Dienste werden geprüft …</div><div id="kristaServicesOutlookLogin" class="ksvc-msg" role="status"></div><div id="kristaServicesMsg" class="ksvc-msg"></div></div></section>`;
     document.body.appendChild(bg);
     bg.addEventListener("click",e=>{if(e.target===bg||e.target.closest("[data-close]"))close()});
     bg.querySelector("#kristaServicesRefresh").onclick=load;
@@ -109,6 +109,7 @@
   }
 
   function actionCell(row){
+    if(row.id==="outlook")return row.canConnect?`<button type="button" class="restart" data-outlook-connect ${row.connecting?"disabled":""}>${row.connecting?"Anmeldung läuft …":"Neu verbinden"}</button>`:`<span class="ksvc-detail">Anmeldung aktiv</span>`;
     if(row.canStart)return `<button type="button" class="start" data-service="${esc(row.id)}" data-action="start">▶ Starten</button>`;
     if(row.canRestart)return `<button type="button" class="restart" data-service="${esc(row.id)}" data-action="restart">↻ Neu starten</button>`;
     return `<span class="ksvc-detail">nur Status</span>`;
@@ -118,9 +119,10 @@
     const content=document.getElementById("kristaServicesContent");if(!content)return;
     const rows=Array.isArray(data.rows)?data.rows:[];
     const green=rows.filter(x=>x.level==="green").length,yellow=rows.filter(x=>x.level==="yellow").length,red=rows.filter(x=>x.level==="red").length;
-    lampLevel=red>0?"red":"green";applyLamp();
+    window.dispatchEvent(new CustomEvent("krista:outlook-status"));
     content.className="";
     content.innerHTML=`<div class="ksvc-summary"><span class="ksvc-chip">🟢 ${green} okay</span><span class="ksvc-chip">🟡 ${yellow} beachten</span><span class="ksvc-chip">🔴 ${red} Fehler</span><span class="ksvc-chip">Git ${esc(data.repo?.branch||'–')} · ${esc(data.repo?.shortCommit||'–')}${data.repo?.dirty?' · lokale Änderungen':''}</span></div><div class="ksvc-table">${rows.map(row=>`<div class="ksvc-row"><div class="ksvc-service"><span class="ksvc-icon">${esc(row.icon||'•')}</span><div><strong>${esc(row.name||row.id)}</strong><div class="ksvc-detail">${esc(row.detail||'')}</div>${row.lastError?`<div class="ksvc-error">⚠ ${esc(row.lastError)}</div>`:''}</div></div><div><span class="ksvc-label">Status</span><span class="ksvc-status ksvc-${esc(row.level||'red')}">${esc(row.status||'–')}</span></div><div class="ksvc-value"><span class="ksvc-label">Version</span><strong>${esc(row.version||'–')}</strong></div><div class="ksvc-value"><span class="ksvc-label">Git / aktuell</span>${commitCell(row)}</div><div class="ksvc-value"><span class="ksvc-label">Laufzeit</span>${esc(uptime(row.uptimeSeconds))}</div><div class="ksvc-action"><span class="ksvc-label">Aktion</span>${actionCell(row)}</div></div>`).join("")}</div>`;
+    content.querySelector("[data-outlook-connect]")?.addEventListener("click",async event=>{event.currentTarget.disabled=true;await window.KristaOutlookServices.connect(document.getElementById("kristaServicesOutlookLogin"));load()});
     content.querySelectorAll("[data-service][data-action]").forEach(button=>button.onclick=()=>runAction(button.dataset.service,button.dataset.action,button));
   }
 
@@ -133,7 +135,9 @@
   async function load(){
     const content=document.getElementById("kristaServicesContent");const msg=document.getElementById("kristaServicesMsg");
     if(content){content.className="ksvc-empty";content.textContent="Dienste werden geprüft …"}if(msg){msg.textContent="";msg.className="ksvc-msg"}
-    try{const data=await managerFetch("/api/status");render(data)}catch(error){renderOffline(error)}
+    const [manager]=await Promise.allSettled([managerFetch("/api/status"),window.KristaOutlookServices?.refresh()]);
+    const data=manager.status==="fulfilled"?manager.value:{rows:[{id:"manager",name:"Dienstemanager",level:"red",status:"Nicht erreichbar",detail:"Der Firmen-PC ist derzeit nicht erreichbar.",lastError:manager.reason?.message}]};
+    const outlook=window.KristaOutlookServices?.row();render({...data,rows:[...(data.rows||[]).filter(row=>row.id!=="outlook"),...(outlook?[outlook]:[])]});
   }
 
   async function runAction(service,action,button){
@@ -144,7 +148,7 @@
     try{
       const data=await managerFetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({service,action})});
       if(msg){msg.textContent="✓ "+(data.message||"Aktion gestartet");msg.className="ksvc-msg ok"}
-      let tries=0;clearInterval(timer);timer=setInterval(async()=>{tries++;try{const status=await managerFetch("/api/status");render(status);if(tries>=3&&status.rows?.find(x=>x.id===service)?.level==="green"){clearInterval(timer);timer=null}}catch(_){}if(tries>20){clearInterval(timer);timer=null}},1000);
+      let tries=0;clearInterval(timer);timer=setInterval(async()=>{tries++;try{const status=await managerFetch("/api/status");render({...status,rows:[...(status.rows||[]).filter(row=>row.id!=="outlook"),window.KristaOutlookServices.row()]});if(tries>=3&&status.rows?.find(x=>x.id===service)?.level==="green"){clearInterval(timer);timer=null}}catch(_){}if(tries>20){clearInterval(timer);timer=null}},1000);
     }catch(error){if(msg){msg.textContent=error.message||String(error);msg.className="ksvc-msg error"}}
     finally{button.disabled=false}
   }

@@ -29,6 +29,6 @@ assert.match(tower, /hoursThroughDate:billingThroughDate/);
 assert.match(tower, /href="\$\{tokenUrl\('\/kristine\/baustellen'\)\}#\$\{encodeURIComponent\(row\.job\.jobId\)\}"/);
 assert.match(tower, /billingReady\?money\(total\)/);
 assert.match(tower, /row\.amountToInvoice!==null\?B\.formatMoney\(row\.amountToInvoice\)/);
-assert.match(topbar, /tower-baustellen-signals\.js\?v=20260915-billing-snapshot-5/);
+assert.match(topbar, /tower-baustellen-signals\.js\?v=20260919-canonical-1/);
 
 console.log("OK: Tower-Abrechnungsstand ist nachts gespeichert, manuell aktualisierbar und bis Vortag begrenzt.");

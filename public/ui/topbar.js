@@ -171,7 +171,8 @@
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260914-progress-1", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260912-lg-surface-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260915-billing-cutoff-1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-hours-core.js?v=20260919-canonical-1", "data-krista-baustellen-hours-core");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260919-canonical-1", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
     loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-hours-cache-1", "data-krista-baustellen-ww-import");
     loadScriptOnce("/public/ui/baustellen-collection.js?v=20260913-sammelmappe-1", "data-krista-baustellen-collection");
@@ -185,7 +186,7 @@
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
       loadScriptOnce("/public/ui/regie-billing-state.js?v=20260915-progress-6", "data-krista-regie-billing-state");
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260915-billing-snapshot-5", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260919-canonical-1", "data-krista-tower-signals");
     }
   }
 
@@ -199,7 +200,7 @@
   function loadKrisadminServices() {
     const path = window.location.pathname.toLowerCase();
     const isKrisadmin = path.includes("baustellen.html") || (path.includes("/admin") && !path.includes("/admin/paint") && !path.includes("/admin/akte") && !path.includes("/admin/pdf") && !path.includes("/admin/download"));
-    if (isKrisadmin) loadScriptOnce("/public/ui/krisadmin-services.js?v=20260825-services1", "data-krista-krisadmin-services");
+    if (isKrisadmin) loadScriptOnce("/public/ui/krisadmin-services.js?v=20260919-outlook-1", "data-krista-krisadmin-services");
   }
 
   function loadAdminEmployeeDocumentCompleteness() {
@@ -309,7 +310,8 @@
     loadAdminEmployeePersonnelFile();
     loadKriszeitToolbar();
     loadCurrentBeulen();
-    loadScriptOnce("/public/ui/access-status-ui.js?v=20260918-gate-position", "data-krista-access-status-v3");
+    loadScriptOnce("/public/ui/outlook-services.js?v=20260919-outlook-1", "data-krista-outlook-services");
+    loadScriptOnce("/public/ui/access-status-ui.js?v=20260919-outlook-1", "data-krista-access-status-v3");
     activateKristineHash();
   });
 

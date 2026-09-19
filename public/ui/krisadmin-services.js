@@ -25,7 +25,8 @@
   // leitet ausschließlich Dienstemanager-Aufrufe sicher über The Brain um.
   preferSingleServicesLamp();
   load("/public/ui/krisadmin-services-remote.js?v=20260827-remote1", "data-krista-services-remote");
-  load("/public/ui/krisadmin-services-core.js?v=20260827-services-home2", "data-krista-services-core");
+  load("/public/ui/outlook-services.js?v=20260919-outlook-1", "data-krista-outlook-services");
+  load("/public/ui/krisadmin-services-core.js?v=20260919-outlook-1", "data-krista-services-core");
 
   // Dienste leben jetzt als eigenes Feld in KRISADMIN. Der alte Einzelbutton
   // auf der Baustellen-/Admin-Oberfläche wird nachgeladenen Zuständen sicher entfernt.

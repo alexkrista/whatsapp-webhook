@@ -3003,7 +3003,9 @@ app.post("/admin/api/jobs", async (req, res) => {
 });
 
 // Admin API: list jobs
+const attachBaustellenHours = require("./baustellen-hours-service").createBaustellenHoursService({dataDir:DATA_DIR,readBootstrap:()=>kristine.getHoursBootstrap()});
 app.get("/admin/api/jobs", async (req, res) => {
+  res.locals.buildBaustellenHours = attachBaustellenHours;
   if (!requireAdmin(req, res)) return;
 
   try {
@@ -3033,7 +3035,8 @@ app.get("/admin/api/jobs", async (req, res) => {
       }
 
       const meta = await readJobMeta(jobId);
-      const acceptedOrder = await fsp.readFile(acceptedOrderPath(jobId), "utf8").then(JSON.parse).catch(() => null);
+      const offerSource = await require("./job-offer-source").readJobOfferSource(DATA_DIR, jobId, {meta,allowDraft:true});
+      const acceptedOrder = offerSource?.order || null;
       const acceptedTargets = acceptedOrder ? acceptedOrderTargets(acceptedOrder) : null;
       const hours = await summarizeJobHours(jobId);
       const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours, acceptedTargets);
@@ -3341,9 +3344,9 @@ function serializedOrderSchedule(action) {
 }
 async function readOrderSchedule(jobId) {
   const stored = await fsp.readFile(orderSchedulePath(jobId), "utf8").then(JSON.parse).catch(() => null);
-  if (stored) return scheduleBase(stored, jobId);
   const meta = await readJobMeta(jobId);
-  return scheduleBase(meta.orderSchedule || {}, jobId);
+  const source = await require("./job-offer-source").readJobOfferSource(DATA_DIR, jobId, {meta});
+  return require("./job-offer-source").scheduleWithOfferRequest(stored || meta.orderSchedule, source?.order, jobId);
 }
 async function persistOrderSchedule(jobId, value, options = {}) {
   const schedule = scheduleBase(value, jobId);
@@ -3554,7 +3557,7 @@ require("./order-confirmation").registerOrderConfirmation(app, {
   readDocumentation, writeDocumentation, appendJobHistory, renderPdf: renderOfferHtmlPdf,
 });
 
-app.get("/admin/api/job/:jobId/accepted-order",async(req,res)=>{if(!requireAdmin(req,res))return;const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null),invoiceDraft=await fsp.readFile(prepaymentInvoiceDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null),schedule=await readOrderSchedule(jobId);res.json({ok:true,jobId,order,invoiceDraft,schedule})});
+app.get("/admin/api/job/:jobId/accepted-order",async(req,res)=>{if(!requireAdmin(req,res))return;const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const source=await require("./job-offer-source").readJobOfferSource(DATA_DIR,jobId),order=source?.accepted?source.order:null,invoiceDraft=await fsp.readFile(prepaymentInvoiceDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null),schedule=await readOrderSchedule(jobId);res.json({ok:true,jobId,order,invoiceDraft,schedule})});
 
 app.post("/admin/api/job/:jobId/offer-draft/accept",async(req,res)=>{
   if(!requireAdmin(req,res))return;
@@ -4876,6 +4879,7 @@ console.log("TEXT_MODEL:", OPENAI_TEXT_MODEL);
 console.log("LOGO_PATH:", LOGO_PATH);
 
 async function startServer() {
+  console.info("CUSTOMER_ACCEPTED_ORDERS_RESTORED", JSON.stringify(await require("./job-offer-source").restoreCustomerAcceptedOrders(DATA_DIR)));
   try {
     const result = await require("./legacy-collection-repair").repairLegacyCollection({ dataDir: DATA_DIR });
     if (result.status === "repaired" || result.status === "already_repaired") {

@@ -51,12 +51,8 @@ function roundMoney(value) {
   return Math.round((number(value) + Number.EPSILON) * 100) / 100;
 }
 async function readCalculation(jobId) {
-  try {
-    const value = JSON.parse(await fsp.readFile(calculationPath(jobId), "utf8"));
-    return value && typeof value === "object" ? value : null;
-  } catch {
-    return null;
-  }
+  const value = await require("./job-offer-source").readJobCalculation(DATA_DIR, jobId);
+  return value;
 }
 async function readMeta(jobId) {
   try {
@@ -127,7 +123,7 @@ function effectiveLine(row, stored, index) {
   const effectiveKind = inferredAcceptedRegie && row?.kind === "auftrag" ? "regie" : row?.kind;
   const plannedHours = isRegie && (componentType === "arbeit" || sourcePlannedHours > 0)
     ? (sourcePlannedHours || (/^std$/i.test(unit) ? quantity : 0))
-    : 0;
+    : sourcePlannedHours;
   return {
     ...row,
     positionId: text(row?.id || meta.positionId, 100),
@@ -167,7 +163,8 @@ function derive(calc, meta, fallbackRate = 0) {
   const materialAmount = fixedOwnAmount * materialPercent / 100;
   const laborAmount = Math.max(0, fixedOwnAmount - materialAmount);
   const billingRate = number(calc?.billingRate) || number(fallbackRate);
-  const calculatedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const explicitFixedHours = included.filter(row => ["auftrag", "nachtrag_auftrag"].includes(row.kind)).reduce((sum,row)=>sum+number(row.plannedHours),0);
+  const calculatedHours = ["accepted_offer","offer_draft"].includes(calc?.sourceType) && explicitFixedHours > 0 ? explicitFixedHours : (billingRate > 0 ? laborAmount / billingRate : 0);
   const plannedRegieHours = included.reduce((sum, row) => sum + ((row.kind === "regie" || row.kind === "nachtrag_regie") ? number(row.plannedHours) : 0), 0);
   const excludedAmount = lines.filter(row => row.calcIncluded === false).reduce((sum, row) => sum + number(row.amount), 0);
   return {
@@ -336,8 +333,9 @@ if (!express.application[GET_PATCH_FLAG]) {
             if (sent) return originalJson(payload);
             sent = true;
             return enrichJobsPayload(payload)
+              .then(value => res.locals.buildBaustellenHours && value?.ok !== false ? res.locals.buildBaustellenHours(value) : value)
               .then(value => originalJson(value))
-              .catch(() => originalJson(payload));
+              .catch(error => { console.error("BAUSTELLEN_HOURS failed:", error.message); return originalJson({...payload,baustellenHours:null}); });
           };
           return handler(req, res, next);
         };
