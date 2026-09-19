@@ -1,5 +1,5 @@
-const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const fs=require('fs'),path=require('path'),assert=require('assert'),{launchTestBrowser}=require('./browser-runtime');
+(async()=>{const browser=await launchTestBrowser({headless:true});try{
  const page=await browser.newPage();let sent=null;
  await page.addInitScript(()=>{Object.defineProperty(navigator,'canShare',{configurable:true,value:()=>true});Object.defineProperty(navigator,'share',{configurable:true,value:async data=>{window.shared={count:data.files.length,text:data.text}}})});
  await page.route('http://photos.test/**',route=>{const url=new URL(route.request().url());

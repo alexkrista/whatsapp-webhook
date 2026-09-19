@@ -1,6 +1,6 @@
 const fs=require('fs'),path=require('path'),assert=require('assert');
-const {chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const {launchTestBrowser}=require('./browser-runtime');
+(async()=>{const browser=await launchTestBrowser({headless:true});try{
  const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const html=fs.readFileSync(path.join(__dirname,'../public/regie-workbench.html'),'utf8').replace("loadBase().catch(error=>{$('queue').innerHTML=`<div class=\"empty\">${error.message}</div>`});",'');
  await page.route('http://regie.test/**',route=>route.fulfill({contentType:route.request().url().includes('.js')?'text/javascript':'text/html; charset=utf-8',body:route.request().url().includes('.js')?'':html}));

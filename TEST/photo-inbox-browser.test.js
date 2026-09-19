@@ -1,5 +1,5 @@
-const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const fs=require('fs'),path=require('path'),assert=require('assert'),{launchTestBrowser}=require('./browser-runtime');
+(async()=>{const browser=await launchTestBrowser({headless:true});try{
  const page=await browser.newPage();let confirmed=false,changes=null,confirmAttempts=0;const discarded=new Set();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('http://inbox.test/**',route=>{const u=new URL(route.request().url());
  if(u.pathname==='/')return route.fulfill({contentType:'text/html; charset=utf-8',body:'<main class="shell"><div class="hero"></div></main><script src="/photos.js"></script>'});

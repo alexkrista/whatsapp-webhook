@@ -1,5 +1,5 @@
-const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{const page=await browser.newPage();
+const fs=require('fs'),path=require('path'),assert=require('assert'),{launchTestBrowser}=require('./browser-runtime');
+(async()=>{const browser=await launchTestBrowser({headless:true});try{const page=await browser.newPage();
 const html=fs.readFileSync(path.join(__dirname,'../public/regie-workbench.html'),'utf8');const functions=html.slice(html.indexOf('function openInboxItem('),html.indexOf('async function loadMailboxStatus('));
 await page.setContent('<input type="checkbox" id="showDismissed"><span id="mailSideCount"></span><p id="inboxActionStatus"></p><div id="mailInbox"></div>');
 await page.addScriptTag({content:`const $=id=>document.getElementById(id),esc=v=>String(v||''),formatRecentDate=v=>v,tokenUrl=v=>v;let inboxItems=[];const row={id:'mail1',name:'Testmail',status:'analyzed'};async function api(url,options){if(options){row.status=JSON.parse(options.body).restore?'analyzed':'dismissed';return {item:row}}return {items:(url.includes('dismissed=true')?row.status==='dismissed':row.status!=='dismissed')?[row]:[]}};${functions};loadInbox();`});

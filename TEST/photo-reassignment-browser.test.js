@@ -1,5 +1,5 @@
-const fs=require('fs'),path=require('path'),assert=require('assert'),{chromium}=require('playwright');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const fs=require('fs'),path=require('path'),assert=require('assert'),{launchTestBrowser}=require('./browser-runtime');
+(async()=>{const browser=await launchTestBrowser({headless:true});try{
  const page=await browser.newPage();let moved=false,submitted;
  await page.route('http://photos.test/**',route=>{const url=new URL(route.request().url());
  if(url.pathname==='/')return route.fulfill({contentType:'text/html; charset=utf-8',body:'<meta charset="utf-8"><div id="bkProtocols"></div><script src="/gallery.js"></script>'});

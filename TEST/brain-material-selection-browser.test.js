@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { launchTestBrowser } = require('./browser-runtime');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'brain_material_selection.py'), 'utf8').replace(/\r\n/g, '\n');
 const ui = source.split("UI = r'''\n")[1].split("\n'''")[0];
@@ -12,7 +12,7 @@ const html = `<!doctype html><html><body><div id="materialResults"><div class="m
 <div id="pdfSuperModal" hidden><div id="pdfSuperTitle"></div><div class="pdf-super-tools">${['Prev','Next','Minus','Plus','100','Width','LoupeToggle','Close'].map(id=>`<button id="pdf${id}">${id}</button>`).join('')}<a id="pdfOriginal">Original</a></div><div id="pdfStatus"></div><div id="pdfStage" style="position:relative;width:900px;height:600px;overflow:auto"><img id="pdfImage" style="width:600px;height:400px"></div><div id="pdfLoupe"></div></div><script>${viewer}</script>${ui}</body></html>`;
 
 (async () => {
- const browser = await chromium.launch({channel:process.env.TEST_BROWSER_CHANNEL || 'chrome', headless:true});
+ const browser = await launchTestBrowser({headless:true});
  try {
   const page = await browser.newPage();
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

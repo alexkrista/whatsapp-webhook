@@ -16,6 +16,7 @@ Module._load = originalLoad;
 
 (async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "day-control-"));
+  let startupReady = Promise.resolve();
   const dataRoot = path.join(root, "_kristine");
   const date = "2026-09-15";
   const employees = [
@@ -54,7 +55,7 @@ Module._load = originalLoad;
 
     const routes = new Map(), app = {};
     for (const method of ["get","put","post","patch","delete"]) app[method] = (url, handler) => routes.set(`${method} ${url}`, handler);
-    registerKristine(app, {dataDir:root,publicDir:root,requireAdmin:()=>true,readEmployees:async()=>employees});
+    ({ startupReady } = registerKristine(app, {dataDir:root,publicDir:root,requireAdmin:()=>true,readEmployees:async()=>employees}));
     async function call(method, url, params={}, body={}) {
       const res={statusCode:200,status(value){this.statusCode=value;return this;},json(value){this.body=value;return this;}};
       await routes.get(`${method} ${url}`)({params,body,query:{}},res);
@@ -107,6 +108,7 @@ Module._load = originalLoad;
     assert.equal(response.body.control.confirmed,true);
     console.log("OK: Tageskontrolle zählt Anwesenheit korrekt und unterstützt Rückgabe, Korrektur und erneuten Tagesabschluss.");
   } finally {
+    await startupReady;
     await fsp.rm(root,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});

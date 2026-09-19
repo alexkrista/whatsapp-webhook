@@ -1,7 +1,7 @@
 const fs=require('fs'),path=require('path'),assert=require('assert');
-const {chromium}=require('playwright');
+const {launchTestBrowser}=require('./browser-runtime');
 (async()=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});
+ const browser=await launchTestBrowser({headless:true});
  try{
   const page=await browser.newPage();
   let html=fs.readFileSync(path.join(__dirname,'../public/regie-assistant.html'),'utf8');

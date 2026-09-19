@@ -3213,12 +3213,16 @@ const open = taskId
   });
 
   // Bestehende freigegebene Tage beim Start einmalig sauber trennen.
-  setImmediate(() => migrateHistoricalReleasedTime().catch(error =>
-    console.error("KRISZEIT historische Zeittrennung:", error)
-  ));
+  // Das Promise bleibt nach außen verfügbar, damit geordnete Shutdowns und
+  // Tests auf die tatsächlich abgeschlossene Startmigration warten können.
+  const startupReady = new Promise(resolve => setImmediate(resolve))
+    .then(() => migrateHistoricalReleasedTime())
+    .catch(error => {
+      console.error("KRISZEIT historische Zeittrennung:", error);
+    });
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
-  return { handleMessage, localDateISO };
+  return { handleMessage, localDateISO, startupReady };
 }
 
 module.exports = { registerKristine };
