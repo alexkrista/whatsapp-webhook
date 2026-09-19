@@ -181,7 +181,7 @@
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260914-position-sum-1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-offer-positions-1", "data-krista-kalkulation-grid-v2");
     loadScriptOnce("/public/ui/document-template.js?v=20260919-invoice-1", "data-krista-document-template");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260918-approved-pdf-only-3-order-schedule-regie-hours-7-order-confirmation-20260919-1-scheduling-notices-2-invoice-3", "data-krista-angebot-v13");
+    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260918-approved-pdf-only-3-order-schedule-regie-hours-7-order-confirmation-20260919-1-scheduling-notices-2-invoice-4-pdf-preview", "data-krista-angebot-v13");
   }
 
   function loadTowerSignals() {

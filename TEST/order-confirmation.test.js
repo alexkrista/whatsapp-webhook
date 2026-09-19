@@ -120,6 +120,8 @@ async function renderer(t){
   t.after(()=>dom.window.close());
   dom.window.MutationObserver=class {observe(){}disconnect(){}};
   dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true};
+  dom.window.URL.createObjectURL=()=>"blob:test-ab-pdf";
+  dom.window.URL.revokeObjectURL=()=>{};
   let source=await fs.readFile(path.join(__dirname,"../public/ui/baustellen-offer-builder.js"),"utf8");
   const startup='  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{init();mountFreePositionUi();watchLivePreview()},{once:true});else{init();mountFreePositionUi();watchLivePreview()}';
   assert.ok(source.includes(startup));
@@ -148,12 +150,27 @@ test("Termin bestätigen übernimmt genau den gespeicherten Termin in die AB und
   s.data.schedule.outlook={status:"failed"};view.schedule=s.data.schedule;
   w.offerTest.setState({draft:s.data.draft,job:{},jobId:"26001",order:s.data.order,schedule:{status:"requested"}});
   w.document.body.insertAdjacentHTML("beforeend",'<section id="kofferOrderSchedule"><input id="kofferScheduleDate" value="2026-10-05"><input id="kofferScheduleFrom" value="07:00"><input id="kofferScheduleTo" value="17:00"><button data-schedule-action="confirm"></button></section>');
-  const requests=[];w.fetch=async(url,options={})=>{requests.push({url,options});return{ok:true,text:async()=>JSON.stringify(String(url).endsWith("/confirm")?{schedule:s.data.schedule,planningCreated:0,outlookSynced:false}:view)}};
+  const requests=[];w.fetch=async(url,options={})=>{requests.push({url,options});return{ok:true,blob:async()=>new w.Blob(["%PDF-test"],{type:"application/pdf"}),text:async()=>JSON.stringify(String(url).endsWith("/confirm")?{schedule:s.data.schedule,planningCreated:0,outlookSynced:false}:view)}};
   await w.offerTest.orderScheduleAction("confirm");
   assert.equal(requests.filter(row=>row.url.endsWith("/confirm")).length,1);
   assert.equal(JSON.parse(requests[0].options.body).date,"2026-10-05");
   const dialog=w.document.getElementById("kofferConfirmationDialog");assert.ok(dialog?.open,w.document.body.textContent);
   assert.match(dialog.querySelector("[data-confirmation-calendar]").textContent,/Outlook-Synchronisierung noch offen/);
-  assert.match(dialog.querySelector("iframe").srcdoc,/Bestätigter Termin/);
+  assert.equal(dialog.querySelector("iframe").src,"blob:test-ab-pdf");
+  assert.equal(dialog.querySelector("iframe").hasAttribute("srcdoc"),false);
+  assert.equal(dialog.querySelector("[data-confirmation-save]").disabled,false);
+  const preview=requests.find(row=>row.url.startsWith("/admin/api/document-layout/render"));assert.ok(preview);assert.match(preview.options.body,/Bestätigter Termin/);
   assert.equal(requests.filter(row=>row.url.endsWith("/pdf")).length,0);
+});
+
+test("gespeicherte AB wird als Original-PDF angezeigt; fehlerhafte Vorschau kann nicht abgelegt werden",async t=>{
+  const s=await service(t),view=await s.request(),w=await renderer(t);
+  w.offerTest.setState({draft:s.data.draft,job:{},jobId:"26001",order:s.data.order,schedule:s.data.schedule});
+  const saved={...view,item:{id:"stored"},pdfUrl:"/admin/api/job/26001/documentation/file?name=ab.pdf"},requests=[];
+  w.fetch=async(url,options={})=>{requests.push({url,options});return{ok:true,text:async()=>JSON.stringify(saved)}};
+  await w.offerTest.openOrderConfirmation();
+  assert.equal(requests.length,1);assert.match(w.document.querySelector("#kofferConfirmationDialog iframe").src,/documentation\/file\?name=ab\.pdf/);
+  w.fetch=async url=>String(url).startsWith("/admin/api/document-layout/render")?{ok:false,json:async()=>({error:"Test Renderfehler"})}:{ok:true,text:async()=>JSON.stringify(view)};
+  await w.offerTest.openOrderConfirmation();
+  const dialog=w.document.getElementById("kofferConfirmationDialog");assert.equal(dialog.querySelector("[data-confirmation-save]").disabled,true);assert.match(dialog.querySelector("[data-confirmation-status]").textContent,/Test Renderfehler/);
 });

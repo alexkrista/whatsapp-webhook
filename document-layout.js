@@ -21,6 +21,8 @@ function layoutPath(dataDir){return path.join(dataDir,"_system","document-layout
 async function readLayout(dataDir){return cleanLayout(await fs.readFile(layoutPath(dataDir),"utf8").then(JSON.parse).catch(error=>{if(error.code==="ENOENT")return DEFAULTS;throw error}))}
 function layoutCss(value){
   const t=cleanLayout(value),p=t.firstPage,n=t.followingPages;
+  // The shared template wins over print rules from older, still-open editors.
+  // applyInvoiceTemplate sets the marker used by the final selector replacement.
   return `
   .koffer-paper{font-family:Arial,Helvetica,sans-serif!important;font-size:${t.fontSizePt}pt!important;line-height:${t.lineHeight}!important;color:#000}
   .koffer-paper p{margin:0 0 ${t.paragraphGapMm}mm!important}
@@ -87,7 +89,7 @@ function layoutCss(value){
     .koffer-paper thead{display:table-header-group}.koffer-paper tfoot{display:table-row-group;break-inside:avoid}
     .koffer-paper tr{break-inside:avoid}.koffer-paper .koffer-paper-group{break-after:avoid}
   }
-`;
+`.replace(/\.koffer-paper(?![\w-])/g,".koffer-paper[data-invoice-template]");
 }
 function registerDocumentLayout(app,{dataDir,requireAdmin,publicDir,renderPdf}){
   const read=()=>readLayout(dataDir);

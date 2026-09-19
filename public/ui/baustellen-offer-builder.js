@@ -270,9 +270,11 @@
       const dialog=document.createElement("dialog");dialog.id="kofferConfirmationDialog";
       dialog.style.cssText="width:min(1100px,calc(100vw - 28px));max-height:94vh;border:0;border-radius:14px;padding:18px;box-shadow:0 18px 60px #0005";
       dialog.innerHTML=`<form method="dialog"><header style="display:flex;justify-content:space-between;align-items:center;gap:14px"><h3>Auftragsbestätigung ${esc(view.confirmation.number)}</h3><button aria-label="Schließen">×</button></header><p><strong>Bestätigter Termin:</strong> ${esc(view.confirmation.scheduleLabel)}</p><p data-confirmation-calendar style="color:${view.schedule.outlook?.status==="synced"?"#276d3d":"#923a22"}">${view.schedule.outlook?.status==="synced"?"✓ Termin in KRISTINE und Outlook gespeichert.":"Termin in KRISTINE gespeichert. Outlook-Synchronisierung noch offen; bitte beim Auftrag erneut versuchen."}</p><iframe title="Vorschau der Auftragsbestätigung" sandbox="allow-same-origin" style="display:block;width:100%;height:62vh;border:1px solid #ddd;background:#eee"></iframe><p data-confirmation-status role="status">${view.item?"Diese AB wurde bereits in der Kundenakte gespeichert.":"Vorschau prüfen, anschließend als PDF in der Kundenakte ablegen."}</p><footer style="display:flex;justify-content:flex-end;gap:9px"><button>Schließen</button><button type="button" data-confirmation-save style="background:#276d3d;color:#fff;padding:10px 15px;border:0;border-radius:8px;font-weight:800">${view.item?"Gespeicherte AB öffnen":"PDF erstellen & ablegen"}</button></footer></form>`;
-      dialog.querySelector("iframe").srcdoc=html;
+      const frame=dialog.querySelector("iframe"),saveButton=dialog.querySelector("[data-confirmation-save]"),previewStatus=dialog.querySelector("[data-confirmation-status]");
+      frame.removeAttribute("sandbox");frame.title="PDF-Vorschau der Auftragsbestätigung";saveButton.disabled=!view.item;
       document.body.append(dialog);dialog.showModal();
-      dialog.addEventListener("close",()=>dialog.remove(),{once:true});
+      let previewUrl="";
+      dialog.addEventListener("close",()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);dialog.remove()},{once:true});
       let stored=view.item?{item:view.item,pdfUrl:view.pdfUrl}:null;
       dialog.querySelector("[data-confirmation-save]").onclick=async()=>{
         const button=dialog.querySelector("[data-confirmation-save]"),status=dialog.querySelector("[data-confirmation-status]");
@@ -288,6 +290,16 @@
         }catch(error){popup?.close();status.textContent="AB konnte nicht gespeichert werden: "+error.message}
         finally{button.disabled=false}
       };
+      if(stored){frame.src=url(stored.pdfUrl);return}
+      previewStatus.textContent="PDF-Vorschau wird erstellt …";
+      try{
+        const response=await fetch(url("/admin/api/document-layout/render"),{method:"POST",headers:{"Content-Type":"text/html"},body:html});
+        if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.error||"PDF konnte nicht erstellt werden.")}
+        const pdf=await response.blob();
+        if(!dialog.isConnected)return;
+        previewUrl=URL.createObjectURL(pdf);frame.src=previewUrl;
+        previewStatus.textContent="PDF-Vorschau prüfen, anschließend in der Kundenakte ablegen.";saveButton.disabled=false;
+      }catch(error){previewStatus.textContent="PDF-Vorschau konnte nicht erstellt werden: "+error.message}
     }catch(error){mountOrderSchedule(false,"AB-Vorschau: "+error.message,"error")}
   }
 

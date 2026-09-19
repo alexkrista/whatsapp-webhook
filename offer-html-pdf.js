@@ -36,6 +36,9 @@ async function renderOfferHtmlPdf(html,options={}) {
     await page.setRequestInterception(true);
     page.on("request",request=>{
       const pathname=new URL(request.url()).pathname;
+      // Old editor windows still reference this retired stylesheet. The server's
+      // common invoice layout is authoritative for every generated document.
+      if(pathname==="/public/ui/order-confirmation-print.css")return request.respond({status:200,contentType:"text/css",body:""});
       if(pathname==="/public/document-layout.css")return request.respond({status:200,contentType:"text/css",body:layoutCss(layout)});
       const local=pathname==="/public/document-logo.png"?path.join(__dirname,"assets/krista_invoice_logo.png"):pathname.startsWith("/public/fonts/")?path.join(__dirname,"public/fonts",path.basename(pathname)):null;
       if(local&&fs.existsSync(local))return request.respond({status:200,contentType:local.endsWith(".png")?"image/png":"font/ttf",body:fs.readFileSync(local)});

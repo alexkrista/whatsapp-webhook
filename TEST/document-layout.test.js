@@ -3,6 +3,24 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const {JSDOM}=require("jsdom"),apply=require("../public/ui/document-template");
 const {cleanLayout,readLayout,registerDocumentLayout,previewHtml}=require("../document-layout");
 
+test("PDF hält den Rechnungskopf auch bei Druckregeln eines älteren AB-Fensters frei",async()=>{
+  const {renderOfferHtmlPdf}=require("../offer-html-pdf"),{getDocument}=await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // An already open browser can still submit the former AB-specific print rules.
+  const legacy="@media print{.koffer-paper[data-order-confirmation] .koffer-paper-page{display:block!important;position:static!important;padding:0!important;margin:0!important}.koffer-paper[data-order-confirmation] .koffer-paper-address{grid-template-columns:1fr 1fr!important}}";
+  const html=previewHtml("Auftragsbestätigung").replace('class="koffer-paper koffer-paper-two-page"','class="koffer-paper koffer-paper-two-page" data-order-confirmation="legacy"').replace("</head>",`<style>${legacy}</style></head>`);
+  const pdf=await renderOfferHtmlPdf(html,{layout:cleanLayout()}),document=await getDocument({data:new Uint8Array(pdf),useSystemFonts:true}).promise;
+  try{
+    assert.equal(document.numPages,2);
+    const page=await document.getPage(1),{items}=await page.getTextContent(),height=page.getViewport({scale:1}).height;
+    const top=text=>height-items.find(item=>item.str.includes(text)).transform[5],mm=72/25.4;
+    assert(top("Auftragsbestätigung")>95*mm,"Der Dokumenttitel steht unter dem Anschriftenfeld, nicht im Logo");
+    assert(top("Auftragsbestätigung")>top("6820 Frastanz"),"Anschrift und Titel überlagern sich nicht");
+    assert(top("Fachgerechte")>top("Auftragsbestätigung"),"Positionen folgen unter dem Dokumentkopf");
+    const next=await document.getPage(2),text=(await next.getTextContent()).items.map(item=>item.str).join(" ");
+    assert.match(text,/Folgeseite/);assert.match(text,/Seite 2\/2/);
+  }finally{await document.destroy()}
+});
+
 test("Gemeinsame Vorlage ordnet Positionswerte wie die Rechnung und verändert keine Beträge",()=>{
   const dom=new JSDOM(previewHtml("Auftragsbestätigung")),paper=dom.window.document.querySelector(".koffer-paper");
   apply(paper);
