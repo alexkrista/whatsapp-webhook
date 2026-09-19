@@ -83,7 +83,7 @@ const { registerCustomerAccess } = require("./customer-portal-access");
 const { renderOfferHtmlPdf } = require("./offer-html-pdf");
 const { OFFER_TERMS } = require("./offer-terms");
 const { structuredAddress, projectContactsFromMaster } = require("./workflow-contacts");
-const { positionId, applyAcceptedPaymentTerm, buildAcceptedOrder, buildOrderCalculation, buildPrepaymentInvoiceDraft } = require("./offer-order-workflow");
+const { positionId, applyAcceptedPaymentTerm, buildAcceptedOrder, buildOrderCalculation, acceptedOrderTargets, buildPrepaymentInvoiceDraft } = require("./offer-order-workflow");
 const { cleanDate: cleanOrderScheduleDate, scheduleBase, requestSchedule, proposeSchedule, confirmSchedule, declineProposal, buildPlanningAssignments, customerScheduleView } = require("./order-schedule-workflow");
 const { registerKristineActivityAudit } = require("./kristine-activity-audit");
 const { createContactMasterStore } = require("./contact-master");
@@ -2907,25 +2907,28 @@ async function summarizeJobHours(jobId) {
   return { actualHours, actualRegieHours };
 }
 
-function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}) {
-  const contractAmount = Math.max(0, Number(meta.contractAmount || 0));
+function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}, acceptedTargets = null) {
+  const contractAmount = Math.max(0, Number(acceptedTargets?.contractAmount ?? meta.contractAmount ?? 0));
   const externalServices = Math.max(0, Number(meta.externalServices || 0));
   const kristaAmount = Math.max(0, contractAmount - externalServices);
   const materialPercent = Math.min(100, Math.max(0, Number(meta.materialPercent || 0)));
   const materialAmount = kristaAmount * materialPercent / 100;
   const laborAmount = Math.max(0, kristaAmount - materialAmount);
   const billingRate = Math.max(0, Number(meta.billingRate || defaultBillingRate || 0));
-  const calculatedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const derivedFixedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const fixedCalculatedHours = Math.max(0, Number(acceptedTargets?.fixedCalculatedHours ?? derivedFixedHours));
+  const plannedRegieHours = Math.max(0, Number(acceptedTargets?.plannedRegieHours ?? meta.plannedRegieHours ?? 0));
+  const calculatedHours = Math.max(0, Number(acceptedTargets?.calculatedHours ?? (fixedCalculatedHours + plannedRegieHours)));
   const actualHours = Math.max(0, Number(hours.actualHours || 0));
   const actualRegieHours = Math.max(0, Number(hours.actualRegieHours || 0));
   const orderHours = Math.max(0, actualHours - actualRegieHours);
   return {
     contractAmount, externalServices, kristaAmount, materialPercent, materialAmount,
-    laborAmount, billingRate, calculatedHours, actualHours, actualRegieHours, orderHours,
-    remainingOrderHours: calculatedHours - orderHours,
-    progressPercent: calculatedHours > 0 ? orderHours / calculatedHours * 100 : 0,
-    plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
-    remainingRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)) - actualRegieHours
+    laborAmount, billingRate, fixedCalculatedHours, calculatedHours, actualHours, actualRegieHours, orderHours,
+    remainingOrderHours: Math.max(0, fixedCalculatedHours - orderHours),
+    progressPercent: calculatedHours > 0 ? actualHours / calculatedHours * 100 : 0,
+    plannedRegieHours,
+    remainingRegieHours: Math.max(0, plannedRegieHours - actualRegieHours)
   };
 }
 
@@ -3030,8 +3033,10 @@ app.get("/admin/api/jobs", async (req, res) => {
       }
 
       const meta = await readJobMeta(jobId);
+      const acceptedOrder = await fsp.readFile(acceptedOrderPath(jobId), "utf8").then(JSON.parse).catch(() => null);
+      const acceptedTargets = acceptedOrder ? acceptedOrderTargets(acceptedOrder) : null;
       const hours = await summarizeJobHours(jobId);
-      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
+      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours, acceptedTargets);
       const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
       const documentation = await readDocumentation(jobId);
       const regieReports = documentation.filter((row) => row?.type === "regie_report");
@@ -3112,7 +3117,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         contactEmail: meta.contactEmail || "",
         customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
         projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
-        orderSchedule: meta.orderSchedule || cleanOrderScheduleMeta({}),
+        orderSchedule: (() => { const schedule=meta.orderSchedule||cleanOrderScheduleMeta({}),requestedDate=cleanOrderScheduleDate(acceptedOrder?.customerRequest?.requestedDate);return schedule.status==="none"&&requestedDate?{...schedule,status:"requested",requestedDate,requestedAt:acceptedOrder.customerRequest.requestedAt||acceptedOrder.acceptedAt||null,requestedBy:acceptedOrder.customerRequest.requestedBy||acceptedOrder.acceptedBy||null,source:"customer"}:schedule })(),
         wwProjectIndex: Number(meta.wwProjectIndex || 0),
         wwProjectNumber: meta.wwProjectNumber || "",
         previousJobIds: meta.previousJobIds || [],
@@ -3307,6 +3312,14 @@ app.put("/admin/api/sammelmappe/:id/status", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const definition = await collectionStore.setStatus(req.params.id, req.body?.status);
+    if (definition.statusOverride === "Geschlossen") {
+      for (const jobId of definition.memberJobIds) {
+        const current = await readJobMeta(jobId);
+        if (current.status === "Geschlossen") continue;
+        await writeJobMeta(jobId, { status:"Geschlossen" });
+        await appendJobHistory(jobId, { type:"collection_member_closed", title:"Einzelauftrag mit Sammelmappe geschlossen", detail:`Sammelmappe ${definition.id} wurde geschlossen.`, source:"KRISTINE Sammelmappe", data:{ collectionId:definition.id } });
+      }
+    }
     const members = await Promise.all(definition.memberJobIds.map(async jobId => ({ ...await readJobMeta(jobId), jobId })));
     const [collection] = collectionCatalog(members, [definition]);
     await appendJobHistory(definition.mainJobId, { type: "collection_status_updated", title: `Status der Sammelmappe ${definition.id} geändert`, detail: definition.statusOverride || `Automatisch aus Einzelakten: ${collection.status}`, source: "KRISTINE Sammelmappe" }).catch(error => console.error("COLLECTION_HISTORY failed:", error.message));
@@ -3502,11 +3515,11 @@ async function finalizeOfferDraft(jobId) {
 }
 
 async function persistAcceptedOffer(jobId, order) {
-  const calculation=buildOrderCalculation(order),invoiceDraft=buildPrepaymentInvoiceDraft(order);
+  const calculation=buildOrderCalculation(order),targets=acceptedOrderTargets(order),invoiceDraft=buildPrepaymentInvoiceDraft(order);
   await fsp.writeFile(acceptedOrderCalculationPath(jobId),JSON.stringify(calculation,null,2),"utf8");
   if(invoiceDraft)await fsp.writeFile(prepaymentInvoiceDraftPath(jobId),JSON.stringify(invoiceDraft,null,2),"utf8");
   const regieRows=calculation.positions.filter(row=>row.kind==="regie"),plannedRegieHours=regieRows.reduce((sum,row)=>sum+Math.max(0,Number(row.plannedHours||0)),0),regieLaborNet=regieRows.filter(row=>Number(row.plannedHours||0)>0).reduce((sum,row)=>sum+Math.max(0,Number(row.amount||0)),0),regieHourlyRate=plannedRegieHours>0?regieLaborNet/plannedRegieHours:0;
-  await writeJobMeta(jobId,{status:"Auftrag",contractAmount:order.totals.net,plannedRegieHours,...(regieHourlyRate>0?{regieHourlyRate}:{})});
+  await writeJobMeta(jobId,{status:"Auftrag",contractAmount:targets.contractAmount,plannedRegieHours:targets.plannedRegieHours,fixedCalculatedHours:targets.fixedCalculatedHours,calculatedHours:targets.calculatedHours,...(regieHourlyRate>0?{regieHourlyRate}:{})});
   return {calculation,invoiceDraft};
 }
 
@@ -4873,6 +4886,20 @@ async function startServer() {
   } catch (error) { console.error("LEGACY_COLLECTION_REPAIR failed:", error.message); }
   try { console.info("SAMMELMAPPEN_MIGRATION", JSON.stringify(await collectionStore.migrateLegacy())); }
   catch (error) { console.error("SAMMELMAPPEN_MIGRATION failed:", error.message); throw error; }
+  try {
+    let closedMembers = 0;
+    for (const definition of await collectionStore.list()) {
+      if (definition.statusOverride !== "Geschlossen") continue;
+      for (const jobId of definition.memberJobIds) {
+        const current = await readJobMeta(jobId);
+        if (current.status === "Geschlossen") continue;
+        await writeJobMeta(jobId, { status:"Geschlossen" });
+        await appendJobHistory(jobId, { type:"collection_member_closed", title:"Einzelauftrag mit Sammelmappe geschlossen", detail:`Bestehende geschlossene Sammelmappe ${definition.id} abgeglichen.`, source:"KRISTINE Sammelmappe", data:{ collectionId:definition.id, reconciliation:true } });
+        closedMembers++;
+      }
+    }
+    console.info("SAMMELMAPPEN_STATUS_ABGLEICH", JSON.stringify({ closedMembers }));
+  } catch (error) { console.error("SAMMELMAPPEN_STATUS_ABGLEICH failed:", error.message); throw error; }
   resumePhotoInboxImport();
   try {
     for (const id of ["S24177", "S25018"]) {

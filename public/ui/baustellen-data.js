@@ -21,6 +21,7 @@
   function orderHours(job){const c=job?.calculation||{};return positive(c.orderHours??positive(num(c.actualHours)-num(c.actualRegieHours)))}
   function remaining(job,actual=orderHours(job)){return hourBalance(fixedTarget(job),positive(actual)).remaining}
   function openHours(job,jobs){if(isSettled(job))return 0;const rows=members(job,jobs);return rows.some(row=>["Auftrag","Laufend"].includes(row.status))?hourBalance(rows.reduce((sum,row)=>sum+totalTarget(row),0),rows.reduce((sum,row)=>sum+actualHours(row),0)).remaining:0}
+  function openHoursTotal(payload){const jobs=catalog(payload);return jobs.filter(job=>!(job.collectionParentJobIds||[]).length).reduce((sum,job)=>sum+openHours(job,jobs),0)}
   function projects(job,jobs){
     const result=[],seen=new Set(),rows=members(job,jobs);
     for(const member of rows){
@@ -99,5 +100,5 @@
       paidGross:payments.reduce((s,r)=>s+num(r.gross),0),openGross:runs.reduce((s,r)=>s+num(r.openGross),0)});
     return {found:results.some(row=>row.billing?.found),summary,invoices,payments,runs};
   }
-  return {num,isCollection,isSettled,catalog,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
+  return {num,isCollection,isSettled,catalog,memberIds,members,single,fixedTarget,totalTarget,actualHours,hourBalance,orderHours,remaining,openHours,openHoursTotal,projects,aggregateCalculation,recalculateCollections,view,mapLimit,combineBilling};
 });

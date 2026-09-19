@@ -237,6 +237,13 @@ function buildOrderCalculation(order = {}) {
   };
 }
 
+function acceptedOrderTargets(order = {}) {
+  const calculation = buildOrderCalculation(order);
+  const fixedCalculatedHours = calculation.positions.filter(row => row.kind !== "regie").reduce((sum, row) => sum + number(row.plannedHours), 0);
+  const plannedRegieHours = calculation.positions.filter(row => row.kind === "regie").reduce((sum, row) => sum + number(row.plannedHours), 0);
+  return { contractAmount:money(order.totals?.net), fixedCalculatedHours, plannedRegieHours, calculatedHours:fixedCalculatedHours + plannedRegieHours };
+}
+
 function buildPrepaymentInvoiceDraft(order = {}) {
   if (order.financials?.prepaymentEnabled !== true) return null;
   const net = money(order.totals?.prepaymentNet);
@@ -280,5 +287,6 @@ module.exports = {
   isRegieOrderPosition,
   buildAcceptedOrder,
   buildOrderCalculation,
+  acceptedOrderTargets,
   buildPrepaymentInvoiceDraft,
 };

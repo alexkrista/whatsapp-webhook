@@ -203,7 +203,7 @@
   }
 
   function patchKpis(jobs,b){
-    const totalOpen=jobs.reduce((sum,j)=>sum+openHoursFor(j),0);
+    const totalOpen=window.BaustellenData.openHoursTotal({jobs});
     const cap=num(b?.company?.weeklyProductiveHours||b?.company?.weeklyCapacityHours)||312;
     const backlog=document.getElementById('backlog');
     const openHours=document.getElementById('openHours');
@@ -240,4 +240,3 @@
   function init(){installCss();renderPending();renderBillable([]);load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
-

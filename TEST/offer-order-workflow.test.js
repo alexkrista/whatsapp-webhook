@@ -8,6 +8,7 @@ const {
   offerOrderTotals,
   buildAcceptedOrder,
   buildOrderCalculation,
+  acceptedOrderTargets,
   buildPrepaymentInvoiceDraft,
 } = require("../offer-order-workflow");
 
@@ -103,4 +104,13 @@ test("Regieangebot übernimmt die angebotene Stundenmenge als Sollstunden", () =
   assert.deepEqual(calculation.positions.map(row => row.kind), ["regie", "regie"]);
   assert.equal(calculation.positions[0].plannedHours, 20);
   assert.equal(calculation.positions[1].plannedHours, 0);
+  assert.deepEqual(acceptedOrderTargets(order), { contractAmount:1800, fixedCalculatedHours:0, plannedRegieHours:20, calculatedHours:20 });
+});
+
+test("Mischauftrag addiert Fix- und Regiestunden genau einmal", () => {
+  const order=buildAcceptedOrder({jobId:"26101",draft:{offerNumber:"2609003",financials:{priceMode:"net",vatRate:20},positions:[
+    {id:"fixed",text:"Pauschalarbeit",quantity:2,unit:"PA",unitPrice:500,laborHoursPerUnit:3},
+    {id:"regie",text:"Regie",quantity:4,unit:"Std",unitPrice:75},
+  ]}});
+  assert.deepEqual(acceptedOrderTargets(order), { contractAmount:1300, fixedCalculatedHours:6, plannedRegieHours:4, calculatedHours:10 });
 });
