@@ -27,6 +27,26 @@ const cookieOptions = {httpOnly:true,secure:true,sameSite:"lax",path:"/kundenpor
 const fingerprint = portal => hash(JSON.stringify([portal.customerEmail.toLowerCase(),portal.customerPhone.replace(/\D/g,""),portal.customerName]));
 const recipientFingerprint = recipient => hash(JSON.stringify([clean(recipient?.id,80),clean(recipient?.email,180).toLowerCase(),clean(recipient?.phone,80).replace(/\D/g,""),clean(recipient?.name,180)]));
 
+function currentCustomerDocuments(rows) {
+  const latest = new Map();
+  const key = row => row.source === "order-confirmation"
+    ? clean(row.confirmationNumber || (row.offerNumber && `AB-${row.offerNumber}`) || row.name || row.storedName || row.id,180).toLowerCase()
+    : "";
+  const revision = row => Number.isFinite(Number(row.confirmationRevision)) ? Number(row.confirmationRevision) : 0;
+  const created = row => Date.parse(row.renderedAt || row.importedAt || row.documentDate) || 0;
+  rows.forEach((row,index) => {
+    const number = key(row);
+    if (!number) return;
+    const previous = latest.get(number);
+    if (!previous || revision(row) > revision(previous.row) || (revision(row) === revision(previous.row) && created(row) > created(previous.row))) {
+      latest.set(number,{row,index});
+    }
+  });
+  // Select the current version before checking visibility, so hiding it cannot
+  // expose an older AB. Historical PDFs remain available to the office.
+  return rows.filter((row,index) => (!key(row) || latest.get(key(row)).index === index) && row.customerVisible === true && row.type !== "regie_report");
+}
+
 // Customer points have their own durable files. The ordinary task reader merges
 // them by ID, so an old browser's bulk save cannot discard a new customer point.
 function mergePortalTasks(dataDir, tasks) {
@@ -217,7 +237,7 @@ function registerCustomerAccess(app, options) {
       if(ctx.portal.modules.projectFile) {
         const calc=read(path.join(dataDir,jobId,".order-calculation.json"),{}),doc=calc.sourceDocument;
         if(doc?.storedName&&path.basename(doc.storedName)===doc.storedName)add(jobId,"pdf",doc.name||"Auftrag",secureFile(jobId,"_auftrag/"+doc.storedName),"documents");
-        const visibleDocuments=documents.filter(row=>row.customerVisible===true&&row.type!=="regie_report"),seenOffers=new Set();
+        const visibleDocuments=currentCustomerDocuments(documents),seenOffers=new Set();
         for(const row of visibleDocuments){
           const documentName=clean(row.name,180),numberFromName=documentName.match(/^Angebot\s+(\d+)\.pdf$/i)?.[1]||"";
           if(row.type==="offer"||numberFromName){

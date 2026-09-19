@@ -31,6 +31,31 @@ test("WhatsApp link authenticates only the issued project, protects files and om
  assert.equal((await f.request(doc.url.replace("/26001/","/25018/"),{headers:{Cookie:cookie}})).status,404);
  assert.equal((await f.request("/kundenportal")).status,200);
 });
+test("only the newest AB is listed, downloadable and exported; older PDFs stay internal",async t=>{
+ const f=await fixture(t),name="Auftragsbestätigung AB-2609002.pdf";
+ const old={id:"ab-old",type:"order",source:"order-confirmation",confirmationNumber:"AB-2609002",confirmationRevision:1,name,customerVisible:true,storedName:"ab-v1.pdf",renderedAt:"2026-09-19T19:00:00Z"};
+ const current={...old,id:"ab-new",confirmationRevision:2,storedName:"ab-v2.pdf",renderedAt:"2026-09-19T20:00:00Z"};
+ f.write("24177/_documentation/ab-v1.pdf","%PDF-old-AB");f.write("24177/_documentation/ab-v2.pdf","%PDF-new-AB");f.setDocumentation("24177",[old]);
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie};
+ let project=await(await f.request("/kundenportal/api/project",{headers})).json();const oldUrl=project.files.find(row=>row.name===name).url;
+ assert.equal((await f.request(oldUrl,{headers})).status,200);
+ // Existing indexes may have both versions released and in either order.
+ const unrelated={...old,id:"another-ab",confirmationNumber:"AB-2609003",name:"Auftragsbestätigung AB-2609003.pdf",storedName:"another-ab.pdf"};
+ f.write("24177/_documentation/another-ab.pdf","%PDF-other-AB");f.setDocumentation("24177",[old,unrelated,current]);
+ f.write("26002/_documentation/ab-v1.pdf","%PDF-other-project-AB");f.setDocumentation("26002",[old]);
+ project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ const visible=project.files.filter(row=>row.jobId==="24177"&&row.name===name);assert.equal(visible.length,1);
+ assert.equal(await(await f.request(visible[0].url,{headers})).text(),"%PDF-new-AB");assert.equal((await f.request(oldUrl,{headers})).status,404);
+ assert(project.files.some(row=>row.name===unrelated.name));assert(project.files.some(row=>row.jobId==="26002"&&row.name===name));
+ const job=await preparedExport(f,{...headers,"x-csrf-token":project.csrf});assert.equal(job.status,"ready");
+ const zip=path.join(f.dir,"ab-export.zip");fs.writeFileSync(zip,Buffer.from(await(await f.request(job.downloadUrl,{headers})).arrayBuffer()));
+ const inspect=require("node:child_process").spawnSync("python3",["-c","import zipfile,json,sys; z=zipfile.ZipFile(sys.argv[1]); print(json.dumps([z.read(n).decode() for n in z.namelist() if n.endswith('.pdf')]))",zip],{encoding:"utf8"});assert.equal(inspect.status,0,inspect.stderr);
+ const pdfs=JSON.parse(inspect.stdout);assert(pdfs.includes("%PDF-new-AB"));assert(!pdfs.includes("%PDF-old-AB"));assert(pdfs.includes("%PDF-other-project-AB"));
+ assert.equal(fs.readFileSync(path.join(f.dir,"24177/_documentation/ab-v1.pdf"),"utf8"),"%PDF-old-AB");assert.equal(old.customerVisible,true,"Read-time filtering preserves the internal document history");
+ f.setDocumentation("24177",[old,{...current,customerVisible:false}]);
+ project=await(await f.request("/kundenportal/api/project",{headers})).json();assert(!project.files.some(row=>row.jobId==="24177"&&row.name===name));
+ assert.equal((await f.request(oldUrl,{headers})).status,404);assert.equal((await f.request(visible[0].url,{headers})).status,404);
+});
 test("revocation, module changes, removed collection members, changed contact and expiry take effect on existing sessions",async t=>{
  const f=await fixture(t),invite=await f.invite(),cookie=await f.login(invite.portalUrl),headers={Cookie:cookie};
  f.metas["24177"].customerPortal.modules.regie=false;let data=await (await f.request("/kundenportal/api/project",{headers})).json();assert.equal(data.reports.length,0);assert(!data.files.some(row=>row.group==="regie"));
