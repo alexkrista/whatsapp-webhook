@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "fontFamily": "Arial",
+  "fontSizePt": 9.92,
+  "titleSizePt": 12.76,
+  "lineHeight": 1.1995967741935485,
+  "paragraphGapMm": 2.47,
+  "sectionGapMm": 13.41,
+  "rowPaddingMm": 0.35,
+  "firstPage": {
+    "topMm": 14,
+    "leftMm": 17,
+    "rightMm": 18,
+    "bottomMm": 27,
+    "logoWidthMm": 69.85,
+    "addressTopMm": 59.27,
+    "addressHeightMm": 28,
+    "bodyTopMm": 100
+  },
+  "followingPages": {
+    "topMm": 32,
+    "leftMm": 17,
+    "rightMm": 18,
+    "bottomMm": 27,
+    "logoWidthMm": 27.52
+  }
+}

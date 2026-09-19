@@ -1,5 +1,7 @@
 "use strict";
 
+const { cleanOfferSchedule } = require("./offer-scheduling");
+
 function number(value, min = 0, max = 1000000000) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : min;
@@ -129,6 +131,7 @@ function buildAcceptedOrder({ draft = {}, jobId = "", customer = "", selectedAlt
       id: String(acceptedBy.id || "").slice(0, 100),
       name: String(acceptedBy.name || "").slice(0, 160),
     },
+    offerSchedule: cleanOfferSchedule(draft.offerSchedule),
     customerRequest: cleanRequestedDate ? {
       requestedDate: cleanRequestedDate,
       requestedAt: acceptedAt,

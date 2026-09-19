@@ -53,9 +53,9 @@ function registerOrderConfirmation(app, options) {
 
   async function context(jobId) {
     const [order, schedule, meta, documents] = await Promise.all([readOrder(jobId), readOrderSchedule(jobId), readJobMeta(jobId), readDocumentation(jobId)]);
-    const slot = confirmedSlot(schedule), draft = buildConfirmationDraft(order);
+    const slot = confirmedSlot(schedule), draft = buildConfirmationDraft(order), layout = await options.readDocumentLayout?.();
     const job = { jobId, name:meta.name, street:meta.street, houseNumber:meta.houseNumber, postalCode:meta.postalCode, city:meta.city, contactName:meta.contactName, customerMaster:meta.customerMaster, projectContacts:meta.projectContacts };
-    const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ version:1, order, slot, job, closing:CLOSING })).digest("hex");
+    const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ version:2, order, slot, job, closing:CLOSING, layoutRevision:layout?.revision||"" })).digest("hex");
     const stored = documents.find(row => row.source === "order-confirmation" && row.fingerprint === fingerprint);
     const versions = documents.filter(row => row.source === "order-confirmation");
     const revision = stored?.confirmationRevision || Math.max(0, ...versions.map(row => Number(row.confirmationRevision) || 0)) + 1;

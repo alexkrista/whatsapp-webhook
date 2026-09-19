@@ -51,7 +51,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     const customerPointChanges = file === TASKS ? require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value) : [];
     await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
-    if (typeof notifyCustomerPoint === "function") for (const change of customerPointChanges.filter(row => row.type === "internal_done")) {
+    if (typeof notifyCustomerPoint === "function") for (const change of customerPointChanges.filter(row=>["assigned","internal_done","office_reopened"].includes(row.type))) {
       try { change.notification = await notifyCustomerPoint(change); }
       catch (error) { change.notification = { sent:false, error:String(error?.message || error) }; }
     }

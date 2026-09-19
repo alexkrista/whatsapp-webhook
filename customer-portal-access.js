@@ -13,6 +13,7 @@ const { OFFER_TERMS } = require("./offer-terms");
 const { PDFDocument } = require("pdf-lib");
 const { PDFParse } = require("pdf-parse");
 const { cleanDate:cleanOrderScheduleDate, customerScheduleView } = require("./order-schedule-workflow");
+const { cleanOfferSchedule, customerOfferSchedule } = require("./offer-scheduling");
 const safeId = id => /^[A-Za-z0-9_-]{1,80}$/.test(String(id || ""));
 const hash = text => crypto.createHash("sha256").update(String(text)).digest("hex");
 const random = () => crypto.randomBytes(32).toString("base64url");
@@ -39,6 +40,9 @@ function mergePortalTasks(dataDir, tasks) {
 
 function registerCustomerAccess(app, options) {
   const {dataDir,requireAdmin,readJobMeta,writeJobMeta,appendJobHistory,collectionMembers,readDocumentation,writeDocumentation,listJobMedia,readEmployees}=options;
+  const activity=async(jobId,event)=>{
+    try{return await options.onActivity?.(jobId,event)}catch(error){console.error("CUSTOMER_ACTIVITY_NOTICE_FAILED",{jobId,error:error.message});return {sent:false,error:error.message}}
+  };
   const root=path.join(dataDir,"_system/customer-access"), origin=new URL(options.publicBaseUrl || "https://protokoll.krista.at").origin;
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
   const grantPath=id=>path.join(root,"invitations",id+".json");
@@ -280,6 +284,7 @@ function registerCustomerAccess(app, options) {
     write(path.join(dataDir,jobId,"_customer-portal",id+".json"),stored);
     write(path.join(dataDir,"_kristine/customer-portal-tasks",id+".json"),task);
     const point=customerPointView(stored,task);
+    await activity(jobId,{key:`point:${id}:created`,audience:source==="office"?"customer":"office",module:source==="office"?module:undefined,pointId:id,title:module==="communication"?"Neue Kundennachricht":source==="office"?"Neuer Punkt in Ihrer Projektakte":"Neuer Kundenwunsch",text:title+"\n"+text});
     return source==="office"?{...point,photos:photos.map(photo=>({id:photo.id,name:photo.name,type:photo.type,internal:photo.internal===true})),internalPhotoCount:photos.filter(photo=>photo.internal===true).length}:point;
   }
   function customerOffer(ctx) {
@@ -293,7 +298,7 @@ function registerCustomerAccess(app, options) {
     const positions=(Array.isArray(draft.positions)?draft.positions:[]).filter(row=>row?.isAlternative!==true&&Number(row?.quantity)>0).map(row=>({text:clean(row.text,1000),quantity:Math.max(0,Number(row.quantity)||0),unit:clean(row.unit,20),unitPrice:Math.max(0,Number(row.unitPrice)||0),groupName:clean(row.groupName,160)}));
     const base=positions.reduce((sum,row)=>sum+row.quantity*row.unitPrice,0),discounts=draft.groupDiscounts&&typeof draft.groupDiscounts==="object"?draft.groupDiscounts:{},groups=[...new Set(positions.map(row=>row.groupName).filter(Boolean))],groupDiscount=groups.reduce((sum,group)=>{const subtotal=positions.filter(row=>row.groupName===group).reduce((value,row)=>value+row.quantity*row.unitPrice,0);return sum+subtotal*Math.max(0,Math.min(100,Number(discounts[group])||0))/100},0),finance=draft.financials||{},afterGroups=Math.max(0,base-groupDiscount),globalDiscount=afterGroups*Math.max(0,Math.min(100,Number(finance.discountPercent)||0))/100,after=Math.max(0,afterGroups-globalDiscount),vatRate=Math.max(0,Math.min(100,Number(finance.vatRate??20)||0)),net=finance.priceMode==="gross"?after/(1+vatRate/100):after,vat=finance.priceMode==="gross"?after-net:net*vatRate/100,gross=finance.priceMode==="gross"?after:net+vat,acceptance=draft.customerAcceptance?.offerNumber===draft.offerNumber&&Number(draft.customerAcceptance?.offerRevision)===Number(draft.offerRevision)?draft.customerAcceptance:null;
     const createdAt=draft.offerCreatedAt||draft.updatedAt||"",validUntil=Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+30*86400000).toISOString():"";
-    return{available:true,number:draft.offerNumber,revision:Number(draft.offerRevision||1),createdAt,validUntil,intro:clean(draft.intro,1000),scopeDescription:clean(draft.scopeDescription,2000),positions,totals:{base,groupDiscount,globalDiscount,net,vat,vatRate,gross},terms:OFFER_TERMS,acceptance:acceptance?{status:"accepted",acceptedAt:acceptance.acceptedAt,customerName:acceptance.customerName,paymentTerm:acceptance.paymentTerm,paymentLabel:acceptance.paymentLabel,preferredDate:acceptance.preferredDate||"",termsVersion:acceptance.termsVersion||"",termsAcceptedAt:acceptance.termsAcceptedAt||acceptance.acceptedAt}:null};
+    return{available:true,offerSchedule:cleanOfferSchedule(draft.offerSchedule),number:draft.offerNumber,revision:Number(draft.offerRevision||1),createdAt,validUntil,intro:clean(draft.intro,1000),scopeDescription:clean(draft.scopeDescription,2000),positions,totals:{base,groupDiscount,globalDiscount,net,vat,vatRate,gross},terms:OFFER_TERMS,acceptance:acceptance?{status:"accepted",acceptedAt:acceptance.acceptedAt,customerName:acceptance.customerName,paymentTerm:acceptance.paymentTerm,paymentLabel:acceptance.paymentLabel,preferredDate:acceptance.preferredDate||"",termsVersion:acceptance.termsVersion||"",termsAcceptedAt:acceptance.termsAcceptedAt||acceptance.acceptedAt}:null};
   }
   async function ensureOfferPdf(ctx,offer) {
     if(!offer?.available||typeof readDocumentation!=="function"||typeof writeDocumentation!=="function")return null;
@@ -324,18 +329,19 @@ function registerCustomerAccess(app, options) {
     if(!row||row.visibility==="internal"||!validPointContacts(ctx).has(row.contact)||!ctx.portal.modules[row.module])throw fail(404,"Punkt nicht gefunden.");
     return row;
   }
-  async function notifyPoint({jobId,pointId,reason="update"}) {
+  async function notifyPoint({jobId,pointId,reason="update",onlyPublished=false}) {
     const ctx=await scope(jobId);
     if(!ctx.portal.modules.projectPoints)throw fail(409,"Projektpunkte sind für diesen Kunden noch nicht freigegeben.");
     const file=path.join(dataDir,ctx.jobId,"_customer-portal",pointId+".json"),row=read(file,null);
     if(!row||row.module!=="projectPoints")throw fail(404,"Kundenpunkt nicht gefunden.");
+    if(onlyPublished&&row.visibility==="internal")return {sent:false,skipped:true,channels:[],error:""};
     const task=pointTaskMap().get(row.taskId)||read(path.join(dataDir,"_kristine/customer-portal-tasks",pointId+".json"),null);
     const date=new Date(now()).toISOString(),contact=fingerprint(ctx.portal);
     updatePointAndTask(dataDir,{jobId:ctx.jobId,pointId,pointPatch:{visibility:"customer",contact},taskPatch:{contactName:ctx.portal.customerName,contactPhone:ctx.portal.customerPhone,contactEmail:ctx.portal.customerEmail}});
     const invitation=await issueInvitation(ctx.jobId,{pointId});
     let result={sent:false,channels:[],error:"Automatischer Versand ist nicht eingerichtet."};
     if(typeof options.sendCustomerPointNotice==="function"){
-      try{result=await options.sendCustomerPointNotice({jobId:ctx.jobId,pointId,title:pointTitle(row),reason,portalUrl:invitation.portalUrl,customerName:ctx.portal.customerName,customerPhone:ctx.portal.customerPhone,customerEmail:ctx.portal.customerEmail,task})||result;}
+      try{result=await options.sendCustomerPointNotice({jobId:ctx.jobId,pointId,title:pointTitle(row),reason,notificationKey:`point:${pointId}:${reason}:${(row.history||[]).filter(event=>!["sent","read"].includes(event.kind)).at(-1)?.date||row.date}`,portalUrl:invitation.portalUrl,customerName:ctx.portal.customerName,customerPhone:ctx.portal.customerPhone,customerEmail:ctx.portal.customerEmail,task})||result;}
       catch(error){result={sent:false,channels:[],error:String(error?.message||error)};}
     }
     if(result.sent){
@@ -395,12 +401,16 @@ function registerCustomerAccess(app, options) {
     const offer=customerOffer(ctx);if(!offer?.available)throw fail(409,offer?.message||"Dieses Angebot ist nicht mehr verfügbar.");
     if(!await ensureOfferPdf(ctx,offer))throw fail(409,"Die verbindliche Angebots-PDF fehlt. Bitte Farben Krista kontaktieren; der Auftrag wurde noch nicht bestätigt.");
     const file=offerSnapshotPath(ctx.jobId,offer.number,offer.revision),draft=read(file,null);if(!draft)throw fail(409,"Die verbindliche Angebotsfassung ist nicht mehr verfügbar.");
-    const persistOrder=async acceptance=>typeof options.onCustomerOfferAccepted==="function"?options.onCustomerOfferAccepted({jobId:ctx.jobId,draft,acceptance,meta:ctx.meta,recipient:ctx.recipient||null}):null;
+    const persistOrder=async acceptance=>{
+      const result=typeof options.onCustomerOfferAccepted==="function"?await options.onCustomerOfferAccepted({jobId:ctx.jobId,draft,acceptance,meta:ctx.meta,recipient:ctx.recipient||null}):null;
+      await activity(ctx.jobId,{key:`offer:${offer.number}:${offer.revision}:accepted`,audience:"office",title:acceptance.preferredDate?"Angebot angenommen – neuer Terminwunsch":"Kunde hat das Angebot beauftragt",text:`${acceptance.customerName} · Angebot ${offer.number} · ${acceptance.paymentLabel}${acceptance.preferredDate?` · Terminwunsch: ${acceptance.preferredDate}`:""}${offer.offerSchedule?.mode==="fixed"?` · Vereinbarter Termin: ${offer.offerSchedule.date}, ${offer.offerSchedule.from}–${offer.offerSchedule.to} Uhr`:""}`});
+      return result;
+    };
     if(draft.customerAcceptance?.offerNumber===offer.number&&Number(draft.customerAcceptance?.offerRevision)===offer.revision){const orderResult=await persistOrder(draft.customerAcceptance);return res.json({ok:true,acceptance:draft.customerAcceptance,alreadyAccepted:true,orderCreated:orderResult?.created===true,orderSchedule:customerScheduleView(orderResult?.schedule||{})})}
     if(req.body?.confirmed!==true)throw fail(400,"Bitte bestätigen Sie die verbindliche Beauftragung.");
     if(req.body?.termsAccepted!==true||clean(req.body?.termsVersion,40)!==OFFER_TERMS.version)throw fail(400,"Bitte bestätigen Sie die aktuelle Fassung der AGB.");
     const paymentLabels={net14:"14 Tage netto",skonto5_2:"2 % Skonto bei Zahlung binnen 5 Tagen",deposit50:"4 % Skonto bei 50 % Anzahlung, fällig bei Auftragserteilung"},paymentTerm=clean(req.body?.paymentTerm,30),paymentLabel=paymentLabels[paymentTerm];if(!paymentLabel)throw fail(400,"Bitte wählen Sie eine Zahlungsbedingung.");
-    const preferredDate=clean(req.body?.preferredDate,10);if(preferredDate&&!cleanOrderScheduleDate(preferredDate))throw fail(400,"Bitte einen gültigen Wunschtermin wählen.");
+    const {preferredDate}=customerOfferSchedule(draft,req.body?.preferredDate);
     const acceptedAt=new Date(now()).toISOString(),acceptance={status:"accepted",acceptedAt,offerNumber:offer.number,offerRevision:offer.revision,customerName:ctx.recipient?.name||ctx.portal.customerName||ctx.meta.name,grantId:ctx.grant.id,paymentTerm,paymentLabel,preferredDate,termsVersion:OFFER_TERMS.version,termsAcceptedAt:acceptedAt};draft.customerAcceptance=acceptance;write(file,draft);const current=read(offerPath(ctx.jobId),null);if(current?.offerNumber===offer.number&&Number(current.offerRevision||1)===offer.revision){current.customerAcceptance=acceptance;write(offerPath(ctx.jobId),current)}
     const orderResult=await persistOrder(acceptance);
     if(typeof writeJobMeta==="function")await writeJobMeta(ctx.jobId,{status:"Auftrag"});
@@ -475,6 +485,7 @@ function registerCustomerAccess(app, options) {
       updated=updatePointAndTask(dataDir,{jobId:ctx.jobId,pointId:row.id,event:{kind:"customer_reopened",status:"open",date,comment},taskPatch:{status:"open",completedAt:null,customerPointResponse:comment,customerPointUpdatedAt:date}});
       try{await options.onCustomerPointReopened?.({jobId:ctx.jobId,pointId:row.id,title:pointTitle(row),comment,task:updated.task});}catch(error){console.error("Kundenpunkt wieder geöffnet; Mitarbeiterhinweis fehlgeschlagen:",String(error?.message||error));}
     }
+    await activity(ctx.jobId,{key:`point:${row.id}:response:${date}`,audience:"office",title:confirmed?"Kunde hat die Erledigung bestätigt":"Kunde hat einen Punkt wieder geöffnet",text:pointTitle(row)+(confirmed?"":`\n${updated.task.customerPointResponse||""}`)});
     res.json({ok:true,point:updated.view});
   }));
   registerCustomerExports(app,{dataDir,context,catalog,readJobMeta,pointRows,readInvoicePdf:options.readInvoicePdf,origin,now,
@@ -484,6 +495,7 @@ function registerCustomerAccess(app, options) {
       if((recipient?recipientFingerprint(recipient):fingerprint(current))!==ctx.grant.contact)throw fail(409,"Die Freigabe hat sich geändert. Bitte erneut öffnen.");
       await options.writeJobMeta(ctx.jobId,{customerPortal:{...current,status:"off",updatedAt:new Date(now()).toISOString()}});
       resetJob(ctx.jobId);
+      await activity(ctx.jobId,{key:`portal:closed:${new Date(now()).toISOString()}`,audience:"office",title:"Kunde hat den Portalzugang geschlossen",text:ctx.recipient?.name||ctx.portal.customerName||ctx.meta.name});
       try{await options.appendJobHistory?.(ctx.jobId,{type:"customer_portal_closed",title:"Kunde hat seinen Portalzugang geschlossen",detail:"Online-Zugang beendet; interne Projektunterlagen bleiben erhalten.",source:"Kundenportal"});}catch{console.error("Kundenzugang geschlossen; Chronikeintrag konnte nicht gespeichert werden.");}
     }:null});
   return {revoke:resetJob,scope,createInvitation:issueInvitation,notifyPoint,listInvitations};

@@ -71,7 +71,7 @@ for(const text of ["Vorkasse","Verbleibender Restbetrag"])assert.ok(ui.includes(
 for(const text of ["prepaymentEnabled","prepaymentPercent"])assert.ok(ui.includes(text)&&server.includes(text),`Gespeicherte Vorkasse enthält ${text}`);
 for(const text of ["Drucken / PDF","printOffer","printDocumentHtml","storeCanonicalOfferPdf","offer-pdf/upload","offerDocumentMeta"])assert.ok(ui.includes(text),`Angebotsdruck enthält ${text}`);
 for(const text of ["offerNumberPrefix","nextOfferNumber","offer-number-counter.json","offer-draft/finalize","offerRevision"])assert.ok(server.includes(text),`Angebotsnummernkreis enthält ${text}`);
-for(const text of ["Terminwunsch des Kunden","Terminwunsch speichern","Termin bestätigen","Anderen Termin vorschlagen","retry-outlook"])
+for(const text of ["Wann führen wir den Auftrag aus?","Wen soll ich einteilen?","Terminwunsch speichern","Termin bestätigen","Anderen Termin vorschlagen","retry-outlook"])
   assert.ok(ui.includes(text),`Auftragstermin enthält ${text}`);
 for(const text of ["order-schedule/request","order-schedule/confirm","order-schedule/propose","order-schedule/retry-outlook"])
   assert.ok(server.includes(text),`Auftragstermin-API enthält ${text}`);

@@ -124,6 +124,7 @@ async function renderer(t){
   const startup='  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{init();mountFreePositionUi();watchLivePreview()},{once:true});else{init();mountFreePositionUi();watchLivePreview()}';
   assert.ok(source.includes(startup));
   source=source.replace(startup,'watchLivePreview();window.offerTest={renderOrderConfirmationHtml,openOrderConfirmation,orderScheduleAction,setState(value){draft=value.draft;job=value.job;jobId=value.jobId;acceptedOrder=value.order;orderSchedule=value.schedule;scheduleEmployees=[]},getDraft(){return draft}};');
+  dom.window.KristaDocumentTemplate=require("../public/ui/document-template");
   dom.window.eval(source);return dom.window;
 }
 

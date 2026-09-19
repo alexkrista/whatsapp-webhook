@@ -140,6 +140,16 @@
     if (collectionChoice) collectionChoice.hidden = ids.length === 0;
     if (!ids.length && selectedMode() === "collection") portalQuery('input[name="cpMode"][value="single"]').checked = true;
   }
+  async function loadNotificationLog(jobId){
+    let host=document.getElementById("cpNotificationLog");
+    if(!host){host=document.createElement("section");host.id="cpNotificationLog";host.className="cp-point";portalBody.append(host)}
+    host.innerHTML='<h3>Automatische Mitteilungen</h3><p>Neue Kundenrückmeldungen → Alex. Neue freigegebene Inhalte und Terminbestätigungen → Kunde.</p><p data-notices>Versandstatus wird geladen …</p>';
+    try{
+      const result=await api(`/admin/api/job/${encodeURIComponent(jobId)}/notifications`);if(currentJobId!==jobId)return;
+      const rows=result.notifications||[];
+      host.querySelector("[data-notices]").innerHTML=rows.length?rows.slice(0,20).map(row=>`<span style="display:block;margin:10px 0"><strong>${escapeHtml(row.title)}</strong><br>${row.audience==="customer"?"An Kunde":"An Alex"} · ${escapeHtml(new Date(row.createdAt).toLocaleString("de-AT"))}<br>${row.sent?`✓ Versendet: ${escapeHtml(row.channels.join(" + "))}`:`⚠ ${escapeHtml(row.status==="pending"||row.status==="sending"?"Versand noch nicht bestätigt":row.error||"Nicht versendet")}`}</span>`).join(""):"Noch keine automatischen Mitteilungen nach der neuen Regel protokolliert.";
+    }catch(error){if(currentJobId===jobId)host.querySelector("[data-notices]").textContent="Versandstatus konnte nicht geladen werden: "+error.message}
+  }
   async function openSettings(jobIdOverride = "", inlineHost = null) {
     currentJobId = String(jobIdOverride || location.hash.slice(1) || document.getElementById("detailNumber")?.textContent.replace(/^#/, "") || "");
     if (!currentJobId) return;
@@ -192,6 +202,7 @@
       const employees=(employeeData.employees||[]).filter(row=>row.active!==false);window.kristineCustomerPortalEmployees=employees;
       document.getElementById("cpPointAssignee").innerHTML='<option value="">Noch nicht eingeteilt · Alex prüft</option>'+employees.map(row=>`<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`).join("");
       renderAdminPoints(pointData.points||[]);
+      await loadNotificationLog(jobId);
       renderJobs(job, portal.includedJobIds || []);
       document.getElementById("cpJobs").classList.toggle("open", selectedMode() === "collection");
       document.getElementById("cpPointForm").reset();

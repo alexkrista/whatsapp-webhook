@@ -3,7 +3,10 @@
 const chromium = require("@sparticuz/chromium").default;
 const puppeteer = require("puppeteer-core");
 const fs = require("node:fs");
-const { PDFDocument } = require("pdf-lib");
+const path = require("node:path");
+const {readLayout,layoutCss}=require("./document-layout");
+const { PDFDocument, StandardFonts } = require("pdf-lib");
+const applyInvoiceTemplate=require("./public/ui/document-template");
 const { renderOfferLegalHtml } = require("./offer-terms");
 
 async function browserExecutable() {
@@ -14,9 +17,14 @@ async function browserExecutable() {
   return executable;
 }
 
-async function renderOfferHtmlPdf(html) {
-  const source=String(html||"");
+async function renderOfferHtmlPdf(html,options={}) {
+  let source=String(html||"");
   if(!source.includes("koffer-paper")||source.length>5*1024*1024)throw new Error("Ungültige Angebotsansicht.");
+  source=source.replace(/@page(?:\s*:[\w-]+)?\s*\{[^}]*\}/g, "");
+  const layout=options.layout||await readLayout(process.env.DATA_DIR||path.join(process.cwd(),"data"));
+  const base=process.env.PUBLIC_BASE_URL||"https://protokoll.krista.at";
+  if(!source.includes("<base "))source=source.replace("<head>",`<head><base href="${base}/">`);
+  source=source.replace("</head>",`<style>${layoutCss(layout)}</style></head>`);
   const browser=await puppeteer.launch({
     args:process.platform==="win32"?["--no-sandbox","--disable-setuid-sandbox"]:chromium.args,
     defaultViewport:{width:1280,height:1800,deviceScaleFactor:1},
@@ -25,22 +33,38 @@ async function renderOfferHtmlPdf(html) {
   });
   try{
     const page=await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request",request=>{
+      const pathname=new URL(request.url()).pathname;
+      if(pathname==="/public/document-layout.css")return request.respond({status:200,contentType:"text/css",body:layoutCss(layout)});
+      const local=pathname==="/public/document-logo.png"?path.join(__dirname,"assets/krista_invoice_logo.png"):pathname.startsWith("/public/fonts/")?path.join(__dirname,"public/fonts",path.basename(pathname)):null;
+      if(local&&fs.existsSync(local))return request.respond({status:200,contentType:local.endsWith(".png")?"image/png":"font/ttf",body:fs.readFileSync(local)});
+      request.continue();
+    });
     await page.setContent(source,{waitUntil:["load","networkidle0"],timeout:30000});
     await page.emulateMediaType("print");
-    const isConfirmation=!!(await page.$(".koffer-paper[data-order-confirmation]"));
-    let confirmationOptions={};
-    if(isConfirmation){
-      const footer=await page.evaluate(()=>{
-        const node=document.querySelector(".koffer-paper-company-footer")?.cloneNode(true);
-        if(!node)throw new Error("Fußzeile der Auftragsbestätigung fehlt.");
-        node.querySelector(".koffer-paper-footer-page").innerHTML='Seite <span class="pageNumber"></span> / <span class="totalPages"></span>';
-        return node.outerHTML;
-      });
-      const footerCss='<style>.koffer-paper-company-footer{box-sizing:border-box;width:100%;margin:0 14mm;padding-top:2mm;border-top:1px solid #222;font:7.5px Arial,sans-serif;color:#333;line-height:1.3}.koffer-paper-footer-page{text-align:right;margin-bottom:4px;font-size:8px}.koffer-paper-bank-warning{color:#e21b23;text-align:center;font-size:8px;font-weight:600}.koffer-paper-company-main{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:5px;font-size:7px}.koffer-paper-company-main span+span:before{content:"|";margin-right:6px}.koffer-paper-company-columns{display:grid;grid-template-columns:1.35fr .85fr .75fr 2fr;gap:2mm;margin-top:5px}.koffer-paper-company-columns>div{white-space:normal}</style>';
-      confirmationOptions={displayHeaderFooter:true,headerTemplate:"<div></div>",footerTemplate:footerCss+footer,margin:{top:"14mm",right:"14mm",bottom:"34mm",left:"14mm"}};
+    await page.evaluate(()=>document.fonts.ready);
+    await page.evaluate(applyInvoiceTemplate, await page.$(".koffer-paper"));
+    const letterhead=await page.$(".koffer-paper-page-one");
+    const footer=await page.evaluate(()=>{
+      const node=document.querySelector(".koffer-paper-company-footer");
+      return {bank:node?.querySelector(".krista-document-bank")?.innerText||"",columns:[...(node?.querySelectorAll(".krista-document-company>div")||[])].map(cell=>cell.innerText.split("\n"))};
+    });
+    await page.evaluate(()=>document.documentElement.classList.add("krista-pdf-render"));
+    const pdf=await page.pdf({format:"A4",printBackground:true,preferCSSPageSize:true,displayHeaderFooter:false,
+      margin:{top:`${layout.firstPage.topMm}mm`,right:`${layout.firstPage.rightMm}mm`,bottom:`${layout.firstPage.bottomMm}mm`,left:`${layout.firstPage.leftMm}mm`}});
+    const document=await PDFDocument.load(pdf),logo=await document.embedPng(fs.readFileSync(path.join(__dirname,"assets/krista_invoice_logo.png"))),pages=document.getPages(),font=await document.embedFont(StandardFonts.Helvetica);
+    // Same absolute letterhead, logo crop and footer positions as the existing invoice.
+    const {pushGraphicsState,popGraphicsState,rectangle,clip,endPath}=require("pdf-lib"),mm=72/25.4;
+    for(const [index,sheet] of pages.entries()){
+      const p=index===0?layout.firstPage:layout.followingPages,w=p.logoWidthMm*mm,fullWidth=w/.42,h=fullWidth*235/1260,x=sheet.getWidth()-p.rightMm*mm-w+3.748,y=sheet.getHeight()-(index===0?114:20*mm);
+      if(letterhead){sheet.pushOperators(pushGraphicsState(),rectangle(x,y,w,h),clip(),endPath());sheet.drawImage(logo,{x:x-.58*fullWidth,y,width:fullWidth,height:h});sheet.pushOperators(popGraphicsState())}
+      sheet.drawText(`Seite ${index+1}/${pages.length}`,{x:layout.firstPage.leftMm*mm,y:sheet.getHeight()-10*mm,font,size:8.2});
+      if(footer.bank)sheet.drawText(footer.bank,{x:36.7,y:48,font,size:7.92});
+      footer.columns.forEach((lines,column)=>lines.slice(0,2).forEach((line,row)=>sheet.drawText(line,{x:[36.5,168.6,249.1,334.1][column],y:row===0?32.5:22.7,font,size:6.84})));
     }
-    const pdf=await page.pdf({format:"A4",printBackground:true,preferCSSPageSize:true,margin:{top:0,right:0,bottom:0,left:0},...confirmationOptions});
-    return Buffer.from(pdf);
+    document.setSubject(`KRISTA Formularvorlage ${layout.revision||"Standardrechnung"}`);
+    return Buffer.from(await document.save());
   }finally{await browser.close()}
 }
 
