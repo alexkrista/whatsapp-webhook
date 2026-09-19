@@ -3536,6 +3536,11 @@ async function persistCustomerAcceptedOffer({ jobId, draft, acceptance }) {
 
 app.post("/admin/api/job/:jobId/offer-draft/finalize",async(req,res)=>{if(!requireAdmin(req,res))return;try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const draft=await finalizeOfferDraft(jobId);res.json({ok:true,jobId,draft,offerNumber:draft.offerNumber,offerRevision:Math.max(1,Number(draft.offerRevision||1))})}catch(e){res.status(e.status||500).json({ok:false,error:String(e?.message||e)})}});
 
+require("./order-confirmation").registerOrderConfirmation(app, {
+  dataDir: DATA_DIR, requireAdmin, readJobMeta, readOrderSchedule,
+  readDocumentation, writeDocumentation, appendJobHistory, renderPdf: renderOfferHtmlPdf,
+});
+
 app.get("/admin/api/job/:jobId/accepted-order",async(req,res)=>{if(!requireAdmin(req,res))return;const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null),invoiceDraft=await fsp.readFile(prepaymentInvoiceDraftPath(jobId),"utf8").then(JSON.parse).catch(()=>null),schedule=await readOrderSchedule(jobId);res.json({ok:true,jobId,order,invoiceDraft,schedule})});
 
 app.post("/admin/api/job/:jobId/offer-draft/accept",async(req,res)=>{

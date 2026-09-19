@@ -140,6 +140,7 @@ function buildAcceptedOrder({ draft = {}, jobId = "", customer = "", selectedAlt
     } : null,
     customer: String(customer || "").slice(0, 180),
     offerType: String(draft.offerType || "").slice(0, 40),
+    presentation: { showQuantities:draft.showQuantities !== false },
     subject: String(draft.scopeDescription || "Auftrag aus angenommenem Angebot").slice(0, 500),
     intro: String(draft.intro || "").slice(0, 2000),
     financials: {
