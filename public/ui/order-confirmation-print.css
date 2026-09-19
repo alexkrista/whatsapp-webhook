@@ -1,0 +1,31 @@
+/* The offer's typography and letterhead remain unchanged; the AB may grow naturally. */
+.koffer-paper[data-order-confirmation] table th,
+.koffer-paper[data-order-confirmation] table td { width:auto!important; }
+.koffer-paper[data-order-confirmation] table { table-layout:fixed!important; }
+.koffer-paper[data-order-confirmation] thead { display:table-header-group; }
+.koffer-paper[data-order-confirmation] tfoot { display:table-row-group; break-inside:avoid; }
+.koffer-paper[data-order-confirmation] .koffer-paper-summary td:nth-child(2) { padding-left:6px!important; }
+
+@media print {
+  @page { size:A4 portrait; margin:14mm 14mm 34mm!important; }
+  html,body {
+    width:auto!important; min-width:0!important; max-width:none!important;
+    margin:0!important; padding:0!important; overflow:visible!important;
+  }
+  .koffer-paper[data-order-confirmation] {
+    width:auto!important; min-width:0!important; max-width:none!important;
+    min-height:0!important; padding:0!important; overflow:visible!important;
+  }
+  .koffer-paper[data-order-confirmation] .koffer-paper-page {
+    display:block!important; position:static!important;
+    width:auto!important; min-width:0!important; max-width:none!important;
+    height:auto!important; min-height:0!important; max-height:none!important;
+    padding:0!important; margin:0!important; overflow:visible!important;
+    break-after:auto!important; page-break-after:auto!important;
+  }
+  .koffer-paper[data-order-confirmation] .koffer-paper-page-two { break-before:page; }
+  .koffer-paper[data-order-confirmation] .koffer-paper-address { grid-template-columns:1fr 1fr!important; }
+  .koffer-paper[data-order-confirmation] .koffer-paper-company-footer { display:none!important; }
+  .koffer-paper[data-order-confirmation] .koffer-paper-gross td { white-space:nowrap; }
+  .koffer-paper[data-order-confirmation] .koffer-paper-group { break-after:avoid; }
+}
