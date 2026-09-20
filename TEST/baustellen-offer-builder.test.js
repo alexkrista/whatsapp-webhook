@@ -40,7 +40,7 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 for(const text of ["splitOfferAddress","offerRecipientNames",'row.kind==="woman"?"Frau":"Herr"','\\d{4,6}',"seen.has(key)",'z. H. ${row.salutation} ${row.person}'])
   assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
-assert.ok(top.includes("20260920-recipient-salutation-3"),"Korrigierte Empfängeranrede wird ohne alte Angebotsmaske geladen");
+assert.ok(top.includes("20260920-recipient-salutation-4"),"Korrigierte Personen- und Firmenanrede wird ohne alte Angebotsmaske geladen");
 for(const text of ["renderCanonicalPdfPreview","PDF-Vorschau des Angebots",'title="PDF-Vorschau des Angebots"',"/admin/api/document-layout/render"])
   assert.ok(ui.includes(text),`Angebotsvorschau ist dauerhaft eine PDF: ${text}`);
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
