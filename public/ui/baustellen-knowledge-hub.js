@@ -452,14 +452,15 @@
       if(query.length<2){host.textContent="Bitte einen Firmennamen eingeben.";return}
       button.disabled=true;host.textContent="Offizielle Homepage und Impressum werden gesucht …";
       try{
-        const result=await api("/admin/api/company-lookup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query,location:role==="owner"?val("bkHomeCity")||val("bkSiteCity"):val(prefix+"City")})}),rows=result.companies||[];
-        host.innerHTML=rows.length?rows.map((row,index)=>`<div class="bk-master-result"><div><strong>${esc(row.legalName)}</strong><div>${esc(masterAddress(row.street,row.houseNumber,row.postalCode,row.city))}</div><div>${esc([row.uid,row.email,row.phone].filter(Boolean).join(" · "))}</div><div>${companySource(row)}</div></div><button type="button" data-company-index="${index}">Daten übernehmen</button></div>`).join(""):"Keine belegten Firmendaten gefunden. Bitte Firmennamen oder Ort präzisieren.";
+        const website=val(prefix+"Website"),result=await api("/admin/api/company-lookup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query,website,location:role==="owner"?val("bkHomeCity")||val("bkSiteCity"):val(prefix+"City")})}),rows=result.companies||[];
+        host.innerHTML=rows.length?rows.map((row,index)=>{const people=(row.contacts||[]).map(person=>esc([person.title,person.firstName,person.lastName,person.role,person.email,person.phone].filter(Boolean).join(" · "))).join("<br>");return`<div class="bk-master-result"><div><strong>${esc(row.legalName)}</strong><div>${esc(masterAddress(row.street,row.houseNumber,row.postalCode,row.city))}</div><div>${esc([row.uid,row.email,row.phone].filter(Boolean).join(" · "))}</div>${people?`<div><strong>Ansprechpartner:</strong><br>${people}</div>`:""}<div>${companySource(row)}</div></div><button type="button" data-company-index="${index}">Daten übernehmen</button></div>`}).join(""):"Keine belegten Firmendaten gefunden. Bitte Firmennamen, Ort oder Website prüfen.";
         host.querySelectorAll("[data-company-index]").forEach(button=>button.onclick=()=>{
           const row=rows[Number(button.dataset.companyIndex)];
           if(role==="owner"){
             set("bkOwnerRole","Firma");updateCompanyMask();set("bkOwnerCustomer",row.legalName);
             for(const [suffix,key] of [["Street","street"],["House","houseNumber"],["Postal","postalCode"],["City","city"]])if(row[key])set("bkHome"+suffix,row[key]);
             if(!val("bkOwnerWomanEmail"))set("bkOwnerWomanEmail",row.email);if(!val("bkOwnerWomanPhone"))set("bkOwnerWomanPhone",row.phone);
+            const person=(row.contacts||[])[0];if(person){set("bkOwnerManTitle",person.title);set("bkOwnerManFirstName",person.firstName);set("bkOwnerManLastName",person.lastName);set("bkOwnerManEmail",person.email);set("bkOwnerManPhone",person.phone);peopleDetails.open=true}
           }else{
             set(prefix+"Company",row.legalName);for(const [suffix,key] of [["Street","street"],["House","houseNumber"],["Postal","postalCode"],["City","city"]])if(row[key])set(prefix+suffix,row[key]);
             if(!val(prefix+"Email"))set(prefix+"Email",row.email);if(!val(prefix+"Phone"))set(prefix+"Phone",row.phone);

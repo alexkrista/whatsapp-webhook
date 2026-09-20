@@ -69,14 +69,12 @@ test("AB verwendet angenommene Preise, gewählte Alternativen und Zahlungsbeding
   assert.equal(JSON.stringify(order),snapshot);
 });
 
-test("AB braucht einen bestätigten und intern gespeicherten Termin; Outlook-Fehler bleibt sichtbar",async t=>{
+test("AB braucht einen bestätigten und intern gespeicherten Termin, aber keinen persönlichen Outlook-Termin",async t=>{
   const s=await service(t);
   assert.equal((await s.request("",{headers:{"x-admin-token":"wrong"}})).status,403);
   for(const status of ["none","requested","proposed"]){s.data.schedule.status=status;assert.equal((await s.request()).status,409)}
-  s.data.schedule.status="confirmed";s.data.schedule.appointmentId="";
-  assert.equal((await s.request()).status,409);
-  s.data.schedule.appointmentId="appointment-1";s.data.schedule.outlook={status:"failed",error:"nicht verbunden"};
-  const view=await s.request();assert.equal(view.status,200);assert.equal(view.schedule.outlook.status,"failed");
+  s.data.schedule.status="confirmed";s.data.schedule.appointmentId="";s.data.schedule.outlook={};
+  const view=await s.request();assert.equal(view.status,200);assert.equal(view.schedule.appointmentId,"");
   assert.match(view.confirmation.scheduleLabel,/05\.10\.2026.*07:00.*17:00/);
   assert.equal(s.renders(),0);
 });
@@ -145,7 +143,7 @@ test("AB nutzt das Angebotslayout ohne Editorwerte zu übernehmen oder das Angeb
   assert.equal(w.offerTest.getDraft(),editor);assert.equal(w.document.getElementById("kofferLiveBody").innerHTML,before);
 });
 
-test("Termin bestätigen übernimmt genau den gespeicherten Termin in die AB und meldet offene Outlook-Synchronisierung",async t=>{
+test("Termin bestätigen übernimmt genau den gespeicherten Termin in die AB und zeigt den gemeinsamen Kalender",async t=>{
   const s=await service(t),view=await s.request(),w=await renderer(t);
   s.data.schedule.outlook={status:"failed"};view.schedule=s.data.schedule;
   w.offerTest.setState({draft:s.data.draft,job:{},jobId:"26001",order:s.data.order,schedule:{status:"requested"}});
@@ -155,7 +153,7 @@ test("Termin bestätigen übernimmt genau den gespeicherten Termin in die AB und
   assert.equal(requests.filter(row=>row.url.endsWith("/confirm")).length,1);
   assert.equal(JSON.parse(requests[0].options.body).date,"2026-10-05");
   const dialog=w.document.getElementById("kofferConfirmationDialog");assert.ok(dialog?.open,w.document.body.textContent);
-  assert.match(dialog.querySelector("[data-confirmation-calendar]").textContent,/Outlook-Synchronisierung noch offen/);
+  assert.match(dialog.querySelector("[data-confirmation-calendar]").textContent,/gemeinsamen KRISTINE-Kalender/);
   assert.equal(dialog.querySelector("iframe").src,"blob:test-ab-pdf");
   assert.equal(dialog.querySelector("iframe").hasAttribute("srcdoc"),false);
   assert.equal(dialog.querySelector("[data-confirmation-save]").disabled,false);

@@ -3417,17 +3417,12 @@ async function confirmOrderScheduleForJob(jobId, input = {}, options = {}) {
     if (!date) throw Object.assign(new Error("Bitte einen gültigen Termin auswählen."), { status:400 });
     const planning = buildPlanningAssignments({ jobId, job:meta, date, from, to, employees, scheduleRevision:current.revision + 1 });
     await replaceOrderScheduleAssignments(jobId, planning);
-    const result = await kristineOutlook.createAppointment({
-      requestId:`order-schedule-${jobId}-r${current.revision + 1}`,
-      taskId:`job:${jobId}`,
-      title:`Baustellenstart #${jobId} · ${meta.name || "Auftrag"}`,
-      date, from, to, allDay:false,
-      location:orderScheduleAddress(meta),
-      details:[`Bestätigter Auftragstermin`, meta.contactName ? `Kunde: ${meta.contactName}` : "", employees.length ? `Eingeteilt: ${employees.map(row => row.name).join(", ")}` : "Mitarbeitereinteilung noch offen"].filter(Boolean).join("\n"),
-    });
-    let schedule = confirmSchedule(current, { date, from, to, employees, assignments:planning, appointment:result.appointment, actor, customerConfirmedAt:options.customerConfirmedAt || null });
+    // Auftragstermine stehen genau einmal im gemeinsamen KRISTINE-Kalender.
+    // Keinen zusaetzlichen Termin (und keinen "Jetzt los"-Block) in Alex'
+    // persoenlichem Outlook-Kalender erzeugen.
+    let schedule = confirmSchedule(current, { date, from, to, employees, assignments:planning, appointment:null, actor, customerConfirmedAt:options.customerConfirmedAt || null });
     await persistOrderSchedule(jobId, schedule, { startDate:date });
-    await appendJobHistory(jobId, { type:"order_schedule_confirmed", title:`Auftragstermin ${formatOrderScheduleDate(date)} bestätigt`, detail:`${from}–${to} Uhr · ${employees.length ? employees.map(row => row.name).join(", ") : "Mitarbeitereinteilung noch offen"} · Outlook ${schedule.outlook.status === "synced" ? "synchronisiert" : "in KRISTINE gespeichert; Synchronisierung offen"}`, source:options.customerConfirmedAt ? "Kundenportal" : "KRISTINE Auftrag", data:{ date, from, to, employeeIds:employees.map(row => row.id), appointmentId:schedule.appointmentId } });
+    await appendJobHistory(jobId, { type:"order_schedule_confirmed", title:`Auftragstermin ${formatOrderScheduleDate(date)} bestätigt`, detail:`${from}–${to} Uhr · ${employees.length ? employees.map(row => row.name).join(", ") : "Mitarbeitereinteilung noch offen"} · im gemeinsamen KRISTINE-Kalender vorgemerkt`, source:options.customerConfirmedAt ? "Kundenportal" : "KRISTINE Auftrag", data:{ date, from, to, employeeIds:employees.map(row => row.id), appointmentId:schedule.appointmentId } });
     if (options.notifyCustomer !== false) {
       schedule = { ...schedule, notification:await sendOrderScheduleNotice(jobId, schedule, "confirmation") };
       await persistOrderSchedule(jobId, schedule, { startDate:date });
@@ -3616,7 +3611,7 @@ app.put("/admin/api/job/:jobId/order-schedule/request",async(req,res)=>{
 
 app.post("/admin/api/job/:jobId/order-schedule/confirm",async(req,res)=>{
   if(!requireAdmin(req,res))return;
-  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!order)return res.status(409).json({ok:false,error:"Bitte zuerst das Angebot als Auftrag übernehmen."});const schedule=await confirmOrderScheduleForJob(jobId,{date:req.body?.date,from:req.body?.from,to:req.body?.to,employeeIds:req.body?.employeeIds,actor:orderScheduleActor(req)});res.json({ok:true,jobId,schedule,planningCreated:schedule.assignmentIds.length,outlookSynced:schedule.outlook.status==="synced"});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});const order=await fsp.readFile(acceptedOrderPath(jobId),"utf8").then(JSON.parse).catch(()=>null);if(!order)return res.status(409).json({ok:false,error:"Bitte zuerst das Angebot als Auftrag übernehmen."});const schedule=await confirmOrderScheduleForJob(jobId,{date:req.body?.date,from:req.body?.from,to:req.body?.to,employeeIds:req.body?.employeeIds,actor:orderScheduleActor(req)});res.json({ok:true,jobId,schedule,planningCreated:schedule.assignmentIds.length,sharedCalendar:true});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
 });
 
 app.post("/admin/api/job/:jobId/order-schedule/propose",async(req,res)=>{
@@ -3626,7 +3621,7 @@ app.post("/admin/api/job/:jobId/order-schedule/propose",async(req,res)=>{
 
 app.post("/admin/api/job/:jobId/order-schedule/retry-outlook",async(req,res)=>{
   if(!requireAdmin(req,res))return;
-  try{const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});let schedule=await readOrderSchedule(jobId);if(schedule.status!=="confirmed"||!schedule.appointmentId)return res.status(409).json({ok:false,error:"Für diesen Auftrag gibt es noch keinen bestätigten Outlook-Termin."});const appointment=await kristineOutlook.syncAppointment(schedule.appointmentId);schedule={...schedule,outlook:appointment.outlook,updatedAt:new Date().toISOString()};await persistOrderSchedule(jobId,schedule,{startDate:schedule.confirmedDate});res.json({ok:true,jobId,schedule,outlookSynced:schedule.outlook.status==="synced"});}catch(e){res.status(e.status||400).json({ok:false,error:String(e?.message||e)})}
+  res.status(410).json({ok:false,error:"Auftragstermine werden nur noch im gemeinsamen KRISTINE-Kalender geführt."});
 });
 
 app.put("/admin/api/job/:jobId/hours-cutover", async (req, res) => {

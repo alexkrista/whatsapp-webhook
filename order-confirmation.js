@@ -36,7 +36,7 @@ function buildConfirmationDraft(order) {
 
 function confirmedSlot(schedule) {
   const date = cleanDate(schedule?.confirmedDate), from = cleanTime(schedule?.confirmedFrom), to = cleanTime(schedule?.confirmedTo);
-  if (schedule?.status !== "confirmed" || !date || !from || !to || to <= from || !schedule.appointmentId) {
+  if (schedule?.status !== "confirmed" || !date || !from || !to || to <= from) {
     throw failure("Bitte zuerst den Ausführungstermin bestätigen und eintragen.");
   }
   return { date, from, to };
