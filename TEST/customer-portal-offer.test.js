@@ -1,11 +1,14 @@
 "use strict";
 const assert=require("assert"),fs=require("fs"),path=require("path"),root=path.join(__dirname,"..");
 const access=fs.readFileSync(path.join(root,"customer-portal-access.js"),"utf8"),ui=fs.readFileSync(path.join(root,"public/ui/kundenportal.js"),"utf8"),html=fs.readFileSync(path.join(root,"public/kundenportal.html"),"utf8"),pkg=require(path.join(root,"package.json"));
+assert.match(ui,/if\(!offer\.pdfUrl\)/,"Ohne gespeicherte PDF zeigt das Kundenportal niemals die Tabellen-Ersatzansicht");
+assert.match(ui,/Eine Beauftragung ist erst möglich, sobald die Original-PDF bereitsteht/);
+assert.match(html,/20260920-offer-pdf-only-1/,"Die PDF-Pflicht wird ohne alten Browser-Cache geladen");
 const terms=fs.readFileSync(path.join(root,"offer-terms.js"),"utf8"),pdf=fs.readFileSync(path.join(root,"offer-html-pdf.js"),"utf8"),server=fs.readFileSync(path.join(root,"server.js"),"utf8");
 assert.equal(pkg.dependencies.qrcode,"^1.5.4","QR-Code wird lokal und ohne Fremddienst erzeugt");
 for(const text of ['purpose==="offer"','90*86400000','QRCode.toString','offerNumber','offerRevision','customerOffer(ctx)','/kundenportal/api/offer/accept','req.body?.confirmed!==true','status:"Auftrag"','offer_customer_accepted'])assert.ok(access.includes(text),`Sicherer Angebotsauftrag enthält ${text}`);
 for(const text of ['offer:"Angebot"','Angebot verbindlich beauftragen','offerConfirm','offer/accept','window.confirm'])assert.ok(ui.includes(text),`Kundenportal zeigt und bestätigt das Angebot: ${text}`);
-assert.ok(html.includes("20260918-offer-original-agb-2"),"Kundenportal lädt Original-PDF und vollständige AGB ohne Alt-Cache");
+assert.ok(html.includes("20260920-offer-pdf-only-1"),"Kundenportal lädt ausschließlich die Original-PDF und vollständige AGB ohne Alt-Cache");
 for(const text of ["Muster-Widerrufsformular","vierzehn Tagen","zuzüglich allfälliger beauftragter Nachträge","Feldkircherstraße 45","FN 15539b","FN 77707a"])assert.ok(terms.includes(text),`Rechtliche Angebotsanlage enthält ${text}`);
 assert.ok(pdf.includes("appendOfferLegalAnnex"),"Die separate AGB-PDF-Erzeugung bleibt verfügbar");
 assert.ok(server.includes("offer-approved-original")&&server.includes("const pdf=originalPdf"),"Die freigegebene Angebots-PDF wird unverändert übernommen");

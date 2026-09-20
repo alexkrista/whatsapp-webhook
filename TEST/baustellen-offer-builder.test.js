@@ -47,8 +47,8 @@ for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
 for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","Verbindliche PDF und E-Mail sind geöffnet."])
   assert.ok(ui.includes(text),`Angebotsversand bereitet E-Mail und WhatsApp gemeinsam vor: ${text}`);
-for(const text of ["Freigegebene Original-PDF auswählen (verpflichtend)","X-Approved-Pdf-Correction","erst danach werden Versand und Portal freigeschaltet"])
-  assert.ok(ui.includes(text),`Verbindlicher Versand verwendet nur die ausdrückliche freigegebene PDF: ${text}`);
+for(const text of ["Optional: andere freigegebene Original-PDF verwenden","X-Approved-Pdf-Correction","await prepareFinalOfferPortal();await storeCanonicalOfferPdf()","Genau diese PDF sieht der Kunde im Portal"])
+  assert.ok(ui.includes(text),`Verbindlicher Versand erzeugt und speichert automatisch die Kunden-PDF: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])
   assert.ok(ui.includes(text),`Druckgestaltung enthält ${text}`);
