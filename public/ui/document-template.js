@@ -1,6 +1,14 @@
 /* The invoice is the common letterhead. This changes presentation only. */
 (function(root,factory){const apply=factory();if(typeof module==="object"&&module.exports)module.exports=apply;else root.KristaDocumentTemplate=apply})(typeof window==="object"?window:globalThis,()=>function applyInvoiceTemplate(paper){
-  if(!paper||paper.dataset.invoiceTemplate)return paper;
+  if(!paper)return paper;
+  // Normalize totals even in an already prepared print view. Older previews
+  // omitted the net marker, so the shared full-width rule was never drawn.
+  for(const row of paper.querySelectorAll("table tfoot tr")){
+    const label=String(row.cells[0]?.textContent||"").replace(/\s+/g," ").trim();
+    if(/^(?:(?:Summe|Angebotssumme|Auftragssumme|Rechnungssumme) )?netto:?$/i.test(label))row.classList.add("koffer-paper-net");
+    if(/^(?:(?:Summe|Angebotssumme|Auftragssumme|Rechnungssumme) )?brutto:?$/i.test(label))row.classList.add("koffer-paper-gross");
+  }
+  if(paper.dataset.invoiceTemplate)return paper;
   paper.dataset.invoiceTemplate="1";
   const doc=paper.ownerDocument,logo=paper.querySelector(".koffer-paper-brand img");
   if(logo)logo.setAttribute("src","/public/document-logo.png");
