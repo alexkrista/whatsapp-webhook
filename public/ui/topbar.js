@@ -181,7 +181,7 @@
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260914-position-sum-1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-offer-positions-1", "data-krista-kalkulation-grid-v2");
     loadScriptOnce("/public/ui/document-template.js?v=20260920-net-line", "data-krista-document-template");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260920-pdf-preview-company-contact-calendar-1", "data-krista-angebot-v14");
+    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260920-offer-pdf-only-auto-2", "data-krista-angebot-v15");
   }
 
   function loadTowerSignals() {
