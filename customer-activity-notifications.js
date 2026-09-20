@@ -5,16 +5,54 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const hash = value => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const safeJob = value => /^[A-Za-z0-9_-]{1,80}$/.test(String(value));
+const clean = value => String(value ?? "").trim().toLowerCase();
+const revision = value => Math.max(1, Math.trunc(Number(value) || 1));
+
+function documentPublicationVersion(row) {
+  const type = clean(row?.type), source = clean(row?.source);
+  const offerNumber = clean(row?.offerNumber);
+  if (type === "offer" && offerNumber) {
+    return hash(["offer", offerNumber, revision(row.offerRevision)]);
+  }
+
+  const confirmationNumber = clean(row?.confirmationNumber || (source === "order-confirmation" && row?.offerNumber ? `AB-${row.offerNumber}` : ""));
+  if ((source === "order-confirmation" || type === "order") && confirmationNumber) {
+    return hash(["order-confirmation", confirmationNumber, revision(row.confirmationRevision)]);
+  }
+
+  if (type === "regie_report") {
+    // A WinWorker sync may enrich an imported report with source/sourceId later.
+    // Its report number remains the business identity within the job.
+    const reportIdentity = clean(row?.reportNumber) || clean(row?.sourceId) || clean(row?.id) || [row?.reportDate, row?.storedName, row?.name].map(clean).filter(Boolean).join("|");
+    return hash(["regie-report", reportIdentity]);
+  }
+
+  // Generic files have no shared revision contract. Keep their stable storage
+  // identity and explicit content/version markers, but never cache timestamps.
+  const identity = clean(row?.id) || clean(row?.storedName) || clean(row?.name);
+  return hash([
+    "document", type, identity,
+    clean(row?.fingerprint), clean(row?.sha256 || row?.contentHash),
+    clean(row?.documentRevision ?? row?.revision ?? row?.version),
+  ]);
+}
 
 function documentChanges(before, after) {
-  const visible = row => row?.type === "regie_report" || (row?.customerVisible === true && /\.pdf$/i.test(row.storedName || ""));
-  const version = row => hash([row.id, row.storedName, row.fingerprint, row.offerRevision, row.confirmationRevision, row.approvedAt, row.renderedAt]);
-  const previous = new Set(before.filter(visible).map(version));
-  return after.filter(visible).filter(row => !previous.has(version(row))).map(row => ({
-    key:`document:${version(row)}`, audience:"customer", module:row.type === "regie_report" ? "regie" : "projectFile",
-    title:row.source === "order-confirmation" ? "Auftragsbestätigung in Ihrer Akte" : row.type === "regie_report" ? "Neuer Regiebericht in Ihrer Projektakte" : "Neues Dokument in Ihrer Projektakte",
-    text:`${String(row.name || "Ein neues Dokument").slice(0, 180)} wurde in Ihrer Projektakte abgelegt.`,
-  }));
+  const visible = row => clean(row?.type) === "regie_report" ? row.customerVisible !== false : row?.customerVisible === true && /\.pdf$/i.test(row.storedName || "");
+  const previous = new Set((Array.isArray(before) ? before : []).filter(visible).map(documentPublicationVersion));
+  const changes = [], added = new Set();
+  for (const row of (Array.isArray(after) ? after : []).filter(visible)) {
+    const version = documentPublicationVersion(row);
+    if (previous.has(version) || added.has(version)) continue;
+    added.add(version);
+    const type = clean(row?.type), source = clean(row?.source);
+    changes.push({
+      key:`document:${version}`, audience:"customer", module:type === "regie_report" ? "regie" : "projectFile",
+      title:source === "order-confirmation" ? "Auftragsbestätigung in Ihrer Akte" : type === "regie_report" ? "Neuer Regiebericht in Ihrer Projektakte" : "Neues Dokument in Ihrer Projektakte",
+      text:`${String(row.name || "Ein neues Dokument").slice(0, 180)} wurde in Ihrer Projektakte abgelegt.`,
+    });
+  }
+  return changes;
 }
 
 function createActivityNotifications({ dataDir, recipients, sendMail, sendWhatsApp, now = () => new Date().toISOString() }) {

@@ -17,6 +17,48 @@ async function browserExecutable() {
   return executable;
 }
 
+function cleanRecipient(value) {
+  if (!value || typeof value !== "object") return null;
+  const lines = key => (Array.isArray(value[key]) ? value[key] : []).map(line => String(line ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const recipient = { nameLines:lines("nameLines"), addressLines:lines("addressLines") };
+  if (!recipient.nameLines.length) throw Object.assign(new Error("Der PDF-Empfänger ist unvollständig."), { status:409 });
+  return recipient;
+}
+
+async function applyDocumentRecipient(page, options) {
+  let recipient = cleanRecipient(options.recipient);
+  if (!recipient && typeof options.resolveRecipient === "function") {
+    let jobId = String(options.jobId || "").trim();
+    if (!jobId && options.inferRecipientJobId) {
+      const project = await page.$eval(".koffer-paper-project strong", node => node.textContent || "").catch(() => "");
+      const match = project.match(/^\s*Projekt:\s*([A-Za-z0-9_-]+)\s*$/);
+      jobId = match?.[1] || "";
+    }
+    if (jobId) recipient = cleanRecipient(await options.resolveRecipient(jobId));
+  }
+  if (!recipient) {
+    if (options.requireRecipient) throw Object.assign(new Error("Der PDF-Empfänger konnte nicht aus den Stammdaten ermittelt werden."), { status:409 });
+    return;
+  }
+  const replaced = await page.evaluate(model => {
+    const node = document.querySelector(".koffer-paper-recipient");
+    if (!node) return false;
+    node.replaceChildren();
+    for (const line of model.nameLines) {
+      const element = document.createElement("strong");
+      element.textContent = line;
+      node.append(element);
+    }
+    for (const line of model.addressLines) {
+      const element = document.createElement("span");
+      element.textContent = line;
+      node.append(element);
+    }
+    return true;
+  }, recipient);
+  if (!replaced) throw Object.assign(new Error("Das PDF enthält kein Empfängerfeld."), { status:400 });
+}
+
 async function renderOfferHtmlPdf(html,options={}) {
   let source=String(html||"");
   if(!source.includes("koffer-paper")||source.length>5*1024*1024)throw new Error("Ungültige Angebotsansicht.");
@@ -45,6 +87,7 @@ async function renderOfferHtmlPdf(html,options={}) {
       request.continue();
     });
     await page.setContent(source,{waitUntil:["load","networkidle0"],timeout:30000});
+    await applyDocumentRecipient(page,options);
     await page.emulateMediaType("print");
     await page.evaluate(()=>document.fonts.ready);
     await page.evaluate(applyInvoiceTemplate, await page.$(".koffer-paper"));

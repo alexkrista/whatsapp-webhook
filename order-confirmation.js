@@ -96,7 +96,7 @@ function registerOrderConfirmation(app, options) {
         if (String(req.headers["x-confirmation-date"] || "") !== view.confirmation.documentDate) throw failure("Bitte die AB-Vorschau für das aktuelle Dokumentdatum erneut öffnen.");
         const html = String(req.body || "");
         if (!html.includes('data-order-confirmation="' + fingerprint + '"') || !html.includes("Auftragsbestätigung")) throw failure("Bitte die Auftragsbestätigung aus der aktuellen Vorschau erstellen.", 400);
-        const pdf = await renderPdf(html);
+        const pdf = await renderPdf(html, { jobId });
         // Rendering takes time; do not file a document for a slot changed in the meantime.
         if ((await context(jobId)).confirmation.fingerprint !== fingerprint) throw failure("Der Auftragstermin wurde während der PDF-Erstellung geändert. Bitte die AB erneut öffnen.");
         const c = view.confirmation, safeNumber = c.number.replace(/[^A-Za-z0-9_-]/g, "_"), storedName = `auftragsbestaetigung-${safeNumber}-v${c.revision}.pdf`;

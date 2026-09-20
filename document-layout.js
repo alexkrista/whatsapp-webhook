@@ -106,7 +106,7 @@ function registerDocumentLayout(app,{dataDir,requireAdmin,publicDir,renderPdf}){
   });
   app.post("/admin/api/document-layout/render",require("express").text({type:"text/html",limit:"5mb"}),async(req,res)=>{
     if(!requireAdmin(req,res))return;
-    try{res.type("application/pdf").send(await renderPdf(req.body))}catch(error){res.status(error.status||500).json({ok:false,error:error.message})}
+    try{res.type("application/pdf").send(await renderPdf(req.body,{inferRecipientJobId:true}))}catch(error){res.status(error.status||500).json({ok:false,error:error.message})}
   });
   return {read};
 }

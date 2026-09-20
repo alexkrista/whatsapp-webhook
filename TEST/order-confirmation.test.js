@@ -29,19 +29,21 @@ function fixture() {
 
 async function service(t) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "kristine-ab-")), data = fixture();
+  data.meta={name:"Testbaustelle",street:"Musterweg",houseNumber:"1",postalCode:"6820",city:"Frastanz",customerMaster:{name:"Testkunde"}};
   await fs.mkdir(path.join(dataDir, "26001"));
   await fs.writeFile(path.join(dataDir, "26001", ".accepted-order.json"), JSON.stringify(data.order));
   let documents = [{id:"existing",type:"plan",name:"Bestandsplan.pdf"}], renders = 0;
+  const renderOptions=[];
   const history = [], app = express();
   const api = registerOrderConfirmation(app, {
     dataDir,
     requireAdmin(req,res) { if(req.headers["x-admin-token"] === "test")return true;res.status(403).json({ok:false});return false; },
-    readJobMeta:async()=>({name:"Testbaustelle",street:"Musterweg",houseNumber:"1",postalCode:"6820",city:"Frastanz",customerMaster:{name:"Testkunde"}}),
+    readJobMeta:async()=>data.meta,
     readOrderSchedule:async()=>data.schedule,
     readDocumentation:async()=>documents,
     writeDocumentation:async(_id,rows)=>{documents=rows},
     appendJobHistory:async(_id,row)=>history.push(row),
-    renderPdf:async html=>{renders++;if(data.onRender)await data.onRender(html);return Buffer.from("%PDF-1.4\nTest PDF");},
+    renderPdf:async (html,options)=>{renders++;renderOptions.push(options);if(data.onRender)await data.onRender(html,options);return Buffer.from("%PDF-1.4\nTest PDF");},
   });
   const server = await new Promise(resolve=>{const s=app.listen(0,"127.0.0.1",()=>resolve(s))});
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -51,7 +53,7 @@ async function service(t) {
     return {status:response.status,...await response.json()};
   };
   const save=(view,extra={})=>request("/pdf",{method:"POST",headers:{"Content-Type":"text/html","X-Confirmation-Fingerprint":view.confirmation.fingerprint,"X-Confirmation-Date":view.confirmation.documentDate},body:`<html><div class="koffer-paper" data-order-confirmation="${view.confirmation.fingerprint}">Auftragsbestätigung</div></html>`,...extra});
-  return {...api,data,dataDir,request,save,history,documents:()=>documents,renders:()=>renders};
+  return {...api,data,dataDir,request,save,history,documents:()=>documents,renders:()=>renders,renderOptions:()=>renderOptions};
 }
 
 test("AB verwendet angenommene Preise, gewählte Alternativen und Zahlungsbedingungen",()=>{
@@ -85,6 +87,7 @@ test("PDF-Ablage ist wiederholbar und erhält Dokumente, die während des Render
   const results=await Promise.all([s.save(view),s.save(view)]);
   assert.ok(results.every(row=>row.status===200));
   assert.equal(s.renders(),1);assert.equal(s.history.length,1);
+  assert.deepEqual(s.renderOptions()[0],{jobId:"26001"});
   assert.equal(s.documents().length,3);assert.ok(s.documents().some(row=>row.id==="concurrent"));
   const item=results[0].item;
   assert.equal(item.type,"order");assert.equal(item.confirmationNumber,"AB-2609007");
@@ -92,6 +95,14 @@ test("PDF-Ablage ist wiederholbar und erhält Dokumente, die während des Render
   assert.equal(await fs.readFile(path.join(s.dataDir,"26001","_documentation",item.storedName),"utf8"),"%PDF-1.4\nTest PDF");
   s.data.schedule.outlook={status:"synced",syncedAt:"later"};
   assert.equal((await s.request()).pdfUrl,item.url);
+});
+
+test("geänderte Empfänger-Stammdaten machen eine offene AB-Vorschau ungültig",async t=>{
+  const s=await service(t),old=await s.request();
+  s.data.meta={...s.data.meta,projectContacts:{owner:{ownerRole:"Bauherr",customer:"Max Neu"}}};
+  const current=await s.request();
+  assert.notEqual(current.confirmation.fingerprint,old.confirmation.fingerprint);
+  assert.equal((await s.save(old)).status,409);assert.equal(s.renders(),0);
 });
 
 test("veraltete Vorschau und während des Renderns geänderter Termin werden nicht abgelegt",async t=>{
@@ -123,7 +134,7 @@ async function renderer(t){
   let source=await fs.readFile(path.join(__dirname,"../public/ui/baustellen-offer-builder.js"),"utf8");
   const startup='  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{init();mountFreePositionUi();watchLivePreview()},{once:true});else{init();mountFreePositionUi();watchLivePreview()}';
   assert.ok(source.includes(startup));
-  source=source.replace(startup,'watchLivePreview();window.offerTest={renderOrderConfirmationHtml,openOrderConfirmation,orderScheduleAction,setState(value){draft=value.draft;job=value.job;jobId=value.jobId;acceptedOrder=value.order;orderSchedule=value.schedule;scheduleEmployees=[]},getDraft(){return draft}};');
+  source=source.replace(startup,'watchLivePreview();window.offerTest={renderOrderConfirmationHtml,openOrderConfirmation,orderScheduleAction,setState(value){draft=value.draft;job=value.job;jobId=value.jobId;acceptedOrder=value.order;orderSchedule=value.schedule;scheduleEmployees=[];const editor=document.getElementById("koffer");if(editor)editor.dataset.jobId=jobId},getDraft(){return draft}};');
   dom.window.KristaDocumentTemplate=require("../public/ui/document-template");
   dom.window.eval(source);return dom.window;
 }
@@ -147,7 +158,7 @@ test("Termin bestätigen übernimmt genau den gespeicherten Termin in die AB und
   const s=await service(t),view=await s.request(),w=await renderer(t);
   s.data.schedule.outlook={status:"failed"};view.schedule=s.data.schedule;
   w.offerTest.setState({draft:s.data.draft,job:{},jobId:"26001",order:s.data.order,schedule:{status:"requested"}});
-  w.document.body.insertAdjacentHTML("beforeend",'<section id="kofferOrderSchedule"><input id="kofferScheduleDate" value="2026-10-05"><input id="kofferScheduleFrom" value="07:00"><input id="kofferScheduleTo" value="17:00"><button data-schedule-action="confirm"></button></section>');
+  w.document.getElementById("koffer").insertAdjacentHTML("beforeend",'<section id="kofferOrderSchedule"><input id="kofferScheduleDate" value="2026-10-05"><input id="kofferScheduleFrom" value="07:00"><input id="kofferScheduleTo" value="17:00"><button data-schedule-action="confirm"></button></section>');
   const requests=[];w.fetch=async(url,options={})=>{requests.push({url,options});return{ok:true,blob:async()=>new w.Blob(["%PDF-test"],{type:"application/pdf"}),text:async()=>JSON.stringify(String(url).endsWith("/confirm")?{schedule:s.data.schedule,planningCreated:0,outlookSynced:false}:view)}};
   await w.offerTest.orderScheduleAction("confirm");
   assert.equal(requests.filter(row=>row.url.endsWith("/confirm")).length,1);

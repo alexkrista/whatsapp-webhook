@@ -40,14 +40,14 @@ for(const text of ["offerAddressBlock","koffer-paper-address","koffer-paper-reci
 for(const text of ["residentialStreet","residentialPostalCode","sharedLastName","womanFirstName","womanLastName","manFirstName","manLastName"])assert.ok(ui.includes(text),`Angebotsadresse verwendet Wohnadresse und getrennte Bauherrendaten: ${text}`);
 for(const text of ["splitOfferAddress","offerRecipientNames",'row.kind==="woman"?"Frau":"Herr"','\\d{4,6}',"seen.has(key)",'z. H. ${row.salutation} ${row.person}'])
   assert.ok(ui.includes(text),`Briefkopf trennt Adresse, ergänzt die Anrede und verhindert doppelte Empfänger: ${text}`);
-assert.ok(top.includes("20260920-recipient-salutation-3"),"Korrigierte Empfängeranrede wird ohne alte Angebotsmaske geladen");
-for(const text of ["renderCanonicalPdfPreview","PDF-Vorschau des Angebots",'title="PDF-Vorschau des Angebots"',"/admin/api/document-layout/render"])
+assert.ok(top.includes("20260920-editor-context-1"),"Aktueller Angebotseditor wird ohne alte Angebotsmaske geladen");
+for(const text of ["renderOfferPdfPreview","PDF-Vorschau des Angebots",'title="PDF-Vorschau des Angebots"',"/admin/api/document-layout/render"])
   assert.ok(ui.includes(text),`Angebotsvorschau ist dauerhaft eine PDF: ${text}`);
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
 for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","Verbindliche PDF und E-Mail sind geöffnet."])
   assert.ok(ui.includes(text),`Angebotsversand bereitet E-Mail und WhatsApp gemeinsam vor: ${text}`);
-for(const text of ["Optional: andere freigegebene Original-PDF verwenden","X-Approved-Pdf-Correction","await prepareFinalOfferPortal();await storeCanonicalOfferPdf()","Genau diese PDF sieht der Kunde im Portal"])
+for(const text of ["Optional: andere freigegebene Original-PDF verwenden","X-Approved-Pdf-Correction","await prepareFinalOfferPortal(context)","await storeCanonicalOfferPdf(context)","Genau diese PDF sieht der Kunde im Portal"])
   assert.ok(ui.includes(text),`Verbindlicher Versand erzeugt und speichert automatisch die Kunden-PDF: ${text}`);
 assert.ok(ui.includes('join(" · ")'),"Projektbezeichnung kombiniert Projektname und Baustellenadresse");
 for(const text of ["Unser Bearbeiter: Ing. Alexander Krista","offerHeading","koffer-paper-offer-head","Zusammenstellung","koffer-paper-summary","krista-logo.png\" alt=\"KRISTA"])

@@ -21,6 +21,21 @@ test("PDF hält den Rechnungskopf auch bei Druckregeln eines älteren AB-Fenster
   }finally{await document.destroy()}
 });
 
+test("PDF ersetzt nur den Browser-Empfänger durch serverseitige Stammdaten",async()=>{
+  const {renderOfferHtmlPdf}=require("../offer-html-pdf"),{getDocument}=await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const html=previewHtml("Angebot").replace("Projekt: Muster","Projekt: 26101"),recipient={nameLines:["Firma <b>Server</b> GmbH","z. H. Frau Eva Muster"],addressLines:["Serverweg 7","6800 Feldkirch"]},resolved=[];
+  const pdf=await renderOfferHtmlPdf(html,{layout:cleanLayout(),inferRecipientJobId:true,resolveRecipient:async jobId=>{resolved.push(jobId);return recipient}}),document=await getDocument({data:new Uint8Array(pdf),useSystemFonts:true}).promise;
+  try{
+    assert.deepEqual(resolved,["26101"]);
+    const first=await document.getPage(1),text=(await first.getTextContent()).items.map(item=>item.str).join(" ");
+    assert.match(text,/Firma <b>Server<\/b> GmbH/);
+    assert.match(text,/z\. H\. Frau Eva Muster/);
+    assert.match(text,/Serverweg 7/);assert.match(text,/6800 Feldkirch/);
+    assert.doesNotMatch(text,/Frau Erika Muster|Musterweg 12/);
+    assert.match(text,/Fachgerechte Malerarbeiten/);assert.match(text,/1\.440,00/);
+  }finally{await document.destroy()}
+});
+
 test("Gemeinsame Vorlage ordnet Positionswerte wie die Rechnung und verändert keine Beträge",()=>{
   const dom=new JSDOM(previewHtml("Auftragsbestätigung")),paper=dom.window.document.querySelector(".koffer-paper");
   apply(paper);
@@ -32,14 +47,16 @@ test("Gemeinsame Vorlage ordnet Positionswerte wie die Rechnung und verändert k
 });
 
 test("Vorlagen bleiben nach Neustart erhalten; nur Admin darf sie ändern oder PDFs erzeugen",async t=>{
-  const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),"krista-layout-")),app=express();app.use(express.json());
-  registerDocumentLayout(app,{dataDir,publicDir:path.resolve("public"),requireAdmin:(req,res)=>{if(req.headers["x-admin-token"]==="test")return true;res.sendStatus(403);return false},renderPdf:async()=>Buffer.from("%PDF-Test")});
+  const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),"krista-layout-")),app=express(),renders=[];app.use(express.json());
+  registerDocumentLayout(app,{dataDir,publicDir:path.resolve("public"),requireAdmin:(req,res)=>{if(req.headers["x-admin-token"]==="test")return true;res.sendStatus(403);return false},renderPdf:async(html,options)=>{renders.push({html,options});return Buffer.from("%PDF-Test")}});
   const server=app.listen(0,"127.0.0.1");await new Promise(resolve=>server.once("listening",resolve));t.after(async()=>{await new Promise(resolve=>server.close(resolve));await fs.rm(dataDir,{recursive:true,force:true})});
   const base=`http://127.0.0.1:${server.address().port}`,body=JSON.stringify({layout:{firstPage:{leftMm:20},followingPages:{leftMm:15,topMm:38},fontSizePt:10.5}}),options={method:"PUT",headers:{"Content-Type":"application/json"},body};
   assert.equal((await fetch(base+"/admin/api/document-layout",options)).status,403);
   assert.equal((await fetch(base+"/admin/api/document-layout",{...options,headers:{...options.headers,"X-Admin-Token":"test"}})).status,200);
   const saved=await readLayout(dataDir);assert.equal(saved.firstPage.leftMm,20);assert.equal(saved.followingPages.leftMm,20);assert.equal(saved.followingPages.topMm,38);assert.equal(saved.fontSizePt,10.5);
   assert.equal((await fetch(base+"/admin/api/document-layout/render",{method:"POST",headers:{"Content-Type":"text/html"},body:"<html></html>"})).status,403);
+  assert.equal((await fetch(base+"/admin/api/document-layout/render",{method:"POST",headers:{"Content-Type":"text/html","X-Admin-Token":"test"},body:"<html><div class=\"koffer-paper\"></div></html>"})).status,200);
+  assert.equal(renders.at(-1).options.inferRecipientJobId,true);
   const published=await(await fetch(base+"/api/document-layout")).json();assert.equal(published.layout.revision,saved.revision);
 });
 

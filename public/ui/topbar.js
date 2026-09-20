@@ -123,6 +123,62 @@
     document.head.appendChild(script);
   }
 
+  function loadOfferBuilder() {
+    const src = "/public/ui/baustellen-offer-builder.js?v=20260920-editor-context-1";
+    const dataKey = "data-krista-angebot";
+    const requestedPath = new URL(src, window.location.href).pathname;
+    const ready = () => window.__kristaOfferBuilderInstalled === true;
+    const loader = window.__kristaOfferBuilderLoader || (window.__kristaOfferBuilderLoader = { retryUsed:false, retryTimer:0 });
+    const candidates = () => [...document.scripts].filter((script) => {
+      try { return new URL(script.src, window.location.href).pathname === requestedPath; }
+      catch { return false; }
+    });
+    const known = candidates();
+    if (ready()) {
+      known[0]?.setAttribute(dataKey, "1");
+      return;
+    }
+    const loading = known.find((script) => script.dataset.kristaLoadState === "loading");
+    if (loading) {
+      loading.setAttribute(dataKey, "1");
+      return;
+    }
+    if (loader.retryTimer) return;
+    for (const script of known) script.remove();
+    const append = () => {
+      if (ready()) return;
+      const script = document.createElement("script");
+      script.src = src;
+      script.setAttribute(dataKey, "1");
+      script.dataset.kristaLoadState = "loading";
+      script.async = false;
+      let settled = false;
+      const failed = () => {
+        if (settled) return;
+        settled = true;
+        script.dataset.kristaLoadState = "error";
+        script.remove();
+        if (!loader.retryUsed) {
+          loader.retryUsed = true;
+          loader.retryTimer = setTimeout(() => {
+            loader.retryTimer = 0;
+            if (!ready() && !candidates().some(candidate => candidate.dataset.kristaLoadState === "loading")) append();
+          }, 0);
+        }
+      };
+      script.addEventListener("load", () => {
+        if (settled) return;
+        if (!ready()) return failed();
+        settled = true;
+        loader.retryUsed = false;
+        script.dataset.kristaLoadState = "ready";
+      }, { once:true });
+      script.addEventListener("error", failed, { once:true });
+      document.head.appendChild(script);
+    };
+    append();
+  }
+
   function loadKristineEmployeeSort() {
     if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-employee-sort.js", "data-krista-employee-sort");
   }
@@ -181,7 +237,7 @@
     loadScriptOnce("/public/ui/baustellen-calculation-v2.js?v=20260914-position-sum-1", "data-krista-kalkulation-v1");
     loadScriptOnce("/public/ui/baustellen-calculation-grid-v2.js?v=20260913-offer-positions-1", "data-krista-kalkulation-grid-v2");
     loadScriptOnce("/public/ui/document-template.js?v=20260920-net-line", "data-krista-document-template");
-    loadScriptOnce("/public/ui/baustellen-offer-builder.js?v=20260920-recipient-salutation-3", "data-krista-angebot-v16");
+    loadOfferBuilder();
   }
 
   function loadTowerSignals() {
