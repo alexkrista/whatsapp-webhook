@@ -46,7 +46,9 @@ test("Backend bildet aus Firma keine zwei Personen und erhält UID und Ansprechp
 
 test("Angebot und AB nennen bei Firmen die Firma vor optionalen Ansprechpartnern",()=>{
   const source=fs.readFileSync(path.join(__dirname,"../public/ui/baustellen-offer-builder.js"),"utf8"),start=source.indexOf("  function offerRecipientNames("),end=source.indexOf("\n  function offerAddressBlock",start),context={job:{}};vm.createContext(context);vm.runInContext(source.slice(start,end),context);
-  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Firma",customer:"Beispiel GmbH",womanFirstName:"Eva",womanLastName:"Muster"},{})),["Beispiel GmbH","z. H. Frau Eva Muster"]);
-  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Firma",customer:"Beispiel GmbH",womanLastName:"Beispiel GmbH",manLastName:"Beispiel GmbH"},{})),["Beispiel GmbH"]);
+  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Firma",customer:"Beispiel GmbH",womanFirstName:"Eva",womanLastName:"Muster"},{})),["Firma Beispiel GmbH","z. H. Frau Eva Muster"]);
+  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Firma",customer:"Beispiel GmbH",womanLastName:"Beispiel GmbH",manLastName:"Beispiel GmbH"},{})),["Firma Beispiel GmbH"]);
+  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Firma",customer:"Kugelfink"},{})),["Firma Kugelfink"]);
   assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Bauherrschaft",womanFirstName:"Brigitte",womanLastName:"Baldauf",manFirstName:"Brigitte",manLastName:"Baldauf"},{})),["Frau Brigitte Baldauf"]);
+  assert.deepEqual(Array.from(context.offerRecipientNames({ownerRole:"Bauherr",customer:"Max Muster",manFirstName:"Max",manLastName:"Muster"},{})),["Herr Max Muster"]);
 });
