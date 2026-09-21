@@ -152,5 +152,36 @@ def install(ns):
         return ns["revolut_connection"]
     connection = Connection()
     ns["revolut_connection"] = connection
+    app = ns.get("app")
+    allowed = ns.get("MOBILE_ALLOWED_PATHS")
+    if isinstance(allowed, set):
+        allowed.add("/revolut/balances")
+    if app is not None and "brain_revolut_balances" not in app.view_functions:
+        from decimal import Decimal, InvalidOperation
+        from flask import jsonify
+
+        @app.get("/revolut/balances")
+        def brain_revolut_balances():
+            try:
+                accounts = connection.accounts()
+                totals = {}
+                cleaned = []
+                for account in accounts:
+                    currency = str(account.get("currency") or "EUR").upper()
+                    try:
+                        balance = Decimal(str(account.get("balance") or "0"))
+                    except InvalidOperation:
+                        raise ValueError("Revolut Business liefert einen ungültigen Kontostand.") from None
+                    totals[currency] = totals.get(currency, Decimal("0")) + balance
+                    cleaned.append({
+                        "id": str(account.get("id") or ""),
+                        "name": str(account.get("name") or "Revolut Business"),
+                        "currency": currency,
+                        "balance": format(balance, "f"),
+                        "state": str(account.get("state") or ""),
+                    })
+                return jsonify(ok=True, accounts=cleaned, totals={key: format(value, "f") for key, value in totals.items()}, fetchedAt=datetime.now(timezone.utc).isoformat())
+            except Exception as exc:
+                return jsonify(ok=False, error=str(exc)), 503
     print("✅ Revolut Business API: bestehende READ-Verbindung eingebunden · " + datetime.now(timezone.utc).isoformat())
     return connection
