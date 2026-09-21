@@ -2874,6 +2874,11 @@ def incoming_for_address(address_id, text_query="", return_context=False):
             item["snippet"] = ""
         all_result.append(item)
 
+    # Dieselbe Zahlungswahrheit wie Rechnungsbuch und Kreditoren verwenden:
+    # Brain-Korrekturen, aktuelle SEPA-Uebergaben und gebuchte Bankzuordnungen.
+    from brain_incoming_search_status import reconcile_incoming_payment_status
+    all_result = reconcile_incoming_payment_status(all_result, globals())
+
     if search_active:
         documents = [item for item in all_result if item.get("materialMatched")]
         documents.sort(

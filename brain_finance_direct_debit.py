@@ -39,6 +39,17 @@ def _iso_day(value):
         return None
 
 
+def _manual_open_ww_ids(overrides):
+    ids = set()
+    for (source, source_id), status in (overrides or {}).items():
+        if source != "WinWorker" or norm_status(status) != "open":
+            continue
+        match = re.fullmatch(r"ww:(\d+)", str(source_id or ""))
+        if match:
+            ids.add(int(match.group(1)))
+    return sorted(ids)
+
+
 def _pick_columns(cursor):
     try:
         rows = cursor.execute("""
@@ -151,6 +162,8 @@ def install(ns):
         cutoff = direct_debit_cutoff()
         meta = store.meta()
         legacy = store.legacy()
+        overrides = store.status_overrides()
+        forced_open_ids = _manual_open_ww_ids(overrides)
         con = sql_connection("WinWorker_Projekte_Standard")
         try:
             cur = con.cursor()
@@ -158,6 +171,11 @@ def install(ns):
             due_sql = f", e.{_identifier(due_col)} AS ddDueDate" if due_col else ", NULL AS ddDueDate"
             payment_sql = f", e.{_identifier(payment_col)} AS ddPaymentHint" if payment_col else ", NULL AS ddPaymentHint"
             due_expr = f"COALESCE(e.{_identifier(due_col)},e.dzBelegdatum)" if due_col else "e.dzBelegdatum"
+            forced_clause = ""
+            params = [cutoff.isoformat()]
+            if forced_open_ids:
+                forced_clause = " OR e.cID IN (" + ",".join("?" for _ in forced_open_ids) + ")"
+                params.extend(forced_open_ids)
             sql = """
                 SELECT e.cID,e.sBelegnummer,e.dzBelegdatum,e.dblBruttoBetrag,
                        e.lVonAdrIndex,e.sZahlungsStatus,dm.sDocID,
@@ -166,10 +184,10 @@ def install(ns):
                 FROM dbo.Eingangsbelege e
                 LEFT JOIN dbo.DokumentenManagement dm ON dm.gID=e.gDMID
                 LEFT JOIN WinWorker_Adressen_Standard.dbo.Kunden k ON k.StammIndex=e.lVonAdrIndex
-                WHERE """ + due_expr + """ >= ?
+                WHERE (""" + due_expr + """ >= ?""" + forced_clause + ")" + """
                 ORDER BY """ + due_expr + """,e.cID
             """
-            rows = cur.execute(sql, cutoff.isoformat()).fetchall()
+            rows = cur.execute(sql, *params).fetchall()
         finally:
             con.close()
 
@@ -207,7 +225,7 @@ def install(ns):
             due_date = iso_date(due_raw) if due_raw is not None and callable(iso_date) else str(due_raw or "")[:10]
             due_date = due_date or invoice_date or ""
             expected = _iso_day(due_date)
-            if expected is not None and expected < cutoff:
+            if expected is not None and expected < cutoff and int(r.cID) not in forced_open_ids:
                 continue
 
             doc = str(getattr(r, "sDocID", "") or "").strip()
