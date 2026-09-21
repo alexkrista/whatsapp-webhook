@@ -290,8 +290,47 @@ def install(ns):
             rows.append(row)
         return rows
 
+    def manually_reopened_direct_debits():
+        """Keep an explicitly reopened WW debit visible regardless of the cutover scan.
+
+        The invoice book is the canonical view here: it already applies the manual
+        status decision and the bank assignment overlay.  This small supplement is
+        deliberately independent from the historic WW debit query so that an old
+        WW row cannot disappear merely because it lies outside that query's window.
+        """
+        book = ns.get("invoice_book")
+        one = getattr(book, "one", None)
+        if not callable(one):
+            return []
+        rows = []
+        for cid in _manual_open_ww_ids(store.status_overrides()):
+            sid = f"ww:{cid}"
+            try:
+                row = dict(one("WinWorker", sid) or {})
+            except Exception as exc:
+                print(f"⚠ Wieder geöffneter WW-Einzug {sid} konnte nicht geladen werden:", exc)
+                continue
+            if norm_status(row.get("paymentStatus")) != "open":
+                continue
+            if norm_method(row.get("paymentMethod")) != "direct_debit":
+                continue
+            row["expectedDebitDate"] = row.get("dueDate") or row.get("invoiceDate") or ""
+            row["approvalStatus"] = "not_required"
+            row["workflowStatus"] = row.get("workflowStatus") or "WinWorker"
+            row["source"] = "WinWorker"
+            row["wwStatusRaw"] = row.get("sourcePaymentLabel") or row.get("wwStatusRaw") or ""
+            rows.append(row)
+        return rows
+
     def direct_debits():
-        rows = ww_direct_debits() + kristine_direct_debits()
+        rows = []
+        try:
+            rows.extend(ww_direct_debits())
+        except Exception as exc:
+            # A discovery problem must not hide explicit manual reopen decisions.
+            print("⚠ WW-Einzugsbestand konnte nicht vollständig geladen werden:", exc)
+        rows.extend(manually_reopened_direct_debits())
+        rows.extend(kristine_direct_debits())
         seen = set()
         clean = []
         for row in rows:
