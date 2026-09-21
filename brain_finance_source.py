@@ -12,6 +12,15 @@ def norm_method(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")
     return {"":"unknown","zahlung":"transfer","ueberweisung":"transfer","überweisung":"transfer","sepa":"transfer","bank":"transfer","einzug":"direct_debit","lastschrift":"direct_debit","abbucher":"direct_debit","revolut_business":"revolut_business","revolut_business_api":"revolut_business","business":"revolut_business","kreditkarte":"revolut","karte":"revolut","barzahlung":"cash","bar":"cash","kassa":"cash"}.get(r,r if r in METHODS else "unknown")
 
+def winworker_method(explicit, source_label):
+    """Keep an explicit Brain choice; otherwise recognize WinWorker direct-debit labels."""
+    method=norm_method(explicit)
+    if method!="unknown": return method
+    label=str(source_label or "").strip().casefold()
+    if any(token in label for token in ("lastschrift","einzug","abbucher")):
+        return "direct_debit"
+    return method
+
 def norm_status(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")
     return {"":"open","offen":"open","sepa":"sepa_submitted","sepa_uebergeben":"sepa_submitted","sepa_übergeben":"sepa_submitted","uebergeben":"sepa_submitted","übergeben":"sepa_submitted","bezahlt":"paid","closed":"paid","geschlossen":"paid"}.get(r,r if r in STATUSES else "open")
@@ -134,7 +143,10 @@ class FinanceStore:
         keep=[]; docs=[]
         for r in rows:
             sid=f"ww:{int(r.cID)}"; lg=legacy.get(sid); key=("WinWorker",sid); ex=meta.get(key,{}); source_state=norm_status(pay(r.sZahlungsStatus)); explicit=overrides.get(key)
-            if explicit:effective_state=explicit
+            # Eine echte, neue SEPA-Uebergabe aus WinWorker ist autoritativ.
+            # Eine alte manuelle "offen"-Korrektur darf sie nicht verdecken.
+            if source_state=="sepa_submitted":effective_state="sepa_submitted"
+            elif explicit:effective_state=explicit
             elif source_state!="open":effective_state=source_state
             elif bool(lg and lg.get("status")=="paid"):effective_state="paid"
             else:effective_state=norm_status(ex.get("paymentStatus")) if key in meta else "open"
@@ -149,7 +161,7 @@ class FinanceStore:
             except Exception:pass
         out=[]
         for r,sid,doc,lg,ex,source_state,st,explicit in keep:
-            company=str(r.sFirma or "").strip(); person=" ".join(x for x in [str(r.sVorname or "").strip(),str(r.sName or "").strip()] if x); found=paths.get(doc,{}) if doc else {}; m=norm_method(ex.get("paymentMethod")); dt=iso(r.dzBelegdatum) if callable(iso) else str(r.dzBelegdatum or "")[:10]
+            company=str(r.sFirma or "").strip(); person=" ".join(x for x in [str(r.sVorname or "").strip(),str(r.sName or "").strip()] if x); found=paths.get(doc,{}) if doc else {}; m=winworker_method(ex.get("paymentMethod"),r.sZahlungsStatus); dt=iso(r.dzBelegdatum) if callable(iso) else str(r.dzBelegdatum or "")[:10]
             out.append(dict(id=sid,docId=doc,supplier=company or person or f"WW-Adresse {r.lVonAdrIndex or ''}".strip(),invoiceNumber=str(r.sBelegnummer or "").strip(),invoiceDate=dt or "",dueDate=dt or "",amount=float(r.dblBruttoBetrag or 0),currency="EUR",iban=str(r.sIban or "").strip(),bic=str(r.sSwift or "").strip(),accountHolder=str(r.sBankkontoInhaber or "").strip(),paymentState=st,paymentStatus=st,sourcePaymentStatus=source_state,sourcePaymentLabel=str(r.sZahlungsStatus or "").strip(),paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("WinWorker",sid) if m=="transfer" else "")),workflowStatus="WinWorker",path=str(found.get("pdfPath") or found.get("originalPath") or ""),source="WinWorker",brainOverride=st if explicit and st!=source_state else ""))
         return out
     def kristine(self,include_resolved=False):

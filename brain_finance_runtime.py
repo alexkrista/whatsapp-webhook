@@ -286,7 +286,20 @@ def install(ns):
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/payment-batches")
         def brain_incoming_payment_batches():
-            try:return jsonify(ok=True,batches=store.sepa_batches(request.args.get("limit") or 100))
+            try:
+                batches=store.sepa_batches(request.args.get("limit") or 100)
+                source_items=store.items(True)
+                supplier_overlay=ns.get("bank_supplier_overlay")
+                if callable(supplier_overlay):
+                    source_items=supplier_overlay(source_items,True)
+                states={(str(x.get("source") or ""),str(x.get("id") or "")):norm_status(x.get("paymentStatus")) for x in source_items}
+                waiting=[];archived=[]
+                for batch in batches:
+                    refs=[(str(x.get("source") or ""),str(x.get("id") or "")) for x in batch.get("items") or []]
+                    # Die XML bleibt technisch sofort gesichert. In das sichtbare
+                    # Archiv kommt sie aber erst nach dem CAMT-/Bankabgleich.
+                    (waiting if any(states.get(ref)=="sepa_submitted" for ref in refs) else archived).append(batch)
+                return jsonify(ok=True,batches=archived,pendingBatches=waiting)
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/payment-batches/xml")
         def brain_incoming_payment_batch_archive_xml():
@@ -303,8 +316,9 @@ def install(ns):
                 out,total=requested_live_items(req);download=sepa_payload(out)
                 batch=store.save_sepa_batch(download["filename"],download["xml"],out,total)
                 for y in out:
+                    store.set_status_override(y["source"],y["id"],"sepa_submitted")
                     saved=store.set_meta(y["source"],y["id"],method="transfer",status="sepa_submitted",note=y["remittanceText"]);y.update(saved)
-                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,archiveId=batch["id"],message="SEPA-Datei erstellt und archiviert; bezahlt erst nach Bankabgleich.",**download)
+                return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,archiveId=batch["id"],message="SEPA-Datei technisch gesichert; sichtbar im Archiv erst nach Bankabgleich.",**download)
             except ValueError as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.post("/incoming/payment-batch/xml")

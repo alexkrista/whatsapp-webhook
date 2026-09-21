@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from brain_finance_source import norm_method, norm_status
+from brain_finance_source import norm_method, norm_status, winworker_method
 from brain_finance_source_v2 import FinanceStore
 
 BOOK_LOCK = threading.RLock()
@@ -123,7 +123,7 @@ class InvoiceBook:
             company = str(raw.sFirma or "").strip()
             person = " ".join(x for x in (str(raw.sVorname or "").strip(), str(raw.sName or "").strip()) if x)
             date = iso(raw.dzBelegdatum) if callable(iso) else str(raw.dzBelegdatum or "")[:10]
-            method = norm_method(ex.get("paymentMethod"))
+            method = winworker_method(ex.get("paymentMethod"), raw.sZahlungsStatus)
             out.append({
                 "source": "WinWorker", "id": sid, "docId": str(raw.sDocID or "").strip(),
                 "supplier": company or person or "WinWorker-Lieferant",

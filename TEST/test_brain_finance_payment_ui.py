@@ -9,6 +9,7 @@ class BrainFinancePaymentUiTests(unittest.TestCase):
         html = payments_page()
         self.assertIn("An SEPA übergeben", html)
         self.assertIn("SEPA-Archiv", html)
+        self.assertIn("im Bankumsatz bereits zugeordnet", html)
         self.assertIn("/incoming/payment-batches/xml", html)
         self.assertIn("XML erneut laden", html)
 

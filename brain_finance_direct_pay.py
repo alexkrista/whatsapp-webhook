@@ -206,6 +206,12 @@ class DirectPay:
             if entry.get("state") != "rejected":
                 for item in live:
                     try:
+                        self.store.set_status_override(
+                            item["source"], item["id"], "sepa_submitted"
+                        )
+                    except Exception:
+                        warnings.append("Kreditorenstatus")
+                    try:
                         self.store.set_meta(
                             item["source"],
                             item["id"],
@@ -218,7 +224,7 @@ class DirectPay:
             try:
                 self.store.save_sepa_batch(draft["name"], draft["xml"], live, draft["total"])
             except Exception:
-                warnings.append("SEPA-Archiv")
+                warnings.append("XML-Sicherung")
 
             try:
                 with closing(self.db(payments)) as db:

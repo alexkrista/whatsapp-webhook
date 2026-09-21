@@ -41,6 +41,9 @@ class _Store:
     def set_meta(self, source, ident, **values):
         self.saved.append((source, ident, values))
 
+    def set_status_override(self, source, ident, status):
+        self.saved.append((source, ident, {'override': status}))
+
     def save_sepa_batch(self, *_args):
         raise RuntimeError('Archiv vorübergehend nicht verfügbar')
 
@@ -62,8 +65,9 @@ class DirectPayTests(unittest.TestCase):
                 'day': date.today().isoformat(), 'total': 100.0,
             }
             result = direct.submit('draft', True)
-        self.assertEqual(store.saved[0][2]['status'], 'sepa_submitted')
-        self.assertIn('SEPA-Archiv', result['warning'])
+        self.assertEqual(store.saved[0][2]['override'], 'sepa_submitted')
+        self.assertEqual(store.saved[1][2]['status'], 'sepa_submitted')
+        self.assertIn('XML-Sicherung', result['warning'])
 
 
 if __name__ == '__main__':
