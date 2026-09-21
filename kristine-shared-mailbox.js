@@ -3,6 +3,7 @@
 const fsp = require("fs/promises");
 const path = require("path");
 const { importInboxBuffer } = require("./kristine-inbox");
+const { importInvoiceAttachmentsFromInbox } = require("./kristine-invoice-intake");
 
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 const DEFAULT_MAILBOX = "kristine@krista.at";
@@ -128,7 +129,7 @@ function installKristineSharedMailbox(app, deps = {}) {
       internetMessageId:String(message.internetMessageId || ""),
       receivedAt:String(message.receivedDateTime || new Date().toISOString()),
     };
-    return importInboxBuffer({
+    const result = await importInboxBuffer({
       dataDir,
       buffer:mime,
       name:messageFilename(message),
@@ -138,6 +139,16 @@ function installKristineSharedMailbox(app, deps = {}) {
       mail,
       attachments,
     });
+    const sentToInvoiceMailbox = mailbox.startsWith("rechnung@") || (mail.to || []).some(recipient =>
+      String(recipient?.email || "").trim().toLowerCase() === "rechnung@krista.at"
+    );
+    const recognizedInvoice = result.item?.analysis?.recommended === "invoice";
+    if (sentToInvoiceMailbox || recognizedInvoice) {
+      const queued = await importInvoiceAttachmentsFromInbox({ dataDir, item:result.item });
+      result.invoiceQueued = queued.length;
+      result.invoiceDuplicates = queued.filter(entry => entry.duplicate).length;
+    }
+    return result;
   }
 
   async function performSync() {

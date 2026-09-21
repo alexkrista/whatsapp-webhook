@@ -19,6 +19,22 @@ def _now():
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _effective_ww_status(source_status, meta_status, explicit_status="", legacy_paid=False):
+    """Use exactly the same status precedence as the operative creditor list."""
+    source_status = norm_status(source_status)
+    meta_status = norm_status(meta_status)
+    explicit_status = norm_status(explicit_status) if explicit_status else ""
+    if meta_status == "sepa_submitted":
+        return "sepa_submitted"
+    if explicit_status:
+        return explicit_status
+    if source_status != "open":
+        return source_status
+    if legacy_paid:
+        return "paid"
+    return meta_status
+
+
 class InvoiceBook:
     def __init__(self, ns):
         self.ns = ns
@@ -112,14 +128,13 @@ class InvoiceBook:
             key = ("WinWorker", sid)
             ex = meta.get(key, {})
             source_status = norm_status(payment_state(raw.sZahlungsStatus) if callable(payment_state) else raw.sZahlungsStatus)
-            if key in overrides:
-                status = norm_status(overrides[key])
-            elif source_status != "open":
-                status = source_status
-            elif legacy.get(sid, {}).get("status") == "paid":
-                status = "paid"
-            else:
-                status = norm_status(ex.get("paymentStatus")) if key in meta else source_status
+            meta_status = norm_status(ex.get("paymentStatus")) if key in meta else "open"
+            status = _effective_ww_status(
+                source_status,
+                meta_status,
+                overrides.get(key, ""),
+                legacy.get(sid, {}).get("status") == "paid",
+            )
             company = str(raw.sFirma or "").strip()
             person = " ".join(x for x in (str(raw.sVorname or "").strip(), str(raw.sName or "").strip()) if x)
             date = iso(raw.dzBelegdatum) if callable(iso) else str(raw.dzBelegdatum or "")[:10]
@@ -190,6 +205,33 @@ class InvoiceBook:
             })
         return out
 
+    def _with_bank_status(self, rows):
+        """Overlay booked bank payments without changing the historic invoice amount."""
+        overlay = self.ns.get("bank_supplier_overlay")
+        if not callable(overlay) or not rows:
+            return rows
+        originals = {
+            (str(row.get("source") or ""), str(row.get("id") or "")): float(row.get("amount") or 0)
+            for row in rows
+        }
+        resolved = overlay([dict(row) for row in rows], True)
+        resolved_by_key = {
+            (str(row.get("source") or ""), str(row.get("id") or "")): row
+            for row in resolved
+        }
+        for row in rows:
+            key = (str(row.get("source") or ""), str(row.get("id") or ""))
+            hit = resolved_by_key.get(key)
+            if not hit:
+                continue
+            row["paymentStatus"] = norm_status(hit.get("paymentStatus"))
+            row["paymentState"] = norm_status(hit.get("paymentState") or hit.get("paymentStatus"))
+            if "bankPaid" in hit:
+                row["bankPaid"] = hit.get("bankPaid")
+                row["openAmount"] = float(hit.get("amount") or 0)
+            row["amount"] = originals[key]
+        return rows
+
     def ensure_numbers(self):
         with BOOK_LOCK:
             con = self.db()
@@ -231,6 +273,7 @@ class InvoiceBook:
         rows = self._ww(query, year) + self._local(query, year)
         local_docs = {x["docId"] for x in rows if x["source"] == "KRISTINE" and x.get("docId")}
         rows = [x for x in rows if x["source"] == "KRISTINE" or not x.get("docId") or x["docId"] not in local_docs]
+        rows = self._with_bank_status(rows)
         rows.sort(key=lambda x: (str(x.get("invoiceDate") or ""), str(x.get("supplier") or "").lower()), reverse=True)
         return self.add_numbers(rows[:10000])
 
@@ -306,7 +349,7 @@ class InvoiceBook:
             raise ValueError("Ungültige Rechnung.")
         if not rows:
             raise ValueError("Rechnung wurde nicht gefunden.")
-        return rows[0]
+        return self._with_bank_status(rows)[0]
 
     def history(self, source, source_id):
         con = self.db()

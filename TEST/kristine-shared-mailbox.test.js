@@ -5,12 +5,13 @@ const fsp = require("fs/promises");
 const os = require("os");
 const path = require("path");
 const { registerKristineInbox } = require("../kristine-inbox");
+const { registerKristineInvoiceIntake, backfillInvoiceInbox } = require("../kristine-invoice-intake");
 const { installKristineSharedMailbox } = require("../kristine-shared-mailbox");
 
 function harness() {
   const routes = new Map();
   const app = {};
-  for (const method of ["get", "post"]) app[method] = (route, handler) => routes.set(`${method.toUpperCase()} ${route}`, handler);
+  for (const method of ["get", "post", "delete"]) app[method] = (route, handler) => routes.set(`${method.toUpperCase()} ${route}`, handler);
   return { app, routes };
 }
 
@@ -36,6 +37,7 @@ async function call(routes, method, route, body = {}) {
   const originalFetch = global.fetch;
   const { app, routes } = harness();
   registerKristineInbox(app, { dataDir:temporary, requireAdmin:() => true });
+  registerKristineInvoiceIntake(app, { dataDir:temporary, requireAdmin:() => true });
   const deltaLink = "https://graph.microsoft.com/v1.0/delta-next";
   let firstDelta = true;
   global.fetch = async (url) => {
@@ -80,6 +82,15 @@ async function call(routes, method, route, body = {}) {
     assert.equal(item.mail.attachments[0].name, "Rechnung-4711.pdf");
     const attachment = path.join(temporary, "_kristine", "inbox", "files", item.id, item.mail.attachments[0].storedFilename);
     assert.equal(await fsp.readFile(attachment, "utf8"), "PDF!");
+    const invoiceIntake = await call(routes, "GET", "/kristine/api/invoice-intake");
+    assert.equal(invoiceIntake.body.items.length, 1, "Invoice attachment must reach Brain invoice intake");
+    assert.equal(invoiceIntake.body.items[0].name, "Rechnung-4711.pdf");
+    assert.equal(invoiceIntake.body.items[0].source, "E-Mail · rechnung@krista.at");
+    const backfilled = await backfillInvoiceInbox(temporary);
+    assert.equal(backfilled.linked, 1);
+    const linkedInbox = await call(routes, "GET", "/kristine/api/inbox");
+    assert.equal(linkedInbox.body.items[0].status, "linked");
+    assert.equal(linkedInbox.body.items[0].links.invoiceIntakeIds.length, 1);
 
     const second = await call(routes, "POST", "/kristine/api/mailbox/sync");
     assert.equal(second.body.imported, 0);
@@ -94,7 +105,7 @@ async function call(routes, method, route, body = {}) {
     assert.equal(duplicate.item.status,"dismissed","Re-import must retain dismissal");
     const hidden=response();await routes.get("GET /kristine/api/inbox")({query:{dismissed:"true"}},hidden);assert.equal(hidden.body.items.length,1);
     assert.equal(await fsp.readFile(attachment,"utf8"),"PDF!");
-    await dismiss({params:{id:item.id},body:{restore:true}},response());assert.equal((await call(routes,"GET","/kristine/api/inbox")).body.items[0].status,"analyzed");
+    await dismiss({params:{id:item.id},body:{restore:true}},response());assert.equal((await call(routes,"GET","/kristine/api/inbox")).body.items[0].status,"linked");
     console.log("OK: shared mailbox mail and attachment arrive once in KRISTINE Eingang");
   } finally {
     mailbox.stop();

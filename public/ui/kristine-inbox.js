@@ -151,7 +151,7 @@
     routing=true;setRouteButtonsDisabled(true);setRouteStatus(`${routeNames[r]} wird übernommen …`);
     try{
       await persistRoute(item,r,assignee);
-      setRouteStatus(`${routeNames[r]} ist vorgemerkt. Die Fachfunktion wird als nächster Schritt angeschlossen.`);
+      setRouteStatus(r==="invoice"?"Rechnung ist im Eingang der Rechnungskontrolle.":`${routeNames[r]} ist vorgemerkt.`);
     }catch(error){
       console.error("KRISTINE Eingang Routing",error);
       setRouteStatus(`Konnte nicht übernommen werden: ${error.message||error}`,"error");

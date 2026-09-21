@@ -6,6 +6,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const { parseMsg, getMsgAttachment, available: msgReaderAvailable } = require("./kristine-msg-reader");
 const { enrichVoicemailItem } = require("./kristine-voicemail-preload");
+const { importInvoiceAttachmentsFromInbox } = require("./kristine-invoice-intake");
 
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const OWN_DOMAINS = ["krista.at"];
@@ -465,9 +466,18 @@ function registerKristineInbox(app, { dataDir, requireAdmin }) {
     const allowed = ["task", "invoice", "filing", "appointment", "order"];
     const route = String(req.body?.route || "");
     if (!allowed.includes(route)) return res.status(400).json({ ok: false, error: "Unbekanntes Ziel" });
-    item.route = route; item.status = route === "task" ? "routed" : "queued"; item.updatedAt = new Date().toISOString();
+    let invoiceItems = [];
+    if (route === "invoice") {
+      invoiceItems = await importInvoiceAttachmentsFromInbox({ dataDir, item });
+      if (!invoiceItems.length) return res.status(400).json({ ok:false, error:"Keine PDF- oder Bildanlage für die Rechnungskontrolle gefunden." });
+      item.links = item.links || { taskIds:[], jobIds:[] };
+      item.links.invoiceIntakeIds = unique(invoiceItems.map(entry => entry.item?.id));
+    }
+    item.route = route;
+    item.status = route === "task" ? "routed" : (route === "invoice" ? "linked" : "queued");
+    item.updatedAt = new Date().toISOString();
     await writeItem(item);
-    res.json({ ok: true, item });
+    res.json({ ok:true, item, invoiceItems:invoiceItems.map(entry => entry.item) });
   });
 
   app.post("/kristine/api/inbox/:id/link-task", async (req, res) => {

@@ -141,7 +141,7 @@ async function api(url,options={}){
       return false;
     }
     routing=true;disableRoutes(true);routeStatus(`${ROUTES[route]} wird übernommen …`);
-    try{await persistRoute(item,route,assignee);routeStatus(`${ROUTES[route]} ist vorgemerkt. Die Fachfunktion wird als nächster Schritt angeschlossen.`)}catch(e){routeStatus(`Konnte nicht übernommen werden: ${e.message||e}`,true)}finally{routing=false;disableRoutes(false)}
+    try{await persistRoute(item,route,assignee);routeStatus(route==="invoice"?"Rechnung ist im Eingang der Rechnungskontrolle.":`${ROUTES[route]} ist vorgemerkt.`)}catch(e){routeStatus(`Konnte nicht übernommen werden: ${e.message||e}`,true)}finally{routing=false;disableRoutes(false)}
     return false;
   }
 
