@@ -33,5 +33,8 @@ const {registerPaintMixHistory}=require('../paint-mix-history');
  await ingest([{...row,id:'matt-alias',productName:'Intelligent Matt Emulsion',baseCode:'Transparent',size:'2.5 L',ean:'5050173175338'}]);
  const aliasResolved=await resolve('matt-alias');assert.equal(aliasResolved.statusCode,200);assert.equal(aliasResolved.body.article.id,'IM');assert.equal(aliasResolved.body.article.stock,2);
  await ingest([{...row,id:'matt-wrong-size',productName:'Intelligent Matt Emulsion',baseCode:'Transparent',size:'5 L',ean:'5050173175338'}]);assert.equal((await resolve('matt-wrong-size')).statusCode,409);
+ const absoluteArticles=JSON.parse(await fs.readFile(path.join(root,'articles.json'),'utf8'));absoluteArticles.push({id:'AM',product:'Absolute Matt',baseCode:'M',baseName:'Medium',size:'2.5 L',stock:4,stockCode:'020602MMMMM'});await fs.writeFile(path.join(root,'articles.json'),JSON.stringify(absoluteArticles));
+ await ingest([{...row,id:'absolute-matt-alias',productName:'Absolute Matt Emulsion',baseName:'Medium',baseCode:'M',size:'2,5 L'}]);
+ const absoluteAliasResolved=await resolve('absolute-matt-alias');assert.equal(absoluteAliasResolved.statusCode,200);assert.equal(absoluteAliasResolved.body.article.id,'AM');assert.equal(absoluteAliasResolved.body.article.stock,3);
  console.log('mix history duplicate, concurrent, recovery and exact-size tests passed');
 })().catch(e=>{console.error(e);process.exitCode=1});

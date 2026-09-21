@@ -283,7 +283,12 @@ function registerPaintMixHistory(app, options = {}) {
   }
 
   async function findArticleForMix(row, articles) {
-    const productAlias = value => /^(intelligent matt)( emulsion)?$/i.test(String(value || "").trim()) ? "Intelligent Matt" : value;
+    const productAlias = value => {
+      const product = String(value || "").trim();
+      if (/^intelligent matt( emulsion)?$/i.test(product)) return "Intelligent Matt";
+      if (/^absolute matt( emulsion)?$/i.test(product)) return "Absolute Matt";
+      return product;
+    };
     const mixIdentity = article => identityKey({...article,product:productAlias(article.product)});
     const wanted = mixIdentity({ product: row.productName, baseCode: row.baseCode || row.baseName, baseName: row.baseName, size: row.size });
     let candidates = (Array.isArray(articles) ? articles : []).filter(article => article && article.active !== false && mixIdentity(article) === wanted);
