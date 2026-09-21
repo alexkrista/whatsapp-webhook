@@ -160,14 +160,18 @@ def install(ns):
             if meta:out[(meta["source"],meta["id"])]=meta
         return out
 
-    def apply_approval(item,index):
-        row=dict(item);amount=max(0.0,float(row.get("amount") or 0));fees=max(0.0,float(row.get("feesAmount") or 0))
+    def apply_approval(item,index,pending=None):
+        row=dict(item);amount=max(0.0,float(row.get("amount") or 0));fees=max(0.0,float(row.get("feesAmount") or 0));key=(str(row.get("source") or ""),str(row.get("id") or ""));pending_amount=max(0.0,float((pending or {}).get(key) or 0))
         if str(row.get("source") or "")!="KRISTINE":
-            row.update(approvalStatus="not_required",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=amount,paymentAmount=round(amount+fees,2),approvalMode="")
+            open_before=round(amount+fees,2);available=max(0.0,round(open_before-pending_amount,2))
+            row.update(approvalStatus="not_required",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=amount,paymentAmount=available,availablePaymentAmount=available,pendingPaymentAmount=round(pending_amount,2),openBeforePending=open_before,approvalMode="")
+            if norm_status(row.get("paymentStatus"))!="paid":
+                status="sepa_submitted" if pending_amount>0.004 and available<=0.004 else "open" if pending_amount>0.004 else norm_status(row.get("paymentStatus"))
+                row.update(paymentStatus=status,paymentState=status)
             return row
         meta=index.get(("KRISTINE",str(row.get("id") or "")))
         if not meta:
-            row.update(approvalStatus="pending",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=0.0,paymentAmount=0.0,approvalMode="")
+            row.update(approvalStatus="pending",approvalTaskId="",approvalReason="",approvalDeduction=0.0,approvedAmount=0.0,paymentAmount=0.0,availablePaymentAmount=0.0,pendingPaymentAmount=round(pending_amount,2),openBeforePending=0.0,approvalMode="")
             return row
         decision=str(meta.get("decision") or "pending").lower(); deduction=max(0.0,float(meta.get("deduction") or 0)); approved=float(meta.get("approved") or 0)
         if decision=="approved":approved=amount;deduction=0.0
@@ -176,8 +180,11 @@ def install(ns):
             approved=min(amount,max(0.0,approved));deduction=max(0.0,amount-approved)
         elif decision=="blocked":approved=0.0
         else:decision="pending";approved=0.0;deduction=0.0
-        payment=approved+fees if decision in FINAL_APPROVALS else 0.0
-        row.update(approvalStatus=decision,approvalTaskId=meta.get("taskId") or "",approvalReason=str(meta.get("reason") or ""),approvalDeduction=round(deduction,2),approvedAmount=round(approved,2),paymentAmount=round(payment,2),approvalMode=str(meta.get("mode") or ""))
+        payment=approved+fees if decision in FINAL_APPROVALS else 0.0;available=max(0.0,round(payment-pending_amount,2))
+        row.update(approvalStatus=decision,approvalTaskId=meta.get("taskId") or "",approvalReason=str(meta.get("reason") or ""),approvalDeduction=round(deduction,2),approvedAmount=round(approved,2),paymentAmount=available,availablePaymentAmount=available,pendingPaymentAmount=round(pending_amount,2),openBeforePending=round(payment,2),approvalMode=str(meta.get("mode") or ""))
+        if norm_status(row.get("paymentStatus"))!="paid":
+            status="sepa_submitted" if pending_amount>0.004 and available<=0.004 else "open" if pending_amount>0.004 else norm_status(row.get("paymentStatus"))
+            row.update(paymentStatus=status,paymentState=status)
         return row
 
     def remittance_for(item):
@@ -187,6 +194,8 @@ def install(ns):
             deduction=float(item.get("approvalDeduction") or 0); reason=" ".join(str(item.get("approvalReason") or "").split())
             base+=f" - Abzug {deduction:.2f} EUR"
             if reason:base+=f": {reason}"
+        if item.get("partialPayment"):
+            base+=f" - Teilzahlung {float(item.get('paymentAmount') or 0):.2f} EUR"
         fees=max(0.0,float(item.get("feesAmount") or 0))
         if fees:base+=f" + Mahnspesen {fees:.2f} EUR"
         return base[:140]
@@ -200,7 +209,7 @@ def install(ns):
 
     def requested_live_items(req, allow_submitted=False):
         if not isinstance(req,list) or not req:raise ValueError("Keine Rechnungen ausgewählt.")
-        _boot,tasks=finance_tasks();idx=approval_index(tasks);live={(x["source"],x["id"]):apply_approval(x,idx) for x in store.items(False)};out=[];total=0.0
+        _boot,tasks=finance_tasks();idx=approval_index(tasks);pending=store.pending_supplier_totals();live={(x["source"],x["id"]):apply_approval(x,idx,pending) for x in store.items(False)};out=[];total=0.0
         for r in req:
             key=(str((r or {}).get("source") or ""),str((r or {}).get("id") or ""));x=live.get(key)
             if not x:raise ValueError(f"Rechnung nicht mehr offen: {key[1]}")
@@ -217,7 +226,7 @@ def install(ns):
             pay=round(pay,2)
             if not math.isfinite(pay) or pay<=0:raise ValueError(f"Freigabebetrag ist 0,00 EUR: {x.get('supplier') or key[1]}")
             if pay>round(available,2)+0.004:raise ValueError(f"Zahlbetrag ist höher als der offene Betrag: {x.get('supplier') or key[1]}")
-            y=dict(x);y["paymentAmount"]=round(pay,2);y["remittanceText"]=remittance_for(x);out.append(y);total+=pay
+            y=dict(x);y["availablePaymentAmount"]=round(available,2);y["paymentAmount"]=round(pay,2);y["partialPayment"]=bool(pay<round(available,2)-0.004);y["remittanceText"]=remittance_for(y);out.append(y);total+=pay
         return out,round(total,2)
 
     if "brain_incoming_open_items" not in app.view_functions:
@@ -279,10 +288,10 @@ def install(ns):
                 supplier_overlay=ns.get("bank_supplier_overlay")
                 if callable(supplier_overlay):
                     source_items=supplier_overlay(source_items,False)
-                idx=approval_index(tasks);all_items=[apply_approval(x,idx) for x in source_items]
+                idx=approval_index(tasks);pending=store.pending_supplier_totals();all_items=[apply_approval(x,idx,pending) for x in source_items]
                 transfer_all=[x for x in all_items if norm_method(x.get("paymentMethod"))=="transfer" and norm_status(x.get("paymentStatus"))!="paid"]
                 submitted=[x for x in transfer_all if norm_status(x.get("paymentStatus"))=="sepa_submitted"]
-                transfer=[x for x in transfer_all if norm_status(x.get("paymentStatus"))!="sepa_submitted"]
+                transfer=[x for x in transfer_all if norm_status(x.get("paymentStatus"))!="sepa_submitted" and float(x.get("paymentAmount") or 0)>0.004]
                 unknown=[x for x in all_items if norm_method(x.get("paymentMethod"))=="unknown" and norm_status(x.get("paymentStatus"))!="paid"]
                 local=[x for x in all_items if str(x.get("source") or "")=="KRISTINE" and norm_status(x.get("paymentStatus"))!="paid"]
                 pending=[x for x in local if x.get("approvalStatus")=="pending"]; blocked=[x for x in local if x.get("approvalStatus")=="blocked"]; approved=[x for x in local if x.get("approvalStatus") in FINAL_APPROVALS]
@@ -321,8 +330,10 @@ def install(ns):
                 out,total=requested_live_items(req);download=sepa_payload(out)
                 batch=store.save_sepa_batch(download["filename"],download["xml"],out,total)
                 for y in out:
-                    store.set_status_override(y["source"],y["id"],"sepa_submitted")
-                    saved=store.set_meta(y["source"],y["id"],method="transfer",status="sepa_submitted",note=y["remittanceText"]);y.update(saved)
+                    store.record_pending_supplier_payment(y["source"],y["id"],f"archive:{batch['id']}",y["paymentAmount"],y.get("currency") or "EUR")
+                    status="open" if y.get("partialPayment") else "sepa_submitted"
+                    store.set_status_override(y["source"],y["id"],status)
+                    saved=store.set_meta(y["source"],y["id"],method="transfer",status=status,note=y["remittanceText"]);y.update(saved)
                 return jsonify(ok=True,status="sepa_submitted",count=len(out),total=total,items=out,archiveId=batch["id"],message="SEPA-Datei technisch gesichert; sichtbar im Archiv erst nach Bankabgleich.",**download)
             except ValueError as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500

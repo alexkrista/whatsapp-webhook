@@ -297,6 +297,17 @@ class Assignments:
                              'KONFIPAY',rid+':'+x['target'],now()))
                 self.outgoing._audit(c,'bank_assignment',rid,'assign',{'lines':clean,'frequency':frequency,'scheduleDates':schedule})
                 c.commit()
+            # A booked supplier payment consumes previously submitted partial
+            # payments.  The bank overlay below remains the source for the
+            # confirmed paid total and therefore for the remaining OP.
+            try:
+                from brain_finance_source_v2 import FinanceStore
+                finance=FinanceStore(self.ns)
+                for line in clean:
+                    if line['category']=='invoice' and line['source'] in {'WinWorker','KRISTINE'}:
+                        finance.settle_pending_supplier_payment(line['source'],line['target'],float(amount(line['paid'])))
+            except Exception as exc:
+                self.ns['app'].logger.warning('Teilzahlungsstand konnte nach Bankzuordnung nicht bestätigt werden: %s',exc)
             self.sync_tasks(rid)
             return self.detail(rid)
 

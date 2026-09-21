@@ -39,6 +39,8 @@ class FinanceStore:
         c.execute("CREATE TABLE IF NOT EXISTS brain_payment_meta(source TEXT NOT NULL,source_id TEXT NOT NULL,payment_method TEXT NOT NULL DEFAULT 'unknown',payment_status TEXT NOT NULL DEFAULT 'open',payment_id TEXT NOT NULL DEFAULT '',note TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
         c.execute("CREATE TABLE IF NOT EXISTS brain_invoice_status_overrides(source TEXT NOT NULL,source_id TEXT NOT NULL,status TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
         c.execute("CREATE TABLE IF NOT EXISTS brain_creditor_details(source TEXT NOT NULL,source_id TEXT NOT NULL,dunning_level INTEGER NOT NULL DEFAULT 0,fees_amount REAL NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',updated_by TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,PRIMARY KEY(source,source_id))")
+        c.execute("CREATE TABLE IF NOT EXISTS brain_supplier_pending_payments(id INTEGER PRIMARY KEY AUTOINCREMENT,source TEXT NOT NULL,source_id TEXT NOT NULL,batch_ref TEXT NOT NULL,amount REAL NOT NULL,remaining REAL NOT NULL,currency TEXT NOT NULL DEFAULT 'EUR',status TEXT NOT NULL DEFAULT 'submitted',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(source,source_id,batch_ref))")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_brain_supplier_pending ON brain_supplier_pending_payments(source,source_id,status)")
         c.execute("CREATE TABLE IF NOT EXISTS brain_sepa_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT NOT NULL,filename TEXT NOT NULL,transaction_count INTEGER NOT NULL,total_amount REAL NOT NULL,currency TEXT NOT NULL DEFAULT 'EUR',summary TEXT NOT NULL DEFAULT '',items_json TEXT NOT NULL DEFAULT '[]',xml_text TEXT NOT NULL)")
         c.commit(); return c
     def creditor_details(self):
@@ -90,6 +92,35 @@ class FinanceStore:
             if m!="transfer" and s=="sepa_submitted": s="open"
             c.execute("INSERT INTO brain_payment_meta(source,source_id,payment_method,payment_status,payment_id,note,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET payment_method=excluded.payment_method,payment_status=excluded.payment_status,payment_id=excluded.payment_id,note=excluded.note,updated_at=excluded.updated_at",(source,source_id,m,s,pid,n,datetime.now().isoformat(timespec="seconds")))
             c.commit(); return {"paymentMethod":m,"paymentStatus":s,"paymentId":pid,"paymentNote":n}
+        finally:c.close()
+    def pending_supplier_totals(self):
+        c=self.con()
+        try:
+            rows=c.execute("SELECT source,source_id,SUM(remaining) AS amount FROM brain_supplier_pending_payments WHERE status='submitted' AND remaining>0.004 GROUP BY source,source_id").fetchall()
+            return {(str(r["source"]),str(r["source_id"])):round(float(r["amount"] or 0),2) for r in rows}
+        finally:c.close()
+    def record_pending_supplier_payment(self,source,source_id,batch_ref,amount,currency="EUR"):
+        source=str(source or "").strip();source_id=str(source_id or "").strip();batch_ref=str(batch_ref or "").strip()
+        if source not in {"WinWorker","KRISTINE"} or not source_id or not batch_ref:raise ValueError("Ungültige Teilzahlung.")
+        value=round(float(amount or 0),2)
+        if value<=0:raise ValueError("Teilzahlung muss größer als 0,00 EUR sein.")
+        now=datetime.now().isoformat(timespec="seconds");c=self.con()
+        try:
+            c.execute("INSERT INTO brain_supplier_pending_payments(source,source_id,batch_ref,amount,remaining,currency,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'submitted',?,?) ON CONFLICT(source,source_id,batch_ref) DO NOTHING",(source,source_id,batch_ref,value,value,str(currency or "EUR").upper(),now,now));c.commit()
+        finally:c.close()
+    def settle_pending_supplier_payment(self,source,source_id,amount):
+        source=str(source or "").strip();source_id=str(source_id or "").strip();rest=round(float(amount or 0),2)
+        if rest<=0:return {"settled":0.0,"unmatched":max(0.0,rest)}
+        c=self.con();settled=0.0;now=datetime.now().isoformat(timespec="seconds")
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            rows=c.execute("SELECT id,remaining FROM brain_supplier_pending_payments WHERE source=? AND source_id=? AND status='submitted' AND remaining>0.004 ORDER BY id",(source,source_id)).fetchall()
+            for row in rows:
+                if rest<=0.004:break
+                current=round(float(row["remaining"] or 0),2);used=min(current,rest);left=round(current-used,2);rest=round(rest-used,2);settled=round(settled+used,2)
+                c.execute("UPDATE brain_supplier_pending_payments SET remaining=?,status=?,updated_at=? WHERE id=?",(left,"confirmed" if left<=0.004 else "submitted",now,int(row["id"])))
+            c.commit();return {"settled":settled,"unmatched":max(0.0,rest)}
+        except Exception:c.rollback();raise
         finally:c.close()
     def save_sepa_batch(self,filename,xml_text,items,total=None,created_at=None):
         created_at=str(created_at or datetime.now().isoformat(timespec="seconds"))

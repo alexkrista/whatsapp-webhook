@@ -207,9 +207,24 @@ class DirectPay:
             # werden kann.
             if entry.get("state") != "rejected":
                 for item in live:
+                    payment = round(float(item.get("paymentAmount") or 0), 2)
+                    available = round(float(item.get("availablePaymentAmount") if item.get("availablePaymentAmount") is not None else payment), 2)
+                    partial = bool(payment < available - 0.004)
+                    pending_saved = True
+                    try:
+                        self.store.record_pending_supplier_payment(
+                            item["source"], item["id"], token, payment,
+                            item.get("currency") or "EUR",
+                        )
+                    except Exception:
+                        pending_saved = False
+                        warnings.append("Teilzahlungsstand")
+                    # If the partial ledger cannot be saved after bank submission,
+                    # block the whole OP instead of risking a duplicate payment.
+                    partial = bool(partial and pending_saved)
                     try:
                         self.store.set_status_override(
-                            item["source"], item["id"], "sepa_submitted"
+                            item["source"], item["id"], "open" if partial else "sepa_submitted"
                         )
                     except Exception:
                         warnings.append("Kreditorenstatus")
@@ -218,7 +233,7 @@ class DirectPay:
                             item["source"],
                             item["id"],
                             method="transfer",
-                            status="sepa_submitted",
+                            status="open" if partial else "sepa_submitted",
                             note=item["remittanceText"],
                         )
                     except Exception:
