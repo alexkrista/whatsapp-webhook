@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import re
+import math
 from datetime import datetime
 from urllib.parse import quote, unquote
 from brain_finance_source import FinanceStore,norm_method,norm_status,METHODS,STATUSES,payment_id
@@ -210,8 +211,12 @@ def install(ns):
             if key[0]=="KRISTINE" and x.get("approvalStatus") not in FINAL_APPROVALS:
                 label="gesperrt" if x.get("approvalStatus")=="blocked" else "noch nicht freigegeben"
                 raise ValueError(f"Rechnung {label}: {x.get('supplier') or key[1]}")
-            pay=float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0)
-            if pay<=0:raise ValueError(f"Freigabebetrag ist 0,00 EUR: {x.get('supplier') or key[1]}")
+            available=float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0)
+            requested=(r or {}).get("paymentAmount")
+            pay=float(requested) if requested not in (None,"") else available
+            pay=round(pay,2)
+            if not math.isfinite(pay) or pay<=0:raise ValueError(f"Freigabebetrag ist 0,00 EUR: {x.get('supplier') or key[1]}")
+            if pay>round(available,2)+0.004:raise ValueError(f"Zahlbetrag ist höher als der offene Betrag: {x.get('supplier') or key[1]}")
             y=dict(x);y["paymentAmount"]=round(pay,2);y["remittanceText"]=remittance_for(x);out.append(y);total+=pay
         return out,round(total,2)
 

@@ -99,11 +99,34 @@ class Book:
                 return dict(added=len(fresh),duplicates=dupes)
             except Exception:c.rollback();raise
             finally:c.close()
+    def manual_incoming(self,area,day,amount,usage,reference=""):
+        usage=str(usage or "").strip()
+        reference=str(reference or "").strip()
+        if len(usage)<3:raise ValueError('Bitte den Grund des Kassaeingangs angeben.')
+        if len(usage)>300 or len(reference)>120:raise ValueError('Text oder Referenz ist zu lang.')
+        try:parsed=datetime.strptime(str(day or ""),'%Y-%m-%d')
+        except ValueError:raise ValueError('Bitte ein gültiges Buchungsdatum angeben.') from None
+        if parsed.date()>date.today():raise ValueError('Kassaeingänge können nicht in der Zukunft gebucht werden.')
+        value=cents(amount)
+        if value<=0:raise ValueError('Der Kassaeingang muss größer als 0,00 EUR sein.')
+        if value>10_000_000:raise ValueError('Der Kassaeingang ist zu hoch; bitte Betrag prüfen.')
+        booked=parsed.replace(hour=datetime.now().hour,minute=datetime.now().minute).isoformat(timespec='minutes')
+        with LOCK:
+            c=self.db(area)
+            try:
+                c.execute('BEGIN IMMEDIATE')
+                minimum=c.execute('SELECT MIN(nr) FROM offisy_cash').fetchone()[0]
+                nr=min(int(minimum or 0),0)-1
+                row=dict(nr=nr,usage=usage,reference=reference,date=booked,direction='Eingang',cents=value,manual=True)
+                c.execute('INSERT INTO offisy_cash VALUES(?,?,?,?,?)',(nr,json.dumps(row,ensure_ascii=False),value,booked,stamp()))
+                c.commit();return row
+            except Exception:c.rollback();raise
+            finally:c.close()
 
 def install(ns):
     if ns.get('cash_book'):return
     app=ns['app'];book=Book(ns);ns['cash_book']=book;csrf=secrets.token_urlsafe(32);drafts={}
-    paths=[PREFIX+'/'+x for x in ('list','preview','import','documents','attach','link','file','script','balance')]
+    paths=[PREFIX+'/'+x for x in ('list','preview','import','manual-incoming','documents','attach','link','file','script','balance')]
     ns['MOBILE_ALLOWED_PATHS'].update(paths)
     @app.before_request
     def cash_book_guard():
@@ -155,6 +178,13 @@ def install(ns):
                 if not d or d['expires']<time.time() or d['area']!=area():raise ValueError('Vorschau abgelaufen. Datei erneut auswählen.')
                 opening=cents(body['opening']) if str(body.get('opening','')).strip() else None
                 result=book.commit(area(),d['rows'],d['name'],d['digest'],opening);drafts.pop(body['token'],None);return result
+        return safe(run)
+    @app.post(PREFIX+'/manual-incoming')
+    def cash_manual_incoming():
+        def run():
+            body=request.get_json(silent=True) or {}
+            row=book.manual_incoming(area(),body.get('date'),body.get('amount'),body.get('usage'),body.get('reference'))
+            return dict(item=row,message='Kassaeingang gebucht. Einnahmenbeleg jetzt anhängen.')
         return safe(run)
     @app.get(PREFIX+'/documents')
     def cash_documents():

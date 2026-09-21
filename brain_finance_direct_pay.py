@@ -69,10 +69,11 @@ class DirectPay:
             items = self.checked(refs)
             with closing(self.db(payments)) as db:
                 for item in items:
-                    if db.execute(
+                    prior = db.execute(
                         "SELECT 1 FROM creditor_claims WHERE source=? AND invoice=?",
                         (item["source"], item["id"]),
-                    ).fetchone():
+                    ).fetchone()
+                    if prior and item.get("paymentStatus") == "sepa_submitted":
                         raise ConnectionError(
                             "Eine ausgewählte Rechnung wurde bereits übergeben. Bitte den Zahlungsstatus prüfen."
                         )
@@ -182,7 +183,8 @@ class DirectPay:
                     db.execute("BEGIN IMMEDIATE")
                     for item in live:
                         db.execute(
-                            "INSERT INTO creditor_claims VALUES (?,?,?,?)",
+                            "INSERT INTO creditor_claims VALUES (?,?,?,?) "
+                            "ON CONFLICT(source,invoice) DO UPDATE SET batch=excluded.batch,state=excluded.state",
                             (item["source"], item["id"], token, "submitting"),
                         )
                     db.commit()

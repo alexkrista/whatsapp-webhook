@@ -36,6 +36,13 @@ class BrainFinancePaymentUiTests(unittest.TestCase):
         self.assertIn("/incoming/pay-direct/preview", html)
         self.assertIn("/incoming/pay-direct/submit", html)
 
+    def test_creditor_partial_payment_amount_can_be_entered(self):
+        html = payments_page()
+        self.assertIn('data-a="${esc(x.source)}|${esc(x.id)}"', html)
+        self.assertIn('Zahlbetrag', html)
+        self.assertIn('paymentAmount:x.paymentAmount', html)
+        self.assertIn("amount>max+.004", html)
+
     def test_direct_debit_period_can_be_switched(self):
         source = (Path(__file__).parents[1] / "brain_finance_direct_debit.py").read_text(encoding="utf-8")
         tools = (Path(__file__).parents[1] / "brain_finance_op_tools.py").read_text(encoding="utf-8")
