@@ -143,13 +143,14 @@ class FinanceStore:
         keep=[]; docs=[]
         for r in rows:
             sid=f"ww:{int(r.cID)}"; lg=legacy.get(sid); key=("WinWorker",sid); ex=meta.get(key,{}); source_state=norm_status(pay(r.sZahlungsStatus)); explicit=overrides.get(key)
-            # Eine echte, neue SEPA-Uebergabe aus WinWorker ist autoritativ.
-            # Eine alte manuelle "offen"-Korrektur darf sie nicht verdecken.
-            if source_state=="sepa_submitted":effective_state="sepa_submitted"
+            meta_state=norm_status(ex.get("paymentStatus")) if key in meta else "open"
+            # Nur eine von KRISTINE protokollierte neue Uebergabe ist wartend.
+            # Historische WinWorker-"SEPA uebergeben"-Zeilen bleiben erledigt.
+            if meta_state=="sepa_submitted":effective_state="sepa_submitted"
             elif explicit:effective_state=explicit
             elif source_state!="open":effective_state=source_state
             elif bool(lg and lg.get("status")=="paid"):effective_state="paid"
-            else:effective_state=norm_status(ex.get("paymentStatus")) if key in meta else "open"
+            else:effective_state=meta_state
             # An SEPA uebergebene Rechnungen bleiben bis zum CAMT-Abgleich sichtbar,
             # werden aber von der Laufzeit-API getrennt von den offenen Rechnungen
             # ausgegeben. Nur wirklich bezahlte Zeilen verschwinden hier.

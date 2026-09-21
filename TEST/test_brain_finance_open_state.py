@@ -64,7 +64,7 @@ class FinanceOpenStateTests(unittest.TestCase):
         )
         store = FinanceStore({
             'sql_connection': lambda _name: _Connection([raw]),
-            '_payment_state': lambda _value: 'sepa_submitted',
+            '_payment_state': lambda _value: 'paid',
             '_iso_date': lambda value: str(value)[:10],
         })
         store.legacy = lambda: {}

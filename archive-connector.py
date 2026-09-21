@@ -1917,7 +1917,8 @@ def _payment_state(status_text):
     """
     Erste feste OP-Regeln:
     - Beglichen/bezahlt = bezahlt
-    - SEPA übergeben = an die Bank übergeben, aber noch nicht bezahlt
+    - Historisches WinWorker-"SEPA übergeben" = bezahlt
+      (neue KRISTINE-Uebergaben werden separat protokolliert)
     - Offen = offen
     - Rest = unbekannt
     """
@@ -1925,18 +1926,11 @@ def _payment_state(status_text):
     if not s:
         return "unknown"
 
-    submitted_terms = (
-        "sepa ubergeben",
-        "sepa übergeben",
-        "an sepa ubergeben",
-        "an sepa übergeben",
-    )
-    if any(t in s for t in submitted_terms):
-        return "sepa_submitted"
-
     paid_terms = (
         "beglichen",
         "bezahlt",
+        "sepa ubergeben",
+        "sepa übergeben",
         "lastschrift beglichen",
     )
     if any(t in s for t in paid_terms):
