@@ -270,7 +270,11 @@ def install(ns):
                     sync_error=str(e)
                     try:_boot,tasks=finance_tasks()
                     except Exception:tasks=[]
-                idx=approval_index(tasks);all_items=[apply_approval(x,idx) for x in store.items(False)]
+                source_items=store.items(False)
+                supplier_overlay=ns.get("bank_supplier_overlay")
+                if callable(supplier_overlay):
+                    source_items=supplier_overlay(source_items,False)
+                idx=approval_index(tasks);all_items=[apply_approval(x,idx) for x in source_items]
                 transfer_all=[x for x in all_items if norm_method(x.get("paymentMethod"))=="transfer" and norm_status(x.get("paymentStatus"))!="paid"]
                 submitted=[x for x in transfer_all if norm_status(x.get("paymentStatus"))=="sepa_submitted"]
                 transfer=[x for x in transfer_all if norm_status(x.get("paymentStatus"))!="sepa_submitted"]

@@ -120,6 +120,18 @@ class AssignmentTests(unittest.TestCase):
         with self.s.db() as c:c.execute('UPDATE bank_assignment_lines SET paid=12000');c.commit()
         self.assertEqual(self.s.supplier_overlay([original]),[])
 
+    def test_supplier_discount_closes_invoice_at_actual_bank_amount(self):
+        original=dict(source='KRISTINE',id='kristine:1',supplier='Lieferant',amount=100,
+                      currency='EUR',paymentStatus='sepa_submitted')
+        with patch('brain_finance_source_v2.FinanceStore.items', return_value=[original]):
+            self.tx.update(amount='98.00',creditDebitIndicator='DBIT',purpose='Rechnung mit Skonto')
+            self.s.observe([self.tx])
+            data=self.s.assign({'rid':'tx-1','lines':[dict(category='invoice',source='KRISTINE',
+                target='kristine:1',amount='98.00',mode='discount',reason='')]})
+        self.assertEqual(data['lines'][0]['decision'],'accepted')
+        self.assertEqual(data['lines'][0]['difference'],'2.00')
+        self.assertEqual(self.s.supplier_overlay([original]),[])
+
     def test_cost_category_and_frequency_are_saved_without_invoice(self):
         data=self.s.assign({'rid':'tx-1','frequency':'quarterly','lines':[
             {'category':'electricity','amount':'100.00','reason':''}

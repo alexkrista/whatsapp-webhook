@@ -199,11 +199,13 @@ class DirectPay:
                 ) from None
 
             entry = (result.get("results") or [{}])[0]
-            warning = None
-            try:
-                self.store.save_sepa_batch(draft["name"], draft["xml"], live, draft["total"])
-                if entry.get("state") != "rejected":
-                    for item in live:
+            warnings = []
+            # Die Bankuebergabe ist bereits erfolgt. Ihr Status darf deshalb
+            # nicht davon abhaengen, ob das zusaetzliche XML-Archiv geschrieben
+            # werden kann.
+            if entry.get("state") != "rejected":
+                for item in live:
+                    try:
                         self.store.set_meta(
                             item["source"],
                             item["id"],
@@ -211,18 +213,28 @@ class DirectPay:
                             status="sepa_submitted",
                             note=item["remittanceText"],
                         )
+                    except Exception:
+                        warnings.append("Kreditorenstatus")
+            try:
+                self.store.save_sepa_batch(draft["name"], draft["xml"], live, draft["total"])
             except Exception:
-                warning = (
-                    "Übergabe protokolliert, aber Kreditorenanzeige konnte nicht aktualisiert werden. "
-                    "Nicht erneut senden."
-                )
+                warnings.append("SEPA-Archiv")
 
-            with closing(self.db(payments)) as db:
-                db.execute(
-                    "UPDATE creditor_claims SET state=? WHERE batch=?",
-                    (entry.get("state", "unknown"), token),
+            try:
+                with closing(self.db(payments)) as db:
+                    db.execute(
+                        "UPDATE creditor_claims SET state=? WHERE batch=?",
+                        (entry.get("state", "unknown"), token),
+                    )
+                    db.commit()
+            except Exception:
+                warnings.append("Übergabeprotokoll")
+            warning = None
+            if warnings:
+                warning = (
+                    "An konfipay übergeben, aber intern noch nicht vollständig aktualisiert "
+                    f"({', '.join(dict.fromkeys(warnings))}). Nicht erneut senden."
                 )
-                db.commit()
             return {**result, "warning": warning}
 
     def cancel(self, token):

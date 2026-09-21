@@ -99,16 +99,21 @@ class Assignments:
 
     def supplier_overlay(self, rows, include_resolved=False):
         with self.db() as c:
-            totals = {(r['source'], r['target']): r['paid'] for r in c.execute(
-                "SELECT source,target,SUM(paid) paid FROM bank_assignment_lines WHERE source IN ('WinWorker','KRISTINE') GROUP BY source,target")}
+            totals = {(r['source'], r['target']): dict(r) for r in c.execute(
+                "SELECT source,target,SUM(paid) bank_paid,"
+                "SUM(paid+CASE WHEN mode IN ('discount','deduction') "
+                "AND decision IN ('accepted','approved') THEN difference ELSE 0 END) settled "
+                "FROM bank_assignment_lines WHERE source IN ('WinWorker','KRISTINE') GROUP BY source,target")}
         result = []
         for item in rows:
             row = dict(item)
-            paid = totals.get((row.get('source'),str(row.get('id'))), 0)
-            if paid:
+            posting = totals.get((row.get('source'),str(row.get('id'))), {})
+            paid = int(posting.get('bank_paid') or 0)
+            settled = int(posting.get('settled') or 0)
+            if settled:
                 original = cents(row['amount'])
-                row.update(invoiceGross=amount(original), bankPaid=amount(paid), amount=float(amount(max(0,original-paid))))
-                if paid >= original:
+                row.update(invoiceGross=amount(original), bankPaid=amount(paid), amount=float(amount(max(0,original-settled))))
+                if settled >= original:
                     row.update(paymentStatus='paid', paymentState='paid')
                 elif row.get('paymentStatus') == 'sepa_submitted':
                     # The posted partial amount releases only the remaining invoice balance.
@@ -122,13 +127,15 @@ class Assignments:
                     open=amount(cents(x['openGross'])), currency=x['currency'], number=x['invoiceNumber'], run=x['runId'])
                     for x in self.outgoing.debtor_open_items()]
         else:
-            from brain_finance_source import FinanceStore
+            from brain_finance_source_v2 import FinanceStore
             source_rows = self.supplier_overlay(FinanceStore(self.ns).items(True), True)
             source_rows = [x for x in source_rows if float(x.get('amount') or 0) > .005 and
                            (x.get('paymentStatus') != 'paid' or x.get('paymentMethod') == 'direct_debit')]
             rows = [dict(source=x['source'], target=str(x['id']),
                     label=x['supplier']+' · '+str(x.get('invoiceNumber') or '')+(' · Einzug aus WW' if x.get('source')=='WinWorker' and x.get('paymentMethod')=='direct_debit' else ''),
-                    open=amount(cents(x['amount'])), currency=x['currency'], number=x.get('invoiceNumber'), e2e=x.get('paymentId'))
+                    open=amount(cents(x['amount'])), currency=x['currency'], number=x.get('invoiceNumber'), e2e=x.get('paymentId'),
+                    skontoEnabled=bool(x.get('skontoEnabled')), skontoPercent=x.get('skontoPercent'),
+                    skontoAmount=x.get('skontoAmount'), skontoDueDate=x.get('skontoDueDate') or '')
                     for x in source_rows]
         purpose = str(tx.get('purpose') or '').casefold()
         for x in rows:
@@ -211,15 +218,19 @@ class Assignments:
                     seen.add((source,target)); difference=cents(item['open'])-paid; label=item['label']
                     if difference<0: raise ValueError('Der zugeordnete Betrag ist größer als der offene Rechnungsbetrag.')
                     if mode not in {'partial','discount','deduction'}: raise ValueError('Bitte die Differenz erläutern.')
-                    if difference and mode!='partial' and not reason: raise ValueError('Bitte Skonto / Abzug begründen.')
-                    if source!='OUTGOING' and difference and mode!='partial':
-                        raise ValueError('Lieferanten-Abzüge bitte zunächst als Teilzahlung erfassen. Der Rest bleibt offen, bis die Lieferantengutschrift vorliegt.')
+                    if difference and mode=='discount' and not reason: reason='Skonto laut Rechnung'
+                    if difference and mode=='deduction' and not reason: raise ValueError('Bitte den Abzug begründen.')
                 else:
                     source=target=''; mode='partial'
                     if cat=='other' and not reason: raise ValueError('Bitte die neue Kostenart eintragen.')
                     if cat=='other': label='Neue Kostenart · '+reason[:120]
+                decision='none'
+                if difference and mode!='partial':
+                    # Bei Lieferanten schliesst Skonto/Abzug die OP unmittelbar;
+                    # bei Kundenrechnungen bleibt die bestehende Gutschrift-Pruefung.
+                    decision='pending' if source=='OUTGOING' else 'accepted'
                 clean.append(dict(category=cat,source=source,target=target,label=label,paid=paid,difference=difference,
-                                  mode=mode,reason=reason,decision='pending' if difference and mode!='partial' else 'none'))
+                                  mode=mode,reason=reason,decision=decision))
             schedule=RENOVATION_DATES if any(x['category']=='renovation_installment' for x in clean) else []
             if schedule:frequency='fixed'
             if sum(x['paid'] for x in clean)!=abs(cents(tx['amount'])):

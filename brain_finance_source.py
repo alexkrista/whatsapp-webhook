@@ -6,6 +6,7 @@ from datetime import datetime
 
 METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","cash"}
 STATUSES={"open","sepa_submitted","paid"}
+OPEN_ITEMS_CUTOFF="2025-11-26"
 
 def norm_method(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")
@@ -137,7 +138,10 @@ class FinanceStore:
             elif source_state!="open":effective_state=source_state
             elif bool(lg and lg.get("status")=="paid"):effective_state="paid"
             else:effective_state=norm_status(ex.get("paymentStatus")) if key in meta else "open"
-            if effective_state!="open" and not include_resolved: continue
+            # An SEPA uebergebene Rechnungen bleiben bis zum CAMT-Abgleich sichtbar,
+            # werden aber von der Laufzeit-API getrennt von den offenen Rechnungen
+            # ausgegeben. Nur wirklich bezahlte Zeilen verschwinden hier.
+            if effective_state=="paid" and not include_resolved: continue
             doc=str(r.sDocID or "").strip(); docs.append(doc) if doc else None; keep.append((r,sid,doc,lg,ex,source_state,effective_state,explicit))
         paths={}
         if callable(lookup) and docs:
@@ -164,6 +168,10 @@ class FinanceStore:
         return out
     def items(self,include_resolved=False):
         ww=self.ww(include_resolved); local=self.kristine(include_resolved); docs={str(x.get("docId") or "").strip() for x in local if str(x.get("docId") or "").strip()}; rows=[x for x in ww if str(x.get("docId") or "").strip() not in docs]+local
+        if not include_resolved:
+            # Stichtag fuer die operative OP-Liste. Die Originalbelege bleiben
+            # erhalten und sind mit include_resolved weiterhin abrufbar.
+            rows=[x for x in rows if not str(x.get("invoiceDate") or "").strip() or str(x.get("invoiceDate") or "")[:10]>=OPEN_ITEMS_CUTOFF]
         details=self.creditor_details()
         for row in rows:
             row["invoiceAmount"]=round(float(row.get("amount") or 0),2)
