@@ -1,7 +1,7 @@
 import unittest
 
 from brain_incoming_search_status import reconcile_incoming_payment_status
-from brain_finance_direct_debit import _manual_open_ww_ids
+from brain_finance_direct_debit import _manual_open_ww_ids, _resolved_debit_method
 
 
 class FakeStore:
@@ -28,6 +28,10 @@ class IncomingSearchStatusTests(unittest.TestCase):
             ("WinWorker", "broken"): "open",
             ("KRISTINE", "kristine:7"): "open",
         }), [7358])
+
+    def test_explicit_transfer_wins_over_old_ww_debit_label(self):
+        self.assertEqual(_resolved_debit_method("transfer", True, "open"), ("transfer", False))
+        self.assertEqual(_resolved_debit_method("unknown", True, "open"), ("direct_debit", True))
 
     def test_manual_reopen_and_bank_assignment_are_visible_in_search(self):
         def overlay(rows, include_resolved=False):

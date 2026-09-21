@@ -50,6 +50,13 @@ def _manual_open_ww_ids(overrides):
     return sorted(ids)
 
 
+def _resolved_debit_method(method, raw_debit, local_status):
+    """Infer WW debit only while KRISTINE has no explicit payment method."""
+    resolved = norm_method(method)
+    inferred = bool(raw_debit and resolved == "unknown" and norm_status(local_status) != "paid")
+    return ("direct_debit" if inferred else resolved), inferred
+
+
 def _pick_columns(cursor):
     try:
         rows = cursor.execute("""
@@ -211,8 +218,10 @@ def install(ns):
                 truth = _norm(hint_value)
                 raw_debit = truth in {"1", "true", "ja", "yes", "x", "j"}
 
-            if raw_debit and method != "direct_debit" and local_status != "paid":
-                method = "direct_debit"
+            # WW is only the fallback.  A payment method explicitly chosen in
+            # KRISTINE (for example normal transfer instead of debit) must win.
+            method, inferred_debit = _resolved_debit_method(method, raw_debit, local_status)
+            if inferred_debit:
                 newly_detected.append(sid)
 
             if method != "direct_debit":
@@ -401,7 +410,7 @@ def install(ns):
                 html = html.replace(marker, section + marker, 1)
             css = r'''
 <style id="kristaDirectDebitCss">
-.dd-range{display:flex;gap:7px;align-items:center;justify-content:flex-end;color:var(--muted);font-size:12px;margin-bottom:5px}.dd-range select{padding:6px 9px}.dd-group{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.dd-group:first-child{border-top:0;margin-top:0}.dd-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:5px 6px 8px}.dd-head strong{font-size:14px}.dd-head span{color:var(--muted);font-size:12px}.dd-row{display:grid;grid-template-columns:105px minmax(160px,1.2fr) minmax(120px,.8fr) 125px 190px 90px;gap:9px;align-items:center;padding:9px 6px;border-top:1px solid var(--line);font-size:13px}.dd-wait{color:#9cc7ff;font-weight:850;font-size:11px}.dd-warn{color:var(--warn);font-weight:850;font-size:11px}.dd-blocked{color:var(--danger);font-weight:850;font-size:11px}@media(max-width:900px){.dd-row{grid-template-columns:1fr 1fr}}@media(max-width:520px){.dd-row{grid-template-columns:1fr}}
+.dd-range{display:flex;gap:7px;align-items:center;justify-content:flex-end;color:var(--muted);font-size:12px;margin-bottom:5px}.dd-range select{padding:6px 9px}.dd-group{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.dd-group:first-child{border-top:0;margin-top:0}.dd-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:5px 6px 8px}.dd-head strong{font-size:14px}.dd-head span{color:var(--muted);font-size:12px}.dd-row{display:grid;grid-template-columns:105px minmax(160px,1.2fr) minmax(120px,.8fr) 125px 190px minmax(130px,.7fr);gap:9px;align-items:center;padding:9px 6px;border-top:1px solid var(--line);font-size:13px}.dd-wait{color:#9cc7ff;font-weight:850;font-size:11px}.dd-warn{color:var(--warn);font-weight:850;font-size:11px}.dd-blocked{color:var(--danger);font-weight:850;font-size:11px}.dd-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}.dd-normal{border:1px solid #53606d;background:#202833;color:#fff;border-radius:8px;padding:7px 9px;font-weight:800;font-size:11px;cursor:pointer}@media(max-width:900px){.dd-row{grid-template-columns:1fr 1fr}}@media(max-width:520px){.dd-row{grid-template-columns:1fr}}
 </style>
 '''
             if 'kristaDirectDebitCss' not in html:
@@ -415,6 +424,7 @@ def install(ns):
  const date=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+'.'+m[2]+'.'+m[1]:(s||'–')};
  const status=x=>x.approvalStatus==='blocked'?'<span class="dd-blocked">⛔ gesperrt · Einzug trotzdem beobachten</span>':x.approvalStatus==='pending'?'<span class="dd-warn">⏳ Freigabe offen · wartet auf CAMT</span>':'<span class="dd-wait">↙ erwartet · wartet auf CAMT</span>';
  const pdf=x=>x.path?`<a class="pdf" href="/pdf?path=${encodeURIComponent(x.path)}" target="_blank">PDF</a>`:'–';
+ const normal=x=>`<button type="button" class="dd-normal" data-dd-normal="${esc(x.source)}|${esc(x.id)}">Auf Überweisung</button>`;
  function totals(rows){const t={};rows.forEach(x=>{const c=x.currency||'EUR';t[c]=(t[c]||0)+Number(x.amount||0)});return Object.entries(t).map(([c,n])=>money(n,c)).join(' · ')}
  function visible(rows){const days=Number(range?.value||31),today=new Date();today.setHours(12,0,0,0);return (rows||[]).filter(x=>{const raw=x.expectedDebitDate||x.dueDate;if(!raw)return true;const due=new Date(String(raw).slice(0,10)+'T12:00:00');return Number.isNaN(due.getTime())||Math.round((due-today)/86400000)<=days})}
  function render(rows){
@@ -422,8 +432,9 @@ def install(ns):
    meta.innerHTML=`<strong>${rows.length} erwartete Einzüge</strong>${rows.length?' · '+esc(totals(rows)):''} · älteste Fälligkeit zuerst`;
    if(!rows.length){box.innerHTML='<div class="empty">Keine erwarteten Einzüge.</div>';return}
    const groups=new Map();rows.forEach(x=>{const k=String(x.supplier||'Ohne Lieferant');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x)});
-   box.innerHTML=[...groups.entries()].map(([supplier,items])=>`<div class="dd-group"><div class="dd-head"><strong>${esc(supplier)}</strong><span>${items.length} Rechnung(en) · ${esc(totals(items))}</span></div>${items.map(x=>`<div class="dd-row"><div><strong>${esc(date(x.expectedDebitDate||x.dueDate))}</strong><div class="sub">erwarteter Einzug</div></div><div><div>${esc(x.invoiceNumber||'–')}</div><div class="sub">${esc(x.source||'')}</div></div><div class="amount">${esc(money(x.amount,x.currency))}</div><div>${status(x)}</div><div class="sub">${x.wwStatusRaw?'WW: '+esc(x.wwStatusRaw):''}</div><div>${pdf(x)}</div></div>`).join('')}</div>`).join('');
+   box.innerHTML=[...groups.entries()].map(([supplier,items])=>`<div class="dd-group"><div class="dd-head"><strong>${esc(supplier)}</strong><span>${items.length} Rechnung(en) · ${esc(totals(items))}</span></div>${items.map(x=>`<div class="dd-row"><div><strong>${esc(date(x.expectedDebitDate||x.dueDate))}</strong><div class="sub">erwarteter Einzug</div></div><div><div>${esc(x.invoiceNumber||'–')}</div><div class="sub">${esc(x.source||'')}</div></div><div class="amount">${esc(money(x.amount,x.currency))}</div><div>${status(x)}</div><div class="sub">${x.wwStatusRaw?'WW: '+esc(x.wwStatusRaw):''}</div><div class="dd-actions">${pdf(x)}${normal(x)}</div></div>`).join('')}</div>`).join('');
  }
+ box.addEventListener('click',async event=>{const button=event.target.closest('[data-dd-normal]');if(!button)return;const [source,id]=button.dataset.ddNormal.split('|');if(!confirm('Zahlungsart auf normale Überweisung ändern?\n\nDie Rechnung bleibt offen und wechselt zu „Zu zahlende Rechnungen“.'))return;button.disabled=true;try{const response=await fetch('/incoming/payment-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,id,paymentMethod:'transfer',note:'Zahlungsart manuell auf normale Überweisung geändert'})}),data=await response.json();if(!response.ok||!data.ok)throw Error(data.error||'Zahlungsart konnte nicht geändert werden');location.reload()}catch(error){alert(error.message||error);button.disabled=false}});
  if(range)range.onchange=()=>render(all);
  fetch('/incoming/payment-open-items',{cache:'no-store'}).then(r=>r.json().then(d=>[r,d])).then(([r,d])=>{if(!r.ok||!d.ok)throw Error(d.error||'Einzüge konnten nicht geladen werden');all=d.directDebit||[];render(all)}).catch(e=>{meta.textContent='Einzüge konnten nicht geladen werden';box.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
 })();
