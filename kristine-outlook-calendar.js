@@ -416,6 +416,67 @@ function installOutlookCalendar(app, deps = {}) {
     }
   }
 
+  async function graphDelete(eventId, appointmentId, kind) {
+    const id = String(eventId || "");
+    if (!id) return { deleted:false, missing:true };
+    const response = await fetch(`${GRAPH_ROOT}/me/events/${encodeURIComponent(id)}`, {
+      method:"DELETE",
+      headers:{ Authorization:`Bearer ${await accessToken()}` },
+    });
+    if (!response.ok && response.status !== 404) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(String(body?.error?.message || `Microsoft Graph HTTP ${response.status}`));
+    }
+    await audit("outlook_event_retired", { appointmentId, eventId:id, kind, missing:response.status === 404 });
+    return { deleted:response.status !== 404, missing:response.status === 404 };
+  }
+
+  async function retireOrderScheduleAppointments(jobId) {
+    const id = String(jobId || "").trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("Ungültige Baustellennummer.");
+    const rows = await readJson(appointmentsFile, []);
+    const legacy = rows.filter(row =>
+      String(row?.taskId || "") === `job:${id}` &&
+      String(row?.requestId || "").startsWith(`order-schedule-${id}-`) &&
+      !row?.retiredAt
+    );
+    let deleted = 0, missing = 0;
+    for (const row of legacy) {
+      for (const [kind, eventId] of [["appointment", row?.outlook?.eventId], ["departure", row?.outlook?.departureBlockEventId]]) {
+        if (!eventId) continue;
+        const result = await graphDelete(eventId, row.id, kind);
+        deleted += result.deleted ? 1 : 0;
+        missing += result.missing ? 1 : 0;
+      }
+    }
+    if (!legacy.length) return { jobId:id, retired:0, deleted, missing };
+    return serialized(async () => {
+      const latest = await readJson(appointmentsFile, []), retiredAt = new Date().toISOString();
+      let retired = 0;
+      for (const row of latest) {
+        if (String(row?.taskId || "") !== `job:${id}` || !String(row?.requestId || "").startsWith(`order-schedule-${id}-`) || row?.retiredAt) continue;
+        const outlook = row.outlook || {};
+        row.retiredAt = retiredAt;
+        row.retiredReason = "shared-calendar-only";
+        row.outlook = {
+          ...outlook,
+          status:"retired",
+          retiredEventId:String(outlook.eventId || ""),
+          retiredDepartureBlockEventId:String(outlook.departureBlockEventId || ""),
+          eventId:"",
+          departureBlockEventId:"",
+          departureBlockStatus:"retired",
+          error:"",
+          departureBlockError:"",
+        };
+        retired += 1;
+      }
+      await atomicJson(appointmentsFile, latest);
+      await audit("order_schedule_appointments_retired", { jobId:id, retired, deleted, missing });
+      return { jobId:id, retired, deleted, missing };
+    });
+  }
+
   async function graphUpdate(appointment) {
     if (!appointment?.outlook?.eventId) throw new Error("Outlook-Event-ID fehlt.");
     try {
@@ -559,6 +620,7 @@ function installOutlookCalendar(app, deps = {}) {
     const rows = await readJson(appointmentsFile, []);
     const current = rows.find(row => row.id === id);
     if (!current) throw new Error("KRISTINE-Termin nicht gefunden.");
+    if (current.retiredAt || current.outlook?.status === "retired") return current;
     if (current.outlook?.status === "synced" && current.outlook.eventId) {
       if (!current.allDay && (!current.outlook.departureBlockEventId || current.outlook.departureBlockStatus !== "synced")) {
         try {
@@ -843,6 +905,12 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
     catch (error) { res.status(404).json({ ok:false, error:String(error?.message || error) }); }
   });
 
+  app.post("/kristine/api/appointments/retire-order-schedule/:jobId", async (req, res) => {
+    if (!allowed(req, res)) return;
+    try { res.json({ ok:true, ...await retireOrderScheduleAppointments(req.params.jobId) }); }
+    catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
+  });
+
   app.post("/kristine/api/appointments/:id/refresh-link", async (req, res) => {
     if (!allowed(req, res)) return;
     try {
@@ -854,7 +922,7 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
     } catch (error) { res.status(400).json({ ok:false, error:String(error?.message || error) }); }
   });
 
-  return { syncAppointment, createAppointment, accessToken };
+  return { syncAppointment, createAppointment, retireOrderScheduleAppointments, accessToken };
 }
 
 module.exports = { installOutlookCalendar };

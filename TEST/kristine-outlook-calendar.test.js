@@ -77,6 +77,7 @@ function jwt(account) {
 
     let graphPayload = null;
     let departurePayload = null;
+    const deletedEventIds = [];
     global.fetch = async (url, options = {}) => {
       if (String(url).endsWith("/devicecode")) return new Response(JSON.stringify({ device_code:"device", user_code:"ABCD-EFGH", verification_uri:"https://login.microsoft.com/device", expires_in:900, interval:1 }), { status:200, headers:{ "Content-Type":"application/json" } });
       if (String(url).endsWith("/token")) return new Response(JSON.stringify({ access_token:"access", refresh_token:"refresh", id_token:jwt("alexander.krista@krista.at"), expires_in:3600, scope:"Calendars.ReadWrite Calendars.ReadWrite.Shared Mail.Read Mail.Read.Shared" }), { status:200, headers:{ "Content-Type":"application/json" } });
@@ -88,6 +89,10 @@ function jwt(account) {
         { subject:"Baustellentermin", status:"busy", start:{ dateTime:"2026-09-18T08:30:00.0000000" }, end:{ dateTime:"2026-09-18T09:15:00.0000000" }, location:"Rankweil" },
         { subject:"Nur in Frei/Belegt", status:"busy", start:{ dateTime:"2026-09-18T13:00:00.0000000" }, end:{ dateTime:"2026-09-18T14:00:00.0000000" } },
       ] }] }), { status:200, headers:{ "Content-Type":"application/json" } });
+      if (String(url).includes("graph.microsoft.com") && String(options.method || "GET").toUpperCase() === "DELETE") {
+        deletedEventIds.push(decodeURIComponent(String(url).split("/events/")[1] || ""));
+        return new Response(null, { status:204 });
+      }
       if (String(url).includes("graph.microsoft.com")) {
         const payload = options.body ? JSON.parse(options.body) : {};
         if (String(payload.subject || "").startsWith("🚗 Jetzt los")) {
@@ -165,8 +170,28 @@ function jwt(account) {
     assert.equal(duplicate.body.duplicatePrevented, true, "same natural appointment must not create a second Outlook event");
     assert.equal(duplicate.body.appointment.id, create.body.appointment.id);
 
+    const appointmentsFile = path.join(temporary, "_kristine", "appointments.json");
+    const withLegacy = JSON.parse(await fsp.readFile(appointmentsFile, "utf8"));
+    withLegacy.push({
+      id:"legacy-order-start", requestId:"order-schedule-26101-r1", taskId:"job:26101",
+      title:"Baustellenstart #26101 · Malerarbeiten Zangerle", date:"2026-09-21", from:"07:00", to:"17:00",
+      outlook:{ status:"synced", eventId:"legacy-event", departureBlockEventId:"legacy-departure", departureBlockStatus:"synced" },
+    });
+    await fsp.writeFile(appointmentsFile, JSON.stringify(withLegacy), "utf8");
+    const retired = await call(routes, "POST", "/kristine/api/appointments/retire-order-schedule/:jobId", { params:{ jobId:"26101" } });
+    assert.equal(retired.statusCode, 200);
+    assert.deepEqual(deletedEventIds.sort(), ["legacy-departure", "legacy-event"]);
+    assert.equal(retired.body.retired, 1);
+    const retiredRows = JSON.parse(await fsp.readFile(appointmentsFile, "utf8"));
+    const retiredRow = retiredRows.find(row => row.id === "legacy-order-start");
+    assert.equal(retiredRow.outlook.status, "retired");
+    assert.equal(retiredRow.outlook.eventId, "");
+    assert.equal(retiredRow.outlook.departureBlockEventId, "");
+    const retiredRetry = await call(routes, "POST", "/kristine/api/appointments/:id/retry", { params:{ id:"legacy-order-start" } });
+    assert.equal(retiredRetry.body.appointment.outlook.status, "retired", "retired order appointments must never be recreated");
+
     const stored = JSON.parse(fs.readFileSync(path.join(temporary, "_kristine", "appointments.json"), "utf8"));
-    assert.equal(stored.length, 1, "Idempotent request must only create one internal appointment");
+    assert.equal(stored.length, 2, "Only the test appointment and the retired legacy order appointment may exist");
     assert.equal(stored[0].outlook.status, "synced");
     assert.equal(stored[0].outlook.eventId, "outlook-event-123");
     assert.equal(stored[0].outlook.departureBlockEventId, "outlook-departure-123");
