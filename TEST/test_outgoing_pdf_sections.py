@@ -23,6 +23,7 @@ class OutgoingPdfSectionTests(unittest.TestCase):
                 "customer_street": "Färbergasse 15",
                 "customer_postal_code": "6850",
                 "customer_city": "Dornbirn",
+                "customer_country": "Österreich",
             },
             "lines": [
                 {"description": "Regiearbeiten", "quantity": 1, "unit": "PA", "unit_price": 100, "net": 100},
@@ -48,6 +49,7 @@ class OutgoingPdfSectionTests(unittest.TestCase):
         expected = ["Vplus GmbH", "z. H. Street-smart Heller KG", "Färbergasse 15", "6850 Dornbirn"]
         positions = [text.index(line) for line in expected]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("Österreich", text)
 
     def test_mixed_order_and_regie_invoice_has_category_totals_and_breakdown(self):
         invoice = {

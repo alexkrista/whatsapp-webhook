@@ -72,13 +72,16 @@ def _recipient_lines(run):
             _single_line(run.get("customer_city"), 80),
         ] if value
     )
+    country = _single_line(run.get("customer_country"), 80)
+    if country.casefold() in {"österreich", "austria", "at"}:
+        country = ""
     return [
         line for line in [
             company,
             *names,
             _single_line(run.get("customer_street"), 120),
             postal_city,
-            _single_line(run.get("customer_country"), 80),
+            country,
         ] if line
     ]
 
