@@ -85,6 +85,7 @@
         .krista-quick-task{padding-inline:7px!important}
       }
       @media(max-width:900px){
+        .krista-shell-topbar{position:relative!important;top:auto!important}
         .krista-shell-main.krista-access-v4{grid-template-columns:minmax(0,1fr) auto!important;padding:8px 10px!important}
         .krista-shell-main.krista-access-v4 .krista-brand{grid-column:1!important}
         .krista-shell-main.krista-access-v4 .krista-mobile-menu{grid-column:2!important}
@@ -92,7 +93,23 @@
         .krista-shell-topbar.menu-open .krista-world-nav{display:flex!important}
         .krista-shell-main.krista-access-v4 .krista-world-link{width:100%!important;justify-content:flex-start!important;font-size:12px!important;min-height:38px!important}
         .krista-shell-main.krista-access-v4 .krista-world-icon{display:inline!important}
-        .krista-access-slot{grid-column:1/-1!important;justify-content:flex-start!important;overflow-x:auto!important;padding-top:2px!important}
+        .krista-access-slot{
+          grid-column:1/-1!important;grid-row:2!important;width:100%!important;
+          display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+          gap:5px!important;overflow:visible!important;padding-top:2px!important;
+        }
+        .krista-quick-task{grid-column:1!important;grid-row:1!important}
+        .krista-gate-lamp{grid-column:2!important;grid-row:1!important}
+        .krista-door-stack{display:contents!important}
+        .krista-services-lamp{grid-column:3!important;grid-row:1!important;width:100%!important}
+        .krista-door-row{
+          grid-column:1/-1!important;grid-row:2!important;
+          display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+          gap:5px!important;width:100%!important;
+        }
+        .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-services-lamp{
+          width:100%!important;min-width:0!important;padding-inline:5px!important;
+        }
         .krista-door-state{display:inline!important}
       }
     `;
