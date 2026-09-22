@@ -215,7 +215,9 @@ ${voicemailBlock}
       #taskList .krista-task-site-group>summary::-webkit-details-marker{display:none}
       #taskList .krista-task-site-group>summary:before{content:'▶';font-size:9px;color:#657068;transition:transform .15s}
       #taskList .krista-task-site-group[open]>summary:before{transform:rotate(90deg)}
-      #taskList .krista-task-site-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:auto}
+      #taskList .krista-task-site-title{min-width:0;display:flex;flex-direction:column;gap:2px;margin-right:auto}
+      #taskList .krista-task-site-designation{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #taskList .krista-task-site-customer{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#687068;font-size:11px;font-weight:750}
       #taskList .krista-task-site-count{display:inline-flex;justify-content:center;border-radius:999px;padding:3px 9px;background:#fff;border:1px solid #d5d0c7;font-size:11px;white-space:nowrap}
       #taskList .krista-task-site-rows{display:grid;gap:6px;padding:7px;background:#faf9f6}
       #taskList .krista-task-row{
@@ -622,7 +624,7 @@ ${voicemailBlock}
         rowContent = [...siteGroups.values()].map(({ site, rows:siteRows }) => {
           const siteOpen = existingSiteState.get(site.key) === true;
           const pointLabel = `${siteRows.length} ${siteRows.length === 1 ? "Punkt" : "Punkte"}`;
-          return `<details class="krista-task-site-group" data-task-site="${esc(site.key)}" ${siteOpen ? "open" : ""}><summary><span class="krista-task-site-title">${esc(site.label)}</span><span class="krista-task-site-count">${pointLabel}</span></summary><div class="krista-task-site-rows">${siteRows.map(taskRowHtml).join("")}</div></details>`;
+          return `<details class="krista-task-site-group" data-task-site="${esc(site.key)}" ${siteOpen ? "open" : ""}><summary><span class="krista-task-site-title"><span class="krista-task-site-designation">${esc(site.label)}</span>${site.customer ? `<span class="krista-task-site-customer">Kunde: ${esc(site.customer)}</span>` : ""}</span><span class="krista-task-site-count">${pointLabel}</span></summary><div class="krista-task-site-rows">${siteRows.map(taskRowHtml).join("")}</div></details>`;
         }).join("");
       }
       return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rowContent}</div></details>`;
@@ -644,8 +646,9 @@ ${voicemailBlock}
   function customerSiteInfo(task, jobs = []) {
     const job = jobs.find(row => String(row?.jobId || "") === String(task?.jobId || ""));
     const label = String(task?.jobName || job?.name || "").trim() || "Ohne Baustelle";
+    const customer = String(task?.contactName || task?.customerMaster?.name || job?.contactName || job?.customerMaster?.name || "").trim();
     const id = String(task?.jobId || job?.jobId || "").trim();
-    return { key:id ? `job:${id}` : `name:${label.toLowerCase()}`, label };
+    return { key:id ? `job:${id}` : `name:${label.toLowerCase()}`, label, customer };
   }
 
   function install() {

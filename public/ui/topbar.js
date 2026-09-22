@@ -196,7 +196,7 @@
   }
 
   function loadKristineTaskList() {
-    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260922-customer-site-groups-1", "data-krista-task-list");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-task-list.js?v=20260922-customer-site-names-1", "data-krista-task-list");
   }
 
   function loadKristineTaskCreateModal() {
