@@ -99,6 +99,8 @@ test('old TR without report IDs allocates billed Regie first and leaves the corr
   assert.equal(p.billablePerformance,44709.93);assert.equal(p.fixedToInvoice,4150.68);assert.equal(p.amountToInvoice,10140.93);
   assert.equal(p.billedRegieRange,'1');assert.equal(p.openRegieRange,'14');
   assert.match(B.renderCalculation(p),/Leistungssumme gesamt/);assert.match(B.renderCalculation(p),/Teilrechnung vorbereiten/);
+  p.regieInvoiceLinks={summary:'http://brain.test/?regieMode=summary',days:'http://brain.test/?regieMode=days'};
+  const rendered=B.renderCalculation(p);assert.match(rendered,/Regierechnung erstellen/);assert.match(rendered,/Zusammengefasst \+ PDF-Beilage/);assert.match(rendered,/Einzeltage übernehmen/);
 });
 test('Halter live stand keeps the reviewed whole-percent progress and legacy invoice rounding',()=>{
   const halter={jobId:'26082',name:'Halter',calculation:{actualHours:480.3,actualRegieHours:392.6,fixedCalculatedHours:570.95,plannedRegieHours:430,contractAmount:92379.94,kristaAmount:51529.94,regieBudgetAmount:40850}};

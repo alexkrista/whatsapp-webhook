@@ -671,13 +671,16 @@ class OutgoingStore:
                 ORDER BY issue_date,id
             """, (f"{year:04d}",))]
 
-    def runs(self, project_index=None):
+    def runs(self, project_index=None, project_number=None):
         with self.connect() as con:
             sql = "SELECT * FROM outgoing_runs"
             params = []
             if project_index not in (None, ""):
                 sql += " WHERE project_index=?"
                 params.append(int(project_index))
+            elif str(project_number or "").strip():
+                sql += " WHERE project_number=?"
+                params.append(str(project_number).strip())
             sql += " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, id DESC"
             return [self._run_public(con, row) for row in con.execute(sql, params)]
 
@@ -1093,6 +1096,120 @@ class OutgoingStore:
                 "SELECT i.* FROM outgoing_invoices i JOIN outgoing_runs r ON r.id=i.run_id WHERE r.project_number=?",
                 (run["project_number"],))]
             return prepare_preset(proposal, run, invoices)
+
+    def regie_preset(self, run_id, payload):
+        """Prepare a reviewed Regie-only invoice with a stable report snapshot."""
+        from brain_progress_billing import invoice_snapshot
+
+        if not isinstance(payload, dict) or len(_json(payload)) > 60000:
+            raise ValueError("Regiedaten sind ungültig oder zu groß.")
+        mode = str(payload.get("mode") or "summary").lower()
+        if mode not in {"summary", "days"}:
+            raise ValueError("Regierechnung muss zusammengefasst oder nach Einzeltagen erstellt werden.")
+        kind = str(payload.get("kind") or "RE").upper()
+        if kind not in {"TR", "RE", "SR"}:
+            raise ValueError("Rechnungsart ist ungültig.")
+        days = payload.get("days") or []
+        if not isinstance(days, list) or not days:
+            raise ValueError("Keine Regieberichte zum Abrechnen vorhanden.")
+
+        clean_days = []
+        for raw in days[:120]:
+            employees = [{
+                "name": str(row.get("name") or "Mitarbeiter")[:120],
+                "hours": float(row.get("hours") or 0),
+                "cost": float(row.get("cost") or 0),
+            } for row in (raw.get("employees") or [])[:30] if isinstance(row, dict)]
+            materials = [{
+                "name": str(row.get("name") or "Material")[:160],
+                "quantity": float(row.get("quantity") or 1),
+                "unit": str(row.get("unit") or "PA")[:20],
+                "unitPrice": float(row.get("unitPrice") or 0),
+                "cost": float(row.get("cost") or 0),
+            } for row in (raw.get("materials") or [])[:80] if isinstance(row, dict)]
+            employee_hours = round(sum(row["hours"] for row in employees), 2)
+            employee_labor = round(sum(row["cost"] for row in employees), 2)
+            material_lines = round(sum(row["cost"] for row in materials), 2)
+            hours = round(float(raw.get("hours") or employee_hours), 2)
+            labor = round(float(raw.get("labor") or employee_labor), 2)
+            material = round(float(raw.get("material") or material_lines), 2)
+            total = round(float(raw.get("total") or (labor + material)), 2)
+            clean_days.append({
+                "id": str(raw.get("id") or "")[:200],
+                "date": str(raw.get("date") or "")[:10],
+                "reportNumber": str(raw.get("reportNumber") or "")[:80],
+                "component": str(raw.get("component") or "Regiearbeiten")[:500],
+                "employees": employees,
+                "materials": materials,
+                "hours": hours,
+                "labor": labor,
+                "material": material,
+                "total": total,
+            })
+        total = round(sum(row["total"] for row in clean_days), 2)
+        if total <= 0:
+            raise ValueError("Die offenen Regieberichte enthalten keinen abrechenbaren Betrag.")
+
+        lines = []
+        if mode == "summary":
+            numbers = [row["reportNumber"] for row in clean_days if row["reportNumber"]]
+            suffix = f" · Rapporte {numbers[0]} bis {numbers[-1]}" if len(numbers) > 1 else (f" · Rapport {numbers[0]}" if numbers else "")
+            lines.append({"description": "Regiearbeiten laut beiliegender Zusammenfassung" + suffix,
+                          "quantity": 1, "unit": "PA", "unitPrice": total,
+                          "discountPercent": 0, "billingComponent": "regie"})
+        else:
+            for index, day in enumerate(clean_days, 1):
+                label = day["date"] or "ohne Datum"
+                lines.extend([
+                    {"description": f"{index}. Bericht - {label}", "quantity": 0, "unit": "TAG", "unitPrice": 0, "discountPercent": 0, "billingComponent": "regie"},
+                    {"description": day["component"], "quantity": 0, "unit": "BAUTEIL", "unitPrice": 0, "discountPercent": 0, "billingComponent": "regie"},
+                    {"description": "Arbeit", "quantity": 0, "unit": "ARBEIT", "unitPrice": 0, "discountPercent": 0, "billingComponent": "regie"},
+                ])
+                for row in day["employees"]:
+                    price = row["cost"] / row["hours"] if row["hours"] else 0
+                    lines.append({"description": row["name"], "quantity": row["hours"], "unit": "Std.", "unitPrice": price, "discountPercent": 0, "billingComponent": "regie"})
+                if not day["employees"] and day["labor"] > 0:
+                    quantity = day["hours"] or 1
+                    lines.append({"description": "Regiearbeit laut Bericht", "quantity": quantity,
+                                  "unit": "Std." if day["hours"] else "PA",
+                                  "unitPrice": day["labor"] / quantity,
+                                  "discountPercent": 0, "billingComponent": "regie"})
+                if day["materials"]:
+                    lines.append({"description": "Material", "quantity": 0, "unit": "MATERIAL", "unitPrice": 0, "discountPercent": 0, "billingComponent": "regie"})
+                for row in day["materials"]:
+                    price = row["unitPrice"] or (row["cost"] / row["quantity"] if row["quantity"] else 0)
+                    lines.append({"description": row["name"], "quantity": row["quantity"], "unit": row["unit"], "unitPrice": price, "discountPercent": 0, "billingComponent": "regie"})
+                if not day["materials"] and day["material"] > 0:
+                    lines.append({"description": "Material laut Bericht", "quantity": 1, "unit": "PA",
+                                  "unitPrice": day["material"], "discountPercent": 0,
+                                  "billingComponent": "regie"})
+                lines.append({"description": f"Summe Bericht {index}", "quantity": 0, "unit": "SUMME", "unitPrice": 0, "discountPercent": 0, "billingComponent": "regie"})
+
+        with self.connect() as con:
+            run = _row(con.execute("SELECT * FROM outgoing_runs WHERE id=?", (int(run_id),)).fetchone())
+            if not run:
+                raise ValueError("Rechnungslauf fehlt.")
+            if con.execute("SELECT 1 FROM outgoing_invoices WHERE run_id=? AND status='draft'", (int(run_id),)).fetchone():
+                raise ValueError("Ein Entwurf ist bereits vorhanden. Diesen zuerst fertigstellen oder löschen.")
+            invoices = [dict(row) for row in con.execute(
+                "SELECT i.* FROM outgoing_invoices i JOIN outgoing_runs r ON r.id=i.run_id WHERE r.project_number=?",
+                (run["project_number"],))]
+        progress = {
+            "version": "20260922-regie-invoice-1", "kind": kind,
+            "jobId": str(run.get("project_number") or ""),
+            "regieBillingMode": mode,
+            "regieSummary": {"days": clean_days, "total": total},
+            "reportIdsToBill": [row["id"] for row in clean_days if row["id"]],
+            "baseline": {"complete": True, "hasClosingInvoice": False,
+                         "invoiceSnapshot": invoice_snapshot(invoices)},
+        }
+        dates = sorted(row["date"] for row in clean_days if row["date"])
+        notes = ("Die Zusammenfassung der Regieleistungen ist als PDF-Beilage angeschlossen."
+                 if mode == "summary" else "Die Regieleistungen sind nach Einzeltagen auf der Rechnung angeführt.")
+        return {"kind": kind, "lines": lines, "progressBilling": progress, "notes": notes,
+                "serviceFrom": dates[0] if dates else date.today().isoformat(),
+                "serviceTo": dates[-1] if dates else date.today().isoformat(),
+                "incrementNet": total}
 
     def save_draft(self, data, invoice_id=None):
         run_id = int(data.get("runId") or 0)

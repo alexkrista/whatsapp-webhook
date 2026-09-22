@@ -65,6 +65,25 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertNotEqual(self.run["id"], second["id"])
         self.assertEqual(len(self.store.runs(2602119)), 2)
 
+    def test_kristine_only_project_and_regie_presets(self):
+        run = self.store.create_run({
+            "projectIndex": None, "projectNumber": "26097", "label": "Malerarbeiten Zangerle",
+            "customerName": "Karin Zangerle", "street": "Erlenweg 8b",
+            "postalCode": "6841", "city": "Mäder", "country": "Österreich",
+        })
+        self.assertEqual([row["id"] for row in self.store.runs(project_number="26097")], [run["id"]])
+        report = {"id": "regie-1", "date": "2026-09-21", "reportNumber": "9",
+                  "component": "Wohnzimmer", "hours": 3.5, "labor": 280,
+                  "material": 45.2, "total": 325.2, "employees": [], "materials": []}
+        summary = self.store.regie_preset(run["id"], {"kind": "RE", "mode": "summary", "days": [report]})
+        self.assertEqual(summary["incrementNet"], 325.2)
+        self.assertEqual(summary["progressBilling"]["regieBillingMode"], "summary")
+        self.assertEqual(summary["lines"][0]["unitPrice"], 325.2)
+        detail = self.store.regie_preset(run["id"], {"kind": "RE", "mode": "days", "days": [report]})
+        self.assertEqual(detail["progressBilling"]["reportIdsToBill"], ["regie-1"])
+        self.assertIn("Wohnzimmer", [row["description"] for row in detail["lines"]])
+        self.assertEqual(sum(row["quantity"] * row["unitPrice"] for row in detail["lines"]), 325.2)
+
     def test_tower_billing_documents_are_loaded_for_many_projects_at_once(self):
         issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="2500"))["id"])
         summaries = self.store.billing_documents_by_project_numbers(["26025", "26026"])
