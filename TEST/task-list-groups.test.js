@@ -8,11 +8,21 @@ assert.equal(context.taskGroupKey({title:"Kundenpunkt prüfen · Kunde"}),"custo
 assert.equal(context.taskGroupKey({title:"Irgendwas",reminder:"[FINANCE_APPROVAL]id=1"}),"invoice");
 assert.equal(context.taskGroupKey({title:"Regiebericht prüfen · Rapport 4"}),"regie");
 assert.equal(context.taskGroupKey({title:"Rückruf Kunde"}),"other");
+assert.deepEqual(
+  JSON.parse(JSON.stringify(context.customerSiteInfo({jobId:"26101",jobName:"Vonblon, Artur"},[]))),
+  {key:"job:26101",label:"Vonblon, Artur"}
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(context.customerSiteInfo({jobId:"26102"},[{jobId:"26102",name:"Egon Allgäuer"}]))),
+  {key:"job:26102",label:"Egon Allgäuer"}
+);
 for(const label of ["Aufgaben","Regie","Rechnungen","Kundenpunkte"])assert(source.includes(`label:\"${label}\"`));
 assert(source.indexOf('label:"Aufgaben"')<source.indexOf('label:"Regie"'));
 assert(source.indexOf('label:"Regie"')<source.indexOf('label:"Rechnungen"'));
 assert(source.indexOf('label:"Rechnungen"')<source.indexOf('label:"Kundenpunkte"'));
 assert(source.includes('class="krista-task-group"'));
+assert(source.includes('class="krista-task-site-group"'));
+assert(source.includes('siteRows.length === 1 ? "Punkt" : "Punkte"'));
 assert(source.includes("window.openKristaTaskEditor = openTaskEditor"));
 assert(source.includes('appointmentRequest("PATCH"'));
 assert(source.includes("window.persistTasks()"));

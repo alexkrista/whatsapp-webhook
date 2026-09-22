@@ -210,6 +210,14 @@ ${voicemailBlock}
       #taskList .krista-task-group-count{display:inline-flex;min-width:27px;justify-content:center;border-radius:999px;padding:3px 8px;background:#fff;border:1px solid #d5d0c7;font-size:11px}
       #taskList .krista-task-group-rows{display:grid;gap:6px;padding:7px}
       #taskList .krista-task-group-empty{padding:10px 12px;color:#777;font-size:12px;background:#fff;border-radius:9px}
+      #taskList .krista-task-site-group{border:1px solid #d9d5cc;border-radius:10px;background:#fff;overflow:hidden}
+      #taskList .krista-task-site-group>summary{display:flex;align-items:center;gap:10px;list-style:none;cursor:pointer;padding:10px 12px;background:#f4f2ed;font-weight:850;user-select:none}
+      #taskList .krista-task-site-group>summary::-webkit-details-marker{display:none}
+      #taskList .krista-task-site-group>summary:before{content:'▶';font-size:9px;color:#657068;transition:transform .15s}
+      #taskList .krista-task-site-group[open]>summary:before{transform:rotate(90deg)}
+      #taskList .krista-task-site-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:auto}
+      #taskList .krista-task-site-count{display:inline-flex;justify-content:center;border-radius:999px;padding:3px 9px;background:#fff;border:1px solid #d5d0c7;font-size:11px;white-space:nowrap}
+      #taskList .krista-task-site-rows{display:grid;gap:6px;padding:7px;background:#faf9f6}
       #taskList .krista-task-row{
         display:grid;
         grid-template-columns:minmax(220px,2fr) minmax(130px,.9fr) minmax(150px,1fr) minmax(145px,.9fr) auto;
@@ -596,13 +604,28 @@ ${voicemailBlock}
       { key:"customer", label:"Kundenpunkte", icon:"👤" },
     ];
     const existingState = new Map([...list.querySelectorAll(".krista-task-group")].map(group => [group.dataset.taskGroup, group.open]));
+    const existingSiteState = new Map([...list.querySelectorAll(".krista-task-site-group")].map(group => [group.dataset.taskSite, group.open]));
     const grouped = new Map(groupDefinitions.map(group => [group.key, []]));
     tasks.forEach(task => grouped.get(taskGroupKey(task)).push(task));
     list.innerHTML = groupDefinitions.map(group => {
       const rows = grouped.get(group.key) || [];
       const remembered = existingState.get(group.key);
       const open = remembered === undefined ? true : remembered;
-      return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rows.length ? rows.map(taskRowHtml).join("") : '<div class="krista-task-group-empty">Keine Einträge.</div>'}</div></details>`;
+      let rowContent = rows.length ? rows.map(taskRowHtml).join("") : '<div class="krista-task-group-empty">Keine Einträge.</div>';
+      if (group.key === "customer" && rows.length) {
+        const siteGroups = new Map();
+        rows.forEach(task => {
+          const site = customerSiteInfo(task, masterJobs || []);
+          if (!siteGroups.has(site.key)) siteGroups.set(site.key, { site, rows:[] });
+          siteGroups.get(site.key).rows.push(task);
+        });
+        rowContent = [...siteGroups.values()].map(({ site, rows:siteRows }) => {
+          const siteOpen = existingSiteState.get(site.key) === true;
+          const pointLabel = `${siteRows.length} ${siteRows.length === 1 ? "Punkt" : "Punkte"}`;
+          return `<details class="krista-task-site-group" data-task-site="${esc(site.key)}" ${siteOpen ? "open" : ""}><summary><span class="krista-task-site-title">${esc(site.label)}</span><span class="krista-task-site-count">${pointLabel}</span></summary><div class="krista-task-site-rows">${siteRows.map(taskRowHtml).join("")}</div></details>`;
+        }).join("");
+      }
+      return `<details class="krista-task-group" data-task-group="${group.key}" ${open ? "open" : ""}><summary><span class="krista-task-group-title"><span>${group.icon}</span>${group.label}</span><span class="krista-task-group-count">${rows.length}</span></summary><div class="krista-task-group-rows">${rowContent}</div></details>`;
     }).join("");
 
     hydrateAttachmentButtons(false);
@@ -616,6 +639,13 @@ ${voicemailBlock}
     if (reminder.includes("[REGIE_APPROVAL]") || title.includes("regiebericht prüfen")) return "regie";
     if (String(task?.creatorId || "") === "customer-portal" || title.includes("kundenpunkt prüfen")) return "customer";
     return "other";
+  }
+
+  function customerSiteInfo(task, jobs = []) {
+    const job = jobs.find(row => String(row?.jobId || "") === String(task?.jobId || ""));
+    const label = String(task?.jobName || job?.name || "").trim() || "Ohne Baustelle";
+    const id = String(task?.jobId || job?.jobId || "").trim();
+    return { key:id ? `job:${id}` : `name:${label.toLowerCase()}`, label };
   }
 
   function install() {
