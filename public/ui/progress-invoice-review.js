@@ -1,6 +1,6 @@
 "use strict";
 (function(){
-  const B=window.KristaRegieBilling,esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const B=window.KristaRegieBilling,esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),linkedToken=value=>btoa(unescape(encodeURIComponent(JSON.stringify(value)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   function open(p,options={}){
     const dialog=document.createElement('dialog');dialog.className='krb-review';
     dialog.style.cssText='width:min(680px,calc(100% - 32px));max-height:90vh;overflow:auto;border:1px solid #c5d3be;border-radius:18px;padding:24px;background:#fffefa;color:#263b2d';
@@ -20,7 +20,7 @@
         if(get('percent').value.trim()===''||get('regie').value.trim()==='')throw new Error('Fertigstellung und Regiebetrag eingeben.');
         proposal=B.prepareInvoiceProposal(baseline,{kind,completionPercent:get('percent').value,regieToInvoice:get('regie').value,reason:get('note').value});
         get('result').innerHTML='<div>'+esc(proposal.completionPercent.toLocaleString('de-AT'))+' % × '+B.formatMoney(baseline.fixedContractAmount)+' − '+B.formatMoney(baseline.fixedPartialInvoiceNet)+' geschriebene Fix-TR = <strong>'+B.formatMoney(proposal.fixedToInvoice)+'</strong></div><div>+ '+B.formatMoney(proposal.regieToInvoice)+' Regie jetzt</div><div><strong>'+esc(kind)+' netto: '+B.formatMoney(proposal.amountToInvoice)+'</strong></div>'+(proposal.changed?'<small>Berechneter Vorschlag: '+B.formatMoney(baseline.amountToInvoice)+' · Korrektur wird mitgeführt.</small>':'');
-        const url=new URL('http://127.0.0.1:5051/outgoing/invoices');url.searchParams.set('project',baseline.jobId);url.searchParams.set('action',kind);
+        const url=new URL('http://127.0.0.1:5051/outgoing/invoices');url.searchParams.set('project',baseline.jobId);url.searchParams.set('action',kind);if(baseline.invoiceProjectContext)url.searchParams.set('projectContext',linkedToken(baseline.invoiceProjectContext));
         url.hash='krb='+encodeURIComponent(JSON.stringify(proposal));
         get('open').href=url.href;get('open').textContent=kind+'-Entwurf öffnen';get('download').disabled=false;get('error').textContent='';
       }catch(error){get('result').textContent='';get('error').textContent=error.message;}
