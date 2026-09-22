@@ -253,6 +253,10 @@ function registerPaintLab(app, options = {}) {
     try { return JSON.parse(String(value || "")); } catch { return null; }
   }
 
+  require('./paint-similar-recipes').registerSimilarRecipes(app, {
+    requireAdmin, loadCatalog: () => readJson(CATALOG, null), buildCatalogIndex, resolveFormulaForProduct,
+  });
+
   async function listJobs() {
     const entries = await fsp.readdir(dataDir, { withFileTypes: true }).catch(() => []);
     const jobs = [];
