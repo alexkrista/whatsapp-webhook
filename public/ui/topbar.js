@@ -208,7 +208,7 @@
   }
 
   function loadKristineRegieApproval() {
-    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-regie-approval.js?v=20260912-photo-inbox", "data-krista-regie-approval");
+    if (isKristineMainPath()) loadScriptOnce("/public/ui/kristine-regie-approval.js?v=20260922-two-step-review", "data-krista-regie-approval");
   }
 
   function loadKristineInbox() {

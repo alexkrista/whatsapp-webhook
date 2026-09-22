@@ -2,6 +2,7 @@
 
 (function () {
   const MARKER = "[REGIE_APPROVAL]";
+  const PRECHECK_MARKER = "[REGIE_PRECHECK]";
 
   function safe(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -14,12 +15,14 @@
   function meta(task) {
     const reminder = String(task?.reminder || "");
     if(reminder.includes('[PHOTO_INBOX]'))return {reportId:'photo:'+reminder.split('groupId=')[1],photo:true};
-    if (!reminder.includes(MARKER)) return null;
+    const marker = reminder.includes(PRECHECK_MARKER) ? PRECHECK_MARKER : reminder.includes(MARKER) ? MARKER : "";
+    if (!marker) return null;
     const result = {};
-    (reminder.split(MARKER, 2)[1] || "").split(";").forEach(part => {
+    (reminder.split(marker, 2)[1] || "").split(";").forEach(part => {
       const index = part.indexOf("=");
       if (index >= 0) result[part.slice(0, index)] = decode(part.slice(index + 1));
     });
+    result.stage = marker === PRECHECK_MARKER ? "bettina" : "alex";
     return result.reportId ? result : null;
   }
 
@@ -44,7 +47,8 @@
   function openButton(task, cssClass) {
     const details = meta(task);
     if (!details || task.status === "done") return "";
-    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId, task.id))}&quot;">${details.photo?'Fotos zuordnen':'Regiebericht prüfen'}</button>`;
+    const changes = details.stage === "bettina" && /ändern/i.test(String(task.title || ""));
+    return `<button type="button" class="${cssClass}" onclick="location.href=&quot;${safe(reportUrl(details.reportId, task.id))}&quot;">${details.photo?'Fotos zuordnen':changes?'Regiebericht ändern':details.stage==='bettina'?'Regiebericht vorprüfen':'Regiebericht prüfen'}</button>`;
   }
 
   function decorateRows() {
@@ -53,7 +57,7 @@
       if (!task || !meta(task)) return;
       row.classList.add("krista-regie-task-row");
       const sub = row.querySelector(".krista-task-sub");
-      if (sub) sub.textContent = meta(task).photo?'Fotoeingang · Zuordnung bestätigen':'Von Bettina / Büro · wartet auf deine Prüfung';
+      if (sub) sub.textContent = meta(task).photo?'Fotoeingang · Zuordnung bestätigen':meta(task).stage==='bettina'?(/ändern/i.test(String(task.title||''))?'Von Alex · Änderung durch Bettina':'Vom Mitarbeiter · Vorprüfung durch Bettina'):'Von Bettina / Büro · wartet auf Alex';
       const actions = row.querySelector(".krista-task-actions");
       if (!actions) return;
       actions.querySelectorAll('button[onclick*="markTaskDone"]').forEach(button => button.remove());
@@ -67,7 +71,7 @@
     const host = document.querySelector("#taskModalList .task-modal-item");
     const actions = host?.querySelector(":scope > .actions");
     if (!actions) return;
-    host.querySelectorAll(".task-detail-grid strong").forEach(value => { if (String(value.textContent || "").includes(MARKER)||String(value.textContent||"").includes("[PHOTO_INBOX]")) value.textContent = meta(task).photo?'Bitte Fotos zuordnen':'Bitte Regiebericht prüfen'; });
+    host.querySelectorAll(".task-detail-grid strong").forEach(value => { if (String(value.textContent || "").includes(MARKER)||String(value.textContent || "").includes(PRECHECK_MARKER)||String(value.textContent||"").includes("[PHOTO_INBOX]")) value.textContent = meta(task).photo?'Bitte Fotos zuordnen':meta(task).stage==='bettina'?'Bitte Regiebericht vorprüfen':'Bitte Regiebericht prüfen'; });
     actions.querySelectorAll('button[onclick*="markTaskDone"]').forEach(button => button.remove());
     if (task.status !== "done" && !actions.querySelector(".krista-regie-open")) actions.insertAdjacentHTML("beforeend", openButton(task, "krista-regie-open"));
   }

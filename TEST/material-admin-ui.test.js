@@ -33,7 +33,9 @@ assert(regie.includes("<th>Name</th><th>Von</th><th>Bis</th><th>Von</th><th>Bis<
 assert(regie.includes("emp-from-2") && regie.includes("emp-to-2"), "Der zweite Von-bis-Zeitblock ist direkt bearbeitbar");
 assert(regie.includes("Zuletzt bearbeitet") && regie.includes("slice(0,10)"), "Die letzten zehn bearbeiteten Regieberichte erscheinen als Kacheln");
 for (const text of ["Nein – ändern", "Ja – nur ablegen", "Ja – versenden", "Zur Prüfung an Alex"]) assert(regie.includes(text), `Regie-Freigabe enthält ${text}`);
+for (const text of ["Vorprüfung durch Bettina", "Geprüft · an Alex weiter", "Endprüfung durch Alex"]) assert(regie.includes(text), `Zweistufige Regie-Freigabe enthält ${text}`);
 assert(regieApproval.includes("Regiebericht prüfen") && regieApproval.includes("reportId"), "Alex kann die Freigabe-Aufgabe direkt im richtigen Regiebericht öffnen");
+assert(regieApproval.includes("[REGIE_PRECHECK]") && regieApproval.includes("Regiebericht vorprüfen"), "Bettina kann ihre Vorprüfungs-Aufgabe direkt öffnen");
 assert(topbar.includes("kristine-regie-approval.js"), "Die Regiebericht-Freigabe wird in Alex' Aufgabenliste geladen");
 const quantityFunction = regie.split(/\r?\n/).find(line => line.startsWith("function calculateQuantity"));
 const quantityContext = {};

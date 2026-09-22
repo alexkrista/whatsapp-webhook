@@ -112,6 +112,7 @@ function registerRegieAssistant(app, options) {
   }
 
   const REGIE_TASK_MARKER = "[REGIE_APPROVAL]";
+  const REGIE_PRECHECK_MARKER = "[REGIE_PRECHECK]";
   const normalizedName = value => clean(value, 180).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
   async function alexAssignee() {
@@ -121,8 +122,59 @@ function registerRegieAssistant(app, options) {
     return { id: clean(alex?.id || alex?.employeeId || "admin", 100), name: clean(alex?.name || "Alexander Krista", 180) };
   }
 
+  async function bettinaAssignee() {
+    const employees = [...await readJson(SYSTEM_EMPLOYEES, []), ...await readJson(EMPLOYEES, [])];
+    const bettina = employees.find(row => /\bbettina\b/.test(normalizedName(row?.name)));
+    return { id: clean(bettina?.id || bettina?.employeeId || "bettina-office", 100), name: clean(bettina?.name || "Bettina / Büro", 180) };
+  }
+
   function regieTaskMeta(report) {
     return `${REGIE_TASK_MARKER}reportId=${encodeURIComponent(report.id)};reportNumber=${encodeURIComponent(report.reportNumber || "")}`;
+  }
+
+  function regiePrecheckTaskMeta(report) {
+    return `${REGIE_PRECHECK_MARKER}reportId=${encodeURIComponent(report.id)};reportNumber=${encodeURIComponent(report.reportNumber || "")}`;
+  }
+
+  async function ensureRegiePrecheckTask(report) {
+    const tasks = await readJson(TASKS, []), assignee = await bettinaAssignee(), marker = `${REGIE_PRECHECK_MARKER}reportId=${encodeURIComponent(report.id)}`;
+    const now = new Date().toISOString(), existing = tasks.find(row => String(row.reminder || "").includes(marker));
+    const changesRequested = report.reviewStatus === "changes_requested";
+    const task = {
+      ...(existing || {}),
+      id: existing?.id || `regie_precheck_${safeId(report.id)}`,
+      title: `${changesRequested ? "Regiebericht ändern" : "Regiebericht vorprüfen"} · Rapport ${reportSequenceOf(report, report.jobId) || report.reportNumber || "–"}`,
+      taskType: "Prüfung",
+      priority: "heute",
+      assigneeId: assignee.id,
+      assigneeName: assignee.name,
+      jobId: report.jobId,
+      jobName: report.jobName,
+      dueDate: new Date().toISOString().slice(0, 10),
+      reminder: regiePrecheckTaskMeta(report),
+      creatorId: changesRequested ? "admin" : clean(report.createdBy?.id || "kgo", 100),
+      creatorName: changesRequested ? "Alexander Krista" : clean(report.createdBy?.name || "KGO / Mitarbeiter", 180),
+      status: "open",
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    if (existing) Object.assign(existing, task); else tasks.unshift(task);
+    await writeJson(TASKS, tasks.slice(0, 20000));
+    return task;
+  }
+
+  async function completeRegiePrecheckTask(report, decision = "forwarded") {
+    const tasks = await readJson(TASKS, []), marker = `${REGIE_PRECHECK_MARKER}reportId=${encodeURIComponent(report.id)}`, now = new Date().toISOString();
+    let changed = false;
+    for (const task of tasks.filter(row => String(row.reminder || "").includes(marker))) {
+      task.status = "done";
+      task.completedAt = now;
+      task.updatedAt = now;
+      task.regieDecision = decision;
+      changed = true;
+    }
+    if (changed) await writeJson(TASKS, tasks);
   }
 
   async function ensureRegieReviewTask(report) {
@@ -530,7 +582,8 @@ function registerRegieAssistant(app, options) {
     if (!jobId) throw new Error("Bitte eine Baustelle auswählen.");
     if (!clean(body.description || existing.description, 4000)) throw new Error("Beschreibung der Arbeit fehlt.");
     const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
-    const priceLocked = ["prepared", "completed"].includes(existing.status);
+    const precheckPending = existing.reviewStatus === "bettina_pending" || existing.processingStatus === "bettina_review";
+    const priceLocked = ["prepared", "completed"].includes(existing.status) && !precheckPending;
     const hourlyRate = Math.max(0, num(priceLocked ? existing.hourlyRate : (body.hourlyRate ?? meta.regieHourlyRate ?? 75)));
     const materialMarkup = Math.max(0, num(priceLocked ? existing.materialMarkup : (body.materialMarkup ?? meta.regieMaterialMarkup ?? 80)));
     if (!priceLocked && typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
@@ -558,8 +611,8 @@ function registerRegieAssistant(app, options) {
     const report = {
       ...existing,
       id,
-      status: priceLocked ? existing.status : (finish ? "prepared" : "draft"),
-      processingStatus: priceLocked ? existing.processingStatus : (finish ? "issued" : (existing.processingStatus || "draft")),
+      status: precheckPending ? "prepared" : (priceLocked ? existing.status : (finish ? "prepared" : "draft")),
+      processingStatus: precheckPending ? "issued" : (priceLocked ? existing.processingStatus : (finish ? "issued" : (existing.processingStatus || "draft"))),
       billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
@@ -578,14 +631,14 @@ function registerRegieAssistant(app, options) {
       createdAt: existing.createdAt || now,
       updatedAt: now,
       submittedAt: finish ? now : existing.submittedAt || null,
-      reviewStatus: finish ? "pending" : (existing.reviewStatus || "draft"),
+      reviewStatus: finish ? "pending" : (precheckPending ? "bettina_pending" : (existing.reviewStatus || "draft")),
       completedAt: existing.status === "completed" ? existing.completedAt || now : null,
     };
     report.totals = calculateTotals(report);
     report.hoursCheck = await checkHours(report,reports);
     if(body.hoursCheckConfirmed===true&&report.hoursCheck.blocked){
       report.hoursCheckConfirmedAt=now;
-      report.hoursCheckConfirmedBy="Alexander Krista";
+      report.hoursCheckConfirmedBy=precheckPending?"Bettina / Büro":"Alexander Krista";
       report.hoursCheckConfirmationKey=hoursCheckKey(report.hoursCheck);
     }
     report.hoursCheck.accepted=hoursCheckAccepted(report,report.hoursCheck);
@@ -603,6 +656,7 @@ function registerRegieAssistant(app, options) {
     }
     if (finish) {
       await ensureRegieReviewTask(report);
+      await completeRegiePrecheckTask(report, "forwarded_to_alex");
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
         type: "regie_report_submitted",
@@ -794,6 +848,7 @@ function registerRegieAssistant(app, options) {
       const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
       if (!report) return res.status(404).json({ ok: false, error: "Regiebericht nicht gefunden" });
       if (report.status !== "prepared" || report.processingStatus !== "issued") return res.status(409).json({ ok: false, error: "Dieser Regiebericht wartet nicht auf Freigabe." });
+      if (report.reviewStatus === "bettina_pending") return res.status(409).json({ ok: false, error: "Der Regiebericht muss zuerst von Bettina vorgeprüft und an Alex weitergegeben werden." });
       const decision = clean(req.body?.decision, 30), now = new Date().toISOString();
       if (!['changes', 'archive'].includes(decision)) return res.status(400).json({ ok: false, error: "Bitte Ändern oder Nur ablegen auswählen." });
       if (decision === "archive") await enforceHours(report,reports);
@@ -815,6 +870,7 @@ function registerRegieAssistant(app, options) {
       }
       await writeJson(REPORTS, reports);
       await completeRegieReviewTask(report, decision, req.body?.taskId);
+      if (decision === "changes") await ensureRegiePrecheckTask(report);
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(report.jobId, {
         type: decision === "changes" ? "regie_changes_requested" : "regie_report_approved",
@@ -836,6 +892,7 @@ function registerRegieAssistant(app, options) {
       const allowedBilling = ["open", "billed"];
       if (processing && !allowedProcessing.includes(processing)) return res.status(400).json({ ok: false, error: "Ungültiger Bearbeitungsstatus" });
       if (billing && !allowedBilling.includes(billing)) return res.status(400).json({ ok: false, error: "Ungültiger Abrechnungsstatus" });
+      if (["approved", "sent", "signed"].includes(processing) && report.reviewStatus === "bettina_pending") return res.status(409).json({ ok: false, error: "Der Regiebericht muss zuerst von Bettina vorgeprüft und an Alex weitergegeben werden." });
       if (["approved","sent","signed"].includes(processing) || billing === "billed") await enforceHours(report,reports);
       if (processing) report.processingStatus = processing;
       if (billing) report.billingStatus = billing;
@@ -914,6 +971,7 @@ function registerRegieAssistant(app, options) {
       }
       if(typeof writeDocumentation==='function')await writeDocumentation(report.jobId,documentation.filter(row=>row.id!=='regie-office-'+id));
       await completeRegieReviewTask(report,'deleted');
+      await completeRegiePrecheckTask(report,'deleted');
       if(typeof appendJobHistory==='function')await appendJobHistory(report.jobId,{type:'regie_report_deleted',title:'Regiebericht '+report.reportNumber+' gelöscht',detail:'Fehleingabe / keine Regie',data:{reportId:id}});
       res.json({ ok: true, deleted: id });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
@@ -984,6 +1042,8 @@ function registerRegieAssistant(app, options) {
         materialMarkup: round(Math.max(0, num(meta.regieMaterialMarkup ?? 80))),
         createdAt: existing?.createdAt || now,
         updatedAt: now,
+        submittedAt: draft ? (existing?.submittedAt || null) : now,
+        reviewStatus: draft ? (existing?.reviewStatus || "draft") : "bettina_pending",
       };
       report.attachments = await saveAttachments(report.id, body.uploads, existing?.attachments || []);
       report.photos = report.attachments.filter(file => String(file.type || "").startsWith("image/"));
@@ -1002,7 +1062,7 @@ function registerRegieAssistant(app, options) {
         storeInDayRegie(report),
         storeInJobFile(report),
       ]);
-      if (!draft) await ensureRegieReviewTask(report);
+      if (!draft) await ensureRegiePrecheckTask(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
         type: draft ? "regie_report_draft_saved" : "regie_report_issued",
         title: draft ? `Regiebericht ${report.reportNumber} als Entwurf gespeichert` : `Regiebericht ${report.reportNumber} ausgestellt`,
@@ -1010,7 +1070,7 @@ function registerRegieAssistant(app, options) {
         source: "KGO",
         data: { reportId: report.id, processingStatus: report.processingStatus, billingStatus: "open" },
       }).catch(() => {});
-      res.json({ ok: true, report, message: draft ? "Regiebericht ist gespeichert und kann später fertig gemacht werden." : "Regiebericht ist ausgestellt und liegt bei Alex zur Prüfung." });
+      res.json({ ok: true, report, message: draft ? "Regiebericht ist gespeichert und kann später fertig gemacht werden." : "Regiebericht ist ausgestellt und liegt bei Bettina zur Vorprüfung." });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
   app.get("/kristine/api/regie/confirmations", async (req, res) => { const employeeId = clean(req.query.employeeId, 100); const rows = await readJson(CONFIRMATIONS, []); res.json({ ok: true, items: rows.filter(row => row.employeeId === employeeId && row.status === "open") }); });

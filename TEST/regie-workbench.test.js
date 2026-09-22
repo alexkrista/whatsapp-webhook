@@ -134,8 +134,9 @@ function invoke(handler, req) {
   const resubmittedSecond = await invoke(save, { body: { ...changesRequested.body.report, description: "Beschreibung ergänzt", finish: true } });
   assert.equal(resubmittedSecond.body.report.status, "prepared");
   reviewTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
-  assert.equal(reviewTasks.filter(task => task.reminder.includes(`reportId=${second.body.report.id}`)).length, 1, "Erneutes Einreichen darf keine doppelte Aufgabe erzeugen");
-  assert.equal(reviewTasks.find(task => task.reminder.includes(`reportId=${second.body.report.id}`)).status, "open");
+  assert.equal(reviewTasks.filter(task => task.reminder.includes("[REGIE_APPROVAL]") && task.reminder.includes(`reportId=${second.body.report.id}`)).length, 1, "Erneutes Einreichen darf keine doppelte Alex-Aufgabe erzeugen");
+  assert.equal(reviewTasks.find(task => task.reminder.includes("[REGIE_APPROVAL]") && task.reminder.includes(`reportId=${second.body.report.id}`)).status, "open");
+  assert.equal(reviewTasks.find(task => task.reminder.includes("[REGIE_PRECHECK]") && task.reminder.includes(`reportId=${second.body.report.id}`)).status, "done", "Bettinas Änderungsaufgabe wird bei der Weitergabe abgeschlossen");
   await invoke(review, { params: { id: second.body.report.id }, body: { decision: "changes" } });
 
   const remove = routes.get("DELETE /kristine/api/regie-reports/:id");
@@ -228,7 +229,19 @@ function invoke(handler, req) {
   const completedDraft = await invoke(issue, { body: { ...mobileDraftBody, id: mobileDraft.body.report.id, draft: false, description: "Regie fertig" } });
   assert.equal(completedDraft.body.report.id, mobileDraft.body.report.id);
   assert.equal(completedDraft.body.report.processingStatus, "issued");
+  assert.equal(completedDraft.body.report.reviewStatus, "bettina_pending");
   assert.equal(completedDraft.body.report.materials[1].unknownMaterialId, "unknown_test_1");
+  let stagedTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  const bettinaTask = stagedTasks.find(task => task.reminder.includes("[REGIE_PRECHECK]") && task.reminder.includes(`reportId=${completedDraft.body.report.id}`));
+  assert.equal(bettinaTask.assigneeName, "Bettina / Büro");
+  assert.equal(bettinaTask.status, "open");
+  const prematureAlexReview = await invoke(review, { params: { id: completedDraft.body.report.id }, body: { decision: "archive" } });
+  assert.equal(prematureAlexReview.statusCode, 409, "Alex darf Bettinas Vorprüfung nicht überspringen");
+  const completedForAlex = await invoke(save, { body: { ...completedDraft.body.report, finish: true } });
+  assert.equal(completedForAlex.body.report.reviewStatus, "pending");
+  stagedTasks = JSON.parse(fs.readFileSync(reviewTasksFile, "utf8"));
+  assert.equal(stagedTasks.find(task => task.id === bettinaTask.id).status, "done");
+  assert.equal(stagedTasks.find(task => task.reminder.includes("[REGIE_APPROVAL]") && task.reminder.includes(`reportId=${completedDraft.body.report.id}`)).assigneeName, "Alexander Krista");
   const completedDay = JSON.parse(fs.readFileSync(path.join(temporaryRoot, "26098", "2026", "09", "03", "regie.json"), "utf8"));
   assert.equal(completedDay.status, "Ausgestellt");
   assert.equal(completedDay.materials.filter(row => row.reportId === mobileDraft.body.report.id).length, 2);
@@ -250,6 +263,9 @@ function invoke(handler, req) {
   assert.equal((await uploadOne(photos[9])).body.report.status, "draft");
   const issuedField = (await invoke(issue, { body: { ...fieldBody, id: field.id, draft: false } })).body.report;
   assert.equal(issuedField.attachments.length, 10);
+  assert.equal(issuedField.reviewStatus, "bettina_pending");
+  const forwardedField = (await invoke(save, { body: { ...issuedField, finish: true } })).body.report;
+  assert.equal(forwardedField.reviewStatus, "pending");
   const retryField = (await invoke(issue, { body: { ...fieldBody, id: field.id, draft: true } })).body.report;
   assert.equal(retryField.id, field.id);
   assert.equal(retryField.status, "prepared", "Lost final response cannot create another report");
@@ -295,6 +311,11 @@ function invoke(handler, req) {
   assert.equal(issuedReview.jobId, "26097");
 
   const changeStatus = routes.get("POST /kristine/api/regie-reports/:id/status");
+  assert.equal(issued.body.report.reviewStatus, "bettina_pending");
+  const blockedBeforeBettina = await invoke(changeStatus, { params: { id: issued.body.report.id }, body: { processingStatus: "approved", billingStatus: "open" } });
+  assert.equal(blockedBeforeBettina.statusCode, 409);
+  const issuedForAlex = await invoke(save, { body: { ...issued.body.report, finish: true } });
+  assert.equal(issuedForAlex.body.report.reviewStatus, "pending");
   const approved = await invoke(changeStatus, { params: { id: issued.body.report.id }, body: { processingStatus: "approved", billingStatus: "open" } });
   assert.equal(approved.statusCode, 200);
   assert.equal(approved.body.report.status, "completed");
