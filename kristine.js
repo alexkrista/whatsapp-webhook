@@ -2,6 +2,7 @@
 "use strict";
 const { upFromJobId } = require("./up-reasons");
 const { normalizeOfficeTimeRow, normalizeOfficeTimeData } = require("./office-time");
+const { clampStartTime } = require("./morning-status");
 
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -366,23 +367,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
   }
 
-function clampOfficialStart(actualTime) {
-  const actual = minutesFromHM(actualTime);
-  if (actual === null) return actualTime;
-
-  const official = 7 * 60;
-  const tolerance = 15;
-
-  if (actual < official) return "07:00";
-  if (actual <= official + tolerance) return "07:00";
-
-  return actualTime;
-}
-
   async function officialStartForEmployee(employeeId, actualTime) {
     const rules = await readJson(EMPLOYEE_WORK_RULES, {});
     const activityMode = rules?.[String(employeeId)]?.activityMode || "productive";
-    return activityMode === "productive" ? clampOfficialStart(actualTime) : actualTime;
+    return activityMode === "productive" ? clampStartTime(actualTime) : actualTime;
   }
 
   async function appendTimeEvent(event) {
@@ -712,6 +700,56 @@ const intent = rawText.startsWith("task_call:")
       });
       state.timeline = state.timeline.slice(-200);
     };
+
+    const automaticPrompt = state.automaticWorktimePrompt;
+    if (
+      intent === "no" &&
+      automaticPrompt?.date === today &&
+      ["lunch", "finish"].includes(automaticPrompt.phase)
+    ) {
+      const expectedType = automaticPrompt.phase === "lunch" ? "mittag" : "ende";
+      const automaticStillActive =
+        String(lastTimeEvent?.type || "").toLowerCase() === expectedType &&
+        lastTimeEvent?.source === "automatic_worktime" &&
+        String(lastTimeEvent?.at || "") === String(automaticPrompt.eventAt || "");
+      delete state.automaticWorktimePrompt;
+      if (!automaticStillActive) {
+        await saveState();
+        return {
+          reply: "Die automatische Buchung wurde bereits geändert. Bitte die nächste Zeitaktion selbst stempeln.",
+          buttons: [],
+          state,
+        };
+      }
+      const correctionAt = String(automaticPrompt.eventAt || actualTime);
+      state.mode = "working";
+      state.pending = null;
+      addTimeline(
+        automaticPrompt.phase === "lunch" ? "automatic_lunch_declined" : "automatic_finish_declined",
+        automaticPrompt.phase === "lunch" ? "Automatisches Mittag abgelehnt" : "Automatischen Feierabend abgelehnt",
+        current
+      );
+      const automaticIndex = timeEvents.indexOf(lastTimeEvent);
+      if (automaticIndex >= 0) timeEvents.splice(automaticIndex, 1);
+      await writeJson(TIME_EVENTS, timeEvents.slice(-20000));
+      await appendEvent({
+        type: automaticPrompt.phase === "lunch" ? "automatic_lunch_declined" : "automatic_finish_declined",
+        employeeId,
+        employeeName: state.employeeName,
+        date: today,
+        jobId: lastTimeEvent?.jobId || current?.jobId || null,
+        time: correctionAt,
+        source: "employee",
+      });
+      await saveState();
+      return {
+        reply: automaticPrompt.phase === "lunch"
+          ? "Okay, Mittag um 12:00 wurde aufgehoben. Bitte nicht vergessen, deine Mittagspause später selbst zu stempeln."
+          : "Okay, Feierabend um 17:00 wurde aufgehoben. Bitte später selbst „Ende“ stempeln.",
+        buttons: [],
+        state,
+      };
+    }
 
     // Pending questions have priority.
     if (state.pending?.type === "confirm_assignment") {
