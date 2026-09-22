@@ -78,11 +78,28 @@ class OutgoingStoreTests(unittest.TestCase):
         summary = self.store.regie_preset(run["id"], {"kind": "RE", "mode": "summary", "days": [report]})
         self.assertEqual(summary["incrementNet"], 325.2)
         self.assertEqual(summary["progressBilling"]["regieBillingMode"], "summary")
+        self.assertEqual(summary["progressBilling"]["regieToInvoice"], 325.2)
         self.assertEqual(summary["lines"][0]["unitPrice"], 325.2)
         detail = self.store.regie_preset(run["id"], {"kind": "RE", "mode": "days", "days": [report]})
         self.assertEqual(detail["progressBilling"]["reportIdsToBill"], ["regie-1"])
         self.assertIn("Wohnzimmer", [row["description"] for row in detail["lines"]])
         self.assertEqual(sum(row["quantity"] * row["unitPrice"] for row in detail["lines"]), 325.2)
+
+        payload = self.payload(kind="RE", issue_date="2026-09-21")
+        payload.update({
+            "runId": run["id"], "dueDate": "2026-10-05",
+            "serviceFrom": detail["serviceFrom"], "serviceTo": detail["serviceTo"],
+            "lines": detail["lines"], "progressBilling": detail["progressBilling"],
+        })
+        draft = self.store.save_draft(payload)
+        edited_lines = [dict(row) for row in detail["lines"]]
+        charge = next(row for row in edited_lines if row["quantity"] and row["unitPrice"])
+        charge["unitPrice"] = 300
+        payload["lines"] = edited_lines
+        draft = self.store.save_draft(payload, draft["id"])
+        issued = self.store.prepare_issue(draft["id"])
+        self.assertTrue(issued["progressBilling"]["regieAmountAdjusted"])
+        self.assertNotEqual(issued["progressBilling"]["regieToInvoice"], 325.2)
 
     def test_tower_billing_documents_are_loaded_for_many_projects_at_once(self):
         issued = self.store.prepare_issue(self.store.save_draft(self.payload(amount="2500"))["id"])

@@ -1198,6 +1198,7 @@ class OutgoingStore:
             "version": "20260922-regie-invoice-1", "kind": kind,
             "jobId": str(run.get("project_number") or ""),
             "regieBillingMode": mode,
+            "regieToInvoice": total,
             "regieSummary": {"days": clean_days, "total": total},
             "reportIdsToBill": [row["id"] for row in clean_days if row["id"]],
             "baseline": {"complete": True, "hasClosingInvoice": False,
@@ -2120,8 +2121,20 @@ class OutgoingStore:
             lines = list(con.execute("SELECT * FROM outgoing_lines WHERE invoice_id=? ORDER BY line_no", (row["id"],)))
             if progress and progress.get("reportIdsToBill"):
                 regie_in_invoice = sum((_d(line["net"]) for line in lines if line["billing_component"] == "regie"), Decimal("0"))
-                if _money(regie_in_invoice) != _money(progress.get("regieToInvoice")):
-                    raise ValueError("Die Regieposition wurde nach dem Vorschlag geändert. Bitte den Abrechnungsvorschlag in der Baustelle neu öffnen.")
+                actual_regie = _money(regie_in_invoice)
+                proposed_regie = _money(
+                    progress.get("regieToInvoice")
+                    if progress.get("regieToInvoice") is not None
+                    else (progress.get("regieSummary") or {}).get("total")
+                )
+                if actual_regie != proposed_regie:
+                    progress["originalRegieToInvoice"] = float(proposed_regie)
+                    progress["regieAmountAdjusted"] = True
+                progress["regieToInvoice"] = float(actual_regie)
+                con.execute(
+                    "UPDATE outgoing_invoices SET progress_billing_json=?,updated_at=? WHERE id=?",
+                    (_json(progress), _now(), int(invoice_id)),
+                )
             if row["kind"] in {"ST", "GS"}:
                 totals = {
                     "vatRate": _d(row["vat_rate"]), "lineSubtotalNet": _d(row["line_subtotal_net"]),
