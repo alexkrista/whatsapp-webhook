@@ -18,10 +18,26 @@ function secureEqual(a, b) {
   const bb = Buffer.from(String(b || ""));
   return aa.length === bb.length && aa.length > 0 && crypto.timingSafeEqual(aa, bb);
 }
-function requireAdmin(req, res) {
+function requestCookies(req) {
+  return Object.fromEntries(String(req.headers?.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
+}
+function browserSession() {
+  return ADMIN_TOKEN ? crypto.createHmac("sha256", ADMIN_TOKEN).update("kristine-browser-session-v1").digest("base64url") : "";
+}
+function rememberBrowser(res, session) {
+  const cookie = `kristine_session=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
+  if (typeof res.append === "function") res.append("Set-Cookie", cookie);
+  else res.setHeader("Set-Cookie", cookie);
+}
+function requireAdmin(req, res, options = {}) {
   if (!ADMIN_TOKEN) { res.status(503).json({ok:false,error:"ADMIN_TOKEN fehlt"}); return false; }
   const token = String(req.headers["x-admin-token"] || req.query?.token || "");
-  if (!secureEqual(token, ADMIN_TOKEN)) { res.status(403).json({ok:false,error:"Forbidden"}); return false; }
+  const session = browserSession();
+  const cookies = requestCookies(req);
+  const validToken = secureEqual(token, ADMIN_TOKEN);
+  const validSession = options.allowBrowserSession === true && secureEqual(cookies.kristine_session, session);
+  if (!validToken && !validSession) { res.status(403).json({ok:false,error:"Forbidden"}); return false; }
+  if (validToken && options.rememberBrowser === true && !secureEqual(cookies.kristine_session, session)) rememberBrowser(res, session);
   return true;
 }
 async function ensureRoot(){ await fsp.mkdir(ROOT,{recursive:true}); }
@@ -142,10 +158,10 @@ function installRoutes(app){
     catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
   app.get("/kristine/api/access-status",async(req,res)=>{
-    if(!requireAdmin(req,res))return;
+    if(!requireAdmin(req,res,{allowBrowserSession:true,rememberBrowser:true}))return;
     try{res.json(await statusPayload())}catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
-  app.get("/admin/systemstatus",(req,res)=>{if(!requireAdmin(req,res))return;res.type("html").send(systemStatusHtml())});
+  app.get("/admin/systemstatus",(req,res)=>{if(!requireAdmin(req,res,{allowBrowserSession:true}))return;res.type("html").send(systemStatusHtml())});
   console.log("KRISTINE Zutritt Cloud Bridge V3 aktiv");
 }
 const expressPath=require.resolve("express"),originalExpress=require(expressPath);
