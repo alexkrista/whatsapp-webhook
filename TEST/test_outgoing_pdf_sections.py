@@ -8,6 +8,47 @@ from brain_outgoing_pdf import render_invoice_pdf
 
 
 class OutgoingPdfSectionTests(unittest.TestCase):
+    def test_company_recipient_prints_contact_as_attention_line(self):
+        invoice = {
+            "kind": "RE",
+            "issue_date": "2026-09-22",
+            "due_date": "2026-10-06",
+            "service_from": "2026-09-01",
+            "service_to": "2026-09-22",
+            "subject": "Regiearbeiten",
+            "run": {
+                "project_number": "26097",
+                "customer_company": "Vplus GmbH",
+                "customer_name": "Street-smart Heller KG",
+                "customer_street": "Färbergasse 15",
+                "customer_postal_code": "6850",
+                "customer_city": "Dornbirn",
+            },
+            "lines": [
+                {"description": "Regiearbeiten", "quantity": 1, "unit": "PA", "unit_price": 100, "net": 100},
+            ],
+            "line_subtotal_net": 100,
+            "cumulative_net": 100,
+            "vat_rate": 20,
+            "cumulative_vat": 20,
+            "cumulative_gross": 120,
+            "open_after_discount": 120,
+        }
+        settings = {
+            "company_name": "Farben Krista GmbH & Co KG",
+            "company_street": "Feldkircherstraße 45",
+            "company_postal_city": "A 6820 Frastanz",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "recipient.pdf"
+            render_invoice_pdf(invoice, settings, target)
+            with pdfplumber.open(target) as pdf:
+                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+        expected = ["Vplus GmbH", "z. H. Street-smart Heller KG", "Färbergasse 15", "6850 Dornbirn"]
+        positions = [text.index(line) for line in expected]
+        self.assertEqual(positions, sorted(positions))
+
     def test_mixed_order_and_regie_invoice_has_category_totals_and_breakdown(self):
         invoice = {
             "kind": "RE",

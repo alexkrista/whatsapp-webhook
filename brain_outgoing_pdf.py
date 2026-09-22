@@ -56,6 +56,33 @@ def _single_line(value, limit):
     return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())[:limit]
 
 
+def _recipient_lines(run):
+    """Return the postal recipient in the order used on invoices and reminders."""
+    company = _single_line(run.get("customer_company"), 120)
+    raw_names = run.get("customer_name_lines")
+    if not isinstance(raw_names, list):
+        raw_names = [run.get("customer_name") or ""]
+    names = [_single_line(name, 120) for name in raw_names]
+    names = [name for name in names if name and name.casefold() != company.casefold()]
+    if company and names:
+        names[0] = f"z. H. {names[0]}"
+    postal_city = " ".join(
+        value for value in [
+            _single_line(run.get("customer_postal_code"), 20),
+            _single_line(run.get("customer_city"), 80),
+        ] if value
+    )
+    return [
+        line for line in [
+            company,
+            *names,
+            _single_line(run.get("customer_street"), 120),
+            postal_city,
+            _single_line(run.get("customer_country"), 80),
+        ] if line
+    ]
+
+
 def _epc_payment_payload(invoice, settings, amount=None):
     """Build an EPC069-12 v3.1 SEPA payment payload for an issued invoice."""
     number = _single_line(invoice.get("invoice_number") or invoice.get("invoiceNumber"), 100)
@@ -194,12 +221,7 @@ def render_invoice_pdf(invoice, settings, destination):
         if doc.page == 1:
             _draw_krista_wordmark(canvas, height, target_x=350.0 + (18-first["rightMm"])*mm - (first["logoWidthMm"]-69.85)*mm, target_w=198.0 + (first["logoWidthMm"]-69.85)*mm)
 
-            customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
-            recipient = [
-                run.get("customer_company") or "", *customer_names, run.get("customer_street") or "",
-                " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
-                run.get("customer_country") or "",
-            ]
+            recipient = _recipient_lines(run)
             canvas.setFillColor(colors.black)
             canvas.setFont(regular_font, font_size)
             y = height - 168 - (first["addressTopMm"]-59.27)*mm
@@ -696,13 +718,7 @@ def render_dunning_pdf(dunning, settings, destination):
     def page(canvas, doc):
         canvas.saveState()
         _draw_krista_wordmark(canvas, height)
-        customer_names = run.get("customer_name_lines") if isinstance(run.get("customer_name_lines"), list) else [run.get("customer_name") or ""]
-        recipient = [
-            run.get("customer_company") or "", *customer_names,
-            run.get("customer_street") or "",
-            " ".join(x for x in [run.get("customer_postal_code") or "", run.get("customer_city") or ""] if x),
-            run.get("customer_country") or "",
-        ]
+        recipient = _recipient_lines(run)
         canvas.setFont(regular_font, 9.92)
         y = height - 168
         for line in (x for x in recipient if x):
