@@ -153,6 +153,29 @@ function view(record) {
   }
   return row;
 }
+function linkTripEndpoints(rows) {
+  for (let i = 1; i < rows.length; i++) {
+    const before = rows[i - 1], after = rows[i];
+    const gap = Date.parse(after.startedAt) - Date.parse(before.closedAt);
+    // Only adjacent recorded trips of this vehicle are linked. Never derive
+    // a private destination from a neighboring business trip or vice versa.
+    if (gap < 0 || before.category === "private" || after.category === "private") continue;
+    const oldEnd = before.endLocation, oldStart = after.startLocation;
+    if (!oldEnd && oldStart) {
+      before.endLocation = oldStart;
+      before.endPoint = after.startPoint;
+      before.inferredEnd = true;
+      if (before.startLocation) before.missing = before.missing.filter(item => item !== "Start/Ziel");
+    }
+    if (!oldStart && oldEnd) {
+      after.startLocation = oldEnd;
+      after.startPoint = before.endPoint;
+      after.inferredStart = true;
+      if (after.endLocation) after.missing = after.missing.filter(item => item !== "Start/Ziel");
+    }
+  }
+  return rows;
+}
 function totals(rows) {
   return rows.reduce((sum, row) => {
     const value = row.distanceKm || 0;
@@ -323,7 +346,8 @@ function registerKrisdriveLogbook(app, options = {}) {
     const ctx = await context(vehicleId);
     const warning = await sync(ctx, range, query.refresh === "1");
     const state = await stateFor(vehicleId);
-    const rows = Object.values(state.records).map(view).filter(row => day(row.startedAt) >= range.from && day(row.startedAt) <= range.to).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const rows = linkTripEndpoints(Object.values(state.records).map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt)))
+      .filter(row => day(row.startedAt) >= range.from && day(row.startedAt) <= range.to);
     return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
   const api = "/kristine/api/krisdrive/logbook";
@@ -388,7 +412,7 @@ function createCsv(data) {
     ["Zeitraum", data.range.from, data.range.to, "Stand", displayDate(data.generatedAt)],
     ["GPS-Abruf", data.warning || "Aktuell", "Letzter Abruf", displayDate(data.lastSync)],
     ["Beginn", "Ende", "Fahrer", "Fahrtart", "Start", "Ziel", "Zweck / Kunde / Baustelle", "km Beginn (Tracker/Korrektur)", "km Ende (Tracker/Korrektur)", "Kilometer", "Zu ergänzen", "Geändert am"],
-    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", categoryLabel(row.category), row.category === "private" ? "" : row.startLocation, row.category === "private" ? "" : row.endLocation, row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
+    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", categoryLabel(row.category), row.category === "private" ? "" : row.startLocation + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : row.endLocation + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
     [], ["Summe km", decimal(data.totals.km)], ["Geschäftlich km", decimal(data.totals.businessKm)], ["Privat km", decimal(data.totals.privateKm)], ["Nicht zugeordnet km", decimal(data.totals.unassignedKm)], ["Fahrten ohne Kilometerangabe", data.totals.missingKm],
   ];
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
