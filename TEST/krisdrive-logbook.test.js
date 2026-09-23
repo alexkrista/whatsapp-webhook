@@ -152,3 +152,26 @@ test("old saved coordinate labels resolve in the page and exports even when GPS 
   assert.match(csv, /Schmittengasse, Frastanz/);
   assert.match(csv, /Torkelgässele, Rankweil/);
 });
+
+test("adjacent trips supply missing start and end in both directions across midnight", async t => {
+  const h = await harness(t);
+  h.state.trips = [
+    trip({ startPositionId: 201, startTime: "2026-09-21T20:00:00Z", endTime: "2026-09-21T20:30:00Z", endAddress: "Schmittengasse, Frastanz" }),
+    trip({ startPositionId: 202, startTime: "2026-09-22T06:00:00Z", endTime: "2026-09-22T06:30:00Z", startAddress: "", endAddress: "", startLat: null, startLon: null, endLat: null, endLon: null }),
+    trip({ startPositionId: 203, startTime: "2026-09-22T07:00:00Z", endTime: "2026-09-22T07:30:00Z", startAddress: "Torkelgässele, Rankweil" }),
+  ];
+  const rows = (await (await h.get()).json()).rows;
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[0].endLocation, "Torkelgässele, Rankweil");
+  assert.equal(rows[0].inferredStart, true);
+  assert.equal(rows[0].inferredEnd, true);
+  assert.ok(!rows[0].missing.includes("Start/Ziel"));
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.match(csv, /aus vorheriger Fahrt/);
+  assert.match(csv, /aus nächster Fahrt/);
+  const privateRow = (await h.patch(rows[0], { category: "private" })).status;
+  assert.equal(privateRow, 200);
+  const hidden = (await (await h.get()).json()).rows[0];
+  assert.equal(hidden.startLocation, ""); assert.equal(hidden.endLocation, "");
+});
