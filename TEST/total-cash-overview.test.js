@@ -13,6 +13,8 @@ assert(page.includes("line('Gesamt-Cash'"));
 assert(page.includes("await renderLiquidity(data)"));
 assert(page.includes('Promise.allSettled'));
 assert(page.includes("line('Bekannter Cash · unvollständig'"));
+assert(page.includes("timed('/incoming/revolut-personal/status',25000)"));
+assert(page.includes("Revolut · Buchungen anzeigen"));
 assert(page.includes('revolut-transfer-prepare'));
 assert(revolut.includes('@app.get("/revolut/balances")'));
 assert(revolut.includes('totals={key: format(value, ".2f")'));

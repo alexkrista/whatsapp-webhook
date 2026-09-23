@@ -237,20 +237,30 @@ async function renderLiquidity(bank){
  const totals={};let complete=!!bank.accounts?.length;
  for(const a of bank.accounts||[]){if(a.error||a.expected===null){complete=false;continue;}try{totals[a.currency]=(totals[a.currency]||0n)+cents(a.expected);}catch(e){complete=false;}}
  line('Bankkonten · erwartet',complete?Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '):'Nicht vollständig verfügbar');
- async function timed(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');return d;}catch(e){if(e.name==='AbortError')throw Error('Zeitlimit erreicht');throw e;}finally{clearTimeout(timer);}}
- const [businessResult,privateResult,cashResult]=await Promise.allSettled([timed('/revolut/balances'),timed('/controlling/import/balances'),timed('/incoming/kassa/book/balance')]);
+ async function timed(url,limit=6000){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),limit);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');return d;}catch(e){if(e.name==='AbortError')throw Error('Zeitlimit erreicht');throw e;}finally{clearTimeout(timer);}}
+ const [businessResult,privateResult,cashResult,enableResult]=await Promise.allSettled([timed('/revolut/balances'),timed('/controlling/import/balances'),timed('/incoming/kassa/book/balance'),timed('/incoming/revolut-personal/status',25000)]);
  let revolut=null;
  if(businessResult.status==='fulfilled'){revolut=businessResult.value;try{const visibleRevolut=Object.entries(revolut.totals||{}).filter(([c,v])=>c==='EUR'||cents(v)!==0n);
    line('Revolut Business',visibleRevolut.length?visibleRevolut.map(([c,v])=>money(v,c)).join(' · '):money('0.00','EUR')+(revolut.stale?' · letzter bekannter Stand':''));
    for(const [currency,value] of visibleRevolut)totals[currency]=(totals[currency]||0n)+cents(value);if(revolut.stale)complete=false;
   }catch(e){complete=false;line('Revolut Business','Ungültiger Bestand');}
  }else{complete=false;line('Revolut Business','Nicht verfügbar · '+businessResult.reason.message);}
- if(privateResult.status==='fulfilled'){try{const d=privateResult.value;if(!Array.isArray(d.accounts))throw Error('Abruf fehlgeschlagen');
+ const enable=enableResult.status==='fulfilled'?enableResult.value:null;
+ const enableBalances=enable?.connected?enable.balances||[]:[];
+ if(enableBalances.length){try{
+  const preferred=enableBalances.filter(a=>a.type==='CLAV'||a.type==='ITAV');
+  const balances=preferred.length?preferred:enableBalances;
+  const used=new Set();
+  for(const a of balances){if(used.has(a.currency))continue;used.add(a.currency);const value=cents(a.amount);line('Revolut',money(decimal(value),a.currency)+' · Stand '+bankDate(a.date||enable.updatedAt)+(enable.syncError?' · letzter bekannter Stand':''));totals[a.currency]=(totals[a.currency]||0n)+value;}
+  if(enable.syncError)complete=false;
+ }catch(e){complete=false;line('Revolut','Ungültiger Bestand');}
+ }else if(privateResult.status==='fulfilled'){try{const d=privateResult.value;if(!Array.isArray(d.accounts))throw Error('Abruf fehlgeschlagen');
   const privateAccounts=d.accounts.filter(a=>/revolut/i.test(String(a.name||''))&&!/business/i.test(String(a.name||'')));
   if(!privateAccounts.length){complete=false;line('Revolut','Bestand noch nicht verfügbar');}
   for(const a of privateAccounts){if(a.amount===null){complete=false;line('Revolut','Bestand fehlt');continue;}if(!Number.isSafeInteger(a.amount))throw Error('Ungültiger Bestand');line('Revolut',money(decimal(BigInt(a.amount)),a.currency)+' · Stand '+bankDate(a.date));totals[a.currency]=(totals[a.currency]||0n)+BigInt(a.amount);}
   }catch(e){complete=false;line('Revolut','Ungültiger Bestand');}
  }else{complete=false;line('Revolut','Bestand noch nicht verfügbar');}
+ const revolutLink=document.createElement('a');revolutLink.className='bank-action';revolutLink.href='/incoming/revolut-personal';revolutLink.textContent=enable?.connected?'Revolut · Buchungen anzeigen →':'Revolut verbinden →';card.append(revolutLink);
  if(cashResult.status==='fulfilled'){const d=cashResult.value;try{if(d.balance===null||d.balance===undefined){complete=false;line('Kassastand','Bestand fehlt · Excel importieren / Anfangsbestand angeben');}else{const value=BigInt(d.balance);totals.EUR=(totals.EUR||0n)+value;line('Kassastand',money(decimal(value),'EUR')+' · Import '+stamp(d.lastImport));}}catch(e){complete=false;line('Kassastand','Ungültiger Importbestand');}}
  else{complete=false;line('Kassastand','Importbestand nicht verfügbar');}
  const known=Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · ')||'Keine Bestände verfügbar';

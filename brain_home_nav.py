@@ -170,7 +170,7 @@ def install(ns):
     accounts.row.appendChild(revolut);
 
     const personal=revolut.cloneNode(true);
-    personal.id='modeRevolutPersonal';personal.textContent='💳 Revolut Privat';
+    personal.id='modeRevolutPersonal';personal.textContent='💳 Revolut';
     personal.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut-personal'});
     accounts.row.appendChild(personal);
 
