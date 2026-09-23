@@ -4,12 +4,14 @@ const fs = require("fs/promises");
 const path = require("path");
 const expressPath = require.resolve("express");
 const originalExpress = require(expressPath);
+const { registerKrisdriveLogbook, trackerMileage, coordinates } = require("./krisdrive-logbook");
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function numberOrNull(value) {
+  if (value === null || value === undefined || typeof value === "boolean" || String(value).trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -31,6 +33,7 @@ function wrappedExpress(...args) {
   const traccarToken = String(process.env.TRACCAR_TOKEN || "").trim();
 
   const requireAdmin = require("./admin-auth").requireAdmin;
+  registerKrisdriveLogbook(app, { dataDir, express: originalExpress });
 
   async function readJson(file, fallback) {
     try {
@@ -119,7 +122,7 @@ function wrappedExpress(...args) {
         const attrs = position?.attributes && typeof position.attributes === "object" ? position.attributes : {};
         const speedKmh = numberOrNull(position?.speed) === null ? null : Math.max(0, Number(position.speed) * 1.852);
         const ignition = boolish(attrs.ignition);
-        const odometerRaw = attrs.totalDistance ?? attrs.totalMileage ?? attrs.odometer ?? null;
+        const mileage = trackerMileage(attrs);
         const battery = attrs.batteryLevel ?? attrs.battery ?? null;
         const fuel = attrs.fuel ?? attrs.fuelLevel ?? null;
         const lastSeen = position?.fixTime || position?.deviceTime || position?.serverTime || device?.lastUpdate || null;
@@ -155,7 +158,10 @@ function wrappedExpress(...args) {
             lastSeen,
             battery: numberOrNull(battery),
             fuel: numberOrNull(fuel),
-            odometerRaw: numberOrNull(odometerRaw),
+            odometerRaw: mileage.raw,
+            odometerKm: mileage.km,
+            odometerLabel: mileage.label,
+            odometerSource: mileage.source,
             attributes: attrs,
           } : null,
           driver: session?.driver || null,
@@ -175,7 +181,7 @@ function wrappedExpress(...args) {
         traccarConfigured: Boolean(traccarBaseUrl && traccarToken),
         traccarError,
         vehicleCount: rows.length,
-        liveCount: rows.filter(row => row.position?.lat !== null && row.position?.lng !== null).length,
+        liveCount: rows.filter(row => coordinates(row.position?.lat, row.position?.lng)).length,
         vehicles: rows,
       });
     } catch (error) {

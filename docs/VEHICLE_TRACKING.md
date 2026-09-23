@@ -1,5 +1,45 @@
 # KRISTINE Fahrzeugtracking – FMC250 / Traccar / NFC
 
+## KRISDRIVE 1.1 – Fahrtenbuch
+
+Beim Fahrzeug öffnet **Fahrtenbuch öffnen** die Fahrtenliste. Zeitraum wählen
+(bis zu 93 Tage), Fahrer und Fahrtart ergänzen, bei Geschäftsfahrten Start, Ziel
+und Zweck/Kunde/Baustelle eintragen. Unvollständige Einträge können als offene
+Ergänzungen gespeichert werden. Privatfahrten zeigen/exportieren keine Ziele,
+Koordinaten oder Zwecke. PDF und CSV enthalten den angezeigten Zeitraum und
+die Summen nach Fahrtart. Kilometerstände können bei Bedarf paarweise korrigiert
+werden; die ursprünglich übernommenen Werte bleiben gespeichert.
+
+- Bestehender `TRACCAR_BASE_URL`/`TRACCAR_TOKEN` reicht aus; keine neue Anmeldung.
+- `GET /kristine/api/krisdrive/logbook?vehicleId=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
+  liest `/api/reports/trips` für den zugeordneten Tracker. Tagesgrenzen gelten in
+  Europe/Vienna, einschließlich Sommer-/Winterzeit. Normale Fahrten über
+  Mitternacht werden mit je einem Tag Vor-/Nachlauf vollständig abgefragt.
+- `PATCH /kristine/api/krisdrive/logbook/:vehicleId/:rideId` speichert Ergänzungen
+  mit Versionsprüfung. Alle Routen verwenden die bestehende Admin-Anmeldung.
+- `GET /kristine/api/krisdrive/logbook/export.pdf` bzw. `export.csv` nutzt dieselben
+  Filter. CSV schützt Textfelder vor Interpretation als Tabellenformel.
+- Persistenz: `/_kristine/vehicle-tracking/logbook/<vehicle-hash>.json`, mit
+  ursprünglichem GPS-Datensatz, aktuellem Datensatz, Ergänzungen und
+  Änderungsverlauf. Schreibvorgänge sind pro Fahrzeug serialisiert und atomar.
+  Bestehende Tracking-/Zündungsdaten werden nicht umgeschrieben.
+- Bei einem GPS-Ausfall bleiben gespeicherte Fahrten verfügbar; Ausfall und
+  letzter erfolgreicher Abruf stehen auch im Export. Lokale Zündungsfahrten
+  dienen als Ersatz und werden bei eindeutiger Übereinstimmung mit dem
+  Traccar-Bericht verknüpft, ohne ihre Ergänzungen zu verlieren.
+- Traccar `distance`, `odometer`, `obdOdometer` und `totalDistance` sind Meter
+  und werden durch 1.000 geteilt. Ein unbekanntes `totalMileage` wird nicht
+  als CAN-Kilometerstand interpretiert. In der Liveansicht steht der Quellentyp
+  am Zähler; eine fehlende Adresse gilt nicht mehr als fehlende GPS-Position.
+
+Quellen: [Traccar API](https://www.traccar.org/api-reference/),
+[Positionsattribute](https://github.com/traccar/traccar/blob/master/src/main/java/org/traccar/model/Position.java),
+[Fahrtbericht](https://github.com/traccar/traccar/blob/master/src/main/java/org/traccar/reports/model/TripReportItem.java).
+
+Prüfung: `node --test TEST/krisdrive-logbook.test.js TEST/employee-login-auth.test.js TEST/access-status-session.test.js`.
+Zusätzlich den Ablauf Fahrzeug → Fahrtenbuch → Geschäftlich/Privat → Speichern
+→ erneuter Abruf → PDF/CSV auf Desktop und schmalem Bildschirm prüfen.
+
 ## Ziel
 
 Fahrzeug wird getrackt, nicht das Mitarbeiter-Handy. Fahrer meldet sich per NFC am Fahrzeug an.
