@@ -114,16 +114,16 @@ test("corrupt persisted data is never overwritten with an empty book", async t =
 test("missing trip addresses resolve through known places and the Traccar geocoder without losing manual edits", async t => {
   const h = await harness(t, { request: async (url, opts, state) => {
     if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
-    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Bahnhofstraße, Feldkirch" };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Bahnhofstraße, 6800 Feldkirch" };
     throw Error("Unexpected GPS request");
   } });
   h.state.trips = [trip({ startAddress: "", endAddress: "", startLat: 47.22429, startLon: 9.61752, endLat: 47.26821, endLon: 9.64093 }),
     trip({ startPositionId: 106, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:20:00Z", startAddress: "", endAddress: "", startLat: 47.24, startLon: 9.59, endLat: 47.26821, endLon: 9.64093 })];
   let rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
-  assert.equal(rows[0].endLocation, "Torkelgässele, Rankweil");
+  assert.equal(rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
+  assert.equal(rows[0].endLocation, "Torkelgässele, 6830 Rankweil");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
-  assert.equal(rows[1].startLocation, "Torkelgässele, Rankweil");
+  assert.equal(rows[1].startLocation, "Torkelgässele, 6830 Rankweil");
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
   const edited = await h.patch(rows[0], { startLocation: "Mein Ziel", endLocation: rows[0].endLocation });
   assert.equal(edited.status, 200);
@@ -147,24 +147,24 @@ test("old saved coordinate labels resolve in the page and exports even when GPS 
   h.state.offline = true;
   const result = await (await h.get(h.query + "&refresh=1")).json();
   assert.match(result.warning, /gespeicherte Fahrten/);
-  assert.equal(result.rows[0].startLocation, "Schmittengasse, Frastanz");
-  assert.equal(result.rows[0].endLocation, "Torkelgässele, Rankweil");
+  assert.equal(result.rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
+  assert.equal(result.rows[0].endLocation, "Torkelgässele, 6830 Rankweil");
   const csv = await (await h.get("/export.csv" + h.query)).text();
-  assert.match(csv, /Schmittengasse, Frastanz/);
-  assert.match(csv, /Torkelgässele, Rankweil/);
+  assert.match(csv, /Schmittengasse, 6820 Frastanz/);
+  assert.match(csv, /Torkelgässele, 6830 Rankweil/);
 });
 
 test("adjacent trips supply missing start and end in both directions across midnight", async t => {
   const h = await harness(t);
   h.state.trips = [
-    trip({ startPositionId: 201, startTime: "2026-09-21T20:00:00Z", endTime: "2026-09-21T20:30:00Z", endAddress: "Schmittengasse, Frastanz" }),
+    trip({ startPositionId: 201, startTime: "2026-09-21T20:00:00Z", endTime: "2026-09-21T20:30:00Z", endAddress: "Schmittengasse, 6820 Frastanz" }),
     trip({ startPositionId: 202, startTime: "2026-09-22T06:00:00Z", endTime: "2026-09-22T06:30:00Z", startAddress: "", endAddress: "", startLat: null, startLon: null, endLat: null, endLon: null }),
-    trip({ startPositionId: 203, startTime: "2026-09-22T07:00:00Z", endTime: "2026-09-22T07:30:00Z", startAddress: "Torkelgässele, Rankweil" }),
+    trip({ startPositionId: 203, startTime: "2026-09-22T07:00:00Z", endTime: "2026-09-22T07:30:00Z", startAddress: "Torkelgässele, 6830 Rankweil" }),
   ];
   const rows = (await (await h.get()).json()).rows;
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
-  assert.equal(rows[0].endLocation, "Torkelgässele, Rankweil");
+  assert.equal(rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
+  assert.equal(rows[0].endLocation, "Torkelgässele, 6830 Rankweil");
   assert.equal(rows[0].inferredStart, true);
   assert.equal(rows[0].inferredEnd, true);
   assert.ok(!rows[0].missing.includes("Start/Ziel"));
@@ -263,16 +263,18 @@ test("private locations, overlapping trips and a missing first origin are not us
   assert.ok(!csv.includes("Privates Ziel"));
 });
 
-test("addresses contain only street and town, preserving numbers that belong to a street name", () => {
+test("addresses contain street and postal town, preserving numbers that belong to a street name", () => {
   for (const [input, expected] of [
-    ["45 Feldkircher Straße, Frastanz, Vorarlberg, AT", "Feldkircher Straße, Frastanz"],
-    ["Feldkircher Straße 47, 6820 Frastanz, Österreich", "Feldkircher Straße, Frastanz"],
-    ["Feldkircher Straße 45a, AT-6820 Frastanz", "Feldkircher Straße, Frastanz"],
-    ["45, Feldkircher Straße, 6820, Frastanz, AT", "Feldkircher Straße, Frastanz"],
-    ["Feldkircher Straße, 45, Frastanz, AT", "Feldkircher Straße, Frastanz"],
-    ["12-14 Oberrain, Meiern, Vorarlberg, AT", "Oberrain, Meiern"],
-    ["Oberrain 128/1, Meiern, Vorarlberg, AT", "Oberrain, Meiern"],
-    ["Schmittengasse, Frastanz", "Schmittengasse, Frastanz"],
+    ["45 Feldkircher Straße, Frastanz, Vorarlberg, AT", "Feldkircher Straße, 6820 Frastanz"],
+    ["Feldkircher Straße 47, 6820 Frastanz, Österreich", "Feldkircher Straße, 6820 Frastanz"],
+    ["Feldkircher Straße 45a, AT-6820 Frastanz", "Feldkircher Straße, 6820 Frastanz"],
+    ["45, Feldkircher Straße, 6820, Frastanz, AT", "Feldkircher Straße, 6820 Frastanz"],
+    ["Feldkircher Straße, 45, Frastanz, AT", "Feldkircher Straße, 6820 Frastanz"],
+    ["12-14 Oberrain, Meiern, Vorarlberg, AT", "Oberrain, 6721 Meiern"],
+    ["Oberrain 128/1, Meiern, Vorarlberg, AT", "Oberrain, 6721 Meiern"],
+    ["Schmittengasse, Frastanz", "Schmittengasse, 6820 Frastanz"],
+    ["Dorfstraße 4, 6840 Götzis, AT", "Dorfstraße, 6840 Götzis"],
+    ["Dorfstraße 4, Neustadt, DE", "Dorfstraße, Neustadt"],
     ["Straße des 17. Juni 45, Berlin, DE", "Straße des 17. Juni, Berlin"],
     ["10.-Oktober-Straße 12, Klagenfurt, AT", "10.-Oktober-Straße, Klagenfurt"],
     ["Feldkircher Str. 45", "Feldkircher Str."],
@@ -282,6 +284,67 @@ test("addresses contain only street and town, preserving numbers that belong to 
   ]) assert.equal(streetAndTown(input), expected, String(input));
 });
 
+test("impossible trip reports are replaced by a plausible GPS track, including old saved records and exports", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (state.offline) throw Error("GPS offline");
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") {
+      assert.equal(url.searchParams.get("deviceId"), "17");
+      return { ok: true, json: async () => [
+        { deviceId: 17, valid: true, fixTime: "2026-09-22T06:00:00Z", latitude: 47.2100, longitude: 9.6200 },
+        { deviceId: 17, valid: true, fixTime: "2026-09-22T06:05:00Z", latitude: 47.2140, longitude: 9.6200 },
+        { deviceId: 17, valid: true, fixTime: "2026-09-22T06:08:00Z", latitude: 49.5000, longitude: 12.2000 }, // GPS jump
+        { deviceId: 17, valid: true, fixTime: "2026-09-22T06:10:00Z", latitude: 47.2180, longitude: 9.6200 },
+        { deviceId: 17, valid: true, fixTime: "2026-09-22T06:14:00Z", latitude: 47.2260, longitude: 9.6200 },
+        { deviceId: 18, valid: true, fixTime: "2026-09-22T06:09:00Z", latitude: 51.0, longitude: 11.0 },
+      ] };
+    }
+    throw Error("Unexpected GPS request");
+  } });
+  h.state.trips = [
+    trip({ endTime: "2026-09-22T06:14:00Z", endLat: 47.2260, endLon: 9.6200, distance: 5339500, endOdometer: 32074317.503 }),
+    trip({ startPositionId: 102, startTime: "2026-09-22T07:00:00Z", endTime: "2026-09-22T07:40:00Z", distance: 14100 }),
+  ];
+  let result = await (await h.get()).json();
+  assert.ok(result.rows[0].distanceKm > 1.7 && result.rows[0].distanceKm < 1.9);
+  assert.equal(result.rows[0].distanceSource, "gps_positions");
+  assert.ok(result.rows[0].missing.includes("km-Stand prüfen"));
+  assert.equal(result.rows[1].distanceKm, 14.1);
+  assert.equal(result.totals.km, result.rows[0].distanceKm + 14.1);
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/positions").length, 1);
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.ok(!csv.includes("5339,50"));
+  h.state.offline = true;
+  result = await (await h.get(h.query + "&refresh=1")).json();
+  assert.ok(result.rows[0].distanceKm < 2);
+  const [file] = await fs.readdir(path.join(h.root, "logbook"));
+  const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));
+  const record = stored.records[result.rows[0].id];
+  record.data.distanceKm = 5339.5;
+  record.data.distanceSource = "gps_report";
+  await fs.writeFile(path.join(h.root, "logbook", file), JSON.stringify(stored));
+  result = await (await h.get(h.query + "&refresh=1")).json();
+  assert.equal(result.rows[0].distanceKm, null);
+  assert.ok(result.rows[0].missing.includes("GPS-Kilometerwert prüfen"));
+  assert.equal(result.totals.km, 14.1);
+});
+
+test("unverifiable GPS jumps and zero-distance drives remain open instead of entering totals", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") throw Error("No route points");
+    throw Error("Unexpected GPS request");
+  } });
+  h.state.trips = [trip({ distance: 10686900 }), trip({ startPositionId: 102, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:30:00Z", distance: 0 })];
+  const result = await (await h.get()).json();
+  assert.equal(result.totals.km, 0);
+  assert.equal(result.totals.missingKm, 2);
+  for (const row of result.rows) {
+    assert.equal(row.distanceKm, null);
+    assert.ok(row.missing.includes("GPS-Kilometerwert prüfen"));
+  }
+});
+
 test("arrival and next departure always share one street and town; corrections on either side update both", async t => {
   const h = await harness(t);
   h.state.trips = [
@@ -289,17 +352,17 @@ test("arrival and next departure always share one street and town; corrections o
     trip({ startPositionId: 502, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:30:00Z", startAddress: "Bahnhofstraße 47, Feldkirch, Vorarlberg, AT", endAddress: "128 Oberrain, Meiern, Vorarlberg, AT" }),
   ];
   let rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].endLocation, "Feldkircher Straße, Frastanz");
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, 6820 Frastanz");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
-  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
-  assert.equal(rows[1].endLocation, "Oberrain, Meiern");
+  assert.equal(rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
+  assert.equal(rows[1].endLocation, "Oberrain, 6721 Meiern");
   assert.equal((await h.patch(rows[0], { endLocation: "Schmittengasse 19, Frastanz, Vorarlberg, AT" })).status, 200);
   rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].endLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[0].endLocation, "Schmittengasse, 6820 Frastanz");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
   assert.equal((await h.patch(rows[1], { startLocation: "47 Feldkircher Straße, Frastanz, Vorarlberg, AT" })).status, 200);
   rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].endLocation, "Feldkircher Straße, Frastanz");
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, 6820 Frastanz");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
   h.state.offline = true;
   rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
@@ -307,12 +370,12 @@ test("arrival and next departure always share one street and town; corrections o
   const csv = await (await h.get("/export.csv" + h.query)).text();
   assert.ok(!csv.includes("45 Feldkircher")); assert.ok(!csv.includes("47 Feldkircher"));
   assert.ok(!csv.includes("Vorarlberg")); assert.ok(!csv.includes("128 Oberrain"));
-  assert.equal(csv.split("Feldkircher Straße, Frastanz").length - 1, 2);
+  assert.equal(csv.split("Feldkircher Straße, 6820 Frastanz").length - 1, 2);
   // Re-entering a formerly stored value is still a new explicit correction,
   // even when only the other side's later edit changed the visible shared stop.
   assert.equal((await h.patch(rows[0], { endLocation: "Schmittengasse 19, Frastanz" })).status, 200);
   rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].endLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[0].endLocation, "Schmittengasse, 6820 Frastanz");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
   const [file] = await fs.readdir(path.join(h.root, "logbook"));
   const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));

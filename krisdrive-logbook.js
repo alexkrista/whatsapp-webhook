@@ -36,6 +36,11 @@ function coordinateLabel(value) {
 }
 const isCoordinates = value => Boolean(coordinateLabel(value));
 const hasAddress = value => Boolean(text(value)) && !isCoordinates(value);
+// Only unambiguous places already used by this logbook. Other postal codes
+// must come from the address provider or a manual correction.
+const knownPostcodes = new Map([
+  ["frastanz", "6820"], ["feldkirch", "6800"], ["rankweil", "6830"], ["meiern", "6721"],
+]);
 function streetAndTown(value) {
   const address = text(value);
   if (!address || isCoordinates(address)) return address;
@@ -48,19 +53,57 @@ function streetAndTown(value) {
   if (parts.length || /(?:stra(?:ß|ss)e|str\.|gasse|weg|allee|platz|steig|gäss(?:le|ele)|gäßle)(?=\s|$)/i.test(street)) {
     street = street.replace(/\s+\d+\s*[a-z]?(?:\s*[-–/]\s*\d+\s*[a-z]?)?$/i, "").trim();
   }
-  const town = parts.find(part => !house.test(part) && !/^(?:AT|DE|CH|FL|LI|Österreich|Austria|Deutschland|Germany|Schweiz|Switzerland|Liechtenstein|Vorarlberg|Tirol|Oberösterreich|Niederösterreich|Steiermark|Kärnten|Burgenland)$/i.test(part));
-  const place = (town || "").replace(/^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s])?\d{4,5}\s+/i, "").replace(/\s+\d{4,5}$/, "").trim();
-  return [street, place].filter(Boolean).join(", ");
+  const details = parts.filter(part => !house.test(part) && !/^(?:AT|DE|CH|FL|LI|Österreich|Austria|Deutschland|Germany|Schweiz|Switzerland|Liechtenstein|Vorarlberg|Tirol|Oberösterreich|Niederösterreich|Steiermark|Kärnten|Burgenland)$/i.test(part));
+  const town = details.find(part => !/^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s]?)?\d{4,5}$/.test(part)) || "";
+  const postcode = town.match(/^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s]?)?(\d{4,5})\s+/i)?.[1]
+    || details.find(part => /^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s]?)?\d{4,5}$/.test(part))?.match(/\d{4,5}/)?.[0];
+  const place = town.replace(/^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s]?)?\d{4,5}\s+/i, "").replace(/\s+\d{4,5}$/, "").trim();
+  const zip = postcode || knownPostcodes.get(place.toLocaleLowerCase("de-AT"));
+  return [street, place ? [zip, place].filter(Boolean).join(" ") : ""].filter(Boolean).join(", ");
 }
 function metresBetween(a, b) {
   if (!a || !b) return Infinity;
   return Math.hypot((a.lat - b.lat) * 111195, (a.lng - b.lng) * 111195 * Math.cos(a.lat * Math.PI / 180));
 }
+// A trip report may inherit a multi-thousand-kilometre jump in Traccar's
+// cumulative GPS counter. Check time and endpoints independently of that counter.
+function plausibleDistance(ride) {
+  if (ride.distanceKm === null || !Number.isFinite(ride.distanceKm) || ride.distanceKm < 0) return false;
+  const hours = (Date.parse(ride.closedAt) - Date.parse(ride.startedAt)) / 3600000;
+  if (!Number.isFinite(hours) || hours < 0 || ride.distanceKm > 2 + hours * 180) return false;
+  const directKm = metresBetween(ride.startPoint, ride.endPoint) / 1000;
+  return !Number.isFinite(directKm) || ride.distanceKm + 0.2 >= directKm;
+}
+function distanceFromPositions(ride, positions) {
+  if (!Array.isArray(positions) || positions.length > 10000) return null;
+  const start = Date.parse(ride.startedAt), end = Date.parse(ride.closedAt);
+  const fixes = positions.filter(row => String(row.deviceId) === String(ride.deviceId) && row.valid !== false)
+    .map(row => ({ at: Date.parse(row.fixTime || row.deviceTime), point: coordinates(row.latitude, row.longitude), accuracy: number(row.accuracy) }))
+    .filter(row => row.point && Number.isFinite(row.at) && row.at >= start && row.at <= end && (row.accuracy === null || row.accuracy <= 150))
+    .sort((a, b) => a.at - b.at);
+  if (fixes.length < 3 || fixes.at(-1).at - fixes[0].at < (end - start) * 0.65) return null;
+  if (ride.startPoint && metresBetween(fixes[0].point, ride.startPoint) > 300) return null;
+  if (ride.endPoint && metresBetween(fixes.at(-1).point, ride.endPoint) > 300) return null;
+  let previous = fixes[0], metres = 0, segments = 0;
+  for (const fix of fixes.slice(1)) {
+    const seconds = (fix.at - previous.at) / 1000;
+    if (seconds <= 0) continue;
+    const length = metresBetween(previous.point, fix.point);
+    // Discard isolated GPS jumps, then join the next valid fix to the last
+    // accepted position. Do not estimate a route through a long data gap.
+    if (length > seconds * 55 + 80) continue;
+    if (seconds > 900 && length > 500) return null;
+    metres += length; segments++; previous = fix;
+  }
+  if (segments < 2 || metres === 0) return null;
+  const candidate = { ...ride, distanceKm: metres / 1000 };
+  return plausibleDistance(candidate) ? candidate.distanceKm : null;
+}
 // Verified from the two locations reported by Alex. Limit these labels to
 // nearby GPS fixes; other destinations must come from the geocoder.
 const knownPlaces = [
-  { lat: 47.22429, lng: 9.61752, label: "Schmittengasse, Frastanz" },
-  { lat: 47.26821, lng: 9.64093, label: "Torkelgässele, Rankweil" },
+  { lat: 47.22429, lng: 9.61752, label: "Schmittengasse, 6820 Frastanz" },
+  { lat: 47.26821, lng: 9.64093, label: "Torkelgässele, 6830 Rankweil" },
 ];
 function knownPlace(point) {
   if (!point) return "";
@@ -111,7 +154,7 @@ function normalizeTrip(trip, vehicleId, deviceId) {
     vehicleId: String(vehicleId), deviceId: String(deviceId), source: "traccar", startedAt, closedAt,
     startPositionId: text(trip.startPositionId, 30), endPositionId: text(trip.endPositionId, 30),
     startLocation: location(trip.startAddress, startPoint), endLocation: location(trip.endAddress, endPoint),
-    startPoint, endPoint, distanceKm: km(trip.distance),
+    startPoint, endPoint, distanceKm: km(trip.distance), distanceSource: "gps_report",
     odometerStartKm: noCounter ? null : km(trip.startOdometer), odometerEndKm: noCounter ? null : km(trip.endOdometer),
     driver: null,
   };
@@ -158,6 +201,12 @@ function view(record) {
     row[field] = streetAndTown(row[field]);
   }
   if (Object.hasOwn(record.edits || {}, "odometerStartKm") && row.odometerStartKm !== null && row.odometerEndKm !== null) row.distanceKm = row.odometerEndKm - row.odometerStartKm;
+  if (Object.hasOwn(record.edits || {}, "odometerStartKm")) row.distanceSource = "manual";
+  else if (!plausibleDistance(row)) {
+    row.distanceIssue = row.distanceKm !== null || row.distanceSource === "gps_unverified" && row.reportedDistanceKm !== null
+      ? "GPS-Kilometerwert prüfen" : "";
+    row.distanceKm = null;
+  }
   row.category = row.category || "unassigned";
   row.purpose = row.purpose || "";
   row.revision = record.revision || 0;
@@ -168,9 +217,10 @@ function view(record) {
   row.missing = [];
   if (!row.driver?.employeeId) row.missing.push("Fahrer");
   if (row.category === "unassigned") row.missing.push("Fahrtart");
-  if (row.distanceKm === null) row.missing.push("Kilometer");
+  if (row.distanceKm === null) row.missing.push(row.distanceIssue || "Kilometer");
   if (row.odometerStartKm === null || row.odometerEndKm === null) row.missing.push("km-Stand");
   else if (row.odometerEndKm < row.odometerStartKm) row.missing.push("km-Stand prüfen");
+  else if (!row.odometerCorrected && !plausibleDistance({ ...row, distanceKm: row.odometerEndKm - row.odometerStartKm })) row.missing.push("km-Stand prüfen");
   if (row.category === "business") {
     if (!row.startLocation || !row.endLocation) row.missing.push("Start/Ziel");
     if (!row.purpose) row.missing.push("Zweck");
@@ -395,6 +445,30 @@ function registerKrisdriveLogbook(app, options = {}) {
               addressCache.set(key, address);
             }
           }
+        }
+        const suspectTrips = trips.filter(trip => !plausibleDistance(trip));
+        for (let i = 0; i < suspectTrips.length; i += 4) {
+          await Promise.all(suspectTrips.slice(i, i + 4).map(async trip => {
+            const reportedDistanceKm = trip.distanceKm;
+            const old = previous.records[trip.id]?.data;
+            // Use an earlier, checked track until the user explicitly refreshes.
+            if (!force && old?.distanceSource === "gps_positions" && old.reportedDistanceKm === reportedDistanceKm &&
+                old.startedAt === trip.startedAt && old.closedAt === trip.closedAt) {
+              trip.distanceKm = old.distanceKm;
+              trip.distanceSource = old.distanceSource;
+              trip.reportedDistanceKm = reportedDistanceKm;
+              return;
+            }
+            trip.reportedDistanceKm = reportedDistanceKm;
+            trip.distanceKm = null;
+            trip.distanceSource = "gps_unverified";
+            try {
+              const query = new URLSearchParams({ deviceId, from: trip.startedAt, to: trip.closedAt });
+              const positions = await traccar("/api/positions?" + query, 8000);
+              const corrected = distanceFromPositions(trip, positions);
+              if (corrected !== null) { trip.distanceKm = corrected; trip.distanceSource = "gps_positions"; }
+            } catch { /* Leave the trip open for verification instead of showing a false distance. */ }
+          }));
         }
         for (const trip of trips) {
           const matches = matchingLocal(trip, ctx.local);

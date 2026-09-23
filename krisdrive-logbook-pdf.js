@@ -80,7 +80,7 @@ async function createLogbookPdf(data) {
   pdf.getPages().forEach((sheet, index, pages) => {
     page = sheet;
     page.drawLine({ start: { x: 34, y: 36 }, end: { x: 808, y: 36 }, thickness: .5, color: line });
-    draw("Farben Krista  |  KRISDRIVE 1.3", 34, 23, 7, regular, muted);
+    draw("Farben Krista  |  KRISDRIVE 1.4", 34, 23, 7, regular, muted);
     const label = `Seite ${index + 1} / ${pages.length}`;
     draw(label, 808 - regular.widthOfTextAtSize(label, 7), 23, 7, regular, muted);
   });

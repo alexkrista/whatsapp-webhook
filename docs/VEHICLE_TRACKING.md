@@ -1,6 +1,6 @@
 # KRISTINE Fahrzeugtracking – FMC250 / Traccar / NFC
 
-## KRISDRIVE 1.3 – Fahrtenbuch
+## KRISDRIVE 1.4 – Fahrtenbuch
 
 Beim Fahrzeug öffnet **Fahrtenbuch öffnen** die Fahrtenliste. Zeitraum wählen
 (bis zu 93 Tage), Fahrer und Fahrtart ergänzen, bei Geschäftsfahrten Start, Ziel
@@ -12,9 +12,11 @@ werden; die ursprünglich übernommenen Werte bleiben gespeichert.
 
 Start und Ziel werden auch in bereits gespeicherten Fahrten ergänzt:
 
-- Adressen werden einheitlich als **Straße, Ort** angezeigt, ohne Hausnummer,
-  Postleitzahl, Bundesland oder Land. Das gilt auch für die Fahrzeugkarte und
-  die Exporte; ursprüngliche GPS-Angaben bleiben im Datensatz erhalten.
+- Adressen werden als **Straße, PLZ Ort** angezeigt, ohne Hausnummer,
+  Bundesland oder Land. Vorhandene Postleitzahlen bleiben erhalten; für die
+  eindeutig bekannten Orte Frastanz, Feldkirch, Rankweil und Meiern werden sie
+  ergänzt. Das gilt auch für die Fahrzeugkarte und die Exporte. Ursprüngliche
+  GPS-Angaben bleiben im Datensatz erhalten.
 - **Ziel einer Fahrt = Start der nächsten Fahrt:** Beide Seiten verwenden eine
   gemeinsame Ortsangabe, auch wenn der Tracker zwei unterschiedliche Namen liefert.
   Ohne Korrektur gilt die Ankunft. Eine spätere Ortskorrektur an Start oder Ziel
@@ -30,6 +32,12 @@ Start und Ziel werden auch in bereits gespeicherten Fahrten ergänzt:
 - Fahrer/Zweck speichern schreibt unveränderte Ortsangaben nicht als manuelle
   Korrektur fest. Alte gespeicherte Koordinaten-Platzhalter verdecken keine
   später aufgelöste GPS-Adresse mehr.
+- Kilometerwerte, die für Dauer oder Start/Ziel physikalisch unplausibel sind,
+  werden aus den GPS-Positionspunkten der Fahrt neu berechnet. Einzelne
+  Positionssprünge werden verworfen. Reicht die GPS-Spur nicht für eine
+  verlässliche Berechnung, bleibt der Kilometerwert offen und wird nicht als
+  vermeintlich echte Fahrstrecke summiert. Das gilt auch für alte gespeicherte
+  Fahrten bei Ausfall des GPS-Dienstes.
 
 - Bestehender `TRACCAR_BASE_URL`/`TRACCAR_TOKEN` reicht aus; keine neue Anmeldung.
 - `GET /kristine/api/krisdrive/logbook?vehicleId=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
