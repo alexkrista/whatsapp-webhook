@@ -26,3 +26,15 @@ def restore_sql_password():
             value = protect(file.read_bytes(), decrypt=True).decode("utf-8")
             if value.strip():
                 os.environ["KRISTINE_SQL_PASSWORD"] = value
+
+
+def lg_sync_token():
+    value = os.environ.get("KRISTINE_LG_SYNC_TOKEN", "").strip()
+    if value or os.name != "nt":
+        return value
+    from pathlib import Path
+    file = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "KRISTA" / "brain-runtime" / "lg-sync-token.dpapi"
+    if not file.is_file():
+        return ""
+    from brain_konfipay import protect
+    return protect(file.read_bytes(), decrypt=True).decode("utf-8").strip()

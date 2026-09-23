@@ -32,7 +32,7 @@ class Updates(unittest.TestCase):
         invoice={'id':1,'supplierName':'Little Greene','invoiceNumber':'TEST','invoiceDate':'2026-09-23','netAmount':10,'pdfText':'test'}
         app.add_url_rule('/save','incoming_capture_save',lambda:jsonify(ok=True,invoice=invoice),methods=['POST'])
         app.add_url_rule('/status','incoming_capture_status',lambda:jsonify(ok=True,invoice=invoice),methods=['POST'])
-        ns={'app':app,'kristine_api_request':lambda url,**kw:calls.append(url) or {'ok':True}}
+        ns={'app':app,'KRISTINE_ADMIN_TOKEN':'test','kristine_api_request':lambda url,**kw:calls.append(url) or {'ok':True}}
         with patch.object(brain_lg_sync,'_INSTALLED',False),patch.object(brain_lg_sync.threading,'Thread'):
             brain_lg_sync.install(ns)
         c=app.test_client()
@@ -55,7 +55,7 @@ class Updates(unittest.TestCase):
         with patch.dict(os.environ,{'KRISTINE_REVOLUT_BUSINESS_OWN_IBAN':'DE89370400440532013000'}):
             targets,_=transfer_targets()
             self.assertEqual([t['name'] for t in targets],['Revolut','Revolut Business'])
-            business=Mock();business.transfer_accounts.return_value=[{'id':'business','iban':'DE89370400440532013000','name':'EUR'}]
+            business=Mock();business.transfer_accounts.return_value=[{'id':'business','iban':'DE89370400440532013000','name':'EUR'},{'id':'other-business','iban':'GB82WEST12345698765432','name':'Other'}]
             targets,_=transfer_targets(business)
             self.assertEqual(len(targets),2,'API account and configured IBAN must not duplicate')
 

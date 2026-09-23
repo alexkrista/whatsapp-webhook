@@ -36,26 +36,40 @@ def _purchase_payload(row):
     return {"invoiceRef": ref, "invoiceDate": date, "netAmount": amount}
 
 
+def _lg_request(ns, path, payload):
+    request = ns.get("kristine_api_request")
+    if ns.get("KRISTINE_ADMIN_TOKEN") and callable(request):
+        return request(path, method="POST", payload=payload)
+    from brain_windows_env import lg_sync_token
+    import json
+    import urllib.request
+    if path not in {"/admin/api/paint/lg-purchase", "/admin/api/paint/lg-incoming-sync"}:
+        raise RuntimeError("LG-Synchronisierung: Endpunkt nicht freigegeben")
+    token = lg_sync_token()
+    if not token:
+        raise RuntimeError("LG-Verbindung zur Cloud ist nicht konfiguriert")
+    base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
+    req = urllib.request.Request(base + path, data=json.dumps(payload).encode("utf-8"),
+                                 method="POST", headers={"Content-Type":"application/json", "X-Krista-LG-Sync-Token":token})
+    with urllib.request.urlopen(req, timeout=20) as response:
+        result = json.load(response)
+    if result.get("ok") is not True:
+        raise RuntimeError("LG-Synchronisierung wurde nicht bestätigt")
+    return result
+
+
 def _sync_turnover(ns, row):
     payload = _purchase_payload(row)
-    if not payload:
-        return None
-    request = ns.get("kristine_api_request")
-    if not callable(request):
-        return None
-    return request("/admin/api/paint/lg-purchase", method="POST", payload=payload)
+    return _lg_request(ns, "/admin/api/paint/lg-purchase", payload) if payload else None
 
 
 def _sync_stock_and_turnover(ns, row):
-    request = ns.get("kristine_api_request")
-    if not callable(request):
-        raise RuntimeError("KRISTINE API nicht verfügbar")
     payload = _purchase_payload(row)
     if not payload:
         raise RuntimeError("LG-Rechnungsnummer, Datum oder Netto fehlt")
     payload["text"] = str(row.get("pdfText") or "")
     payload["sourceInvoiceId"] = row.get("id")
-    return request("/admin/api/paint/lg-incoming-sync", method="POST", payload=payload)
+    return _lg_request(ns, "/admin/api/paint/lg-incoming-sync", payload)
 
 
 def _install_farben_navigation(ns):
