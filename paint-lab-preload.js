@@ -100,8 +100,11 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-lg-order-excel-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-order-excel-ui.js?v=20260822-1845"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-goods-receipt-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-goods-receipt-ui.js?v=20260923"></script>\n</body>');
+      }
       if (!fixed.includes("/public/paint-lg-sent-order-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-lg-sent-order-ui.js?v=20260822-2134"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-lg-sent-order-ui.js?v=20260923-receipts"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-stock-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260910-filter-remove"></script>\n</body>');

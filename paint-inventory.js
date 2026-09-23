@@ -122,33 +122,8 @@ function registerPaintInventory(app, options = {}) {
     return lines;
   }
 
-  app.post("/admin/api/paint/lg-incoming-sync", async(req,res)=>{
-    if(!requireAdmin(req,res))return;
-    try{
-      const invoiceRef=clean(req.body?.invoiceRef||req.body?.invoiceNumber,120);
-      const invoiceDate=clean(req.body?.invoiceDate,20).slice(0,10);
-      const netAmount=num(req.body?.netAmount,NaN);
-      const text=String(req.body?.text||"");
-      if(!invoiceRef||!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||!Number.isFinite(netAmount))return res.status(400).json({ok:false,error:"invoiceRef, invoiceDate und netAmount erforderlich"});
-      const sync=await readJson(syncFile,{}); if(sync[invoiceRef])return res.json({ok:true,duplicate:true,invoiceRef,previous:sync[invoiceRef]});
-      const articles=await readJson(articlesFile,[]); const lines=parseLgPaintLines(text,articles); const unmatched=lines.filter(x=>!x.article);
-      if(!lines.length)return res.status(422).json({ok:false,error:"Keine eindeutigen LG-Lagerpositionen in der Rechnung erkannt. Der Lagerstand wurde nicht verändert."});
-      if(unmatched.length)return res.status(409).json({ok:false,error:"LG-Rechnung enthaelt unbekannte Lagerartikel",unmatched:unmatched.map(x=>({stockCode:x.stockCode,description:x.description,base:x.base,size:x.size,quantity:x.quantity}))});
-      const results=[];
-      for(const line of lines){
-        const a=line.article, before=Number(a.stock||0), qty=Math.max(0,Number(line.quantity||0)), oldPrice=Number(a.purchasePrice||0);
-        a.stock=before+qty; a.purchasePrice=Number(line.purchasePrice||oldPrice); a.updatedAt=new Date().toISOString();
-        const movement={at:a.updatedAt,articleId:a.id,ean:a.ean||"",product:a.product||"",baseCode:a.baseCode||"",size:a.size||"",direction:"in",quantity:qty,delta:qty,before,after:a.stock,reason:"invoice",invoiceRef,user:"Dunja Eingangsrechnung",purchasePrice:a.purchasePrice};
-        await appendJsonl(movementsFile,movement); if(a.purchasePrice!==oldPrice)await appendJsonl(priceHistoryFile,{at:a.updatedAt,articleId:a.id,oldPurchasePrice:oldPrice,newPurchasePrice:a.purchasePrice,invoiceRef,source:"LG-Rechnung"});
-        results.push({articleId:a.id,stockCode:line.stockCode,before,after:a.stock,quantity:qty,purchasePrice:a.purchasePrice});
-      }
-      await writeJson(articlesFile,articles);
-      const purchases=await readJson(purchasesFile,[]); const purchase={invoiceRef,invoiceDate,netAmount:Number(netAmount.toFixed(2)),source:"incoming-capture",createdAt:new Date().toISOString()};
-      const pi=purchases.findIndex(x=>String(x.invoiceRef)===invoiceRef); if(pi>=0)purchases[pi]={...purchases[pi],...purchase};else purchases.push(purchase); await writeJson(purchasesFile,purchases);
-      sync[invoiceRef]={at:new Date().toISOString(),invoiceDate,netAmount:Number(netAmount.toFixed(2)),paintLines:results.length}; await writeJson(syncFile,sync);
-      res.json({ok:true,invoiceRef,paintLines:results.length,results,netAmount:Number(netAmount.toFixed(2))});
-    }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)});}
-  });
+  require("./paint-goods-receipt").registerPaintGoodsReceipt(app, {dataDir, parseLines:parseLgPaintLines});
+
 }
 
 module.exports={registerPaintInventory};

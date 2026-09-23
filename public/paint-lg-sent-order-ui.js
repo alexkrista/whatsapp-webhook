@@ -99,6 +99,7 @@
       let suffix = q ? ` · ${q} Mengenänderung${q === 1 ? "" : "en"} erkannt` : " · Mengen unverändert";
       if (p) suffix += ` · ${p} Preisabweichung${p === 1 ? "" : "en"} ⚠`;
       setMessage((data.duplicate ? "Bereits hinterlegt · " : "Übernommen · ") + statusText(data.order) + suffix, true);
+      window.dispatchEvent(new CustomEvent("krista:lg-order-imported", {detail:{id:data.order.id}}));
     } catch (error) {
       const unknown = error.body?.unknown;
       setMessage(Array.isArray(unknown) && unknown.length ? `${error.message}: ${unknown.slice(0, 4).join(", ")}` : error.message, true);

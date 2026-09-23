@@ -2,8 +2,8 @@
 """Little Greene · Brücke zwischen Dunjas Eingangsrechnung und KRISTINE Farben/Lager.
 
 - Historische LG-Umsätze kommen aus der Eingangsrechnungserfassung / WinWorker.
-- Nur wenn Dunja eine neue LG-Rechnung auf „geprüft“ setzt, werden erkannte
-  Farb-Lagerpositionen zum aktuellen Lager addiert.
+- Eine neue LG-Rechnung erzeugt die Aufgabe „Ware da?“. Erst der ausdrücklich
+  bestätigte Wareneingang erhöht den Lagerstand.
 - The Brain bekommt denselben Farben-Einstieg wie die übrigen KRISTA-Arbeitswelten.
 """
 from __future__ import annotations
@@ -185,7 +185,7 @@ def install(ns):
                 area = str(body.get("area") or request.args.get("area") or "live").strip().lower()
                 if area not in {"", "live"}:
                     return response
-                if not response.is_json:
+                if response.status_code >= 400 or not response.is_json:
                     return response
                 payload = response.get_json(silent=True) or {}
                 row = payload.get("invoice") or {}
@@ -205,6 +205,7 @@ def install(ns):
                     finally:
                         con.close()
                 try:
+                    payload["lgTurnoverSync"] = _sync_turnover(ns, row) or {"ok": False}
                     payload["lgStockSync"] = _sync_stock_and_turnover(ns, row) or {"ok": False}
                 except Exception as exc:
                     payload["lgStockSync"] = {"ok": False, "error": str(exc)}
@@ -217,5 +218,41 @@ def install(ns):
 
         wrapped_status._krista_lg_sync = True
         app.view_functions["incoming_capture_status"] = wrapped_status
+
+    original_save = app.view_functions.get("incoming_capture_save")
+    if original_save and not getattr(original_save, "_krista_lg_receipt", False):
+        def wrapped_save(*args, **kwargs):
+            from flask import request
+            import json
+            response = app.make_response(original_save(*args, **kwargs))
+            try:
+                form = request.get_json(silent=True) or json.loads(request.form.get("payload") or "{}")
+                area = str(form.get("area") or ("test" if form.get("trainingMode") else "live")).lower()
+                if area != "live" or response.status_code >= 400 or not response.is_json:
+                    return response
+                payload = response.get_json(silent=True) or {}
+                row = payload.get("invoice") or {}
+                if not payload.get("ok") or not _is_lg(row):
+                    return response
+                connection_factory, public_row = ns.get("_capture_connection"), ns.get("_capture_row_public")
+                if callable(connection_factory) and callable(public_row) and row.get("id"):
+                    con = connection_factory()
+                    try:
+                        raw = con.execute("SELECT * FROM incoming_invoices WHERE id=?", (int(row["id"]),)).fetchone()
+                        if raw:
+                            row = public_row(raw, [], include_text=True)
+                    finally:
+                        con.close()
+                try:
+                    payload["lgGoodsReceipt"] = _sync_stock_and_turnover(ns, row) or {"ok": False}
+                except Exception as exc:
+                    payload["lgGoodsReceipt"] = {"ok": False, "error": str(exc)}
+                response.set_data(app.json.dumps(payload))
+                response.content_type = "application/json"
+            except Exception as exc:
+                print("LG Wareneingangsaufgabe wartet auf Klärung:", exc)
+            return response
+        wrapped_save._krista_lg_receipt = True
+        app.view_functions["incoming_capture_save"] = wrapped_save
 
     threading.Thread(target=_historical_backfill, args=(ns,), daemon=True, name="lg-gj-sync").start()

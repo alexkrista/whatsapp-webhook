@@ -109,6 +109,25 @@ Module._load = originalLoad;
     assert.equal(annaDiet.rows.find(row=>row.date===nextDate).dietLarge,1,"BUAK groß wird separat gezählt");
     assert.equal(annaDiet.rows.reduce((sum,row)=>sum+row.taggeld,0),2,"Gesamtdiäten bleiben zusätzlich verfügbar");
     assert(annaDiet.rows.every(row=>row.flMinutes>0),"FL wird nur für tatsächlich betroffene Baustellen ausgewiesen");
+    const alexDiet=response.body.employees.find(e=>e.employeeId==="5");
+    assert.equal(alexDiet.dailyAllowanceModel,"employee6");
+    assert.equal(alexDiet.rows.find(r=>r.date===date).dietEmployee,1);
+    assert.equal(alexDiet.rows.find(r=>r.date===nextDate).dietEmployee,0,"no attendance means no automatic allowance");
+    assert(response.body.employees.every(e=>e.rows.every(r=>r.taggeld===r.dietPainter+r.dietSmall+r.dietLarge+r.dietEmployee)),"row sum equals total");
+    const eventsPath=path.join(dataRoot,"time-events.json");
+    const originalEvents=await fsp.readFile(eventsPath,"utf8");
+    const officeEvents=JSON.parse(originalEvents).filter(e=>e.employeeId!=="5");
+    for(const [d,end,type] of [["2026-09-17","13:00","start"],["2026-09-18","13:01","start"],["2026-09-21","17:00","up"]]){
+      officeEvents.push({employeeId:"5",date:d,type,at:"07:00",jobName:type==="up"?"Urlaub":"Büro",reason:type==="up"?"Urlaub":"",unproductiveCode:type==="up"?"900":""},{employeeId:"5",date:d,type:"ende",at:end});
+    }
+    await fsp.writeFile(eventsPath,JSON.stringify(officeEvents));
+    const officeReport=await call("get","/kristine/api/diet-report",{},{},{from:"2026-09-17",to:"2026-09-21"});
+    const officeRows=officeReport.body.employees.find(e=>e.employeeId==="5").rows;
+    assert.equal(officeRows.find(r=>r.date==="2026-09-17").dietEmployee,0,"exactly six hours does not qualify");
+    assert.equal(officeRows.find(r=>r.date==="2026-09-18").dietEmployee,1,"office work over six hours qualifies");
+    assert.equal(officeRows.find(r=>r.date==="2026-09-21").dietEmployee,0,"vacation does not qualify");
+    await fsp.writeFile(eventsPath,originalEvents);
+
 
     response=await call("get","/kristine/api/buak-vacation-report",{}, {}, {from:"2026-10-01",to:"2026-10-31"});
     assert.equal(response.statusCode,200);

@@ -4,6 +4,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
 const XLSX = require("xlsx");
+const {withOrderLock} = require("./paint-order-lock");
 
 function registerPaintLgSentOrder(app, options = {}) {
   const dataDir = options.dataDir || process.env.DATA_DIR || "/var/data";
@@ -30,7 +31,7 @@ function registerPaintLgSentOrder(app, options = {}) {
   const isLittleGreene = article => String(article?.manufacturer || "Little Greene").toLowerCase().includes("little greene");
 
   async function readJson(file, fallback) {
-    try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; }
+    try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch(e) { if(e.code==="ENOENT")return fallback; throw e; }
   }
   async function writeJson(file, value) {
     await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -172,7 +173,8 @@ function registerPaintLgSentOrder(app, options = {}) {
     return `${prefix}${String(count).padStart(3, "0")}`;
   }
 
-  async function saveSnapshot({ positions, source, fileName = "", comparison = null }) {
+  async function saveSnapshot(args) { return withOrderLock(root,()=>saveSnapshotLocked(args)); }
+  async function saveSnapshotLocked({ positions, source, fileName = "", comparison = null }) {
     const historyRaw = await readJson(ordersFile, []);
     const history = Array.isArray(historyRaw) ? historyRaw : [];
     const fp = fingerprint(positions);
@@ -220,6 +222,30 @@ function registerPaintLgSentOrder(app, options = {}) {
     };
   }
 
+  app.get("/admin/api/paint/sent-orders", async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    try {const orders=await readJson(ordersFile,[]);res.json({ok:true,orders:orders.slice().reverse()});}
+    catch(e){res.status(500).json({ok:false,error:e.message});}
+  });
+  app.post("/admin/api/paint/sent-orders/:id/correct", async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    const run=withOrderLock(root,async()=>{
+      const orders=await readJson(ordersFile,[]), order=orders.find(o=>o.id===req.params.id);
+      if(!order)throw Error("Bestellung nicht gefunden");
+      if(["received","invoiced","cancelled","superseded"].includes(order.status))throw Error("Abgeschlossene Bestellung kann nicht geändert werden");
+      if(req.body?.fingerprint!==order.fingerprint)throw Error("Bestellung wurde inzwischen geändert. Bitte neu laden.");
+      const changes=req.body?.positions;
+      if(!Array.isArray(changes)||changes.length!==order.positions.length)throw Error("Alle Bestellpositionen müssen vorhanden sein");
+      const bySku=new Map(changes.map(r=>[String(r.sku),r]));
+      if(bySku.size!==order.positions.length)throw Error("Doppelte Bestellposition");
+      const next=order.positions.map(row=>{const r=bySku.get(row.sku);if(!r||r.quantity===''||r.unitPrice===''||r.quantity==null||r.unitPrice==null)throw Error("Menge oder Preis fehlt");const qty=Number(r.quantity),price=Number(r.unitPrice);if(!Number.isFinite(qty)||qty<0||!Number.isFinite(price)||price<0)throw Error("Menge und Preis müssen gültige, nichtnegative Zahlen sein");return {...row,quantity:qty,unitPrice:Number(price.toFixed(2)),lineTotal:Number((qty*price).toFixed(2))};});
+      if(!next.some(r=>r.quantity>0))throw Error("Die Bestellung enthält keine Menge");
+      const fp=fingerprint(next);if(fp!==order.fingerprint){order.revisions=order.revisions||[];order.revisions.push({at:new Date().toISOString(),positions:order.positions,fingerprint:order.fingerprint,total:order.total});order.positions=next;order.fingerprint=fp;Object.assign(order,{positionCount:summarizePositions(next).positions,pieces:summarizePositions(next).pieces,total:summarizePositions(next).total,updatedAt:new Date().toISOString()});await writeJson(ordersFile,orders);}
+      return order;
+    });
+    try{res.json({ok:true,order:await run});}catch(e){res.status(409).json({ok:false,error:e.message});}
+  });
+
   app.get("/admin/api/paint/sent-orders/status", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -237,7 +263,7 @@ function registerPaintLgSentOrder(app, options = {}) {
     try {
       const historyRaw = await readJson(ordersFile, []);
       const history = Array.isArray(historyRaw) ? historyRaw : [];
-      const open = history.filter(order => !["invoiced", "cancelled", "superseded"].includes(String(order?.status || "sent")));
+      const open = history.filter(order => !["received", "invoiced", "cancelled", "superseded"].includes(String(order?.status || "sent")));
       res.json({ ok: true, orders: open, count: open.length });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });

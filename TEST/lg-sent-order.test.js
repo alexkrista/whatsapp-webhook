@@ -79,5 +79,18 @@ function workbookBase64() {
   assert.equal(res.body.count, 2);
   assert.equal(res.body.orders[1].positions[0].sku, "020603YYYYY");
 
+  const order=res.body.orders[1], oldFingerprint=order.fingerprint;
+  const articlesBefore=await fs.readFile(path.join(paintDir,"articles.json"),"utf8");
+  const changes=order.positions.map(p=>({...p,quantity:p.quantity+1,unitPrice:p.unitPrice+2}));
+  res=await call(app,"POST","/admin/api/paint/sent-orders/:id/correct",{params:{id:order.id},body:{fingerprint:oldFingerprint,positions:changes}});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.order.revisions.length,1);
+  assert.equal(res.body.order.pieces,6);
+  assert.equal(await fs.readFile(path.join(paintDir,"articles.json"),"utf8"),articlesBefore,"correction never touches stock or master prices");
+  res=await call(app,"POST","/admin/api/paint/sent-orders/:id/correct",{params:{id:order.id},body:{fingerprint:oldFingerprint,positions:changes}});
+  assert.equal(res.statusCode,409,"stale order edits are rejected");
+  res=await call(app,"GET","/admin/api/paint/sent-orders");
+  assert.equal(res.body.orders[0].positions.length,2);
+  await fs.rm(dataDir,{recursive:true,force:true});
   console.log("lg-sent-order test ok");
 })().catch(error => { console.error(error); process.exit(1); });

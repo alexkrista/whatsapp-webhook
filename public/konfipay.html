@@ -22,7 +22,7 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <div class="scroll"><table><thead id="bankHead"></thead><tbody id="bankRows"></tbody></table></div>
 <div class="row" style="margin-top:14px;justify-content:flex-start"><button id="bankPrev" class="secondary" disabled>Zurück</button><span id="bankPage" class="small"></span><button id="bankNext" class="secondary" disabled>Weiter</button></div></section>
 <section class="card" id="revolutTransfer"><div class="row"><div><h2>Bank → Revolut</h2><p class="small">Interne Umbuchung als SEPA Instant/Eilüberweisung vorbereiten. Erst nach deiner Prüfung wird die Datei im Zahlungsbereich freigegeben.</p></div><button id="revolutTransferLoad" class="secondary" type="button">Konten neu laden</button></div>
-<div class="formrow"><div class="field"><label for="revolutTransferSource">Von Bankkonto</label><select id="revolutTransferSource"><option value="">Konten werden geladen …</option></select></div><div class="field"><label for="revolutTransferTarget">Auf Revolut Business</label><select id="revolutTransferTarget"><option value="">Revolut wird geladen …</option></select></div></div>
+<div class="formrow"><div class="field"><label for="revolutTransferSource">Von Bankkonto</label><select id="revolutTransferSource"><option value="">Konten werden geladen …</option></select></div><div class="field"><label for="revolutTransferTarget">Auf Revolut / Revolut Business</label><select id="revolutTransferTarget"><option value="">Revolut wird geladen …</option></select></div></div>
 <div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Eil-SEPA vorbereiten</button></div>
 <p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><a id="revolutTransferDownload" class="bank-action" hidden>SEPA-Datei herunterladen</a>
 <p class="small">Der spätere Bankumsatz wird nur bei exakter Übereinstimmung von Konten, Betrag und EndToEnd-ID automatisch als „Umbuchung · Revolut“ erkannt – ohne Aufwand oder Ertrag.</p></section>
@@ -171,7 +171,8 @@ async function loadRevolutTransferContext(){
  const button=$('revolutTransferLoad');button.disabled=true;$('revolutTransferMessage').textContent='Bank- und Revolut-Konten werden geladen …';
  try{const d=await api('revolut-transfer-context');
   for(const [id,items,label] of [['revolutTransferSource',d.sources,'Bankkonto auswählen'],['revolutTransferTarget',d.targets,'Revolut-Konto auswählen']]){const select=$(id),old=select.value;select.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent=label;select.append(empty);for(const item of items){const option=document.createElement('option');option.value=item.id;option.textContent=(item.name||'Konto')+' · '+String(item.iban||'').replace(/\s/g,'').slice(-4);select.append(option);}select.value=old&&items.some(x=>x.id===old)?old:(items.length===1?items[0].id:'');}
-  $('revolutTransferMessage').textContent='Bereit. Betrag eingeben und Eil-SEPA vorbereiten.';
+  const source=$('revolutTransferSource');if(!source.value){const hypo=d.sources.filter(x=>/hypo/i.test(x.name||''));if(hypo.length===1)source.value=hypo[0].id;}
+  $('revolutTransferMessage').textContent=['Bereit. Ziel wählen, Betrag eingeben und Eil-SEPA vorbereiten.',...(d.warnings||[])].join(' ');
  }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
 }
 $('revolutTransferLoad').addEventListener('click',loadRevolutTransferContext);
@@ -179,7 +180,7 @@ $('revolutTransferPrepare').addEventListener('click',async()=>{
  const button=$('revolutTransferPrepare'),link=$('revolutTransferDownload');button.disabled=true;link.hidden=true;$('revolutTransferMessage').textContent='SEPA Instant wird vorbereitet …';
  try{const d=await api('revolut-transfer-prepare',{sourceAccountId:$('revolutTransferSource').value,revolutAccountId:$('revolutTransferTarget').value,amount:$('revolutTransferAmount').value.replace(',','.'),purpose:$('revolutTransferPurpose').value});
   if(revolutTransferUrl)URL.revokeObjectURL(revolutTransferUrl);revolutTransferUrl=URL.createObjectURL(new Blob([d.xml],{type:'application/xml'}));link.href=revolutTransferUrl;link.download=d.filename;link.hidden=false;
-  $('revolutTransferMessage').textContent='Vorbereitet: '+money(d.amount,'EUR')+' · '+d.source.name+' → '+d.target.name+' · SEPA Instant/Eilüberweisung. Bitte Datei herunterladen und im Zahlungsbereich prüfen.';
+  $('revolutTransferMessage').textContent='Vorbereitet: '+money(d.amount,'EUR')+' · '+d.source.name+' → '+d.target.name+' · '+d.target.iban+' · '+d.target.beneficiary+' · SEPA Instant/Eilüberweisung. Bitte Datei herunterladen und im Zahlungsbereich prüfen.';
  }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
 });
 loadRevolutTransferContext();
