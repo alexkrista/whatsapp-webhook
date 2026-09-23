@@ -61,7 +61,7 @@ function registerEmployeeLogin(app, { dataDir, readEmployees, sendWhatsApp }) {
       if (employee) {
         const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
         const salt = crypto.randomBytes(16).toString("hex");
-        await sendWhatsApp({ to:phone, reply:`Dein KRISTINE-Anmeldecode: ${code}\nGültig für 5 Minuten. Wenn du dich nicht anmeldest, ignoriere diese Nachricht.`, buttons:[] });
+        await sendWhatsApp({ to:phone, reply:`Dein KRISTINE-Anmeldecode: ${code}\nGültig für 5 Minuten. Wenn du dich nicht anmeldest, ignoriere diese Nachricht.`, buttons:[], includeGoLink:false });
         await write(phone, { employeeId:String(employee.id || employee.employeeId), salt, codeHash:digest(salt,code),
           expiresAt:now+300000, attempts:0, sentAt:now,
           windowAt:challenge?.windowAt > now-3600000 ? challenge.windowAt : now,

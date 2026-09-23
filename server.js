@@ -1635,7 +1635,7 @@ function getActiveKristinePhoneNumberId(phoneNumberId = "") {
   ).trim();
 }
 
-async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [] }) {
+async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [], includeGoLink = true }) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
   const senderId = getActiveKristinePhoneNumberId(phoneNumberId);
   if (!senderId) {
@@ -1644,7 +1644,7 @@ async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [
   const recipient = normalizeWhatsAppRecipient(to);
   if (!recipient) throw new Error("WhatsApp-EmpfÃ¤nger fehlt");
 
-  const kgoLink = await kristineGoLinkForWhatsAppRecipient(to);
+  const kgoLink = includeGoLink ? await kristineGoLinkForWhatsAppRecipient(to) : "";
 
 const replyWithKgo = kgoLink
   ? `${String(reply || "").trim()}
