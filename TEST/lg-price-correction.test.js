@@ -22,14 +22,15 @@ const { registerPaintCommercial } = require("../paint-commercial");
     { materialId: "020603HHHHH", sourceId: "LG-A", supplierArticleNumber: "020603HHHHH", supplier: "Little Greene", product: "Absolute Matt · 1 L", purchasePrice: 20, salePrice: 49.17 },
   ]));
 
-  process.env.ADMIN_TOKEN = "";
+  process.env.ADMIN_TOKEN = "test-lg-prices";
   const app = express();
   app.use(express.json({ limit: "20mb" }));
   registerPaintCommercial(app, { dataDir, publicDir });
   const server = await new Promise(resolve => { const instance = app.listen(0, "127.0.0.1", () => resolve(instance)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const exported = await fetch(`${base}/admin/api/paint/lg-prices/export.xlsx`);
+    const auth = { "x-admin-token": process.env.ADMIN_TOKEN };
+    const exported = await fetch(`${base}/admin/api/paint/lg-prices/export.xlsx`, { headers: auth });
     assert.equal(exported.status, 200);
     const wb = XLSX.read(Buffer.from(await exported.arrayBuffer()), { type: "buffer" });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets["LG Preise"]);
@@ -41,7 +42,7 @@ const { registerPaintCommercial } = require("../paint-commercial");
     wb.Sheets["LG Preise"] = XLSX.utils.json_to_sheet(rows);
     const base64 = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }).toString("base64");
 
-    const preview = await fetch(`${base}/admin/api/paint/lg-prices/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base64 }) });
+    const preview = await fetch(`${base}/admin/api/paint/lg-prices/preview`, { method: "POST", headers: { "Content-Type": "application/json", ...auth }, body: JSON.stringify({ base64 }) });
     const previewBody = await preview.json();
     assert.equal(preview.status, 200);
     assert.equal(previewBody.errors.length, 0);
@@ -49,7 +50,7 @@ const { registerPaintCommercial } = require("../paint-commercial");
     assert.equal(previewBody.changes[0].oldSale, 49.17);
     assert.equal(previewBody.changes[0].nextSale, 52.25);
 
-    const applied = await fetch(`${base}/admin/api/paint/lg-prices/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base64 }) });
+    const applied = await fetch(`${base}/admin/api/paint/lg-prices/apply`, { method: "POST", headers: { "Content-Type": "application/json", ...auth }, body: JSON.stringify({ base64 }) });
     const appliedBody = await applied.json();
     assert.equal(applied.status, 200);
     assert.equal(appliedBody.updatedArticles, 1);

@@ -245,7 +245,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       .replace(/\b(gmbh|mbh|ag|kg|og|e\.u|eu)\b/g, " ")
       .replace(/\b(?:und\s+co|co)\b/g, " ")
       .replace(/[^a-z0-9]+/g, "") || "ohne-lieferant";
-    return fingerprint === "lg" ? "littlegreene" : fingerprint;
+    return ["lg", "thelittlegreene"].includes(fingerprint) ? "littlegreene" : fingerprint;
   }
 
   function matchesSupplierFilter(item, filter) {
@@ -326,11 +326,18 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
   }
 
   function lgSize(value, containerSize = 0) {
-    let raw = `${containerSize || ""}${value || ""}`.toLowerCase().replace(/,/g, ".").replace(/litre|liter|ltr/g, "l").replace(/\s+/g, "");
-    const fromText = raw.match(/(?:^|[^0-9])((?:0\.)?25|0\.5|0\.75|1|2|2\.5|4|5|10)l(?:$|[^a-z])/);
-    if (fromText) return `${Number(fromText[1])}l`;
-    const ml = raw.match(/(?:^|[^0-9])(60|250|500|750)ml(?:$|[^a-z])/);
-    return ml ? `${Number(ml[1])}ml` : "";
+    const normalize = raw => String(raw || "").toLowerCase().replace(/,/g, ".").replace(/litre|liter|ltr/g, "l").replace(/\s+/g, "");
+    const parse = raw => {
+      const fromText = raw.match(/(?:^|[^0-9])((?:0\.)?25|0\.5|0\.75|1|2|2\.5|4|5|10)l(?:$|[^a-z])/);
+      if (fromText) return `${Number(fromText[1])}l`;
+      const ml = raw.match(/(?:^|[^0-9])(60|250|500|750)ml(?:$|[^a-z])/);
+      return ml ? `${Number(ml[1])}ml` : "";
+    };
+    const rawValue = normalize(value);
+    const explicit = parse(rawValue);
+    if (explicit) return explicit;
+    if (!number(containerSize)) return "";
+    return parse(`${number(containerSize)}${rawValue.includes("ml") ? "ml" : "l"}`);
   }
 
   function lgProductKey(value) {

@@ -20,13 +20,13 @@ const { registerMaterialMaster } = require("../material-master");
     fs.writeFileSync(path.join(materialDir, "materials.json"), JSON.stringify([
       { id: "M1", materialId: "M1", group: "Farbe", product: "Alt", unit: "kg", purchasePrice: 1, salePrice: 2, supplier: "", active: true, note: "bleibt" },
       { id: "M2", materialId: "M2", group: "Werkzeug", product: "Stilllegen", unit: "Stk", purchasePrice: 3, salePrice: 5, active: true },
-      { id: "M3", materialId: "M3", group: "Farbe", product: "Absolute Matt", unit: "1 L", purchasePrice: 0, salePrice: 0, supplier: "LG", supplierArticleNumber: "SKU1", active: true },
+      { id: "M3", materialId: "M3", group: "Farbe", product: "Absolute Matt", unit: "2,5 L", purchasePrice: 0, salePrice: 0, supplier: "The Little Greene", supplierArticleNumber: "SKU1", active: true },
       { id: "M4", materialId: "M4", group: "Farbe", product: "LG Zubehör", unit: "Stk", purchasePrice: 4, salePrice: 8, supplier: "Little Greene", active: true },
     ]));
     const paintDir = path.join(root, "_kristine", "paint");
     fs.mkdirSync(paintDir, { recursive: true });
     fs.writeFileSync(path.join(paintDir, "articles.json"), JSON.stringify([
-      { id: "LG-SKU1", stockCode: "SKU1", manufacturer: "Little Greene", product: "Absolute Matt", size: "1 L", purchasePrice: 21, salePrice: 0, active: true, updatedAt: "2026-09-08T08:00:00Z" },
+      { id: "LG-SKU1", stockCode: "SKU1", manufacturer: "Little Greene", product: "Absolute Matt", size: "2,5 L", purchasePrice: 41.1, salePrice: 0, active: true, updatedAt: "2026-09-08T08:00:00Z" },
     ]));
 
     const invoke = (handler, req = {}) => new Promise((resolve, reject) => {
@@ -101,14 +101,14 @@ const { registerMaterialMaster } = require("../material-master");
     assert.equal(littleGreeneRows.body.materials.length, 2, "LG und Little Greene erscheinen als gemeinsamer Lieferant");
     assert(littleGreeneRows.body.materials.every(row => row.supplier === "Little Greene"), "Dropdown und Liste verwenden nur den kanonischen Lieferantennamen");
     const lgArticle = littleGreeneRows.body.materials.find(row => row.materialId === "M3");
-    assert.equal(lgArticle.purchasePrice, 21, "Little-Greene-EK wird aus dem LG-Stamm kopiert");
-    assert.equal(lgArticle.salePrice, 49.17, "Little-Greene-VK netto wird aus der LG-Retailpreisliste kopiert");
+    assert.equal(lgArticle.purchasePrice, 41.1, "Little-Greene-EK wird aus dem LG-Stamm kopiert");
+    assert.equal(lgArticle.salePrice, 92.5, "The Little Greene wird erkannt und 2,5 L erhält nicht versehentlich den 5-L-VK");
     assert.equal(lgArticle.priceSource, "Little Greene");
 
     const suppliers = await invoke(routes["get:/admin/api/material-suppliers"], { query: {} });
     const lgSupplier = suppliers.body.suppliers.find(row => row.name === "Little Greene");
     assert.equal(lgSupplier.materialCount, 2);
-    assert.deepEqual(lgSupplier.aliases, ["LG", "Little Greene"]);
+    assert.deepEqual(lgSupplier.aliases, ["LG", "Little Greene", "The Little Greene"]);
     const linked = await invoke(routes["post:/admin/api/material-suppliers/link-winworker"], { body: {
       localKey: lgSupplier.key,
       localName: lgSupplier.name,
