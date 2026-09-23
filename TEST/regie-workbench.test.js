@@ -392,6 +392,10 @@ function invoke(handler, req) {
   assert.equal(legacyCoveredMix.body.materialSuggestions.length, 0, "Eine früher manuell verrechnete LG-Menge darf die Maschine nicht nochmals anbieten");
   const legacyOwnMix = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03", reportId: "legacy-lg" } });
   assert.equal(legacyOwnMix.body.materialSuggestions.length, 1, "Im betroffenen Alt-Rapport bleibt der Maschinenabgleich möglich");
+  reportRows[reportRows.length - 1].materials = [{ product: "Absolute Matt Emulsion", quantity: 1, containerSize: 1, unit: "L" }];
+  fs.writeFileSync(machineReportFile, JSON.stringify(reportRows));
+  const partialLegacyMix = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
+  assert.equal(partialLegacyMix.body.materialSuggestions[0].quantity, 3, "Eine unklare Teilmenge erzeugt niemals Bruchteile eines Maschinengebindes");
 
   const workbench = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
   assert.match(workbench, /Baustellenzeiten dieses Tages/);

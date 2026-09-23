@@ -340,7 +340,7 @@ function registerRegieAssistant(app, options) {
     const alreadyUsed = new Set(otherMaterials.map(row => clean(row.machineBookingId, 180)).filter(Boolean));
     const legacyUsed = new Map();
     for (const row of otherMaterials.filter(row => !row.machineBookingId)) {
-      const key = canonicalPaintProduct(row.product || row.name), size = num(row.containerSize) || packageLiters(row.product || row.name) || 1;
+      const key = canonicalPaintProduct(row.product || row.name), size = packageLiters(row.product || row.name) || num(row.containerSize) || 1;
       if (key) legacyUsed.set(key, round((legacyUsed.get(key) || 0) + num(row.quantity) * size));
     }
     const masterFor = booking => {
@@ -358,10 +358,9 @@ function registerRegieAssistant(app, options) {
     )) {
       const master = masterFor(booking) || {}, size = num(master.containerSize) || packageLiters(booking.size) || (num(booking.quantity) ? num(booking.liters) / num(booking.quantity) : 1);
       const bookedQuantity = num(booking.quantity) || (size ? num(booking.liters) / size : 1), bookedLiters = bookedQuantity * size;
-      const key = canonicalPaintProduct(booking.product), legacyCoverage = Math.min(bookedLiters, legacyUsed.get(key) || 0);
-      legacyUsed.set(key, round((legacyUsed.get(key) || 0) - legacyCoverage));
-      const quantity = size ? round((bookedLiters - legacyCoverage) / size) : bookedQuantity;
-      if (quantity <= 0) continue;
+      const key = canonicalPaintProduct(booking.product), legacyCoverage = legacyUsed.get(key) || 0;
+      if (legacyCoverage + .001 >= bookedLiters) { legacyUsed.set(key, round(legacyCoverage - bookedLiters)); continue; }
+      const quantity = bookedQuantity;
       const purchasePrice = num(master.purchasePrice ?? master.unitPrice ?? booking.purchasePrice);
       const explicitSale = num(master.salePrice ?? master.vkNet ?? booking.salePrice);
       rows.push({
