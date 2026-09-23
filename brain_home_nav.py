@@ -169,6 +169,11 @@ def install(ns):
     revolut.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut'});
     accounts.row.appendChild(revolut);
 
+    const personal=revolut.cloneNode(true);
+    personal.id='modeRevolutPersonal';personal.textContent='💳 Revolut Privat';
+    personal.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/revolut-personal'});
+    accounts.row.appendChild(personal);
+
     const kassa=captureNav.cloneNode(true);
     kassa.id='modeKassa';kassa.classList.remove('active');kassa.removeAttribute('onclick');kassa.textContent='💶 KASSA';
     kassa.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/kassa'});
