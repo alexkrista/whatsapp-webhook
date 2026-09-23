@@ -13,8 +13,9 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   process.env.ADMIN_TOKEN = "legacy-machine-secret";
   process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = "true";
   const people = [
-    { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true },
-    { id:"mario", name:"Mario", phone:"+43 660 222222", active:true },
+    { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true, kristineAccess:true },
+    { id:"mario", name:"Mario", phone:"+43 660 222222", active:true, kristineAccess:true },
+    { id:"lutz", name:"Lutz", phone:"+43 660 333333", active:true },
   ];
   await fs.mkdir(path.join(dir, "_system"), { recursive:true });
   await fs.writeFile(path.join(dir, "_system", "employees.json"), JSON.stringify(people));
@@ -47,6 +48,9 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   assert.equal((await request("/admin/api/paint/status", { headers:{ Cookie:legacyCookie } })).status, 200);
   assert.equal((await post("/kristine/api/access-heartbeat", {}, { Cookie:legacyCookie })).status, 403);
 
+  assert.equal((await post("/auth/whatsapp/start", { phone:"+43 660 333333" })).status, 200);
+  assert.equal(messages.length, 0, "KGO-only employee must not receive a KRISTINE code");
+
   async function login(phone) {
     const start = await post("/auth/whatsapp/start", { phone });
     assert.equal(start.status, 200);
@@ -71,7 +75,7 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   assert.equal(authorized.status, 200);
   assert.equal((await post("/auth/logout", {}, { Cookie:alex })).status, 200);
   assert.equal((await request("/auth/me", { headers:{ Cookie:alex } })).status, 401);
-  people[1].active = false;
+  people[1].kristineAccess = false;
   await fs.writeFile(path.join(dir, "_system", "employees.json"), JSON.stringify(people));
   assert.equal((await request("/auth/me", { headers:{ Cookie:mario } })).status, 401);
 });
