@@ -245,6 +245,7 @@ async function renderLiquidity(bank){
    for(const [currency,value] of visibleRevolut)totals[currency]=(totals[currency]||0n)+cents(value);if(revolut.stale)complete=false;
   }catch(e){complete=false;line('Revolut Business','Ungültiger Bestand');}
  }else{complete=false;line('Revolut Business','Nicht verfügbar · '+businessResult.reason.message);}
+ const businessLink=document.createElement('a');businessLink.className='bank-action';businessLink.href='/incoming/revolut';businessLink.textContent='Revolut Business · Belege zuordnen →';card.append(businessLink);
  const enable=enableResult.status==='fulfilled'?enableResult.value:null;
  const enableBalances=enable?.connected?enable.balances||[]:[];
  if(enableBalances.length){try{
@@ -260,7 +261,7 @@ async function renderLiquidity(bank){
   for(const a of privateAccounts){if(a.amount===null){complete=false;line('Revolut','Bestand fehlt');continue;}if(!Number.isSafeInteger(a.amount))throw Error('Ungültiger Bestand');line('Revolut',money(decimal(BigInt(a.amount)),a.currency)+' · Stand '+bankDate(a.date));totals[a.currency]=(totals[a.currency]||0n)+BigInt(a.amount);}
   }catch(e){complete=false;line('Revolut','Ungültiger Bestand');}
  }else{complete=false;line('Revolut','Bestand noch nicht verfügbar');}
- const revolutLink=document.createElement('a');revolutLink.className='bank-action';revolutLink.href='/incoming/revolut-personal';revolutLink.textContent=enable?.connected?'Revolut · Buchungen anzeigen →':'Revolut verbinden →';card.append(revolutLink);
+ const revolutLink=document.createElement('a');revolutLink.className='bank-action';revolutLink.href='/incoming/revolut-personal';revolutLink.style.marginLeft='8px';revolutLink.textContent=enable?.connected?'Revolut · Belege zuordnen →':'Revolut verbinden →';card.append(revolutLink);
  if(cashResult.status==='fulfilled'){const d=cashResult.value;try{if(d.balance===null||d.balance===undefined){complete=false;line('Kassastand','Bestand fehlt · Excel importieren / Anfangsbestand angeben');}else{const value=BigInt(d.balance);totals.EUR=(totals.EUR||0n)+value;line('Kassastand',money(decimal(value),'EUR')+' · Import '+stamp(d.lastImport));}}catch(e){complete=false;line('Kassastand','Ungültiger Importbestand');}}
  else{complete=false;line('Kassastand','Importbestand nicht verfügbar');}
  const known=Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · ')||'Keine Bestände verfügbar';
