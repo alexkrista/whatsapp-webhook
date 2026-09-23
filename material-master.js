@@ -404,9 +404,11 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const productKey = lgProductKey(article.product || item.product);
       const size = lgSize(article.size || `${item.product} ${item.unit}`, item.containerSize);
       const retail = retailRows.find(row => row.productKey === productKey && row.size === size);
-      const salePrice = retail?.gross ? Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100 : (number(article.salePrice) || number(item.salePrice));
-      const sourceDate = retail?.gross ? "2025-05-01" : (clean(article.updatedAt, 10) || item.priceCheckedAt);
-      if (purchasePrice === number(item.purchasePrice) && salePrice === number(item.salePrice) && item.priceSource === "Little Greene" && item.fixedSalePrice === true) continue;
+      const manualSalePrice = article.manualSalePrice === true && number(article.salePrice) > 0;
+      const salePrice = manualSalePrice ? number(article.salePrice) : (retail?.gross ? Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100 : (number(article.salePrice) || number(item.salePrice)));
+      const sourceDate = manualSalePrice ? (clean(article.updatedAt, 10) || item.priceCheckedAt) : (retail?.gross ? "2025-05-01" : (clean(article.updatedAt, 10) || item.priceCheckedAt));
+      const priceSource = manualSalePrice ? "Little Greene · Excel-Korrektur" : "Little Greene";
+      if (purchasePrice === number(item.purchasePrice) && salePrice === number(item.salePrice) && item.priceSource === priceSource && item.fixedSalePrice === true) continue;
       materials[index] = normalizeMaterial({
         ...item,
         supplier: item.wwSupplierAddressId ? item.supplier : "Little Greene",
@@ -415,7 +417,7 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
         fixedSalePrice: true,
         priceCheckedAt: sourceDate,
         priceValidFrom: sourceDate,
-        priceSource: "Little Greene",
+        priceSource,
         priceSourceId: clean(article.id || article.stockCode, 160),
         supplierAliases: [...new Set([...(item.supplierAliases || []), item.supplier, "LG", "Little Greene"].filter(Boolean))],
         createdAt: item.createdAt,
@@ -488,7 +490,9 @@ function registerMaterialMaster(app, { dataDir, requireAdmin, publicDir }) {
       const generatedCode = `LG-${slug(retail.product)}-${String(retail.size).replace(/[^a-z0-9]/gi, "")}`.toUpperCase();
       const stockCode = clean(article?.stockCode, 100).toUpperCase() || generatedCode;
       const sourceId = clean(article?.id || stockCode, 160);
-      const salePrice = Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100;
+      const salePrice = article?.manualSalePrice === true && number(article.salePrice) > 0
+        ? number(article.salePrice)
+        : Math.round((retail.gross / 1.2 + Number.EPSILON) * 100) / 100;
       const sourceDate = clean(article?.updatedAt, 10) || "2025-05-01";
       const linked = applySupplierLink({ supplier: "Little Greene", supplierAliases: ["LG", "Little Greene"] }, supplierLinks);
       let materialId = stockCode;

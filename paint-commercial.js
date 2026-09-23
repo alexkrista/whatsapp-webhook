@@ -16,11 +16,13 @@ function registerPaintCommercial(app, options = {}) {
   const adminToken = process.env.ADMIN_TOKEN || "";
   const ROOT = path.join(dataDir, "_kristine", "paint");
   const ARTICLES = path.join(ROOT, "articles.json");
+  const MATERIALS = path.join(dataDir, "_kristine", "materials", "materials.json");
   const PRICE_HISTORY = path.join(ROOT, "price-history.jsonl");
   const MOVEMENTS = path.join(ROOT, "movements.jsonl");
   const PRICE_LIST_META = path.join(ROOT, "lg-pricelist.json");
   const PRICE_LIST_DIR = path.join(ROOT, "price-lists");
   const PURCHASES = path.join(ROOT, "lg-purchases.json");
+  const LG_RETAIL_FILE = path.join(options.publicDir || path.join(process.cwd(), "public"), "lg-retail-preisliste-2025.html");
 
   const requireAdmin = require("./admin-auth").requireAdmin;
 
@@ -33,6 +35,147 @@ function registerPaintCommercial(app, options = {}) {
   };
   const normHeader = (v) => clean(v, 120).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[€()]/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
   const stockCodeNorm = (v) => clean(v, 100).toUpperCase().replace(/\s+/g, "");
+
+  function lgSize(value) {
+    const raw = clean(value, 120).toLowerCase().replace(/,/g, ".").replace(/litre|liter|ltr/g, "l").replace(/\s+/g, "");
+    const fromText = raw.match(/(?:^|[^0-9])((?:0\.)?25|0\.5|0\.75|1|2|2\.5|4|5|10)l(?:$|[^a-z])/);
+    if (fromText) return `${Number(fromText[1])}l`;
+    const ml = raw.match(/(?:^|[^0-9])(60|250|500|750)ml(?:$|[^a-z])/);
+    return ml ? `${Number(ml[1])}ml` : "";
+  }
+
+  function lgProductKey(value) {
+    return clean(value, 240).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+      .replace(/\b(little\s*greene|lg|hi\s*white|medium|deep|extra\s*deep|transparent|yellow|pastel|white\s*asp)\b/g, " ")
+      .replace(/\bemulsion\b/g, " ")
+      .replace(/\b(60|250|500|750)\s*ml\b|\b(?:0[.,])?(?:25|5|75)\s*l\b|\b(?:1|2|2[.,]5|4|5|10)\s*l\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  async function retailPrices() {
+    try {
+      const html = await fsp.readFile(LG_RETAIL_FILE, "utf8");
+      const prices = new Map();
+      for (const match of html.matchAll(/<tr><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><\/tr>/gi)) {
+        const product = match[1].replace(/<[^>]+>/g, "");
+        const size = match[2].replace(/<[^>]+>/g, "");
+        const gross = num(match[3].replace(/<[^>]+>/g, "").replace(/[^0-9,.]/g, ""), 0);
+        const key = `${lgProductKey(product)}|${lgSize(size)}`;
+        if (key !== "|" && gross > 0) prices.set(key, Number((gross / 1.2).toFixed(2)));
+      }
+      return prices;
+    } catch { return new Map(); }
+  }
+
+  function isLittleGreeneArticle(article) {
+    return article && article.active !== false && (
+      String(article.manufacturer || "Little Greene").toLowerCase().includes("little greene") || /^lg[-_]/i.test(String(article.id || ""))
+    );
+  }
+
+  function effectiveSalePrice(article, retail) {
+    if (article.manualSalePrice === true && Number(article.salePrice) > 0) return Number(article.salePrice);
+    const listed = retail.get(`${lgProductKey(article.product)}|${lgSize(article.size)}`);
+    return Number(listed || article.salePrice || 0);
+  }
+
+  async function buildPriceWorkbook() {
+    if (!XLSX) throw new Error("xlsx-Modul fehlt");
+    const [articles, retail] = await Promise.all([readJson(ARTICLES, []), retailPrices()]);
+    const rows = articles.filter(isLittleGreeneArticle).map(article => ({
+      "Artikel-ID (nicht ändern)": clean(article.id, 160),
+      "Product Code (nicht ändern)": clean(article.stockCode, 100),
+      "Produkt": clean(article.product, 180),
+      "Basis": clean(article.baseName || article.baseCode, 100),
+      "Gebinde": clean(article.size, 60),
+      "EK netto": Number(article.purchasePrice || 0),
+      "VK netto": effectiveSalePrice(article, retail),
+      "Hinweis": "Nur EK netto und VK netto ändern",
+    })).sort((a, b) => String(a.Produkt).localeCompare(String(b.Produkt), "de") || String(a.Gebinde).localeCompare(String(b.Gebinde), "de") || String(a.Basis).localeCompare(String(b.Basis), "de"));
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{wch:24},{wch:28},{wch:30},{wch:18},{wch:12},{wch:13},{wch:13},{wch:36}];
+    ws["!autofilter"] = { ref: ws["!ref"] || "A1:H1" };
+    for (let row = 2; row <= rows.length + 1; row += 1) {
+      for (const col of ["F", "G"]) if (ws[`${col}${row}`]) ws[`${col}${row}`].z = '#,##0.00 [$€-407]';
+    }
+    XLSX.utils.book_append_sheet(wb, ws, "LG Preise");
+    const help = XLSX.utils.aoa_to_sheet([
+      ["LG Preiswartung"],
+      ["Bitte nur die Spalten EK netto und VK netto ändern."],
+      ["Artikel-ID und Product Code dienen der sicheren Zuordnung und dürfen nicht verändert werden."],
+      ["Nach dem Hochladen zeigt KRISTINE zuerst eine Vorschau. Erst danach werden die Änderungen übernommen."],
+    ]);
+    help["!cols"] = [{wch:110}];
+    XLSX.utils.book_append_sheet(wb, help, "Anleitung");
+    return { buffer: XLSX.write(wb, { type: "buffer", bookType: "xlsx" }), count: rows.length };
+  }
+
+  function parsePriceCorrectionWorkbook(buffer) {
+    if (!XLSX) throw new Error("xlsx-Modul fehlt");
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: false });
+    const ws = wb.Sheets["LG Preise"] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: "" });
+    return rows.map((row, index) => ({
+      row: index + 2,
+      id: clean(row["Artikel-ID (nicht ändern)"] || row["Artikel-ID"] || row.id, 160),
+      stockCode: stockCodeNorm(row["Product Code (nicht ändern)"] || row["Product Code"] || row.stockCode),
+      purchaseRaw: row["EK netto"],
+      saleRaw: row["VK netto"],
+    })).filter(row => row.id || row.stockCode);
+  }
+
+  async function priceCorrectionChanges(buffer) {
+    const [incoming, articles, retail] = await Promise.all([Promise.resolve(parsePriceCorrectionWorkbook(buffer)), readJson(ARTICLES, []), retailPrices()]);
+    const byId = new Map(articles.map((article, index) => [String(article.id || ""), { article, index }]));
+    const byCode = new Map(articles.map((article, index) => [stockCodeNorm(article.stockCode), { article, index }]).filter(([code]) => code));
+    const changes = [], errors = [];
+    const seen = new Set();
+    for (const row of incoming) {
+      const found = byId.get(row.id) || byCode.get(row.stockCode);
+      if (!found || !isLittleGreeneArticle(found.article)) { errors.push(`Zeile ${row.row}: Artikel nicht gefunden`); continue; }
+      if (seen.has(found.index)) { errors.push(`Zeile ${row.row}: Artikel doppelt`); continue; }
+      seen.add(found.index);
+      const purchase = num(row.purchaseRaw, NaN), sale = num(row.saleRaw, NaN);
+      if (!Number.isFinite(purchase) || purchase <= 0) { errors.push(`Zeile ${row.row}: EK netto ist ungültig`); continue; }
+      if (!Number.isFinite(sale) || sale <= 0) { errors.push(`Zeile ${row.row}: VK netto ist ungültig`); continue; }
+      const oldPurchase = Number(found.article.purchasePrice || 0);
+      const oldSale = effectiveSalePrice(found.article, retail);
+      if (Math.abs(purchase - oldPurchase) < 0.005 && Math.abs(sale - oldSale) < 0.005) continue;
+      changes.push({
+        index: found.index,
+        id: clean(found.article.id, 160),
+        stockCode: clean(found.article.stockCode, 100),
+        product: clean(found.article.product, 180),
+        size: clean(found.article.size, 60),
+        base: clean(found.article.baseName || found.article.baseCode, 100),
+        oldPurchase: Number(oldPurchase.toFixed(2)), nextPurchase: Number(purchase.toFixed(2)),
+        oldSale: Number(oldSale.toFixed(2)), nextSale: Number(sale.toFixed(2)),
+      });
+    }
+    return { articles, changes, errors, rows: incoming.length };
+  }
+
+  async function syncCorrectedMaterials(changes) {
+    const materials = await readJson(MATERIALS, []);
+    if (!materials.length || !changes.length) return 0;
+    const byId = new Map(changes.map(change => [String(change.id), change]));
+    const byCode = new Map(changes.map(change => [stockCodeNorm(change.stockCode), change]));
+    let updated = 0;
+    for (const material of materials) {
+      const change = byId.get(String(material.sourceId || "")) || byCode.get(stockCodeNorm(material.supplierArticleNumber || material.articleNumber || material.priceSourceId));
+      if (!change) continue;
+      material.purchasePrice = change.nextPurchase;
+      material.salePrice = change.nextSale;
+      material.fixedSalePrice = true;
+      material.priceCheckedAt = new Date().toISOString().slice(0, 10);
+      material.priceValidFrom = material.priceCheckedAt;
+      material.priceSource = "Little Greene · Excel-Korrektur";
+      updated += 1;
+    }
+    if (updated) await writeJson(MATERIALS, materials);
+    return updated;
+  }
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -220,6 +363,58 @@ function registerPaintCommercial(app, options = {}) {
     if (!requireAdmin(req, res)) return;
     const [order, turnover, priceList] = await Promise.all([openOrderSummary(), turnoverSummary(), readJson(PRICE_LIST_META, null)]);
     res.json({ ok: true, order, turnover, priceList, orderEmail: LG_ORDER_EMAIL, accountCode: LG_ACCOUNT_CODE });
+  });
+
+  app.get("/admin/api/paint/lg-prices/export.xlsx", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await buildPriceWorkbook();
+      const day = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename=LG_EK_VK_Preise_${day}.xlsx`);
+      res.setHeader("X-LG-Articles", String(result.count));
+      res.send(result.buffer);
+    } catch (e) { res.status(500).json({ ok:false, error:String(e?.message||e) }); }
+  });
+
+  app.post("/admin/api/paint/lg-prices/preview", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const base64 = clean(req.body?.base64, 120_000_000).replace(/^data:.*?;base64,/, "");
+      if (!base64) return res.status(400).json({ ok:false, error:"Excel-Datei fehlt" });
+      const result = await priceCorrectionChanges(Buffer.from(base64, "base64"));
+      res.json({ ok:true, rows:result.rows, changes:result.changes, errors:result.errors });
+    } catch (e) { res.status(400).json({ ok:false, error:String(e?.message||e) }); }
+  });
+
+  app.post("/admin/api/paint/lg-prices/apply", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const base64 = clean(req.body?.base64, 120_000_000).replace(/^data:.*?;base64,/, "");
+      if (!base64) return res.status(400).json({ ok:false, error:"Excel-Datei fehlt" });
+      const result = await priceCorrectionChanges(Buffer.from(base64, "base64"));
+      if (result.errors.length) return res.status(409).json({ ok:false, error:"Die Excel-Datei enthält Fehler. Bitte erneut prüfen.", errors:result.errors });
+      const now = new Date().toISOString();
+      for (const change of result.changes) {
+        const article = result.articles[change.index];
+        if (change.nextPurchase !== change.oldPurchase) article.purchasePrice = change.nextPurchase;
+        if (change.nextSale !== change.oldSale) {
+          article.salePrice = change.nextSale;
+          article.manualSalePrice = true;
+        }
+        article.updatedAt = now;
+        article.priceSource = "LG-Preiskorrektur Excel";
+        await appendJsonl(PRICE_HISTORY, {
+          at: now, articleId: article.id, stockCode: article.stockCode,
+          oldPurchasePrice: change.oldPurchase, newPurchasePrice: change.nextPurchase,
+          oldSalePrice: change.oldSale, newSalePrice: change.nextSale,
+          source: "LG-Preiskorrektur Excel",
+        });
+      }
+      if (result.changes.length) await writeJson(ARTICLES, result.articles);
+      const updatedMaterials = await syncCorrectedMaterials(result.changes);
+      res.json({ ok:true, updatedArticles:result.changes.length, updatedMaterials });
+    } catch (e) { res.status(500).json({ ok:false, error:String(e?.message||e) }); }
   });
 
   app.post("/admin/api/paint/lg-pricelist/import", async (req, res) => {

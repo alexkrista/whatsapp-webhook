@@ -12,6 +12,8 @@ for(const text of ["Farben Retail · wird geprüft","Preislisten hochladen","Far
 assert.ok(html.includes('id="priceUploadBtn" data-tab="admin"'),"Preislisten hochladen öffnet zuverlässig den bestehenden Import-Reiter");
 assert.ok(html.includes("document.getElementById('priceImport')?.addEventListener"),"Farben-Import ist unabhängig von ausgeblendeten Alt-Importen gebunden");
 assert.ok(html.includes("Bitte zuerst eine Farben-Preisliste auswählen."),"Farben-Import meldet eine fehlende Datei sichtbar");
+for(const text of ["Aktuelle EK/VK als Excel","Änderungen prüfen","Geprüfte Änderungen übernehmen","/admin/api/paint/lg-prices/export.xlsx","/admin/api/paint/lg-prices/preview","/admin/api/paint/lg-prices/apply"])
+  assert.ok(html.includes(text),`LG EK/VK-Korrektur ist sichtbar und sicher zweistufig: ${text}`);
 assert.ok(commercial.includes("/(wallpaper|tapete)/i.test(name)"),"Tapetenlisten werden im Farben-Import abgewiesen");
 for(const text of ["Tapeten · Retail-Preisliste","Hier nur Tapeten hochladen","Tapeten Retail · fehlt","wallpaper-pricelist/status","Aktive Tapetenliste"])
   assert.ok(html.includes(text)||inventory.includes(text),`Tapeten-Preisliste ist eindeutig sichtbar: ${text}`);

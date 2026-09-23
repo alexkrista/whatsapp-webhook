@@ -1074,10 +1074,10 @@ def install(ns):
                 details = [value for value in details if value and value.casefold() not in name.casefold()]
                 label = " · ".join([name, *[value for value in details if value]])
                 retail_net = _lg_retail_net_price(name, row.get("unit"), row.get("containerSize")) if is_little_greene else 0
-                maintained_retail_gross = float(row.get("salePrice") or 0)
+                maintained_retail_net = float(row.get("salePrice") or 0)
                 purchase_price = float(row.get("purchasePrice") or 0)
                 calculated_price = round(purchase_price * (1 + material_markup / 100), 2)
-                unit_price = retail_net or (round(maintained_retail_gross / 1.2, 2) if is_little_greene and maintained_retail_gross else calculated_price)
+                unit_price = maintained_retail_net if is_little_greene and maintained_retail_net else (retail_net or calculated_price)
                 materials.append({
                     "name": label,
                     "sourceName": name,
