@@ -85,6 +85,7 @@ function distanceFromPositions(ride, positions) {
   if (ride.startPoint && metresBetween(fixes[0].point, ride.startPoint) > 300) return null;
   if (ride.endPoint && metresBetween(fixes.at(-1).point, ride.endPoint) > 300) return null;
   let previous = fixes[0], metres = 0, segments = 0;
+  const accepted = [previous];
   for (const fix of fixes.slice(1)) {
     const seconds = (fix.at - previous.at) / 1000;
     if (seconds <= 0) continue;
@@ -93,9 +94,15 @@ function distanceFromPositions(ride, positions) {
     // accepted position. Do not estimate a route through a long data gap.
     if (length > seconds * 55 + 80) continue;
     if (seconds > 900 && length > 500) return null;
-    metres += length; segments++; previous = fix;
+    metres += length; segments++; previous = fix; accepted.push(fix);
   }
-  if (segments < 2 || metres === 0) return null;
+  if (ride.endPoint && metresBetween(previous.point, ride.endPoint) > 300) return null;
+  if (segments < 2) return null;
+  // A parked tracker can accumulate many metres of GPS jitter. If all valid
+  // fixes stay inside one small parking area, the vehicle did not make a trip.
+  if (accepted.every(fix => metresBetween(fix.point, accepted[0].point) <= 80) &&
+      (!ride.startPoint || !ride.endPoint || metresBetween(ride.startPoint, ride.endPoint) <= 160)) return 0;
+  if (metres === 0) return null;
   const candidate = { ...ride, distanceKm: metres / 1000 };
   return plausibleDistance(candidate) ? candidate.distanceKm : null;
 }

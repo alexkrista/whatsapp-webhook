@@ -345,6 +345,24 @@ test("unverifiable GPS jumps and zero-distance drives remain open instead of ent
   }
 });
 
+test("a parked tracker with a distant GPS outlier is recalculated as zero kilometres", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [
+      { deviceId: 17, valid: true, fixTime: "2026-09-22T06:00:00Z", latitude: 47.26821, longitude: 9.64093 },
+      { deviceId: 17, valid: true, fixTime: "2026-09-22T08:00:00Z", latitude: 55, longitude: 12 },
+      { deviceId: 17, valid: true, fixTime: "2026-09-22T09:00:00Z", latitude: 47.26831, longitude: 9.64093 },
+      { deviceId: 17, valid: true, fixTime: "2026-09-22T11:00:00Z", latitude: 47.26821, longitude: 9.64093 },
+    ] };
+    throw Error("Unexpected GPS request");
+  } });
+  h.state.trips = [trip({ endTime: "2026-09-22T11:00:00Z", startLat: 47.26821, startLon: 9.64093,
+    endLat: 47.26821, endLon: 9.64093, distance: 5344600 })];
+  const row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.distanceKm, 0);
+  assert.equal(row.distanceSource, "gps_positions");
+});
+
 test("arrival and next departure always share one street and town; corrections on either side update both", async t => {
   const h = await harness(t);
   h.state.trips = [
