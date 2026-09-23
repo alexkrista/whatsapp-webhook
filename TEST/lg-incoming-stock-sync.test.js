@@ -8,6 +8,7 @@ const express = require("express");
 const { registerPaintInventory } = require("../paint-inventory");
 
 (async () => {
+  process.env.ADMIN_TOKEN = "test-only";
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "krista-lg-stock-"));
   const paintDir = path.join(dataDir, "_kristine", "paint");
   fs.mkdirSync(paintDir, { recursive: true });
@@ -41,7 +42,7 @@ const { registerPaintInventory } = require("../paint-inventory");
 
   try {
     let response = await fetch(base + "/admin/api/paint/lg-incoming-sync", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      method: "POST", headers: { "Content-Type": "application/json", "x-admin-token":"test-only" }, body: JSON.stringify(payload),
     });
     let body = await response.json();
     assert.equal(response.status, 200);
@@ -50,7 +51,7 @@ const { registerPaintInventory } = require("../paint-inventory");
     assert.equal(body.results[0].after, 5);
 
     response = await fetch(base + "/admin/api/paint/lg-incoming-sync", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      method: "POST", headers: { "Content-Type": "application/json", "x-admin-token":"test-only" }, body: JSON.stringify(payload),
     });
     body = await response.json();
     assert.equal(body.duplicate, true);

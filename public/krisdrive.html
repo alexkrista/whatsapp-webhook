@@ -52,7 +52,7 @@
   <script>
   (()=>{
     const token=new URLSearchParams(location.search).get('token')||'';
-    const api=path=>`${path}${path.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`;
+    const api=path=>token?`${path}${path.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:path;
     const fleet=document.getElementById('fleet');
     const warning=document.getElementById('warning');
     let map=null,markers=new Map(),firstFit=true,lastRows=[];

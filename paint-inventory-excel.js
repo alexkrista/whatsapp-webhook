@@ -10,15 +10,7 @@ function registerPaintInventoryExcel(app, options = {}) {
   const root = path.join(dataDir, "_kristine", "paint");
   const articlesFile = path.join(root, "articles.json");
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = req.headers["x-admin-token"] || req.query.token || "";
-    if (String(token) !== String(adminToken)) {
-      res.status(403).json({ ok: false, error: "Forbidden" });
-      return false;
-    }
-    return true;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   const clean = (value, max = 500) => String(value ?? "").trim().slice(0, max);
   const num = value => {

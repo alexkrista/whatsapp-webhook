@@ -22,15 +22,7 @@ function safeJobId(value) {
   const id = String(value || "");
   return /^[A-Za-z0-9_-]+$/.test(id) ? id : "";
 }
-function requireAdmin(req, res) {
-  if (!ADMIN_TOKEN) return true;
-  const token = req.headers["x-admin-token"] || req.headers["x-krista-admin-token"] || req.query.token || "";
-  if (token !== ADMIN_TOKEN) {
-    res.status(403).json({ ok: false, error: "Forbidden" });
-    return false;
-  }
-  return true;
-}
+const requireAdmin = require("./admin-auth").requireAdmin;
 function calcPath(jobId) {
   return path.join(DATA_DIR, String(jobId), ".order-calculation.json");
 }

@@ -18,12 +18,7 @@ function secureEqual(a, b) {
   const bb = Buffer.from(String(b || ""));
   return aa.length === bb.length && aa.length > 0 && crypto.timingSafeEqual(aa, bb);
 }
-function requireAdmin(req, res) {
-  if (!ADMIN_TOKEN) { res.status(503).json({ ok:false, error:"ADMIN_TOKEN fehlt" }); return false; }
-  const token = String(req.headers["x-admin-token"] || req.query?.token || "");
-  if (!secureEqual(token, ADMIN_TOKEN)) { res.status(403).json({ ok:false, error:"Forbidden" }); return false; }
-  return true;
-}
+const requireAdmin = require("./admin-auth").requireAdmin;
 async function readJson(file, fallback) {
   try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; }
 }

@@ -16,13 +16,7 @@ function wrappedExpress(...args) {
   const dataDir = process.env.DATA_DIR || "/var/data";
   const adminToken = String(process.env.ADMIN_TOKEN || "");
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = String(req.headers["x-admin-token"] || req.query.token || "");
-    if (token === adminToken) return true;
-    res.status(403).json({ ok: false, error: "Forbidden" });
-    return false;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   async function readJson(file, fallback) {
     try {

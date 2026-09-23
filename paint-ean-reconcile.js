@@ -42,7 +42,7 @@ function reconcile(rows,catalog){
 function registerPaintEanReconcile(app,options={}){
  const root=path.join(options.dataDir||process.env.DATA_DIR||"/var/data","_kristine","paint");
  const file=path.join(root,"articles.json"),catalogFile=path.join(root,"innovatint-catalog.json");
- const auth=(req,res)=>{const t=process.env.ADMIN_TOKEN;if(t&&String(req.headers["x-admin-token"]||req.query.token||"")!==t){res.status(403).json({ok:false,error:"Forbidden"});return false;}return true;};
+ const auth=require("./admin-auth").requireAdmin;
  function plan(){const raw=fs.readFileSync(file,"utf8"),catalog=JSON.parse(fs.readFileSync(catalogFile,"utf8"));if(!catalog.previousCatalog)throw Error("Zuerst neuen Katalog mit Archiv aktivieren");return {raw,revision:hash(raw),...reconcile(JSON.parse(raw),catalog)};}
  app.get("/admin/api/paint/ean-reconcile",(req,res)=>{if(!auth(req,res))return;try{const p=plan();res.json({ok:true,revision:p.revision,changes:p.changes,referenceCount:p.referenceCount});}catch(e){res.status(400).json({ok:false,error:e.message});}});
  app.post("/admin/api/paint/ean-reconcile",(req,res)=>{

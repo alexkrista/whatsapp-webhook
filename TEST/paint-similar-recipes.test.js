@@ -36,7 +36,6 @@ test('real paint routes: reference lookup, sorted classes, scope, validation and
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'paint-similar-')),root=path.join(dir,'_kristine','paint');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(path.join(root,'innovatint-catalog.json'),JSON.stringify(fixture()));
   const previous=process.env.ADMIN_TOKEN;process.env.ADMIN_TOKEN='similar-test';
   const app=express();registerPaintLab(app,{dataDir:dir});
-  if(previous===undefined)delete process.env.ADMIN_TOKEN;else process.env.ADMIN_TOKEN=previous;
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
   const base=`http://127.0.0.1:${server.address().port}/admin/api/paint/similar-recipes?`;
   const get=async(q)=>{const r=await fetch(base+q,{headers:{'x-admin-token':'similar-test'}});return [r.status,await r.json()];};
@@ -52,7 +51,7 @@ test('real paint routes: reference lookup, sorted classes, scope, validation and
     assert.equal((await get('colourId=1&productId=13&canSizeId=1'))[1].results.length,4);
     assert.deepEqual((await get('q=does-not-exist'))[1].references,[]);
     assert.equal(fs.readFileSync(path.join(root,'innovatint-catalog.json'),'utf8'),JSON.stringify(fixture()));
-  }finally{await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
+  }finally{await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});if(previous===undefined)delete process.env.ADMIN_TOKEN;else process.env.ADMIN_TOKEN=previous;}
 });
 
 test('UI: reference selection, comparison, escaping, empty results and stale responses',async()=>{

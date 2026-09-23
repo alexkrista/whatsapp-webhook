@@ -138,13 +138,7 @@ function registerVehicleTracking(app, options = {}) {
     };
   }
 
-  function requireAdmin(req, res) {
-    if (!ADMIN_TOKEN) return true;
-    const token = String(req.headers["x-admin-token"] || req.query.token || "");
-    if (token === ADMIN_TOKEN) return true;
-    res.status(403).json({ ok: false, error: "Forbidden" });
-    return false;
-  }
+  const requireAdmin = (req, res) => require("./admin-auth").requireAdmin(req, res, { secret: ADMIN_TOKEN });
 
   function requireTracker(req, res) {
     if (!TRACKER_SECRET) {

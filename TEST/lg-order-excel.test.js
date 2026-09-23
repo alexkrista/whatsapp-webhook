@@ -24,14 +24,14 @@ function cfbEntry(buffer, target) {
 }
 
 async function jsonFetch(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, { headers:{ "x-admin-token":"test-only" } });
   return { response, body: await response.json() };
 }
 
 (async () => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "kristine-lg-order-"));
   process.env.DATA_DIR = tmp;
-  process.env.ADMIN_TOKEN = "";
+  process.env.ADMIN_TOKEN = "test-only";
 
   const { registerPaintLgOrderExcel } = require("../paint-lg-order-excel");
   const root = path.join(tmp, "_kristine", "paint");
@@ -65,7 +65,7 @@ async function jsonFetch(url) {
     assert.strictEqual(status.response.status, 200);
     assert.strictEqual(status.body.installed, true);
 
-    const good = await fetch(`${base}/admin/api/paint/order-review/xlsx`);
+    const good = await fetch(`${base}/admin/api/paint/order-review/xlsx`, { headers:{ "x-admin-token":"test-only" } });
     if (good.status !== 200) throw new Error(`Good export returned ${good.status}: ${await good.text()}`);
     const out = Buffer.from(await good.arrayBuffer());
     assert.strictEqual(good.headers.get("x-price-check"), "ok");

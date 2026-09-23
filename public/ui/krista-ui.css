@@ -64,6 +64,7 @@
 .krista-mobile-menu{display:none}
 
 .krista-user{text-align:right;display:flex;flex-direction:column}
+.krista-world-nav .krista-login-link{display:none}
 .krista-user strong{font-size:13px}.krista-user small{margin-top:4px;color:rgba(255,255,255,.6)}
 
 /* Shared module navigation under the fixed product header */
@@ -98,6 +99,7 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
 @media(max-width:1180px){
   .krista-shell-main{grid-template-columns:200px 1fr}
   .krista-user{display:none}
+  .krista-world-nav .krista-login-link{display:inline-flex!important}
   .krista-world-nav{justify-content:flex-start;overflow-x:auto;padding-bottom:3px}
 }
 @media(max-width:760px){

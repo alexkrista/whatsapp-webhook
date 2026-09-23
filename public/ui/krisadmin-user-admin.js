@@ -10,7 +10,7 @@
   const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c]));
   const token=()=>new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token()&&u.origin===location.origin)u.searchParams.set("token",token());return u.pathname+u.search+u.hash};
-  const actorId=()=>localStorage.getItem(USER_KEY)||sessionStorage.getItem("kristaCurrentSessionUserIdV2")||"";
+  const actorId=()=>window.KristaUser?.currentId?.()||"";
 
   async function api(path,options={}){
     const headers={...(options.headers||{})};

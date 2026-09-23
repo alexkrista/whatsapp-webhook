@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bei KRISTINE anmelden</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#232b25;background:#f5f4ef}*{box-sizing:border-box}
+body{min-height:100vh;display:grid;place-items:center;margin:0;padding:20px}main{width:min(420px,100%);background:#fffefa;border:1px solid #dedbd2;border-radius:18px;padding:26px;box-shadow:0 18px 60px #14201918}h1{margin:0 0 8px;font-size:27px}.sub{color:#677069;line-height:1.45;margin:0 0 22px}label{display:block;font-weight:700;margin:15px 0 6px}input{width:100%;border:1px solid #b9c2ba;border-radius:10px;font:inherit;padding:12px;min-height:48px}button{width:100%;margin-top:17px;border:0;border-radius:10px;background:#2f7d4a;color:white;font:700 16px system-ui;padding:13px;min-height:48px;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.status{min-height:42px;margin-top:16px;line-height:1.4;color:#2d613e}.status.error{color:#9d3232}#codeStep[hidden]{display:none}.back{background:none;color:#2f7d4a;padding:5px;margin-top:8px;font-size:14px}
+</style></head><body><main>
+<h1>Bei KRISTINE anmelden</h1><p class="sub">Mit deiner im Mitarbeiterstamm hinterlegten Mobilnummer. Deinen einmaligen Code schickt dir Kristine per WhatsApp.</p>
+<form id="phoneStep"><label for="phone">Mobilnummer</label><input id="phone" type="tel" inputmode="tel" autocomplete="tel" required placeholder="+43 …"><button type="submit">Code per WhatsApp senden</button></form>
+<form id="codeStep" hidden><label for="code">6-stelliger Code</label><input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"><button type="submit">Anmelden</button><button class="back" id="again" type="button">Neuen Code anfordern</button></form>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+</main><script>
+const phone=document.getElementById('phone'),code=document.getElementById('code'),status=document.getElementById('status');
+phone.value=localStorage.getItem('kristineLoginPhone')||'';
+const redirect=(()=>{const target=new URLSearchParams(location.search).get('return')||'/kontrollzentrum';if(!target.startsWith('/')||target.startsWith('//'))return '/kontrollzentrum';const u=new URL(target,location.origin);u.searchParams.delete('token');return u.pathname+u.search+u.hash})();
+function message(value,error=false){status.textContent=value;status.classList.toggle('error',error)}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'});const data=await r.json();if(!r.ok)throw Error(data.error||'Anmeldung fehlgeschlagen');return data}
+document.getElementById('phoneStep').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await post('/auth/whatsapp/start',{phone:phone.value});localStorage.setItem('kristineLoginPhone',phone.value);document.getElementById('phoneStep').hidden=true;document.getElementById('codeStep').hidden=false;message('Code angefordert. Bitte WhatsApp prüfen.');code.focus()}catch(error){message(error.message,true)}finally{button.disabled=false}};
+document.getElementById('codeStep').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button[type="submit"]');button.disabled=true;try{await post('/auth/whatsapp/verify',{phone:phone.value,code:code.value});location.replace(redirect)}catch(error){message(error.message,true);code.select()}finally{button.disabled=false}};
+document.getElementById('again').onclick=()=>{document.getElementById('codeStep').hidden=true;document.getElementById('phoneStep').hidden=false;message('');phone.focus()};
+fetch('/auth/me',{cache:'no-store'}).then(r=>{if(r.ok)location.replace(redirect)}).catch(()=>{});
+</script></body></html>

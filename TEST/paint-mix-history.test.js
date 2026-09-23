@@ -3,9 +3,10 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=req
 const {registerPaintMixHistory}=require('../paint-mix-history');
 (async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'mix-test-')),root=path.join(dir,'_kristine','paint');await fs.mkdir(root,{recursive:true});
+ process.env.ADMIN_TOKEN='test-only';
  const articles=[{id:'A',product:'Matt',baseCode:'T',size:'1 L',stock:5}];await fs.writeFile(path.join(root,'articles.json'),JSON.stringify(articles));
  process.env.KRISTINE_LG_BRIDGE_TOKEN='test';const routes={};const app={get:(p,f)=>routes[p]=f,post:(p,f)=>routes[p]=f};registerPaintMixHistory(app,{dataDir:dir});
- async function call(route,body={},params={},query={}){const res={statusCode:200,status(s){this.statusCode=s;return this},json(d){this.body=d;return this}};await routes[route]({body,params,query,headers:{'x-lg-bridge-token':'test'}},res);return res;}
+ async function call(route,body={},params={},query={}){const res={statusCode:200,status(s){this.statusCode=s;return this},json(d){this.body=d;return this}};await routes[route]({body,params,query,headers:{'x-lg-bridge-token':'test','x-admin-token':'test-only'}},res);return res;}
  const row={id:'event-1',completedAt:'2026-09-10T10:00:00Z',productName:'Matt',baseCode:'T',size:'1 L',quantity:1};
  const ingest=rows=>call('/admin/api/paint/bridge/history',{rows,createTasks:false});
  await Promise.all([ingest([row]),ingest([row])]);assert.equal((await call('/admin/api/paint/mix-history')).body.count,1);

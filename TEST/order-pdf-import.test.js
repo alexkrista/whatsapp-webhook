@@ -1,6 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),fsp=require("node:fs/promises"),path=require("node:path"),os=require("node:os"),vm=require("node:vm"),{createRequire}=require("node:module");
 const root=path.resolve(__dirname,".."),fixture=fs.readFileSync(path.join(__dirname,"fixtures/offer-flat-positions.txt"),"utf8");
+process.env.ADMIN_TOKEN="test-only";
 function frontend(extra={}){
   const elements={kcv2Save:{disabled:false},kcv2SaveMsg:{textContent:"",style:{}},kcv2ParseStatus:{textContent:"",className:""}},events=[];
   const document={readyState:"loading",getElementById:id=>elements[id]||null,addEventListener(){},dispatchEvent:e=>events.push(e)};
@@ -50,7 +51,7 @@ test("save and reload retain all positions; employee handover excludes unselecte
   const meta=await v2.readMeta("99001");assert.equal(meta.rows[7].calcIncluded,false);
   const scope=v2.employeeScope(calc,meta);assert.deepEqual(plain(scope.order.map(p=>p.number)),["02","03","04","05","06","07"]);assert.equal(scope.regie.length,0);assert.equal(scope.order[0].unit,"Monate");
   const routes={};v2.registerRoutes({get(route,fn){routes[route]=fn},put(){}});let response;
-  await routes["/kristine/api/job/:jobId/work-scope-v2"]({params:{jobId:"99001"}},{json(value){response=value},status(code){throw new Error(String(code))}});
+  await routes["/kristine/api/job/:jobId/work-scope-v2"]({params:{jobId:"99001"},headers:{"x-admin-token":"test-only"}},{json(value){response=value},status(code){throw new Error(String(code))}});
   assert.equal(response.scope.order.length,6);assert.equal(response.scope.regie.length,0);
   meta.rows.forEach(p=>p.calcIncluded=true);d=v2.derive(calc,meta);assert.equal(d.contractAmount,14572.2);assert.equal(d.regieAmount,475);assert.equal(d.plannedRegieHours,5);
   assert.equal(v2.employeeScope(calc,meta).regie.length,2);

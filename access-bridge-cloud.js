@@ -3,43 +3,15 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const crypto = require("crypto");
 
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
-const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || "").trim();
 const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || "").trim();
 const CHEF_PHONE = String(process.env.CHEF_PHONE || "").trim();
 const TZ = "Europe/Vienna";
 const ROOT = path.join(DATA_DIR, "_kristine");
 const STATUS_FILE = path.join(ROOT, "access-local-status.json");
 
-function secureEqual(a, b) {
-  const aa = Buffer.from(String(a || ""));
-  const bb = Buffer.from(String(b || ""));
-  return aa.length === bb.length && aa.length > 0 && crypto.timingSafeEqual(aa, bb);
-}
-function requestCookies(req) {
-  return Object.fromEntries(String(req.headers?.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
-}
-function browserSession() {
-  return ADMIN_TOKEN ? crypto.createHmac("sha256", ADMIN_TOKEN).update("kristine-browser-session-v1").digest("base64url") : "";
-}
-function rememberBrowser(res, session) {
-  const cookie = `kristine_session=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
-  if (typeof res.append === "function") res.append("Set-Cookie", cookie);
-  else res.setHeader("Set-Cookie", cookie);
-}
-function requireAdmin(req, res, options = {}) {
-  if (!ADMIN_TOKEN) { res.status(503).json({ok:false,error:"ADMIN_TOKEN fehlt"}); return false; }
-  const token = String(req.headers["x-admin-token"] || req.query?.token || "");
-  const session = browserSession();
-  const cookies = requestCookies(req);
-  const validToken = secureEqual(token, ADMIN_TOKEN);
-  const validSession = options.allowBrowserSession === true && secureEqual(cookies.kristine_session, session);
-  if (!validToken && !validSession) { res.status(403).json({ok:false,error:"Forbidden"}); return false; }
-  if (validToken && options.rememberBrowser === true && !secureEqual(cookies.kristine_session, session)) rememberBrowser(res, session);
-  return true;
-}
+const requireAdmin = require("./admin-auth").requireAdmin;
 async function ensureRoot(){ await fsp.mkdir(ROOT,{recursive:true}); }
 async function readJson(file,fallback){ try{return JSON.parse(await fsp.readFile(file,"utf8"));}catch{return fallback;} }
 async function writeJson(file,value){ await ensureRoot(); await fsp.writeFile(file,JSON.stringify(value,null,2),"utf8"); }
@@ -127,7 +99,7 @@ const token=new URLSearchParams(location.search).get("token")||"";
 function esc(v){return String(v??"").replace(/[&<>\"]/g,s=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[s]))}
 function cls(v){return v==="ok"?"ok":v==="warn"?"warn":"bad"}
 async function load(){try{
- const r=await fetch("/kristine/api/access-status?token="+encodeURIComponent(token),{cache:"no-store"}),d=await r.json(),vals=Object.values(d.services||{});
+ const r=await fetch("/kristine/api/access-status"+(token?"?token="+encodeURIComponent(token):""),{cache:"no-store"}),d=await r.json(),vals=Object.values(d.services||{});
  const bad=!d.online||vals.some(x=>x?.state==="bad"),warn=!bad&&vals.some(x=>x?.state==="warn");
  document.getElementById("overall").textContent=(bad?"🔴 Fehler":warn?"🟡 Warnung":"🟢 Alles OK")+" · PC-Kontakt "+(d.ageSeconds??"-")+" s";
  const doors=d.gantner?.doors||{},labels={1:"Eingang",2:"Lager",3:"Büro"};
@@ -148,12 +120,12 @@ function installRoutes(app){
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
   app.post("/kristine/api/access-notify",async(req,res)=>{
-    if(!requireAdmin(req,res))return;
+    if(!requireAdmin(req,res,{allowBrowserSession:false}))return;
     try{const message=String(req.body?.message||"").trim();if(!message)return res.status(400).json({ok:false,error:"message fehlt"});await sendChefWhatsApp(message);res.json({ok:true});}
     catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
   app.post("/kristine/api/access-heartbeat",async(req,res)=>{
-    if(!requireAdmin(req,res))return;
+    if(!requireAdmin(req,res,{allowBrowserSession:false}))return;
     try{await writeJson(STATUS_FILE,{...(req.body||{}),receivedAt:new Date().toISOString()});res.json({ok:true});}
     catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });

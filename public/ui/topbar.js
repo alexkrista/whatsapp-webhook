@@ -184,7 +184,7 @@
   }
 
   function loadKristineUserContext() {
-    loadScriptOnce("/public/ui/kristine-user-context.js?v=20260918-audit1", "data-krista-user-context");
+    loadScriptOnce("/public/ui/kristine-user-context.js?v=20260923-personal-login1", "data-krista-user-context");
   }
 
   function loadKristinePlanningSidebarFix() {
@@ -330,6 +330,7 @@
             <a class="krista-world-link ${item.key === active ? "active" : ""}" ${item.key === active ? 'aria-current="page"' : ""} href="${tokenized(item.href, item.external)}" ${item.external ? 'rel="noopener"' : ""} title="${item.subtitle}">
               <span class="krista-world-icon" aria-hidden="true">${item.icon}</span><span>${item.label}</span>
             </a>`).join("")}
+          <a id="kristaLoginLink" class="krista-world-link krista-login-link" href="/anmelden"><span class="krista-world-icon" aria-hidden="true">👤</span><span>Anmelden</span></a>
         </nav>
         <div class="krista-user" aria-label="Angemeldeter Benutzer"><strong>Alexander Krista</strong><small>Build ${build}</small></div>
       </div>`;

@@ -3112,7 +3112,11 @@ const open = taskId
     try {
       const previousTasks = await readJson(TASKS, []);
       const previousIds = new Set(previousTasks.map(t => String(t.id || "")));
+      const previousById = new Map(previousTasks.map(t => [String(t.id || ""), t]));
       const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
+      if (req.kristineActor?.permissions.taskCreate === false && tasks.some(t => !previousIds.has(String(t?.id || "")))) {
+        return res.status(403).json({ ok:false, error:"Aufgaben anlegen ist für diesen Benutzer nicht freigegeben." });
+      }
       const employees = typeof readEmployees === "function" ? await readEmployees() : [];
       const employeeById = new Map(employees.map(e => [String(e.id || ""), e]));
       const clean = [];
@@ -3137,8 +3141,8 @@ const open = taskId
           jobName: String(t.jobName || jobMeta.name || "").trim().slice(0, 140),
           taskType: ["Rückruf","Angebot","Problem","Termin","Reklamation","Sonstiges"].includes(String(t.taskType || "")) ? String(t.taskType) : "Sonstiges",
           priority: ["normal","heute","sofort"].includes(String(t.priority || "")) ? String(t.priority) : "normal",
-          creatorId: String(t.creatorId || "admin").slice(0, 100),
-          creatorName: String(t.creatorName || "Chef / Büro").trim().slice(0, 140),
+          creatorId: String(req.kristineActor ? (previousById.get(String(t.id || ""))?.creatorId || req.kristineActor.id) : (t.creatorId || "admin")).slice(0, 100),
+          creatorName: String(req.kristineActor ? (previousById.get(String(t.id || ""))?.creatorName || req.kristineActor.name) : (t.creatorName || "Chef / Büro")).trim().slice(0, 140),
           address: taskAddress,
           contactName: String(t.contactName || jobMeta.contactName || "").trim().slice(0, 140),
           contactPhone: String(t.contactPhone || jobMeta.contactPhone || "").trim().slice(0, 60),

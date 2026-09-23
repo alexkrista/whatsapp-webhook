@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-18-audit1";
+  const VERSION="2026-09-23-personal-login1";
   const USER_KEY="kristaCurrentUserIdV2";
   const SESSION_USER_KEY="kristaCurrentSessionUserIdV2";
   const TASK_VIEW_KEY="kristaTaskOwnerView";
@@ -11,6 +11,8 @@
   let promptShown=false;
   let accessSnapshot=null;
   let accessLoadedAt=0;
+  let sessionActor=null;
+  let sessionLoadedAt=0;
   let actorHeaderInstalled=false;
   const pageVisitId=(window.crypto?.randomUUID?.()||`visit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const entrySentFor=new Set();
@@ -23,7 +25,8 @@
   function employees(){
     try{
       const localRows=typeof masterEmployees!=="undefined"&&Array.isArray(masterEmployees)?masterEmployees:(typeof data!=="undefined"&&Array.isArray(data?.employees)?data.employees:[]);
-      const rows=localRows.length?localRows:(Array.isArray(accessSnapshot?.users)?accessSnapshot.users.map(row=>({id:row.employeeId,name:row.employeeName,employeeName:row.employeeName,active:true,userRole:row.role})):[]);
+      const rows=[...(localRows.length?localRows:(Array.isArray(accessSnapshot?.users)?accessSnapshot.users.map(row=>({id:row.employeeId,name:row.employeeName,employeeName:row.employeeName,active:true,userRole:row.role})):[]))];
+      if(sessionActor&&!rows.some(e=>employeeId(e)===sessionActor.id))rows.push({id:sessionActor.id,name:sessionActor.name,active:true});
       return rows.filter(e=>e&&e.active!==false&&employeeId(e));
     }catch{return []}
   }
@@ -38,6 +41,7 @@
     return accessSnapshot?.users?.find(row=>String(row.employeeId)===id)||null;
   }
   function roleFor(e){
+    if(sessionActor?.id===employeeId(e))return sessionActor.role;
     const row=accessRow(e);if(row?.role)return String(row.role);
     const explicit=String(e?.userRole||e?.accessRole||e?.role||"").trim().toLowerCase();
     if(explicit)return explicit;
@@ -49,6 +53,7 @@
   function can(permission){
     const e=current();
     if(!e)return false;
+    if(sessionActor?.id===employeeId(e))return permission==="admin"?sessionActor.role==="admin":sessionActor.permissions?.[permission]===true;
     const row=accessRow(e);
     if(row?.permissions&&typeof row.permissions[permission]==="boolean")return row.permissions[permission];
     if(permission==="financeApproval"||permission==="userAdmin")return isAlexander(e);
@@ -56,7 +61,19 @@
     if(permission==="taskViewAll"||permission==="taskCreate")return true;
     return false;
   }
-  function canChangeIdentity(){return !current()||can("userAdmin")}
+  function canChangeIdentity(){return false}
+
+  async function loadIdentity(force=false){
+    if(!force&&Date.now()-sessionLoadedAt<15000)return sessionActor;
+    try{
+      const response=await fetch('/auth/me',{cache:'no-store'});
+      const payload=await response.json();
+      sessionActor=response.ok&&payload?.user?payload.user:null;
+      currentUserId=sessionActor?.id||"";
+    }catch{sessionActor=null;currentUserId=""}
+    sessionLoadedAt=Date.now();
+    return sessionActor;
+  }
 
   function tokenUrl(path){
     const url=new URL(path,location.origin);
@@ -104,18 +121,15 @@
   }
 
   function resolveInitialUser(){
-    const candidates=[sessionStorage.getItem(SESSION_USER_KEY),localStorage.getItem(USER_KEY)].filter(Boolean);
-    for(const id of candidates){if(findEmployee(id))return String(id)}
-    return "";
+    return sessionActor?.id||"";
   }
 
   function rememberMode(){
-    if(sessionStorage.getItem(SESSION_USER_KEY))return "session";
-    if(localStorage.getItem(USER_KEY))return "device";
-    return "none";
+    return sessionActor?"device":"none";
   }
 
   function setCurrentUser(id,{remember=true,force=false}={}){
+    if(!sessionActor||sessionActor.id!==String(id))return false;
     const e=findEmployee(id);if(!e)return false;
     if(current()&&employeeId(current())!==employeeId(e)&&!force&&!canChangeIdentity()){
       alert("Der Benutzer ist auf diesem Gerät gesperrt. Nur Alexander kann die Zuordnung ändern.");
@@ -123,12 +137,7 @@
     }
     const changed=currentUserId!==employeeId(e);
     currentUserId=employeeId(e);
-    if(remember){
-      localStorage.setItem(USER_KEY,currentUserId);
-      sessionStorage.removeItem(SESSION_USER_KEY);
-    }else{
-      sessionStorage.setItem(SESSION_USER_KEY,currentUserId);
-    }
+    localStorage.removeItem(USER_KEY);sessionStorage.removeItem(SESSION_USER_KEY);
     if(changed)localStorage.setItem(TASK_VIEW_KEY,"me");
     updateCreatorField();renderIdentity();ensureTaskViewFilter();
     void recordEntry();
@@ -160,44 +169,28 @@
     `;document.head.appendChild(s);
   }
 
-  function ensureUserPicker(){
-    let bg=document.getElementById("kristaUserPickBg");if(bg)return bg;
-    bg=document.createElement("div");bg.id="kristaUserPickBg";bg.className="krista-user-pick-bg";
-    bg.innerHTML=`<div class="krista-user-pick"><h3>👤 Wer arbeitet gerade mit KRISTINE?</h3><div class="small">Damit werden persönliche Aufgaben, „Von“-Felder und Berechtigungen automatisch richtig gesetzt.</div><select id="kristaUserPickSelect"></select><label class="krista-user-remember"><input id="kristaUserRemember" type="checkbox" checked><span><strong>Auf diesem Gerät merken</strong><small>Beim nächsten Einstieg wird dieser Benutzer automatisch verwendet. Ohne Häkchen gilt die Auswahl nur für diese Browser-Sitzung.</small></span></label><div class="krista-user-lockhint">🔒 Nach der Zuordnung kann nur Alexander den Benutzer auf diesem Gerät ändern.</div><div class="krista-user-pick-actions"><button type="button" class="secondary" data-user-cancel>Abbrechen</button><button type="button" class="green" data-user-save>Übernehmen</button></div></div>`;
-    document.body.appendChild(bg);
-    bg.addEventListener("click",e=>{if((e.target===bg||e.target.closest("[data-user-cancel]"))&&current())bg.classList.remove("open")});
-    bg.querySelector("[data-user-save]").onclick=()=>{
-      const id=bg.querySelector("#kristaUserPickSelect")?.value;if(!id){alert("Bitte einen Benutzer auswählen.");return}
-      const remember=bg.querySelector("#kristaUserRemember")?.checked!==false;
-      if(setCurrentUser(id,{remember}))bg.classList.remove("open");
-    };
-    return bg;
-  }
-
   function openUserPicker(){
-    if(current()&&!canChangeIdentity()){
-      alert("Die Benutzerzuordnung ist auf diesem Gerät gesperrt. Nur Alexander kann sie ändern.");return;
-    }
-    const bg=ensureUserPicker(),select=bg.querySelector("#kristaUserPickSelect");
-    select.innerHTML='<option value="">– Benutzer auswählen –</option>'+employees().sort((a,b)=>employeeName(a).localeCompare(employeeName(b),"de")).map(e=>`<option value="${esc(employeeId(e))}" ${employeeId(e)===currentId()?"selected":""}>${esc(employeeName(e))}</option>`).join("");
-    const remember=bg.querySelector("#kristaUserRemember");if(remember)remember.checked=rememberMode()!=="session";
-    const cancel=bg.querySelector("[data-user-cancel]");if(cancel)cancel.hidden=!current();
-    bg.classList.add("open");
+    const u=new URL(location.href);u.searchParams.delete('token');
+    location.href='/anmelden?return='+encodeURIComponent(u.pathname+u.search+u.hash);
   }
 
   function renderIdentity(){
     const host=document.querySelector(".krista-user");if(!host)return;
+    const mobileLink=document.getElementById('kristaLoginLink');
+    if(mobileLink){
+      mobileLink.href='/anmelden';mobileLink.onclick=null;
+      mobileLink.querySelector('span:last-child').textContent=current()?`Abmelden · ${currentName()}`:'Anmelden';
+      if(current())mobileLink.onclick=async e=>{e.preventDefault();await fetch('/auth/logout',{method:'POST'});location.href='/anmelden'};
+    }
     host.classList.add("krista-user-context");
     if(!current()){
-      host.innerHTML='<button type="button"><strong>Benutzer wählen</strong></button><small>noch nicht zugeordnet</small>';
+      host.innerHTML='<button type="button"><strong>Anmelden</strong></button><small>persönlicher Zugang</small>';
       host.querySelector("button").onclick=openUserPicker;return;
     }
     const role=roleFor(current());
-    const label=role==="admin"?"Chef / Admin":role==="office"?"Büro":(rememberMode()==="device"?"🔒 Gerät zugeordnet":"Benutzer");
-    if(canChangeIdentity()){
-      host.innerHTML=`<button type="button" title="Benutzerzuordnung ändern"><strong>${esc(currentName())}</strong></button><small>${esc(label)}</small>`;
-      host.querySelector("button").onclick=openUserPicker;
-    }else host.innerHTML=`<span class="krista-user-static"><strong>${esc(currentName())}</strong><small>${esc(label)}</small></span>`;
+    const label=role==="admin"?"Chef / Admin":role==="office"?"Büro":"Benutzer";
+    host.innerHTML=`<span class="krista-user-static"><strong>${esc(currentName())}</strong><small>${esc(label)}</small></span><button type="button" title="Von diesem Gerät abmelden">Abmelden</button>`;
+    host.querySelector("button").onclick=async()=>{await fetch('/auth/logout',{method:'POST'});location.href='/anmelden'};
   }
 
   function financeTask(task){return String(task?.creatorId||"")==="brain-finance"||String(task?.reminder||"").includes("[FINANCE_APPROVAL]")}
@@ -278,19 +271,10 @@
   }
 
   async function refresh(){
+    await loadIdentity(false);
     await loadAccess(false);
+    if(!sessionActor){installStyle();renderIdentity();return}
     if(!employees().length)return;
-    if(!currentUserId){
-      const resolved=resolveInitialUser();
-      if(resolved)setCurrentUser(resolved,{remember:rememberMode()!=="session",force:true});
-      else{
-        installStyle();renderIdentity();installTaskCreatorHooks();guardFinanceActions();
-        if(!promptShown){promptShown=true;setTimeout(openUserPicker,120)}
-        return;
-      }
-    }else if(!current()){
-      currentUserId="";sessionStorage.removeItem(SESSION_USER_KEY);localStorage.removeItem(USER_KEY);promptShown=false;return refresh();
-    }
     installStyle();renderIdentity();updateCreatorField();ensureTaskViewFilter();installRenderScope();installModalScope();installTaskCreatorHooks();guardFinanceActions();
     void recordEntry();
   }

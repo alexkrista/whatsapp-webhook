@@ -118,7 +118,7 @@ for (const event of ["krista:baustellen-rendered", "krista:baustelle-opened", "k
 assert.match(page, /Keine Baustellen gefunden\.<\/div>';notifyCollections\(\);return/);
 assert.match(source, /#detail \.detail-top/);
 assert.doesNotMatch(source, /getElementById\("detailNumber"\)/, "legacy ID formatting must not erase the badge");
-assert.match(page, /topbar\.js\?v=20260919-baustellen-hours-1/);
+assert.match(page, /topbar\.js\?v=20260920-offer-loader-1/);
 assert.match(topbar, /baustellen-collection\.js\?v=20260913-sammelmappe-1/);
 for (const match of page.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
   if (match[1].trim()) new vm.Script(match[1]);
