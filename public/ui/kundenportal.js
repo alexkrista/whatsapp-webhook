@@ -7,13 +7,14 @@
   history.replaceState(null,"",location.pathname);
   const api=async(path,options={})=>{const response=await fetch("/kundenportal/api/"+path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}}),body=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(body.error||"Das hat nicht funktioniert. Bitte erneut versuchen."),{status:response.status});return body};
   const fileData=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data:reader.result});reader.onerror=()=>reject(Error(`Foto ${file.name} konnte nicht gelesen werden.`));reader.readAsDataURL(file)});
-  const access=message=>{$("project").hidden=true;$("access").hidden=false;$("logout").hidden=true;$("accessMessage").textContent=message;$("enter").hidden=!ticket};
+  const access=message=>{$("project").hidden=true;$("access").hidden=false;$("logout").hidden=true;$("accessMessage").textContent=message;$("enter").hidden=!ticket;$("loginForm").hidden=!!ticket;$("passwordForm").hidden=true};
+  const requirePasswordChange=()=>{$("project").hidden=true;$("access").hidden=false;$("logout").hidden=true;$("enter").hidden=true;$("loginForm").hidden=true;$("passwordForm").hidden=false;$("accessMessage").textContent="Der erste Einstieg war erfolgreich. Bitte jetzt ein eigenes Passwort festlegen.";$("passwordForm").elements.password.focus()};
   async function load(){
     try{data=await api("project");$("access").hidden=true;$("project").hidden=false;$("logout").hidden=false;$("preview").hidden=!data.preview;$("closeProject").disabled=!!data.preview;$("downloadCloseProject").disabled=!!data.preview;$("number").textContent=(data.number.startsWith("S")?"Sammelmappe ":"Baustelle ")+data.number;$("name").textContent=data.name;$("greeting").textContent="Willkommen"+(data.customerName?", "+data.customerName:"")+". Hier finden Sie Ihre freigegebenen Unterlagen.";renderOrderSchedule();
       const enabled=Object.keys(labels).filter(key=>key==="offer"?Boolean(data.offer):data.modules[key]);if(focusPoint&&enabled.includes("projectPoints"))selected="projectPoints";else if(!enabled.includes(selected))selected=enabled[0]||"";
       $("tabs").innerHTML=enabled.map(key=>`<button data-tab="${key}" aria-current="${key===selected}">${labels[key]}</button>`).join("");$("tabs").querySelectorAll("button").forEach(button=>button.onclick=()=>{selected=button.dataset.tab;render();for(const row of $("tabs").querySelectorAll("button"))row.setAttribute("aria-current",String(row===button))});render();
       if(focusPoint){const point=data.points.find(row=>row.id===focusPoint);focusPoint="";if(point)setTimeout(()=>openPoint(point),0);}
-    }catch(e){access(e.message)}
+    }catch(e){if(e.status===428)requirePasswordChange();else access(e.message)}
   }
   function fileLink(file){return `<a class="button" href="${esc(file.url)}" target="_blank" rel="noopener">${esc(file.name||"PDF öffnen")}</a>`}
   const date=value=>/^\d{4}-\d{2}-\d{2}/.test(value||"")?String(value).slice(0,10).split("-").reverse().join("."):"";
@@ -160,7 +161,9 @@
   $("downloadCloseProject").onclick=()=>downloadProject(true);
   $("closeProject").onclick=()=>closeProject();
   $("confirmDownloadClose").onclick=()=>closeProject(downloadToClose);
+  $("loginForm").onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector("button"),message=$("accessMessage");button.disabled=true;message.textContent="Anmeldung wird geprüft …";try{const result=await api("login",{method:"POST",body:JSON.stringify({loginName:form.elements.loginName.value,password:form.elements.password.value})});form.elements.password.value="";if(result.mustChangePassword)requirePasswordChange();else await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}};
+  $("passwordForm").onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector("button"),message=$("accessMessage");button.disabled=true;message.textContent="Passwort wird gespeichert …";try{await api("password",{method:"POST",body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});form.reset();await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}};
   $("enter").onclick=async()=>{$("enter").disabled=true;try{await api("session",{method:"POST",body:JSON.stringify({ticket})});ticket="";await load()}catch(e){access(e.message)}finally{$("enter").disabled=false}};
-  $("logout").onclick=async()=>{try{await api("logout",{method:"POST",body:"{}"});data=null;access("Sie sind abgemeldet. Zum erneuten Öffnen verwenden Sie Ihren persönlichen Einladungslink.")}catch(e){$("status").textContent=e.message}};
+  $("logout").onclick=async()=>{try{await api("logout",{method:"POST",body:"{}"});data=null;access("Sie sind abgemeldet. Sie können sich mit Namen und Passwort erneut anmelden.")}catch(e){$("status").textContent=e.message}};
   if(ticket)access("Mit Ihrem persönlichen Link öffnen Sie die von Farben Krista freigegebene Projektakte.");else load();
 })();

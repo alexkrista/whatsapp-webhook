@@ -31,6 +31,18 @@ test("WhatsApp link authenticates only the issued project, protects files and om
  assert.equal((await f.request(doc.url.replace("/26001/","/25018/"),{headers:{Cookie:cookie}})).status,404);
  assert.equal((await f.request("/kundenportal")).status,200);
 });
+test("customer can use name and job number once, must change password, and can then log in without a link",async t=>{
+ const f=await fixture(t),first=await f.request("/kundenportal/api/login",{method:"POST",body:JSON.stringify({loginName:"Testkunde",password:"24177"})}),firstBody=await first.json();
+ assert.equal(first.status,200);assert.equal(firstBody.mustChangePassword,true);const cookie=first.headers.get("set-cookie").split(";")[0];
+ assert.equal((await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).status,428,"No project data before password change");
+ assert.equal((await f.request("/kundenportal/api/password",{method:"POST",headers:{Cookie:cookie},body:JSON.stringify({password:"kurz",confirmation:"kurz"})})).status,400);
+ const changed=await f.request("/kundenportal/api/password",{method:"POST",headers:{Cookie:cookie},body:JSON.stringify({password:"SicheresPortal9",confirmation:"SicheresPortal9"})});assert.equal(changed.status,200);
+ assert.equal((await f.request("/kundenportal/api/project",{headers:{Cookie:cookie}})).status,200);
+ const accountFile=path.join(f.dir,"_system/customer-access/password-accounts/24177.json"),stored=fs.readFileSync(accountFile,"utf8");assert(!stored.includes("SicheresPortal9"));
+ const oldPassword=await f.request("/kundenportal/api/login",{method:"POST",body:JSON.stringify({loginName:"Testkunde",password:"24177"})});assert.equal(oldPassword.status,401);
+ const again=await f.request("/kundenportal/api/login",{method:"POST",body:JSON.stringify({loginName:"testkunde",password:"SicheresPortal9"})});assert.equal(again.status,200);assert.equal((await again.json()).mustChangePassword,false);
+ const newCookie=again.headers.get("set-cookie").split(";")[0];assert.equal((await f.request("/kundenportal/api/project",{headers:{Cookie:newCookie}})).status,200);
+});
 test("only the newest AB is listed, downloadable and exported; older PDFs stay internal",async t=>{
  const f=await fixture(t),name="Auftragsbestätigung AB-2609002.pdf";
  const old={id:"ab-old",type:"order",source:"order-confirmation",confirmationNumber:"AB-2609002",confirmationRevision:1,name,customerVisible:true,storedName:"ab-v1.pdf",renderedAt:"2026-09-19T19:00:00Z"};

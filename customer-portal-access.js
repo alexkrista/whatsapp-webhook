@@ -67,6 +67,7 @@ function registerCustomerAccess(app, options) {
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
   const grantPath=id=>path.join(root,"invitations",id+".json");
   const sessionPath=value=>path.join(root,"sessions",hash(value)+".json");
+  const accountPath=jobId=>path.join(root,"password-accounts",String(jobId)+".json");
   const offerPath=jobId=>path.join(dataDir,jobId,".offer-draft.json");
   const offerSnapshotPath=(jobId,number,revision)=>path.join(dataDir,jobId,"_offers",`offer-${number}-v${revision}.json`);
   const offerPdfName=(number,revision)=>`angebot-${String(number).replace(/[^A-Za-z0-9_-]/g,"")}-v${Math.max(1,Number(revision)||1)}.pdf`;
@@ -107,6 +108,33 @@ function registerCustomerAccess(app, options) {
     const jobIds=[...new Set([jobId,...members.filter(id=>id!==jobId&&selected.has(id))])].filter(safeId);
     return {jobId,meta,portal,jobIds,label:portal.mode==="collection"?"S"+jobId:jobId};
   }
+  const normalizeLogin=value=>String(value||"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+  function loginAliases(current) {
+    const owner=current.meta?.projectContacts?.owner||{},master=current.meta?.customerMaster||{},values=[
+      current.portal.customerName,customerContactDefaults(current.meta).customerName,current.meta?.contactName,master.name,
+      owner.customer,owner.company,owner.sharedLastName,owner.womanLastName,owner.manLastName,
+      ...(current.portal.recipients||[]).map(row=>row.name),
+    ];
+    const aliases=new Set;
+    for(const value of values){
+      const full=normalizeLogin(value);if(!full)continue;aliases.add(full);
+      for(const part of full.split(/\s+und\s+/)){
+        const words=part.split(" ").filter(Boolean),suffixes=new Set(["gmbh","kg","og","ag","co","mbh","e u","eu"]);
+        while(words.length&&suffixes.has(words.at(-1)))words.pop();
+        if(words.length)aliases.add(words.at(-1));
+      }
+    }
+    return [...aliases].filter(value=>value.length>=2).slice(0,40);
+  }
+  const passwordHash=(password,salt)=>crypto.scryptSync(String(password),salt,32).toString("hex");
+  function passwordMatches(account,password){
+    if(!account?.passwordSalt||!/^[a-f0-9]{64}$/.test(String(account.passwordHash||"")))return false;
+    const candidate=passwordHash(password,account.passwordSalt);return crypto.timingSafeEqual(Buffer.from(account.passwordHash,"hex"),Buffer.from(candidate,"hex"));
+  }
+  function passwordAccounts(){
+    const dir=path.join(root,"password-accounts");if(!fs.existsSync(dir))return [];
+    return fs.readdirSync(dir).filter(name=>/^[A-Za-z0-9_-]{1,80}\.json$/.test(name)).map(name=>read(path.join(dir,name),null)).filter(Boolean);
+  }
   function selectedRecipient(portal, recipientId) {
     const id=clean(recipientId,80);
     return id?(portal.recipients||[]).find(row=>row.id===id):null;
@@ -131,7 +159,13 @@ function registerCustomerAccess(app, options) {
   }
   async function context(req) {
     const session=readSession(req);
-    if(!session||session.expiresAt<=now())throw fail(401,"Bitte den persönlichen Einladungslink aus WhatsApp öffnen.");
+    if(!session||session.expiresAt<=now())throw fail(401,"Bitte anmelden oder den persönlichen Einladungslink öffnen.");
+    if(session.authMode==="password"){
+      if(session.mustChangePassword)throw fail(428,"Bitte zuerst ein eigenes Passwort festlegen.");
+      const current=await scope(session.jobId),account=read(accountPath(current.jobId),null);
+      if(!account||account.revoked||session.contact!==fingerprint(current.portal))throw fail(401,"Dieser Zugang wurde geändert. Bitte erneut anmelden.");
+      return {...current,session,grant:{id:`password-${current.jobId}`,jobId:current.jobId,jobIds:current.jobIds,preview:false,purpose:"portal"},recipient:null};
+    }
     const grant=read(grantPath(session.grantId),null);
     if(!grant||grant.revoked)throw fail(401,"Dieser Zugang wurde beendet. Bitte einen neuen Link anfordern.");
     const current=await scope(grant.jobId);
@@ -141,16 +175,16 @@ function registerCustomerAccess(app, options) {
   }
   function sameOrigin(req) { if(req.headers.origin!==origin)throw fail(403,"Anfrage nicht erlaubt."); }
   const attempts=new Map();
-  function throttle(req) {
-    const key=req.ip||req.socket?.remoteAddress||"",time=now(),previous=attempts.get(key),record=previous&&previous.until>time?previous:{count:0,until:time+600000};
-    if(++record.count>30)throw fail(429,"Zu viele Versuche. Bitte später erneut versuchen.");attempts.set(key,record);
+  function throttle(req,identity="",limit=30) {
+    const key=(req.ip||req.socket?.remoteAddress||"")+"|"+normalizeLogin(identity),time=now(),previous=attempts.get(key),record=previous&&previous.until>time?previous:{count:0,until:time+900000};
+    if(++record.count>limit)throw fail(429,"Zu viele Versuche. Bitte später erneut versuchen.");attempts.set(key,record);
     if(attempts.size>1000)for(const [key,row]of attempts)if(row.until<=time)attempts.delete(key);
   }
   function resetJob(jobId) {
-    const dir=path.join(root,"invitations");if(!fs.existsSync(dir))return;
-    for(const name of fs.readdirSync(dir).filter(n=>/^[a-f0-9]{32}\.json$/.test(n))) {
+    const dir=path.join(root,"invitations");if(fs.existsSync(dir))for(const name of fs.readdirSync(dir).filter(n=>/^[a-f0-9]{32}\.json$/.test(n))) {
       const file=path.join(dir,name),grant=read(file,null);if(grant?.jobId===jobId&&!grant.revoked)write(file,{...grant,revoked:true});
     }
+    const account=read(accountPath(jobId),null);if(account)write(accountPath(jobId),{...account,revoked:true,revokedAt:now()});
   }
   function listInvitations(jobId) {
     const dir=path.join(root,"invitations");if(!fs.existsSync(dir))return [];
@@ -209,6 +243,35 @@ function registerCustomerAccess(app, options) {
     const secret=random(),session={grantId:grant.id,expiresAt:now()+(grant.preview?600000:30*86400000),csrf:random()};
     write(sessionPath(secret),session);
     res.cookie(cookieName,secret,{...cookieOptions,maxAge:session.expiresAt-now()});res.json({ok:true});
+  }));
+  app.post("/kundenportal/api/login",guard(async(req,res)=>{
+    sameOrigin(req);const loginName=normalizeLogin(req.body?.loginName),password=String(req.body?.password||"");throttle(req,loginName,10);
+    if(loginName.length<2||password.length<1||password.length>128)throw fail(401,"Anmeldung nicht möglich. Bitte Namen und Passwort prüfen.");
+    let current=null,account=null,mustChangePassword=false;
+    for(const candidate of passwordAccounts().filter(row=>!row.revoked&&(row.loginNames||[]).includes(loginName))){
+      if(passwordMatches(candidate,password)){current=await scope(candidate.jobId);account=candidate;break}
+    }
+    if(!current&&safeId(password)){
+      try{current=await scope(password)}catch{current=null}
+      const existing=current?read(accountPath(current.jobId),null):null;
+      if(current&&(!existing||existing.revoked)&&loginAliases(current).includes(loginName))mustChangePassword=true;
+      else current=null;
+    }
+    if(!current)throw fail(401,"Anmeldung nicht möglich. Bitte Namen und Passwort prüfen.");
+    if(account&&account.contact!==fingerprint(current.portal))throw fail(401,"Dieser Zugang wurde geändert. Bitte Farben Krista kontaktieren.");
+    const secret=random(),session={authMode:"password",jobId:current.jobId,loginName,contact:fingerprint(current.portal),mustChangePassword,expiresAt:now()+(mustChangePassword?15*60000:30*86400000),csrf:random()};
+    write(sessionPath(secret),session);res.cookie(cookieName,secret,{...cookieOptions,maxAge:session.expiresAt-now()});
+    res.json({ok:true,mustChangePassword});
+  }));
+  app.post("/kundenportal/api/password",guard(async(req,res)=>{
+    sameOrigin(req);const session=readSession(req);if(!session||session.authMode!=="password"||!session.mustChangePassword||session.expiresAt<=now())throw fail(401,"Bitte erneut mit dem Startpasswort anmelden.");
+    const password=String(req.body?.password||""),confirmation=String(req.body?.confirmation||"");
+    if(password!==confirmation)throw fail(400,"Die beiden Passwörter stimmen nicht überein.");
+    if(password.length<10||password.length>128||!/\p{L}/u.test(password)||!/\d/.test(password))throw fail(400,"Bitte mindestens 10 Zeichen sowie Buchstaben und eine Zahl verwenden.");
+    if(password===session.jobId||normalizeLogin(password)===session.loginName)throw fail(400,"Bitte ein anderes Passwort als Name oder Baustellennummer wählen.");
+    const current=await scope(session.jobId),salt=crypto.randomBytes(16).toString("hex"),account={jobId:current.jobId,loginNames:loginAliases(current),loginLabel:current.portal.customerName||customerContactDefaults(current.meta).customerName,contact:fingerprint(current.portal),passwordSalt:salt,passwordHash:passwordHash(password,salt),createdAt:now(),changedAt:now(),revoked:false};
+    write(accountPath(current.jobId),account);write(sessionPath(String(req.headers.cookie||"").split(";").map(s=>s.trim()).find(s=>s.startsWith(cookieName+"="))?.slice(cookieName.length+1)||""),{...session,mustChangePassword:false,expiresAt:now()+30*86400000,csrf:random()});
+    res.cookie(cookieName,String(req.headers.cookie||"").split(";").map(s=>s.trim()).find(s=>s.startsWith(cookieName+"="))?.slice(cookieName.length+1)||"",{...cookieOptions,maxAge:30*86400000});res.json({ok:true});
   }));
   app.post("/kundenportal/api/logout",guard(async(req,res)=>{
     sameOrigin(req);const session=readSession(req);if(session){const raw=String(req.headers.cookie).split(";").map(s=>s.trim()).find(s=>s.startsWith(cookieName+"="))?.slice(cookieName.length+1);if(raw)fs.rmSync(sessionPath(raw),{force:true})}
