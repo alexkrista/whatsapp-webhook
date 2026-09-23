@@ -175,3 +175,89 @@ test("adjacent trips supply missing start and end in both directions across midn
   const hidden = (await (await h.get()).json()).rows[0];
   assert.equal(hidden.startLocation, ""); assert.equal(hidden.endLocation, "");
 });
+
+test("coordinate placeholders link both ways and recurring stops reuse the same address, including offline exports", async t => {
+  const h = await harness(t);
+  // Synthetic route with the screenshot's shape: known arrival, coordinate-only
+  // departure, missing arrival, and a later return to a previously named stop.
+  h.state.trips = [
+    trip({ startPositionId: 301, startTime: "2026-09-21T20:00:00Z", endTime: "2026-09-21T20:30:00Z", endAddress: "Werkstatt A", endLat: 47.2995, endLon: 9.5 }),
+    trip({ startPositionId: 302, startAddress: "", endAddress: "", startLat: 47.3, startLon: 9.5, endLat: 47.4, endLon: 9.6 }),
+    trip({ startPositionId: 303, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:30:00Z", startAddress: "Baustelle B", startLat: 47.4005, startLon: 9.6, endAddress: "Büro C" }),
+    trip({ startPositionId: 304, startTime: "2026-09-22T10:00:00Z", endTime: "2026-09-22T10:30:00Z", startAddress: "Büro C", endAddress: "", endLat: null, endLon: null }),
+    trip({ startPositionId: 305, startTime: "2026-09-22T12:00:00Z", endTime: "2026-09-22T12:30:00Z", startAddress: "47.3, 9.5", startLat: 47.3, startLon: 9.5, endAddress: "Letztes Ziel" }),
+  ];
+  let rows = (await (await h.get()).json()).rows;
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].startLocation, "Werkstatt A");
+  assert.equal(rows[0].endLocation, rows[1].startLocation);
+  assert.equal(rows[0].endLocation, "Baustelle B");
+  assert.equal(rows[2].endLocation, "Werkstatt A");
+  assert.equal(rows[3].startLocation, "Werkstatt A");
+  assert.equal(rows[0].inferredStart, true); assert.equal(rows[0].inferredEnd, true);
+  assert.equal(rows[2].inferredEnd, true);
+  assert.deepEqual(rows[0].endPoint, { lat: 47.4, lng: 9.6 });
+  const [file] = await fs.readdir(path.join(h.root, "logbook"));
+  const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));
+  assert.equal(stored.records[rows[0].id].original.endLocation, "47.40000, 9.60000");
+  h.state.offline = true;
+  rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
+  assert.equal(rows[0].endLocation, "Baustelle B"); assert.equal(rows[3].startLocation, "Werkstatt A");
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.ok(!csv.includes("47.40000")); assert.ok(!csv.includes("47.30000"));
+  assert.match(csv, /Baustelle B/); assert.match(csv, /Werkstatt A/);
+  const pdf = await h.get("/export.pdf" + h.query);
+  assert.equal(pdf.status, 200); assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
+});
+
+test("coordinate placeholders saved by older edit forms do not hide resolved addresses; real manual labels survive", async t => {
+  const h = await harness(t);
+  h.state.trips = [trip({ startAddress: "", startLat: 47.5, startLon: 9.7 })];
+  let row = (await (await h.get()).json()).rows[0];
+  row = (await (await h.patch(row)).json()).row;
+  h.state.trips[0].startAddress = "Aufgelöste Startadresse";
+  row = (await (await h.get(h.query + "&refresh=1")).json()).rows[0];
+  assert.equal(row.startLocation, "Aufgelöste Startadresse"); assert.ok(!row.missing.includes("Start/Ziel"));
+  assert.equal((await h.patch(row, { startLocation: "Meine Korrektur" })).status, 200);
+  h.state.trips[0].startAddress = "Andere GPS-Adresse";
+  row = (await (await h.get(h.query + "&refresh=1")).json()).rows[0];
+  assert.equal(row.startLocation, "Meine Korrektur");
+});
+
+test("an omitted first start is recovered only from its exact valid position on the configured device", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") {
+      assert.deepEqual(url.searchParams.getAll("id"), ["101"]);
+      return { ok: true, json: async () => [
+        { id: 101, deviceId: 999, latitude: 47.5, longitude: 9.7, address: "Fremdes Fahrzeug" },
+        { id: 101, deviceId: 17, valid: false, latitude: 47.5, longitude: 9.7, address: "Ungültiger Fix" },
+        { id: 101, deviceId: 17, valid: true, latitude: 47.5, longitude: 9.7, address: "Tatsächlicher Start" },
+      ] };
+    }
+    throw Error("Unexpected GPS request");
+  } });
+  h.state.trips = [trip({ startAddress: "", startLat: null, startLon: null })];
+  const row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.startLocation, "Tatsächlicher Start");
+  assert.deepEqual(row.startPoint, { lat: 47.5, lng: 9.7 });
+  assert.equal(row.inferredStart, undefined);
+});
+
+test("private locations, overlapping trips and a missing first origin are not used as invented addresses", async t => {
+  const h = await harness(t);
+  h.state.trips = [
+    trip({ startPositionId: 401, startAddress: "", startLat: null, startLon: null, endAddress: "Privates Ziel", endLat: 47.5, endLon: 9.7 }),
+    trip({ startPositionId: 402, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:30:00Z", startAddress: "", startLat: 47.5, startLon: 9.7, endAddress: "", endLat: null, endLon: null }),
+    trip({ startPositionId: 403, startTime: "2026-09-22T08:15:00Z", endTime: "2026-09-22T08:45:00Z", startAddress: "Überlappende Fahrt" }),
+  ];
+  let rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].startLocation, "");
+  assert.equal((await h.patch(rows[0], { category: "private" })).status, 200);
+  rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, ""); assert.equal(rows[0].endPoint, null);
+  assert.equal(rows[1].startLocation, "47.50000, 9.70000");
+  assert.equal(rows[1].endLocation, "");
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.ok(!csv.includes("Privates Ziel"));
+});

@@ -30,7 +30,16 @@ function location(address, point) {
   return text(address) || (point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "");
 }
 function pointKey(point) { return point && `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`; }
-function isCoordinates(value) { return /^-?\d{1,2}\.\d{4,},\s*-?\d{1,3}\.\d{4,}$/.test(String(value || "").trim()); }
+function coordinateLabel(value) {
+  const match = /^\s*([+-]?\d{1,2}(?:\.\d+)?),\s*([+-]?\d{1,3}(?:\.\d+)?)\s*$/.exec(String(value || ""));
+  return match ? coordinates(match[1], match[2]) : null;
+}
+const isCoordinates = value => Boolean(coordinateLabel(value));
+const hasAddress = value => Boolean(text(value)) && !isCoordinates(value);
+function metresBetween(a, b) {
+  if (!a || !b) return Infinity;
+  return Math.hypot((a.lat - b.lat) * 111195, (a.lng - b.lng) * 111195 * Math.cos(a.lat * Math.PI / 180));
+}
 // Verified from the two locations reported by Alex. Limit these labels to
 // nearby GPS fixes; other destinations must come from the geocoder.
 const knownPlaces = [
@@ -39,11 +48,7 @@ const knownPlaces = [
 ];
 function knownPlace(point) {
   if (!point) return "";
-  const match = knownPlaces.find(place => {
-    const north = (point.lat - place.lat) * 111195;
-    const east = (point.lng - place.lng) * 111195 * Math.cos(place.lat * Math.PI / 180);
-    return Math.hypot(north, east) <= 70;
-  });
+  const match = knownPlaces.find(place => metresBetween(point, place) <= 70);
   return match?.label || "";
 }
 
@@ -88,6 +93,7 @@ function normalizeTrip(trip, vehicleId, deviceId) {
   return {
     id: "trip-" + hash(`${vehicleId}:${deviceId}:${trip.startPositionId || startedAt}`),
     vehicleId: String(vehicleId), deviceId: String(deviceId), source: "traccar", startedAt, closedAt,
+    startPositionId: text(trip.startPositionId, 30), endPositionId: text(trip.endPositionId, 30),
     startLocation: location(trip.startAddress, startPoint), endLocation: location(trip.endAddress, endPoint),
     startPoint, endPoint, distanceKm: km(trip.distance),
     odometerStartKm: noCounter ? null : km(trip.startOdometer), odometerEndKm: noCounter ? null : km(trip.endOdometer),
@@ -128,6 +134,10 @@ function view(record) {
   // A saved trip must stay readable even if Traccar is temporarily unavailable:
   // sync cannot enrich existing records while the GPS report is offline.
   for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+    // Older edit forms submitted unchanged coordinate placeholders as edits.
+    // A subsequently resolved GPS address must still be allowed to replace them.
+    if (!hasAddress(row[field]) && hasAddress(record.data[field])) row[field] = record.data[field];
+    row[pointField] = coordinates(row[pointField]?.lat, row[pointField]?.lng) || coordinateLabel(row[field]);
     if (!row[field] || isCoordinates(row[field])) row[field] = knownPlace(row[pointField]) || row[field];
   }
   if (Object.hasOwn(record.edits || {}, "odometerStartKm") && row.odometerStartKm !== null && row.odometerEndKm !== null) row.distanceKm = row.odometerEndKm - row.odometerStartKm;
@@ -150,29 +160,70 @@ function view(record) {
   }
   if (row.category === "private") {
     row.startLocation = ""; row.endLocation = ""; row.startPoint = null; row.endPoint = null; row.purpose = "";
+    row.startPositionId = ""; row.endPositionId = "";
   }
   return row;
 }
 function linkTripEndpoints(rows) {
+  const quality = value => hasAddress(value) ? 2 : isCoordinates(value) ? 1 : 0;
   for (let i = 1; i < rows.length; i++) {
     const before = rows[i - 1], after = rows[i];
     const gap = Date.parse(after.startedAt) - Date.parse(before.closedAt);
     // Only adjacent recorded trips of this vehicle are linked. Never derive
     // a private destination from a neighboring business trip or vice versa.
-    if (gap < 0 || before.category === "private" || after.category === "private") continue;
+    if (!Number.isFinite(gap) || gap < 0 || before.vehicleId !== after.vehicleId || before.category === "private" || after.category === "private") continue;
     const oldEnd = before.endLocation, oldStart = after.startLocation;
-    if (!oldEnd && oldStart) {
+    if (quality(oldEnd) < quality(oldStart)) {
       before.endLocation = oldStart;
-      before.endPoint = after.startPoint;
+      before.endPoint ||= after.startPoint;
       before.inferredEnd = true;
       if (before.startLocation) before.missing = before.missing.filter(item => item !== "Start/Ziel");
     }
-    if (!oldStart && oldEnd) {
+    if (quality(oldStart) < quality(oldEnd)) {
       after.startLocation = oldEnd;
-      after.startPoint = before.endPoint;
+      after.startPoint ||= before.endPoint;
       after.inferredStart = true;
       if (after.endLocation) after.missing = after.missing.filter(item => item !== "Start/Ziel");
     }
+  }
+  return rows;
+}
+function reuseStopAddresses(rows) {
+  // Build from this vehicle's visible records, never from redacted private trips.
+  // Keep actual GPS points, including small differences between arrival/departure.
+  const places = new Map();
+  for (const row of rows) {
+    if (row.category === "private") continue;
+    for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+      if (hasAddress(row[field]) && row[pointField]) {
+        places.set(`${row.vehicleId}:${pointKey(row[pointField])}`, { vehicleId: row.vehicleId, point: row[pointField], label: row[field] });
+      }
+    }
+  }
+  for (const row of rows) {
+    if (row.category === "private") continue;
+    for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+      if (hasAddress(row[field]) || !row[pointField]) continue;
+      let nearest = null, distance = 40;
+      for (const place of places.values()) {
+        if (place.vehicleId !== row.vehicleId) continue;
+        const gap = metresBetween(row[pointField], place.point);
+        if (gap <= distance) { nearest = place; distance = gap; }
+      }
+      if (nearest) row[field] = nearest.label;
+    }
+  }
+  return rows;
+}
+function resolvedRows(records) {
+  const rows = records.map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  // Resolve known coordinates before joining the stops. Then learn the other
+  // GPS fix of each joined stop, so recurring visits and old records benefit too.
+  linkTripEndpoints(reuseStopAddresses(rows));
+  linkTripEndpoints(reuseStopAddresses(rows));
+  for (const row of rows) {
+    row.missing = row.missing.filter(item => item !== "Start/Ziel");
+    if (row.category === "business" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))) row.missing.push("Start/Ziel");
   }
   return rows;
 }
@@ -223,9 +274,9 @@ function registerKrisdriveLogbook(app, options = {}) {
     locks.set(id, current);
     try { return await current; } finally { if (locks.get(id) === current) locks.delete(id); }
   }
-  async function traccar(apiPath) {
+  async function traccar(apiPath, timeout = 25000) {
     if (!base || !token) throw fail("Der GPS-Zugang ist noch nicht eingerichtet.", 503);
-    const response = await request(base + apiPath, { headers: { Accept: "application/json", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(25000) });
+    const response = await request(base + apiPath, { headers: { Accept: "application/json", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeout) });
     if (!response.ok) throw fail(`GPS-Abruf fehlgeschlagen (HTTP ${response.status}).`, 502);
     const rows = await response.json();
     if (!Array.isArray(rows)) throw fail("Der GPS-Dienst hat keine Fahrtenliste geliefert.", 502);
@@ -264,6 +315,25 @@ function registerKrisdriveLogbook(app, options = {}) {
         const query = new URLSearchParams({ deviceId, from: new Date(range.start - DAY).toISOString(), to: new Date(Math.min(range.end + DAY, Date.now())).toISOString() });
         trips = (await traccar("/api/reports/trips?" + query)).map(row => normalizeTrip(row, ctx.vehicle.id, deviceId)).filter(Boolean);
         const previous = await stateFor(ctx.vehicle.id);
+        // A report can omit an endpoint while still referring to its original
+        // position. Recover that exact fix, not the first later fix while moving.
+        const endpoints = trips.filter(trip => previous.records[trip.id]?.edits?.category !== "private").flatMap(trip =>
+          [["startLocation", "startPoint", "startPositionId"], ["endLocation", "endPoint", "endPositionId"]]
+            .filter(([field, pointField, idField]) => !hasAddress(trip[field]) && !trip[pointField] && /^[1-9]\d*$/.test(trip[idField]))
+            .map(([field, pointField, idField]) => ({ trip, field, pointField, id: trip[idField] })));
+        const ids = [...new Set(endpoints.map(endpoint => endpoint.id))].slice(0, 40);
+        if (ids.length) {
+          try {
+            const positions = await traccar("/api/positions?" + new URLSearchParams(ids.map(id => ["id", id])), 5000);
+            for (const endpoint of endpoints) {
+              const position = positions.find(row => String(row.id) === endpoint.id && String(row.deviceId) === deviceId && row.valid !== false);
+              if (!position) continue;
+              const point = coordinates(position.latitude, position.longitude);
+              endpoint.trip[endpoint.pointField] = point;
+              endpoint.trip[endpoint.field] = location(position.address, point) || endpoint.trip[endpoint.field];
+            }
+          } catch { /* The report remains usable if individual positions are unavailable. */ }
+        }
         let geocoderUnavailable = false, lookups = 0;
         for (const trip of trips) {
           if (previous.records[trip.id]?.edits?.category === "private") continue;
@@ -346,7 +416,7 @@ function registerKrisdriveLogbook(app, options = {}) {
     const ctx = await context(vehicleId);
     const warning = await sync(ctx, range, query.refresh === "1");
     const state = await stateFor(vehicleId);
-    const rows = linkTripEndpoints(Object.values(state.records).map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt)))
+    const rows = resolvedRows(Object.values(state.records))
       .filter(row => day(row.startedAt) >= range.from && day(row.startedAt) <= range.to);
     return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
