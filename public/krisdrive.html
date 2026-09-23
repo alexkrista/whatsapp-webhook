@@ -66,9 +66,16 @@
     const hasPosition=p=>p?.lat!=null&&p?.lng!=null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng))&&Math.abs(Number(p.lat))<=90&&Math.abs(Number(p.lng))<=180&&(Number(p.lat)!==0||Number(p.lng)!==0);
 
     function initMap(){
-      if(!window.maplibregl){document.getElementById('map').outerHTML='<div class="mapfallback">Karte konnte nicht geladen werden.<br>Die Fahrzeugliste funktioniert trotzdem.</div>';return;}
-      map=new maplibregl.Map({container:'map',style:'https://tiles.openfreemap.org/styles/liberty',center:[9.60,47.22],zoom:9});
-      map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+      const fallback=()=>{
+        if(map){try{map.remove()}catch{}}
+        map=null;
+        document.getElementById('map').outerHTML='<div class="mapfallback">Karte konnte nicht geladen werden.<br>Fahrzeugliste und Fahrtenbuch sind weiterhin verfügbar.</div>';
+      };
+      if(!window.maplibregl){fallback();return;}
+      try{
+        map=new maplibregl.Map({container:'map',style:'https://tiles.openfreemap.org/styles/liberty',center:[9.60,47.22],zoom:9});
+        map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+      }catch{fallback();}
     }
 
     function fit(rows=lastRows){
