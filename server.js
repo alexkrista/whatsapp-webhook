@@ -363,6 +363,7 @@ function isAllowedPdfSender(sender) {
   return allowed.includes(String(sender || "").trim());
 }
 const requireAdmin = require("./admin-auth").requireAdmin;
+require("./enable-banking-personal").register(app, { dataDir: DATA_DIR, requireAdmin });
 
 registerKristineActivityAudit(app, {
   dataDir: DATA_DIR,
