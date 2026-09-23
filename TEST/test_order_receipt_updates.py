@@ -19,6 +19,14 @@ class Updates(unittest.TestCase):
             self.assertEqual(os.environ['KRISTINE_SQL_PASSWORD'],'existing')
             self.assertEqual(registry.QueryValueEx.call_count,1)
 
+    def test_system_reads_only_provisioned_encrypted_sql_setting(self):
+        registry=types.SimpleNamespace(HKEY_CURRENT_USER=1,OpenKey=Mock(side_effect=OSError('no user setting')))
+        file=Mock();file.__truediv__=Mock(return_value=file);file.is_file.return_value=True;file.read_bytes.return_value=b'encrypted'
+        with patch.dict(os.environ,{},clear=True),patch.object(brain_windows_env.os,'name','nt'),patch.dict(sys.modules,{'winreg':registry}),patch('pathlib.Path',return_value=file),patch('brain_konfipay.protect',return_value=b'test-service-secret') as decrypt:
+            brain_windows_env.restore_sql_password()
+            self.assertEqual(os.environ['KRISTINE_SQL_PASSWORD'],'test-service-secret')
+            decrypt.assert_called_once_with(b'encrypted',decrypt=True)
+
     def test_invoice_save_queues_receipt_and_review_preserves_turnover(self):
         app=Flask(__name__);calls=[]
         invoice={'id':1,'supplierName':'Little Greene','invoiceNumber':'TEST','invoiceDate':'2026-09-23','netAmount':10,'pdfText':'test'}
