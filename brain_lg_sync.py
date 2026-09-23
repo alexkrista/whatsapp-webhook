@@ -244,6 +244,8 @@ def install(ns):
                     finally:
                         con.close()
                 try:
+                    if str(form.get("workflowStatus") or row.get("workflowStatus") or "") == "geprueft":
+                        payload["lgTurnoverSync"] = _sync_turnover(ns, row) or {"ok": False}
                     payload["lgGoodsReceipt"] = _sync_stock_and_turnover(ns, row) or {"ok": False}
                 except Exception as exc:
                     payload["lgGoodsReceipt"] = {"ok": False, "error": str(exc)}
