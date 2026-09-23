@@ -347,7 +347,6 @@ function registerRegieAssistant(app, options) {
     return bookings.filter(booking =>
       String(booking.jobId || "") === jobId
       && booking.source === "innovatint-history"
-      && booking.knowledgeOnly !== true
       && !alreadyUsed.has(clean(booking.id, 180))
       && (!validDate(date) || !clean(booking.mixedAt || booking.at, 10) || clean(booking.mixedAt || booking.at, 10) <= date)
     ).map(booking => {
@@ -363,6 +362,7 @@ function registerRegieAssistant(app, options) {
         purchasePrice: round(purchasePrice), salePrice: round(explicitSale), fixedSalePrice: master.fixedSalePrice === true,
         color: clean(booking.colourTone, 120), component: clean(booking.component, 120),
         machineBookingId: clean(booking.id, 180), machineHistoryId: clean(booking.historyId, 180), sourceSystem: "innovatint-history",
+        historicalAssignment: booking.knowledgeOnly === true,
       };
     });
   }

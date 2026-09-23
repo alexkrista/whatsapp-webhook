@@ -368,7 +368,7 @@ function invoke(handler, req) {
 
   fs.mkdirSync(path.join(temporaryRoot, "_kristine", "paint"), { recursive: true });
   fs.mkdirSync(path.join(temporaryRoot, "_kristine", "materials"), { recursive: true });
-  fs.writeFileSync(path.join(temporaryRoot, "_kristine", "paint", "job-materials.jsonl"), JSON.stringify({ id: "mixmat-1", historyId: "mix-1", jobId: "26096", source: "innovatint-history", product: "Absolute Matt", size: "2,5 L", quantity: 3, liters: 7.5, colourTone: "Book Room Green 322", component: "Wohnzimmer", mixedAt: "2026-09-02T08:00:00Z" }) + "\n");
+  fs.writeFileSync(path.join(temporaryRoot, "_kristine", "paint", "job-materials.jsonl"), JSON.stringify({ id: "mixmat-1", historyId: "mix-1", jobId: "26096", source: "innovatint-history", knowledgeOnly: true, product: "Absolute Matt", size: "2,5 L", quantity: 3, liters: 7.5, colourTone: "Book Room Green 322", component: "Wohnzimmer", mixedAt: "2026-09-02T08:00:00Z" }) + "\n");
   fs.writeFileSync(path.join(temporaryRoot, "_kristine", "materials", "materials.json"), JSON.stringify([{ materialId: "LG02", product: "Absolute Matt Emulsion · 2,5 L", supplier: "The Little Greene", containerSize: 2.5, unit: "L", purchasePrice: 41.1, salePrice: 155.83 }]));
   const machineSuggestions = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
   assert.equal(machineSuggestions.body.materialSuggestions.length, 1);
@@ -376,6 +376,8 @@ function invoke(handler, req) {
   assert.equal(machineSuggestions.body.materialSuggestions[0].containerSize, 2.5);
   assert.equal(machineSuggestions.body.materialSuggestions[0].color, "Book Room Green 322");
   assert.equal(machineSuggestions.body.materialSuggestions[0].machineBookingId, "mixmat-1");
+  assert.equal(machineSuggestions.body.materialSuggestions[0].sourceSystem, "innovatint-history", "Historische Maschinenzuordnung wird verrechnet, ohne einen Lagerabzug zu erfinden");
+  assert.equal(machineSuggestions.body.materialSuggestions[0].historicalAssignment, true, "Historische Zuordnung verlangt eine bewusste Übernahme");
   const machineReportFile = path.join(temporaryRoot, "_kristine", "regie-reports.json"), reportRows = JSON.parse(fs.readFileSync(machineReportFile, "utf8"));
   reportRows.push({ id: "uses-mix", jobId: "26096", materials: [{ machineBookingId: "mixmat-1" }] });
   fs.writeFileSync(machineReportFile, JSON.stringify(reportRows));
@@ -392,6 +394,8 @@ function invoke(handler, req) {
   assert.match(workbench, /Little Greene aus der Mischmaschine/);
   assert.match(workbench, /materialSuggestions=data\.materialSuggestions/);
   assert.match(workbench, /machineBookingId/);
+  assert.match(workbench, /Historische Mischungen übernehmen/);
+  assert.match(workbench, /if\(!materialSuggestions\.some\(row=>row\.historicalAssignment\)\)reconcileMachineMaterials/);
 
   const print = routes.get("GET /kristine/regie-report/:id/print");
   const printed = await invoke(print, { params: { id: first.body.report.id } });
