@@ -32,6 +32,8 @@ function registerRegieAssistant(app, options) {
   const FILES = path.join(ROOT, "regie-files");
   const REVIEWS = path.join(ROOT, "day-review-entries.json");
   const TASKS = path.join(ROOT, "tasks.json");
+  const PAINT_JOB_MATERIALS = path.join(ROOT, "paint", "job-materials.jsonl");
+  const MATERIALS_FILE = path.join(ROOT, "materials", "materials.json");
 
   async function readJson(file, fallback) {
     try { return JSON.parse(await fsp.readFile(file, "utf8")); } catch { return fallback; }
@@ -41,6 +43,11 @@ function registerRegieAssistant(app, options) {
     const tmp = `${file}.${process.pid}.tmp`;
     await fsp.writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
     await fsp.rename(tmp, file);
+  }
+  async function readJsonl(file) {
+    try {
+      return (await fsp.readFile(file, "utf8")).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+    } catch { return []; }
   }
   const clean = (value, max = 1000) => String(value ?? "").trim().slice(0, max);
   const safeId = value => clean(value, 140).replace(/[^a-zA-Z0-9_-]/g, "");
@@ -305,7 +312,59 @@ function registerRegieAssistant(app, options) {
       regieEntryId: clean(row?.regieEntryId, 150),
       labelPhotoName: clean(row?.labelPhotoName, 500),
       searchAlias: clean(row?.searchAlias, 240),
+      machineBookingId: clean(row?.machineBookingId, 180),
+      machineHistoryId: clean(row?.machineHistoryId, 180),
+      sourceSystem: clean(row?.sourceSystem, 80),
+      machineExcessFor: clean(row?.machineExcessFor, 180),
     };
+  }
+
+  function packageLiters(value) {
+    const match = String(value || "").replace(",", ".").match(/(\d+(?:\.\d+)?)\s*l\b/i);
+    return match ? num(match[1]) : 0;
+  }
+
+  function canonicalPaintProduct(value) {
+    return clean(value, 240).toLowerCase()
+      .replace(/\b(the\s+)?little\s+greene\b/g, "")
+      .replace(/\b(emulsion|paint)\b/g, "")
+      .replace(/[·|].*$/, "")
+      .replace(/\b\d+(?:[.,]\d+)?\s*l\b/g, "")
+      .replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function machineMaterialRows(bookings, masterRows, reports, jobId, date, currentReportId = "") {
+    const alreadyUsed = new Set(reports
+      .filter(report => String(report.jobId || "") === jobId && String(report.id || "") !== currentReportId)
+      .flatMap(report => report.materials || [])
+      .map(row => clean(row.machineBookingId, 180)).filter(Boolean));
+    const masterFor = booking => {
+      const articleId = clean(booking.articleId, 180), size = packageLiters(booking.size) || (num(booking.quantity) ? num(booking.liters) / num(booking.quantity) : 0);
+      return masterRows.find(row => articleId && [row.sourceId, row.articleId, row.id, row.materialId].some(value => String(value || "") === articleId))
+        || masterRows.find(row => canonicalPaintProduct(row.product || row.name) === canonicalPaintProduct(booking.product) && Math.abs(num(row.containerSize) - size) < .001)
+        || null;
+    };
+    return bookings.filter(booking =>
+      String(booking.jobId || "") === jobId
+      && booking.source === "innovatint-history"
+      && booking.knowledgeOnly !== true
+      && !alreadyUsed.has(clean(booking.id, 180))
+      && (!validDate(date) || !clean(booking.mixedAt || booking.at, 10) || clean(booking.mixedAt || booking.at, 10) <= date)
+    ).map(booking => {
+      const master = masterFor(booking) || {}, size = num(master.containerSize) || packageLiters(booking.size) || (num(booking.quantity) ? num(booking.liters) / num(booking.quantity) : 1);
+      const quantity = num(booking.quantity) || (size ? num(booking.liters) / size : 1);
+      const purchasePrice = num(master.purchasePrice ?? master.unitPrice ?? booking.purchasePrice);
+      const explicitSale = num(master.salePrice ?? master.vkNet ?? booking.salePrice);
+      return {
+        materialId: clean(master.materialId || master.id, 140),
+        product: clean(master.product || master.name || [booking.product, booking.size].filter(Boolean).join(" · "), 240),
+        supplier: clean(master.supplier || "Little Greene", 180),
+        quantity: round(quantity), unit: clean(master.unit || "L", 40), containerSize: round(size),
+        purchasePrice: round(purchasePrice), salePrice: round(explicitSale), fixedSalePrice: master.fixedSalePrice === true,
+        color: clean(booking.colourTone, 120), component: clean(booking.component, 120),
+        machineBookingId: clean(booking.id, 180), machineHistoryId: clean(booking.historyId, 180), sourceSystem: "innovatint-history",
+      };
+    });
   }
 
   function calculateTotals(report) {
@@ -452,6 +511,15 @@ function registerRegieAssistant(app, options) {
       name: row.product,
       quantity: String(row.quantity),
       unit: row.unit,
+      materialId: row.materialId,
+      supplier: row.supplier,
+      containerSize: row.containerSize,
+      color: row.color,
+      component: row.component,
+      machineBookingId: row.machineBookingId,
+      machineHistoryId: row.machineHistoryId,
+      sourceSystem: row.sourceSystem,
+      machineExcessFor: row.machineExcessFor,
       source: "Regie",
       reportId: report.id,
     })));
@@ -520,7 +588,7 @@ function registerRegieAssistant(app, options) {
     text("Durchgeführte Arbeiten", { bold: true, size: 12, color: rgb(.12,.34,.2) }); text(report.description, { size: 11, line: 16 }); y -= 10;
     text("Arbeitszeit", { bold: true, size: 12, color: rgb(.12,.34,.2) });
     for (const row of report.employees) text(`${row.name} · ${row.from || ""}–${row.to || ""} · ${num(row.hours).toLocaleString("de-AT")} Std. · ${money(num(row.hours) * employeeRate(row, report.hourlyRate))}`);
-    if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product} · ${num(row.quantity).toLocaleString("de-AT")} ${row.unit} · ${money(num(row.quantity) * num(row.salePrice))}`); }
+    if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product}${row.color ? ` · Farbton ${row.color}` : ""} · ${num(row.quantity).toLocaleString("de-AT")} × ${num(row.containerSize || 1).toLocaleString("de-AT")} ${row.unit} · ${money(num(row.quantity) * num(row.salePrice))}`); }
     y -= 12; text(`Arbeit: ${money(report.totals.laborTotal)}`, { bold: true }); text(`Material: ${money(report.totals.materialTotal)}`, { bold: true }); text(`Netto: ${money(report.totals.net)} · 20 % MwSt.: ${money(report.totals.vat)} · Brutto: ${money(report.totals.gross)}`, { bold: true });
     y -= 35; ensure(80); page.drawLine({ start: { x: margin, y }, end: { x: margin + 190, y }, thickness: .7 }); page.drawLine({ start: { x: size[0] - margin - 190, y }, end: { x: size[0] - margin, y }, thickness: .7 }); y -= 14; text("Ort, Datum                              Auftraggeber", { size: 9 });
     const bytes = await pdf.save(); return Buffer.from(bytes);
@@ -542,7 +610,7 @@ function registerRegieAssistant(app, options) {
       laborCost: report.totals.laborTotal,
       materialTotal: money(report.totals.materialTotal),
       materialCost: report.totals.materialTotal,
-      materials: report.materials.map(row => ({ name: row.product, quantity: row.quantity, unit: row.unit, cost: round(num(row.quantity) * num(row.salePrice)) })),
+      materials: report.materials.map(row => ({ name: row.product, quantity: row.quantity, unit: row.unit, containerSize: row.containerSize, supplier: row.supplier, color: row.color, component: row.component, machineBookingId: row.machineBookingId, machineHistoryId: row.machineHistoryId, sourceSystem: row.sourceSystem, machineExcessFor: row.machineExcessFor, cost: round(num(row.quantity) * num(row.salePrice)) })),
       importedAt: report.completedAt || report.updatedAt,
       source: report.source || "office",
       url: `/kristine/regie-report/${encodeURIComponent(report.id)}/print`,
@@ -796,7 +864,9 @@ function registerRegieAssistant(app, options) {
     }
     const suggestions = [...grouped.values()];
     const stampedSuggestions = suggestions.filter(row => row.source === "stamped");
-    res.json({ ok: true, suggestions, stampedSuggestions });
+    const [paintBookings, materialMaster, reports] = await Promise.all([readJsonl(PAINT_JOB_MATERIALS), readJson(MATERIALS_FILE, []), readJson(REPORTS, [])]);
+    const materialSuggestions = machineMaterialRows(paintBookings, materialMaster, reports, jobId, date, safeId(req.query.reportId));
+    res.json({ ok: true, suggestions, stampedSuggestions, materialSuggestions });
   });
   app.get("/kristine/api/regie-reports/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
