@@ -131,3 +131,24 @@ test("missing trip addresses resolve through known places and the Traccar geocod
   assert.equal(rows[1].startLocation, "Bahnhofstraße, Feldkirch");
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
 });
+
+test("old saved coordinate labels resolve in the page and exports even when GPS is offline", async t => {
+  const h = await harness(t);
+  h.state.trips = [trip({ startAddress: "", endAddress: "", startLat: 47.22429, startLon: 9.61752, endLat: 47.26821, endLon: 9.64093 })];
+  await h.get();
+  const [name] = await fs.readdir(path.join(h.root, "logbook"));
+  const file = path.join(h.root, "logbook", name);
+  const saved = JSON.parse(await fs.readFile(file, "utf8"));
+  const record = Object.values(saved.records)[0];
+  record.data.startLocation = "47.22429, 9.61752";
+  record.data.endLocation = "47.26821, 9.64093";
+  await fs.writeFile(file, JSON.stringify(saved));
+  h.state.offline = true;
+  const result = await (await h.get(h.query + "&refresh=1")).json();
+  assert.match(result.warning, /gespeicherte Fahrten/);
+  assert.equal(result.rows[0].startLocation, "Schmittengasse, Frastanz");
+  assert.equal(result.rows[0].endLocation, "Torkelgässele, Rankweil");
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.match(csv, /Schmittengasse, Frastanz/);
+  assert.match(csv, /Torkelgässele, Rankweil/);
+});
