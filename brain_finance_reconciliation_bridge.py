@@ -55,15 +55,11 @@ def install(ns):
                 return jsonify(ok=False, error="movementId fehlt"), 400
             return dynamic_allocate(movement_id)
 
-    def exact_revolut_match(tx, expected_method="revolut"):
+    def exact_revolut_match(tx, expected_method="revolut", items=()):
         amount = round(float(tx.get("amount") or 0), 2)
         currency = str(tx.get("currency") or "EUR").upper()
         merchant = _txt(tx.get("merchant") or tx.get("counterpartyName") or tx.get("description")).lower()
         matches = []
-        try:
-            items = store.items(True)
-        except Exception:
-            items = []
         for item in items:
             if norm_method(item.get("paymentMethod")) != expected_method or norm_status(item.get("paymentStatus")) == "paid":
                 continue
@@ -97,6 +93,13 @@ def install(ns):
                 account = _txt(body.get("account") or statement_source)
                 currency = str(body.get("currency") or "EUR").upper()
                 digest = hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+                # Read possible invoices before opening the bank write transaction.
+                # FinanceStore opens the same SQLite database, so reading it from
+                # inside that transaction can wait on its own write lock.
+                try:
+                    candidate_items = store.items(True)
+                except Exception:
+                    candidate_items = []
                 c = con()
                 try:
                     existing = c.execute(
@@ -138,7 +141,7 @@ def install(ns):
                             external_id = "revolut:" + hashlib.sha256(
                                 f"{external_statement}|{index}|{booking}|{direction}|{amount}|{tx_currency}|{merchant}|{reference}".encode("utf-8", "ignore")
                             ).hexdigest()[:32]
-                        match = exact_revolut_match({**tx, "amount": amount, "currency": tx_currency, "merchant": merchant}, expected_method) if direction == "out" else None
+                        match = exact_revolut_match({**tx, "amount": amount, "currency": tx_currency, "merchant": merchant}, expected_method, candidate_items) if direction == "out" else None
                         suggested_category = "supplier_payment" if match else ""
                         target_source = str((match or {}).get("source") or "")
                         target_id = str((match or {}).get("id") or "")
