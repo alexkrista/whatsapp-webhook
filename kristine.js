@@ -2483,27 +2483,66 @@ const open = taskId
     const text=String(segment?.reason||segment?.jobName||segment?.absenceType||"")
       .normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
     const code=String(segment?.unproductiveCode||"");
-    return code==="900"||code==="901"||code==="911"||/sonderurlaub|(^|[^a-z])urlaub([^a-z]|$)|krank/.test(text)
-      ? "absence"
-      : "work";
+    if(code==="930"||/zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(text))return "za";
+    if(code==="900"||/(^|[^a-z])urlaub([^a-z]|$)/.test(text))return "vacation";
+    return code==="901"||code==="911"||/sonderurlaub|krank/.test(text)?"absence":"work";
   }
 
   function dayControlSegmentLabel(segment, kind) {
     if(kind==="break")return segment?.type==="lunch"?"Mittag":"Pause";
-    if(kind==="absence")return String(segment?.reason||segment?.jobName||segment?.absenceType||"Abwesenheit");
+    if(kind==="za")return "ZA · Zeitausgleich";
+    if(kind==="vacation"||kind==="absence")return String(segment?.reason||segment?.jobName||segment?.absenceType||"Abwesenheit");
     const detail=String(segment?.reason||"").trim();
     return detail?`Arbeit · ${detail}`:"Arbeit";
   }
 
-  function dayControlAutomaticTime(models, employee, date, segments, plannedAbsence) {
-    if(plannedAbsence)return null;
+  function dayControlEmployeeModel(models, employee, {preferInferred=false}={}) {
+    const directId=String(employee?.worktimeModelId||"").trim();
+    const direct=(models||[]).find(row=>String(row?.id||"")===directId);
     const normalizedName=String(employee?.nickname||employee?.name||employee?.employeeName||"")
       .normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
     const inferredId=/\balex(?:ander)?\b/.test(normalizedName)?"office-alex":
       /\bjudith\b/.test(normalizedName)?"office-judith":
       /\bgeri\b|\bgerry\b/.test(normalizedName)?"office-geri":"";
-    const modelId=String(inferredId||employee?.worktimeModelId||"").trim();
-    const model=(models||[]).find(row=>String(row?.id||"")===modelId)||null;
+    const inferred=(models||[]).find(row=>String(row?.id||"")===inferredId)||null;
+    return preferInferred?(inferred||direct||null):(direct||inferred||null);
+  }
+
+  function dayControlNetRowMinutes(row) {
+    const from=minutesFromHM(row?.from),to=minutesFromHM(row?.to);
+    if(from===null||to===null||to<=from)return 0;
+    const overlap=(start,end)=>{
+      const a=minutesFromHM(start),b=minutesFromHM(end);
+      return a===null||b===null||b<=a?0:Math.max(0,Math.min(to,b)-Math.max(from,a));
+    };
+    return Math.max(0,to-from-overlap(row?.pauseFrom,row?.pauseTo)-overlap(row?.lunchFrom,row?.lunchTo));
+  }
+
+  function dayControlPayrollSchedule(models, employee, date) {
+    const model=dayControlEmployeeModel(models,employee);
+    const parsed=new Date(`${date}T12:00:00`);
+    if(!model||Number.isNaN(parsed.getTime()))return null;
+    const weekday=parsed.getDay()===0?7:parsed.getDay();
+    const factor=Math.max(0,Number(employee?.employmentPercent??employee?.employmentPercentage??employee?.workPercent??100)||0)/100;
+    const targetRow=(model?.blocks?.finkTarget?.rows||[]).find(row=>(row?.days||[]).map(Number).includes(weekday));
+    let targetMinutes=targetRow?dayControlNetRowMinutes(targetRow):0;
+    let from=String(targetRow?.from||"");
+    if(targetMinutes<=0){
+      const month=parsed.getMonth()+1;
+      const season=(model.seasons||[]).find(row=>(row.months||[]).map(Number).includes(month))||(model.seasons||[])[0]||null;
+      const legacy=season?.weekdays?.[String(parsed.getDay())]||{};
+      targetMinutes=Math.round(Number(legacy.payrollTargetHours??model.payrollTargetHoursWeekday??legacy.targetHours??0)*60);
+      from=String(legacy.from||"07:00");
+    }
+    targetMinutes=Math.round(targetMinutes*factor);
+    const fromMinutes=minutesFromHM(from);
+    if(targetMinutes<=0||fromMinutes===null)return null;
+    return {from,to:`${String(Math.floor((fromMinutes+targetMinutes)/60)).padStart(2,"0")}:${String((fromMinutes+targetMinutes)%60).padStart(2,"0")}`,minutes:targetMinutes,modelName:String(model.name||"Zeitmodell")};
+  }
+
+  function dayControlAutomaticTime(models, employee, date, segments, plannedAbsence) {
+    if(plannedAbsence)return null;
+    const model=dayControlEmployeeModel(models,employee,{preferInferred:true});
     const block=model?.blocks?.finkFixed;
     if(!model||block?.enabled!==true)return null;
     const parsed=new Date(`${date}T12:00:00`);
@@ -2544,18 +2583,30 @@ const open = taskId
       const employeeName=employeeEverydayName(employee)||employeeId;
       let segments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
       const plannedAbsence=employeeAbsenceForDay(assignments,employee,date);
-      if(!segments.length&&plannedAbsence){
+      const recordedFullDayType=(segments||[]).map(segment=>dayControlSegmentKind(segment)).find(kind=>kind==="vacation"||kind==="za")||"";
+      const fullDayType=["urlaub","za"].includes(String(plannedAbsence?.type||""))
+        ? String(plannedAbsence.type)
+        : recordedFullDayType==="vacation"?"urlaub":recordedFullDayType;
+      const payrollSchedule=fullDayType?dayControlPayrollSchedule(worktimeModels,employee,date):null;
+      let scheduleWarning="";
+      if(fullDayType&&payrollSchedule){
+        const label=fullDayType==="za"?"ZA · Zeitausgleich":"Urlaub";
+        segments=[{type:"up",from:payrollSchedule.from,to:payrollSchedule.to,reason:label,absenceType:fullDayType,unproductiveCode:fullDayType==="za"?"930":"900"}];
+      }else if(fullDayType){
+        segments=[];
+        scheduleWarning=`${fullDayType==="za"?"ZA":"Urlaub"}: Im Zeitmodell fehlen Sollstunden für diesen Tag.`;
+      }else if(!segments.length&&plannedAbsence){
         const type=String(plannedAbsence.type||"");
         const row=plannedAbsence.row||{};
         const reason=String(row.jobName||row.reason||row.note||type||"Abwesenheit");
-        segments=[{type:"up",from:String(row.from||"07:00"),to:String(row.to||"14:48"),reason,absenceType:type,unproductiveCode:type==="urlaub"?"900":type==="krank"?"901":""}];
+        segments=[{type:"up",from:String(row.from||"07:00"),to:String(row.to||"14:48"),reason,absenceType:type,unproductiveCode:type==="krank"?"901":type==="sonderurlaub"?"911":""}];
       }
       const cleanSegments=segments.map(segment=>{
         const kind=dayControlSegmentKind(segment);
         return {from:String(segment.from||""),to:String(segment.to||""),kind,label:dayControlSegmentLabel(segment,kind),minutes:dayControlMinutes(segment)};
       }).filter(segment=>segment.from&&segment.to&&segment.minutes>0);
       const release=dayControlReleaseForEmployee(releases,employee,date);
-      const totals=cleanSegments.reduce((sum,segment)=>{sum[segment.kind]+=segment.minutes;return sum;},{work:0,absence:0,break:0});
+      const totals=cleanSegments.reduce((sum,segment)=>{const key=segment.kind==="vacation"?"absence":segment.kind;sum[key]+=segment.minutes;return sum;},{work:0,absence:0,za:0,break:0});
       const automatic=dayControlAutomaticTime(worktimeModels,employee,date,segments,plannedAbsence);
       return {
         employeeId,employeeName,
@@ -2563,11 +2614,11 @@ const open = taskId
         returned:Boolean(release?.returned===true),
         returnedReason:String(release?.returnedReason||""),
         releasedAt:release?.releasedAt||null,
-        segments:cleanSegments,automatic,totals
+        segments:cleanSegments,automatic,totals,scheduleWarning
       };
     }).filter(item=>item.employeeId).sort((a,b)=>a.employeeName.localeCompare(b.employeeName,"de"));
     const control=(controls||[]).find(row=>String(row.date)===date)||null;
-    const totals=items.reduce((sum,item)=>{sum.work+=item.totals.work;sum.absence+=item.totals.absence;sum.break+=item.totals.break;return sum;},{work:0,absence:0,break:0});
+    const totals=items.reduce((sum,item)=>{sum.work+=item.totals.work;sum.absence+=item.totals.absence;sum.za+=item.totals.za;sum.break+=item.totals.break;return sum;},{work:0,absence:0,za:0,break:0});
     return {date,items,totals,allReleased:items.length>0&&items.every(item=>item.released),control};
   }
 
@@ -2735,11 +2786,12 @@ const open = taskId
         return res.status(400).json({ ok:false, error:"Zeitraum prüfen." });
       }
 
-      const [allEvents, states, corrections, employees] = await Promise.all([
+      const [allEvents, states, corrections, employees, employeeWorkRules] = await Promise.all([
         readJson(TIME_EVENTS, []),
         readJson(STATES, {}),
         readJson(DAY_CORRECTIONS, []),
         typeof readEmployees === "function" ? readEmployees() : [],
+        readJson(EMPLOYEE_WORK_RULES, {}),
       ]);
 
       const dates = [];
@@ -2806,6 +2858,21 @@ const open = taskId
         ""
       ).trim();
 
+      const allowanceModelFor = employee => {
+        const employeeId=String(employee?.id||employee?.employeeId||"");
+        const direct=String(employee?.dailyAllowanceModel||"").trim().toLowerCase();
+        if(["maler","buak","site6","none"].includes(direct))return direct;
+        if(employeeWorkRules?.[employeeId]?.buak===true)return "buak";
+        return /\bmaler\b/i.test(String(employee?.role||""))?"maler":"none";
+      };
+      const allowanceFor = (model,siteMinutes) => {
+        const minutes=Math.max(0,Number(siteMinutes)||0);
+        if(model==="buak")return minutes>=540?"buak_gross":minutes>=180?"buak_klein":"";
+        if(model==="site6")return minutes>=360?"site6":"";
+        if(model==="maler")return minutes>180?"maler":"";
+        return "";
+      };
+
       const people = [...(employees || [])]
         .filter(employee => employee && (employee.id || employee.employeeId))
         .sort((a,b) => {
@@ -2820,6 +2887,7 @@ const open = taskId
       for (const employee of people) {
         const employeeId = String(employee.id || employee.employeeId);
         const employeeName = String(employee.name || employee.employeeName || employee.nickname || employeeId);
+        const dailyAllowanceModel=allowanceModelFor(employee);
         const rows = [];
 
         for (const date of dates) {
@@ -2843,10 +2911,16 @@ const open = taskId
             String(row.employeeId) === employeeId && String(row.date) === date
           );
           const override = parseOverride(correction?.note || "");
+          const automaticType=allowanceFor(dailyAllowanceModel,siteMinutes);
+          const taggeld=finalFlag(override.taggeld,Boolean(automaticType));
+          const allowanceType=taggeld?(automaticType||(dailyAllowanceModel==="buak"?(siteMinutes>=540?"buak_gross":"buak_klein"):"manual")):"";
 
           rows.push({
             date,
-            taggeld: finalFlag(override.taggeld, siteMinutes > 180),
+            taggeld,
+            allowanceType,
+            dietSmall:allowanceType==="buak_klein"?1:0,
+            dietLarge:allowanceType==="buak_gross"?1:0,
             flMinutes,
             flDay: finalFlag(override.fl, flMinutes > 0),
             chMinutes,
@@ -2858,6 +2932,7 @@ const open = taskId
           employeeId,
           employeeName,
           personalNumber: personalNo(employee),
+          dailyAllowanceModel,
           rows,
         });
       }
@@ -2866,6 +2941,36 @@ const open = taskId
     } catch (error) {
       res.status(500).json({ ok:false, error:String(error?.message || error) });
     }
+  });
+
+  app.get("/kristine/api/buak-vacation-report", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const from=String(req.query?.from||"").slice(0,10),to=String(req.query?.to||"").slice(0,10);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)return res.status(400).json({ok:false,error:"Zeitraum prüfen."});
+      const [employees,assignments,employeeWorkRules,worktimeModels]=await Promise.all([
+        typeof readEmployees==="function"?readEmployees():[],readJson(ASSIGNMENTS,[]),readJson(EMPLOYEE_WORK_RULES,{}),readJson(WORKTIME_MODELS,[])
+      ]);
+      const isBuak=employee=>{
+        const id=String(employee?.id||employee?.employeeId||"");
+        return String(employee?.dailyAllowanceModel||"").toLowerCase()==="buak"||employeeWorkRules?.[id]?.buak===true;
+      };
+      const personalNo=employee=>String(employee?.finkzeitPersonnelNumber||employee?.finkzeitPersonalNumber||employee?.personalnummerFinkzeit||employee?.personnelNumber||employee?.personalNumber||employee?.employeeNumber||employee?.number||"").trim();
+      const rows=[];
+      const seen=new Set();
+      for(const assignment of assignments||[]){
+        const date=String(assignment?.date||assignment?.day||"").slice(0,10);
+        if(date<from||date>to||assignmentAbsenceType(assignment)!=="urlaub")continue;
+        const employee=findEmployeeMaster(employees,assignment);
+        if(!employee||!isBuak(employee))continue;
+        const employeeId=String(employee.id||employee.employeeId||"");
+        const key=`${employeeId}:${date}`;if(seen.has(key))continue;seen.add(key);
+        const schedule=dayControlPayrollSchedule(worktimeModels,employee,date);
+        rows.push({employeeId,employeeName:employeeEverydayName(employee)||employeeId,personalNumber:personalNo(employee),date,minutes:Number(schedule?.minutes||0)});
+      }
+      rows.sort((a,b)=>a.employeeName.localeCompare(b.employeeName,"de")||a.date.localeCompare(b.date));
+      res.json({ok:true,from,to,rows});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
 
   app.put("/kristine/api/segments/:employeeId/:date", async (req, res) => {

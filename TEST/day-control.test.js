@@ -19,20 +19,23 @@ Module._load = originalLoad;
   let startupReady = Promise.resolve();
   const dataRoot = path.join(root, "_kristine");
   const date = "2026-09-15";
+  const nextDate = "2026-09-16";
   const employees = [
-    { id:"1", name:"Anna Arbeit" },
-    { id:"2", name:"Uwe Urlaub" },
+    { id:"1", name:"Anna Arbeit", worktimeModelId:"krista-standard" },
+    { id:"2", name:"Uwe Urlaub", worktimeModelId:"krista-standard" },
     { id:"3", name:"Bernd Schule" },
     { id:"4", name:"Judith Krista", worktimeModelId:"krista-standard" },
     { id:"5", name:"Alexander Krista", worktimeModelId:"office-alex" },
     { id:"6", name:"Vor Eintritt", employmentStart:"2026-09-16" },
     { id:"7", name:"Bereits ausgetreten", employmentEnd:"2026-09-14" },
     { id:"8", name:"Deaktiviert", active:false },
+    { id:"9", name:"Zara Zeitausgleich", worktimeModelId:"krista-standard" },
   ];
   try {
     await fsp.mkdir(dataRoot);
     await fsp.mkdir(path.join(root,"_system"));
     await fsp.writeFile(path.join(root,"_system","worktime-models.json"),JSON.stringify([
+      {id:"krista-standard",name:"Produktive MA",blocks:{finkTarget:{rows:[{days:[1,2,3,4,5],from:"07:00",to:"14:48"}]},finkFixed:{enabled:false,rows:[]}}},
       {id:"office-judith",name:"Judith",blocks:{finkFixed:{enabled:true,rows:[{days:[2],from:"07:00",to:"13:48",activityCode:"022",activityLabel:"Baustelle < 120 km"}]}}},
       {id:"office-alex",name:"Alex",blocks:{finkFixed:{enabled:true,rows:[{days:[2],from:"07:00",to:"13:48",activityCode:"022",activityLabel:"Baustelle < 120 km"}]}}}
     ]));
@@ -41,13 +44,22 @@ Module._load = originalLoad;
       {employeeId:"1",employeeName:"Anna Arbeit",date,type:"up",at:"12:00",reason:"Werkstatt",unproductiveCode:"913"},
       {employeeId:"1",employeeName:"Anna Arbeit",date,type:"ende",at:"14:00"},
       {employeeId:"2",employeeName:"Uwe Urlaub",date,type:"up",at:"07:00",reason:"Urlaub",unproductiveCode:"900"},
-      {employeeId:"2",employeeName:"Uwe Urlaub",date,type:"ende",at:"14:48"},
+      {employeeId:"2",employeeName:"Uwe Urlaub",date,type:"ende",at:"17:00"},
       {employeeId:"3",employeeName:"Bernd Schule",date,type:"up",at:"07:00",reason:"Berufsschule",unproductiveCode:"903"},
       {employeeId:"3",employeeName:"Bernd Schule",date,type:"ende",at:"14:48"},
       {employeeId:"5",employeeName:"Alexander Krista",date,type:"start",at:"07:00",jobId:"25018",jobName:"Baustelle"},
       {employeeId:"5",employeeName:"Alexander Krista",date,type:"mittag",at:"12:00"},
       {employeeId:"5",employeeName:"Alexander Krista",date,type:"weiter",at:"12:29",jobId:"25018",jobName:"Baustelle"},
       {employeeId:"5",employeeName:"Alexander Krista",date,type:"ende",at:"13:48"},
+      {employeeId:"9",employeeName:"Zara Zeitausgleich",date,type:"up",at:"07:00",reason:"Zeitausgleich",unproductiveCode:"930"},
+      {employeeId:"9",employeeName:"Zara Zeitausgleich",date,type:"ende",at:"17:00"},
+      {employeeId:"1",employeeName:"Anna Arbeit",date:nextDate,type:"start",at:"07:00",jobId:"25018",jobName:"Baustelle"},
+      {employeeId:"1",employeeName:"Anna Arbeit",date:nextDate,type:"ende",at:"16:30"},
+    ]));
+    await fsp.writeFile(path.join(dataRoot,"employee-work-rules.json"),JSON.stringify({"1":{activityMode:"productive",buak:true}}));
+    await fsp.writeFile(path.join(dataRoot,"assignments.json"),JSON.stringify([
+      {id:"vac-1",date:"2026-10-01",employeeId:"1",employeeName:"Anna Arbeit",cardType:"urlaub",jobName:"Urlaub"},
+      {id:"vac-2",date:"2026-10-02",employeeId:"2",employeeName:"Uwe Urlaub",cardType:"urlaub",jobName:"Urlaub"}
     ]));
     await fsp.writeFile(path.join(dataRoot, "day-releases.json"), JSON.stringify(employees.map(employee=>({
       id:`release_${employee.id}_${date}`,employeeId:employee.id,employeeName:employee.name,date,released:true,reviewer:"Bettina",releasedAt:"2026-09-15T15:00:00Z"
@@ -55,20 +67,26 @@ Module._load = originalLoad;
 
     const routes = new Map(), app = {};
     for (const method of ["get","put","post","patch","delete"]) app[method] = (url, handler) => routes.set(`${method} ${url}`, handler);
-    ({ startupReady } = registerKristine(app, {dataDir:root,publicDir:root,requireAdmin:()=>true,readEmployees:async()=>employees}));
-    async function call(method, url, params={}, body={}) {
+    ({ startupReady } = registerKristine(app, {dataDir:root,publicDir:root,requireAdmin:()=>true,readEmployees:async()=>employees,readJobMeta:async()=>({address:"Vaduz, Liechtenstein"})}));
+    async function call(method, url, params={}, body={}, query={}) {
       const res={statusCode:200,status(value){this.statusCode=value;return this;},json(value){this.body=value;return this;}};
-      await routes.get(`${method} ${url}`)({params,body,query:{}},res);
+      await routes.get(`${method} ${url}`)({params,body,query},res);
       return res;
     }
 
     let response=await call("get","/kristine/api/day-control/:date",{date});
     assert.equal(response.statusCode,200);
     assert.equal(response.body.allReleased,true);
-    assert.equal(response.body.items.length,5);
+    assert.equal(response.body.items.length,6);
     assert.equal(response.body.items.some(item=>["6","7","8"].includes(item.employeeId)),false,"Personalregeln begrenzen die Tageskontrolle");
     assert.equal(response.body.items.find(item=>item.employeeId==="1").totals.work,420,"Werkstatt zählt im Überblick als Arbeit");
-    assert.equal(response.body.items.find(item=>item.employeeId==="2").totals.absence,468,"Urlaub zählt als Abwesenheit");
+    assert.equal(response.body.items.find(item=>item.employeeId==="2").totals.absence,468,"Urlaub folgt trotz längerem Rohzeitraum den 7,8 Sollstunden des Zeitmodells");
+    assert.equal(response.body.items.find(item=>item.employeeId==="2").segments[0].kind,"vacation","Urlaub erhält die Kartenfarbe für Urlaub");
+    const za=response.body.items.find(item=>item.employeeId==="9");
+    assert.equal(za.totals.za,468,"ZA folgt trotz längerem Rohzeitraum den 7,8 Sollstunden des Zeitmodells");
+    assert.equal(za.totals.work,0,"ZA darf nicht als Arbeitszeit erscheinen");
+    assert.equal(za.segments[0].kind,"za","ZA erhält eine eigene Kartenfarbe");
+    assert.equal(response.body.totals.za,468,"ZA wird in der Tageszusammenfassung separat ausgewiesen");
     assert.equal(response.body.items.find(item=>item.employeeId==="3").totals.work,468,"Berufsschule zählt im Überblick als Arbeit");
     const judith=response.body.items.find(item=>item.employeeId==="4");
     assert.equal(judith.totals.work,0,"Automatische Zeit darf noch nicht als Ist gerechnet werden");
@@ -83,6 +101,20 @@ Module._load = originalLoad;
     response=await call("put","/kristine/api/day-control/:date",{date},{reviewer:"Bettina / Büro"});
     assert.equal(response.statusCode,200);
     assert.equal(response.body.control.confirmed,true);
+
+    response=await call("get","/kristine/api/diet-report",{}, {}, {from:date,to:nextDate});
+    const annaDiet=response.body.employees.find(employee=>employee.employeeId==="1");
+    assert.equal(annaDiet.dailyAllowanceModel,"buak","BUAK-Regel wird in den Diätenbericht übernommen");
+    assert.equal(annaDiet.rows.find(row=>row.date===date).dietSmall,1,"BUAK klein wird separat gezählt");
+    assert.equal(annaDiet.rows.find(row=>row.date===nextDate).dietLarge,1,"BUAK groß wird separat gezählt");
+    assert.equal(annaDiet.rows.reduce((sum,row)=>sum+row.taggeld,0),2,"Gesamtdiäten bleiben zusätzlich verfügbar");
+    assert(annaDiet.rows.every(row=>row.flMinutes>0),"FL wird nur für tatsächlich betroffene Baustellen ausgewiesen");
+
+    response=await call("get","/kristine/api/buak-vacation-report",{}, {}, {from:"2026-10-01",to:"2026-10-31"});
+    assert.equal(response.statusCode,200);
+    assert.equal(response.body.rows.length,1,"BUAK-Urlaubsplan enthält keine Nicht-BUAK-Mitarbeiter");
+    assert.equal(response.body.rows[0].employeeId,"1");
+    assert.equal(response.body.rows[0].minutes,468,"Geplanter BUAK-Urlaub folgt den 7,8 Modellstunden");
 
     response=await call("post","/kristine/api/day-control/:date/return",{date},{employeeId:"1",reason:"Endzeit prüfen",returnedBy:"Bettina"});
     assert.equal(response.statusCode,200);

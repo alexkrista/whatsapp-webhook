@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>KRISTOOL – Tagesprüfung</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
-  <link rel="stylesheet" href="kristool.css">
+  <link rel="stylesheet" href="kristool.css?v=0023.54-za-model">
   <link rel="stylesheet" href="kristool-diet.css">
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.52"></div>
+  <div id="kristaTopbar" data-krista-active="kristool" data-krista-build="0023.54"></div>
 
   <main class="tool-page">
     <section class="tool-intro">
@@ -51,6 +51,7 @@
         <button class="btn primary" id="openKriszeitPdf" type="button">▤ PDF-Auswahl</button>
         <button class="btn primary" id="openFinkzeitExport" type="button">⬇ Finkzeit CSV</button>
         <button class="btn primary" id="openDietReport" type="button">▤ Diäten PDF</button>
+        <button class="btn secondary" id="openBuakVacationReport" type="button">▤ BUAK Urlaub</button>
         <button class="btn secondary" id="openEmployeeLogic" type="button">👷 Arbeitslogik</button>
       </div>
     </section>
@@ -256,7 +257,7 @@
   </div>
   <div id="toast" class="toast"></div>
   <script src="/public/ui/topbar.js"></script>
-  <script src="kristool.js?v=0023.53-day-control-2"></script>
+  <script src="kristool.js?v=0023.54-za-model"></script>
 
   <div class="logic-modal day-control-modal" id="dayControlModal" hidden>
     <div class="logic-dialog day-control-dialog" role="dialog" aria-modal="true" aria-labelledby="dayControlTitle">
@@ -265,7 +266,7 @@
         <button class="logic-close" id="closeDayControl" type="button">×</button>
       </div>
       <div id="dayControlSummary" class="day-control-summary"></div>
-      <div class="day-control-legend"><span><i class="work"></i>Arbeit / anwesend</span><span><i class="absence"></i>Urlaub, Krank, Sonderurlaub</span><span><i class="break"></i>Pause</span><span><i class="automatic"></i>Zeitmodell · nur Anzeige</span></div>
+      <div class="day-control-legend"><span><i class="work"></i>Arbeit / anwesend</span><span><i class="vacation"></i>Urlaub</span><span><i class="absence"></i>Krank / Sonderurlaub</span><span><i class="za"></i>ZA</span><span><i class="break"></i>Pause</span><span><i class="automatic"></i>Zeitmodell · nur Anzeige</span></div>
       <div id="dayControlList" class="day-control-list"><div class="fink-preview">Tagesübersicht wird geladen …</div></div>
       <div class="day-control-footer">
         <label><span>Kontrolliert durch</span><input id="dayControlReviewer" value="Bettina / Büro" maxlength="120"></label>
@@ -352,6 +353,26 @@
       <div class="logic-actions">
         <span id="dietReportStatus">Standard: nur Zusammenfassung.</span>
         <button class="btn primary" id="createDietReport" type="button">PDF öffnen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="logic-modal" id="buakVacationModal" hidden>
+    <div class="logic-dialog diet-dialog" role="dialog" aria-modal="true" aria-labelledby="buakVacationTitle">
+      <div class="logic-head">
+        <div><p class="eyebrow">VORAUSSCHAU</p><h2 id="buakVacationTitle">BUAK-Urlaubsplan</h2></div>
+        <button class="logic-close" id="closeBuakVacationReport" type="button">×</button>
+      </div>
+      <div class="diet-report-options">
+        <p>Geplante Urlaubstage der BUAK-Mitarbeiter im frei gewählten Zeitraum.</p>
+        <div class="diet-range-grid">
+          <label>Von<input type="date" id="buakVacationFrom"></label>
+          <label>Bis<input type="date" id="buakVacationTo"></label>
+        </div>
+      </div>
+      <div class="logic-actions">
+        <span id="buakVacationStatus">Nur bereits eingeplante Urlaubstage werden übernommen.</span>
+        <button class="btn primary" id="createBuakVacationReport" type="button">Liste als PDF öffnen</button>
       </div>
     </div>
   </div>

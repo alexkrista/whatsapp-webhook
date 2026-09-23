@@ -37,6 +37,7 @@ function esc(value){ return String(value ?? "").replace(/[&<>"']/g,ch=>({"&":"&a
 function initials(name){ return String(name||"?").split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("").toUpperCase()||"?"; }
 function minutes(hm){ const m=String(hm||"").match(/^(\d{1,2}):(\d{2})$/); return m?Number(m[1])*60+Number(m[2]):null; }
 function durationLabel(total){ total=Math.max(0,Math.round(total||0)); return `${Math.floor(total/60)}:${String(total%60).padStart(2,"0")} h`; }
+function decimalHoursLabel(total){return `${(Math.max(0,Number(total)||0)/60).toLocaleString("de-AT",{minimumFractionDigits:1,maximumFractionDigits:1})} h`}
 function secondsLabel(seconds){ return durationLabel(Math.round(Number(seconds||0)/60)); }
 function deDate(iso){
   if(!iso)return "";
@@ -420,56 +421,65 @@ function dietPrintReport(data,{mode="summary",popup=null}={}){
   const periodLabel=`${shortDate(data.from)} – ${shortDate(data.to)}`;
   const totalsFor=employee=>(employee.rows||[]).reduce((sum,row)=>({
     taggeld:sum.taggeld+Number(row.taggeld||0),
+    dietSmall:sum.dietSmall+Number(row.dietSmall||0),
+    dietLarge:sum.dietLarge+Number(row.dietLarge||0),
     flMinutes:sum.flMinutes+Number(row.flMinutes||0),
     flDay:sum.flDay+Number(row.flDay||0),
     chMinutes:sum.chMinutes+Number(row.chMinutes||0),
     chDay:sum.chDay+Number(row.chDay||0),
-  }),{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  }),{taggeld:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
 
-  const employees=[...(data.employees||[])].sort((a,b)=>{
+  const employees=[...(data.employees||[])].filter(employee=>{
+    const total=totalsFor(employee);
+    return total.taggeld>0||total.flMinutes>0||total.flDay>0||total.chMinutes>0||total.chDay>0;
+  }).sort((a,b)=>{
     const na=Number(String(a.personalNumber||"").replace(/\D/g,""))||999999;
     const nb=Number(String(b.personalNumber||"").replace(/\D/g,""))||999999;
     return na-nb||String(a.employeeName||"").localeCompare(String(b.employeeName||""),"de");
   });
+  const showFl=employees.some(employee=>{const total=totalsFor(employee);return total.flMinutes>0||total.flDay>0});
+  const showCh=employees.some(employee=>{const total=totalsFor(employee);return total.chMinutes>0||total.chDay>0});
 
   const summaryRows=employees.map(employee=>{
     const total=totalsFor(employee);
+    const flCells=showFl?`<td>${total.flMinutes?dietMinutesLabel(total.flMinutes):""}</td><td>${total.flDay||""}</td>`:"";
+    const chCells=showCh?`<td>${total.chMinutes?dietMinutesLabel(total.chMinutes):""}</td><td>${total.chDay||""}</td>`:"";
     return `<tr>
       <td>${escape(employee.personalNumber||"–")}</td>
       <td>${escape(employee.employeeName)}<br><small>${escape(({maler:"Maler · Taggeld",buak:"BUAK",site6:"Baustelle ≥ 6 Std.",none:"Kein Taggeld"})[employee.dailyAllowanceModel]||"")}</small></td>
-      <td>${total.taggeld||"–"}</td>
-      <td>${dietMinutesLabel(total.flMinutes)}</td>
-      <td>${total.flDay||"–"}</td>
-      <td>${dietMinutesLabel(total.chMinutes)}</td>
-      <td>${total.chDay||"–"}</td>
+      <td>${total.dietSmall||""}</td><td>${total.dietLarge||""}</td><td><strong>${total.taggeld||"–"}</strong></td>
+      ${flCells}${chCells}
     </tr>`;
-  }).join("");
+  }).join("")||'<tr><td colspan="9">Im gewählten Zeitraum gibt es keine Diäten oder FL/CH-Zeiten.</td></tr>';
 
   const overall=employees.reduce((sum,e)=>{
     const t=totalsFor(e);
-    sum.taggeld+=t.taggeld;sum.flMinutes+=t.flMinutes;sum.flDay+=t.flDay;sum.chMinutes+=t.chMinutes;sum.chDay+=t.chDay;
+    sum.taggeld+=t.taggeld;sum.dietSmall+=t.dietSmall;sum.dietLarge+=t.dietLarge;sum.flMinutes+=t.flMinutes;sum.flDay+=t.flDay;sum.chMinutes+=t.chMinutes;sum.chDay+=t.chDay;
     return sum;
-  },{taggeld:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  },{taggeld:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  const countryHead=`${showFl?"<th>FL Std.</th><th>FL Tage</th>":""}${showCh?"<th>CH Std.</th><th>CH Tage</th>":""}`;
+  const countryFoot=`${showFl?`<th>${dietMinutesLabel(overall.flMinutes)}</th><th>${overall.flDay||"–"}</th>`:""}${showCh?`<th>${dietMinutesLabel(overall.chMinutes)}</th><th>${overall.chDay||"–"}</th>`:""}`;
 
   const summaryPage=`<section class="diet-page summary-page">
     <header><div><small>FARBEN KRISTA · DIÄTEN & ENTSENDUNG</small><h1>Zusammenfassung</h1></div><strong>${escape(periodLabel)}</strong></header>
     <table class="summary-table">
-      <thead><tr><th>Pers.Nr.</th><th>Name</th><th>Taggeld</th><th>FL Std.</th><th>FL Tage</th><th>CH Std.</th><th>CH Tage</th></tr></thead>
+      <thead><tr><th>Pers.Nr.</th><th>Name</th><th>Diät klein</th><th>Diät groß</th><th>Gesamt</th>${countryHead}</tr></thead>
       <tbody>${summaryRows}</tbody>
-      <tfoot><tr><th></th><th>GESAMT</th><th>${overall.taggeld||"–"}</th><th>${dietMinutesLabel(overall.flMinutes)}</th><th>${overall.flDay||"–"}</th><th>${dietMinutesLabel(overall.chMinutes)}</th><th>${overall.chDay||"–"}</th></tr></tfoot>
+      <tfoot><tr><th></th><th>GESAMT</th><th>${overall.dietSmall||"–"}</th><th>${overall.dietLarge||"–"}</th><th>${overall.taggeld||"–"}</th>${countryFoot}</tr></tfoot>
     </table>
   </section>`;
 
   const detailPages=mode==="detail"?employees.map(employee=>{
     const total=totalsFor(employee);
+    const employeeFl=total.flMinutes>0||total.flDay>0,employeeCh=total.chMinutes>0||total.chDay>0;
     const body=(employee.rows||[]).map(row=>`<tr>
-      <td>${escape(dateLabel(row.date))}</td><td>${row.taggeld||"–"}</td><td>${dietMinutesLabel(row.flMinutes)}</td><td>${row.flDay||"–"}</td><td>${dietMinutesLabel(row.chMinutes)}</td><td>${row.chDay||"–"}</td>
+      <td>${escape(dateLabel(row.date))}</td><td>${row.dietSmall||""}</td><td>${row.dietLarge||""}</td><td>${row.taggeld||""}</td>${employeeFl?`<td>${row.flMinutes?dietMinutesLabel(row.flMinutes):""}</td><td>${row.flDay||""}</td>`:""}${employeeCh?`<td>${row.chMinutes?dietMinutesLabel(row.chMinutes):""}</td><td>${row.chDay||""}</td>`:""}
     </tr>`).join("");
     return `<section class="diet-page">
       <header><div><small>FARBEN KRISTA · DIÄTENNACHWEIS</small><h1>${escape(employee.personalNumber?employee.personalNumber+" · ":"")}${escape(employee.employeeName)}</h1></div><strong>${escape(periodLabel)}</strong></header>
-      <table><thead><tr><th>Datum</th><th>Taggeld</th><th>FL Std.</th><th>FL Tag</th><th>CH Std.</th><th>CH Tag</th></tr></thead>
+      <table><thead><tr><th>Datum</th><th>Klein</th><th>Groß</th><th>Gesamt</th>${employeeFl?"<th>FL Std.</th><th>FL Tag</th>":""}${employeeCh?"<th>CH Std.</th><th>CH Tag</th>":""}</tr></thead>
       <tbody>${body}</tbody>
-      <tfoot><tr><th>SUMME</th><th>${total.taggeld}</th><th>${dietMinutesLabel(total.flMinutes)}</th><th>${total.flDay}</th><th>${dietMinutesLabel(total.chMinutes)}</th><th>${total.chDay}</th></tr></tfoot>
+      <tfoot><tr><th>SUMME</th><th>${total.dietSmall||"–"}</th><th>${total.dietLarge||"–"}</th><th>${total.taggeld||"–"}</th>${employeeFl?`<th>${dietMinutesLabel(total.flMinutes)}</th><th>${total.flDay}</th>`:""}${employeeCh?`<th>${dietMinutesLabel(total.chMinutes)}</th><th>${total.chDay}</th>`:""}</tr></tfoot>
       </table>
     </section>`;
   }).join(""):"";
@@ -528,6 +538,30 @@ async function createDietReport(){
     try{popup.close()}catch{}
     toast(`Diätenbericht: ${error.message}`,true);
   }finally{btn.disabled=false;btn.textContent="PDF öffnen"}
+}
+
+function openBuakVacationReport(){
+  const today=new Date(`${state.activeDate||new Date().toISOString().slice(0,10)}T12:00:00`);
+  const end=new Date(today);end.setMonth(end.getMonth()+3);
+  const localIso=value=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;
+  $("buakVacationFrom").value=localIso(today);$("buakVacationTo").value=localIso(end);$("buakVacationModal").hidden=false;
+}
+function closeBuakVacationReport(){$("buakVacationModal").hidden=true}
+async function createBuakVacationReport(){
+  const from=$("buakVacationFrom").value,to=$("buakVacationTo").value;
+  if(!from||!to||from>to)return toast("Zeitraum prüfen.",true);
+  const popup=window.open("","_blank");if(!popup)return toast("Popup blockiert – bitte Popups für KRISTOOL erlauben.",true);
+  popup.document.write('<!doctype html><html><body style="font-family:Arial;padding:30px">BUAK-Urlaubsplan wird erstellt …</body></html>');popup.document.close();
+  const button=$("createBuakVacationReport");button.disabled=true;button.textContent="Liste wird erstellt …";
+  try{
+    const data=await request(`/kristine/api/buak-vacation-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+    const deDate=value=>new Intl.DateTimeFormat("de-AT",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(`${value}T12:00:00`));
+    const grouped=new Map();for(const row of data.rows||[]){if(!grouped.has(row.employeeId))grouped.set(row.employeeId,{...row,dates:[],minutes:0});const group=grouped.get(row.employeeId);group.dates.push(row.date);group.minutes+=Number(row.minutes||0)}
+    const rows=[...grouped.values()].map(group=>`<tr><td>${escape(group.personalNumber||"–")}</td><td><strong>${escape(group.employeeName)}</strong></td><td>${group.dates.map(date=>escape(deDate(date))).join("<br>")}</td><td>${group.dates.length}</td><td>${decimalHoursLabel(group.minutes)}</td></tr>`).join("")||'<tr><td colspan="5">Im gewählten Zeitraum ist kein BUAK-Urlaub eingeplant.</td></tr>';
+    const totalDays=[...grouped.values()].reduce((sum,row)=>sum+row.dates.length,0),totalMinutes=[...grouped.values()].reduce((sum,row)=>sum+row.minutes,0);
+    popup.document.open();popup.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8"><title>BUAK Urlaub ${escape(from)} bis ${escape(to)}</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial;color:#202620;margin:0}header{display:flex;justify-content:space-between;align-items:end;border-bottom:3px solid #1f5134;padding-bottom:8px;margin-bottom:14px}h1{color:#1f5134;margin:3px 0 0;font-size:22px}header small{letter-spacing:.12em;color:#647168;font-weight:700}table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:8px;border-bottom:1px solid #dce2dd;text-align:left;vertical-align:top}th{background:#eaf1ec;color:#234b32}th:nth-child(4),th:nth-child(5),td:nth-child(4),td:nth-child(5){text-align:right}tfoot th{border-top:2px solid #789180;background:#f1f5f2}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><header><div><small>FARBEN KRISTA · VORAUSSCHAU</small><h1>BUAK-Urlaubsplan</h1></div><strong>${escape(shortDate(from))} – ${escape(shortDate(to))}</strong></header><table><thead><tr><th>Pers.Nr.</th><th>Mitarbeiter</th><th>Geplante Urlaubstage</th><th>Tage</th><th>Modellstunden</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th></th><th>GESAMT</th><th></th><th>${totalDays||"–"}</th><th>${totalMinutes?decimalHoursLabel(totalMinutes):"–"}</th></tr></tfoot></table></body></html>`);popup.document.close();popup.focus();setTimeout(()=>popup.print(),250);closeBuakVacationReport();
+  }catch(error){try{popup.close()}catch{}toast(`BUAK-Urlaubsplan: ${error.message}`,true)}finally{button.disabled=false;button.textContent="Liste als PDF öffnen"}
 }
 
 // 0023.52 · Mitarbeiter-Arbeitslogik
@@ -854,7 +888,7 @@ function dayControlTrack(segments,bounds){
 }
 function renderDayControlOverview(payload){
   state.dayControl=payload;
-  const items=payload.items||[],totals=payload.totals||{work:0,absence:0,break:0};
+  const items=payload.items||[],totals=payload.totals||{work:0,absence:0,za:0,break:0};
   const open=items.filter(item=>!item.released).length,returned=items.filter(item=>item.returned).length;
   const control=payload.control||null,confirmed=control?.confirmed===true;
   const bounds=dayControlBounds(items);
@@ -864,6 +898,7 @@ function renderDayControlOverview(payload){
     <div class="day-control-metric"><span>Mitarbeiter</span><strong>${items.length}</strong></div>
     <div class="day-control-metric"><span>Arbeit / anwesend · Ist</span><strong>${durationLabel(totals.work)}</strong></div>
     <div class="day-control-metric"><span>Abwesenheit</span><strong>${durationLabel(totals.absence)}</strong></div>
+    <div class="day-control-metric za"><span>ZA · Zeitausgleich</span><strong>${decimalHoursLabel(totals.za)}</strong></div>
     <div class="day-control-metric"><span>Noch offen</span><strong>${open}</strong></div>`;
   $("dayControlList").innerHTML=items.length?items.map(item=>{
     const stateClass=item.returned?"returned":item.released?"done":"open";
@@ -874,10 +909,12 @@ function renderDayControlOverview(payload){
     const automatic=item.automatic||null;
     const visualSegments=[...(automatic?[{...automatic,kind:"automatic",label:`Zeitmodell · ${automatic.activityLabel||"automatisch"}`}]:[]),...(item.segments||[])];
     const automaticLine=automatic?`<div class="day-control-automatic"><span>Zeitmodell · nur Anzeige</span><strong>${esc(automatic.from)}–${esc(automatic.to)}</strong><small>${esc(automatic.activityLabel||automatic.modelName||"Automatische Zeit")} · Pause ${durationLabel(automatic.pauseMinutes||15)} fix · ${automatic.lunchMinutes>0?`Mittag ${durationLabel(automatic.lunchMinutes)} lt. Stempelung`:"Mittag noch nicht gestempelt"} · noch nicht als Ist gerechnet</small></div>`:"";
-    return `<article class="day-control-person ${stateClass}">
+    const zaTotal=item.totals.za>0?`<span class="day-control-total-za">ZA <strong>${decimalHoursLabel(item.totals.za)}</strong></span>`:"";
+    const scheduleWarning=item.scheduleWarning?`<div class="day-control-schedule-warning">${esc(item.scheduleWarning)}</div>`:"";
+    return `<article class="day-control-person ${stateClass} ${item.totals.za>0?"has-za":""}">
       <div class="day-control-person-head"><div><h3>${esc(item.employeeName)}</h3><small>${item.returnedReason?esc(item.returnedReason):"Gespeicherte Tageszeiten ohne Baustellenaufteilung"}</small></div><div class="day-control-person-actions"><span class="day-control-badge ${stateClass}">${esc(badge)}</span>${action}</div></div>
       <div class="day-control-track-wrap"><div class="day-control-axis"><span>${esc(hmFromMinutes(bounds.from))}</span><span>${esc(hmFromMinutes(Math.round((bounds.from+bounds.to)/2)))}</span><span>${esc(hmFromMinutes(bounds.to))}</span></div><div class="day-control-track">${dayControlTrack(visualSegments,bounds)}</div></div>
-      <div class="day-control-totals"><span>Ist Arbeit <strong>${durationLabel(item.totals.work)}</strong></span><span>Urlaub/Krank/Sonderurlaub <strong>${durationLabel(item.totals.absence)}</strong></span><span>Ist Pause <strong>${durationLabel(item.totals.break)}</strong></span></div>${automaticLine}
+      <div class="day-control-totals"><span>Ist Arbeit <strong>${durationLabel(item.totals.work)}</strong></span><span>Urlaub/Krank/Sonderurlaub <strong>${durationLabel(item.totals.absence)}</strong></span>${zaTotal}<span>Ist Pause <strong>${durationLabel(item.totals.break)}</strong></span></div>${scheduleWarning}${automaticLine}
     </article>`;
   }).join(""):'<div class="fink-preview">Für diesen Tag wurden keine Mitarbeiter gefunden.</div>';
   const status=$("dayControlStatus"),button=$("confirmDayControl");
@@ -2006,11 +2043,12 @@ document.querySelectorAll("[data-diet-preset]").forEach(button=>button.addEventL
 
 // 0023.52: robuste Event-Delegation für dynamische/neu gerenderte Kopfbuttons.
 document.addEventListener("click",(event)=>{
-  const button=event.target.closest?.("#openEmployeeLogic,#openDietReport");
+  const button=event.target.closest?.("#openEmployeeLogic,#openDietReport,#openBuakVacationReport");
   if(!button)return;
   event.preventDefault();
   if(button.id==="openEmployeeLogic")openEmployeeLogic();
   if(button.id==="openDietReport")openDietReport();
+  if(button.id==="openBuakVacationReport")openBuakVacationReport();
 });
 
 
@@ -2019,7 +2057,8 @@ document.addEventListener("click",event=>{
   const target=event.target;
   const button=target?.closest?.(
     "#openEmployeeLogic,#closeEmployeeLogic,#saveEmployeeLogic,"+
-    "#openDietReport,#closeDietReport,#createDietReport"
+    "#openDietReport,#closeDietReport,#createDietReport,"+
+    "#openBuakVacationReport,#closeBuakVacationReport,#createBuakVacationReport"
   );
 
   if(button){
@@ -2030,14 +2069,19 @@ document.addEventListener("click",event=>{
     if(button.id==="openDietReport") return openDietReport();
     if(button.id==="closeDietReport") return closeDietReport();
     if(button.id==="createDietReport") return createDietReport();
+    if(button.id==="openBuakVacationReport") return openBuakVacationReport();
+    if(button.id==="closeBuakVacationReport") return closeBuakVacationReport();
+    if(button.id==="createBuakVacationReport") return createBuakVacationReport();
   }
 
   if(target?.id==="employeeLogicModal")closeEmployeeLogic();
   if(target?.id==="dietReportModal")closeDietReport();
+  if(target?.id==="buakVacationModal")closeBuakVacationReport();
 });
 
 document.addEventListener("keydown",event=>{
   if(event.key!=="Escape")return;
   if($("employeeLogicModal")&&!$("employeeLogicModal").hidden)closeEmployeeLogic();
   if($("dietReportModal")&&!$("dietReportModal").hidden)closeDietReport();
+  if($("buakVacationModal")&&!$("buakVacationModal").hidden)closeBuakVacationReport();
 });
