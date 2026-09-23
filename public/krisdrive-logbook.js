@@ -110,7 +110,7 @@
     for (const [key, input] of [["startLocation", "start"], ["endLocation", "end"], ["purpose", "purpose"]]) {
       // A private row is redacted by the server. Leaving a redacted field blank
       // when switching back restores the stored original instead of erasing it.
-      if (row.category !== "private" || $(input).value) body[key] = $(input).value;
+      if ($(input).value !== (row[key] || "") && (row.category !== "private" || $(input).value)) body[key] = $(input).value;
     }
     $("save").disabled = true; $("cancel").disabled = true; error("", "edit-error");
     try {

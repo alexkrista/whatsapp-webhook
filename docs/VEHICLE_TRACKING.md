@@ -1,6 +1,6 @@
 # KRISTINE Fahrzeugtracking – FMC250 / Traccar / NFC
 
-## KRISDRIVE 1.1 – Fahrtenbuch
+## KRISDRIVE 1.2 – Fahrtenbuch
 
 Beim Fahrzeug öffnet **Fahrtenbuch öffnen** die Fahrtenliste. Zeitraum wählen
 (bis zu 93 Tage), Fahrer und Fahrtart ergänzen, bei Geschäftsfahrten Start, Ziel
@@ -9,6 +9,23 @@ Ergänzungen gespeichert werden. Privatfahrten zeigen/exportieren keine Ziele,
 Koordinaten oder Zwecke. PDF und CSV enthalten den angezeigten Zeitraum und
 die Summen nach Fahrtart. Kilometerstände können bei Bedarf paarweise korrigiert
 werden; die ursprünglich übernommenen Werte bleiben gespeichert.
+
+Start und Ziel werden auch in bereits gespeicherten Fahrten ergänzt:
+
+- Eine Straßenadresse am Ziel einer Fahrt ergänzt den Start der nächsten
+  Fahrt und umgekehrt. Das gilt sowohl für leere Felder als auch für reine
+  Koordinaten; manuell eingetragene Ortsnamen bleiben erhalten.
+- Bereits bekannte Adressen desselben Fahrzeugs werden bei erneuten Besuchen
+  desselben Standorts verwendet (nächster bekannter GPS-Punkt bis 40 m).
+  Die Zuordnung gilt in der Ansicht sowie in PDF und CSV, auch ohne GPS-Verbindung.
+- Fehlt ein GPS-Punkt im Traccar-Fahrtbericht, wird seine originale Positions-ID
+  gezielt nachgeschlagen. Ein nicht aufgezeichneter erster Start wird nicht aus
+  dem Ziel derselben Fahrt oder einer späteren Position erfunden.
+- Privatfahrten werden weder als Adressquelle noch zum Verknüpfen benachbarter
+  Fahrten verwendet. Überlappende Fahrten werden ebenfalls nicht verknüpft.
+- Fahrer/Zweck speichern schreibt unveränderte Ortsangaben nicht als manuelle
+  Korrektur fest. Alte gespeicherte Koordinaten-Platzhalter verdecken keine
+  später aufgelöste GPS-Adresse mehr.
 
 - Bestehender `TRACCAR_BASE_URL`/`TRACCAR_TOKEN` reicht aus; keine neue Anmeldung.
 - `GET /kristine/api/krisdrive/logbook?vehicleId=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
