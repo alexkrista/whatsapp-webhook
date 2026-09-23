@@ -9,7 +9,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
   async function read(p, fallback){try{return JSON.parse(await fs.readFile(p,"utf8"));}catch(e){if(e.code==="ENOENT")return fallback;throw e;}}
   async function write(p,value){await fs.mkdir(path.dirname(p),{recursive:true});const tmp=p+"."+crypto.randomUUID()+".tmp";await fs.writeFile(tmp,JSON.stringify(value,null,2));await fs.rename(tmp,p);}
   function serial(fn){return withOrderLock(root,fn);}
-  function wrap(fn){return async(req,res)=>{if(!auth(req,res))return;try{res.json({ok:true,...await serial(()=>fn(req))});}catch(e){res.status(e.status||400).json({ok:false,error:e.message});}};}
+  function wrap(fn,allowSync=false){return async(req,res)=>{if(!(allowSync?require("./paint-lg-service-auth").requirePaintLgSync(req,res):auth(req,res)))return;try{res.json({ok:true,...await serial(()=>fn(req))});}catch(e){res.status(e.status||400).json({ok:false,error:e.message});}};}
   const round=n=>Math.round(Number(n)*1000)/1000;
   const rev=r=>crypto.createHash("sha256").update(JSON.stringify([r.invoiceRef,r.invoiceDate,r.netAmount,r.lines])).digest("hex");
   async function task(receipt,done=false){
@@ -38,7 +38,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
     next.revision=rev(next);if(r)Object.assign(r,next);else{r=next;receipts.push(r);}
     await write(file,receipts);await task(r);
     return {invoiceRef,paintLines:lines.length,awaitingGoods:true,receipt:r};
-  }));
+  },true));
   app.post("/admin/api/paint/goods-receipts/:id/confirm",wrap(async req=>{
     if(req.body?.goodsReceived!==true)throw Error("Bitte den vollständigen Wareneingang ausdrücklich bestätigen.");
     const receipts=await read(file,[]), r=receipts.find(x=>x.id===req.params.id);

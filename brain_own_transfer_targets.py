@@ -25,6 +25,7 @@ def configured_business_iban():
 
 def transfer_targets(revolut=None):
     targets, warnings = [], []
+    configured_business = configured_business_iban()
     # Account 2881 comes from the user's approved chart of accounts.
     account = next((a for a in ACCOUNTS if a['number'] == '2881'), None)
     configured = os.environ.get('KRISTINE_REVOLUT_OWN_IBAN', '')
@@ -39,16 +40,17 @@ def transfer_targets(revolut=None):
     try:
         business = revolut.transfer_accounts() if revolut else []
         for item in business:
+            if configured_business and re.sub(r'\s+', '', str(item.get('iban') or '')).upper() != configured_business:
+                continue
             if str(item.get('currency') or 'EUR').upper() != 'EUR' or not iban_valid(item.get('iban')):
                 continue
             if any(t['iban'] == re.sub(r'\s+', '', item['iban']).upper() for t in targets):
                 continue
-            targets.append({**item, 'name': 'Revolut Business · ' + str(item.get('name') or 'EUR')})
+            targets.append({**item, 'name': 'Revolut Business' if configured_business else 'Revolut Business · ' + str(item.get('name') or 'EUR')})
         if not business:
             warnings.append('Revolut Business ist momentan nicht verfügbar.')
     except Exception:
         warnings.append('Revolut Business konnte nicht geladen werden. Verbindung prüfen.')
-    configured_business = configured_business_iban()
     if configured_business and not iban_valid(configured_business):
         warnings.append('Die hinterlegte Revolut-Business-IBAN ist ungültig.')
     elif configured_business and not any(t['iban'].replace(' ', '').upper() == configured_business for t in targets):

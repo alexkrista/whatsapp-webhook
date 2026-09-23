@@ -492,7 +492,7 @@ function registerPaintCommercial(app, options = {}) {
   });
 
   app.post("/admin/api/paint/lg-purchase", async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!require("./paint-lg-service-auth").requirePaintLgSync(req, res)) return;
     try {
       const invoiceRef = clean(req.body?.invoiceRef || req.body?.invoiceNumber, 120);
       const invoiceDate = clean(req.body?.invoiceDate, 20).slice(0,10);
