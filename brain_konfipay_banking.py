@@ -3,6 +3,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -207,7 +208,7 @@ def install(ns,client,write_allowed,csrf):
     brain_konfipay_archive.install(ns,client,write_allowed)
     import brain_bank_assignment
     assignments=brain_bank_assignment.install(ns,write_allowed)
-    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content']
+    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content','revolut-transfer-context','revolut-transfer-prepare']
     ns['MOBILE_ALLOWED_PATHS'].update('/konfipay/api/'+p for p in paths)
 
     def guard():
@@ -239,6 +240,45 @@ def install(ns,client,write_allowed,csrf):
 
     @app.get('/konfipay/api/context')
     def context():return jsonify({'ok':True,'csrf':csrf,'configured':client.store.exists()})
+
+    @app.get('/konfipay/api/revolut-transfer-context')
+    @safe
+    def revolut_transfer_context():
+        revolut=ns.get('revolut_connection')
+        if revolut is None:raise ConnectionError('Die Revolut-Verbindung ist noch nicht bereit.')
+        sources=[a for a in client.accounts(client.auth_token()) if str(a.get('currency') or '').upper()=='EUR' and a.get('iban')]
+        targets=revolut.transfer_accounts()
+        if not targets:raise ConnectionError('Für Revolut Business wurde noch keine EUR-IBAN gefunden.')
+        return jsonify({'ok':True,'sources':sources,'targets':targets})
+
+    @app.post('/konfipay/api/revolut-transfer-prepare')
+    @safe
+    def revolut_transfer_prepare():
+        guard();body=request.get_json(silent=True) or {}
+        try:
+            transfer_amount=Decimal(str(body.get('amount') or '')).quantize(Decimal('.01'))
+        except Exception:raise ConnectionError('Bitte einen gültigen Betrag eingeben.') from None
+        if transfer_amount<=0 or transfer_amount>Decimal('9999999.99'):
+            raise ConnectionError('Bitte einen gültigen Betrag größer 0 EUR eingeben.')
+        sources=client.accounts(client.auth_token())
+        source=next((a for a in sources if a.get('id')==body.get('sourceAccountId') and str(a.get('currency') or '').upper()=='EUR'),None)
+        revolut=ns.get('revolut_connection')
+        if not source or revolut is None:raise ConnectionError('Ausgangskonto oder Revolut-Verbindung nicht gefunden.')
+        target=next((a for a in revolut.transfer_accounts() if a.get('id')==body.get('revolutAccountId')),None)
+        if not target:raise ConnectionError('Das gewählte Revolut-Konto wurde nicht gefunden.')
+        purpose=' '.join(str(body.get('purpose') or 'Interne Umbuchung Bank an Revolut').split())[:140]
+        if target.get('referenceRequired'):purpose=target['referenceRequired']
+        e2e=('KRISTA-REV-'+datetime.now().strftime('%y%m%d%H%M%S')+'-'+secrets.token_hex(3).upper())[:35]
+        from brain_finance_sepa import build_sepa_xml
+        xml,filename=build_sepa_xml([{
+            'supplier':target['beneficiary'],'accountHolder':target['beneficiary'],'iban':target['iban'],'bic':target.get('bic'),
+            'amount':format(transfer_amount,'.2f'),'currency':'EUR','remittanceText':purpose,'paymentId':e2e,
+        }],os.environ.get('KRISTINE_SEPA_DEBTOR_NAME') or 'Farben Krista GmbH & Co KG',source['iban'],'',instant=True)
+        assignments.register_internal_revolut(end_to_end=e2e,debtor_iban=source['iban'],creditor_iban=target['iban'],
+            amount_cents=int(transfer_amount*100),purpose=purpose)
+        return jsonify({'ok':True,'xml':xml.decode('utf-8'),'filename':filename,'amount':format(transfer_amount,'.2f'),
+            'source':{'name':source.get('name'),'iban':source.get('iban')},'target':target,'purpose':purpose,'endToEndId':e2e,
+            'instant':True,'note':'SEPA Instant/Eilüberweisung vorbereitet. Vor dem Absenden bitte Bankvorschau prüfen.'})
 
     @app.get('/konfipay/api/transactions')
     @safe

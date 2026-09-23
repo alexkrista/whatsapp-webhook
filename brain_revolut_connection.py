@@ -42,6 +42,8 @@ class Connection:
         self.vault = vault or Vault()
         self.lock = threading.RLock()
         self.opener = urllib.request.build_opener(NoRedirect())
+        self.balance_cache = None
+        self.balance_cache_at = None
 
     def read(self):
         return json.loads(self.vault.read()) if self.vault.exists() else {}
@@ -70,12 +72,13 @@ class Connection:
         }).encode())
         return content + "." + _encode(key.sign(content.encode(), padding.PKCS1v15(), hashes.SHA256()))
 
-    def call(self, path, form=None, token=None, raw=False):
+    def call(self, path, form=None, token=None, raw=False, timeout=20):
         if form is not None and path != "/auth/token":
             raise ValueError("Nur die Anmeldung darf Daten an Revolut senden.")
         endpoint = urllib.parse.urlsplit(path).path
         is_receipt = bool(re.fullmatch(r"/expenses/[0-9a-fA-F-]{36}/receipts/[0-9a-fA-F-]{36}/content", endpoint))
-        if form is None and endpoint not in {"/accounts", "/transactions", "/expenses"} and not is_receipt:
+        is_bank_details = bool(re.fullmatch(r"/accounts/[0-9a-fA-F-]{36}/bank-details", endpoint))
+        if form is None and endpoint not in {"/accounts", "/transactions", "/expenses"} and not is_receipt and not is_bank_details:
             raise ValueError("Diese Revolut-API-Funktion ist nicht freigegeben.")
         if raw and not is_receipt:
             raise ValueError("Ungültiger Belegabruf.")
@@ -88,7 +91,7 @@ class Connection:
             headers["Authorization"] = "Bearer " + token
         req = urllib.request.Request(API + path, data=body, headers=headers, method="POST" if form is not None else "GET")
         try:
-            with self.opener.open(req, timeout=20) as response:
+            with self.opener.open(req, timeout=timeout) as response:
                 limit = 20_000_000 if raw else 4_000_000
                 content = response.read(limit + 1)
                 if len(content) > limit:
@@ -103,7 +106,7 @@ class Connection:
         except Exception:
             raise ValueError("Revolut hat die Anfrage nicht bestätigt.") from None
 
-    def get(self, path, raw=False):
+    def get(self, path, raw=False, timeout=20):
         with self.lock:
             data = self.read()
             if not data.get("refresh_token"):
@@ -121,13 +124,42 @@ class Connection:
                 if result.get("refresh_token"):
                     data["refresh_token"] = result["refresh_token"]
                 self.save(data)
-            return self.call(path, token=data["access_token"], raw=raw)
+            token = data["access_token"]
+        # Only token rotation is serialized. A slow receipt or transaction call
+        # must never block the balance card.
+        return self.call(path, token=token, raw=raw, timeout=timeout)
 
-    def accounts(self):
-        rows = self.get("/accounts")
+    def accounts(self, timeout=8):
+        rows = self.get("/accounts", timeout=timeout)
         if not isinstance(rows, list):
             raise ValueError("Unerwartete Revolut-Kontenantwort.")
         return [{key: row.get(key) for key in ("id", "name", "currency", "balance", "state")} for row in rows]
+
+    def transfer_accounts(self):
+        """Return own EUR accounts with bank details, without enabling Revolut writes."""
+        result = []
+        for account in self.accounts():
+            ident = str(account.get("id") or "")
+            if str(account.get("currency") or "").upper() != "EUR" or not re.fullmatch(r"[0-9a-fA-F-]{36}", ident):
+                continue
+            details = self.get("/accounts/" + ident + "/bank-details", timeout=8)
+            if not isinstance(details, list):
+                continue
+            usable = [item for item in details if isinstance(item, dict) and item.get("iban")]
+            usable.sort(key=lambda item: (bool(item.get("pooled")), "sepa" not in {str(x).lower() for x in item.get("schemes") or []}))
+            if not usable:
+                continue
+            item = usable[0]
+            result.append({
+                "id": ident,
+                "name": str(account.get("name") or "Revolut Business"),
+                "currency": "EUR",
+                "iban": str(item.get("iban") or ""),
+                "bic": str(item.get("bic") or ""),
+                "beneficiary": str(item.get("beneficiary") or account.get("name") or "Revolut Business"),
+                "referenceRequired": str(item.get("unique_reference") or "") if item.get("pooled") else "",
+            })
+        return result
 
     def receipt(self, expense_id, receipt_id):
         if not re.fullmatch(r"[0-9a-fA-F-]{36}", str(expense_id or "")) or not re.fullmatch(r"[0-9a-fA-F-]{36}", str(receipt_id or "")):
@@ -168,20 +200,31 @@ def install(ns):
                 cleaned = []
                 for account in accounts:
                     currency = str(account.get("currency") or "EUR").upper()
+                    raw_balance = account.get("balance")
+                    if raw_balance is None:
+                        raise ValueError("Revolut Business liefert keinen Kontostand.")
                     try:
-                        balance = Decimal(str(account.get("balance") or "0"))
+                        balance = Decimal(str(raw_balance))
                     except InvalidOperation:
                         raise ValueError("Revolut Business liefert einen ungültigen Kontostand.") from None
+                    if not balance.is_finite():
+                        raise ValueError("Revolut Business liefert einen ungültigen Kontostand.")
+                    balance = balance.quantize(Decimal("0.01"))
                     totals[currency] = totals.get(currency, Decimal("0")) + balance
                     cleaned.append({
                         "id": str(account.get("id") or ""),
                         "name": str(account.get("name") or "Revolut Business"),
                         "currency": currency,
-                        "balance": format(balance, "f"),
+                        "balance": format(balance, ".2f"),
                         "state": str(account.get("state") or ""),
                     })
-                return jsonify(ok=True, accounts=cleaned, totals={key: format(value, "f") for key, value in totals.items()}, fetchedAt=datetime.now(timezone.utc).isoformat())
+                payload = dict(accounts=cleaned, totals={key: format(value, ".2f") for key, value in totals.items()}, fetchedAt=datetime.now(timezone.utc).isoformat())
+                connection.balance_cache = payload
+                connection.balance_cache_at = time.time()
+                return jsonify(ok=True, stale=False, **payload)
             except Exception as exc:
+                if connection.balance_cache:
+                    return jsonify(ok=True, stale=True, warning=str(exc), **connection.balance_cache)
                 return jsonify(ok=False, error=str(exc)), 503
     print("✅ Revolut Business API: bestehende READ-Verbindung eingebunden · " + datetime.now(timezone.utc).isoformat())
     return connection

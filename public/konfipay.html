@@ -21,6 +21,11 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <p id="bankNote" class="small">Gebuchte Umsätze aus den von der Bank bereitgestellten Auszügen.</p><p id="bankMessage" role="status" aria-live="polite"></p>
 <div class="scroll"><table><thead id="bankHead"></thead><tbody id="bankRows"></tbody></table></div>
 <div class="row" style="margin-top:14px;justify-content:flex-start"><button id="bankPrev" class="secondary" disabled>Zurück</button><span id="bankPage" class="small"></span><button id="bankNext" class="secondary" disabled>Weiter</button></div></section>
+<section class="card" id="revolutTransfer"><div class="row"><div><h2>Bank → Revolut</h2><p class="small">Interne Umbuchung als SEPA Instant/Eilüberweisung vorbereiten. Erst nach deiner Prüfung wird die Datei im Zahlungsbereich freigegeben.</p></div><button id="revolutTransferLoad" class="secondary" type="button">Konten neu laden</button></div>
+<div class="formrow"><div class="field"><label for="revolutTransferSource">Von Bankkonto</label><select id="revolutTransferSource"><option value="">Konten werden geladen …</option></select></div><div class="field"><label for="revolutTransferTarget">Auf Revolut Business</label><select id="revolutTransferTarget"><option value="">Revolut wird geladen …</option></select></div></div>
+<div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Eil-SEPA vorbereiten</button></div>
+<p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><a id="revolutTransferDownload" class="bank-action" hidden>SEPA-Datei herunterladen</a>
+<p class="small">Der spätere Bankumsatz wird nur bei exakter Übereinstimmung von Konten, Betrag und EndToEnd-ID automatisch als „Umbuchung · Revolut“ erkannt – ohne Aufwand oder Ertrag.</p></section>
 <section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
 <button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
 <dialog id="paymentDetails"><div class="row"><h2 id="detailTitle">Zahlungsinhalt</h2><button id="detailClose" class="secondary">Schließen</button></div><p id="detailMessage" class="small"></p><div class="scroll"><table><thead><tr><th>Empfänger / IBAN</th><th>Betrag</th><th>Termin / Auftraggeberkonto</th><th>Verwendungszweck / EndToEndId</th></tr></thead><tbody id="detailRows"></tbody></table></div><div class="row" style="margin-top:16px"><button id="detailMore" class="secondary" hidden>Weitere Zahlungen laden</button><a id="detailXml" hidden>Original-XML herunterladen</a></div></dialog>
@@ -161,6 +166,23 @@ async function openRemoteContent(rid,more=false){const version=more?detailVersio
 $('detailMore').addEventListener('click',()=>openRemoteContent(detailRid,true));
 async function loadHistory(){$('historyLoad').disabled=true;$('historyMessage').textContent='Archiv wird geladen …';try{const d=await api('payment-history');$('historyRows').replaceChildren();for(const item of d.items){const tr=document.createElement('tr');cell(tr,item.name+'\n'+stamp(item.created));cell(tr,item.count);cell(tr,money(item.total,'EUR'));cell(tr,statusName(item.status||item.state)+(item.error?'\n'+item.error:''));const td=cell(tr,'');action(td,'Inhalt',()=>openLocalContent(item));if(item.rid)action(td,'Status prüfen',async()=>{try{await api('payment-status',{rid:item.rid});await loadHistory();}catch(e){$('historyMessage').textContent=e.message;}});$('historyRows').append(tr);}$('historyMessage').textContent=d.items.length?d.items.length+' Übergaben (maximal die letzten 100). Bei unklarem Status nicht erneut senden.':'Noch keine Zahlungen über Brain übergeben.';}catch(e){$('historyMessage').textContent=e.message;}finally{$('historyLoad').disabled=false;}}
 $('historyLoad').addEventListener('click',loadHistory);
+let revolutTransferUrl='';
+async function loadRevolutTransferContext(){
+ const button=$('revolutTransferLoad');button.disabled=true;$('revolutTransferMessage').textContent='Bank- und Revolut-Konten werden geladen …';
+ try{const d=await api('revolut-transfer-context');
+  for(const [id,items,label] of [['revolutTransferSource',d.sources,'Bankkonto auswählen'],['revolutTransferTarget',d.targets,'Revolut-Konto auswählen']]){const select=$(id),old=select.value;select.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent=label;select.append(empty);for(const item of items){const option=document.createElement('option');option.value=item.id;option.textContent=(item.name||'Konto')+' · '+String(item.iban||'').replace(/\s/g,'').slice(-4);select.append(option);}select.value=old&&items.some(x=>x.id===old)?old:(items.length===1?items[0].id:'');}
+  $('revolutTransferMessage').textContent='Bereit. Betrag eingeben und Eil-SEPA vorbereiten.';
+ }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
+}
+$('revolutTransferLoad').addEventListener('click',loadRevolutTransferContext);
+$('revolutTransferPrepare').addEventListener('click',async()=>{
+ const button=$('revolutTransferPrepare'),link=$('revolutTransferDownload');button.disabled=true;link.hidden=true;$('revolutTransferMessage').textContent='SEPA Instant wird vorbereitet …';
+ try{const d=await api('revolut-transfer-prepare',{sourceAccountId:$('revolutTransferSource').value,revolutAccountId:$('revolutTransferTarget').value,amount:$('revolutTransferAmount').value.replace(',','.'),purpose:$('revolutTransferPurpose').value});
+  if(revolutTransferUrl)URL.revokeObjectURL(revolutTransferUrl);revolutTransferUrl=URL.createObjectURL(new Blob([d.xml],{type:'application/xml'}));link.href=revolutTransferUrl;link.download=d.filename;link.hidden=false;
+  $('revolutTransferMessage').textContent='Vorbereitet: '+money(d.amount,'EUR')+' · '+d.source.name+' → '+d.target.name+' · SEPA Instant/Eilüberweisung. Bitte Datei herunterladen und im Zahlungsbereich prüfen.';
+ }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
+});
+loadRevolutTransferContext();
 </script>
 <script>let expectedBusy=false;
 async function loadExpected(){
@@ -192,20 +214,24 @@ async function renderLiquidity(bank){
  const totals={};let complete=!!bank.accounts?.length;
  for(const a of bank.accounts||[]){if(a.error||a.expected===null){complete=false;continue;}try{totals[a.currency]=(totals[a.currency]||0n)+cents(a.expected);}catch(e){complete=false;}}
  line('Bankkonten · erwartet',complete?Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '):'Nicht vollständig verfügbar');
- let revolut;try{const r=await fetch('/revolut/balances',{cache:'no-store'});revolut=await r.json();if(!r.ok||!revolut.ok)throw Error(revolut.error||'Abruf fehlgeschlagen');
-  const visibleRevolut=Object.entries(revolut.totals||{}).filter(([c,v])=>c==='EUR'||cents(v)!==0n);
-  line('Revolut Business',visibleRevolut.length?visibleRevolut.map(([c,v])=>money(v,c)).join(' · '):money('0.00','EUR'));
-  for(const [currency,value] of visibleRevolut)totals[currency]=(totals[currency]||0n)+cents(value);
- }catch(e){complete=false;line('Revolut Business','Nicht verfügbar · '+e.message);}
- try{const r=await fetch('/controlling/import/balances',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok||!Array.isArray(d.accounts))throw Error('Abruf fehlgeschlagen');
+ async function timed(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');return d;}catch(e){if(e.name==='AbortError')throw Error('Zeitlimit erreicht');throw e;}finally{clearTimeout(timer);}}
+ const [businessResult,privateResult,cashResult]=await Promise.allSettled([timed('/revolut/balances'),timed('/controlling/import/balances'),timed('/incoming/kassa/book/balance')]);
+ let revolut=null;
+ if(businessResult.status==='fulfilled'){revolut=businessResult.value;try{const visibleRevolut=Object.entries(revolut.totals||{}).filter(([c,v])=>c==='EUR'||cents(v)!==0n);
+   line('Revolut Business',visibleRevolut.length?visibleRevolut.map(([c,v])=>money(v,c)).join(' · '):money('0.00','EUR')+(revolut.stale?' · letzter bekannter Stand':''));
+   for(const [currency,value] of visibleRevolut)totals[currency]=(totals[currency]||0n)+cents(value);if(revolut.stale)complete=false;
+  }catch(e){complete=false;line('Revolut Business','Ungültiger Bestand');}
+ }else{complete=false;line('Revolut Business','Nicht verfügbar · '+businessResult.reason.message);}
+ if(privateResult.status==='fulfilled'){try{const d=privateResult.value;if(!Array.isArray(d.accounts))throw Error('Abruf fehlgeschlagen');
   const privateAccounts=d.accounts.filter(a=>/revolut/i.test(String(a.name||''))&&!/business/i.test(String(a.name||'')));
   if(!privateAccounts.length){complete=false;line('Revolut','Bestand noch nicht verfügbar');}
   for(const a of privateAccounts){if(a.amount===null){complete=false;line('Revolut','Bestand fehlt');continue;}if(!Number.isSafeInteger(a.amount))throw Error('Ungültiger Bestand');line('Revolut',money(decimal(BigInt(a.amount)),a.currency)+' · Stand '+bankDate(a.date));totals[a.currency]=(totals[a.currency]||0n)+BigInt(a.amount);}
- }catch(e){complete=false;line('Revolut','Bestand noch nicht verfügbar');}
- let cash=null;try{const r=await fetch('/incoming/kassa/book/balance',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');cash=d;
-  line('Kassastand',d.balance===null?'Bestand fehlt · Excel importieren / Anfangsbestand angeben':money(decimal(BigInt(d.balance)),'EUR')+' · Import '+stamp(d.lastImport));
- }catch(e){line('Kassastand','Importbestand nicht verfügbar');}
- if(complete&&cash?.balance!==null&&cash?.balance!==undefined){totals.EUR=(totals.EUR||0n)+BigInt(cash.balance);line('Gesamt-Cash',Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · '),true);}else line('Gesamt-Cash','Noch nicht vollständig verfügbar',true);
+  }catch(e){complete=false;line('Revolut','Ungültiger Bestand');}
+ }else{complete=false;line('Revolut','Bestand noch nicht verfügbar');}
+ if(cashResult.status==='fulfilled'){const d=cashResult.value;try{if(d.balance===null||d.balance===undefined){complete=false;line('Kassastand','Bestand fehlt · Excel importieren / Anfangsbestand angeben');}else{const value=BigInt(d.balance);totals.EUR=(totals.EUR||0n)+value;line('Kassastand',money(decimal(value),'EUR')+' · Import '+stamp(d.lastImport));}}catch(e){complete=false;line('Kassastand','Ungültiger Importbestand');}}
+ else{complete=false;line('Kassastand','Importbestand nicht verfügbar');}
+ const known=Object.entries(totals).map(([c,v])=>money(decimal(v),c)).join(' · ')||'Keine Bestände verfügbar';
+ if(complete)line('Gesamt-Cash',known,true);else line('Bekannter Cash · unvollständig',known,true);
  const note=document.createElement('p');note.className='small';note.textContent='Bank, Revolut, Revolut Business und Kassa werden gemeinsam gerechnet. Umbuchungen zwischen diesen Konten verändern den Gesamt-Cash nicht; bei zeitversetzter Verbuchung kann die Anzeige vorübergehend abweichen.'+(revolut?.fetchedAt?' Revolut Business abgerufen: '+stamp(revolut.fetchedAt)+'.':'');card.append(note);
 }
 </script><script>let archiveTimer=null,archiveLoading=false;

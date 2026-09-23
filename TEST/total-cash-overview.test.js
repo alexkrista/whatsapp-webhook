@@ -11,7 +11,11 @@ assert(page.includes("line('Revolut'"));
 assert(page.includes("line('Kassastand'"));
 assert(page.includes("line('Gesamt-Cash'"));
 assert(page.includes("await renderLiquidity(data)"));
+assert(page.includes('Promise.allSettled'));
+assert(page.includes("line('Bekannter Cash · unvollständig'"));
+assert(page.includes('revolut-transfer-prepare'));
 assert(revolut.includes('@app.get("/revolut/balances")'));
-assert(revolut.includes('totals={key: format(value, "f")'));
+assert(revolut.includes('totals={key: format(value, ".2f")'));
+assert(revolut.includes('stale=True'));
 
 console.log('OK: Gesamter Cash enthält Bank, Revolut, Revolut Business und Kassa.');

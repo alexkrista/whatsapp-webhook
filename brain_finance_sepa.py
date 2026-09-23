@@ -73,7 +73,7 @@ def _child(parent, name, text=None, **attributes):
     return node
 
 
-def build_sepa_xml(items, debtor_name, debtor_iban, debtor_bic="", created_at=None):
+def build_sepa_xml(items, debtor_name, debtor_iban, debtor_bic="", created_at=None, instant=False):
     """Return (xml bytes, filename) for a pain.001.001.03 payment batch."""
     debtor_name = _clean(debtor_name, 70)
     debtor_iban = _iban(debtor_iban)
@@ -129,7 +129,12 @@ def build_sepa_xml(items, debtor_name, debtor_iban, debtor_bic="", created_at=No
     _child(payment, "BtchBookg", "true")
     _child(payment, "NbOfTxs", len(rows))
     _child(payment, "CtrlSum", f"{total:.2f}")
-    _child(_child(_child(payment, "PmtTpInf"), "SvcLvl"), "Cd", "SEPA")
+    payment_type = _child(payment, "PmtTpInf")
+    if instant:
+        _child(payment_type, "InstrPrty", "HIGH")
+    _child(_child(payment_type, "SvcLvl"), "Cd", "SEPA")
+    if instant:
+        _child(_child(payment_type, "LclInstrm"), "Cd", "INST")
     _child(payment, "ReqdExctnDt", now.date().isoformat())
     _child(_child(payment, "Dbtr"), "Nm", debtor_name)
     _child(_child(_child(payment, "DbtrAcct"), "Id"), "IBAN", debtor_iban)
@@ -155,4 +160,5 @@ def build_sepa_xml(items, debtor_name, debtor_iban, debtor_bic="", created_at=No
 
     xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     recipients = _recipient_filename(rows)
-    return xml, f"SEPA_{now.strftime('%Y-%m-%d_%H-%M-%S')}_{recipients}.xml"
+    prefix = "SEPA_INSTANT" if instant else "SEPA"
+    return xml, f"{prefix}_{now.strftime('%Y-%m-%d_%H-%M-%S')}_{recipients}.xml"

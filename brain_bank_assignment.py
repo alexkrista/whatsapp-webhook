@@ -67,6 +67,10 @@ class Assignments:
                 label TEXT NOT NULL, paid INTEGER NOT NULL, difference INTEGER NOT NULL,
                 mode TEXT NOT NULL, reason TEXT NOT NULL, decision TEXT NOT NULL,
                 task_id TEXT, task_error TEXT, correction_id INTEGER, decided TEXT);
+            CREATE TABLE IF NOT EXISTS bank_internal_transfer_intents(
+                end_to_end TEXT PRIMARY KEY, debtor_iban TEXT NOT NULL, creditor_iban TEXT NOT NULL,
+                amount INTEGER NOT NULL, currency TEXT NOT NULL, purpose TEXT NOT NULL,
+                created TEXT NOT NULL, matched_rid TEXT);
                 ''')
                 columns={row['name'] for row in c.execute('PRAGMA table_info(bank_assignments)')}
                 if 'frequency' not in columns:
@@ -95,7 +99,42 @@ class Assignments:
                 c.execute('INSERT INTO bank_assignment_transactions VALUES(?,?,?,?) '
                     'ON CONFLICT(rid) DO UPDATE SET payload=excluded.payload,fingerprint=excluded.fingerprint,observed=excluded.observed',
                     (x['rId'], payload, self.fingerprint(x), now()))
+                self._match_internal_revolut(c, x, payload)
             c.commit()
+
+    @staticmethod
+    def _iban(value):
+        return ''.join(str(value or '').upper().split())
+
+    def register_internal_revolut(self, *, end_to_end, debtor_iban, creditor_iban, amount_cents, purpose):
+        if not str(end_to_end).startswith('KRISTA-REV-'):
+            raise ValueError('Ungültige Kennung für die Revolut-Umbuchung.')
+        with LOCK, self.db() as c:
+            c.execute('INSERT OR REPLACE INTO bank_internal_transfer_intents '
+                '(end_to_end,debtor_iban,creditor_iban,amount,currency,purpose,created,matched_rid) VALUES(?,?,?,?,?,?,?,NULL)',
+                (str(end_to_end), self._iban(debtor_iban), self._iban(creditor_iban), int(amount_cents), 'EUR', str(purpose)[:140], now()))
+            c.commit()
+
+    def _match_internal_revolut(self, c, tx, payload):
+        """Auto-assign only an exact transfer prepared by KRISTINE; never guess by name."""
+        if tx.get('creditDebitIndicator') != 'DBIT' or str(tx.get('currency') or '').upper() != 'EUR':
+            return
+        e2e = str(tx.get('endToEndId') or '')
+        row = c.execute('SELECT * FROM bank_internal_transfer_intents WHERE end_to_end=? AND matched_rid IS NULL',(e2e,)).fetchone()
+        if not row or c.execute('SELECT 1 FROM bank_assignments WHERE rid=?',(tx['rId'],)).fetchone():
+            return
+        source_iban = self._iban((tx.get('bankAccount') or {}).get('iban'))
+        target_iban = self._iban(tx.get('iban'))
+        try: paid = abs(cents(tx.get('amount')))
+        except ValueError: return
+        if (source_iban, target_iban, paid) != (row['debtor_iban'], row['creditor_iban'], row['amount']):
+            return
+        fingerprint = self.fingerprint(tx)
+        c.execute('INSERT INTO bank_assignments(rid,fingerprint,payload,note,recurring,created,frequency,schedule_json) VALUES(?,?,?,?,?,?,?,?)',
+            (tx['rId'], fingerprint, payload, 'Automatisch erkannt: vorbereitete Bank → Revolut Umbuchung', 0, now(), 'none', '[]'))
+        c.execute('INSERT INTO bank_assignment_lines(rid,category,source,target,label,paid,difference,mode,reason,decision) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            (tx['rId'], 'internal_revolut', '', '', CATEGORIES['internal_revolut'], paid, 0, 'partial', row['purpose'], 'none'))
+        c.execute('UPDATE bank_internal_transfer_intents SET matched_rid=? WHERE end_to_end=?',(tx['rId'],e2e))
 
     def supplier_overlay(self, rows, include_resolved=False):
         with self.db() as c:
