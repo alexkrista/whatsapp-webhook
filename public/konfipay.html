@@ -21,10 +21,10 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <p id="bankNote" class="small">Gebuchte Umsätze aus den von der Bank bereitgestellten Auszügen.</p><p id="bankMessage" role="status" aria-live="polite"></p>
 <div class="scroll"><table><thead id="bankHead"></thead><tbody id="bankRows"></tbody></table></div>
 <div class="row" style="margin-top:14px;justify-content:flex-start"><button id="bankPrev" class="secondary" disabled>Zurück</button><span id="bankPage" class="small"></span><button id="bankNext" class="secondary" disabled>Weiter</button></div></section>
-<section class="card" id="revolutTransfer"><div class="row"><div><h2>Bank → Revolut</h2><p class="small">Interne Umbuchung als SEPA Instant/Eilüberweisung vorbereiten. Erst nach deiner Prüfung wird die Datei im Zahlungsbereich freigegeben.</p></div><button id="revolutTransferLoad" class="secondary" type="button">Konten neu laden</button></div>
+<section class="card" id="revolutTransfer"><div class="row"><div><h2>Bank → Revolut</h2><p class="small">Interne Umbuchung als SEPA Instant/Eilüberweisung vorbereiten. Nach deiner Prüfung direkt an Konfipay übergeben.</p></div><button id="revolutTransferLoad" class="secondary" type="button">Konten neu laden</button></div>
 <div class="formrow"><div class="field"><label for="revolutTransferSource">Von Bankkonto</label><select id="revolutTransferSource"><option value="">Konten werden geladen …</option></select></div><div class="field"><label for="revolutTransferTarget">Auf Revolut / Revolut Business</label><select id="revolutTransferTarget"><option value="">Revolut wird geladen …</option></select></div></div>
-<div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Eil-SEPA vorbereiten</button></div>
-<p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><a id="revolutTransferDownload" class="bank-action" hidden>SEPA-Datei herunterladen</a>
+<div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Umbuchung prüfen</button></div>
+<p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><dialog id="revolutTransferReview"><h2>Eilüberweisung prüfen</h2><p id="revolutTransferReviewText" style="white-space:pre-line"></p><p class="small">Die Übergabe erfolgt als interne Umbuchung. Eine erforderliche Bankunterschrift bleibt bestehen.</p><div class="row"><button id="revolutTransferCancel" class="secondary" type="button">Schließen</button><button id="revolutTransferSubmit" type="button">Jetzt an Konfipay übergeben</button></div><p id="revolutTransferResult" role="status"></p></dialog>
 <p class="small">Der spätere Bankumsatz wird nur bei exakter Übereinstimmung von Konten, Betrag und EndToEnd-ID automatisch als „Umbuchung · Revolut“ erkannt – ohne Aufwand oder Ertrag.</p></section>
 <section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
 <button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
@@ -166,7 +166,7 @@ async function openRemoteContent(rid,more=false){const version=more?detailVersio
 $('detailMore').addEventListener('click',()=>openRemoteContent(detailRid,true));
 async function loadHistory(){$('historyLoad').disabled=true;$('historyMessage').textContent='Archiv wird geladen …';try{const d=await api('payment-history');$('historyRows').replaceChildren();for(const item of d.items){const tr=document.createElement('tr');cell(tr,item.name+'\n'+stamp(item.created));cell(tr,item.count);cell(tr,money(item.total,'EUR'));cell(tr,statusName(item.status||item.state)+(item.error?'\n'+item.error:''));const td=cell(tr,'');action(td,'Inhalt',()=>openLocalContent(item));if(item.rid)action(td,'Status prüfen',async()=>{try{await api('payment-status',{rid:item.rid});await loadHistory();}catch(e){$('historyMessage').textContent=e.message;}});$('historyRows').append(tr);}$('historyMessage').textContent=d.items.length?d.items.length+' Übergaben (maximal die letzten 100). Bei unklarem Status nicht erneut senden.':'Noch keine Zahlungen über Brain übergeben.';}catch(e){$('historyMessage').textContent=e.message;}finally{$('historyLoad').disabled=false;}}
 $('historyLoad').addEventListener('click',loadHistory);
-let revolutTransferUrl='';
+let revolutTransferDraft=null, revolutTransferSending=false;
 async function loadRevolutTransferContext(){
  const button=$('revolutTransferLoad');button.disabled=true;$('revolutTransferMessage').textContent='Bank- und Revolut-Konten werden geladen …';
  try{const d=await api('revolut-transfer-context');
@@ -176,12 +176,34 @@ async function loadRevolutTransferContext(){
  }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
 }
 $('revolutTransferLoad').addEventListener('click',loadRevolutTransferContext);
+function revolutTransferInputs(){return JSON.stringify(['revolutTransferSource','revolutTransferTarget','revolutTransferAmount','revolutTransferPurpose'].map(id=>$(id).value));}
 $('revolutTransferPrepare').addEventListener('click',async()=>{
- const button=$('revolutTransferPrepare'),link=$('revolutTransferDownload');button.disabled=true;link.hidden=true;$('revolutTransferMessage').textContent='SEPA Instant wird vorbereitet …';
+ const button=$('revolutTransferPrepare');if(button.disabled||revolutTransferSending)return;
+ button.disabled=true;revolutTransferDraft=null;const inputs=revolutTransferInputs();
+ $('revolutTransferMessage').textContent='Eilüberweisung wird zur Prüfung vorbereitet …';
  try{const d=await api('revolut-transfer-prepare',{sourceAccountId:$('revolutTransferSource').value,revolutAccountId:$('revolutTransferTarget').value,amount:$('revolutTransferAmount').value.replace(',','.'),purpose:$('revolutTransferPurpose').value});
-  if(revolutTransferUrl)URL.revokeObjectURL(revolutTransferUrl);revolutTransferUrl=URL.createObjectURL(new Blob([d.xml],{type:'application/xml'}));link.href=revolutTransferUrl;link.download=d.filename;link.hidden=false;
-  $('revolutTransferMessage').textContent='Vorbereitet: '+money(d.amount,'EUR')+' · '+d.source.name+' → '+d.target.name+' · '+d.target.iban+' · '+d.target.beneficiary+' · SEPA Instant/Eilüberweisung. Bitte Datei herunterladen und im Zahlungsbereich prüfen.';
+  const review=await api('payment-prepare',{files:[{name:d.filename,xml:d.xml}]});
+  if(inputs!==revolutTransferInputs())throw Error('Eingaben wurden geändert. Bitte die Umbuchung erneut prüfen.');
+  revolutTransferDraft={id:review.draft,inputs};
+  $('revolutTransferReviewText').textContent='Von: '+d.source.name+' · '+d.source.iban+'\nAn: '+d.target.name+' · '+d.target.iban+'\nKontoinhaber: '+d.target.beneficiary+'\nBetrag: '+money(d.amount,'EUR')+'\nVerwendungszweck: '+d.purpose+'\nAusführung: SEPA Instant / Eilüberweisung';
+  $('revolutTransferResult').textContent='';$('revolutTransferSubmit').disabled=false;
+  $('revolutTransferReview').showModal();
+  $('revolutTransferMessage').textContent='Vorbereitet. Bitte Betrag und Konten prüfen und anschließend die Übergabe bestätigen.';
  }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
+});
+$('revolutTransferCancel').addEventListener('click',()=>{$('revolutTransferReview').close();revolutTransferDraft=null;});
+$('revolutTransferReview').addEventListener('cancel',()=>{revolutTransferDraft=null;});
+$('revolutTransferSubmit').addEventListener('click',async()=>{
+ if(revolutTransferSending||!revolutTransferDraft)return;
+ if(revolutTransferDraft.inputs!==revolutTransferInputs()){revolutTransferDraft=null;$('revolutTransferResult').textContent='Eingaben geändert. Bitte neu vorbereiten.';return;}
+ const draft=revolutTransferDraft.id;revolutTransferDraft=null;revolutTransferSending=true;$('revolutTransferSubmit').disabled=true;
+ $('revolutTransferResult').textContent='Übergabe läuft …';
+ try{const d=await api('payment-submit',{draft,confirmed:true});
+  $('revolutTransferResult').textContent=d.results.map(r=>r.name+': '+(r.error||statusName(r.status||r.state))).join('\n')+(d.remaining?'\n'+d.remaining+' Datei(en) noch nicht übergeben.':'')+'\nDen weiteren Status findest du im Brain-Zahlungsarchiv.';
+  $('revolutTransferMessage').textContent='Übergabe bearbeitet. Zahlungsstatus im Archiv prüfen.';
+  await loadHistory();await loadExpected();
+ }catch(e){$('revolutTransferResult').textContent=e.message+' Bitte vor einem erneuten Versuch das Zahlungsarchiv prüfen.';}
+ finally{revolutTransferSending=false;}
 });
 loadRevolutTransferContext();
 </script>
