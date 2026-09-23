@@ -43,6 +43,14 @@ class Updates(unittest.TestCase):
         targets,warnings=transfer_targets(business)
         self.assertEqual(len(targets),1);self.assertNotIn('credentials',str(warnings))
 
+    def test_configured_business_target_survives_api_outage(self):
+        with patch.dict(os.environ,{'KRISTINE_REVOLUT_BUSINESS_OWN_IBAN':'DE89370400440532013000'}):
+            targets,_=transfer_targets()
+            self.assertEqual([t['name'] for t in targets],['Revolut','Revolut Business'])
+            business=Mock();business.transfer_accounts.return_value=[{'id':'business','iban':'DE89370400440532013000','name':'EUR'}]
+            targets,_=transfer_targets(business)
+            self.assertEqual(len(targets),2,'API account and configured IBAN must not duplicate')
+
     def test_prepare_only_resolves_server_targets_and_never_submits(self):
         app=Flask(__name__);client=Mock();client.store.folder=Path(tempfile.gettempdir());client.accounts.return_value=[{'id':'hypo','name':'Hypo','iban':'AT825800010499323013','currency':'EUR'}]
         assignments=Mock();business=Mock();business.transfer_accounts.return_value=[{'id':'business','currency':'EUR','name':'EUR','iban':'DE89370400440532013000','beneficiary':'Test company'}]

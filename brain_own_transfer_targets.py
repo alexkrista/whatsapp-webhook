@@ -5,6 +5,18 @@ from brain_capture_accounts import ACCOUNTS
 from brain_finance_sepa import iban_valid
 
 
+def configured_business_iban():
+    value = os.environ.get('KRISTINE_REVOLUT_BUSINESS_OWN_IBAN', '')
+    if not value and os.name == 'nt':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as key:
+                value, _kind = winreg.QueryValueEx(key, 'KRISTINE_REVOLUT_BUSINESS_OWN_IBAN')
+        except OSError:
+            pass
+    return re.sub(r'\s+', '', str(value)).upper()
+
+
 def transfer_targets(revolut=None):
     targets, warnings = [], []
     # Account 2881 comes from the user's approved chart of accounts.
@@ -30,4 +42,11 @@ def transfer_targets(revolut=None):
             warnings.append('Revolut Business ist momentan nicht verfügbar.')
     except Exception:
         warnings.append('Revolut Business konnte nicht geladen werden. Verbindung prüfen.')
+    configured_business = configured_business_iban()
+    if configured_business and not iban_valid(configured_business):
+        warnings.append('Die hinterlegte Revolut-Business-IBAN ist ungültig.')
+    elif configured_business and not any(t['iban'].replace(' ', '').upper() == configured_business for t in targets):
+        targets.append({'id': 'own-revolut-business', 'name': 'Revolut Business', 'currency': 'EUR',
+                        'iban': configured_business, 'bic': '', 'beneficiary': os.environ.get('KRISTINE_SEPA_DEBTOR_NAME') or 'Farben Krista GmbH & Co KG',
+                        'referenceRequired': '', 'source': 'Bestätigtes eigenes Business-Konto'})
     return targets, warnings
