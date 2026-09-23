@@ -29,6 +29,23 @@ function coordinates(lat, lng) {
 function location(address, point) {
   return text(address) || (point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "");
 }
+function pointKey(point) { return point && `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`; }
+function isCoordinates(value) { return /^-?\d{1,2}\.\d{4,},\s*-?\d{1,3}\.\d{4,}$/.test(String(value || "").trim()); }
+// Verified from the two locations reported by Alex. Limit these labels to
+// nearby GPS fixes; other destinations must come from the geocoder.
+const knownPlaces = [
+  { lat: 47.22429, lng: 9.61752, label: "Schmittengasse, Frastanz" },
+  { lat: 47.26821, lng: 9.64093, label: "Torkelgässele, Rankweil" },
+];
+function knownPlace(point) {
+  if (!point) return "";
+  const match = knownPlaces.find(place => {
+    const north = (point.lat - place.lat) * 111195;
+    const east = (point.lng - place.lng) * 111195 * Math.cos(place.lat * Math.PI / 180);
+    return Math.hypot(north, east) <= 70;
+  });
+  return match?.label || "";
+}
 
 // Date-only filters mean Austrian calendar days, including the DST transitions.
 function midnight(date) {
@@ -157,6 +174,7 @@ function registerKrisdriveLogbook(app, options = {}) {
   const express = options.express || require("express");
   const json = express.json({ limit: "24kb" });
   const locks = new Map(), refreshed = new Map(), inFlight = new Map();
+  const addressCache = new Map();
   const fileFor = id => path.join(root, "logbook", hash(id) + ".json");
   async function stateFor(id) {
     const state = await readJson(fileFor(id), { version: 1, records: {}, lastSync: null });
@@ -217,6 +235,32 @@ function registerKrisdriveLogbook(app, options = {}) {
         // Padding avoids cutting ordinary overnight trips at the filter boundary.
         const query = new URLSearchParams({ deviceId, from: new Date(range.start - DAY).toISOString(), to: new Date(Math.min(range.end + DAY, Date.now())).toISOString() });
         trips = (await traccar("/api/reports/trips?" + query)).map(row => normalizeTrip(row, ctx.vehicle.id, deviceId)).filter(Boolean);
+        const previous = await stateFor(ctx.vehicle.id);
+        let geocoderUnavailable = false, lookups = 0;
+        for (const trip of trips) {
+          if (previous.records[trip.id]?.edits?.category === "private") continue;
+          for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+            const point = trip[pointField], key = pointKey(point);
+            if (!key || (trip[field] && !isCoordinates(trip[field]))) continue;
+            const old = previous.records[trip.id]?.data;
+            if (pointKey(old?.[pointField]) === key && old?.[field] && !isCoordinates(old[field])) { trip[field] = old[field]; continue; }
+            let address = knownPlace(point) || addressCache.get(key) || "";
+            if (!address && !geocoderUnavailable && lookups < 12) {
+              lookups++;
+              try {
+                const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
+                const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "text/plain", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
+                if (response.ok) address = text(await response.text());
+                else if (response.status === 500 || response.status === 401 || response.status === 403) geocoderUnavailable = true;
+              } catch { geocoderUnavailable = true; }
+            }
+            if (address && !isCoordinates(address)) {
+              trip[field] = address;
+              if (addressCache.size > 500) addressCache.clear();
+              addressCache.set(key, address);
+            }
+          }
+        }
         for (const trip of trips) {
           const matches = matchingLocal(trip, ctx.local);
           const drivers = new Map(matches.filter(row => row.driver?.employeeId).map(row => [row.driver.employeeId, row.driver]));

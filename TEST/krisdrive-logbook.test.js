@@ -110,3 +110,24 @@ test("corrupt persisted data is never overwritten with an empty book", async t =
   await fs.writeFile(target, "broken");
   assert.equal((await h.get(h.query + "&refresh=1")).status, 500); assert.equal(await fs.readFile(target, "utf8"), "broken");
 });
+
+test("missing trip addresses resolve through known places and the Traccar geocoder without losing manual edits", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Bahnhofstraße, Feldkirch" };
+    throw Error("Unexpected GPS request");
+  } });
+  h.state.trips = [trip({ startAddress: "", endAddress: "", startLat: 47.22429, startLon: 9.61752, endLat: 47.26821, endLon: 9.64093 }),
+    trip({ startPositionId: 106, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:20:00Z", startAddress: "", endAddress: "", startLat: 47.24, startLon: 9.59, endLat: 47.26821, endLon: 9.64093 })];
+  let rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[0].endLocation, "Torkelgässele, Rankweil");
+  assert.equal(rows[1].startLocation, "Bahnhofstraße, Feldkirch");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
+  const edited = await h.patch(rows[0], { startLocation: "Mein Ziel", endLocation: rows[0].endLocation });
+  assert.equal(edited.status, 200);
+  rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
+  assert.equal(rows[0].startLocation, "Mein Ziel");
+  assert.equal(rows[1].startLocation, "Bahnhofstraße, Feldkirch");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
+});
