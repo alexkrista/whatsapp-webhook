@@ -385,6 +385,13 @@ function invoke(handler, req) {
   assert.equal(consumedMix.body.materialSuggestions.length, 0, "Bereits in einem anderen Regiebericht verwendete Mischung wird nicht nochmals angeboten");
   const ownMix = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03", reportId: "uses-mix" } });
   assert.equal(ownMix.body.materialSuggestions.length, 1, "Beim Bearbeiten bleibt die eigene Maschinenzeile verfügbar");
+  reportRows.pop();
+  reportRows.push({ id: "legacy-lg", jobId: "26096", materials: [{ product: "Absolute Matt Emulsion · 2,5 L", quantity: 3, containerSize: 2.5, unit: "L" }] });
+  fs.writeFileSync(machineReportFile, JSON.stringify(reportRows));
+  const legacyCoveredMix = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03" } });
+  assert.equal(legacyCoveredMix.body.materialSuggestions.length, 0, "Eine früher manuell verrechnete LG-Menge darf die Maschine nicht nochmals anbieten");
+  const legacyOwnMix = await invoke(routes.get("GET /kristine/api/regie-reports/time-suggestions"), { query: { jobId: "26096", date: "2026-09-03", reportId: "legacy-lg" } });
+  assert.equal(legacyOwnMix.body.materialSuggestions.length, 1, "Im betroffenen Alt-Rapport bleibt der Maschinenabgleich möglich");
 
   const workbench = fs.readFileSync(path.join(__dirname, "..", "public", "regie-workbench.html"), "utf8");
   assert.match(workbench, /Baustellenzeiten dieses Tages/);

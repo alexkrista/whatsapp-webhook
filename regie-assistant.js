@@ -334,27 +334,37 @@ function registerRegieAssistant(app, options) {
   }
 
   function machineMaterialRows(bookings, masterRows, reports, jobId, date, currentReportId = "") {
-    const alreadyUsed = new Set(reports
+    const otherMaterials = reports
       .filter(report => String(report.jobId || "") === jobId && String(report.id || "") !== currentReportId)
-      .flatMap(report => report.materials || [])
-      .map(row => clean(row.machineBookingId, 180)).filter(Boolean));
+      .flatMap(report => report.materials || []);
+    const alreadyUsed = new Set(otherMaterials.map(row => clean(row.machineBookingId, 180)).filter(Boolean));
+    const legacyUsed = new Map();
+    for (const row of otherMaterials.filter(row => !row.machineBookingId)) {
+      const key = canonicalPaintProduct(row.product || row.name), size = num(row.containerSize) || packageLiters(row.product || row.name) || 1;
+      if (key) legacyUsed.set(key, round((legacyUsed.get(key) || 0) + num(row.quantity) * size));
+    }
     const masterFor = booking => {
       const articleId = clean(booking.articleId, 180), size = packageLiters(booking.size) || (num(booking.quantity) ? num(booking.liters) / num(booking.quantity) : 0);
       return masterRows.find(row => articleId && [row.sourceId, row.articleId, row.id, row.materialId].some(value => String(value || "") === articleId))
         || masterRows.find(row => canonicalPaintProduct(row.product || row.name) === canonicalPaintProduct(booking.product) && Math.abs(num(row.containerSize) - size) < .001)
         || null;
     };
-    return bookings.filter(booking =>
+    const rows = [];
+    for (const booking of bookings.filter(booking =>
       String(booking.jobId || "") === jobId
       && booking.source === "innovatint-history"
       && !alreadyUsed.has(clean(booking.id, 180))
       && (!validDate(date) || !clean(booking.mixedAt || booking.at, 10) || clean(booking.mixedAt || booking.at, 10) <= date)
-    ).map(booking => {
+    )) {
       const master = masterFor(booking) || {}, size = num(master.containerSize) || packageLiters(booking.size) || (num(booking.quantity) ? num(booking.liters) / num(booking.quantity) : 1);
-      const quantity = num(booking.quantity) || (size ? num(booking.liters) / size : 1);
+      const bookedQuantity = num(booking.quantity) || (size ? num(booking.liters) / size : 1), bookedLiters = bookedQuantity * size;
+      const key = canonicalPaintProduct(booking.product), legacyCoverage = Math.min(bookedLiters, legacyUsed.get(key) || 0);
+      legacyUsed.set(key, round((legacyUsed.get(key) || 0) - legacyCoverage));
+      const quantity = size ? round((bookedLiters - legacyCoverage) / size) : bookedQuantity;
+      if (quantity <= 0) continue;
       const purchasePrice = num(master.purchasePrice ?? master.unitPrice ?? booking.purchasePrice);
       const explicitSale = num(master.salePrice ?? master.vkNet ?? booking.salePrice);
-      return {
+      rows.push({
         materialId: clean(master.materialId || master.id, 140),
         product: clean(master.product || master.name || [booking.product, booking.size].filter(Boolean).join(" · "), 240),
         supplier: clean(master.supplier || "Little Greene", 180),
@@ -363,8 +373,9 @@ function registerRegieAssistant(app, options) {
         color: clean(booking.colourTone, 120), component: clean(booking.component, 120),
         machineBookingId: clean(booking.id, 180), machineHistoryId: clean(booking.historyId, 180), sourceSystem: "innovatint-history",
         historicalAssignment: booking.knowledgeOnly === true,
-      };
-    });
+      });
+    }
+    return rows;
   }
 
   function calculateTotals(report) {
