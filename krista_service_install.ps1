@@ -4,6 +4,7 @@ $TaskName = 'KRISTA Dienstemanager'
 $BrainTaskName = 'Kristine The Brain Dienst'
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Runner = Join-Path $RepoRoot 'krista_service_manager_bg.py'
+$BrainRunner = Join-Path $RepoRoot 'archive-connector.py'
 $Port = 8765
 
 Write-Host ''
@@ -11,6 +12,9 @@ Write-Host 'KRISTA Dienstemanager wird als Windows-SYSTEM-Dienst eingerichtet ..
 
 if (-not (Test-Path $Runner)) {
     throw "Runner fehlt: $Runner"
+}
+if (-not (Test-Path $BrainRunner)) {
+    throw "Brain Connector fehlt: $BrainRunner"
 }
 
 $PythonExe = ''
@@ -61,20 +65,14 @@ $RegisterArgs = @{
 }
 Register-ScheduledTask @RegisterArgs | Out-Null
 
-# Der bestehende Brain-Task behaelt bewusst seine Aktion, Benutzerkennung und
-# Zugangsdaten. Wir ergaenzen nur den fehlenden Start-beim-Hochfahren-Ausloeser.
-$BrainTask = Get-ScheduledTask -TaskName $BrainTaskName -ErrorAction SilentlyContinue
-if ($BrainTask) {
-    $HasStartupTrigger = @($BrainTask.Triggers | Where-Object {
-        $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger'
-    }).Count -gt 0
-    if (-not $HasStartupTrigger) {
-        $BrainTriggers = @($BrainTask.Triggers) + @(New-ScheduledTaskTrigger -AtStartup)
-        Set-ScheduledTask -TaskName $BrainTaskName -Trigger $BrainTriggers | Out-Null
-    }
-} else {
-    Write-Warning "Brain-Windows-Task '$BrainTaskName' fehlt. Bitte einmal ueber KRISADMIN -> Dienste einrichten."
-}
+# Brain-Aufgabe bewusst auf den aktuellen Projektordner neu aufbauen. Damit
+# bleiben keine veralteten Dateipfade nach einem Umzug des Repositories zurueck.
+$BrainAction = New-ScheduledTaskAction -Execute $PythonExe -Argument ('"' + $BrainRunner + '"') -WorkingDirectory $RepoRoot
+$BrainTrigger = New-ScheduledTaskTrigger -AtStartup
+$BrainPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$BrainSettings = New-ScheduledTaskSettingsSet @SettingsArgs
+Register-ScheduledTask -TaskName $BrainTaskName -Action $BrainAction -Trigger $BrainTrigger -Principal $BrainPrincipal -Settings $BrainSettings -Description 'KRISTINE Brain Connector' -Force | Out-Null
+$BrainTask = Get-ScheduledTask -TaskName $BrainTaskName -ErrorAction Stop
 
 Start-ScheduledTask -TaskName $TaskName
 if ($BrainTask) {

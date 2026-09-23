@@ -97,6 +97,48 @@ def _brain_task_state() -> str:
     return (cp.stdout or "").strip()
 
 
+def _ps_quote(value: str) -> str:
+    return str(value).replace("'", "''")
+
+
+def _repair_brain_task() -> None:
+    """Rebuild the task action when Windows still points to a moved file."""
+    if os.name != "nt":
+        raise RuntimeError("Brain-Windows-Task ist nur unter Windows verfuegbar")
+    script = Path(base.BRAIN_SCRIPT).resolve()
+    python_exe = Path(sys.executable).resolve()
+    if not script.is_file():
+        raise RuntimeError(f"{script.name} fehlt im Projektordner")
+    if not python_exe.is_file():
+        raise RuntimeError("Python fuer den Brain Connector wurde nicht gefunden")
+    quoted_name = _ps_quote(BRAIN_TASK_NAME)
+    command = (
+        f"$a=New-ScheduledTaskAction -Execute '{_ps_quote(str(python_exe))}' "
+        f"-Argument '\"{_ps_quote(str(script))}\"' -WorkingDirectory '{_ps_quote(str(REPO_ROOT))}'; "
+        "$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; "
+        "$t=New-ScheduledTaskTrigger -AtStartup; "
+        "$s=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries "
+        "-DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew; "
+        f"Register-ScheduledTask -TaskName '{quoted_name}' -Action $a -Principal $p -Trigger $t -Settings $s "
+        "-Description 'KRISTINE Brain Connector' -Force | Out-Null"
+    )
+    cp = _powershell(command, timeout=12.0)
+    if cp.returncode != 0:
+        raise RuntimeError((cp.stderr or cp.stdout or "Brain-Task konnte nicht repariert werden").strip())
+    base._set_manager_action("brain-task-repair", str(script))
+
+
+def _start_brain_task() -> subprocess.CompletedProcess:
+    quoted = BRAIN_TASK_NAME.replace("'", "''")
+    cp = _powershell(f"Start-ScheduledTask -TaskName '{quoted}' -ErrorAction Stop", timeout=8.0)
+    if cp.returncode == 0:
+        return cp
+    # Error 0x80070002 means that the task exists but its executable/script was
+    # moved. Repair from the manager's current repository and retry once.
+    _repair_brain_task()
+    return _powershell(f"Start-ScheduledTask -TaskName '{quoted}' -ErrorAction Stop", timeout=8.0)
+
+
 def _start_brain(existing: dict | None = None) -> int:
     if _brain_http_ok():
         process = base._discover_brain_process()
@@ -106,11 +148,7 @@ def _start_brain(existing: dict | None = None) -> int:
         raise RuntimeError("Brain-Windows-Task ist nur unter Windows verfuegbar")
     _require_system_context()
 
-    quoted = BRAIN_TASK_NAME.replace("'", "''")
-    cp = _powershell(
-        f"Start-ScheduledTask -TaskName '{quoted}' -ErrorAction Stop",
-        timeout=8.0,
-    )
+    cp = _start_brain_task()
     if cp.returncode != 0:
         raise RuntimeError((cp.stderr or cp.stdout or "Brain-Task konnte nicht gestartet werden").strip())
 
@@ -146,10 +184,7 @@ def _restart_brain() -> int:
         timeout=8.0,
     )
 
-    cp = _powershell(
-        f"Start-ScheduledTask -TaskName '{quoted}' -ErrorAction Stop",
-        timeout=8.0,
-    )
+    cp = _start_brain_task()
     if cp.returncode != 0:
         raise RuntimeError((cp.stderr or cp.stdout or "Brain-Task konnte nicht neu gestartet werden").strip())
 
