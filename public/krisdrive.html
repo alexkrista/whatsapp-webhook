@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISDRIVE · Live-Fuhrpark</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
-  <link rel="stylesheet" href="/public/krisdrive-logbook.css?v=1.2">
+  <link rel="stylesheet" href="/public/krisdrive-logbook.css?v=1.3">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
   <style>
     :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#10233f;background:#eef1f3}
@@ -25,10 +25,10 @@
   </style>
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="krisdrive" data-krista-build="KRISDRIVE 1.2"></div>
+  <div id="kristaTopbar" data-krista-active="krisdrive" data-krista-build="KRISDRIVE 1.3"></div>
   <main class="wrap">
     <div class="hero">
-      <div><div class="eyebrow">KRISTA Fuhrpark · 1.2</div><h1>🚐 KRISDRIVE</h1><div class="sub">Live-Fahrzeuge · Fahrer · Position · Fahrtenbuch</div></div>
+      <div><div class="eyebrow">KRISTA Fuhrpark · 1.3</div><h1>🚐 KRISDRIVE</h1><div class="sub">Live-Fahrzeuge · Fahrer · Position · Fahrtenbuch</div></div>
       <div class="actions"><button class="btn secondary" id="showAll">Alle anzeigen</button><button class="btn" id="refresh">↻ Aktualisieren</button></div>
     </div>
 
@@ -151,6 +151,6 @@
     initMap();load();setInterval(load,5000);
   })();
   </script>
-  <script src="/public/krisdrive-logbook.js?v=1.2"></script>
+  <script src="/public/krisdrive-logbook.js?v=1.3"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs/promises"), os = require("node:os"), path = require("node:path");
 const express = require("express");
-const { registerKrisdriveLogbook, dateRange, trackerMileage, normalizeLocal } = require("../krisdrive-logbook");
+const { registerKrisdriveLogbook, dateRange, trackerMileage, normalizeLocal, streetAndTown } = require("../krisdrive-logbook");
 
 const trip = (extra = {}) => ({ deviceId: 17, startPositionId: 101, startTime: "2026-09-22T06:00:00Z", endTime: "2026-09-22T06:30:00Z", startAddress: "Frastanz Werkstatt", endAddress: "Feldkirch Baustelle", startLat: 47.21, startLon: 9.62, endLat: 47.24, endLon: 9.59, distance: 12500, startOdometer: 26734817.503, endOdometer: 26747317.503, ...extra });
 async function harness(t, { local = [], config, request } = {}) {
@@ -122,13 +122,14 @@ test("missing trip addresses resolve through known places and the Traccar geocod
   let rows = (await (await h.get()).json()).rows;
   assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
   assert.equal(rows[0].endLocation, "Torkelgässele, Rankweil");
-  assert.equal(rows[1].startLocation, "Bahnhofstraße, Feldkirch");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  assert.equal(rows[1].startLocation, "Torkelgässele, Rankweil");
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
   const edited = await h.patch(rows[0], { startLocation: "Mein Ziel", endLocation: rows[0].endLocation });
   assert.equal(edited.status, 200);
   rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
   assert.equal(rows[0].startLocation, "Mein Ziel");
-  assert.equal(rows[1].startLocation, "Bahnhofstraße, Feldkirch");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
 });
 
@@ -260,4 +261,61 @@ test("private locations, overlapping trips and a missing first origin are not us
   assert.equal(rows[1].endLocation, "");
   const csv = await (await h.get("/export.csv" + h.query)).text();
   assert.ok(!csv.includes("Privates Ziel"));
+});
+
+test("addresses contain only street and town, preserving numbers that belong to a street name", () => {
+  for (const [input, expected] of [
+    ["45 Feldkircher Straße, Frastanz, Vorarlberg, AT", "Feldkircher Straße, Frastanz"],
+    ["Feldkircher Straße 47, 6820 Frastanz, Österreich", "Feldkircher Straße, Frastanz"],
+    ["Feldkircher Straße 45a, AT-6820 Frastanz", "Feldkircher Straße, Frastanz"],
+    ["45, Feldkircher Straße, 6820, Frastanz, AT", "Feldkircher Straße, Frastanz"],
+    ["Feldkircher Straße, 45, Frastanz, AT", "Feldkircher Straße, Frastanz"],
+    ["12-14 Oberrain, Meiern, Vorarlberg, AT", "Oberrain, Meiern"],
+    ["Oberrain 128/1, Meiern, Vorarlberg, AT", "Oberrain, Meiern"],
+    ["Schmittengasse, Frastanz", "Schmittengasse, Frastanz"],
+    ["Straße des 17. Juni 45, Berlin, DE", "Straße des 17. Juni, Berlin"],
+    ["10.-Oktober-Straße 12, Klagenfurt, AT", "10.-Oktober-Straße, Klagenfurt"],
+    ["Feldkircher Str. 45", "Feldkircher Str."],
+    ["Halle 2", "Halle 2"],
+    ["47.22409, 9.62169", "47.22409, 9.62169"],
+    [null, ""],
+  ]) assert.equal(streetAndTown(input), expected, String(input));
+});
+
+test("arrival and next departure always share one street and town; corrections on either side update both", async t => {
+  const h = await harness(t);
+  h.state.trips = [
+    trip({ startPositionId: 501, startAddress: "12 Schmittengasse, 6820 Frastanz, Vorarlberg, AT", endAddress: "45 Feldkircher Straße, Frastanz, Vorarlberg, AT" }),
+    trip({ startPositionId: 502, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:30:00Z", startAddress: "Bahnhofstraße 47, Feldkirch, Vorarlberg, AT", endAddress: "128 Oberrain, Meiern, Vorarlberg, AT" }),
+  ];
+  let rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, Frastanz");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  assert.equal(rows[0].startLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[1].endLocation, "Oberrain, Meiern");
+  assert.equal((await h.patch(rows[0], { endLocation: "Schmittengasse 19, Frastanz, Vorarlberg, AT" })).status, 200);
+  rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  assert.equal((await h.patch(rows[1], { startLocation: "47 Feldkircher Straße, Frastanz, Vorarlberg, AT" })).status, 200);
+  rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, Frastanz");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  h.state.offline = true;
+  rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.ok(!csv.includes("45 Feldkircher")); assert.ok(!csv.includes("47 Feldkircher"));
+  assert.ok(!csv.includes("Vorarlberg")); assert.ok(!csv.includes("128 Oberrain"));
+  assert.equal(csv.split("Feldkircher Straße, Frastanz").length - 1, 2);
+  // Re-entering a formerly stored value is still a new explicit correction,
+  // even when only the other side's later edit changed the visible shared stop.
+  assert.equal((await h.patch(rows[0], { endLocation: "Schmittengasse 19, Frastanz" })).status, 200);
+  rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, "Schmittengasse, Frastanz");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  const [file] = await fs.readdir(path.join(h.root, "logbook"));
+  const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));
+  assert.equal(stored.records[rows[0].id].original.endLocation, "45 Feldkircher Straße, Frastanz, Vorarlberg, AT");
+  assert.equal(stored.records[rows[1].id].original.startLocation, "Bahnhofstraße 47, Feldkirch, Vorarlberg, AT");
 });

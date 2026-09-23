@@ -4,7 +4,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const expressPath = require.resolve("express");
 const originalExpress = require(expressPath);
-const { registerKrisdriveLogbook, trackerMileage, coordinates } = require("./krisdrive-logbook");
+const { registerKrisdriveLogbook, trackerMileage, coordinates, streetAndTown } = require("./krisdrive-logbook");
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -151,7 +151,7 @@ function wrappedExpress(...args) {
           position: position ? {
             lat: numberOrNull(position.latitude),
             lng: numberOrNull(position.longitude),
-            address: String(position.address || ""),
+            address: streetAndTown(position.address),
             speedKmh,
             course: numberOrNull(position.course),
             ignition,
