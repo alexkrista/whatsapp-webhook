@@ -33,11 +33,7 @@ const { registerPaintColorStockOverlay } = require("./paint-color-stock-overlay"
 
 function registerPaintHtmlHotfix(app, publicDir) {
   app.get("/admin/paint", (req, res, next) => {
-    const adminToken = process.env.ADMIN_TOKEN || "";
-    if (adminToken) {
-      const token = req.headers["x-admin-token"] || req.query.token || "";
-      if (String(token) !== String(adminToken)) return res.status(403).send("Forbidden");
-    }
+    if (!require("./admin-auth").requireAdmin(req, res)) return;
 
     // Diese Arbeitsmaske ändert sich laufend und darf nie als alte Browser-
     // oder Proxy-Version weitergereicht werden.

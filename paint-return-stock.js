@@ -14,15 +14,7 @@ function registerPaintReturnStock(app, options = {}) {
   const printQueueFile = path.join(root, "return-print-queue.json");
   let writeChain = Promise.resolve();
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = req.headers["x-admin-token"] || req.query.token || "";
-    if (String(token) !== String(adminToken)) {
-      res.status(403).json({ ok: false, error: "Forbidden" });
-      return false;
-    }
-    return true;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   const clean = (value, max = 300) => String(value ?? "").trim().slice(0, max);
   const eanNorm = (value) => clean(value, 80).replace(/\D/g, "");

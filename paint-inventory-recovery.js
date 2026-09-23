@@ -15,15 +15,7 @@ function registerPaintInventoryRecovery(app, options = {}) {
   const identityFile = path.join(publicDir, "lg-ean-identity.json");
   const backupDir = path.join(root, "recovery-backups");
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = req.headers["x-admin-token"] || req.query.token || "";
-    if (String(token) !== String(adminToken)) {
-      res.status(403).json({ ok: false, error: "Forbidden" });
-      return false;
-    }
-    return true;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   const clean = (value, max = 500) => String(value ?? "").trim().slice(0, max);
   const digits = value => clean(value, 100).replace(/\D/g, "");

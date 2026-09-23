@@ -30,13 +30,7 @@ function wrappedExpress(...args) {
   const traccarBaseUrl = String(process.env.TRACCAR_BASE_URL || "").replace(/\/$/, "");
   const traccarToken = String(process.env.TRACCAR_TOKEN || "").trim();
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = String(req.headers["x-admin-token"] || req.query.token || "");
-    if (token === adminToken) return true;
-    res.status(403).json({ ok: false, error: "Forbidden" });
-    return false;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   async function readJson(file, fallback) {
     try {

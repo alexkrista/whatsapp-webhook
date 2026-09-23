@@ -21,15 +21,16 @@ function response() {
     json(value) { this.body = value; return this; },
   };
 }
-async function call(app, method, route, { body = {}, query = {}, params = {} } = {}) {
+async function call(app, method, route, { body = {}, query = {}, params = {}, headers = { "x-admin-token":"test-only" } } = {}) {
   const handler = app.routes[method].get(route);
   assert(handler, `${method} ${route} registered`);
   const res = response();
-  await handler({ body, query, params, headers: {} }, res);
+  await handler({ body, query, params, headers }, res);
   return res;
 }
 
 (async () => {
+  process.env.ADMIN_TOKEN = "test-only";
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "kristine-return-"));
   const paintDir = path.join(dataDir, "_kristine", "paint");
   await fs.mkdir(paintDir, { recursive: true });
@@ -114,7 +115,7 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   registerPaintReturnStock(securedApp, { dataDir });
   if (previousToken === undefined) delete process.env.ADMIN_TOKEN;
   else process.env.ADMIN_TOKEN = previousToken;
-  res = await call(securedApp, "POST", "/admin/api/paint/returns/:id/update", { params: { id: "R-1" }, body: change });
+  res = await call(securedApp, "POST", "/admin/api/paint/returns/:id/update", { params: { id: "R-1" }, body: change, headers:{} });
   assert.equal(res.statusCode, 403);
 
   res = await call(app, "GET", "/admin/api/paint/returns/print-queue", { query: {} });
@@ -144,7 +145,7 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   assert.equal(res.body.items.length,0);
   res = await call(app,"GET","/admin/api/paint/returns",{query:{manufacturer:"Little Greene",includeUsed:"1"}});
   assert.equal(res.body.items[0].returnLabel,"LG-2");
-  assert.equal((await call(securedApp,"POST","/admin/api/paint/returns/:id/remove",{params:{id:"R-1"},body:{reason:"used",revision:2}})).statusCode,403);
+  assert.equal((await call(securedApp,"POST","/admin/api/paint/returns/:id/remove",{params:{id:"R-1"},body:{reason:"used",revision:2},headers:{}})).statusCode,403);
   for (const [maker,prefix] of [["Synthesa","SY"],["KABE Farben","KB"],["FarbenCenter","FC"],["Brillux","BX"],["Farben Morscher","FM"]]) {
     await call(app,"POST","/admin/api/paint/returns/material",{body:{ean:"9001234567890",manufacturer:maker,material:"Test",size:"1 L"}});
     res = await call(app,"POST","/admin/api/paint/returns",{body:{ean:"9001234567890",colour:"Test",weightKg:1}});

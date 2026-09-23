@@ -22,17 +22,7 @@ function registerPaintMixHistory(app, options = {}) {
   let writeChain = Promise.resolve();
   function serial(fn) { const result = writeChain.then(fn); writeChain = result.catch(() => {}); return result; }
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = req.headers["x-admin-token"] || req.query.token || "";
-    const cookies = Object.fromEntries(String(req.headers.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
-    const browserSession = crypto.createHmac("sha256", adminToken).update("kristine-browser-session-v1").digest("base64url");
-    if (String(token) !== String(adminToken) && cookies.kristine_session !== browserSession) {
-      res.status(403).json({ ok: false, error: "Forbidden" });
-      return false;
-    }
-    return true;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   async function requireBridge(req, res) {
     const token = String(req.headers["x-lg-bridge-token"] || "");

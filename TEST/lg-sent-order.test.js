@@ -26,7 +26,7 @@ async function call(app, method, route, { body = {}, query = {}, params = {} } =
   const handler = app.routes[method].get(route);
   assert(handler, `${method} ${route} registered`);
   const res = response();
-  await handler({ body, query, params, headers: {} }, res);
+  await handler({ body, query, params, headers: { "x-admin-token":"test-only" } }, res);
   return res;
 }
 function workbookBase64() {
@@ -44,6 +44,7 @@ function workbookBase64() {
 }
 
 (async () => {
+  process.env.ADMIN_TOKEN = "test-only";
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "kristine-sent-order-"));
   const paintDir = path.join(dataDir, "_kristine", "paint");
   await fs.mkdir(paintDir, { recursive: true });

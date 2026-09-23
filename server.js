@@ -362,17 +362,7 @@ function isAllowedPdfSender(sender) {
   const allowed = PDF_ALLOWED_FROM.split(",").map((s) => s.trim()).filter(Boolean);
   return allowed.includes(String(sender || "").trim());
 }
-function requireAdmin(req, res) {
-  if (!ADMIN_TOKEN) return true;
-  const tok = req.headers["x-admin-token"] || req.query.token || "";
-  const cookies = Object.fromEntries(String(req.headers.cookie || "").split(";").map(part => part.trim().split(/=(.*)/s).slice(0, 2)).filter(parts => parts[0]));
-  const browserSession = crypto.createHmac("sha256", ADMIN_TOKEN).update("kristine-browser-session-v1").digest("base64url");
-  if (tok !== ADMIN_TOKEN && cookies.kristine_session !== browserSession) {
-    res.status(403).send("Forbidden");
-    return false;
-  }
-  return true;
-}
+const requireAdmin = require("./admin-auth").requireAdmin;
 
 registerKristineActivityAudit(app, {
   dataDir: DATA_DIR,
@@ -1803,6 +1793,11 @@ console.log("ðŸ“¡ WhatsApp-Sender-Konfiguration", {
 });
 
 // ===== KRISTINE INITIALIZATION (nach sendWhatsAppKristineReply Definition) =====
+require("./employee-login").registerEmployeeLogin(app, {
+  dataDir: DATA_DIR,
+  readEmployees,
+  sendWhatsApp: sendWhatsAppKristineReply,
+});
 let customerAccess = null;
 let customerNotifications = null;
 kristine = registerKristine(app, {
@@ -3368,6 +3363,7 @@ async function persistOrderSchedule(jobId, value, options = {}) {
   return schedule;
 }
 function orderScheduleActor(req, fallback = "Alex / Büro") {
+  if (req.kristineActor) return { id:req.kristineActor.id, name:req.kristineActor.name };
   return { id:String(req?.headers?.["x-krista-user-id"] || "admin").slice(0, 100), name:String(req?.headers?.["x-krista-user-name"] || fallback).slice(0, 160) };
 }
 async function selectedOrderEmployees(employeeIds) {
@@ -3580,7 +3576,7 @@ app.post("/admin/api/job/:jobId/offer-draft/accept",async(req,res)=>{
     if(existing){const persisted=await persistAcceptedOffer(jobId,existing),requestedDate=cleanOrderScheduleDate(req.body?.requestedDate||req.body?.desiredDate||req.body?.customerRequestedDate||req.body?.wunschtermin);let schedule=await readOrderSchedule(jobId);if(confirmedInput)schedule=await confirmOrderScheduleForJob(jobId,confirmedInput);else if(requestedDate&&schedule.status!=="confirmed")schedule=await recordOrderScheduleRequest(jobId,requestedDate,orderScheduleActor(req),"customer");return res.json({ok:true,jobId,alreadyAccepted:true,order:existing,schedule,...persisted})}
     const draft=await finalizeOfferDraft(jobId),selectedAlternativeIds=[...new Set((Array.isArray(req.body?.selectedAlternativeIds)?req.body.selectedAlternativeIds:[]).map(value=>String(value).slice(0,80)))],knownAlternatives=new Set((draft.positions||[]).map((row,index)=>row?.isAlternative===true?positionId(row,index):null).filter(Boolean));
     const unknown=selectedAlternativeIds.filter(id=>!knownAlternatives.has(id));if(unknown.length)return res.status(400).json({ok:false,error:"Eine gewählte Alternativposition ist nicht mehr im Angebot vorhanden. Bitte Angebot neu laden."});
-    const actorId=String(req.headers["x-krista-user-id"]||"").slice(0,100),employees=actorId?await readEmployees().catch(()=>[]):[],actor=employees.find(row=>String(row.id||"")===actorId)||{};
+    const actorId=String(req.kristineActor?.id||req.headers["x-krista-user-id"]||"").slice(0,100),employees=actorId?await readEmployees().catch(()=>[]):[],actor=employees.find(row=>String(row.id||"")===actorId)||{};
     const requestedDate=cleanOrderScheduleDate(req.body?.requestedDate||req.body?.desiredDate||req.body?.customerRequestedDate||req.body?.wunschtermin),meta=await readJobMeta(jobId),acceptedBy={id:actorId,name:actor.name||actor.employeeName||""},order=buildAcceptedOrder({draft,jobId,customer:meta.contactName||meta.customerMaster?.name||meta.name,selectedAlternativeIds,acceptedBy,requestedDate,requestedBy:acceptedBy});
     const agreed=order.offerSchedule;
     if(confirmedInput&&agreed?.mode==="fixed"&&["date","from","to"].some(key=>confirmedInput[key]!==agreed[key]))return res.status(409).json({ok:false,error:"Der Termin muss dem vereinbarten Angebotstermin entsprechen."});

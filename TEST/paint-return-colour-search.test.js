@@ -8,6 +8,7 @@ const { JSDOM } = require("jsdom");
 const { registerPaintLab } = require("../paint-lab");
 
 (async () => {
+  process.env.ADMIN_TOKEN = "colour-test";
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "return-colour-test-"));
   const root = path.join(dataDir, "_kristine", "paint");
   await fs.mkdir(root, { recursive: true });
@@ -49,7 +50,7 @@ const { registerPaintLab } = require("../paint-lab");
       if (failSystems.includes(system)) return response({ ok: false, error: "offline" }, false);
       if (customRows) return response({ results: system === "LG" ? customRows : [] });
       const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; } };
-      await routes.get("/admin/api/paint/search")({ query: Object.fromEntries(u.searchParams), headers: {} }, res);
+      await routes.get("/admin/api/paint/search")({ query: Object.fromEntries(u.searchParams), headers: { "x-admin-token":"colour-test" } }, res);
       return response(res.data, res.statusCode === 200);
     }
     if (u.pathname.endsWith("/jobs")) return response({ jobs: [] });

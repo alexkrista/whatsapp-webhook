@@ -13,7 +13,7 @@ const { registerPaintMixHistory } = require("../paint-mix-history");
     { id: "alex-real", name: "Alexander Krista", active: true },
   ]));
 
-  process.env.ADMIN_TOKEN = "";
+  process.env.ADMIN_TOKEN = "test-only";
   process.env.KRISTINE_LG_BRIDGE_TOKEN = "test";
   const routes = {};
   const app = {
@@ -28,7 +28,7 @@ const { registerPaintMixHistory } = require("../paint-mix-history");
       status(code) { this.statusCode = code; return this; },
       json(data) { this.body = data; return this; },
     };
-    await routes[`${method} ${route}`]({ body, query: {}, params: {}, headers }, res);
+    await routes[`${method} ${route}`]({ body, query: {}, params: {}, headers: { "x-admin-token":"test-only", ...headers } }, res);
     return res;
   }
 

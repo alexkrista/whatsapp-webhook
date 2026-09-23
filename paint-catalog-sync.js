@@ -13,15 +13,7 @@ function registerPaintCatalogSync(app, options = {}) {
   const candidateMetaFile = path.join(root, "innovatint-catalog-candidate-meta.json");
   const backupDir = path.join(root, "catalog-backups");
 
-  function requireAdmin(req, res) {
-    if (!adminToken) return true;
-    const token = req.headers["x-admin-token"] || req.query.token || "";
-    if (String(token) !== String(adminToken)) {
-      res.status(403).json({ ok:false, error:"Forbidden" });
-      return false;
-    }
-    return true;
-  }
+  const requireAdmin = require("./admin-auth").requireAdmin;
 
   const clean = (value, max = 500) => String(value ?? "").trim().slice(0, max);
   async function ensureDir(dir = root) { await fsp.mkdir(dir, { recursive:true }); }

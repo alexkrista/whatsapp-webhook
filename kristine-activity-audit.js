@@ -3,6 +3,7 @@
 const fsp = require("fs/promises");
 const path = require("path");
 const { isAlexander } = require("./kristine-user-access");
+const { currentActor } = require("./employee-sessions");
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -75,6 +76,8 @@ function registerKristineActivityAudit(app, { dataDir, requireAdmin, readEmploye
   }
 
   async function actor(req) {
+    const sessionActor = currentActor(req);
+    if (sessionActor) return (await employees()).find(employee => employeeId(employee) === sessionActor.id) || null;
     const wanted = text(req.headers["x-krista-user-id"], 120);
     if (!wanted) return null;
     return (await employees()).find((employee) => employeeId(employee) === wanted) || null;
