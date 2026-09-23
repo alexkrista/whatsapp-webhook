@@ -22,6 +22,8 @@ function readJson(file, fallback) {
 function employeeId(row) { return String(row?.id || row?.employeeId || "").trim(); }
 function employeeName(row) { return String(row?.nickname || row?.rufname || row?.name || row?.employeeName || employeeId(row)).trim(); }
 function currentActor(req) {
+  // Personal login stays unavailable until explicit KRISTINE entitlements are in place.
+  if (process.env.KRISTINE_PERSONAL_LOGIN_ENABLED !== "true") return null;
   const token = cookieValue(req);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   const session = readJson(sessionPath(token), null);

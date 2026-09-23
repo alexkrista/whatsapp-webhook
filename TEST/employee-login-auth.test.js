@@ -11,6 +11,7 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   t.after(() => fs.rm(dir, { recursive:true, force:true }));
   process.env.DATA_DIR = dir;
   process.env.ADMIN_TOKEN = "legacy-machine-secret";
+  process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = "true";
   const people = [
     { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true },
     { id:"mario", name:"Mario", phone:"+43 660 222222", active:true },

@@ -39,7 +39,12 @@ function registerEmployeeLogin(app, { dataDir, readEmployees, sendWhatsApp }) {
     return matches.length === 1 ? matches[0] : null;
   }
 
-  app.get("/anmelden", (_req, res) => res.sendFile(path.join(__dirname, "public", "anmelden.html")));
+  app.get("/anmelden", (_req, res) => {
+    if (process.env.KRISTINE_PERSONAL_LOGIN_ENABLED !== "true") {
+      return res.status(503).type("html").send('<!doctype html><html lang="de"><meta charset="utf-8"><title>KRISTINE Anmeldung</title><body><h1>Persönliche Anmeldung wird eingerichtet</h1><p>Die Zugänge werden gerade auf die berechtigten Personen begrenzt.</p></body></html>');
+    }
+    res.sendFile(path.join(__dirname, "public", "anmelden.html"));
+  });
   app.get("/auth/me", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const actor = currentActor(req);
@@ -47,6 +52,7 @@ function registerEmployeeLogin(app, { dataDir, readEmployees, sendWhatsApp }) {
     res.json({ ok:true, user:actor });
   });
   app.post("/auth/whatsapp/start", async (req, res) => {
+    if (process.env.KRISTINE_PERSONAL_LOGIN_ENABLED !== "true") return res.status(403).json({ ok:false, error:"Die persönliche Anmeldung wird eingerichtet." });
     if (rejectOrigin(req, res)) return;
     const phone = normalizePhone(req.body?.phone);
     if (phone.length < 9 || phone.length > 16) return res.status(400).json({ ok:false, error:"Bitte eine gültige Mobilnummer eingeben." });
@@ -75,6 +81,7 @@ function registerEmployeeLogin(app, { dataDir, readEmployees, sendWhatsApp }) {
   });
 
   app.post("/auth/whatsapp/verify", async (req, res) => {
+    if (process.env.KRISTINE_PERSONAL_LOGIN_ENABLED !== "true") return res.status(403).json({ ok:false, error:"Die persönliche Anmeldung wird eingerichtet." });
     if (rejectOrigin(req, res)) return;
     const phone = normalizePhone(req.body?.phone), code = String(req.body?.code || "").trim();
     const row = await read(phone);
