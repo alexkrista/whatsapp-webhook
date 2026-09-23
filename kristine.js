@@ -2859,14 +2859,16 @@ const open = taskId
       ).trim();
 
       const allowanceModelFor = employee => {
+        if(String(employee?.worktimeModelId||"")==="office-alex")return "employee6";
         const employeeId=String(employee?.id||employee?.employeeId||"");
         const direct=String(employee?.dailyAllowanceModel||"").trim().toLowerCase();
         if(["maler","buak","site6","none"].includes(direct))return direct;
         if(employeeWorkRules?.[employeeId]?.buak===true)return "buak";
         return /\bmaler\b/i.test(String(employee?.role||""))?"maler":"none";
       };
-      const allowanceFor = (model,siteMinutes) => {
+      const allowanceFor = (model,siteMinutes,workMinutes=0) => {
         const minutes=Math.max(0,Number(siteMinutes)||0);
+        if(model==="employee6")return workMinutes>360?"employee6":"";
         if(model==="buak")return minutes>=540?"buak_gross":minutes>=180?"buak_klein":"";
         if(model==="site6")return minutes>=360?"site6":"";
         if(model==="maler")return minutes>180?"maler":"";
@@ -2892,13 +2894,14 @@ const open = taskId
 
         for (const date of dates) {
           const segments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
-          let siteMinutes = 0, flMinutes = 0, chMinutes = 0;
+          let siteMinutes = 0, workMinutes = 0, flMinutes = 0, chMinutes = 0;
 
           for (const segment of segments) {
             if (segment.type !== "work") continue;
             const duration = minutesOf(segment);
             if (!duration) continue;
 
+            workMinutes += duration;
             const meta = await jobMetaFor(segment.jobId);
             if (!isInternal(segment, meta)) siteMinutes += duration;
 
@@ -2911,7 +2914,7 @@ const open = taskId
             String(row.employeeId) === employeeId && String(row.date) === date
           );
           const override = parseOverride(correction?.note || "");
-          const automaticType=allowanceFor(dailyAllowanceModel,siteMinutes);
+          const automaticType=allowanceFor(dailyAllowanceModel,siteMinutes,workMinutes);
           const taggeld=finalFlag(override.taggeld,Boolean(automaticType));
           const allowanceType=taggeld?(automaticType||(dailyAllowanceModel==="buak"?(siteMinutes>=540?"buak_gross":"buak_klein"):"manual")):"";
 
@@ -2919,6 +2922,8 @@ const open = taskId
             date,
             taggeld,
             allowanceType,
+            dietPainter:taggeld&&["maler","none"].includes(dailyAllowanceModel)?1:0,
+            dietEmployee:taggeld&&["employee6","site6"].includes(dailyAllowanceModel)?1:0,
             dietSmall:allowanceType==="buak_klein"?1:0,
             dietLarge:allowanceType==="buak_gross"?1:0,
             flMinutes,

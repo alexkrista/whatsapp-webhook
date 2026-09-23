@@ -10,7 +10,7 @@ try{
  w.selected={name:"Adventurer 7"};w.system="LG";
  const p={productId:11,productName:'Absolute Matt Emulsion',baseName:'Transparent',recipeAvailable:true,sizes:[{canSizeId:1,size:'1 L',stock:2}],oldRecipe:{baseName:'Extra Deep'}};
  w.api=async url=>{calls.push(url);if(url.includes('/color/'))return {products:[{...p,baseName:'Extra Deep'}]};return {formulaId:1,baseName:'Extra Deep',canSize:'1 L',recipeUnitMl:1,legacy:true,recipe:[]};};
- for(const line of html.split('\n'))if(line.startsWith('function renderDetail(')||line.startsWith('window.openRecipe='))w.eval(line);
+ for(const line of html.split('\n'))if(line.startsWith('function colorDisplayName(')||line.startsWith('function renderDetail(')||line.startsWith('window.openRecipe='))w.eval(line);
  w.eval(fs.readFileSync(path.join(__dirname,'../public/paint-catalog-history-ui.js'),'utf8'));
  w.renderDetail({color:{id:1,name:'Adventurer 7'},products:[p,{...p,productId:16,productName:'ASP',oldRecipe:null}]});
  assert.equal(w.document.querySelectorAll('[data-old-colour]').length,1);
@@ -20,6 +20,13 @@ try{
  assert(calls.some(x=>x.includes('/recipe?')&&x.includes('catalogVersion=before-2026-09')));
  assert.match(w.document.querySelector('#recipeTitle').textContent,/Extra Deep.*ALT/);
  w.renderDetail({color:{id:'old:2',name:'Old colour',legacy:true},products:[]});assert.match(w.document.querySelector('#detail').textContent,/Alt · vor 09\/2026/);
+ w.system='RAL';w.selected=null;
+ w.renderDetail({color:{id:9010,code:'RAL 9010',name:'Reinweiß',ralName:'Reinweiß',ralNumber:'9010'},products:[]});
+ assert.equal(w.document.querySelector('#q').value,'RAL 9010 · Reinweiß');
+ assert.equal(w.document.querySelector('#detail h2').textContent,'RAL 9010 · Reinweiß');
+ w.selected={id:7021,code:'RAL 7021',name:'Schwarzgrau',aliases:['Schwarzgrau']};
+ w.renderDetail({color:{id:7021,code:'RAL 7021',name:'RAL 7021'},products:[]});
+ assert.match(w.document.querySelector('#q').value,/Schwarzgrau/);
  console.log('Archive button visibility, old-basis request and red legacy label tests passed');
 }finally{w.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -3324,6 +3324,8 @@ def get_sql_driver():
 
 
 def sql_connection(database=SQL_DATABASE):
+    from brain_windows_env import restore_sql_password
+    restore_sql_password()
     password = os.environ.get("KRISTINE_SQL_PASSWORD", "").strip()
     if not password:
         raise RuntimeError("KRISTINE_SQL_PASSWORD fehlt")
@@ -8089,6 +8091,8 @@ def mobile_home_alias():
 
 @app.get("/status")
 def status():
+    from brain_windows_env import restore_sql_password
+    restore_sql_password()
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",

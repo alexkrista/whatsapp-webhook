@@ -259,6 +259,7 @@ function currentEmployeeMaster(){
 function currentAllowanceModel(){
   const item=activeQueueItem();
   const employee=currentEmployeeMaster();
+  if(employee?.worktimeModelId==="office-alex")return "employee6";
   const direct=String(employee?.dailyAllowanceModel||item?.dailyAllowanceModel||"").trim().toLowerCase();
   if(["maler","buak","site6","none"].includes(direct))return direct;
   if(item?.buak===true)return "buak";
@@ -306,7 +307,8 @@ function selectedEmployeeScheduledFree(){
   const target=Number(rule.targetHours??0);
   return rule.free===true || !rule.from || !rule.to || target<=0;
 }
-function allowanceForMinutes(model,siteMinutes){
+function allowanceForMinutes(model,siteMinutes,workMinutes=0){
+  if(model==="employee6")return {eligible:workMinutes>360,type:"employee6",label:"Angestellte",rule:"über 6:00 h Arbeit, einschließlich Büro"};
   const m=Math.max(0,Number(siteMinutes||0));
   if(model==="buak"){
     if(m>=540)return {eligible:true,type:"buak_gross",label:"BUAK groß",rule:"ab 9:00 h Baustelle"};
@@ -318,19 +320,20 @@ function allowanceForMinutes(model,siteMinutes){
   return {eligible:false,type:"none",label:"Kein Taggeld",rule:"für diese Mitarbeitergruppe kein Taggeld"};
 }
 function dietCalculation(){
-  let siteMinutes=0,flMinutes=0,chMinutes=0;
+  let siteMinutes=0,workMinutes=0,flMinutes=0,chMinutes=0;
   for(const row of state.segments||[]){
     if(row.type!=="work")continue;
     const from=minutes(row.from),to=minutes(row.to);
     if(from===null||to===null||to<=from)continue;
     const dur=to-from;
+    workMinutes+=dur;
     if(!isInternalWork(row))siteMinutes+=dur;
     const country=countryForSegment(row);
     if(country==="FL")flMinutes+=dur;
     if(country==="CH")chMinutes+=dur;
   }
   const allowanceModel=currentAllowanceModel();
-  const allowance=allowanceForMinutes(allowanceModel,siteMinutes);
+  const allowance=allowanceForMinutes(allowanceModel,siteMinutes,workMinutes);
   return {
     siteMinutes,flMinutes,chMinutes,
     allowanceModel,allowance,
@@ -421,13 +424,15 @@ function dietPrintReport(data,{mode="summary",popup=null}={}){
   const periodLabel=`${shortDate(data.from)} – ${shortDate(data.to)}`;
   const totalsFor=employee=>(employee.rows||[]).reduce((sum,row)=>({
     taggeld:sum.taggeld+Number(row.taggeld||0),
+    dietPainter:sum.dietPainter+Number(row.dietPainter??(employee.dailyAllowanceModel==="maler"?row.taggeld||0:0)),
+    dietEmployee:sum.dietEmployee+Number(row.dietEmployee??(["employee6","site6"].includes(employee.dailyAllowanceModel)?row.taggeld||0:0)),
     dietSmall:sum.dietSmall+Number(row.dietSmall||0),
     dietLarge:sum.dietLarge+Number(row.dietLarge||0),
     flMinutes:sum.flMinutes+Number(row.flMinutes||0),
     flDay:sum.flDay+Number(row.flDay||0),
     chMinutes:sum.chMinutes+Number(row.chMinutes||0),
     chDay:sum.chDay+Number(row.chDay||0),
-  }),{taggeld:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  }),{taggeld:0,dietPainter:0,dietEmployee:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
 
   const employees=[...(data.employees||[])].filter(employee=>{
     const total=totalsFor(employee);
@@ -446,26 +451,26 @@ function dietPrintReport(data,{mode="summary",popup=null}={}){
     const chCells=showCh?`<td>${total.chMinutes?dietMinutesLabel(total.chMinutes):""}</td><td>${total.chDay||""}</td>`:"";
     return `<tr>
       <td>${escape(employee.personalNumber||"–")}</td>
-      <td>${escape(employee.employeeName)}<br><small>${escape(({maler:"Maler · Taggeld",buak:"BUAK",site6:"Baustelle ≥ 6 Std.",none:"Kein Taggeld"})[employee.dailyAllowanceModel]||"")}</small></td>
-      <td>${total.dietSmall||""}</td><td>${total.dietLarge||""}</td><td><strong>${total.taggeld||"–"}</strong></td>
+      <td>${escape(employee.employeeName)}<br><small>${escape(({maler:"Maler · Taggeld",buak:"BUAK",site6:"Baustelle ≥ 6 Std.",employee6:"Angestellte · über 6 Std. Arbeit",none:"Kein Taggeld"})[employee.dailyAllowanceModel]||"")}</small></td>
+      <td>${total.dietPainter||""}</td><td>${total.dietSmall||""}</td><td>${total.dietLarge||""}</td><td>${total.dietEmployee||""}</td><td><strong>${total.taggeld||"–"}</strong></td>
       ${flCells}${chCells}
     </tr>`;
   }).join("")||'<tr><td colspan="9">Im gewählten Zeitraum gibt es keine Diäten oder FL/CH-Zeiten.</td></tr>';
 
   const overall=employees.reduce((sum,e)=>{
     const t=totalsFor(e);
-    sum.taggeld+=t.taggeld;sum.dietSmall+=t.dietSmall;sum.dietLarge+=t.dietLarge;sum.flMinutes+=t.flMinutes;sum.flDay+=t.flDay;sum.chMinutes+=t.chMinutes;sum.chDay+=t.chDay;
+    sum.taggeld+=t.taggeld;sum.dietPainter+=t.dietPainter;sum.dietEmployee+=t.dietEmployee;sum.dietSmall+=t.dietSmall;sum.dietLarge+=t.dietLarge;sum.flMinutes+=t.flMinutes;sum.flDay+=t.flDay;sum.chMinutes+=t.chMinutes;sum.chDay+=t.chDay;
     return sum;
-  },{taggeld:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
+  },{taggeld:0,dietPainter:0,dietEmployee:0,dietSmall:0,dietLarge:0,flMinutes:0,flDay:0,chMinutes:0,chDay:0});
   const countryHead=`${showFl?"<th>FL Std.</th><th>FL Tage</th>":""}${showCh?"<th>CH Std.</th><th>CH Tage</th>":""}`;
   const countryFoot=`${showFl?`<th>${dietMinutesLabel(overall.flMinutes)}</th><th>${overall.flDay||"–"}</th>`:""}${showCh?`<th>${dietMinutesLabel(overall.chMinutes)}</th><th>${overall.chDay||"–"}</th>`:""}`;
 
   const summaryPage=`<section class="diet-page summary-page">
     <header><div><small>FARBEN KRISTA · DIÄTEN & ENTSENDUNG</small><h1>Zusammenfassung</h1></div><strong>${escape(periodLabel)}</strong></header>
     <table class="summary-table">
-      <thead><tr><th>Pers.Nr.</th><th>Name</th><th>Diät klein</th><th>Diät groß</th><th>Gesamt</th>${countryHead}</tr></thead>
+      <thead><tr><th>Pers.Nr.</th><th>Name</th><th>Maler</th><th>Verputz klein</th><th>Verputz groß</th><th>Angestellte</th><th>Gesamt</th>${countryHead}</tr></thead>
       <tbody>${summaryRows}</tbody>
-      <tfoot><tr><th></th><th>GESAMT</th><th>${overall.dietSmall||"–"}</th><th>${overall.dietLarge||"–"}</th><th>${overall.taggeld||"–"}</th>${countryFoot}</tr></tfoot>
+      <tfoot><tr><th></th><th>GESAMT</th><th>${overall.dietPainter||"–"}</th><th>${overall.dietSmall||"–"}</th><th>${overall.dietLarge||"–"}</th><th>${overall.dietEmployee||"–"}</th><th>${overall.taggeld||"–"}</th>${countryFoot}</tr></tfoot>
     </table>
   </section>`;
 

@@ -245,11 +245,10 @@ def install(ns,client,write_allowed,csrf):
     @safe
     def revolut_transfer_context():
         revolut=ns.get('revolut_connection')
-        if revolut is None:raise ConnectionError('Die Revolut-Verbindung ist noch nicht bereit.')
         sources=[a for a in client.accounts(client.auth_token()) if str(a.get('currency') or '').upper()=='EUR' and a.get('iban')]
-        targets=revolut.transfer_accounts()
-        if not targets:raise ConnectionError('Für Revolut Business wurde noch keine EUR-IBAN gefunden.')
-        return jsonify({'ok':True,'sources':sources,'targets':targets})
+        from brain_own_transfer_targets import transfer_targets
+        targets,warnings=transfer_targets(revolut)
+        return jsonify({'ok':True,'sources':sources,'targets':targets,'warnings':warnings})
 
     @app.post('/konfipay/api/revolut-transfer-prepare')
     @safe
@@ -258,14 +257,18 @@ def install(ns,client,write_allowed,csrf):
         try:
             transfer_amount=Decimal(str(body.get('amount') or '')).quantize(Decimal('.01'))
         except Exception:raise ConnectionError('Bitte einen gültigen Betrag eingeben.') from None
-        if transfer_amount<=0 or transfer_amount>Decimal('9999999.99'):
+        if not transfer_amount.is_finite() or transfer_amount<=0 or transfer_amount>Decimal('9999999.99'):
             raise ConnectionError('Bitte einen gültigen Betrag größer 0 EUR eingeben.')
         sources=client.accounts(client.auth_token())
         source=next((a for a in sources if a.get('id')==body.get('sourceAccountId') and str(a.get('currency') or '').upper()=='EUR'),None)
         revolut=ns.get('revolut_connection')
-        if not source or revolut is None:raise ConnectionError('Ausgangskonto oder Revolut-Verbindung nicht gefunden.')
-        target=next((a for a in revolut.transfer_accounts() if a.get('id')==body.get('revolutAccountId')),None)
+        if not source:raise ConnectionError('Ausgangskonto nicht gefunden.')
+        from brain_own_transfer_targets import transfer_targets
+        targets,_warnings=transfer_targets(revolut)
+        target=next((a for a in targets if a.get('id')==body.get('revolutAccountId')),None)
         if not target:raise ConnectionError('Das gewählte Revolut-Konto wurde nicht gefunden.')
+        if re.sub(r'\s+','',source.get('iban') or '').upper()==re.sub(r'\s+','',target['iban']).upper():
+            raise ConnectionError('Ausgangs- und Zielkonto müssen verschieden sein.')
         purpose=' '.join(str(body.get('purpose') or 'Interne Umbuchung Bank an Revolut').split())[:140]
         if target.get('referenceRequired'):purpose=target['referenceRequired']
         e2e=('KRISTA-REV-'+datetime.now().strftime('%y%m%d%H%M%S')+'-'+secrets.token_hex(3).upper())[:35]
