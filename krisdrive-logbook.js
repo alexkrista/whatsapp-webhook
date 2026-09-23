@@ -36,6 +36,22 @@ function coordinateLabel(value) {
 }
 const isCoordinates = value => Boolean(coordinateLabel(value));
 const hasAddress = value => Boolean(text(value)) && !isCoordinates(value);
+function streetAndTown(value) {
+  const address = text(value);
+  if (!address || isCoordinates(address)) return address;
+  const parts = address.split(",").map(part => part.trim()).filter(Boolean);
+  const house = /^\d+[a-z]?(?:\s*[-–/]\s*\d+[a-z]?)?$/i;
+  if (parts.length > 1 && house.test(parts[0])) parts.shift();
+  let street = parts.shift() || "";
+  street = street.replace(/^\d+[a-z]?(?:\s*[-–/]\s*\d+[a-z]?)?\s+(?=\p{L})/iu, "");
+  // A plain label such as "Halle 2" is not necessarily a numbered street.
+  if (parts.length || /(?:stra(?:ß|ss)e|str\.|gasse|weg|allee|platz|steig|gäss(?:le|ele)|gäßle)(?=\s|$)/i.test(street)) {
+    street = street.replace(/\s+\d+\s*[a-z]?(?:\s*[-–/]\s*\d+\s*[a-z]?)?$/i, "").trim();
+  }
+  const town = parts.find(part => !house.test(part) && !/^(?:AT|DE|CH|FL|LI|Österreich|Austria|Deutschland|Germany|Schweiz|Switzerland|Liechtenstein|Vorarlberg|Tirol|Oberösterreich|Niederösterreich|Steiermark|Kärnten|Burgenland)$/i.test(part));
+  const place = (town || "").replace(/^(?:(?:A|AT|D|DE|CH|FL|LI)[-\s])?\d{4,5}\s+/i, "").replace(/\s+\d{4,5}$/, "").trim();
+  return [street, place].filter(Boolean).join(", ");
+}
 function metresBetween(a, b) {
   if (!a || !b) return Infinity;
   return Math.hypot((a.lat - b.lat) * 111195, (a.lng - b.lng) * 111195 * Math.cos(a.lat * Math.PI / 180));
@@ -139,6 +155,7 @@ function view(record) {
     if (!hasAddress(row[field]) && hasAddress(record.data[field])) row[field] = record.data[field];
     row[pointField] = coordinates(row[pointField]?.lat, row[pointField]?.lng) || coordinateLabel(row[field]);
     if (!row[field] || isCoordinates(row[field])) row[field] = knownPlace(row[pointField]) || row[field];
+    row[field] = streetAndTown(row[field]);
   }
   if (Object.hasOwn(record.edits || {}, "odometerStartKm") && row.odometerStartKm !== null && row.odometerEndKm !== null) row.distanceKm = row.odometerEndKm - row.odometerStartKm;
   row.category = row.category || "unassigned";
@@ -164,7 +181,7 @@ function view(record) {
   }
   return row;
 }
-function linkTripEndpoints(rows) {
+function linkTripEndpoints(rows, corrections = new Map()) {
   const quality = value => hasAddress(value) ? 2 : isCoordinates(value) ? 1 : 0;
   for (let i = 1; i < rows.length; i++) {
     const before = rows[i - 1], after = rows[i];
@@ -173,14 +190,23 @@ function linkTripEndpoints(rows) {
     // a private destination from a neighboring business trip or vice versa.
     if (!Number.isFinite(gap) || gap < 0 || before.vehicleId !== after.vehicleId || before.category === "private" || after.category === "private") continue;
     const oldEnd = before.endLocation, oldStart = after.startLocation;
-    if (quality(oldEnd) < quality(oldStart)) {
-      before.endLocation = oldStart;
+    const endQuality = quality(oldEnd), startQuality = quality(oldStart);
+    const endEdited = corrections.get(`${before.id}:endLocation`) || 0;
+    const startEdited = corrections.get(`${after.id}:startLocation`) || 0;
+    // Arrival and the following departure are ONE stop. Prefer a real street
+    // over coordinates; for names, the latest explicit correction wins. Without
+    // a correction the arrival fixes the next departure, even if GPS differs.
+    const takeStart = startQuality > endQuality || startQuality === endQuality && startQuality === 2 && startEdited > endEdited;
+    const stop = takeStart ? oldStart : oldEnd;
+    if (!stop) continue;
+    if (oldEnd !== stop) {
+      before.endLocation = stop;
       before.endPoint ||= after.startPoint;
       before.inferredEnd = true;
       if (before.startLocation) before.missing = before.missing.filter(item => item !== "Start/Ziel");
     }
-    if (quality(oldStart) < quality(oldEnd)) {
-      after.startLocation = oldEnd;
+    if (oldStart !== stop) {
+      after.startLocation = stop;
       after.startPoint ||= before.endPoint;
       after.inferredStart = true;
       if (after.endLocation) after.missing = after.missing.filter(item => item !== "Start/Ziel");
@@ -217,10 +243,21 @@ function reuseStopAddresses(rows) {
 }
 function resolvedRows(records) {
   const rows = records.map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const corrections = new Map();
+  for (const record of records) {
+    for (const field of ["startLocation", "endLocation"]) {
+      if (!hasAddress(record.edits?.[field])) continue;
+      const changed = array(record.history).findLast(entry => entry.type === "edit" &&
+        (entry.locationChanges?.[field] && streetAndTown(entry.locationChanges[field].after) === streetAndTown(record.edits[field]) ||
+          streetAndTown(entry.after?.[field]) === streetAndTown(record.edits[field]) &&
+          streetAndTown(entry.before?.[field]) !== streetAndTown(entry.after?.[field])));
+      corrections.set(`${record.data.id}:${field}`, Date.parse(changed?.at || record.updatedAt) || 1);
+    }
+  }
   // Resolve known coordinates before joining the stops. Then learn the other
   // GPS fix of each joined stop, so recurring visits and old records benefit too.
-  linkTripEndpoints(reuseStopAddresses(rows));
-  linkTripEndpoints(reuseStopAddresses(rows));
+  linkTripEndpoints(reuseStopAddresses(rows), corrections);
+  linkTripEndpoints(reuseStopAddresses(rows), corrections);
   for (const row of rows) {
     row.missing = row.missing.filter(item => item !== "Start/Ziel");
     if (row.category === "business" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))) row.missing.push("Start/Ziel");
@@ -438,12 +475,12 @@ function registerKrisdriveLogbook(app, options = {}) {
       if (!["unassigned", "business", "private"].includes(body.category)) throw fail("Bitte eine gültige Fahrtart auswählen.");
       const employeeId = text(body.employeeId, 100);
       const employee = ctx.employees.find(row => row.id === employeeId);
-      const current = view(record);
+      const current = resolvedRows(Object.values(state.records)).find(row => row.id === record.data.id);
       if (employeeId && !employee && current.driver?.employeeId !== employeeId) throw fail("Mitarbeiter nicht gefunden oder inaktiv.");
       const edits = { ...record.edits, category: body.category, driver: employee ? { employeeId, employeeName: employee.name, source: "logbook" } : employeeId ? current.driver : null };
       if (body.category !== "private") {
         for (const key of ["startLocation", "endLocation", "purpose"]) {
-          if (Object.hasOwn(body, key)) edits[key] = text(body[key], key === "purpose" ? 1000 : 500);
+          if (Object.hasOwn(body, key)) edits[key] = key === "purpose" ? text(body[key], 1000) : streetAndTown(body[key]);
         }
       }
       const start = number(body.odometerStartKm), end = number(body.odometerEndKm);
@@ -453,8 +490,18 @@ function registerKrisdriveLogbook(app, options = {}) {
       else { edits.odometerStartKm = start; edits.odometerEndKm = end; }
       const actor = text(req.kristineActor?.name || "KRISTINE-Administration", 160);
       const at = new Date().toISOString();
-      if (JSON.stringify(edits) !== JSON.stringify(record.edits)) {
-        record.history.push({ type: "edit", at, actor, actorId: text(req.kristineActor?.id, 100), before: record.edits, after: edits });
+      const locationChanges = {};
+      if (body.category !== "private") {
+        for (const field of ["startLocation", "endLocation"]) {
+          if (Object.hasOwn(body, field) && hasAddress(edits[field]) && edits[field] !== current[field]) {
+            locationChanges[field] = { before: current[field], after: edits[field] };
+          }
+        }
+      }
+      // The visible shared stop may differ from this record's older edit.
+      // Re-entering that old name is a NEW correction and must win again.
+      if (JSON.stringify(edits) !== JSON.stringify(record.edits) || Object.keys(locationChanges).length) {
+        record.history.push({ type: "edit", at, actor, actorId: text(req.kristineActor?.id, 100), before: record.edits, after: edits, locationChanges });
         record.edits = edits; record.updatedAt = at; record.changedBy = actor; record.revision++;
       }
       return view(record);
@@ -488,4 +535,4 @@ function createCsv(data) {
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
 }
 
-module.exports = { registerKrisdriveLogbook, trackerMileage, number, coordinates, dateRange, normalizeTrip, normalizeLocal, view, totals, createCsv, displayDate, decimal, categoryLabel };
+module.exports = { registerKrisdriveLogbook, trackerMileage, number, coordinates, streetAndTown, dateRange, normalizeTrip, normalizeLocal, view, totals, createCsv, displayDate, decimal, categoryLabel };

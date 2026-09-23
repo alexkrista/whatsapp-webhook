@@ -27,7 +27,7 @@
       <form id="lb-edit-form"><h3 id="lb-edit-title">Fahrt ergänzen</h3><div id="lb-edit-sub" class="lb-sub"></div>
         <div id="lb-edit-error" class="lb-error" role="alert" hidden></div>
         <div class="lb-fields"><label>Fahrer<select id="lb-driver"></select></label><label>Fahrtart<select id="lb-category"><option value="unassigned">Noch offen</option><option value="business">Geschäftlich</option><option value="private">Privat</option></select></label>
-          <label data-business>Start<input id="lb-start" maxlength="500" autocomplete="off"></label><label data-business>Ziel<input id="lb-end" maxlength="500" autocomplete="off"></label>
+          <label data-business>Start<input id="lb-start" maxlength="500" autocomplete="off" placeholder="Straße, Ort"></label><label data-business>Ziel<input id="lb-end" maxlength="500" autocomplete="off" placeholder="Straße, Ort"></label>
           <label class="full" data-business>Zweck / Kunde / Baustelle<textarea id="lb-purpose" rows="2" maxlength="1000" placeholder="z. B. Baustellenbesprechung · Kunde / Baustelle"></textarea></label>
         </div><div id="lb-private-hint" class="lb-hint" hidden>Privatfahrten werden ohne Ziel- und Zweckangaben angezeigt und exportiert.</div>
         <details id="lb-km-details"><summary>Kilometerstände prüfen / korrigieren</summary><div class="lb-fields"><label>km-Stand Beginn<input id="lb-km-start" type="number" min="0" max="10000000" step="0.001"></label><label>km-Stand Ende<input id="lb-km-end" type="number" min="0" max="10000000" step="0.001"></label></div><div class="lb-hint" id="lb-km-hint"></div></details>
