@@ -125,6 +125,11 @@ function matchingLocal(trip, local) {
 }
 function view(record) {
   const row = { ...record.data, ...(record.edits || {}) };
+  // A saved trip must stay readable even if Traccar is temporarily unavailable:
+  // sync cannot enrich existing records while the GPS report is offline.
+  for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+    if (!row[field] || isCoordinates(row[field])) row[field] = knownPlace(row[pointField]) || row[field];
+  }
   if (Object.hasOwn(record.edits || {}, "odometerStartKm") && row.odometerStartKm !== null && row.odometerEndKm !== null) row.distanceKm = row.odometerEndKm - row.odometerStartKm;
   row.category = row.category || "unassigned";
   row.purpose = row.purpose || "";
