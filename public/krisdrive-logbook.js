@@ -27,7 +27,7 @@
       <form id="lb-edit-form"><h3 id="lb-edit-title">Fahrt ergänzen</h3><div id="lb-edit-sub" class="lb-sub"></div>
         <div id="lb-edit-error" class="lb-error" role="alert" hidden></div>
         <div class="lb-fields"><label>Fahrer<select id="lb-driver"></select></label><label>Fahrtart<select id="lb-category"><option value="unassigned">Noch offen</option><option value="business">Geschäftlich</option><option value="private">Privat</option></select></label>
-          <label data-business>Start<input id="lb-start" maxlength="500" autocomplete="off" placeholder="Straße, Ort"></label><label data-business>Ziel<input id="lb-end" maxlength="500" autocomplete="off" placeholder="Straße, Ort"></label>
+          <label data-business>Start<input id="lb-start" maxlength="500" autocomplete="off" placeholder="Straße, PLZ Ort"></label><label data-business>Ziel<input id="lb-end" maxlength="500" autocomplete="off" placeholder="Straße, PLZ Ort"></label>
           <label class="full" data-business>Zweck / Kunde / Baustelle<textarea id="lb-purpose" rows="2" maxlength="1000" placeholder="z. B. Baustellenbesprechung · Kunde / Baustelle"></textarea></label>
         </div><div id="lb-private-hint" class="lb-hint" hidden>Privatfahrten werden ohne Ziel- und Zweckangaben angezeigt und exportiert.</div>
         <details id="lb-km-details"><summary>Kilometerstände prüfen / korrigieren</summary><div class="lb-fields"><label>km-Stand Beginn<input id="lb-km-start" type="number" min="0" max="10000000" step="0.001"></label><label>km-Stand Ende<input id="lb-km-end" type="number" min="0" max="10000000" step="0.001"></label></div><div class="lb-hint" id="lb-km-hint"></div></details>
@@ -58,7 +58,7 @@
         <div class="lb-date"><strong>${esc(date(row.startedAt))}</strong><small>${esc(time(row.startedAt))} – ${esc(date(row.startedAt) !== date(row.closedAt) ? date(row.closedAt) + " " : "")}${esc(time(row.closedAt))}</small></div>
         <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(row.startLocation || "Start noch offen")}${row.inferredStart ? ' <small>(aus vorheriger Fahrt)</small>' : ""}</div><div>→ ${esc(row.endLocation || "Ziel noch offen")}${row.inferredEnd ? ' <small>(aus nächster Fahrt)</small>' : ""}</div>`}</div>
         <div class="lb-assignment"><strong>${esc(row.driver?.employeeName || "Fahrer offen")}</strong><span class="lb-badge ${esc(row.category)}">${esc(label(row.category))}</span>${row.purpose ? `<small class="lb-purpose">${esc(row.purpose)}</small>` : ""}${row.missing.length ? `<small class="lb-missing">Offen: ${esc(row.missing.join(", "))}</small>` : ""}</div>
-        <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.odometerCorrected ? " · korrigiert" : ""}</small></div>
+        <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.distanceSource === "gps_positions" ? " · GPS neu berechnet" : row.odometerCorrected ? " · korrigiert" : row.distanceIssue ? " · bitte prüfen" : ""}</small></div>
         <button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>
       </article>`).join("") : '<div class="lb-empty">Keine gespeicherten Fahrten in diesem Zeitraum.<br>Wähle einen anderen Zeitraum oder rufe die Fahrten erneut ab.</div>';
     $("stamp").textContent = `${data.range.from} bis ${data.range.to} · ${data.lastSync ? "Letzter GPS-Abruf " + date(data.lastSync) + " " + time(data.lastSync) : "Noch kein erfolgreicher GPS-Abruf"}${sum.unassignedKm ? " · " + format(sum.unassignedKm) + " km noch nicht zugeordnet" : ""}${sum.missingKm ? " · " + sum.missingKm + " Fahrt(en) ohne Kilometerangabe" : ""}`;
@@ -98,7 +98,9 @@
     $("km-start").value = row.odometerCorrected ? row.odometerStartKm : ""; $("km-end").value = row.odometerCorrected ? row.odometerEndKm : "";
     $("km-start").placeholder = format(row.odometerStartKm, 2); $("km-end").placeholder = format(row.odometerEndKm, 2);
     $("km-details").open = row.odometerStartKm == null || row.odometerEndKm == null;
-    $("km-hint").textContent = `Übernommen: ${format(row.odometerStartKm, 2)} → ${format(row.odometerEndKm, 2)} km. Mit dem Fahrzeugtacho abgleichen. Nur bei Abweichung beide Felder ausfüllen; leer lassen übernimmt die GPS-Werte.`;
+    $("km-hint").textContent = row.distanceIssue || row.missing.includes("km-Stand prüfen")
+      ? `Der GPS-Zähler enthält einen auffälligen Sprung. Kilometerstände am Fahrzeug prüfen und bei Bedarf beide Werte korrigieren. Die alte GPS-Angabe wird nicht als Strecke übernommen.`
+      : `Übernommen: ${format(row.odometerStartKm, 2)} → ${format(row.odometerEndKm, 2)} km. Mit dem Fahrzeugtacho abgleichen. Nur bei Abweichung beide Felder ausfüllen; leer lassen übernimmt die GPS-Werte.`;
     $("history").textContent = row.updatedAt ? `Zuletzt geändert: ${date(row.updatedAt)} ${time(row.updatedAt)} · ${row.changedBy}. Änderungen werden protokolliert.` : "Ergänzungen und Korrekturen werden mit Zeitpunkt protokolliert.";
     error("", "edit-error"); togglePrivate(); $("dialog").showModal();
   }
