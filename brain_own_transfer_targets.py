@@ -14,6 +14,12 @@ def configured_business_iban():
                 value, _kind = winreg.QueryValueEx(key, 'KRISTINE_REVOLUT_BUSINESS_OWN_IBAN')
         except OSError:
             pass
+        if not value:
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment') as key:
+                    value, _kind = winreg.QueryValueEx(key, 'KRISTINE_REVOLUT_BUSINESS_OWN_IBAN')
+            except OSError:
+                pass
     return re.sub(r'\s+', '', str(value)).upper()
 
 
