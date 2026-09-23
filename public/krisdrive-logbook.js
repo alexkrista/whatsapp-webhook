@@ -56,7 +56,7 @@
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
         <div class="lb-date"><strong>${esc(date(row.startedAt))}</strong><small>${esc(time(row.startedAt))} – ${esc(date(row.startedAt) !== date(row.closedAt) ? date(row.closedAt) + " " : "")}${esc(time(row.closedAt))}</small></div>
-        <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(row.startLocation || "Start noch offen")}</div><div>→ ${esc(row.endLocation || "Ziel noch offen")}</div>`}</div>
+        <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(row.startLocation || "Start noch offen")}${row.inferredStart ? ' <small>(aus vorheriger Fahrt)</small>' : ""}</div><div>→ ${esc(row.endLocation || "Ziel noch offen")}${row.inferredEnd ? ' <small>(aus nächster Fahrt)</small>' : ""}</div>`}</div>
         <div class="lb-assignment"><strong>${esc(row.driver?.employeeName || "Fahrer offen")}</strong><span class="lb-badge ${esc(row.category)}">${esc(label(row.category))}</span>${row.purpose ? `<small class="lb-purpose">${esc(row.purpose)}</small>` : ""}${row.missing.length ? `<small class="lb-missing">Offen: ${esc(row.missing.join(", "))}</small>` : ""}</div>
         <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.odometerCorrected ? " · korrigiert" : ""}</small></div>
         <button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>
