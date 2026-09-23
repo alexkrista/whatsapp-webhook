@@ -10,15 +10,19 @@ def install(ns):
     app = ns.get("app")
     if app is None or "brain_revolut_personal_page" in app.view_functions:
         return
-    from flask import jsonify
+    from flask import jsonify, request
     allowed = ns.get("MOBILE_ALLOWED_PATHS")
     if isinstance(allowed, set):
         allowed.update({"/incoming/revolut-personal", "/incoming/revolut-personal/status"})
 
     def cloud_status():
-        token = str(ns.get("KRISTINE_ADMIN_TOKEN") or os.environ.get("KRISTINE_ADMIN_TOKEN") or "")
+        # The Brain can be reached through a per-browser Render login even when
+        # this PC has no permanent admin token. The global header stores that
+        # login in a local HttpOnly cookie; Render verifies it on every request.
+        token = str(ns.get("KRISTINE_ADMIN_TOKEN") or os.environ.get("KRISTINE_ADMIN_TOKEN")
+                    or request.cookies.get("krista_render_token") or "").strip()
         if not token:
-            raise ValueError("KRISTINE_ADMIN_TOKEN fehlt")
+            raise ValueError("KRISTA-Zugang fehlt: The Brain über KRISTOWER öffnen")
         base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
         with urllib.request.urlopen(urllib.request.Request(
             base + "/banking/enablebanking/status",
