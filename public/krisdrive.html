@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#10233f">
   <title>KRISDRIVE · Live-Fuhrpark</title>
   <link rel="stylesheet" href="/public/ui/krista-ui.css">
+  <link rel="stylesheet" href="/public/krisdrive-logbook.css?v=1.1">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
   <style>
     :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#10233f;background:#eef1f3}
@@ -24,10 +25,10 @@
   </style>
 </head>
 <body>
-  <div id="kristaTopbar" data-krista-active="krisdrive" data-krista-build="KRISDRIVE"></div>
+  <div id="kristaTopbar" data-krista-active="krisdrive" data-krista-build="KRISDRIVE 1.1"></div>
   <main class="wrap">
     <div class="hero">
-      <div><div class="eyebrow">KRISTA Fuhrpark</div><h1>🚐 KRISDRIVE</h1><div class="sub">Live-Fahrzeuge · Fahrer · Position · Fahrten</div></div>
+      <div><div class="eyebrow">KRISTA Fuhrpark · 1.1</div><h1>🚐 KRISDRIVE</h1><div class="sub">Live-Fahrzeuge · Fahrer · Position · Fahrtenbuch</div></div>
       <div class="actions"><button class="btn secondary" id="showAll">Alle anzeigen</button><button class="btn" id="refresh">↻ Aktualisieren</button></div>
     </div>
 
@@ -45,6 +46,7 @@
     </section>
 
     <section id="fleet" class="fleet"></section>
+    <section id="logbook" class="logbook" hidden aria-labelledby="lb-title"></section>
   </main>
 
   <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
@@ -61,6 +63,7 @@
     const statusText=s=>({driving:'fährt',ignition_on:'Zündung an',active_session:'Fahrt aktiv',parked:'steht',online:'online',offline:'offline',waiting_device:'Tracker wartet',not_configured:'noch kein Tracker'})[s]||s||'unbekannt';
     const when=v=>{if(!v)return '–';const d=new Date(v);return Number.isNaN(d.getTime())?'–':new Intl.DateTimeFormat('de-AT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d)};
     const speed=v=>v===null||v===undefined?'–':`${Math.round(Number(v))} km/h`;
+    const hasPosition=p=>p?.lat!=null&&p?.lng!=null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng))&&Math.abs(Number(p.lat))<=90&&Math.abs(Number(p.lng))<=180&&(Number(p.lat)!==0||Number(p.lng)!==0);
 
     function initMap(){
       if(!window.maplibregl){document.getElementById('map').outerHTML='<div class="mapfallback">Karte konnte nicht geladen werden.<br>Die Fahrzeugliste funktioniert trotzdem.</div>';return;}
@@ -70,7 +73,7 @@
 
     function fit(rows=lastRows){
       if(!map)return;
-      const coords=rows.map(r=>[Number(r.position?.lng),Number(r.position?.lat)]).filter(([x,y])=>Number.isFinite(x)&&Number.isFinite(y)&&Math.abs(x)>0.001&&Math.abs(y)>0.001);
+      const coords=rows.filter(r=>hasPosition(r.position)).map(r=>[Number(r.position.lng),Number(r.position.lat)]);
       if(!coords.length)return;
       if(coords.length===1){map.flyTo({center:coords[0],zoom:13});return;}
       const bounds=coords.reduce((b,c)=>b.extend(c),new maplibregl.LngLatBounds(coords[0],coords[0]));
@@ -81,7 +84,7 @@
       if(!map)return;
       const keep=new Set();
       rows.forEach(row=>{
-        const lng=Number(row.position?.lng),lat=Number(row.position?.lat);if(!Number.isFinite(lng)||!Number.isFinite(lat)||Math.abs(lng)<.001||Math.abs(lat)<.001)return;
+        if(!hasPosition(row.position))return;const lng=Number(row.position.lng),lat=Number(row.position.lat);
         const id=String(row.vehicle?.id||'');keep.add(id);
         let marker=markers.get(id);
         if(!marker){
@@ -97,33 +100,37 @@
 
     function card(row){
       const pos=row.position||{};const driver=row.driver?.employeeName||'';const missing=row.session?.unresolvedDriver&&!driver;
-      const canRaw=pos.odometerRaw===null||pos.odometerRaw===undefined?'–':Number(pos.odometerRaw).toLocaleString('de-AT');
+      const odometer=pos.odometerKm==null?'–':Number(pos.odometerKm).toLocaleString('de-AT',{maximumFractionDigits:1})+' km';
+      const address=pos.address||(hasPosition(pos)?`Position vorhanden · Adresse fehlt (${Number(pos.lat).toFixed(4)}, ${Number(pos.lng).toFixed(4)})`:!row.tracking?'Tracker noch nicht gekoppelt':'Noch keine Position');
       return `<article class="vehicle" data-id="${esc(row.vehicle?.id)}">
         <div class="vhead"><div><div class="vname">${esc(row.vehicle?.label||'Fahrzeug')}</div><div class="plate">${esc(row.vehicle?.plate||'')}</div></div><span class="status ${esc(row.status)}"><i class="dot"></i>${esc(statusText(row.status))}</span></div>
         <div class="driver">👤 ${esc(driver||(missing?'Fahrer fehlt':'–'))}</div>
         <div class="meta">
           <div class="metric"><small>Geschwindigkeit</small><strong>${esc(speed(pos.speedKmh))}</strong></div>
           <div class="metric"><small>Zündung</small><strong>${pos.ignition===true?'EIN':pos.ignition===false?'AUS':'–'}</strong></div>
-          <div class="metric"><small>CAN Kilometer · roh</small><strong>${esc(canRaw)}</strong></div>
+          <div class="metric"><small>${esc(pos.odometerLabel||'Kilometerstand')}</small><strong>${esc(odometer)}</strong></div>
           <div class="metric"><small>Tracker</small><strong>${esc(row.tracking?.trackerModel||'–')}</strong></div>
         </div>
-        <div class="address">📍 ${esc(pos.address||(!row.tracking?'Tracker noch nicht gekoppelt':'Noch keine Position'))}</div>
+        <div class="address">📍 ${esc(address)}</div>
         <div class="foot"><span>letztes Signal ${esc(when(pos.lastSeen||row.device?.lastUpdate))}</span><span>${row.session?.buzzerWanted?'🔊 Fahrerwarnung aktiv':''}</span></div>
+        <button type="button" class="btn logbook-open" data-logbook="${esc(row.vehicle?.id)}" aria-label="Fahrtenbuch ${esc(row.vehicle?.label||'Fahrzeug')} öffnen">Fahrtenbuch öffnen →</button>
       </article>`;
     }
 
     function render(data){
       lastRows=data.vehicles||[];
       document.getElementById('countAll').textContent=lastRows.length;
-      document.getElementById('countLive').textContent=lastRows.filter(r=>r.position?.lat!=null&&r.position?.lng!=null).length;
+      document.getElementById('countLive').textContent=lastRows.filter(r=>hasPosition(r.position)).length;
       document.getElementById('countDriving').textContent=lastRows.filter(r=>r.status==='driving').length;
       document.getElementById('countMissing').textContent=lastRows.filter(r=>r.session?.unresolvedDriver&&!r.driver?.employeeName).length;
       document.getElementById('fresh').textContent=`Stand ${new Intl.DateTimeFormat('de-AT',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(data.generatedAt||Date.now()))}`;
       warning.textContent=data.traccarError||'';warning.classList.toggle('show',Boolean(data.traccarError));
       fleet.innerHTML=lastRows.length?lastRows.map(card).join(''):'<div class="vehicle">Noch keine Fahrzeuge im KRISTA-Fahrzeugstamm.</div>';
       updateMarkers(lastRows);
-      fleet.querySelectorAll('.vehicle[data-id]').forEach(el=>el.addEventListener('click',()=>{
-        const row=lastRows.find(r=>String(r.vehicle?.id)===el.dataset.id);const p=row?.position;if(map&&p?.lng!=null&&p?.lat!=null)map.flyTo({center:[Number(p.lng),Number(p.lat)],zoom:15});
+      fleet.querySelectorAll('.vehicle[data-id]').forEach(el=>el.addEventListener('click',(event)=>{
+        const row=lastRows.find(r=>String(r.vehicle?.id)===el.dataset.id);
+        if(event.target.closest('[data-logbook]')){window.dispatchEvent(new CustomEvent('krisdrive:logbook',{detail:row.vehicle}));return;}
+        const p=row?.position;if(map&&hasPosition(p))map.flyTo({center:[Number(p.lng),Number(p.lat)],zoom:15});
       }));
     }
 
@@ -137,5 +144,6 @@
     initMap();load();setInterval(load,5000);
   })();
   </script>
+  <script src="/public/krisdrive-logbook.js?v=1.1"></script>
 </body>
 </html>
