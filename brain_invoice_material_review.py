@@ -322,11 +322,14 @@ def _install_routes(ns):
                                     import brain_lg_sync
                                     if brain_lg_sync._is_lg(full_row):
                                         try:
+                                            body["lgTurnoverSync"] = brain_lg_sync._sync_turnover(ns, full_row)
                                             body["lgStockSync"] = brain_lg_sync._sync_stock_and_turnover(ns, full_row)
                                         except Exception as exc:
                                             body["lgStockSync"] = {"ok": False, "error": str(exc)}
                                         stock_result = body.get("lgStockSync") or {}
-                                        if stock_result.get("ok") and stock_result.get("duplicate"):
+                                        if stock_result.get("ok") and stock_result.get("awaitingGoods"):
+                                            warnings.append('LG-Lager unverändert: Aufgabe „Ware da?“ angelegt. Lieferung unter Farben & Lager bestätigen und einbuchen.')
+                                        elif stock_result.get("ok") and stock_result.get("duplicate"):
                                             warnings.append("LG-Lager: Rechnung war bereits eingebucht – Bestand nicht doppelt erhöht.")
                                         elif stock_result.get("ok"):
                                             count = int(stock_result.get("paintLines") or stock_result.get("updated") or 0)
