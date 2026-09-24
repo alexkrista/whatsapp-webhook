@@ -117,6 +117,7 @@
       if (button) { button.disabled = false; button.textContent = "⚖ Wiegen"; }
     }
   }
+  window.kristineReadReturnWeight = () => localApi("/weight");
 
   async function printJob(job) {
     const id = String(job?.id || "");
@@ -129,7 +130,7 @@
     try {
       await localApi("/print", {
         method: "POST",
-        body: JSON.stringify({ big, small, job: project }),
+        body: JSON.stringify({ big, small, job: project, returnId: /^R-[1-9]\d{0,8}$/.test(String(item?.id || "")) ? item.id : undefined }),
       });
       if (!job.skipAck) {
         await serverApi(`/admin/api/paint/returns/print-queue/${encodeURIComponent(id)}/ack`, {
@@ -177,7 +178,9 @@
     open.type = "button";
     open.className = "btn";
     open.textContent = "Etikett frei drucken";
-    heading.insertAdjacentElement("afterend", open);
+    const status = el("returnStatus");
+    if (status) status.insertAdjacentElement("afterend", open);
+    else heading.insertAdjacentElement("afterend", open);
 
     const dialog = document.createElement("dialog");
     dialog.id = "returnFreeLabelDialog";
@@ -260,7 +263,7 @@
       .return-hardware-line.ok{color:#23673e}.return-hardware-line.err{color:#a7322d}
       .return-weight-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}
       .return-weight-wrap .btn{min-height:43px;white-space:nowrap}
-      #returnFreeLabelOpen{margin:0 0 12px}
+      #returnFreeLabelOpen{margin:12px 0}
       #returnFreeLabelDialog{width:min(450px,calc(100% - 30px));max-height:90vh;overflow:auto;border:1px solid #b9c4bc;border-radius:16px;padding:20px;background:#fff;color:#17241b;box-shadow:0 16px 60px #0006}
       #returnFreeLabelDialog::backdrop{background:#0009}
       #returnFreeLabelDialog h2{margin:0 0 6px}
@@ -315,7 +318,7 @@
       clearTimeout(scanTimer);
       scanTimer = setTimeout(() => {
         const digits = String(ean.value || "").replace(/\D/g, "");
-        if ([8, 12, 13, 14].includes(digits.length)) el("returnLookupBtn")?.click();
+        if (/^\d+$/.test(String(ean.value || "").trim()) && [8, 12, 13, 14].includes(digits.length)) el("returnLookupBtn")?.click();
       }, 220);
     });
 
