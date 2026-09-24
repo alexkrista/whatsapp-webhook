@@ -103,12 +103,14 @@ function Get-PmaWeight {
   }
 }
 
-function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
+function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]$Font = '0', [string]$Size = 'normal', [bool]$Custom = $false) {
   $bigText = ConvertTo-SafeLabelText $Big 16
   $smallText = ConvertTo-SafeLabelText $Small 24
   $jobText = ConvertTo-SafeLabelText $Job 44
   if (-not $bigText) { throw "Archivnummer fehlt" }
   if (-not $smallText) { throw "Datum fehlt" }
+  if ($Font -cnotin @('0','D','E')) { throw 'Unbekannte Schriftart' }
+  if ($Size -cnotin @('small','normal','large')) { throw 'Unbekannte Schriftgroesse' }
 
   $len = $bigText.Length
   # Archivnummer bewusst ca. 6 Druckpunkte groesser als bisher.
@@ -118,6 +120,23 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
   if ($len -ge 4) { $fontH = 156; $fontW = 74 }
   if ($len -ge 5) { $fontH = 144; $fontW = 61 }
   if ($len -ge 7) { $fontH = 124; $fontW = 48 }
+
+  $smallH = 20; $smallW = 20
+  $rotBigH = 36; $rotBigW = 28; $rotSmallH = 22; $rotSmallW = 22
+  if ($Custom) {
+    $factor = @{ small = 0.75; normal = 1.0; large = 1.2 }[$Size]
+    $fontH = [int][math]::Round($fontH * $factor)
+    $fontW = [math]::Max(12,[math]::Min([int][math]::Round($fontW * $factor),[math]::Floor(310 / [math]::Max(1,$len))))
+    $smallH = [int][math]::Round($smallH * $factor)
+    $smallW = [int][math]::Round($smallW * $factor)
+    $smallW = [math]::Max(9,[math]::Min($smallW,[math]::Floor(290 / [math]::Max(1,$smallText.Length))))
+    $rotBigH = [int][math]::Round($rotBigH * $factor)
+    $rotBigW = [int][math]::Round($rotBigW * $factor)
+    $rotBigW = [math]::Max(9,[math]::Min($rotBigW,[math]::Floor(250 / [math]::Max(1,$len))))
+    $rotSmallH = [int][math]::Round($rotSmallH * $factor)
+    $rotSmallW = [int][math]::Round($rotSmallW * $factor)
+    $rotSmallW = [math]::Max(9,[math]::Min($rotSmallW,[math]::Floor(250 / [math]::Max(1,$smallText.Length))))
+  }
 
   # Kalibriertes Medium am ZD220:
   # Gesamt 58 mm, links 16 x 40 mm, rechts 42 x 44 mm, UNTEN buendig, ^LT40.
@@ -137,12 +156,12 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job) {
 ^LL352
 ^LT40
 ^LH0,0
-^FO150,48^FB300,1,0,C,0^A0N,20,20^FD$smallText^FS
-^FO128,92^FB336,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
-^FO129,93^FB334,1,0,C,0^A0N,$fontH,$fontW^FD$bigText^FS
+^FO150,48^FB300,1,0,C,0^A${Font}N,$smallH,$smallW^FD$smallText^FS
+^FO128,92^FB336,1,0,C,0^A${Font}N,$fontH,$fontW^FD$bigText^FS
+^FO129,93^FB334,1,0,C,0^A${Font}N,$fontH,$fontW^FD$bigText^FS
 $jobLine
-^FO68,58^A0R,36,28^FD$bigText^FS
-^FO30,58^A0R,22,22^FD$smallText^FS
+^FO68,58^A${Font}R,$rotBigH,$rotBigW^FD$bigText^FS
+^FO30,58^A${Font}R,$rotSmallH,$rotSmallW^FD$smallText^FS
 ^PQ1,0,0,N
 ^XZ
 "@
@@ -265,7 +284,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.3.0'
+            version = '1.4.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })
@@ -279,7 +298,10 @@ try {
           $big = ConvertTo-SafeLabelText $data.big 16
           $small = ConvertTo-SafeLabelText $data.small 24
           $job = ConvertTo-SafeLabelText $data.job 44
-          Send-RawZpl (New-ReturnLabelZpl $big $small $job)
+          $custom = $null -ne $data.font -or $null -ne $data.size
+          $font = if ($null -ne $data.font) { [string]$data.font } else { '0' }
+          $size = if ($null -ne $data.size) { [string]$data.size } else { 'normal' }
+          Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom)
           Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
         }
         else {
