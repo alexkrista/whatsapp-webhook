@@ -152,5 +152,33 @@ async function call(app, method, route, { body = {}, query = {}, params = {}, he
     assert.equal(res.body.item.returnLabel,`${prefix}-${res.body.item.returnNo}`);
     assert.equal(res.body.printJob.big,res.body.item.returnLabel);
   }
+  const queueBeforeTransfer = await fs.readFile(queueFile,"utf8");
+  const barcode = code => call(app,"GET","/admin/api/paint/returns/barcode",{query:{code}});
+  for (const code of ["ST1","ST 1","ST-1","R-1"])
+    assert.equal((await barcode(code)).body.item.id,"R-1");
+  assert.equal((await barcode("LG1")).statusCode,404);
+  const checkout = revision => call(app,"POST","/admin/api/paint/returns/:id/checkout",{params:{id:"R-1"},body:{revision}});
+  const receive = (weightKg,revision) => call(app,"POST","/admin/api/paint/returns/:id/receive",{params:{id:"R-1"},body:{weightKg,revision}});
+  assert.equal((await receive(1.5,2)).statusCode,409);
+  res = await checkout(2);
+  assert.equal(res.body.item.status,"out");
+  assert.equal((await checkout(2)).statusCode,409);
+  assert.equal((await call(app,"GET","/admin/api/paint/returns",{query:{q:"ST-1"}})).body.count,0);
+  assert.equal((await barcode("ST 1")).body.item.status,"out");
+  assert.equal((await update({weightKg:1.1,jobId:"26083",jobName:"Muster",revision:3})).statusCode,409);
+  assert.equal((await call(app,"GET","/admin/api/paint/returns/barcode",{query:{code:"ST1"},headers:{}})).statusCode,403);
+  assert.equal((await receive("",3)).statusCode,400);
+  res = await receive(1.5,3);
+  assert.equal(res.body.item.status,"available");
+  assert.equal(res.body.item.weightKg,1.5);
+  assert.equal(res.body.item.returnLabel,"ST-1");
+  assert.equal((await barcode("ST1")).body.item.material,"StoSil");
+  assert.equal((await checkout(4)).statusCode,200);
+  res = await receive(0,5);
+  assert.equal(res.body.item.status,"used");
+  assert.equal(res.body.item.weightKg,0);
+  assert.equal((await checkout(6)).statusCode,409);
+  assert.equal((await barcode("ST 1")).body.item.history.at(-1).reason,"receive");
+  assert.equal(await fs.readFile(queueFile,"utf8"),queueBeforeTransfer);
   console.log("paint-return-stock test ok");
 })().catch((error) => { console.error(error); process.exit(1); });
