@@ -59,10 +59,13 @@ def expected_balances(client):
                     if page>=pages:break
                     page+=1
             expected=base+sums['bookedIn']-sums['bookedOut']+sums['pendingIn']-sums['pendingOut']
+            # The bank movements are known even when an own payment cannot be
+            # uniquely matched. Keep their subtotal separate from the estimate.
+            result.update(reportedBalance=format(expected,'.2f'),pendingCount=count)
+            result.update({k:format(v,'.2f') for k,v in sums.items()})
             own_state=reconcile(client,account,local,bank)
             result.update(own_state)
             expected-=Decimal(own_state['ownOutgoing'])
-            result.update({k:format(v,'.2f') for k,v in sums.items()})
             result.update(expected=format(expected,'.2f'),pendingCount=count)
         except ConnectionError as exc:result['error']=str(exc)
         except Exception:result['error']='Die vollständige Berechnung ist derzeit nicht möglich.'
