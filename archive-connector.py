@@ -160,15 +160,25 @@ def archive_security_headers(response):
     return response
 
 
+def kristine_api_token():
+    """Use the configured service token or the current Kristine browser session."""
+    if KRISTINE_ADMIN_TOKEN:
+        return KRISTINE_ADMIN_TOKEN
+    from flask import has_request_context
+    if has_request_context():
+        return str(request.cookies.get("krista_render_token") or "").strip()
+    return ""
+
+
 def kristine_api_request(path, method="GET", payload=None):
     """Serverseitiger, gleich-origin sicherer Proxy zu KRISTINE/Render."""
-    if not KRISTINE_ADMIN_TOKEN:
-        raise RuntimeError("KRISTINE_ADMIN_TOKEN fehlt am Brain-Connector")
+    token = kristine_api_token()
+    if not token:
+        raise RuntimeError("Bitte The Brain über Kristine erneut öffnen, damit der Rechnungseingang verbunden wird.")
 
-    sep = "&" if "?" in path else "?"
-    url = f"{KRISTINE_API_BASE}{path}{sep}token={urllib.parse.quote(KRISTINE_ADMIN_TOKEN)}"
+    url = f"{KRISTINE_API_BASE}{path}"
     body = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "X-Admin-Token": token}
 
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
