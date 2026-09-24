@@ -51,7 +51,7 @@ def value(node,path):
     return (node.text or '').strip()
 
 
-def review_xml(xml):
+def review_xml(xml, *, strict_ids=True, allow_past=False):
     if not isinstance(xml,str) or len(xml)>8_000_000 or '<!DOCTYPE' in xml.upper() or '<!ENTITY' in xml.upper():
         raise ConnectionError('Ungültige oder zu große SEPA-Datei.')
     try: root=ET.fromstring(xml)
@@ -73,7 +73,7 @@ def review_xml(xml):
         if value(block,'PmtMtd')!='TRF':raise ConnectionError('Nur Überweisungen werden unterstützt.')
         ids.append(value(block,'PmtInfId'));debtor=value(block,'DbtrAcct/Id/IBAN');execution=child(block,'ReqdExctnDt')
         execution=(execution.text or '').strip() if not len(execution) else (execution[0].text or '').strip()
-        if day(execution)<date.today().isoformat():raise ConnectionError('Ein Ausführungstermin liegt in der Vergangenheit. Bitte die Quelldatei mit gültigem Termin neu erstellen.')
+        if not allow_past and day(execution)<date.today().isoformat():raise ConnectionError('Ein Ausführungstermin liegt in der Vergangenheit. Bitte die Quelldatei mit gültigem Termin neu erstellen.')
         items=[]
         for tx in [x for x in block if localname(x)=='CdtTrfTxInf']:
             amount=child(child(tx,'Amt'),'InstdAmt');raw=(amount.text or '').strip()
@@ -88,7 +88,7 @@ def review_xml(xml):
         verify(block,items);entries.extend(items)
     if not entries:raise ConnectionError('Keine Zahlungen gefunden.')
     verify(header,entries)
-    if any(not x or len(x)>35 for x in ids) or len(set(x[:16] for x in ids))!=len(ids):
+    if strict_ids and (any(not x or len(x)>35 for x in ids) or len(set(x[:16] for x in ids))!=len(ids)):
         raise ConnectionError('MsgId und PmtInfId müssen innerhalb der ersten 16 Zeichen eindeutig sein. Bitte die Dateien mit dem aktuellen Brain-Aufteiler erstellen.')
     return {'items':entries,'keys':keys,'ids':ids,'total':format(sum((Decimal(x['amount']) for x in entries),Decimal(0)),'.2f')}
 
@@ -388,10 +388,12 @@ def install(ns,client,write_allowed,csrf):
             raise ConnectionError('Dateigröße überschritten.')
         body=request.get_json(silent=True) or {}
         from brain_payroll_banking import prepare_payroll_file
-        payroll=prepare_payroll_file(body.get('xml'),body.get('category'),body.get('period'),body.get('instant',False))
-        draft=payments.prepare([{'name':payroll['name'],'xml':payroll['xml']}])
+        payroll=prepare_payroll_file(body.get('xml'),body.get('category'),body.get('period'),body.get('instant',False),body.get('executionDate'))
+        draft=payments.prepare(payroll['files'])
         return jsonify({'ok':True,'label':payroll['label'],'draft':draft['draft'],
                         'count':payroll['count'],'total':payroll['total'],'items':payroll['items'],
+                        'originalDates':payroll['originalDates'],'executionDate':payroll['executionDate'],'taxCount':payroll['taxCount'],
+                        'files':[{'name':f['name'],'count':len(review_xml(f['xml'])['items'])} for f in payroll['files']],
                         'instant':body.get('instant',False)})
 
     @app.post('/konfipay/api/payment-submit')

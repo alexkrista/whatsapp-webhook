@@ -1,6 +1,7 @@
 import unittest
 import sys
 import types
+from xml.etree import ElementTree as ET
 from datetime import date, datetime
 
 # The test runner also works on workstations without the web server extras.
@@ -47,6 +48,34 @@ class PayrollTests(unittest.TestCase):
         xml = self.xml.decode().replace(date.today().isoformat(), '2099-10-15')
         with self.assertRaisesRegex(ConnectionError, 'heute'):
             prepare_payroll_file(xml, 'wages', '2026-09', True)
+
+    def test_expired_source_requires_explicit_new_date(self):
+        xml=self.xml.decode().replace(date.today().isoformat(),'2020-01-01')
+        with self.assertRaisesRegex(ConnectionError,'Vergangenheit'):
+            prepare_payroll_file(xml,'wages','2026-09')
+        result=prepare_payroll_file(xml,'wages','2026-09',execution_date=date.today().isoformat())
+        self.assertEqual(result['originalDates'],['2020-01-01'])
+        self.assertEqual(review_xml(result['xml'])['items'][0]['date'],date.today().isoformat())
+
+    def test_finanzamt_marker_and_reference_survive_as_one_payment(self):
+        root=ET.fromstring(self.xml)
+        first=next(x for x in root.iter() if x.tag.endswith('}CdtTrfTxInf'))
+        purpose=ET.Element(first.tag.replace('CdtTrfTxInf','Purp'))
+        ET.SubElement(purpose,first.tag.replace('CdtTrfTxInf','Cd')).text='TAXS'
+        first.insert(-1,purpose)
+        next(x for x in first.iter() if x.tag.endswith('}EndToEndId')).text='123456789'
+        source=ET.tostring(root,encoding='unicode')
+        result=prepare_payroll_file(source,'contributions',date.today().isoformat())
+        self.assertEqual(result['taxCount'],1)
+        self.assertEqual(len(result['files']),2)
+        self.assertEqual([len(review_xml(f['xml'])['items']) for f in result['files']],[1,1])
+        self.assertTrue(result['items'][0]['taxPayment'])
+        self.assertFalse(result['items'][1].get('taxPayment',False))
+        outgoing=ET.fromstring(result['files'][1]['xml'])
+        actual=next(x for x in outgoing.iter() if x.tag.endswith('}CdtTrfTxInf'))
+        self.assertEqual(ET.tostring(first),ET.tostring(actual))
+        with self.assertRaisesRegex(ConnectionError,'Finanzamtszahlungen'):
+            prepare_payroll_file(source,'contributions',date.today().isoformat(),True)
 
 
 if __name__ == '__main__':
