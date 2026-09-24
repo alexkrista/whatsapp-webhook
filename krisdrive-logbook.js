@@ -388,6 +388,8 @@ function registerKrisdriveLogbook(app, options = {}) {
     if (!Array.isArray(rows)) throw fail("Der GPS-Dienst hat keine Fahrtenliste geliefert.", 502);
     return rows;
   }
+  // Postcodes are optional; require a street and locality from the provider.
+  const usableAddress = value => hasAddress(value) && /^[^,]+,\s*[^,]+$/.test(streetAndTown(value));
   async function resolveAddresses(trips, previous, force = false) {
     let lookups = 0;
     if (addressFailures.size > 1000) addressFailures.clear();
@@ -401,10 +403,10 @@ function registerKrisdriveLogbook(app, options = {}) {
         const point = trip[pointField], key = pointKey(point);
         if (!key) continue;
         if (old?.addressVersion !== 2 && isCoordinates(previous.records[trip.id]?.original?.[field]) && trip[field] === old?.[field]) trip[field] = "";
-        // Preserve legacy user-defined place names; provider addresses with
-        // locality components must include a postcode before being accepted.
+        // Preserve legacy user-defined place names and street/locality addresses.
+        // A missing postcode must not hide an otherwise usable address.
         if (hasAddress(trip[field]) && !text(trip[field]).includes(",")) continue;
-        if (hasAddress(trip[field]) && /, \d{4,5} \S/.test(streetAndTown(trip[field])) && (field !== "endLocation" || trip.endPointSource !== "stable_gps")) continue;
+        if (usableAddress(trip[field]) && (field !== "endLocation" || trip.endPointSource !== "stable_gps")) continue;
         trip[field] = "";
         if (old?.addressVersion === 2 && pointKey(old?.[pointField]) === key && hasAddress(old?.[field])) { trip[field] = old[field]; continue; }
         let address = addressCache.get(key) || "";
@@ -416,9 +418,9 @@ function registerKrisdriveLogbook(app, options = {}) {
             if (response.ok) address = streetAndTown(await response.text());
             else addressFailures.set(key, Date.now() + 60000);
           } catch { /* Retry without storing a placeholder as an address. */ }
-          if (!hasAddress(address) || !/, \d{4,5} \S/.test(address)) addressFailures.set(key, Date.now() + 60000);
+          if (!usableAddress(address)) addressFailures.set(key, Date.now() + 60000);
         }
-        if (hasAddress(address) && /, \d{4,5} \S/.test(address)) {
+        if (usableAddress(address)) {
           trip[field] = address;
           if (addressCache.size > 500) addressCache.clear();
           addressCache.set(key, address);

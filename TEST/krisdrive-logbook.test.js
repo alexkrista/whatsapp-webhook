@@ -501,3 +501,20 @@ test("lookup budget gives later rows a turn instead of retrying the first failin
   const all = h.calls.filter(call => call.url.pathname === "/api/server/geocode");
   assert.equal(new Set(all.map(call => call.url.search)).size, 16);
 });
+
+test("street and town remain usable and cached when a postcode is unavailable", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Buchholzstrasse 12, Rüthi (SG), CH" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "Wies, Schwarzenberg", endAddress: "" })];
+  let row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.startLocation, "Wies, Schwarzenberg");
+  assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
+  const lookups = h.calls.filter(call => call.url.pathname === "/api/server/geocode").length;
+  row = (await (await h.get(h.query + "&refresh=1")).json()).rows[0];
+  assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, lookups);
+});
