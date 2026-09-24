@@ -204,6 +204,67 @@ function registerPaintReturnStock(app, options = {}) {
     res.json({ ok: true, items, count: items.length, manufacturers });
   });
 
+  app.get("/admin/api/paint/returns/barcode", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const code = clean(req.query.code, 40).toUpperCase().replace(/\s+/g, "");
+    const match = /^(?:R-|(?:LG|ST|SY|KB|FC|BX|FM)-?)([1-9]\d{0,8})$/.exec(code);
+    if (!match) return res.status(400).json({ ok:false, error:"Ungültige Etikettennummer" });
+    const rows = await readJson(returnsFile, []);
+    const item = (Array.isArray(rows) ? rows : []).find(row => Number(row.returnNo) === Number(match[1]) &&
+      (code.startsWith("R-") || returnLabel(row).toUpperCase() === code.replace(/^([A-Z]{2})(\d)/,"$1-$2")));
+    if (!item) return res.status(404).json({ ok:false, error:"Dose zu diesem Etikett nicht gefunden" });
+    res.json({ ok:true, item:publicReturn(item) });
+  });
+
+  app.post("/admin/api/paint/returns/:id/checkout", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const revision = req.body?.revision;
+      if (!Number.isInteger(revision) || revision < 0) return res.status(400).json({ok:false,error:"Bearbeitungsstand fehlt"});
+      const result = await serial(async () => {
+        const rows = JSON.parse(await fsp.readFile(returnsFile,"utf8"));
+        const item = rows.find(row => row.id === req.params.id);
+        if (!item) return {status:404,error:"Rückware nicht gefunden"};
+        if (Number(item.revision || 0) !== revision || (item.status || "available") !== "available")
+          return {status:409,error:"Dose ist nicht mehr verfügbar. Bitte neu laden."};
+        const changedAt = new Date().toISOString();
+        item.history = [...(item.history || []),{changedAt,before:{status:"available",weightKg:item.weightKg},after:{status:"out"},reason:"checkout"}];
+        Object.assign(item,{status:"out",updatedAt:changedAt,revision:revision+1});
+        await writeJson(returnsFile,rows);
+        return {item};
+      });
+      if (result.error) return res.status(result.status).json({ok:false,error:result.error});
+      res.json({ok:true,item:publicReturn(result.item)});
+    } catch (error) {res.status(500).json({ok:false,error:String(error?.message || error)});}
+  });
+
+  app.post("/admin/api/paint/returns/:id/receive", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rawWeight = req.body?.weightKg;
+      const parsedWeight = num(rawWeight);
+      const weightKg = Math.round(parsedWeight * 1000) / 1000;
+      const revision = req.body?.revision;
+      if (rawWeight === undefined || rawWeight === null || String(rawWeight).trim() === "" || !Number.isFinite(parsedWeight) || parsedWeight < 0 || (parsedWeight !== 0 && weightKg < 0.001) || weightKg > 1000 || !Number.isInteger(revision) || revision < 0)
+        return res.status(400).json({ok:false,error:"Neues Gewicht (auch 0 kg) und Bearbeitungsstand erforderlich"});
+      const result = await serial(async () => {
+        const rows = JSON.parse(await fsp.readFile(returnsFile,"utf8"));
+        const item = rows.find(row => row.id === req.params.id);
+        if (!item) return {status:404,error:"Rückware nicht gefunden"};
+        if (Number(item.revision || 0) !== revision || item.status !== "out")
+          return {status:409,error:"Dose ist nicht ausgebucht. Bitte neu laden."};
+        const changedAt = new Date().toISOString();
+        const status = weightKg === 0 ? "used" : "available";
+        item.history = [...(item.history || []),{changedAt,before:{status:"out",weightKg:item.weightKg},after:{status,weightKg},reason:"receive"}];
+        Object.assign(item,{weightKg,status,updatedAt:changedAt,revision:revision+1});
+        await writeJson(returnsFile,rows);
+        return {item};
+      });
+      if (result.error) return res.status(result.status).json({ok:false,error:result.error});
+      res.json({ok:true,item:publicReturn(result.item)});
+    } catch (error) {res.status(500).json({ok:false,error:String(error?.message || error)});}
+  });
+
   app.post("/admin/api/paint/returns/:id/remove", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -307,6 +368,8 @@ function registerPaintReturnStock(app, options = {}) {
         const rows = JSON.parse(await fsp.readFile(returnsFile, "utf8"));
         const item = rows.find((row) => row.id === req.params.id);
         if (!item) return { status: 404, error: "Rückware nicht gefunden" };
+        if ((item.status || "available") !== "available")
+          return { status: 409, error: "Ausgebuchte oder aufgebrauchte Dosen können nur über die Rücknahme geändert werden." };
         if (Number(item.revision || 0) !== revision)
           return { status: 409, error: "Rückware wurde inzwischen geändert. Bitte neu öffnen." };
         const before = { weightKg: item.weightKg, jobId: item.jobId, jobName: item.jobName };
