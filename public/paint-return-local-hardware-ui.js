@@ -35,6 +35,13 @@
     return data;
   }
 
+  async function requireLabelFeatures() {
+    const health = await localApi("/health");
+    const parts = String(health.version || "").split(".").map(Number);
+    if (parts[0] < 1 || (parts[0] === 1 && parts[1] < 5) || !Number.isFinite(parts[0]))
+      throw new Error("Druckerdienst am Misch-PC aktualisieren (Version 1.5 erforderlich)");
+  }
+
   function asciiLabelText(value) {
     return String(value || "")
       .replace(/Ä/g, "Ae").replace(/Ö/g, "Oe").replace(/Ü/g, "Ue")
@@ -128,6 +135,7 @@
     const small = asciiLabelText(String(job.small || dateLabel(item?.createdAt) || ""));
     const project = asciiLabelText(String(job.job || projectLabel(item) || ""));
     try {
+      if (item?.id) await requireLabelFeatures();
       await localApi("/print", {
         method: "POST",
         body: JSON.stringify({ big, small, job: project, returnId: /^R-[1-9]\d{0,8}$/.test(String(item?.id || "")) ? item.id : undefined }),
@@ -228,6 +236,7 @@
       print.disabled = true;
       message.textContent = "Drucke …";
       try {
+        await requireLabelFeatures();
         await localApi("/print", { method: "POST", body: JSON.stringify({big:labelBig,small:labelSmall,job:"",font:font.value,size:size.value}) });
         message.textContent = "Etikett gedruckt ✓";
       } catch (error) {message.textContent = "Druck fehlgeschlagen: " + error.message;}
