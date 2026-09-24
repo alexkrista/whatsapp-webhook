@@ -171,6 +171,67 @@
     });
   };
 
+  function addFreeLabelDialog(heading) {
+    const open = document.createElement("button");
+    open.id = "returnFreeLabelOpen";
+    open.type = "button";
+    open.className = "btn";
+    open.textContent = "Etikett frei drucken";
+    heading.insertAdjacentElement("afterend", open);
+
+    const dialog = document.createElement("dialog");
+    dialog.id = "returnFreeLabelDialog";
+    dialog.setAttribute("aria-labelledby", "returnFreeLabelTitle");
+    dialog.innerHTML = `
+      <h2 id="returnFreeLabelTitle">Etikett frei drucken</h2>
+      <p class="return-free-help">Hier stehen die Etiketten untereinander. Der Zebra druckt sie wie bisher liegend.</p>
+      <label for="returnFreeSmall">Kleines Etikett · oben</label>
+      <input id="returnFreeSmall" class="field" maxlength="24" autocomplete="off" placeholder="z. B. 24.09.2026">
+      <label for="returnFreeBig">Größeres Etikett · unten</label>
+      <input id="returnFreeBig" class="field" maxlength="16" autocomplete="off" placeholder="z. B. LG-59">
+      <div class="return-free-options">
+        <label for="returnFreeFont">Schriftart<select id="returnFreeFont" class="field"><option value="0">Klar</option><option value="D">Klassisch</option><option value="E">Technisch</option></select></label>
+        <label for="returnFreeSize">Schriftgröße<select id="returnFreeSize" class="field"><option value="small">Klein</option><option value="normal" selected>Normal</option><option value="large">Groß</option></select></label>
+      </div>
+      <div class="return-free-preview" aria-label="Etikettenvorschau">
+        <div class="return-free-small" id="returnFreeSmallPreview">Kleines Etikett</div>
+        <div class="return-free-big" id="returnFreeBigPreview">Größeres Etikett</div>
+      </div>
+      <p id="returnFreeMessage" role="status" aria-live="polite"></p>
+      <div class="return-free-actions">
+        <button id="returnFreeCancel" class="btn" type="button">Schließen</button>
+        <button id="returnFreePrint" class="btn primary" type="button">Auf Zebra drucken</button>
+      </div>`;
+    document.body.appendChild(dialog);
+    const small = el("returnFreeSmall"), big = el("returnFreeBig"), font = el("returnFreeFont"), size = el("returnFreeSize"), message = el("returnFreeMessage"), print = el("returnFreePrint");
+    const refresh = () => {
+      el("returnFreeSmallPreview").textContent = asciiLabelText(small.value).slice(0, 24) || "Kleines Etikett";
+      el("returnFreeBigPreview").textContent = asciiLabelText(big.value).slice(0, 16) || "Größeres Etikett";
+      el("returnFreeBigPreview").style.fontFamily = font.value === "E" ? "monospace" : font.value === "D" ? "Georgia, serif" : "Arial, sans-serif";
+      el("returnFreeSmallPreview").style.fontFamily = el("returnFreeBigPreview").style.fontFamily;
+      el("returnFreeBigPreview").style.fontSize = {small:"22px",normal:"34px",large:"45px"}[size.value];
+      el("returnFreeSmallPreview").style.fontSize = {small:"11px",normal:"14px",large:"18px"}[size.value];
+    };
+    small.addEventListener("input", refresh);
+    big.addEventListener("input", refresh);
+    font.addEventListener("change", refresh);
+    size.addEventListener("change", refresh);
+    open.addEventListener("click", () => { message.textContent = "";refresh();dialog.showModal();small.focus(); });
+    el("returnFreeCancel").addEventListener("click", () => dialog.close());
+    print.addEventListener("click", async () => {
+      const labelSmall = asciiLabelText(small.value).slice(0, 24);
+      const labelBig = asciiLabelText(big.value).slice(0, 16);
+      if (!labelSmall || !labelBig) {message.textContent = "Bitte beide Etiketten beschriften.";return;}
+      print.disabled = true;
+      message.textContent = "Drucke …";
+      try {
+        await localApi("/print", { method: "POST", body: JSON.stringify({big:labelBig,small:labelSmall,job:"",font:font.value,size:size.value}) });
+        message.textContent = "Etikett gedruckt ✓";
+      } catch (error) {message.textContent = "Druck fehlgeschlagen: " + error.message;}
+      finally {print.disabled = false;}
+    });
+  }
+
   // Nur NEU erzeugte Druckauftraege dieser Browser-Sitzung automatisch lokal drucken.
   // Alte pending Jobs werden absichtlich nicht automatisch abgearbeitet.
   window.fetch = async function kristineReturnHardwareFetch(input, init) {
@@ -199,6 +260,21 @@
       .return-hardware-line.ok{color:#23673e}.return-hardware-line.err{color:#a7322d}
       .return-weight-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}
       .return-weight-wrap .btn{min-height:43px;white-space:nowrap}
+      #returnFreeLabelOpen{margin:0 0 12px}
+      #returnFreeLabelDialog{width:min(450px,calc(100% - 30px));max-height:90vh;overflow:auto;border:1px solid #b9c4bc;border-radius:16px;padding:20px;background:#fff;color:#17241b;box-shadow:0 16px 60px #0006}
+      #returnFreeLabelDialog::backdrop{background:#0009}
+      #returnFreeLabelDialog h2{margin:0 0 6px}
+      #returnFreeLabelDialog label{display:block;font-weight:800;margin:14px 0 5px}
+      #returnFreeLabelDialog input{width:100%;box-sizing:border-box}
+      .return-free-options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+      .return-free-options select{width:100%;box-sizing:border-box}
+      .return-free-help{margin:0;color:#59665d;font-size:13px}
+      .return-free-preview{display:grid;justify-items:center;gap:8px;margin:17px auto;padding:14px;border:1px dashed #acb8ae;border-radius:10px;background:#f1f3f0;overflow:hidden}
+      .return-free-small,.return-free-big{display:grid;place-items:center;box-sizing:border-box;max-width:100%;min-width:0;padding:8px;overflow:hidden;white-space:nowrap;background:#fff;border:1px solid #ced3ce;color:#111}
+      .return-free-small{width:160px;height:56px;font-size:13px;font-weight:700}
+      .return-free-big{width:320px;height:108px;font-size:clamp(20px,5vw,34px);font-weight:900}
+      .return-free-actions{display:flex;justify-content:flex-end;gap:8px}
+      #returnFreeMessage{min-height:20px}
       @media(max-width:760px){.return-weight-wrap{grid-template-columns:1fr}.return-weight-wrap .btn{width:100%}}
     `;
     document.head.appendChild(style);
@@ -210,6 +286,7 @@
       state.className = "return-hardware-line";
       state.textContent = "● Hardware wird geprüft …";
       heading.insertAdjacentElement("afterend", state);
+      addFreeLabelDialog(heading);
     }
 
     const wrap = document.createElement("div");
