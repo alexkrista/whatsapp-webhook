@@ -20,13 +20,31 @@ def install(ns):
 
     # Lokales Werkzeug zum Pruefen und Aufteilen von SEPA-Sammlern.
     from pathlib import Path
-    from flask import send_file
+    from flask import send_file, request, jsonify
     app = ns["app"]
     ns["MOBILE_ALLOWED_PATHS"].add("/sepa-split")
+    ns["MOBILE_ALLOWED_PATHS"].update({"/incoming/payment-batch/excel-template", "/incoming/payment-batch/excel"})
     if "brain_sepa_split" not in app.view_functions:
         def brain_sepa_split():
             return send_file(Path(__file__).resolve().parent / "public" / "sepa-split.html", mimetype="text/html")
         app.add_url_rule("/sepa-split", "brain_sepa_split", brain_sepa_split, methods=["GET"])
+    if "brain_payment_excel_template" not in app.view_functions:
+        def brain_payment_excel_template():
+            return send_file(Path(__file__).resolve().parent / "public" / "SEPA_Sammler_Vorlage.xlsx",
+                             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             as_attachment=True,download_name="SEPA_Sammler_Vorlage.xlsx")
+        app.add_url_rule("/incoming/payment-batch/excel-template", "brain_payment_excel_template", brain_payment_excel_template, methods=["GET"])
+    if "brain_payment_excel_import" not in app.view_functions:
+        def brain_payment_excel_import():
+            try:
+                from brain_payment_excel import convert
+                upload=request.files.get("file")
+                if not upload or not upload.filename.lower().endswith(".xlsx"):
+                    return jsonify(ok=False,error="Bitte eine Excel-Vorlage (.xlsx) auswählen."),400
+                raw=upload.stream.read(2_000_001)
+                return jsonify(ok=True,**convert(raw))
+            except ValueError as exc:return jsonify(ok=False,error=str(exc)),400
+        app.add_url_rule("/incoming/payment-batch/excel", "brain_payment_excel_import", brain_payment_excel_import, methods=["POST"])
 
     import re
     page = re.sub(r'<script\s+id="kristaBrainHomeNavV[123]">.*?</script>', '', page, flags=re.I | re.S)

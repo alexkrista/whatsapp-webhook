@@ -67,6 +67,24 @@ dialog{background:var(--card);color:var(--text);border:1px solid var(--line);bor
   <h1>SEPA aufteilen</h1>
   <div class="sub">Sammler einlesen, Zahlungen ansehen und als Einzelaufträge oder Pakete herunterladen.</div>
 
+  <div class="card" id="singleTransfer" hidden style="margin-bottom:18px">
+    <h2>Neue Überweisung</h2><p class="note">Empfänger werden nach erfolgreicher Übergabe gemerkt.</p>
+    <div class="actions">
+      <label>Von Konto<br><select id="singleSource" class="package-input" style="width:260px"><option value="">Bankkonto laden …</option></select></label>
+      <label>Gespeicherter Empfänger<br><select id="singleSaved" class="package-input" style="width:260px"><option value="">Neuer Empfänger</option></select></label>
+    </div>
+    <div class="actions">
+      <label>Name<br><input id="singleName" class="package-input" style="width:230px" maxlength="70"></label>
+      <label>IBAN<br><input id="singleIban" class="package-input" style="width:290px" maxlength="34"></label>
+      <label>Betrag EUR<br><input id="singleAmount" class="package-input" style="width:150px" inputmode="decimal" placeholder="0,00"></label>
+    </div>
+    <div class="actions">
+      <label>Verwendungszweck<br><input id="singlePurpose" class="package-input" style="width:min(520px,85vw)" maxlength="140"></label>
+      <label>Art<br><select id="singlePriority" class="package-input" style="width:165px"><option value="normal">Normal</option><option value="instant">Eil / Instant</option></select></label>
+      <button id="singlePrepare" class="primary" type="button">An Konfipay übergeben</button>
+    </div><p class="note" id="singleMessage" role="status"></p>
+  </div>
+
   <div class="card">
     <div class="assignment-help" style="margin-bottom:16px">
       <p><strong>Neu: Excel-Sammler erstellen</strong><br>Vorlage laden, Zahlungen zeilenweise eintragen und die fertige Excel-Datei unten hineinziehen. KRISTINE prüft Pflichtfelder, IBAN, Beträge und doppelte Zeilen.</p>
@@ -446,8 +464,27 @@ zipBtn.addEventListener("click", () => {
 let transferCsrf='',transferDraft=null,transferBusy=false;
 const transferMode=location.protocol.startsWith('http')&&new URLSearchParams(location.search).get('konfipay')==='1';
 $('bankTransferEntry').hidden=!transferMode;
-if(transferMode){document.querySelector('.sub').textContent='Sammler einlesen, mit 0 / Paketnummer / x zusammenstellen und nach Prüfung an konfipay übergeben.';const note=document.querySelector('#result > .note');if(note)note.textContent='Die Aufteilung erfolgt im Browser. „Zusammenstellung prüfen“ überträgt die ausgewählten Dateien an den Brain-PC. Erst deine verbindliche Freigabe sendet sie weiter an konfipay. Zahlungsdaten und EndToEndId bleiben unverändert.';}
+if(transferMode){$('singleTransfer').hidden=false;document.querySelector('.sub').textContent='Sammler einlesen, mit 0 / Paketnummer / x zusammenstellen und nach Prüfung an konfipay übergeben.';const note=document.querySelector('#result > .note');if(note)note.textContent='Die Aufteilung erfolgt im Browser. „Zusammenstellung prüfen“ überträgt die ausgewählten Dateien an den Brain-PC. Erst deine verbindliche Freigabe sendet sie weiter an konfipay. Zahlungsdaten und EndToEndId bleiben unverändert.';}
 async function transferApi(path,body){const r=await fetch('/konfipay/api/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Brain-Konfipay':transferCsrf},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const data=await r.json();if(!r.ok||!data.ok)throw Error(data.error||'Übergabe fehlgeschlagen.');return data;}
+let singlePayees=[];
+async function loadSingleContext(){
+ if(!transferMode)return;
+ try{const d=await transferApi('single-transfer-context');singlePayees=d.payees;
+  const source=$('singleSource'),old=source.value;source.replaceChildren();for(const a of d.accounts){const o=document.createElement('option');o.value=a.id;o.textContent=(a.name||'Konto')+' · '+a.iban.slice(-4);source.append(o);}if(old&&d.accounts.some(a=>a.id===old))source.value=old;
+  const saved=$('singleSaved');saved.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent='Neuer Empfänger';saved.append(empty);for(const p of singlePayees){const o=document.createElement('option');o.value=p.iban;o.textContent=p.name+' · '+p.iban.slice(-4);saved.append(o);}
+ }catch(e){$('singleMessage').textContent=e.message;}
+}
+$('singleSaved').addEventListener('change',()=>{const p=singlePayees.find(x=>x.iban===$('singleSaved').value);if(p){$('singleName').value=p.name;$('singleIban').value=p.iban;}});
+$('singlePrepare').addEventListener('click',async()=>{
+ if(transferBusy)return;transferBusy=true;$('singlePrepare').disabled=true;$('singleMessage').textContent='Überweisung wird geprüft …';transferDraft=null;
+ try{const c=await transferApi('context');transferCsrf=c.csrf;
+  const d=await transferApi('single-transfer-prepare',{sourceAccountId:$('singleSource').value,name:$('singleName').value,iban:$('singleIban').value,amount:$('singleAmount').value,purpose:$('singlePurpose').value,instant:$('singlePriority').value==='instant'});
+  transferDraft=d.draft;$('transferTotal').textContent=d.count+' Überweisung · '+d.total.replace('.',',')+' EUR · '+(d.instant?'Eil / Instant':'Normal');$('transferReview').replaceChildren();
+  const item=d.files[0].items[0],info=document.createElement('p');info.style.whiteSpace='pre-line';info.textContent='Empfänger: '+item.name+'\nIBAN: '+item.iban+'\nBetrag: '+item.amount.replace('.',',')+' EUR\nZweck: '+item.purpose+'\nVon: '+item.debtorIban+'\nAusführung: '+item.date;$('transferReview').append(info);
+  $('transferConfirm').checked=false;$('sendTransfer').disabled=true;$('transferConfirm').disabled=false;$('cancelTransfer').disabled=false;$('cancelTransfer').textContent='Abbrechen';$('transferResult').textContent='';$('transferDialog').showModal();$('singleMessage').textContent='Vorbereitet. Bitte Vorschau prüfen und verbindlich bestätigen.';
+ }catch(e){$('singleMessage').textContent=e.message;}finally{transferBusy=false;$('singlePrepare').disabled=false;}
+});
+loadSingleContext();
 $('prepareTransfer').addEventListener('click',async()=>{
  if(transferBusy)return;if(!generated.length||zipBtn.disabled){$('transferMessage').textContent='Bitte zuerst einen Sammler einlesen und eine gültige Zusammenstellung auswählen.';return;}
  transferBusy=true;$('prepareTransfer').disabled=true;$('transferMessage').textContent='Zusammenstellung wird auf dem Brain-PC geprüft …';transferDraft=null;
@@ -467,7 +504,7 @@ $('transferDialog').addEventListener('cancel',e=>{if(transferBusy)e.preventDefau
 $('sendTransfer').addEventListener('click',async()=>{
  if(transferBusy||!transferDraft||!$('transferConfirm').checked)return;
  const draft=transferDraft;transferDraft=null;transferBusy=true;$('sendTransfer').disabled=true;$('cancelTransfer').disabled=true;$('transferConfirm').disabled=true;$('transferResult').textContent='Verbindliche Übergabe läuft. Bitte warten und nicht erneut senden.';
- try{const d=await transferApi('payment-submit',{draft,confirmed:true});$('transferResult').textContent=d.results.map(r=>r.name+': '+(r.error||r.status||r.state)).join('\n')+(d.remaining?'\n'+d.remaining+' Datei(en) wurden noch nicht übergeben.':'')+'\nDen weiteren Status und Inhalt findest du im Brain-Zahlungsarchiv.';$('transferMessage').textContent='Übergabe bearbeitet. Bitte den Zahlungsstatus im Archiv prüfen.';}
+ try{const d=await transferApi('payment-submit',{draft,confirmed:true});$('transferResult').textContent=d.results.map(r=>r.name+': '+(r.error||r.status||r.state)).join('\n')+(d.remaining?'\n'+d.remaining+' Datei(en) wurden noch nicht übergeben.':'')+'\nDen weiteren Status und Inhalt findest du im Brain-Zahlungsarchiv.';$('transferMessage').textContent='Übergabe bearbeitet. Bitte den Zahlungsstatus im Archiv prüfen.';await loadSingleContext();}
  catch(e){$('transferResult').textContent=e.message+' Falls die Verbindung unterbrochen wurde: erst das Zahlungsarchiv prüfen, nicht erneut senden.';}
  finally{transferBusy=false;$('cancelTransfer').disabled=false;$('cancelTransfer').textContent='Schließen';}
 });

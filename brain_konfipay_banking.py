@@ -51,7 +51,7 @@ def value(node,path):
     return (node.text or '').strip()
 
 
-def review_xml(xml):
+def review_xml(xml, *, strict_ids=True, allow_past=False):
     if not isinstance(xml,str) or len(xml)>8_000_000 or '<!DOCTYPE' in xml.upper() or '<!ENTITY' in xml.upper():
         raise ConnectionError('Ungültige oder zu große SEPA-Datei.')
     try: root=ET.fromstring(xml)
@@ -73,7 +73,7 @@ def review_xml(xml):
         if value(block,'PmtMtd')!='TRF':raise ConnectionError('Nur Überweisungen werden unterstützt.')
         ids.append(value(block,'PmtInfId'));debtor=value(block,'DbtrAcct/Id/IBAN');execution=child(block,'ReqdExctnDt')
         execution=(execution.text or '').strip() if not len(execution) else (execution[0].text or '').strip()
-        if day(execution)<date.today().isoformat():raise ConnectionError('Ein Ausführungstermin liegt in der Vergangenheit. Bitte die Quelldatei mit gültigem Termin neu erstellen.')
+        if not allow_past and day(execution)<date.today().isoformat():raise ConnectionError('Ein Ausführungstermin liegt in der Vergangenheit. Bitte die Quelldatei mit gültigem Termin neu erstellen.')
         items=[]
         for tx in [x for x in block if localname(x)=='CdtTrfTxInf']:
             amount=child(child(tx,'Amt'),'InstdAmt');raw=(amount.text or '').strip()
@@ -88,7 +88,7 @@ def review_xml(xml):
         verify(block,items);entries.extend(items)
     if not entries:raise ConnectionError('Keine Zahlungen gefunden.')
     verify(header,entries)
-    if any(not x or len(x)>35 for x in ids) or len(set(x[:16] for x in ids))!=len(ids):
+    if strict_ids and (any(not x or len(x)>35 for x in ids) or len(set(x[:16] for x in ids))!=len(ids)):
         raise ConnectionError('MsgId und PmtInfId müssen innerhalb der ersten 16 Zeichen eindeutig sein. Bitte die Dateien mit dem aktuellen Brain-Aufteiler erstellen.')
     return {'items':entries,'keys':keys,'ids':ids,'total':format(sum((Decimal(x['amount']) for x in entries),Decimal(0)),'.2f')}
 
@@ -106,7 +106,23 @@ class Payments:
         db.execute('CREATE TABLE IF NOT EXISTS transfers (id TEXT PRIMARY KEY, digest TEXT UNIQUE, name TEXT, total TEXT, count INTEGER, created TEXT, state TEXT, rid TEXT, status TEXT, error TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS payment_keys (fingerprint TEXT PRIMARY KEY, transfer_id TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS contents (transfer_id TEXT PRIMARY KEY, payload BLOB NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS payees (iban TEXT PRIMARY KEY, name TEXT NOT NULL, last_used TEXT NOT NULL)')
         return db
+
+    def payees(self):
+        if not self.client.store.exists():return []
+        db=self.db()
+        try:return [dict(x) for x in db.execute('SELECT name,iban FROM payees ORDER BY last_used DESC, name LIMIT 100')]
+        finally:db.close()
+
+    def remember_payees(self,items):
+        db=self.db()
+        try:
+            for item in items:
+                db.execute('INSERT INTO payees (iban,name,last_used) VALUES (?,?,?) ON CONFLICT(iban) DO UPDATE SET name=excluded.name,last_used=excluded.last_used',
+                           (item['iban'].replace(' ','').upper(),item['name'],datetime.now(timezone.utc).isoformat()))
+            db.commit()
+        finally:db.close()
 
     def prepare(self,files):
         if not isinstance(files,list) or not 1<=len(files)<=50:raise ConnectionError('Bitte 1 bis 50 Dateien pro Übergabe auswählen.')
@@ -176,6 +192,9 @@ class Payments:
                 except Exception:
                     error='Ergebnis der Übergabe unklar. Bitte in konfipay prüfen; nicht erneut einreichen.'
                 self.record(transfer,state,rid,status,error)
+                if state=='submitted' and draft.get('rememberPayee'):
+                    try:self.remember_payees(f['items'])
+                    except sqlite3.Error:pass  # Submission succeeded; a payee-list failure must not suggest retrying payment.
                 results.append({'id':transfer,'name':f['name'],'state':state,'rid':rid,'status':status,'error':error})
                 if error or state=='rejected':break
             return {'results':results,'remaining':len(draft['files'])-len(results)}
@@ -208,7 +227,7 @@ def install(ns,client,write_allowed,csrf):
     brain_konfipay_archive.install(ns,client,write_allowed)
     import brain_bank_assignment
     assignments=brain_bank_assignment.install(ns,write_allowed)
-    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content','revolut-transfer-context','revolut-transfer-prepare']
+    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content','revolut-transfer-context','revolut-transfer-prepare','payroll-prepare','single-transfer-context','single-transfer-prepare']
     ns['MOBILE_ALLOWED_PATHS'].update('/konfipay/api/'+p for p in paths)
 
     def guard():
@@ -240,6 +259,42 @@ def install(ns,client,write_allowed,csrf):
 
     @app.get('/konfipay/api/context')
     def context():return jsonify({'ok':True,'csrf':csrf,'configured':client.store.exists()})
+
+    @app.get('/konfipay/api/single-transfer-context')
+    @safe
+    def single_transfer_context():
+        accounts=[{'id':a['id'],'name':a.get('name'),'iban':a['iban']} for a in client.accounts(client.auth_token())
+                  if a.get('iban') and str(a.get('currency') or '').upper()=='EUR']
+        return jsonify({'ok':True,'accounts':accounts,'payees':payments.payees()})
+
+    @app.post('/konfipay/api/single-transfer-prepare')
+    @safe
+    def single_transfer_prepare():
+        guard();body=request.get_json(silent=True) or {}
+        from brain_finance_sepa import build_sepa_xml
+        name=' '.join(str(body.get('name') or '').split())[:70]
+        purpose=' '.join(str(body.get('purpose') or '').split())[:140]
+        if not name or not purpose:raise ConnectionError('Name und Verwendungszweck eingeben.')
+        instant=body.get('instant',False)
+        if not isinstance(instant,bool):raise ConnectionError('Ungültige Überweisungsart.')
+        sources=client.accounts(client.auth_token())
+        source=next((a for a in sources if a.get('id')==body.get('sourceAccountId') and str(a.get('currency') or '').upper()=='EUR'),None)
+        if not source:raise ConnectionError('Ausgangskonto auswählen.')
+        amount=str(body.get('amount') or '').replace(',','.')
+        if not re.fullmatch(r'\d+(?:\.\d{1,2})?',amount) or Decimal(amount)<=0 or Decimal(amount)>Decimal('9999999.99'):
+            raise ConnectionError('Bitte einen gültigen Betrag größer 0 EUR eingeben.')
+        if re.sub(r'\s+','',source['iban']).upper()==re.sub(r'\s+','',str(body.get('iban') or '')).upper():
+            raise ConnectionError('Ausgangs- und Empfängerkonto müssen verschieden sein.')
+        try:
+            xml,filename=build_sepa_xml([{'supplier':name,'iban':body.get('iban'),'amount':amount,
+                'remittanceText':purpose,'paymentId':'KRISTA-EINZ-'+secrets.token_hex(8).upper()}],
+                os.environ.get('KRISTINE_SEPA_DEBTOR_NAME') or 'Farben Krista GmbH & Co KG',source['iban'],instant=instant)
+        except ValueError as exc:raise ConnectionError(str(exc)) from None
+        reviewed=payments.prepare([{'name':filename,'xml':xml.decode()}])
+        with payments.lock:
+            payments.drafts[reviewed['draft']]['rememberPayee']=True
+        return jsonify({'ok':True,'draft':reviewed['draft'],'files':reviewed['files'],
+                        'count':reviewed['count'],'total':reviewed['total'],'instant':instant})
 
     @app.get('/konfipay/api/revolut-transfer-context')
     @safe
@@ -324,6 +379,22 @@ def install(ns,client,write_allowed,csrf):
         if not request.content_length or request.content_length>9_000_000:raise ConnectionError('Dateigröße überschritten.')
         body=request.get_json(silent=True) or {}
         return jsonify({'ok':True,**payments.prepare(body.get('files'))})
+
+    @app.post('/konfipay/api/payroll-prepare')
+    @safe
+    def payroll_prepare():
+        guard()
+        if not request.content_length or request.content_length>9_000_000:
+            raise ConnectionError('Dateigröße überschritten.')
+        body=request.get_json(silent=True) or {}
+        from brain_payroll_banking import prepare_payroll_file
+        payroll=prepare_payroll_file(body.get('xml'),body.get('category'),body.get('period'),body.get('instant',False),body.get('executionDate'))
+        draft=payments.prepare(payroll['files'])
+        return jsonify({'ok':True,'label':payroll['label'],'draft':draft['draft'],
+                        'count':payroll['count'],'total':payroll['total'],'items':payroll['items'],
+                        'originalDates':payroll['originalDates'],'executionDate':payroll['executionDate'],'taxCount':payroll['taxCount'],
+                        'files':[{'name':f['name'],'count':len(review_xml(f['xml'])['items'])} for f in payroll['files']],
+                        'instant':body.get('instant',False)})
 
     @app.post('/konfipay/api/payment-submit')
     @safe
