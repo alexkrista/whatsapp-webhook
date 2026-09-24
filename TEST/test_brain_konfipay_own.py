@@ -45,6 +45,14 @@ class Tests(unittest.TestCase):
         db=self.p.db();self.assertEqual(db.execute('SELECT count(*) FROM bank_seen_payments').fetchone()[0],1);db.close()
     def test_missing_reference_ambiguous(self):
         with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[local()],[dict(tx(),endToEndId='NOTPROVIDED')])
+    def test_anonymous_pending_debit_still_shows_reported_balance(self):
+        pending=dict(tx(),endToEndId=None,iban=None)
+        with patch('brain_konfipay_own.outstanding',return_value=[local()]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[pending]):
+            result=expected_balances(self.c)['accounts'][0]
+        self.assertEqual(result['reportedBalance'],'900.00')
+        self.assertEqual(result['pendingCount'],1)
+        self.assertIsNone(result['expected'])
+        self.assertIn('ohne Zahlungsreferenz',result['error'])
     def test_grouped_booking_ambiguous(self):
         second=local('40','two');second.update(transfer='one',index=1)
         with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[local(),second],[tx('140','batch')])
@@ -72,4 +80,3 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[item],[])
 
 if __name__=='__main__':unittest.main()
-
