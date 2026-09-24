@@ -10,7 +10,9 @@
   const time = value => new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
   const today = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const label = category => ({ business: "Geschäftlich", private: "Privat", unassigned: "Fahrtart offen" })[category] || "Offen";
-  let vehicle = null, data = null, activeRow = null, generation = 0, controller = null;
+  let vehicle = null, data = null, activeRow = null, generation = 0, controller = null, retryTimer = null;
+  const safeLocation = value => /^\s*[+-]?\d+(?:\.\d+)?\s*[,;]\s*[+-]?\d+(?:\.\d+)?\s*$/.test(value || "") ? "" : value || "";
+  const locationLabel = value => safeLocation(value) || "Adresse wird ermittelt";
   host.innerHTML = `
     <div class="lb-head"><div><div class="eyebrow">KRISDRIVE · Fahrtenbuch</div><h2 id="lb-title" tabindex="-1">Fahrtenbuch</h2><div id="lb-vehicle" class="lb-sub"></div></div><button class="lb-close" id="lb-close" aria-label="Fahrtenbuch schließen">×</button></div>
     <form id="lb-filters" class="lb-controls">
@@ -56,7 +58,7 @@
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
         <div class="lb-date"><strong>${esc(date(row.startedAt))}</strong><small>${esc(time(row.startedAt))} – ${esc(date(row.startedAt) !== date(row.closedAt) ? date(row.closedAt) + " " : "")}${esc(time(row.closedAt))}</small></div>
-        <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(row.startLocation || "Start noch offen")}${row.inferredStart ? ' <small>(aus vorheriger Fahrt)</small>' : ""}</div><div>→ ${esc(row.endLocation || "Ziel noch offen")}${row.inferredEnd ? ' <small>(aus nächster Fahrt)</small>' : ""}</div>`}</div>
+        <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(locationLabel(row.startLocation))}${row.inferredStart ? ' <small>(aus vorheriger Fahrt)</small>' : ""}</div><div>→ ${esc(locationLabel(row.endLocation))}${row.inferredEnd ? ' <small>(aus nächster Fahrt)</small>' : ""}</div>`}</div>
         <div class="lb-assignment"><strong>${esc(row.driver?.employeeName || "Fahrer offen")}</strong><span class="lb-badge ${esc(row.category)}">${esc(label(row.category))}</span>${row.purpose ? `<small class="lb-purpose">${esc(row.purpose)}</small>` : ""}${row.missing.length ? `<small class="lb-missing">Offen: ${esc(row.missing.join(", "))}</small>` : ""}</div>
         <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.distanceSource === "gps_positions" ? " · GPS neu berechnet" : row.odometerCorrected ? " · korrigiert" : row.distanceIssue ? " · bitte prüfen" : ""}</small></div>
         <button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>
@@ -65,6 +67,7 @@
   }
   async function load(force = false) {
     if (!vehicle) return;
+    clearTimeout(retryTimer);
     const current = ++generation;
     controller?.abort(); controller = new AbortController();
     const query = { vehicleId: vehicle.id, from: $("from").value, to: $("to").value };
@@ -75,6 +78,14 @@
       const result = await jsonRequest(url(endpoint, query), { signal: controller.signal });
       if (current !== generation) return;
       data = result; render(); exportsEnabled(true);
+      if (data.rows.some(row => row.category !== "private" && (!safeLocation(row.startLocation) || !safeLocation(row.endLocation)))) {
+        const retry = () => {
+          if (host.hidden) return;
+          if ($("dialog").open) { retryTimer = setTimeout(retry, 65000); return; }
+          load();
+        };
+        retryTimer = setTimeout(retry, 65000);
+      }
     } catch (e) {
       if (current !== generation || e.name === "AbortError") return;
       data = null; $("rows").innerHTML = ""; error(e.message);
@@ -94,7 +105,7 @@
     if (row.driver?.employeeId && !people.some(person => person.id === row.driver.employeeId)) people.push({ id: row.driver.employeeId, name: row.driver.employeeName });
     $("driver").innerHTML = '<option value="">Noch nicht zugeordnet</option>' + people.map(person => `<option value="${esc(person.id)}">${esc(person.name)}</option>`).join("");
     $("driver").value = row.driver?.employeeId || ""; $("category").value = row.category;
-    $("start").value = row.startLocation || ""; $("end").value = row.endLocation || ""; $("purpose").value = row.purpose || "";
+    $("start").value = safeLocation(row.startLocation); $("end").value = safeLocation(row.endLocation); $("purpose").value = row.purpose || "";
     $("km-start").value = row.odometerCorrected ? row.odometerStartKm : ""; $("km-end").value = row.odometerCorrected ? row.odometerEndKm : "";
     $("km-start").placeholder = format(row.odometerStartKm, 2); $("km-end").placeholder = format(row.odometerEndKm, 2);
     $("km-details").open = row.odometerStartKm == null || row.odometerEndKm == null;
@@ -142,7 +153,7 @@
   $("today").addEventListener("click", () => { $("from").value = $("to").value = today(); load(); });
   $("month").addEventListener("click", () => { $("to").value = today(); $("from").value = today().slice(0, 8) + "01"; load(); });
   $("pdf").addEventListener("click", () => download("pdf")); $("csv").addEventListener("click", () => download("csv"));
-  $("close").addEventListener("click", () => { generation++; controller?.abort(); host.hidden = true; data = null; });
+  $("close").addEventListener("click", () => { generation++; clearTimeout(retryTimer); controller?.abort(); host.hidden = true; data = null; });
   window.addEventListener("krisdrive:logbook", event => {
     vehicle = event.detail; if (!vehicle?.id) return;
     host.hidden = false; $("title").textContent = `Fahrtenbuch · ${vehicle.label || "Fahrzeug"}`; $("vehicle").textContent = vehicle.plate || "";
