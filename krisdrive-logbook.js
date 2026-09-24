@@ -410,11 +410,11 @@ function registerKrisdriveLogbook(app, options = {}) {
         trip[field] = "";
         if (old?.addressVersion === 2 && pointKey(old?.[pointField]) === key && hasAddress(old?.[field])) { trip[field] = old[field]; continue; }
         let address = addressCache.get(key) || "";
-        if (!address && base && token && (force || (addressFailures.get(key) || 0) <= Date.now()) && lookups < 12) {
+        if (!address && base && token && (force || (addressFailures.get(key) || 0) <= Date.now()) && lookups < 4) {
           lookups++;
           try {
             const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
-            const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
+            const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
             if (response.ok) {
               let result = await response.text();
               // Traccar advertises application/json but normally returns a raw

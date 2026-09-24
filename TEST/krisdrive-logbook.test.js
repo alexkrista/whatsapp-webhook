@@ -496,7 +496,9 @@ test("lookup budget gives later rows a turn instead of retrying the first failin
   h.state.trips = Array.from({ length: 8 }, (_, i) => trip({ startPositionId: 200 + i, startAddress: "", endAddress: "", startLat: 47 + i / 100, endLat: 47.005 + i / 100 }));
   await h.get();
   const initial = h.calls.filter(call => call.url.pathname === "/api/server/geocode");
-  assert.equal(initial.length, 12);
+  assert.equal(initial.length, 4);
+  await h.get(h.query + "&refresh=1");
+  await h.get(h.query + "&refresh=1");
   await h.get(h.query + "&refresh=1");
   const all = h.calls.filter(call => call.url.pathname === "/api/server/geocode");
   assert.equal(new Set(all.map(call => call.url.search)).size, 16);
@@ -572,4 +574,23 @@ test("a fresh stable fix's own address survives when reverse geocoding is unavai
   const row = (await (await h.get()).json()).rows[0];
   assert.equal(row.endLocation, "Feldkircher Straße, 6820 Frastanz");
   assert.equal(row.endPositionId, "202");
+});
+
+test("a geocoder response slower than five seconds is still saved", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") {
+      await new Promise((resolve, reject) => {
+        const onAbort = () => { clearTimeout(timer); reject(Error("Address lookup aborted")); };
+        const timer = setTimeout(() => { opts.signal.removeEventListener("abort", onAbort); resolve(); }, 5500);
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+      });
+      return { ok: true, text: async () => "20 Buchholzstrasse, Rüthi (SG), St. Gallen, CH" };
+    }
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ endAddress: "" })];
+  const row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
 });
