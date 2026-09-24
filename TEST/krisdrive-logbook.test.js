@@ -111,7 +111,7 @@ test("corrupt persisted data is never overwritten with an empty book", async t =
   assert.equal((await h.get(h.query + "&refresh=1")).status, 500); assert.equal(await fs.readFile(target, "utf8"), "broken");
 });
 
-test("missing trip addresses resolve through known places and the Traccar geocoder without losing manual edits", async t => {
+test("missing trip addresses use point-specific geocoding and preserve manual edits", async t => {
   const h = await harness(t, { request: async (url, opts, state) => {
     if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
     if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Bahnhofstraße, 6800 Feldkirch" };
@@ -120,20 +120,20 @@ test("missing trip addresses resolve through known places and the Traccar geocod
   h.state.trips = [trip({ startAddress: "", endAddress: "", startLat: 47.22429, startLon: 9.61752, endLat: 47.26821, endLon: 9.64093 }),
     trip({ startPositionId: 106, startTime: "2026-09-22T08:00:00Z", endTime: "2026-09-22T08:20:00Z", startAddress: "", endAddress: "", startLat: 47.24, startLon: 9.59, endLat: 47.26821, endLon: 9.64093 })];
   let rows = (await (await h.get()).json()).rows;
-  assert.equal(rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
-  assert.equal(rows[0].endLocation, "Torkelgässele, 6830 Rankweil");
+  assert.equal(rows[0].startLocation, "Bahnhofstraße, 6800 Feldkirch");
+  assert.equal(rows[0].endLocation, "Bahnhofstraße, 6800 Feldkirch");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
-  assert.equal(rows[1].startLocation, "Torkelgässele, 6830 Rankweil");
-  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
+  assert.equal(rows[1].startLocation, "Bahnhofstraße, 6800 Feldkirch");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 3);
   const edited = await h.patch(rows[0], { startLocation: "Mein Ziel", endLocation: rows[0].endLocation });
   assert.equal(edited.status, 200);
   rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
   assert.equal(rows[0].startLocation, "Mein Ziel");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
-  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 1);
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 3);
 });
 
-test("old saved coordinate labels resolve in the page and exports even when GPS is offline", async t => {
+test("old saved coordinates stay hidden when GPS and geocoding are offline", async t => {
   const h = await harness(t);
   h.state.trips = [trip({ startAddress: "", endAddress: "", startLat: 47.22429, startLon: 9.61752, endLat: 47.26821, endLon: 9.64093 })];
   await h.get();
@@ -147,11 +147,11 @@ test("old saved coordinate labels resolve in the page and exports even when GPS 
   h.state.offline = true;
   const result = await (await h.get(h.query + "&refresh=1")).json();
   assert.match(result.warning, /gespeicherte Fahrten/);
-  assert.equal(result.rows[0].startLocation, "Schmittengasse, 6820 Frastanz");
-  assert.equal(result.rows[0].endLocation, "Torkelgässele, 6830 Rankweil");
+  assert.equal(result.rows[0].startLocation, "");
+  assert.equal(result.rows[0].endLocation, "");
   const csv = await (await h.get("/export.csv" + h.query)).text();
-  assert.match(csv, /Schmittengasse, 6820 Frastanz/);
-  assert.match(csv, /Torkelgässele, 6830 Rankweil/);
+  assert.ok(!csv.includes("47.22429"));
+  assert.ok(!csv.includes("47.26821"));
 });
 
 test("adjacent trips supply missing start and end in both directions across midnight", async t => {
@@ -193,17 +193,17 @@ test("coordinate placeholders link both ways and recurring stops reuse the same 
   assert.equal(rows[0].startLocation, "Werkstatt A");
   assert.equal(rows[0].endLocation, rows[1].startLocation);
   assert.equal(rows[0].endLocation, "Baustelle B");
-  assert.equal(rows[2].endLocation, "Werkstatt A");
-  assert.equal(rows[3].startLocation, "Werkstatt A");
+  assert.equal(rows[2].endLocation, "");
+  assert.equal(rows[3].startLocation, "");
   assert.equal(rows[0].inferredStart, true); assert.equal(rows[0].inferredEnd, true);
-  assert.equal(rows[2].inferredEnd, true);
+  assert.equal(rows[2].inferredEnd, undefined);
   assert.deepEqual(rows[0].endPoint, { lat: 47.4, lng: 9.6 });
   const [file] = await fs.readdir(path.join(h.root, "logbook"));
   const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));
   assert.equal(stored.records[rows[0].id].original.endLocation, "47.40000, 9.60000");
   h.state.offline = true;
   rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
-  assert.equal(rows[0].endLocation, "Baustelle B"); assert.equal(rows[3].startLocation, "Werkstatt A");
+  assert.equal(rows[0].endLocation, "Baustelle B"); assert.equal(rows[3].startLocation, "");
   const csv = await (await h.get("/export.csv" + h.query)).text();
   assert.ok(!csv.includes("47.40000")); assert.ok(!csv.includes("47.30000"));
   assert.match(csv, /Baustelle B/); assert.match(csv, /Werkstatt A/);
@@ -257,7 +257,7 @@ test("private locations, overlapping trips and a missing first origin are not us
   assert.equal((await h.patch(rows[0], { category: "private" })).status, 200);
   rows = (await (await h.get()).json()).rows;
   assert.equal(rows[0].endLocation, ""); assert.equal(rows[0].endPoint, null);
-  assert.equal(rows[1].startLocation, "47.50000, 9.70000");
+  assert.equal(rows[1].startLocation, "");
   assert.equal(rows[1].endLocation, "");
   const csv = await (await h.get("/export.csv" + h.query)).text();
   assert.ok(!csv.includes("Privates Ziel"));
@@ -311,7 +311,7 @@ test("impossible trip reports are replaced by a plausible GPS track, including o
   assert.ok(result.rows[0].missing.includes("km-Stand prüfen"));
   assert.equal(result.rows[1].distanceKm, 14.1);
   assert.equal(result.totals.km, result.rows[0].distanceKm + 14.1);
-  assert.equal(h.calls.filter(call => call.url.pathname === "/api/positions").length, 1);
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/positions" && call.url.searchParams.get("from") === "2026-09-22T06:00:00.000Z").length, 1);
   const csv = await (await h.get("/export.csv" + h.query)).text();
   assert.ok(!csv.includes("5339,50"));
   h.state.offline = true;
@@ -399,4 +399,122 @@ test("arrival and next departure always share one street and town; corrections o
   const stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", file)));
   assert.equal(stored.records[rows[0].id].original.endLocation, "45 Feldkircher Straße, Frastanz, Vorarlberg, AT");
   assert.equal(stored.records[rows[1].id].original.startLocation, "Bahnhofstraße 47, Feldkirch, Vorarlberg, AT");
+});
+
+test("stable arrival replaces stale report street, ignores jumps and keeps next departure continuous", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [
+      { id: 1, deviceId: 17, valid: true, fixTime: "2026-09-22T13:32:50Z", latitude: 47.22409, longitude: 9.62169, speed: 0, accuracy: 8 },
+      { id: 2, deviceId: 17, valid: true, fixTime: "2026-09-22T13:33:10Z", latitude: 47.22410, longitude: 9.62170, speed: 0, accuracy: 8 },
+      { id: 3, deviceId: 17, valid: true, fixTime: "2026-09-22T13:33:20Z", latitude: 48, longitude: 10, speed: 0, accuracy: 8 },
+      { id: 4, deviceId: 999, valid: true, fixTime: "2026-09-22T13:33:30Z", latitude: 48, longitude: 10, speed: 0 },
+      { id: 5, deviceId: 17, valid: false, fixTime: "2026-09-22T13:33:40Z", latitude: 48, longitude: 10, speed: 0 },
+    ] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Feldkircher Straße 47, 6820 Frastanz, AT" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startTime: "2026-09-22T13:25:00Z", endTime: "2026-09-22T13:33:00Z", distance: 2830, startLat: 47.224, startLon: 9.62, endLat: 47.22429, endLon: 9.61752, endAddress: "Schmittengasse, 6820 Frastanz" }),
+    trip({ startPositionId: 102, startTime: "2026-09-22T14:00:00Z", endTime: "2026-09-22T14:20:00Z", startAddress: "Schmittengasse, 6820 Frastanz" })];
+  let rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, 6820 Frastanz");
+  assert.deepEqual(rows[0].endPoint, { lat: 47.22410, lng: 9.62170 });
+  assert.equal(rows[0].endPositionId, "2");
+  assert.equal(rows[0].endPointSource, "stable_gps");
+  assert.equal(rows[1].startLocation, rows[0].endLocation);
+  assert.equal(rows[0].distanceKm, 2.83);
+  assert.equal(rows[0].odometerStartKm, 26734.817503);
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.match(csv, /Feldkircher Straße, 6820 Frastanz/);
+  assert.ok(!csv.includes("Schmittengasse"));
+  rows = (await (await h.get(h.query + "&refresh=1")).json()).rows;
+  assert.equal(rows[0].endLocation, "Feldkircher Straße, 6820 Frastanz");
+});
+
+test("screenshot coordinate rows retry geocoding and cache only complete addresses", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => state.resolved ? "Teststraße 12, 6820 Frastanz, AT" : "47.22468, 9.61105" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "47.22468, 9.61105", startLat: 47.22468, startLon: 9.61105, endAddress: "47.24786, 9.58159", endLat: 47.24786, endLon: 9.58159 })];
+  let row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.startLocation, ""); assert.equal(row.endLocation, "");
+  h.state.resolved = true;
+  row = (await (await h.get(h.query + "&refresh=1")).json()).rows[0];
+  assert.equal(row.startLocation, "Teststraße, 6820 Frastanz");
+  assert.equal(row.endLocation, row.startLocation);
+  const count = h.calls.filter(call => call.url.pathname === "/api/server/geocode").length;
+  await h.get(h.query + "&refresh=1");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, count);
+  const csv = await (await h.get("/export.csv" + h.query)).text();
+  assert.ok(!csv.includes("47.22468") && !csv.includes("47.24786"));
+});
+
+test("nearby streets do not inherit a radius label and a single late GPS fix is not an arrival", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [
+      { deviceId: 17, fixTime: "2026-09-22T06:30:10Z", latitude: 47.22410, longitude: 9.62170, speed: 0 }
+    ] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "Schmittengasse, 6820 Frastanz", startLat: 47.22429, startLon: 9.61752, endAddress: "", endLat: 47.22430, endLon: 9.61753 })];
+  const row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.endLocation, "");
+  assert.equal(row.endPointSource, undefined);
+  assert.deepEqual(row.endPoint, { lat: 47.22430, lng: 9.61753 });
+});
+
+test("saved unresolved coordinates can resolve while the trip report is offline", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") { if (state.offline) throw Error("Report unavailable"); return { ok: true, json: async () => state.trips }; }
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => state.offline ? "Feldkircher Straße 47, 6820 Frastanz" : "" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "", endAddress: "" })];
+  const initial = (await (await h.get()).json()).rows[0];
+  assert.equal(initial.endLocation, "");
+  h.state.offline = true;
+  const response = await (await h.get(h.query + "&refresh=1")).json();
+  assert.match(response.warning, /gespeicherte Fahrten/);
+  assert.equal(response.rows[0].startLocation, "Feldkircher Straße, 6820 Frastanz");
+  assert.equal(response.rows[0].endLocation, "Feldkircher Straße, 6820 Frastanz");
+  assert.equal(response.rows[0].distanceKm, initial.distanceKm);
+});
+
+test("lookup budget gives later rows a turn instead of retrying the first failing points forever", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = Array.from({ length: 8 }, (_, i) => trip({ startPositionId: 200 + i, startAddress: "", endAddress: "", startLat: 47 + i / 100, endLat: 47.005 + i / 100 }));
+  await h.get();
+  const initial = h.calls.filter(call => call.url.pathname === "/api/server/geocode");
+  assert.equal(initial.length, 12);
+  await h.get(h.query + "&refresh=1");
+  const all = h.calls.filter(call => call.url.pathname === "/api/server/geocode");
+  assert.equal(new Set(all.map(call => call.url.search)).size, 16);
+});
+
+test("street and town remain usable and cached when a postcode is unavailable", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "Buchholzstrasse 12, Rüthi (SG), CH" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "Wies, Schwarzenberg", endAddress: "" })];
+  let row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.startLocation, "Wies, Schwarzenberg");
+  assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
+  const lookups = h.calls.filter(call => call.url.pathname === "/api/server/geocode").length;
+  row = (await (await h.get(h.query + "&refresh=1")).json()).rows[0];
+  assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, lookups);
 });

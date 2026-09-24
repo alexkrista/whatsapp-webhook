@@ -1,0 +1,46 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict");
+const fs = require("node:fs"), path = require("node:path");
+const { JSDOM } = require("jsdom");
+
+test("logbook hides legacy coordinates, retries addresses, preserves open forms and stops polling when closed", async t => {
+  const dom = new JSDOM('<div id="logbook" hidden></div>', { url: "https://krisdrive.example/krisdrive.html", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window, timers = new Map(); let timerId = 0, requests = 0;
+  w.HTMLElement.prototype.scrollIntoView = () => {};
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  w.setTimeout = fn => { timers.set(++timerId, fn); return timerId; };
+  w.clearTimeout = id => timers.delete(id);
+  const row = { id: "trip-1", startedAt: "2026-09-24T13:25:00Z", closedAt: "2026-09-24T13:33:00Z", category: "unassigned", startLocation: "47.22468, 9.61105", endLocation: "47.24786, 9.58159", missing: ["Fahrer", "Fahrtart"], distanceKm: 2.83 };
+  w.fetch = async () => {
+    requests++;
+    return { ok: true, json: async () => ({ rows: [{ ...row }], employees: [], range: { from: "2026-09-24", to: "2026-09-24" }, totals: { count: 1, km: 2.83, businessKm: 0, privateKm: 0, open: 1 } }) };
+  };
+  w.eval(fs.readFileSync(path.join(__dirname, "../public/krisdrive-logbook.js"), "utf8"));
+  w.dispatchEvent(new w.CustomEvent("krisdrive:logbook", { detail: { id: "byd", label: "BYD", plate: "FK 2589" } }));
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  await settle();
+  const routes = () => w.document.querySelector(".lb-route").textContent;
+  assert.match(routes(), /Adresse wird ermittelt/);
+  assert.ok(!routes().includes("47.22468") && !routes().includes("47.24786"));
+  assert.match(w.document.querySelector(".lb-date").textContent, /15:25.*15:33/);
+  assert.equal(timers.size, 1);
+  w.document.querySelector(".lb-edit").click();
+  assert.equal(w.document.getElementById("lb-start").value, "");
+  const tick = () => { const [id, fn] = timers.entries().next().value; timers.delete(id); fn(); };
+  tick(); await settle();
+  assert.equal(requests, 1); assert.equal(timers.size, 1);
+  w.document.getElementById("lb-cancel").click();
+  row.startLocation = "Maria Grünerstraße, 6820 Frastanz";
+  row.endLocation = "Feldkircher Straße, 6820 Frastanz";
+  tick(); await settle();
+  assert.equal(requests, 2);
+  assert.match(routes(), /Feldkircher Straße, 6820 Frastanz/);
+  assert.equal(timers.size, 0);
+  row.endLocation = "";
+  w.document.getElementById("lb-filters").dispatchEvent(new w.Event("submit", { cancelable: true }));
+  await settle(); assert.equal(timers.size, 1);
+  w.document.getElementById("lb-close").click();
+  assert.equal(timers.size, 0);
+});
