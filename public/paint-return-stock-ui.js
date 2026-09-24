@@ -81,7 +81,7 @@
         <h2 style="margin-top:0">Rückware erfassen</h2>
         <div class="return-scan-actions">
           <button id="returnCameraBtn" class="btn primary" type="button">📷 Dose scannen</button>
-          <input id="returnEan" class="field return-ean" inputmode="numeric" autocomplete="off" placeholder="oder Barcode eingeben">
+          <input id="returnEan" class="field return-ean" inputmode="text" autocomplete="off" placeholder="Barcode oder LG 19 eingeben">
           <button id="returnLookupBtn" class="btn" type="button">Übernehmen</button>
         </div>
         <div id="returnLearn" class="return-learn" hidden>
@@ -262,6 +262,14 @@
   }
 
   async function lookupEan(raw) {
+    const returnCode = String(raw || "").trim().toUpperCase();
+    if (/^(?:R-|(?:LG|ST|SY|KB|FC|BX|FM)[ -]?)[1-9]\d{0,8}$/.test(returnCode)) {
+      try {
+        const data = await api("/admin/api/paint/returns/barcode?code=" + encodeURIComponent(returnCode));
+        openTransfer(data.item);
+      } catch (error) {setStatus(error.message,"err");}
+      return;
+    }
     const code = String(raw || "").replace(/\D/g, "");
     if (code.length < 6) return setStatus("Barcode/EAN fehlt.", "err");
     currentEan = code;
@@ -327,7 +335,7 @@
   document.body.insertBefore(editModal, modal);
   el("returnEditProjectBtn").onclick = () => openProject("edit");
   el("returnEditClose").onclick = () => { editModal.hidden = true; editing = null; };
-  const statusLabel = value => ({used:"Aufgebraucht",dried:"Eingetrocknet",available:"Verfügbar"}[value] || value);
+  const statusLabel = value => ({used:"Aufgebraucht",dried:"Eingetrocknet",out:"Ausgebucht",available:"Verfügbar"}[value] || value);
   const historyValues = (value) => value?.status ? statusLabel(value.status) : `${formatWeight(value?.weightKg)} · ${[value?.jobId, value?.jobName].filter(Boolean).join(" · ") || "Keine Baustelle"}`;
   function openEdit(row) {
     editing = row;
@@ -378,7 +386,7 @@
     el("returnResults").innerHTML = returns.map((row) => {
       const material = [row.manufacturer, row.material, row.size].filter(Boolean).join(" · ");
       const projectText = row.jobId === "__lager__" ? "Lager" : [row.jobId, row.jobName].filter(Boolean).join(" · ");
-      return `<div class="return-row"><div class="return-no">${esc(row.returnLabel || row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div>${row.status !== "available" ? `<strong style="color:#a7322d">${esc(statusLabel(row.status))}</strong>` : ""}</div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div><button class="btn" type="button" data-return-edit="${esc(row.id)}">${row.status === "available" ? "Ändern" : "Verlauf"}</button>${row.status === "available" ? `<button class="btn" type="button" style="color:#a7322d" data-return-remove="${esc(row.id)}">Entfernen</button>` : ""}</div></div>`;
+      return `<div class="return-row"><div class="return-no">${esc(row.returnLabel || row.returnNo)}</div><div class="return-main"><b>${esc(row.colour)}</b><div class="return-sub">${esc(material)}${projectText ? "<br>von " + esc(projectText) : ""}</div>${row.status !== "available" ? `<strong style="color:#a7322d">${esc(statusLabel(row.status))}</strong>` : ""}</div><div class="return-side"><div>${esc(formatWeight(row.weightKg))}</div><div class="return-age">${esc(ageText(row.ageDays))}</div><button class="btn" type="button" data-return-edit="${esc(row.id)}">${row.status === "available" ? "Ändern" : "Verlauf"}</button>${["available","out"].includes(row.status) ? `<button class="btn" type="button" data-return-transfer="${esc(row.id)}">${row.status === "out" ? "Zurückbuchen" : "Ausbuchen"}</button>` : ""}${row.status === "available" ? `<button class="btn" type="button" style="color:#a7322d" data-return-remove="${esc(row.id)}">Entfernen</button>` : ""}</div></div>`;
     }).join("");
     el("returnResults").querySelectorAll("[data-return-edit]").forEach((button) => {
       button.onclick = () => openEdit(returns.find((row) => row.id === button.dataset.returnEdit));
@@ -386,7 +394,60 @@
     el("returnResults").querySelectorAll("[data-return-remove]").forEach(button => {
       button.onclick = () => openRemove(returns.find(row => row.id === button.dataset.returnRemove));
     });
+    el("returnResults").querySelectorAll("[data-return-transfer]").forEach(button => {
+      button.onclick = () => openTransfer(returns.find(row => row.id === button.dataset.returnTransfer));
+    });
   }
+
+  const transferModal = document.createElement("div");
+  transferModal.className = "return-modal";
+  transferModal.hidden = true;
+  transferModal.innerHTML = `<div class="return-modal-card" role="dialog" aria-modal="true" aria-labelledby="returnTransferTitle"><h2 id="returnTransferTitle"></h2><p id="returnTransferDescription"></p><div id="returnReceiveFields"><label for="returnReceiveWeight">Neues Gewicht in kg</label><input id="returnReceiveWeight" class="field" type="number" min="0" step="0.001" inputmode="decimal" placeholder="Frisch wiegen oder 0 für leer"><button id="returnReceiveWeigh" class="btn" type="button">⚖ Jetzt wiegen</button> <button id="returnReceiveEmpty" class="btn" type="button">Dose leer · 0 kg</button></div><p id="returnTransferHint"></p><button id="returnTransferCancel" class="btn" type="button">Abbrechen</button> <button id="returnTransferSave" class="btn primary" type="button"></button><div id="returnTransferStatus" role="status"></div></div>`;
+  document.body.appendChild(transferModal);
+  let transferring = null;
+  function openTransfer(row) {
+    if (!row) return;
+    transferring = row;
+    const receiving = row.status === "out";
+    el("returnTransferTitle").textContent = `${row.returnLabel || row.returnNo} · ${receiving ? "Zurückbuchen" : "Ausbuchen"}`;
+    el("returnTransferDescription").textContent = `${row.manufacturer} · ${row.material} · ${row.colour} · zuletzt ${formatWeight(row.weightKg)}`;
+    el("returnReceiveFields").hidden = !receiving;
+    el("returnReceiveWeight").value = "";
+    el("returnTransferHint").textContent = receiving ? "Farbe und Material bleiben gespeichert. Mit neuem Gewicht kommt die Dose ohne neues Etikett zurück; bei 0 kg gilt sie als aufgebraucht." : "Die Dose verschwindet aus dem verfügbaren Bestand. Das Etikett bleibt für die Rückkehr gültig.";
+    el("returnTransferSave").textContent = receiving ? "Mit neuem Gewicht zurückbuchen" : "Dose ausbuchen";
+    el("returnTransferStatus").textContent = "";
+    transferModal.hidden = false;
+    if (receiving) el("returnReceiveWeight").focus();
+  }
+  el("returnTransferCancel").onclick = () => {transferModal.hidden = true;transferring = null;};
+  el("returnReceiveEmpty").onclick = () => {el("returnReceiveWeight").value = "0";el("returnTransferStatus").textContent = "Dose wird als aufgebraucht markiert.";};
+  el("returnReceiveWeigh").onclick = async () => {
+    const button = el("returnReceiveWeigh");button.disabled = true;
+    try {
+      if (typeof window.kristineReadReturnWeight !== "function") throw Error("Waage nicht bereit");
+      const data = await window.kristineReadReturnWeight();
+      el("returnReceiveWeight").value = String(data.weightKg);
+      el("returnTransferStatus").textContent = `Neu gewogen: ${data.display}`;
+    } catch (error) {el("returnTransferStatus").textContent = error.message;}
+    finally {button.disabled = false;}
+  };
+  el("returnTransferSave").onclick = async () => {
+    if (!transferring || el("returnTransferSave").disabled) return;
+    const row = transferring, receiving = row.status === "out";
+    if (!["available","out"].includes(row.status)) return;
+    const weightKg = Number(String(el("returnReceiveWeight").value).replace(",","."));
+    if (receiving && (el("returnReceiveWeight").value.trim() === "" || !Number.isFinite(weightKg) || weightKg < 0)) {el("returnTransferStatus").textContent = "Bitte die Dose neu wiegen oder 0 kg für leer wählen.";return;}
+    el("returnTransferSave").disabled = true;
+    try {
+      await api(`/admin/api/paint/returns/${encodeURIComponent(row.id)}/${receiving ? "receive" : "checkout"}`, {method:"POST",body:JSON.stringify(receiving ? {weightKg,revision:row.revision || 0} : {revision:row.revision || 0})});
+      transferModal.hidden = true;transferring = null;
+      await loadReturns(el("returnSearch").value || "");
+      setStatus(`${row.returnLabel || row.returnNo} ${receiving ? (weightKg === 0 ? "als aufgebraucht erfasst" : "mit neuem Gewicht zurückgebucht") : "ausgebucht"} ✓`,"ok");
+      el("returnEan").value = "";
+      el("returnEan").focus();
+    } catch (error) {el("returnTransferStatus").textContent = error.message;}
+    finally {el("returnTransferSave").disabled = false;}
+  };
 
   const removeModal = document.createElement("div");
   removeModal.className = "return-modal";
@@ -508,8 +569,9 @@
       const config = { fps: 12, qrbox: { width: 280, height: 150 }, aspectRatio: 1.5 };
       const onCode = async (decoded) => {
         if (scannerLocked) return;
-        const code = String(decoded || "").replace(/\D/g, "");
-        if (code.length < 6 || code.length > 18) return;
+        const raw = String(decoded || "").trim().toUpperCase();
+        const code = /^R-[1-9]\d{0,8}$/.test(raw) ? raw : raw.replace(/\D/g, "");
+        if (!/^R-[1-9]\d{0,8}$/.test(code) && (code.length < 6 || code.length > 18)) return;
         scannerLocked = true;
         try { navigator.vibrate?.(70); } catch {}
         await stopScanner();
