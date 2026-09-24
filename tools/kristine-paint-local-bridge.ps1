@@ -103,7 +103,7 @@ function Get-PmaWeight {
   }
 }
 
-function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]$Font = '0', [string]$Size = 'normal', [bool]$Custom = $false) {
+function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]$Font = '0', [string]$Size = 'normal', [bool]$Custom = $false, [string]$Barcode = '') {
   $bigText = ConvertTo-SafeLabelText $Big 16
   $smallText = ConvertTo-SafeLabelText $Small 24
   $jobText = ConvertTo-SafeLabelText $Job 44
@@ -111,6 +111,7 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]
   if (-not $smallText) { throw "Datum fehlt" }
   if ($Font -cnotin @('0','D','E')) { throw 'Unbekannte Schriftart' }
   if ($Size -cnotin @('small','normal','large')) { throw 'Unbekannte Schriftgroesse' }
+  if ($Barcode -and $Barcode -cnotmatch '^R-[1-9][0-9]{0,8}$') { throw 'Ungueltige Etikettenkennung' }
 
   $len = $bigText.Length
   # Archivnummer bewusst ca. 6 Druckpunkte groesser als bisher.
@@ -146,8 +147,14 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]
   # Beide Texte bleiben vollstaendig im 16-mm-Bereich; dadurch laeuft LG 1 nicht mehr ins grosse Etikett.
   # ^PQ1 erzwingt genau einen Etiketten-Satz pro Druckauftrag.
   $jobLine = ""
+  $barcodeLine = ""
   if ($jobText) {
     $jobLine = "^FO145,276^FB310,2,2,C,0^A0N,18,18^FD$jobText^FS"
+  }
+  if ($Barcode) {
+    # Maschinelle Kennung auf dem grossen Etikett, unter der Archivnummer.
+    $barcodeLine = "^FO170,270^BY2,2,28^BCN,28,N,N,N^FD$Barcode^FS"
+    if ($jobText) { $jobLine = "^FO145,310^FB310,1,0,C,0^A0N,14,14^FD$jobText^FS" }
   }
 
   return @"
@@ -159,6 +166,7 @@ function New-ReturnLabelZpl([string]$Big, [string]$Small, [string]$Job, [string]
 ^FO150,48^FB300,1,0,C,0^A${Font}N,$smallH,$smallW^FD$smallText^FS
 ^FO128,92^FB336,1,0,C,0^A${Font}N,$fontH,$fontW^FD$bigText^FS
 ^FO129,93^FB334,1,0,C,0^A${Font}N,$fontH,$fontW^FD$bigText^FS
+$barcodeLine
 $jobLine
 ^FO68,58^A${Font}R,$rotBigH,$rotBigW^FD$bigText^FS
 ^FO30,58^A${Font}R,$rotSmallH,$rotSmallW^FD$smallText^FS
@@ -284,7 +292,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.4.0'
+            version = '1.5.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })
@@ -301,7 +309,8 @@ try {
           $custom = $null -ne $data.font -or $null -ne $data.size
           $font = if ($null -ne $data.font) { [string]$data.font } else { '0' }
           $size = if ($null -ne $data.size) { [string]$data.size } else { 'normal' }
-          Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom)
+          $barcode = if ($null -ne $data.returnId) { [string]$data.returnId } else { '' }
+          Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom $barcode)
           Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
         }
         else {
