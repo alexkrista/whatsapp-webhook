@@ -25,7 +25,7 @@ def install(ns):
     page = str(ns.get("MOBILE_PAGE") or "")
     kristine_api = ns.get("kristine_api_request")
     api_base = str(ns.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
-    admin_token = str(ns.get("KRISTINE_ADMIN_TOKEN") or "").strip()
+    token_for_request = ns.get("kristine_api_token")
     allowed = ns.get("MOBILE_ALLOWED_PATHS")
     if app is None or not page or not callable(kristine_api):
         return
@@ -88,14 +88,12 @@ def install(ns):
             item_id = _safe_id(request.args.get("id"))
             if not item_id:
                 return jsonify(ok=False, error="Eingang fehlt"), 400
-            if not admin_token:
-                return jsonify(ok=False, error="KRISTINE_ADMIN_TOKEN fehlt"), 503
-            url = (
-                f"{api_base}/kristine/api/invoice-intake/{urllib.parse.quote(item_id)}/file"
-                f"?token={urllib.parse.quote(admin_token)}"
-            )
+            token = token_for_request() if callable(token_for_request) else ""
+            if not token:
+                return jsonify(ok=False, error="Bitte The Brain über Kristine erneut öffnen."), 503
+            url = f"{api_base}/kristine/api/invoice-intake/{urllib.parse.quote(item_id)}/file"
             try:
-                req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "KRISTINE-Brain/1.0"})
+                req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "KRISTINE-Brain/1.0", "X-Admin-Token": token})
                 with urllib.request.urlopen(req, timeout=30) as response:
                     raw = response.read()
                     mime = str(response.headers.get("content-type") or "application/octet-stream").split(";", 1)[0].strip().lower()
