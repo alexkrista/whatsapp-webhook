@@ -5,7 +5,7 @@ const page = fs.readFileSync('public/konfipay.html', 'utf8');
 const revolut = fs.readFileSync('brain_revolut_connection.py', 'utf8');
 
 assert(page.includes("title.textContent='Gesamter Cash'"));
-assert(page.includes("line('Bankkonten · erwartet'"));
+assert(page.includes("complete?'Bankkonten · erwartet':'Bankkonten · nach Umsätzen'"));
 assert(page.includes("line('Revolut Business'"));
 assert(page.includes("line('Revolut'"));
 assert(page.includes("line('Kassastand'"));
