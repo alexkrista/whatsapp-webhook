@@ -406,7 +406,7 @@ function registerKrisdriveLogbook(app, options = {}) {
         // Preserve legacy user-defined place names and street/locality addresses.
         // A missing postcode must not hide an otherwise usable address.
         if (hasAddress(trip[field]) && !text(trip[field]).includes(",")) continue;
-        if (usableAddress(trip[field]) && (field !== "endLocation" || trip.endPointSource !== "stable_gps")) continue;
+        if (usableAddress(trip[field])) continue;
         trip[field] = "";
         if (old?.addressVersion === 2 && pointKey(old?.[pointField]) === key && hasAddress(old?.[field])) { trip[field] = old[field]; continue; }
         let address = addressCache.get(key) || "";
@@ -414,8 +414,14 @@ function registerKrisdriveLogbook(app, options = {}) {
           lookups++;
           try {
             const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
-            const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "text/plain", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
-            if (response.ok) address = streetAndTown(await response.text());
+            const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
+            if (response.ok) {
+              let result = await response.text();
+              // Traccar advertises application/json but normally returns a raw
+              // address string; accept JSON-encoded strings from proxies too.
+              try { const parsed = JSON.parse(result); if (typeof parsed === "string") result = parsed; } catch {}
+              address = streetAndTown(result);
+            }
             else addressFailures.set(key, Date.now() + 60000);
           } catch { /* Retry without storing a placeholder as an address. */ }
           if (!usableAddress(address)) addressFailures.set(key, Date.now() + 60000);
@@ -481,8 +487,10 @@ function registerKrisdriveLogbook(app, options = {}) {
               if (endpoint.field === "endLocation" && (!Number.isFinite(at) || Math.abs(at - Date.parse(endpoint.trip.closedAt)) > 60000 || number(position.accuracy) > 50)) continue;
               const point = coordinates(position.latitude, position.longitude);
               if (!point) continue;
+              const samePoint = pointKey(endpoint.trip[endpoint.pointField]) === pointKey(point);
+              const address = hasAddress(position.address) ? position.address : samePoint && hasAddress(endpoint.trip[endpoint.field]) ? endpoint.trip[endpoint.field] : "";
               endpoint.trip[endpoint.pointField] = point;
-              endpoint.trip[endpoint.field] = location(position.address, point) || endpoint.trip[endpoint.field];
+              endpoint.trip[endpoint.field] = location(address, point);
             }
           } catch { /* The report remains usable if individual positions are unavailable. */ }
         }
@@ -494,7 +502,9 @@ function registerKrisdriveLogbook(app, options = {}) {
             if (previous.records[trip.id]?.edits?.category === "private") return;
             const old = previous.records[trip.id]?.data;
             if (old?.endPointSource === "stable_gps" && old.closedAt === trip.closedAt) {
-              trip.endPoint = old.endPoint; trip.endLocation = old.endLocation;
+              const samePoint = pointKey(trip.endPoint) === pointKey(old.endPoint);
+              trip.endLocation = samePoint && hasAddress(trip.endLocation) ? trip.endLocation : old.endLocation;
+              trip.endPoint = old.endPoint;
               trip.endPositionId = old.endPositionId; trip.endPointSource = old.endPointSource;
               trip.arrivalCheckedUntil = old.arrivalCheckedUntil;
             }
@@ -505,9 +515,11 @@ function registerKrisdriveLogbook(app, options = {}) {
               const query = new URLSearchParams({ deviceId, from: new Date(Math.max(Date.parse(trip.startedAt), Date.parse(trip.closedAt) - 120000)).toISOString(), to: new Date(until).toISOString() });
               const fix = stableArrival(trip, await traccar("/api/positions?" + query, 5000), until);
               if (fix) {
+                const samePoint = pointKey(trip.endPoint) === pointKey(fix.point);
+                const address = hasAddress(fix.row.address) ? fix.row.address : samePoint && hasAddress(trip.endLocation) ? trip.endLocation : "";
                 trip.endPoint = fix.point;
                 trip.endPositionId = text(fix.row.id, 30);
-                trip.endLocation = location(fix.row.address, fix.point);
+                trip.endLocation = location(address, fix.point);
                 trip.endPointSource = "stable_gps";
                 trip.arrivalCheckedUntil = until;
               }
@@ -685,7 +697,7 @@ function createCsv(data) {
     ["Zeitraum", data.range.from, data.range.to, "Stand", displayDate(data.generatedAt)],
     ["GPS-Abruf", data.warning || "Aktuell", "Letzter Abruf", displayDate(data.lastSync)],
     ["Beginn", "Ende", "Fahrer", "Fahrtart", "Start", "Ziel", "Zweck / Kunde / Baustelle", "km Beginn (Tracker/Korrektur)", "km Ende (Tracker/Korrektur)", "Kilometer", "Zu ergänzen", "Geändert am"],
-    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", categoryLabel(row.category), row.category === "private" ? "" : (row.startLocation || "Adresse wird ermittelt") + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : (row.endLocation || "Adresse wird ermittelt") + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
+    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", categoryLabel(row.category), row.category === "private" ? "" : (row.startLocation || "Adresse derzeit nicht verfügbar") + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : (row.endLocation || "Adresse derzeit nicht verfügbar") + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
     [], ["Summe km", decimal(data.totals.km)], ["Geschäftlich km", decimal(data.totals.businessKm)], ["Privat km", decimal(data.totals.privateKm)], ["Nicht zugeordnet km", decimal(data.totals.unassignedKm)], ["Fahrten ohne Kilometerangabe", data.totals.missingKm],
   ];
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";

@@ -22,7 +22,7 @@ test("logbook hides legacy coordinates, retries addresses, preserves open forms 
   const settle = () => new Promise(resolve => setImmediate(resolve));
   await settle();
   const routes = () => w.document.querySelector(".lb-route").textContent;
-  assert.match(routes(), /Adresse wird ermittelt/);
+  assert.match(routes(), /Adresse derzeit nicht verfügbar/);
   assert.ok(!routes().includes("47.22468") && !routes().includes("47.24786"));
   assert.match(w.document.querySelector(".lb-date").textContent, /15:25.*15:33/);
   assert.equal(timers.size, 1);

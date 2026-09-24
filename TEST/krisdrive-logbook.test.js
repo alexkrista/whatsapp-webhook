@@ -518,3 +518,58 @@ test("street and town remain usable and cached when a postcode is unavailable", 
   assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, lookups);
 });
+
+test("geocoder accepts Traccar JSON media type with raw or JSON-encoded strings", async t => {
+  for (const encoded of [false, true]) {
+    const h = await harness(t, { request: async (url, opts, state) => {
+      if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+      if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+      if (url.pathname === "/api/server/geocode") {
+        // Traccar's resource declares application/json. A text/plain-only
+        // Accept header causes HTTP 406 before the geocoder is called.
+        if (!opts.headers.Accept.includes("application/json")) return { ok: false, status: 406 };
+        const label = "Feldkircher Straße 45, Frastanz, Vorarlberg, AT";
+        return { ok: true, text: async () => encoded ? JSON.stringify(label) : label };
+      }
+      throw Error("Unexpected request");
+    } });
+    h.state.trips = [trip({ startAddress: "", endAddress: "" })];
+    const row = (await (await h.get()).json()).rows[0];
+    assert.equal(row.startLocation, "Feldkircher Straße, 6820 Frastanz");
+    assert.equal(row.endLocation, "Feldkircher Straße, 6820 Frastanz");
+  }
+});
+
+test("exact endpoint and stable stop enrichment preserve the report address at the same GPS point", async t => {
+  const point = { latitude: 47.24, longitude: 9.59 };
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [
+      { id: 201, deviceId: 17, valid: true, fixTime: "2026-09-22T06:29:50Z", speed: 0, ...point },
+      { id: 202, deviceId: 17, valid: true, fixTime: "2026-09-22T06:30:00Z", speed: 0, ...point },
+    ] };
+    throw Error("No geocoding needed for an unchanged, already named point");
+  } });
+  h.state.trips = [trip({ endPositionId: 202, endAddress: "Feldkircher Straße, 6820 Frastanz" })];
+  for (const suffix of [h.query, h.query + "&refresh=1"]) {
+    const row = (await (await h.get(suffix)).json()).rows[0];
+    assert.equal(row.endLocation, "Feldkircher Straße, 6820 Frastanz");
+    assert.equal(row.endPointSource, "stable_gps");
+  }
+  assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 0);
+});
+
+test("a fresh stable fix's own address survives when reverse geocoding is unavailable", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [
+      { id: 201, deviceId: 17, valid: true, fixTime: "2026-09-22T06:29:50Z", latitude: 47.22410, longitude: 9.62170, speed: 0 },
+      { id: 202, deviceId: 17, valid: true, fixTime: "2026-09-22T06:30:00Z", latitude: 47.22411, longitude: 9.62171, speed: 0, address: "Feldkircher Straße 45, 6820 Frastanz" },
+    ] };
+    return { ok: false, status: 503 };
+  } });
+  h.state.trips = [trip({ endAddress: "Schmittengasse, 6820 Frastanz" })];
+  const row = (await (await h.get()).json()).rows[0];
+  assert.equal(row.endLocation, "Feldkircher Straße, 6820 Frastanz");
+  assert.equal(row.endPositionId, "202");
+});

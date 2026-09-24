@@ -12,7 +12,7 @@
   const label = category => ({ business: "Geschäftlich", private: "Privat", unassigned: "Fahrtart offen" })[category] || "Offen";
   let vehicle = null, data = null, activeRow = null, generation = 0, controller = null, retryTimer = null;
   const safeLocation = value => /^\s*[+-]?\d+(?:\.\d+)?\s*[,;]\s*[+-]?\d+(?:\.\d+)?\s*$/.test(value || "") ? "" : value || "";
-  const locationLabel = value => safeLocation(value) || "Adresse wird ermittelt";
+  const locationLabel = value => safeLocation(value) || "Adresse derzeit nicht verfügbar";
   host.innerHTML = `
     <div class="lb-head"><div><div class="eyebrow">KRISDRIVE · Fahrtenbuch</div><h2 id="lb-title" tabindex="-1">Fahrtenbuch</h2><div id="lb-vehicle" class="lb-sub"></div></div><button class="lb-close" id="lb-close" aria-label="Fahrtenbuch schließen">×</button></div>
     <form id="lb-filters" class="lb-controls">
