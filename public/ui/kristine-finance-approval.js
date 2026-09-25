@@ -86,11 +86,16 @@
   }
 
   async function persistFinanceDecision(task, meta, { done }) {
+    if (!window.KristaUser?.currentId()) throw new Error("Bitte zuerst persönlich als Alexander anmelden (Menü → Anmelden).");
+    if (!window.KristaUser.can("financeApproval")) throw new Error("Rechnungsfreigaben sind nur für Alexander freigeschaltet.");
+    if (typeof persistTasks !== "function") throw new Error("Aufgaben-Speicherung ist noch nicht bereit.");
+    const previous = { reminder: task.reminder, status: task.status, completedAt: task.completedAt };
     task.reminder = buildFinanceReminder(meta);
     task.status = done ? "done" : "open";
     task.completedAt = done ? new Date().toISOString() : null;
     if (typeof persistTasks !== "function") throw new Error("Aufgaben-Speicherung ist noch nicht bereit.");
-    await persistTasks();
+    try { await persistTasks(); }
+    catch (error) { Object.assign(task, previous); throw error; }
     if (typeof renderTasks === "function") renderTasks();
     setTimeout(() => {
       decorateRows();

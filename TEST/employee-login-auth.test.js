@@ -15,6 +15,7 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   const people = [
     { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true },
     { id:"mario", name:"Mario", phone:"+43 660 222222", active:true },
+    { id:"bettina", name:"Bettina", phone:"+43 660 333333", active:true },
   ];
   await fs.mkdir(path.join(dir, "_system"), { recursive:true });
   await fs.writeFile(path.join(dir, "_system", "employees.json"), JSON.stringify(people));
@@ -31,6 +32,7 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   installRoutes(app);
   registerEmployeeLogin(app, { dataDir:dir, readEmployees:async()=>people, sendWhatsApp:async row=>messages.push(row) });
   registerKristineUserAccess(app, { dataDir:dir, readEmployees:async()=>people, requireAdmin:require("../admin-auth").requireAdmin });
+  app.put("/kristine/api/tasks", (_req,res)=>res.json({ok:true}));
   registerPaintLab(app, { dataDir:dir });
   const server = await new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
@@ -69,6 +71,18 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   const alex = await login("+43 660 111111");
   const authorized = await request("/kristine/api/user-access", { method:"PUT", headers:{ Cookie:alex, Origin:base, "Content-Type":"application/json" }, body:JSON.stringify({ users:[] }) });
   assert.equal(authorized.status, 200);
+  process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = 'alexander';
+  assert.equal((await request('/anmelden')).status,200);
+  assert.equal((await request('/auth/me',{headers:{Cookie:mario}})).status,401);
+  assert.equal((await request('/auth/me',{headers:{Cookie:alex}})).status,200);
+  const countBefore=messages.length;
+  assert.equal((await post('/auth/whatsapp/start',{phone:'+43 660 333333'})).status,200);
+  assert.equal(messages.length,countBefore,'restricted mode must not send a code to another employee');
+  const finance={id:'invoice',creatorId:'brain-finance',reminder:'[FINANCE_APPROVAL]decision=approved'};
+  const saveApproval=cookie=>request('/kristine/api/tasks',{method:'PUT',headers:{Cookie:cookie,Origin:base,'Content-Type':'application/json','X-Krista-User-Id':'alex'},body:JSON.stringify({tasks:[finance],actorId:'alex'})});
+  assert.equal((await saveApproval(alex)).status,200);
+  assert.equal((await saveApproval(mario)).status,403);
+
   assert.equal((await post("/auth/logout", {}, { Cookie:alex })).status, 200);
   assert.equal((await request("/auth/me", { headers:{ Cookie:alex } })).status, 401);
   people[1].active = false;
