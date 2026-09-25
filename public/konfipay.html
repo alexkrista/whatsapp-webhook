@@ -299,6 +299,14 @@ async function loadExpected(){
    line('Kontostand '+bankDate(a.date),money(a.amount,a.currency));
    if(a.error){
     if(a.reportedBalance!==undefined){
+     if(Number(a.earlierNet)!==0)line('Weitere Buchungen bis gestern',money(a.earlierNet,a.currency));
+     line('Eingänge '+bankDate(data.date)+' inkl. Vormerkungen','+ '+money(a.todayIn,a.currency));
+     line('Ausgänge '+bankDate(data.date)+' inkl. Vormerkungen','− '+money(a.todayOut,a.currency));
+     if(Number(a.pendingCount)>0){
+      const pending=document.createElement('p');pending.className='small';
+      pending.textContent='Darin vorgemerkt: Eingänge '+money(a.pendingIn,a.currency)+' · Ausgänge '+money(a.pendingOut,a.currency)+'.';
+      card.append(pending);
+     }
      line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
      const note=document.createElement('p');note.className='small';note.textContent='Eigene Überweisung noch nicht eindeutig zugeordnet. '+a.error;card.append(note);
     }else line('Erwarteter Kontostand',a.error);
