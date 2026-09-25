@@ -52,7 +52,7 @@ function createAddressQueue({ file, lookup, now = Date.now }) {
         if (shouldRequest && !await shouldRequest(key)) continue;
         let address = "", error = "empty_response";
         try { address = await lookup(job.point); }
-        catch (e) { error = e.name === "TimeoutError" ? "timeout" : Number.isInteger(e.status) ? `http_${e.status}` : "provider_unavailable"; }
+        catch (e) { error = ["empty_address", "address_format"].includes(e.code) ? e.code : e.name === "TimeoutError" ? "timeout" : Number.isInteger(e.status) ? `http_${e.status}` : "provider_unavailable"; }
         await transaction(state => {
           const current = state.jobs[key];
           current.attempts++; current.lastAttemptAt = now();
