@@ -21,7 +21,7 @@ def expected_balances(client):
             sums={'bookedIn':Decimal(0),'bookedOut':Decimal(0),'pendingIn':Decimal(0),'pendingOut':Decimal(0),'todayIn':Decimal(0),'todayOut':Decimal(0),'earlierNet':Decimal(0)}
             own=[x for x in local if iban(x['item']['debtorIban'])==iban(account['iban'])]
             result['ownPaymentCount']=len(own)
-            result['ownPayments']=[{'name':x['item']['name'],'amount':x['item']['amount'],'date':x['item']['date'],'transfer':x['transfer']} for x in own[-20:]]
+            result['ownPayments']=[{'name':x['item'].get('name') or 'Empfänger unbekannt','amount':x['item']['amount'],'date':x['item']['date'],'transfer':x['transfer']} for x in own[-20:]]
             lookup_start=min([start]+[date.fromisoformat(x['item']['date']) for x in own])
             seen=set();count=0;bank=[]
             for booking in ['booked','pending']:
