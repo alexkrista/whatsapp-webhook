@@ -5,7 +5,7 @@ const express = require("express");
 const { registerKrisdriveLogbook, dateRange, trackerMileage, normalizeLocal, streetAndTown } = require("../krisdrive-logbook");
 
 const trip = (extra = {}) => ({ deviceId: 17, startPositionId: 101, startTime: "2026-09-22T06:00:00Z", endTime: "2026-09-22T06:30:00Z", startAddress: "Frastanz Werkstatt", endAddress: "Feldkirch Baustelle", startLat: 47.21, startLon: 9.62, endLat: 47.24, endLon: 9.59, distance: 12500, startOdometer: 26734817.503, endOdometer: 26747317.503, ...extra });
-async function harness(t, { local = [], config, request } = {}) {
+async function harness(t, { local = [], config, request, inlineAddresses = true, background = false, now } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "krisdrive-logbook-"));
   const root = path.join(dir, "_kristine", "vehicle-tracking");
   await fs.mkdir(path.join(dir, "_system"), { recursive: true }); await fs.mkdir(root, { recursive: true });
@@ -15,7 +15,7 @@ async function harness(t, { local = [], config, request } = {}) {
   await fs.writeFile(path.join(root, "rides.json"), JSON.stringify(local));
   const calls = [], state = { offline: false, trips: [trip()] };
   const app = express();
-  registerKrisdriveLogbook(app, { dataDir: dir, traccarBaseUrl: "https://gps.example", traccarToken: "gps-test-only", request: async (raw, opts) => {
+  const service = registerKrisdriveLogbook(app, { background, inlineAddresses, now, dataDir: dir, traccarBaseUrl: "https://gps.example", traccarToken: "gps-test-only", request: async (raw, opts) => {
     const url = new URL(raw); calls.push({ url, opts });
     if (request) return request(url, opts, state);
     if (state.offline) throw Error("Network unavailable");
@@ -24,11 +24,11 @@ async function harness(t, { local = [], config, request } = {}) {
   const oldToken = process.env.ADMIN_TOKEN; process.env.ADMIN_TOKEN = "logbook-test-only";
   const server = app.listen(0, "127.0.0.1"); await new Promise(resolve => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}/kristine/api/krisdrive/logbook`;
-  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); if (oldToken === undefined) delete process.env.ADMIN_TOKEN; else process.env.ADMIN_TOKEN = oldToken; });
+  t.after(async () => { await service.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); if (oldToken === undefined) delete process.env.ADMIN_TOKEN; else process.env.ADMIN_TOKEN = oldToken; });
   const query = "?vehicleId=byd&from=2026-09-22&to=2026-09-22";
   const get = async (suffix = query, auth = true) => fetch(base + suffix, { headers: auth ? { "x-admin-token": "logbook-test-only" } : {} });
   const patch = async (row, extra = {}, vehicleId = "byd") => fetch(base + `/${vehicleId}/${row.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-token": "logbook-test-only" }, body: JSON.stringify({ revision: row.revision, category: "business", employeeId: "alex", purpose: "Baustellenbesprechung", startLocation: row.startLocation, endLocation: row.endLocation, odometerStartKm: "", odometerEndKm: "", ...extra }) });
-  return { dir, root, state, calls, get, patch, query };
+  return { dir, root, state, calls, get, patch, query, service };
 }
 
 test("Austrian date filters handle both DST changes and invalid ranges", () => {
@@ -574,6 +574,74 @@ test("a fresh stable fix's own address survives when reverse geocoding is unavai
   const row = (await (await h.get()).json()).rows[0];
   assert.equal(row.endLocation, "Feldkircher Straße, 6820 Frastanz");
   assert.equal(row.endPositionId, "202");
+});
+
+test("background imports and saves addresses without any browser request", async t => {
+  const h = await harness(t, { inlineAddresses: false, background: true, request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "20 Buchholzstrasse, Rüthi (SG), CH" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "", endAddress: "" })];
+  let stored;
+  for (let i = 0; i < 60; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const files = await fs.readdir(path.join(h.root, "logbook")).catch(() => []);
+    if (files[0]) stored = JSON.parse(await fs.readFile(path.join(h.root, "logbook", files[0]), "utf8"));
+    if (Object.values(stored?.records || {})[0]?.data.endLocation === "Buchholzstrasse, Rüthi (SG)") break;
+  }
+  assert.equal(Object.values(stored.records)[0].data.endLocation, "Buchholzstrasse, Rüthi (SG)");
+  assert.ok(stored.processing.lastImportAt); assert.ok(stored.processing.lastAddressRunAt);
+  const queue = JSON.parse(await fs.readFile(path.join(h.root, "address-queue.json"), "utf8"));
+  assert.equal(Object.values(queue.jobs).filter(j => j.address).length, 2);
+});
+
+test("live reads do not wait for geocoding; queued results preserve concurrent edits and private rows", async t => {
+  let release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const h = await harness(t, { inlineAddresses: false, request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") { entered(); await gate; return { ok: true, text: async () => "Feldkircher Straße, 6820 Frastanz" }; }
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "", endAddress: "" })];
+  const first = (await (await h.get()).json()).rows[0];
+  assert.equal(first.endLocation, "");
+  assert.equal(h.calls.filter(c => c.url.pathname === "/api/server/geocode").length, 0);
+  const work = h.service.processAddresses();
+  await waiting;
+  try {
+    const result = await h.patch(first, { category: "private", purpose: "untouched" });
+    assert.equal(result.status, 200);
+    const response = await h.get(); assert.equal(response.status, 200);
+  } finally { release(); }
+  await work;
+  const rows = (await (await h.get()).json()).rows;
+  assert.equal(rows[0].category, "private"); assert.equal(rows[0].endLocation, "");
+  assert.equal(rows[0].driver.employeeId, "alex"); assert.equal(rows[0].distanceKm, first.distanceKm);
+});
+
+test("only GPS-confirmed zero-distance intervals are marked as standstill", async t => {
+  const start = Date.parse("2026-09-22T06:00:00Z");
+  const fixes = Array.from({ length: 7 }, (_, i) => ({ deviceId: 17, valid: true, fixTime: new Date(start + i * 300000).toISOString(), latitude: 47.21, longitude: 9.62, speed: 0, accuracy: 8 }));
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => state.fixes || fixes };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ distance: 0, endLat: 47.21, endLon: 9.62 })];
+  let data = await (await h.get()).json();
+  assert.equal(data.rows[0].activity, "standstill"); assert.equal(data.totals.count, 0); assert.equal(data.totals.stops, 1);
+  assert.equal(data.rows[0].distanceKm, 0);
+  h.state.fixes = [fixes[0], fixes.at(-1)];
+  data = await (await h.get(h.query + "&refresh=1")).json();
+  assert.equal(data.rows[0].activity, undefined, "two sparse fixes do not prove a stop");
+  h.state.fixes = [...fixes, { ...fixes[3], speed: 20 }];
+  data = await (await h.get(h.query + "&refresh=1")).json();
+  assert.equal(data.rows[0].activity, undefined, "contradictory duplicate must not hide movement");
 });
 
 test("a geocoder response slower than five seconds is still saved", async t => {

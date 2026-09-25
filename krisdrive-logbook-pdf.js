@@ -56,7 +56,7 @@ async function createLogbookPdf(data) {
   for (const row of data.rows) {
     const parts = [
       [displayDate(row.startedAt), displayDate(row.closedAt)],
-      [row.driver?.employeeName || "Fahrer offen", categoryLabel(row.category)],
+      [row.driver?.employeeName || "Fahrer offen", (row.activity === "standstill" ? "Stillstand" : categoryLabel(row.category))],
       row.category === "private" ? ["Privatfahrt"] : [`Von: ${row.startLocation || "offen"}${row.inferredStart ? " (aus vorheriger Fahrt)" : ""}`, `Nach: ${row.endLocation || "offen"}${row.inferredEnd ? " (aus naechster Fahrt)" : ""}`],
       [row.category === "private" ? "" : row.purpose, row.missing.length ? `Offen: ${row.missing.join(", ")}` : ""],
       [decimal(row.odometerStartKm) || "-"], [decimal(row.odometerEndKm) || "-"], [decimal(row.distanceKm) || "-"],
