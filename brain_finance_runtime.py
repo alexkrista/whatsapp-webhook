@@ -14,6 +14,17 @@ FINANCE_MARKER="[FINANCE_APPROVAL]"
 FINAL_APPROVALS={"approved","reduced"}
 
 
+def _visible_transfer(row):
+    """Keep unresolved approval decisions visible without making them payable."""
+    if norm_status(row.get("paymentStatus")) in {"paid", "sepa_submitted"}:
+        return False
+    if float(row.get("paymentAmount") or 0) > 0.004:
+        return True
+    return (row.get("approvalStatus") in {"pending", "blocked"}
+            and float(row.get("amount") or 0) > 0.004)
+
+
+
 def _finance_employee_identity(employee):
     employee=employee or {}
     return str(employee.get("id") or employee.get("employeeId") or "").strip()
@@ -291,7 +302,7 @@ def install(ns):
                 idx=approval_index(tasks);pending=store.pending_supplier_totals();all_items=[apply_approval(x,idx,pending) for x in source_items]
                 transfer_all=[x for x in all_items if norm_method(x.get("paymentMethod"))=="transfer" and norm_status(x.get("paymentStatus"))!="paid"]
                 submitted=[x for x in transfer_all if norm_status(x.get("paymentStatus"))=="sepa_submitted"]
-                transfer=[x for x in transfer_all if norm_status(x.get("paymentStatus"))!="sepa_submitted" and float(x.get("paymentAmount") or 0)>0.004]
+                transfer=[x for x in transfer_all if _visible_transfer(x)]
                 unknown=[x for x in all_items if norm_method(x.get("paymentMethod"))=="unknown" and norm_status(x.get("paymentStatus"))!="paid"]
                 local=[x for x in all_items if str(x.get("source") or "")=="KRISTINE" and norm_status(x.get("paymentStatus"))!="paid"]
                 pending=[x for x in local if x.get("approvalStatus")=="pending"]; blocked=[x for x in local if x.get("approvalStatus")=="blocked"]; approved=[x for x in local if x.get("approvalStatus") in FINAL_APPROVALS]
