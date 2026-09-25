@@ -390,8 +390,10 @@ function registerKrisdriveLogbook(app, options = {}) {
       if (!response.ok) throw Object.assign(Error("Geocoder unavailable"), { status: response.status });
       let result = await response.text();
       try { const parsed = JSON.parse(result); if (typeof parsed === "string") result = parsed; } catch {}
+      if (!text(result) || text(result) === "null") throw Object.assign(Error("No geocoder address"), { code: "empty_address" });
       const address = streetAndTown(result);
-      return usableAddress(address) ? address : "";
+      if (!usableAddress(address)) throw Object.assign(Error("Unusable geocoder format"), { code: "address_format" });
+      return address;
     },
   });
   const fileFor = id => path.join(root, "logbook", hash(id) + ".json");
