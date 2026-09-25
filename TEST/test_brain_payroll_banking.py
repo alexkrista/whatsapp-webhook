@@ -1,6 +1,9 @@
 import unittest
 import sys
 import types
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 from datetime import date, datetime
 
@@ -12,7 +15,7 @@ except ImportError:
 
 from brain_finance_sepa import build_sepa_xml
 from brain_konfipay import ConnectionError
-from brain_konfipay_banking import review_xml
+from brain_konfipay_banking import review_xml, Payments
 from brain_payroll_banking import prepare_payroll_file
 
 
@@ -49,6 +52,25 @@ class PayrollTests(unittest.TestCase):
         self.assertEqual(checked['items'][0]['endToEndId'],'WAGE-2')
         with self.assertRaises(ConnectionError):
             prepare_payroll_file(self.xml.decode(),'wages','2026-09',selected_indexes=[0,0])
+
+    def test_saved_payroll_survives_restart_and_marks_processed(self):
+        with tempfile.TemporaryDirectory() as folder,patch('brain_konfipay_banking.protect',side_effect=lambda data,decrypt=False:data):
+            store=types.SimpleNamespace(folder=Path(folder),exists=lambda:True)
+            payments=Payments(types.SimpleNamespace(store=store))
+            body={'revision':0,'execution':'','priority':'normal','blocked':False,'files':[{
+                'name':'loehne.xml','xml':self.xml.decode(),'category':'wages','period':'2026-09',
+                'selectedIndexes':[0,1],'processedIndexes':[]}]}
+            saved=payments.payroll_saved_save(body)
+            self.assertEqual(saved['revision'],1)
+            reopened=Payments(types.SimpleNamespace(store=store))
+            self.assertEqual(reopened.payroll_saved_load()['files'][0]['selectedIndexes'],[0,1])
+            key=review_xml(self.xml.decode(),strict_ids=False,allow_past=True)['keys'][0]
+            db=reopened.db();db.execute('INSERT INTO payment_keys VALUES(?,?)',(key,'example'));db.commit();db.close()
+            loaded=reopened.payroll_saved_load()
+            self.assertEqual(loaded['files'][0]['selectedIndexes'],[1])
+            self.assertEqual(loaded['files'][0]['processedIndexes'],[0])
+            with self.assertRaisesRegex(ConnectionError,'anderen Fenster'):
+                reopened.payroll_saved_save(body)
 
     def test_invalid_period_rejected(self):
         with self.assertRaises(ConnectionError):

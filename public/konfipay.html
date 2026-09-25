@@ -29,11 +29,11 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <section class="card" id="signatureApproval"><div class="row"><div><h2>Bankunterschrift</h2><p id="signatureStatus" class="small" role="status" aria-live="polite">Zahlungsstatus wird geprüft …</p></div><div><a id="signatureLink" class="bank-action" href="https://portal.konfipay.de/App/Home" target="_blank" rel="noopener noreferrer" hidden>Jetzt in konfipay unterschreiben ↗</a><span id="signatureInactive" class="badge">Noch keine Unterschrift bereit</span></div></div><p class="small">Sobald konfipay „Wartet auf Unterschrift“ meldet, öffnet der Button das konfipay-Portal. Eine Anmeldung oder die Freigabe bei der Bank kann weiterhin erforderlich sein.</p></section>
 <section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
 <button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
-<section class="card" id="payrollBanking"><h2>Löhne und Abgaben</h2><p class="small">Alle XML-Dateien gemeinsam laden und jede Einzelzahlung prüfen. Die Checkbox bestimmt, welche Datei übergeben wird. Eine Datei mit Finanzamtszahlung wird beim Vorbereiten bankgerecht in getrennte SEPA-Dateien aufgeteilt.</p>
+<section class="card" id="payrollBanking"><h2>Löhne und Abgaben</h2><p class="small">Alle XML-Dateien gemeinsam laden und jede Einzelzahlung prüfen. Die Haken bestimmen, welche Einzelzahlungen übergeben werden. Dateien und Auswahl werden als Entwurf auf Brain gespeichert; erst deine ausdrückliche Freigabe übergibt Zahlungen. Finanzamtszahlungen werden bankgerecht getrennt.</p>
 <div id="payrollDrop" class="card" style="border-style:dashed" tabindex="0"><label for="payrollFile">SEPA-XML hierher ziehen oder Dateien auswählen</label><input id="payrollFile" type="file" multiple accept=".xml,application/xml,text/xml"><p class="small">Mehrere Dateien auf einmal möglich · Löhne und Abgaben in einer Übersicht.</p></div>
 <div id="payrollStaged"></div>
 <div class="formrow"><div class="field"><label for="payrollExecution">Neuer Ausführungstermin für alle Dateien (optional)</label><input id="payrollExecution" type="date"><div class="small">Leer lassen: Originaltermin je Datei.</div></div><div class="field"><label for="payrollPriority">Überweisungsart</label><select id="payrollPriority"><option value="normal">Standard-SEPA</option><option value="instant">SEPA Instant / Eilüberweisung (heute)</option></select></div><button id="payrollPrepare" type="button">Alle Dateien prüfen</button></div>
-<p id="payrollMessage" class="small" role="status" aria-live="polite"></p><div id="payrollGroups"></div><div class="row" style="margin-top:16px"><strong id="payrollSelectedTotal">0 Dateien ausgewählt</strong><button id="payrollReviewSelected" type="button" disabled>Ausgewählte Überweisungen prüfen →</button></div>
+<div class="row"><p id="payrollSaved" class="small" role="status" aria-live="polite">Gespeicherter Entwurf wird geladen …</p><button id="payrollSaveNow" class="secondary" type="button">Entwurf jetzt speichern</button></div><p id="payrollMessage" class="small" role="status" aria-live="polite"></p><div id="payrollGroups"></div><div class="row" style="margin-top:16px"><strong id="payrollSelectedTotal">0 Einzelzahlungen ausgewählt</strong><button id="payrollReviewSelected" type="button" disabled>Ausgewählte Überweisungen prüfen →</button></div>
 <p class="small">Vor der Übergabe werden die ausgewählten Dateien nochmals zusammengefasst. Bei unklarem Status zuerst das Zahlungsarchiv prüfen und nicht erneut senden.</p></section>
 <dialog id="payrollReview"><h2>Löhne und Abgaben freigeben</h2><p id="payrollReviewText" style="white-space:pre-line"></p><p>Prüfe die Einzelzahlungen in der aufgeklappten Gruppe. Mit der Freigabe werden die Aufträge an Konfipay übergeben und die Bankübertragung angestoßen. Eine Bankunterschrift kann zusätzlich nötig sein.</p><div class="row"><button id="payrollCancel" class="secondary" type="button">Abbrechen</button><button id="payrollSubmit" type="button">Verbindlich an Konfipay übergeben</button></div><p id="payrollResult" role="status"></p></dialog>
 <dialog id="paymentDetails"><div class="row"><h2 id="detailTitle">Zahlungsinhalt</h2><button id="detailClose" class="secondary">Schließen</button></div><p id="detailMessage" class="small"></p><div class="scroll"><table><thead><tr><th>Empfänger / IBAN</th><th>Betrag</th><th>Termin / Auftraggeberkonto</th><th>Verwendungszweck / EndToEndId</th></tr></thead><tbody id="detailRows"></tbody></table></div><div class="row" style="margin-top:16px"><button id="detailMore" class="secondary" hidden>Weitere Zahlungen laden</button><a id="detailXml" hidden>Original-XML herunterladen</a></div></dialog>
@@ -213,8 +213,55 @@ loadHistory(true);
 setInterval(()=>{if(!document.hidden)loadHistory(true);},45000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadHistory(true);});
 const payrollState={files:[],prepared:[],busy:false,blocked:false};
+let payrollRevision=0,payrollRestoring=true,payrollSaveTimer=null,payrollSaving=false,payrollDirty=false;
+$('payrollFile').disabled=true;$('payrollPrepare').disabled=true;
+function payrollSnapshot(){
+ return {revision:payrollRevision,execution:$('payrollExecution').value,priority:$('payrollPriority').value,blocked:payrollState.blocked,
+  files:payrollState.files.map(file=>{
+   const entry=payrollState.prepared.find(x=>x.file===file);
+   const selected=entry?[...entry.selection].filter(i=>!entry.submittedIndices.has(i)):file.savedSelection||[];
+   return {name:file.file.name,xml:file.xml,category:file.category,period:file.period,selectedIndexes:selected,processedIndexes:entry?[...entry.submittedIndices]:file.processedIndexes||[]};
+  })};
+}
+function payrollScheduleSave(){
+ if(payrollRestoring)return;
+ payrollDirty=true;$('payrollSaved').textContent='Entwurf wird gespeichert …';
+ clearTimeout(payrollSaveTimer);payrollSaveTimer=setTimeout(payrollSave,450);
+}
+async function payrollSave(){
+ clearTimeout(payrollSaveTimer);
+ if(payrollRestoring||payrollSaving||!payrollDirty)return;
+ payrollDirty=false;payrollSaving=true;
+ try{
+  const saved=await api('payroll-saved-save',payrollSnapshot());
+  payrollRevision=saved.revision;
+  $('payrollSaved').textContent=payrollDirty?'Weitere Änderungen werden gespeichert …':'Entwurf auf Brain gespeichert · '+stamp(saved.updated);
+ }catch(e){payrollDirty=true;$('payrollSaved').textContent='Entwurf nicht gespeichert: '+e.message+' Bitte erneut speichern.';return;}
+ finally{payrollSaving=false;if(payrollDirty&&$('payrollSaved').textContent.startsWith('Weitere'))payrollScheduleSave();}
+}
+$('payrollSaveNow').addEventListener('click',()=>{payrollDirty=true;payrollSave();});
+window.addEventListener('beforeunload',e=>{if(payrollDirty||payrollSaving){e.preventDefault();e.returnValue='';}});
+async function payrollLoadSaved(){
+ try{
+  const saved=await api('payroll-saved-load',{});
+  payrollRevision=saved.revision;
+  $('payrollExecution').value=saved.execution||'';
+  $('payrollPriority').value=saved.priority||'normal';
+  payrollState.blocked=saved.blocked===true;
+  payrollState.files=(saved.files||[]).map(x=>{
+   const info=payrollDate(x.xml);
+   return {file:{name:x.name,size:new Blob([x.xml]).size,lastModified:0},xml:x.xml,category:x.category,
+    period:x.period,originalDates:info.dates,savedSelection:x.selectedIndexes||[],processedIndexes:x.processedIndexes||[]};
+  });
+  payrollRenderStage();
+  $('payrollSaved').textContent=saved.files.length?'Entwurf auf Brain gespeichert · '+stamp(saved.updated):'Noch kein Entwurf gespeichert.';
+  payrollRestoring=false;$('payrollFile').disabled=false;$('payrollPrepare').disabled=false;
+  if(payrollState.files.length)$('payrollPrepare').click();
+ }catch(e){payrollRestoring=false;$('payrollFile').disabled=false;$('payrollPrepare').disabled=false;$('payrollSaved').textContent='Gespeicherten Entwurf nicht geladen: '+e.message;}
+}
+
 function payrollInputs(){return JSON.stringify({files:payrollState.files.map(x=>[x.file.name,x.file.size,x.file.lastModified,x.category,x.period]),execution:$('payrollExecution').value,priority:$('payrollPriority').value});}
-function payrollInvalidate(){payrollState.prepared=[];payrollState.blocked=false;$('payrollGroups').replaceChildren();$('payrollReviewSelected').disabled=true;$('payrollSelectedTotal').textContent='0 Dateien ausgewählt';}
+function payrollInvalidate(){for(const entry of payrollState.prepared){entry.file.savedSelection=[...entry.selection].filter(i=>!entry.submittedIndices.has(i));entry.file.processedIndexes=[...entry.submittedIndices];}payrollState.prepared=[];payrollState.blocked=false;$('payrollGroups').replaceChildren();$('payrollReviewSelected').disabled=true;$('payrollSelectedTotal').textContent='0 Einzelzahlungen ausgewählt';}
 function payrollDate(xml){
  const doc=new DOMParser().parseFromString(xml,'application/xml');
  if(doc.querySelector('parsererror'))throw Error('XML konnte nicht gelesen werden.');
@@ -228,14 +275,14 @@ async function payrollStage(files){
  let added=0,errors=[];
  for(const file of files){
   if(!file.name.toLowerCase().endsWith('.xml')||file.size>8_000_000){errors.push(file.name+': Nur XML bis 8 MB.');continue;}
-  if(payrollState.files.some(x=>x.file.name===file.name&&x.file.size===file.size&&x.file.lastModified===file.lastModified))continue;
   try{
-   const xml=await file.text();if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('Unzulässige XML-Definition.');
+   const xml=await file.text();if(payrollState.files.some(x=>x.file.name===file.name&&x.xml===xml))continue;
+   if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('Unzulässige XML-Definition.');
    const info=payrollDate(xml),original=info.dates[0]||'';
    payrollState.files.push({file,xml,category:info.category,period:info.category==='wages'?original.slice(0,7):original,originalDates:info.dates});added++;
   }catch(e){errors.push(file.name+': '+e.message);}
  }
- if(added)payrollInvalidate();
+ if(added){payrollInvalidate();payrollScheduleSave();}
  payrollRenderStage();
  $('payrollMessage').textContent=errors.length?errors.join(' · '):payrollState.files.length+' Datei(en) bereit. Bereiche und Termine prüfen, dann alle Dateien vorbereiten.';
 }
@@ -247,12 +294,12 @@ function payrollRenderStage(){
   const row=document.createElement('div');row.className='formrow';
   const area=document.createElement('div');area.className='field';const areaLabel=document.createElement('label');areaLabel.textContent='Bereich';const category=document.createElement('select');
   for(const [value,label] of [['wages','Löhne'],['contributions','Abgaben']]){const option=document.createElement('option');option.value=value;option.textContent=label;category.append(option);}
-  category.value=entry.category;category.addEventListener('change',()=>{entry.category=category.value;entry.period=entry.category==='wages'?(entry.originalDates[0]||'').slice(0,7):(entry.originalDates[0]||'');payrollInvalidate();payrollRenderStage();});
+  category.value=entry.category;category.addEventListener('change',()=>{entry.category=category.value;entry.period=entry.category==='wages'?(entry.originalDates[0]||'').slice(0,7):(entry.originalDates[0]||'');payrollInvalidate();payrollRenderStage();payrollScheduleSave();});
   area.append(areaLabel,category);row.append(area);
   const when=document.createElement('div');when.className='field';const whenLabel=document.createElement('label');whenLabel.textContent=entry.category==='wages'?'Lohnmonat':'Fälligkeit der Abgaben';
-  const period=document.createElement('input');period.type=entry.category==='wages'?'month':'date';period.value=entry.period;period.addEventListener('change',()=>{entry.period=period.value;payrollInvalidate();});
+  const period=document.createElement('input');period.type=entry.category==='wages'?'month':'date';period.value=entry.period;period.addEventListener('change',()=>{entry.period=period.value;payrollInvalidate();payrollScheduleSave();});
   when.append(whenLabel,period);row.append(when);
-  const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='Entfernen';remove.addEventListener('click',()=>{payrollState.files=payrollState.files.filter(x=>x!==entry);payrollInvalidate();payrollRenderStage();});
+  const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='Entfernen';remove.addEventListener('click',()=>{payrollState.files=payrollState.files.filter(x=>x!==entry);payrollInvalidate();payrollRenderStage();payrollScheduleSave();});
   row.append(remove);card.append(row);const note=document.createElement('p');note.className='small';note.textContent='Originaltermin: '+(entry.originalDates.map(bankDate).join(', ')||'nicht erkennbar');card.append(note);box.append(card);
  }
 }
@@ -261,7 +308,7 @@ const payrollDrop=$('payrollDrop');
 payrollDrop.addEventListener('dragover',e=>{e.preventDefault();payrollDrop.style.borderColor='white';});
 payrollDrop.addEventListener('dragleave',()=>{payrollDrop.style.borderColor='';});
 payrollDrop.addEventListener('drop',e=>{e.preventDefault();payrollDrop.style.borderColor='';payrollStage([...e.dataTransfer.files]);});
-for(const id of ['payrollExecution','payrollPriority'])$(id).addEventListener('change',payrollInvalidate);
+for(const id of ['payrollExecution','payrollPriority'])$(id).addEventListener('change',()=>{payrollInvalidate();payrollScheduleSave();});
 function payrollChosen(){
  return payrollState.prepared.map(entry=>({entry,indexes:[...entry.selection].filter(i=>!entry.submittedIndices.has(i)).sort((a,b)=>a-b)})).filter(x=>x.indexes.length);
 }
@@ -280,14 +327,14 @@ function payrollRenderPrepared(){
   all.checked=remaining.length>0&&remaining.every(i=>entry.selection.has(i));
   all.indeterminate=remaining.some(i=>entry.selection.has(i))&&!all.checked;
   all.disabled=!remaining.length||payrollState.blocked;
-  all.addEventListener('change',()=>{for(const i of remaining)all.checked?entry.selection.add(i):entry.selection.delete(i);payrollRenderPrepared();});
+  all.addEventListener('change',()=>{for(const i of remaining)all.checked?entry.selection.add(i):entry.selection.delete(i);payrollRenderPrepared();payrollScheduleSave();});
   label.append(all,document.createTextNode('Alle aus dieser Datei · '+entry.file.file.name+' · '+entry.data.label+' · '+entry.data.count+' Zahlungen · '+money(entry.data.total,'EUR')));card.append(label);
   const details=document.createElement('details');details.open=true;const summary=document.createElement('summary');summary.textContent='Alle Einzelzahlungen · Ausführung '+(entry.data.executionDate?bankDate(entry.data.executionDate):'laut Datei');details.append(summary);
   const scroll=document.createElement('div');scroll.className='scroll';const table=document.createElement('table');const head=document.createElement('thead');head.innerHTML='<tr><th>Überweisen</th><th>Empfänger / IBAN</th><th>Ausführung</th><th>Verwendungszweck / EndToEndId</th><th class="amount">Betrag</th></tr>';table.append(head);
   const body=document.createElement('tbody');entry.data.items.forEach((item,i)=>{
    const row=document.createElement('tr'),td=document.createElement('td'),check=document.createElement('input');check.type='checkbox';check.style.width='auto';check.checked=entry.selection.has(i);check.disabled=entry.submittedIndices.has(i)||payrollState.blocked;
    check.setAttribute('aria-label',item.name+' '+money(item.amount,'EUR')+' überweisen');
-   check.addEventListener('change',()=>{check.checked?entry.selection.add(i):entry.selection.delete(i);payrollRenderPrepared();});td.append(check);row.append(td);
+   check.addEventListener('change',()=>{check.checked?entry.selection.add(i):entry.selection.delete(i);payrollRenderPrepared();payrollScheduleSave();});td.append(check);row.append(td);
    cell(row,(item.taxPayment?'Finanzamt · ':'')+item.name+'\n'+item.iban+(entry.submittedIndices.has(i)?'\nBereits übergeben':''));
    cell(row,bankDate(item.date));cell(row,(item.purpose||'–')+'\n'+item.endToEndId);
    const amount=cell(row,money(item.amount,'EUR'));amount.className='amount';body.append(row);
@@ -309,7 +356,9 @@ $('payrollPrepare').addEventListener('click',async()=>{
    try{
     const data=await api('payroll-prepare',{xml:file.xml,category:file.category,period:file.period,executionDate:$('payrollExecution').value||null,instant:$('payrollPriority').value==='instant',previewOnly:true});
     if(snapshot!==payrollInputs())throw Error('Eingaben während der Prüfung geändert.');
-    results.push({file,data,selection:new Set(),submittedIndices:new Set()});
+    const processed=new Set([...(file.processedIndexes||[]),...(data.processedIndexes||[])]);
+    file.savedSelection=(file.savedSelection||[]).filter(i=>!processed.has(i));file.processedIndexes=[...processed];
+    results.push({file,data,selection:new Set(file.savedSelection),submittedIndices:processed});
    }catch(e){errors.push(file.file.name+': '+e.message);}
   }
   payrollState.prepared=results;payrollRenderPrepared();
@@ -356,9 +405,10 @@ $('payrollSubmit').addEventListener('click',async()=>{
    }catch(e){payrollState.blocked=true;messages.push(entry.file.file.name+': Status unklar. '+e.message+' Zahlungsarchiv prüfen; nicht erneut senden.');break;}
   }
   $('payrollResult').textContent=messages.join('\n');$('payrollMessage').textContent=payrollState.blocked?'Übergabe angehalten. Status im Zahlungsarchiv prüfen.':'Ausgewählte Einzelzahlungen übergeben. Status im Zahlungsarchiv prüfen.';
-  payrollRenderPrepared();await loadHistory();await loadExpected();
+  payrollRenderPrepared();payrollScheduleSave();await loadHistory();await loadExpected();
  }finally{payrollState.busy=false;$('payrollSubmit').disabled=false;payrollSelection();}
 });
+payrollLoadSaved();
 let revolutTransferDraft=null, revolutTransferSending=false;
 async function loadRevolutTransferContext(){
  const button=$('revolutTransferLoad');button.disabled=true;$('revolutTransferMessage').textContent='Bank- und Revolut-Konten werden geladen …';

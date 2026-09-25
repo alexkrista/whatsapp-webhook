@@ -109,6 +109,67 @@ class Payments:
         db.execute('CREATE TABLE IF NOT EXISTS payees (iban TEXT PRIMARY KEY, name TEXT NOT NULL, last_used TEXT NOT NULL)')
         return db
 
+    def payroll_saved_load(self):
+        db=self.db()
+        try:
+            db.execute('CREATE TABLE IF NOT EXISTS payroll_workspace (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, revision INTEGER NOT NULL, updated TEXT NOT NULL)')
+            row=db.execute('SELECT payload,revision,updated FROM payroll_workspace WHERE id=1').fetchone()
+            if not row:return {'revision':0,'updated':None,'files':[],'execution':'','priority':'normal','blocked':False}
+            data=json.loads(protect(row['payload'],decrypt=True).decode('utf-8'))
+            for item in data['files']:
+                keys=review_xml(item['xml'],strict_ids=False,allow_past=True)['keys']
+                already={i for i,key in enumerate(keys) if db.execute('SELECT 1 FROM payment_keys WHERE fingerprint=?',(key,)).fetchone()}
+                item['processedIndexes']=sorted(set(item.get('processedIndexes',[]))|already)
+                item['selectedIndexes']=[i for i in item['selectedIndexes'] if i not in item['processedIndexes']]
+            return {**data,'revision':row['revision'],'updated':row['updated']}
+        finally:db.close()
+
+    def payroll_saved_save(self,data):
+        files=data.get('files')
+        if not isinstance(files,list) or len(files)>20 or sum(len(str(x.get('xml',''))) for x in files if isinstance(x,dict))>24_000_000:
+            raise ConnectionError('Höchstens 20 XML-Dateien und insgesamt 24 MB speicherbar.')
+        if type(data.get('revision')) is not int or data['revision']<0:
+            raise ConnectionError('Entwurf bitte neu laden.')
+        if data.get('priority') not in {'normal','instant'} or not isinstance(data.get('execution'),str) or len(data['execution'])>10:
+            raise ConnectionError('Termin oder Überweisungsart ungültig.')
+        clean=[]
+        for item in files:
+            if not isinstance(item,dict) or not isinstance(item.get('xml'),str) or not isinstance(item.get('name'),str):
+                raise ConnectionError('Eine XML-Datei fehlt.')
+            if len(item['name'])>180 or not item['name'].lower().endswith('.xml') or len(item['xml'])>8_000_000:
+                raise ConnectionError('XML-Datei zu groß oder Dateiname ungültig.')
+            reviewed=review_xml(item['xml'],strict_ids=False,allow_past=True)
+            selected=item.get('selectedIndexes');processed=item.get('processedIndexes',[])
+            for indexes in (selected,processed):
+                if (not isinstance(indexes,list) or len(set(map(str,indexes)))!=len(indexes) or
+                    any(type(i) is not int or i<0 or i>=len(reviewed['items']) for i in indexes)):
+                    raise ConnectionError('Auswahl der Einzelzahlungen ungültig.')
+            if item.get('category') not in {'wages','contributions'} or not isinstance(item.get('period'),str) or len(item['period'])>12:
+                raise ConnectionError('Lohnmonat oder Abgabentermin ungültig.')
+            clean.append({**{k:item[k] for k in ['name','xml','category','period','selectedIndexes']},'processedIndexes':processed})
+        payload=protect(json.dumps({'files':clean,'execution':data['execution'],'priority':data['priority'],
+                                    'blocked':data.get('blocked') is True},ensure_ascii=False).encode('utf-8'))
+        updated=datetime.now(timezone.utc).isoformat()
+        db=self.db()
+        try:
+            db.execute('CREATE TABLE IF NOT EXISTS payroll_workspace (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, revision INTEGER NOT NULL, updated TEXT NOT NULL)')
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT revision FROM payroll_workspace WHERE id=1').fetchone()
+            revision=row['revision'] if row else 0
+            if revision!=data['revision']:
+                raise ConnectionError('Der Entwurf wurde in einem anderen Fenster geändert. Bitte dort prüfen und diese Seite neu laden.')
+            db.execute('INSERT INTO payroll_workspace VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,updated=excluded.updated',
+                       (payload,revision+1,updated))
+            db.commit()
+            return {'revision':revision+1,'updated':updated}
+        finally:db.close()
+
+    def payroll_processed(self,xml):
+        keys=review_xml(xml,strict_ids=False,allow_past=True)['keys']
+        db=self.db()
+        try:return [i for i,key in enumerate(keys) if db.execute('SELECT 1 FROM payment_keys WHERE fingerprint=?',(key,)).fetchone()]
+        finally:db.close()
+
     def payees(self):
         if not self.client.store.exists():return []
         db=self.db()
@@ -227,7 +288,7 @@ def install(ns,client,write_allowed,csrf):
     brain_konfipay_archive.install(ns,client,write_allowed)
     import brain_bank_assignment
     assignments=brain_bank_assignment.install(ns,write_allowed)
-    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content','revolut-transfer-context','revolut-transfer-prepare','payroll-prepare','single-transfer-context','single-transfer-prepare']
+    paths=['expected-balances','context','transactions','statements','statement-download','payment-prepare','payment-submit','payment-history','payment-status','payment-content','payment-xml','payment-archive','payment-archive-content','revolut-transfer-context','revolut-transfer-prepare','payroll-prepare','payroll-saved-load','payroll-saved-save','single-transfer-context','single-transfer-prepare']
     ns['MOBILE_ALLOWED_PATHS'].update('/konfipay/api/'+p for p in paths)
 
     def guard():
@@ -432,6 +493,20 @@ def install(ns,client,write_allowed,csrf):
         body=request.get_json(silent=True) or {}
         return jsonify({'ok':True,**payments.prepare(body.get('files'))})
 
+    @app.post('/konfipay/api/payroll-saved-load')
+    @safe
+    def payroll_saved_load():
+        guard()
+        return jsonify({'ok':True,**payments.payroll_saved_load()})
+
+    @app.post('/konfipay/api/payroll-saved-save')
+    @safe
+    def payroll_saved_save():
+        guard()
+        if not request.content_length or request.content_length>26_000_000:
+            raise ConnectionError('Gespeicherter Entwurf ist zu groß.')
+        return jsonify({'ok':True,**payments.payroll_saved_save(request.get_json(silent=True) or {})})
+
     @app.post('/konfipay/api/payroll-prepare')
     @safe
     def payroll_prepare():
@@ -444,6 +519,7 @@ def install(ns,client,write_allowed,csrf):
         draft=payments.prepare(payroll['files']) if body.get('previewOnly') is not True else {'draft':None}
         return jsonify({'ok':True,'label':payroll['label'],'draft':draft['draft'],
                         'count':payroll['count'],'total':payroll['total'],'items':payroll['items'],
+                        'processedIndexes':payments.payroll_processed(body.get('xml')) if body.get('previewOnly') is True else [],
                         'originalDates':payroll['originalDates'],'executionDate':payroll['executionDate'],'taxCount':payroll['taxCount'],
                         'files':[{'name':f['name'],'count':len(review_xml(f['xml'])['items'])} for f in payroll['files']],
                         'instant':body.get('instant',False)})
