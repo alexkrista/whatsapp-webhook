@@ -129,6 +129,21 @@ function stableArrival(trip, positions, until) {
   return null;
 }
 
+function confirmedStandstill(trip, positions) {
+  if (trip.distanceKm !== 0) return false;
+  const start = Date.parse(trip.startedAt), end = Date.parse(trip.closedAt);
+  if (end - start < 300000) return false;
+  const fixes = array(positions).filter(p => String(p.deviceId) === String(trip.deviceId) && p.valid !== false)
+    .map(p => ({ at: Date.parse(p.fixTime || p.deviceTime), point: coordinates(p.latitude, p.longitude), speed: number(p.speed), accuracy: number(p.accuracy) }))
+    .filter(p => p.point && p.at >= start && p.at <= end && (p.accuracy === null || p.accuracy <= 50))
+    .sort((a, b) => a.at - b.at);
+  // Zero kilometres alone are not evidence. Require coverage of the whole
+  // interval, stationary speeds and one tight cluster, with no long data gaps.
+  return new Set(fixes.map(p => p.at)).size >= 3 && fixes[0].at - start <= 120000 && end - fixes.at(-1).at <= 120000 &&
+    fixes.every((p, i) => p.speed !== null && p.speed <= 1 && p.speed >= 0 && metresBetween(p.point, fixes[0].point) <= 50 &&
+      (!i || p.at - fixes[i - 1].at <= 600000));
+}
+
 // Date-only filters mean Austrian calendar days, including the DST transitions.
 function midnight(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) throw fail("Ungültiges Datum.");
@@ -226,6 +241,7 @@ function view(record) {
       ? "GPS-Kilometerwert prüfen" : "";
     row.distanceKm = null;
   }
+  if (row.distanceKm !== 0) delete row.activity;
   row.category = row.category || "unassigned";
   row.purpose = row.purpose || "";
   row.revision = record.revision || 0;
@@ -269,6 +285,9 @@ function linkTripEndpoints(rows, corrections = new Map()) {
     const takeStart = (startEdited > endEdited && startQuality === 2) || (!verifiedArrival && startQuality > endQuality);
     const stop = takeStart ? oldStart : oldEnd;
     if (!stop && !verifiedArrival) continue;
+    const stopPoint = takeStart ? after.startPoint : before.endPoint;
+    const sharedStop = { id: "stop-" + hash(`${before.id}:${after.id}`), point: stopPoint || null, address: stop || "" };
+    before.endStop = sharedStop; after.startStop = sharedStop;
     if (oldEnd !== stop) {
       before.endLocation = stop;
       before.endPoint ||= after.startPoint;
@@ -335,13 +354,14 @@ function resolvedRows(records) {
 }
 function totals(rows) {
   return rows.reduce((sum, row) => {
+    if (row.activity === "standstill") { sum.stops++; return sum; }
     const value = row.distanceKm || 0;
     sum.count++; sum.km += value;
     sum[row.category + "Km"] += value;
     if (row.missing.length) sum.open++;
     if (row.distanceKm === null) sum.missingKm++;
     return sum;
-  }, { count: 0, km: 0, businessKm: 0, privateKm: 0, unassignedKm: 0, open: 0, missingKm: 0 });
+  }, { count: 0, stops: 0, km: 0, businessKm: 0, privateKm: 0, unassignedKm: 0, open: 0, missingKm: 0 });
 }
 
 async function readJson(file, fallback) {
@@ -359,7 +379,21 @@ function registerKrisdriveLogbook(app, options = {}) {
   const express = options.express || require("express");
   const json = express.json({ limit: "24kb" });
   const locks = new Map(), refreshed = new Map(), inFlight = new Map();
-  const addressCache = new Map(), addressFailures = new Map();
+  const inlineAddresses = options.inlineAddresses === true;
+  const addressQueue = require("./krisdrive-address-queue").createAddressQueue({
+    file: path.join(root, "address-queue.json"), now: options.now || Date.now,
+    lookup: async point => {
+      const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
+      const response = await request(base + "/api/server/geocode?" + params, {
+        headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw Object.assign(Error("Geocoder unavailable"), { status: response.status });
+      let result = await response.text();
+      try { const parsed = JSON.parse(result); if (typeof parsed === "string") result = parsed; } catch {}
+      const address = streetAndTown(result);
+      return usableAddress(address) ? address : "";
+    },
+  });
   const fileFor = id => path.join(root, "logbook", hash(id) + ".json");
   async function stateFor(id) {
     const state = await readJson(fileFor(id), { version: 1, records: {}, lastSync: null });
@@ -391,11 +425,8 @@ function registerKrisdriveLogbook(app, options = {}) {
   // Postcodes are optional; require a street and locality from the provider.
   const usableAddress = value => hasAddress(value) && /^[^,]+,\s*[^,]+$/.test(streetAndTown(value));
   async function resolveAddresses(trips, previous, force = false) {
-    let lookups = 0;
-    if (addressFailures.size > 1000) addressFailures.clear();
-    // Give untouched rows their turn before retrying earlier failures.
-    const failedAt = trip => Math.max(addressFailures.get(pointKey(trip.startPoint)) || 0, addressFailures.get(pointKey(trip.endPoint)) || 0);
-    for (const trip of [...trips].sort((a, b) => failedAt(a) - failedAt(b))) {
+    const pending = [];
+    for (const trip of trips) {
       const old = previous.records[trip.id]?.data;
       trip.addressVersion = 2;
       if (previous.records[trip.id]?.edits?.category === "private") continue;
@@ -409,31 +440,18 @@ function registerKrisdriveLogbook(app, options = {}) {
         if (usableAddress(trip[field])) continue;
         trip[field] = "";
         if (old?.addressVersion === 2 && pointKey(old?.[pointField]) === key && hasAddress(old?.[field])) { trip[field] = old[field]; continue; }
-        let address = addressCache.get(key) || "";
-        if (!address && base && token && (force || (addressFailures.get(key) || 0) <= Date.now()) && lookups < 4) {
-          lookups++;
-          try {
-            const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
-            const response = await request(base + "/api/server/geocode?" + params, { headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
-            if (response.ok) {
-              let result = await response.text();
-              // Traccar advertises application/json but normally returns a raw
-              // address string; accept JSON-encoded strings from proxies too.
-              try { const parsed = JSON.parse(result); if (typeof parsed === "string") result = parsed; } catch {}
-              address = streetAndTown(result);
-            }
-            else addressFailures.set(key, Date.now() + 60000);
-          } catch { /* Retry without storing a placeholder as an address. */ }
-          if (!usableAddress(address)) addressFailures.set(key, Date.now() + 60000);
-        }
-        if (usableAddress(address)) {
-          trip[field] = address;
-          if (addressCache.size > 500) addressCache.clear();
-          addressCache.set(key, address);
-          addressFailures.delete(key);
-        }
+        pending.push({ trip, field, point, key });
       }
     }
+    const points = pending.map(row => [row.key, row.point]);
+    let cached = await addressQueue.enqueue(points);
+    // Live requests only enqueue/read results. Synchronous mode is for bounded imports.
+    if (inlineAddresses && base && token) {
+      await addressQueue.drain({ wanted: new Set(points.map(([key]) => key)), force });
+      cached = await addressQueue.enqueue(points);
+    }
+    for (const row of pending) if (cached[row.key]) row.trip[row.field] = cached[row.key];
+    return new Set(points.map(([key]) => key));
   }
   async function context(vehicleId) {
     const [master, config, people, rides] = await Promise.all([
@@ -552,6 +570,18 @@ function registerKrisdriveLogbook(app, options = {}) {
           }));
         }
         for (const trip of trips) {
+          if (trip.distanceKm === 0 && Date.parse(trip.closedAt) - Date.parse(trip.startedAt) >= 300000) {
+            const old = previous.records[trip.id]?.data;
+            if (!force && old?.standstillCheckedUntil === trip.closedAt) {
+              trip.activity = old.activity; trip.standstillCheckedUntil = old.standstillCheckedUntil;
+            } else {
+              try {
+                const positions = await traccar("/api/positions?" + new URLSearchParams({ deviceId, from: trip.startedAt, to: trip.closedAt }), 8000);
+                trip.standstillCheckedUntil = trip.closedAt;
+                if (confirmedStandstill(trip, positions)) trip.activity = "standstill";
+              } catch { /* Retain the record as a trip until evidence is available. */ }
+            }
+          }
           const matches = matchingLocal(trip, ctx.local);
           const drivers = new Map(matches.filter(row => row.driver?.employeeId).map(row => [row.driver.employeeId, row.driver]));
           if (drivers.size === 1) trip.driver = [...drivers.values()][0];
@@ -598,14 +628,23 @@ function registerKrisdriveLogbook(app, options = {}) {
             }
           }
           if (!record) record = { data: trip, original: originals.get(trip.id) || trip, edits: {}, history: [], revision: 0 };
-          else if (JSON.stringify(record.data) !== JSON.stringify(trip)) {
+          else {
+            // Preserve addresses completed during report network I/O.
+            for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+              if (!hasAddress(trip[field]) && record.data.addressVersion === 2 && pointKey(trip[pointField]) === pointKey(record.data[pointField]) && hasAddress(record.data[field])) trip[field] = record.data[field];
+            }
+          }
+          if (JSON.stringify(record.data) !== JSON.stringify(trip)) {
             if (record.revision > 0) record.history.push({ type: "gps_refresh", at: now, previous: record.data });
             record.revision++;
             record.data = trip;
           }
           state.records[trip.id] = record;
         }
-        if (gpsOk) state.lastSync = now;
+        if (gpsOk) {
+          state.lastSync = now;
+          state.importedRanges = [...array(state.importedRanges).filter(r => !(r.from === range.from && r.to === range.to)), { from: range.from, to: range.to }].slice(-100);
+        }
       });
       if (gpsOk) {
         if (refreshed.size > 200) refreshed.clear();
@@ -616,14 +655,105 @@ function registerKrisdriveLogbook(app, options = {}) {
     inFlight.set(key, work);
     try { return await work; } finally { inFlight.delete(key); }
   }
+  let stopped = false, importTimer, addressTimer, importWork, addressWork;
+  const logFailure = (phase, error) => (options.logger || console).error(`[KRISDRIVE] ${phase}: ${error.status || error.code || error.name || "failed"}`);
+  async function vehicleIds() {
+    const [vehicles, config] = await Promise.all([
+      readJson(path.join(dataDir, "_system", "vehicles.json"), []), readJson(path.join(root, "tracker-config.json"), []),
+    ]);
+    return array(vehicles).filter(v => array(config).some(c => String(c.vehicleId) === String(v.id))).map(v => String(v.id));
+  }
+  async function importRecent() {
+    if (importWork) return importWork;
+    importWork = (async () => {
+      for (const id of await vehicleIds()) {
+        if (stopped) break;
+        try {
+          const ctx = await context(id);
+          // Include yesterday for midnight boundaries. Historical address jobs
+          // are processed from disk independently of this import window.
+          const range = dateRange({ from: day(Date.now() - DAY), to: day(Date.now()) });
+          const warning = await sync(ctx, range, false);
+          await mutate(id, state => { state.processing = { ...state.processing, lastImportAt: new Date().toISOString(), warning }; });
+        } catch (error) { logFailure("import", error); }
+      }
+    })();
+    try { return await importWork; } finally { importWork = null; }
+  }
+  async function processAddresses() {
+    if (addressWork) return addressWork;
+    addressWork = (async () => {
+      const ids = await vehicleIds(), wanted = new Set();
+      async function apply(id) {
+        const previous = await stateFor(id);
+        const pending = Object.values(previous.records).map(record => ({ ...record.data,
+          startPoint: record.data.startPoint || coordinateLabel(record.data.startLocation),
+          endPoint: record.data.endPoint || coordinateLabel(record.data.endLocation),
+        }));
+        const keys = await resolveAddresses(pending, previous);
+        for (const key of keys) wanted.add(key);
+        await mutate(id, state => {
+          for (const trip of pending) {
+            const record = state.records[trip.id];
+            if (!record || record.edits?.category === "private") continue;
+            let changed = false;
+            for (const [field, pointField] of [["startLocation", "startPoint"], ["endLocation", "endPoint"]]) {
+              const currentPoint = record.data[pointField] || coordinateLabel(record.data[field]);
+              if (!hasAddress(record.data[field]) && hasAddress(trip[field]) && pointKey(currentPoint) === pointKey(trip[pointField])) {
+                record.data[field] = trip[field]; record.data[pointField] = trip[pointField]; changed = true;
+              }
+            }
+            if (changed) { record.data.addressVersion = 2; record.revision++; }
+          }
+          state.processing = { ...state.processing, lastAddressRunAt: new Date().toISOString() };
+        });
+      }
+      for (const id of ids) { if (stopped) return; await apply(id); }
+      if (base && token && !stopped) await addressQueue.drain({ wanted, shouldRequest: async key => {
+        if (stopped) return false;
+        for (const id of ids) {
+          const state = await stateFor(id);
+          if (Object.values(state.records).some(record => record.edits?.category !== "private" &&
+            [["startLocation", "startPoint"], ["endLocation", "endPoint"]].some(([field, pointField]) =>
+              !hasAddress(record.data[field]) && pointKey(record.data[pointField] || coordinateLabel(record.data[field])) === key))) return true;
+        }
+        return false;
+      } });
+      for (const id of ids) { if (stopped) return; await apply(id); }
+    })();
+    try { return await addressWork; } finally { addressWork = null; }
+  }
+  function schedule(work, delay, kind) {
+    const timer = setTimeout(async () => {
+      try { await work(); } catch (error) { logFailure(kind, error); }
+      if (!stopped) {
+        if (kind === "import") importTimer = schedule(work, 120000, kind);
+        else addressTimer = schedule(work, 5000, kind);
+      }
+    }, delay);
+    timer.unref?.();
+    return timer;
+  }
+  if (options.background !== false && base && token) {
+    importTimer = schedule(importRecent, 1000, "import");
+    addressTimer = schedule(processAddresses, 2000, "addresses");
+  }
+  async function close() {
+    stopped = true; clearTimeout(importTimer); clearTimeout(addressTimer);
+    await Promise.allSettled([importWork, addressWork, ...inFlight.values()]);
+  }
   async function report(query) {
     const range = dateRange(query), vehicleId = text(query.vehicleId, 100);
     const ctx = await context(vehicleId);
-    const warning = await sync(ctx, range, query.refresh === "1");
+    const saved = await stateFor(vehicleId);
+    let warning = saved.processing?.warning || "";
+    const covered = array(saved.importedRanges).some(r => r.from <= range.from && r.to >= range.to);
+    if (inlineAddresses || query.refresh === "1" || !covered) warning = await sync(ctx, range, query.refresh === "1");
+    else void sync(ctx, range, false).catch(error => logFailure("report refresh", error));
     const state = await stateFor(vehicleId);
     const rows = resolvedRows(Object.values(state.records))
       .filter(row => day(row.startedAt) >= range.from && day(row.startedAt) <= range.to);
-    return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
+    return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
   const api = "/kristine/api/krisdrive/logbook";
   const route = handler => async (req, res) => {
@@ -684,7 +814,7 @@ function registerKrisdriveLogbook(app, options = {}) {
     if (req.params.format === "csv") res.type("text/csv; charset=utf-8").send(createCsv(data));
     else res.type("application/pdf").send(await require("./krisdrive-logbook-pdf").createLogbookPdf(data));
   }));
-  return { report };
+  return { report, importRecent, processAddresses, close };
 }
 
 const categoryLabel = category => ({ business: "Geschäftlich", private: "Privat", unassigned: "Offen" })[category] || "Offen";
@@ -697,7 +827,7 @@ function createCsv(data) {
     ["Zeitraum", data.range.from, data.range.to, "Stand", displayDate(data.generatedAt)],
     ["GPS-Abruf", data.warning || "Aktuell", "Letzter Abruf", displayDate(data.lastSync)],
     ["Beginn", "Ende", "Fahrer", "Fahrtart", "Start", "Ziel", "Zweck / Kunde / Baustelle", "km Beginn (Tracker/Korrektur)", "km Ende (Tracker/Korrektur)", "Kilometer", "Zu ergänzen", "Geändert am"],
-    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", categoryLabel(row.category), row.category === "private" ? "" : (row.startLocation || "Adresse derzeit nicht verfügbar") + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : (row.endLocation || "Adresse derzeit nicht verfügbar") + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
+    ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", (row.activity === "standstill" ? "Stillstand" : categoryLabel(row.category)), row.category === "private" ? "" : (row.startLocation || "Adresse derzeit nicht verfügbar") + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : (row.endLocation || "Adresse derzeit nicht verfügbar") + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
     [], ["Summe km", decimal(data.totals.km)], ["Geschäftlich km", decimal(data.totals.businessKm)], ["Privat km", decimal(data.totals.privateKm)], ["Nicht zugeordnet km", decimal(data.totals.unassignedKm)], ["Fahrten ohne Kilometerangabe", data.totals.missingKm],
   ];
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
