@@ -308,7 +308,16 @@ async function loadExpected(){
       card.append(pending);
      }
      line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
-     const note=document.createElement('p');note.className='small';note.textContent='Eigene Überweisung noch nicht eindeutig zugeordnet. '+a.error;card.append(note);
+     if(a.ownPayments?.length){
+      const heading=document.createElement('h3');heading.textContent='Von Brain übergebene Überweisungen im Abgleich';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
+      for(const payment of a.ownPayments){
+       line(bankDate(payment.date)+' · '+payment.name,money(payment.amount,a.currency));
+      }
+      if(a.ownPaymentCount>a.ownPayments.length){
+       const more=document.createElement('p');more.className='small';more.textContent='Weitere '+(a.ownPaymentCount-a.ownPayments.length)+' Überweisungen im Zahlungsarchiv.';card.append(more);
+      }
+     }
+     const note=document.createElement('p');note.className='small';note.textContent='Diese Brain-Überweisungen sind bekannt. Ob sie bereits im Bankstand oder in den Vormerkungen enthalten sind, ist noch nicht eindeutig belegt; daher wird hier kein zweiter Abzug gerechnet. '+a.error;card.append(note);
     }else line('Erwarteter Kontostand',a.error);
    }else{
     if(Number(a.earlierNet)!==0)line('Weitere Buchungen bis gestern',money(a.earlierNet,a.currency));
