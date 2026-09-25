@@ -26,6 +26,7 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Umbuchung prüfen</button></div>
 <p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><dialog id="revolutTransferReview"><h2>Eilüberweisung prüfen</h2><p id="revolutTransferReviewText" style="white-space:pre-line"></p><p class="small">Die Übergabe erfolgt als interne Umbuchung. Eine erforderliche Bankunterschrift bleibt bestehen.</p><div class="row"><button id="revolutTransferCancel" class="secondary" type="button">Schließen</button><button id="revolutTransferSubmit" type="button">Jetzt an Konfipay übergeben</button></div><p id="revolutTransferResult" role="status"></p></dialog>
 <p class="small">Der spätere Bankumsatz wird nur bei exakter Übereinstimmung von Konten, Betrag und EndToEnd-ID automatisch als „Umbuchung · Revolut“ erkannt – ohne Aufwand oder Ertrag.</p></section>
+<section class="card" id="signatureApproval"><div class="row"><div><h2>Bankunterschrift</h2><p id="signatureStatus" class="small" role="status" aria-live="polite">Zahlungsstatus wird geprüft …</p></div><div><a id="signatureLink" class="bank-action" href="https://portal.konfipay.de/App/Home" target="_blank" rel="noopener noreferrer" hidden>Jetzt in konfipay unterschreiben ↗</a><span id="signatureInactive" class="badge">Noch keine Unterschrift bereit</span></div></div><p class="small">Sobald konfipay „Wartet auf Unterschrift“ meldet, öffnet der Button das konfipay-Portal. Eine Anmeldung oder die Freigabe bei der Bank kann weiterhin erforderlich sein.</p></section>
 <section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
 <button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
 <section class="card" id="payrollBanking"><h2>Löhne und Abgaben</h2><p class="small">SEPA-Sammler vom Lohnbüro einlesen. Jede enthaltene Zahlung wird als eigener Auftrag ohne Sammelbuchung vorbereitet; Empfänger, Betrag, Verwendungszweck und EndToEndId bleiben erhalten.</p>
@@ -169,8 +170,46 @@ $('detailClose').addEventListener('click',()=>{detailVersion++;$('paymentDetails
 async function openLocalContent(item){const version=beginDetail(item.name);try{const d=await api('payment-content?id='+encodeURIComponent(item.id));if(version!==detailVersion)return;detailRows(d.items);$('detailMessage').textContent=d.items.length+' Zahlungen · '+statusName(item.status||item.state);$('detailXml').href='/konfipay/api/payment-xml?id='+encodeURIComponent(item.id);$('detailXml').hidden=false;}catch(e){$('detailMessage').textContent=e.message;}}
 async function openRemoteContent(rid,more=false){const version=more?detailVersion:beginDetail('Zahlungsinhalt aus konfipay');if(!more){detailRid=rid;detailPage=1;}try{const d=await api('payment-archive-content?rid='+encodeURIComponent(rid)+'&page='+detailPage);if(version!==detailVersion)return;detailRows(d.items.map(x=>({name:x.otherPartyBankAccount?.description||'–',iban:x.otherPartyBankAccount?.iban||'',amount:x.transaction?.amount,currency:x.transaction?.currency,date:x.transaction?.executionDate,debtorIban:x.initPartyBankAccount?.iban||'',purpose:x.transaction?.rmtInfoUStrd||'',endToEndId:x.transaction?.endToEndId||''})));$('detailMessage').textContent=(d.total??d.items.length)+' Zahlungen · Seite '+d.page+' von '+Math.max(1,d.pages||1);$('detailMore').hidden=Number(d.page)>=Number(d.pages);detailPage=Number(d.page)+1;}catch(e){$('detailMessage').textContent=e.message;}}
 $('detailMore').addEventListener('click',()=>openRemoteContent(detailRid,true));
-async function loadHistory(){$('historyLoad').disabled=true;$('historyMessage').textContent='Archiv wird geladen …';try{const d=await api('payment-history');$('historyRows').replaceChildren();for(const item of d.items){const tr=document.createElement('tr');cell(tr,item.name+'\n'+stamp(item.created));cell(tr,item.count);cell(tr,money(item.total,'EUR'));cell(tr,statusName(item.status||item.state)+(item.error?'\n'+item.error:''));const td=cell(tr,'');action(td,'Inhalt',()=>openLocalContent(item));if(item.rid)action(td,'Status prüfen',async()=>{try{await api('payment-status',{rid:item.rid});await loadHistory();}catch(e){$('historyMessage').textContent=e.message;}});$('historyRows').append(tr);}$('historyMessage').textContent=d.items.length?d.items.length+' Übergaben (maximal die letzten 100). Bei unklarem Status nicht erneut senden.':'Noch keine Zahlungen über Brain übergeben.';}catch(e){$('historyMessage').textContent=e.message;}finally{$('historyLoad').disabled=false;}}
-$('historyLoad').addEventListener('click',loadHistory);
+let historyBusy=false;
+function renderSignatureStatus(items){
+ const waiting=items.filter(item=>(item.status||item.state)==='FIN_VEU_FORWARDED');
+ const pending=items.filter(item=>item.rid&&!['FIN_CONFIRMED','FIN_REJECTED','FIN_VEU_CANCELED','KON_REJECTED'].includes(item.status||item.state));
+ $('signatureLink').hidden=waiting.length===0;
+ $('signatureInactive').hidden=waiting.length>0;
+ $('signatureStatus').textContent=waiting.length
+  ?waiting.length+' Auftrag/Aufträge warten auf deine Unterschrift. Im Zahlungsarchiv siehst du die einzelnen Beträge.'
+  :pending.length?'Noch kein Auftrag zur Unterschrift bereit · '+pending.length+' Auftrag/Aufträge in Bearbeitung. Der Status wird alle 45 Sekunden geprüft.'
+  :'Derzeit wartet kein Auftrag auf eine Unterschrift.';
+}
+async function loadHistory(refreshPending=false){
+ if(historyBusy)return;
+ historyBusy=true;$('historyLoad').disabled=true;$('historyMessage').textContent='Archiv wird geladen …';
+ try{
+  let d=await api('payment-history');
+  if(refreshPending){
+   const pending=d.items.filter(item=>item.rid&&!['FIN_CONFIRMED','FIN_REJECTED','FIN_VEU_CANCELED','KON_REJECTED'].includes(item.status||item.state)).slice(0,5);
+   await Promise.allSettled(pending.map(item=>api('payment-status',{rid:item.rid})));
+   if(pending.length)d=await api('payment-history');
+  }
+  $('historyRows').replaceChildren();
+  renderSignatureStatus(d.items);
+  for(const item of d.items){
+   const tr=document.createElement('tr');cell(tr,item.name+'\n'+stamp(item.created));cell(tr,item.count);cell(tr,money(item.total,'EUR'));cell(tr,statusName(item.status||item.state)+(item.error?'\n'+item.error:''));
+   const td=cell(tr,'');action(td,'Inhalt',()=>openLocalContent(item));
+   if(item.rid)action(td,'Status prüfen',async()=>{try{await api('payment-status',{rid:item.rid});await loadHistory();}catch(e){$('historyMessage').textContent=e.message;}});
+   if((item.status||item.state)==='FIN_VEU_FORWARDED'){
+    const link=document.createElement('a');link.href='https://portal.konfipay.de/App/Home';link.target='_blank';link.rel='noopener noreferrer';link.textContent='Unterschreiben ↗';link.style.marginLeft='12px';td.append(link);
+   }
+   $('historyRows').append(tr);
+  }
+  $('historyMessage').textContent=d.items.length?d.items.length+' Übergaben (maximal die letzten 100). Bei unklarem Status nicht erneut senden.':'Noch keine Zahlungen über Brain übergeben.';
+ }catch(e){$('historyMessage').textContent=e.message;$('signatureStatus').textContent='Zahlungsstatus derzeit nicht abrufbar: '+e.message;}
+ finally{historyBusy=false;$('historyLoad').disabled=false;}
+}
+$('historyLoad').addEventListener('click',()=>loadHistory(true));
+loadHistory(true);
+setInterval(()=>{if(!document.hidden)loadHistory(true);},45000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadHistory(true);});
 let payrollDraft=null, payrollBusy=false;
 const payrollCategory=$('payrollCategory');
 payrollCategory.addEventListener('change',()=>{$('payrollMonthField').hidden=payrollCategory.value!=='wages';$('payrollDueField').hidden=payrollCategory.value!=='contributions';payrollDraft=null;});
