@@ -12,6 +12,7 @@ test("queue survives restarts, backs off failures, drains untouched points first
   await queue.enqueue(points);
   await Promise.all([queue.drain(), queue.drain()]);
   assert.equal(calls, 4, "only one consumer");
+  assert.deepEqual((await queue.status()).errors, { provider_unavailable: 4 });
   queue = createAddressQueue({ file, now: () => now, lookup: async () => { calls++; return "Buchholzstrasse, Rüthi (SG)"; } });
   await queue.drain();
   assert.equal(calls, 8);
@@ -19,6 +20,7 @@ test("queue survives restarts, backs off failures, drains untouched points first
   now += 60001; await queue.drain(); assert.equal(calls, 12);
   queue = createAddressQueue({ file, now: () => now, lookup: async () => { throw Error("must use persisted cache"); } });
   const result = await queue.enqueue(points); assert.equal(Object.values(result).filter(Boolean).length, 8);
+  assert.equal((await queue.status()).resolved, 8);
   assert.equal(await queue.drain(), 0);
 });
 
