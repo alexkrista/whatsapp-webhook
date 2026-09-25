@@ -542,6 +542,20 @@ test("geocoder accepts Traccar JSON media type with raw or JSON-encoded strings"
   }
 });
 
+test("reports an empty address provider response without inventing a street", async t => {
+  const h = await harness(t, { request: async (url, opts, state) => {
+    if (url.pathname === "/api/reports/trips") return { ok: true, json: async () => state.trips };
+    if (url.pathname === "/api/positions") return { ok: true, json: async () => [] };
+    if (url.pathname === "/api/server/geocode") return { ok: true, text: async () => "" };
+    throw Error("Unexpected request");
+  } });
+  h.state.trips = [trip({ startAddress: "", endAddress: "" })];
+  const data = await (await h.get()).json();
+  assert.equal(data.rows[0].startLocation, "");
+  assert.equal(data.rows[0].endLocation, "");
+  assert.match(data.addressIssue, /GPS-Adressdienst liefert derzeit keine Straßenadressen/);
+});
+
 test("exact endpoint and stable stop enrichment preserve the report address at the same GPS point", async t => {
   const point = { latitude: 47.24, longitude: 9.59 };
   const h = await harness(t, { request: async (url, opts, state) => {
