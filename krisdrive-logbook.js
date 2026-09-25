@@ -761,7 +761,15 @@ function registerKrisdriveLogbook(app, options = {}) {
     const state = await stateFor(vehicleId);
     const rows = resolvedRows(Object.values(state.records))
       .filter(row => day(row.startedAt) >= range.from && day(row.startedAt) <= range.to);
-    return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
+    const missingPoints = new Set(rows.filter(row => row.category !== "private").flatMap(row =>
+      [[row.startLocation, row.startPoint], [row.endLocation, row.endPoint]]
+        .filter(([label, point]) => !hasAddress(label) && pointKey(point))
+        .map(([, point]) => pointKey(point))));
+    const addressStatus = missingPoints.size ? await addressQueue.status(missingPoints) : null;
+    const addressIssue = addressStatus?.pending && addressStatus.errors.empty_address === addressStatus.pending
+      ? "Der GPS-Adressdienst liefert derzeit keine Straßenadressen. Die GPS-Punkte sind gespeichert; Start und Ziel können auch unter „Ergänzen“ eingetragen werden."
+      : "";
+    return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, addressIssue, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
   const api = "/kristine/api/krisdrive/logbook";
   const route = handler => async (req, res) => {

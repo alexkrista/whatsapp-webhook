@@ -54,7 +54,8 @@
   function render() {
     const sum = data.totals;
     $("totals").innerHTML = [[format(sum.km) + " km", `${sum.count} ${sum.count === 1 ? "Fahrt" : "Fahrten"} insgesamt`], [format(sum.businessKm) + " km", "Geschäftlich"], [format(sum.privateKm) + " km", "Privat"], [String(sum.open), `${sum.open === 1 ? "Fahrt" : "Fahrten"} zu ergänzen`]].map(([n, title], i) => `<div class="lb-total ${i === 3 && sum.open ? "lb-open-count" : ""}"><strong>${esc(n)}</strong><span>${esc(title)}</span></div>`).join("");
-    $("warning").textContent = data.warning || ""; $("warning").hidden = !data.warning;
+    const notices = [data.warning, data.addressIssue].filter(Boolean);
+    $("warning").textContent = notices.join(" "); $("warning").hidden = !notices.length;
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
         <div class="lb-date"><strong>${esc(date(row.startedAt))}</strong>${row.activity === "standstill" ? '<small>Bestätigter Stillstand</small>' : ''}<small>${esc(time(row.startedAt))} – ${esc(date(row.startedAt) !== date(row.closedAt) ? date(row.closedAt) + " " : "")}${esc(time(row.closedAt))}</small></div>
@@ -63,7 +64,7 @@
         <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.distanceSource === "gps_positions" ? " · GPS neu berechnet" : row.odometerCorrected ? " · korrigiert" : row.distanceIssue ? " · bitte prüfen" : ""}</small></div>
         <button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>
       </article>`).join("") : '<div class="lb-empty">Keine gespeicherten Fahrten in diesem Zeitraum.<br>Wähle einen anderen Zeitraum oder rufe die Fahrten erneut ab.</div>';
-    $("stamp").textContent = `${data.range.from} bis ${data.range.to} · ${data.lastSync ? "Letzter GPS-Abruf " + date(data.lastSync) + " " + time(data.lastSync) : "Noch kein erfolgreicher GPS-Abruf"}${sum.unassignedKm ? " · " + format(sum.unassignedKm) + " km noch nicht zugeordnet" : ""}${sum.missingKm ? " · " + sum.missingKm + " Fahrt(en) ohne Kilometerangabe" : ""}`;
+    $("stamp").textContent = `${data.range.from} bis ${data.range.to} · ${data.lastSync ? "Letzter GPS-Abruf " + date(data.lastSync) + " " + time(data.lastSync) : "Noch kein erfolgreicher GPS-Abruf"}${sum.unassignedKm ? " · " + format(sum.unassignedKm) + " km mit noch offener Fahrtart" : ""}${sum.missingKm ? " · " + sum.missingKm + " Fahrt(en) ohne Kilometerangabe" : ""}`;
     if (data.processing?.lastImportAt) $("stamp").textContent += " · Automatischer Abruf alle 2 Minuten";
     if (sum.stops) $("stamp").textContent += ` · ${sum.stops} bestätigte Stillstandsabschnitte`;
   }
