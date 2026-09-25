@@ -655,7 +655,7 @@ function registerKrisdriveLogbook(app, options = {}) {
     inFlight.set(key, work);
     try { return await work; } finally { inFlight.delete(key); }
   }
-  let stopped = false, importTimer, addressTimer, importWork, addressWork;
+  let stopped = false, importTimer, addressTimer, importWork, addressWork, lastAddressStatus = "";
   const logFailure = (phase, error) => (options.logger || console).error(`[KRISDRIVE] ${phase}: ${error.status || error.code || error.name || "failed"}`);
   async function vehicleIds() {
     const [vehicles, config] = await Promise.all([
@@ -720,6 +720,12 @@ function registerKrisdriveLogbook(app, options = {}) {
         return false;
       } });
       for (const id of ids) { if (stopped) return; await apply(id); }
+      const addressStatus = await addressQueue.status(wanted);
+      const statusText = JSON.stringify(addressStatus);
+      if (statusText !== lastAddressStatus) {
+        (options.logger || console).info("[KRISDRIVE] address queue", statusText);
+        lastAddressStatus = statusText;
+      }
     })();
     try { return await addressWork; } finally { addressWork = null; }
   }

@@ -64,7 +64,17 @@ function createAddressQueue({ file, lookup, now = Date.now }) {
     })();
     try { return await running; } finally { running = null; }
   }
-  return { enqueue, drain };
+  async function status(wanted) {
+    return transaction(state => {
+      const jobs = Object.entries(state.jobs).filter(([key]) => !wanted || wanted.has(key)).map(([, job]) => job);
+      const pending = jobs.filter(job => !job.address), errors = {};
+      for (const job of pending) if (job.error) errors[job.error] = (errors[job.error] || 0) + 1;
+      return { pending: pending.length, resolved: jobs.length - pending.length, errors,
+        lastAttemptAt: Math.max(0, ...jobs.map(job => job.lastAttemptAt || 0)),
+        nextAttemptAt: pending.length ? Math.min(...pending.map(job => job.nextAttemptAt || 0)) : null };
+    });
+  }
+  return { enqueue, drain, status };
 }
 
 module.exports = { createAddressQueue };
