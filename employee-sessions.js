@@ -29,7 +29,7 @@ function currentActor(req) {
   const session = readJson(sessionPath(token), null);
   if (!session || session.expiresAt <= Date.now()) return null;
   const people = readJson(path.join(process.env.DATA_DIR || "/var/data", "_system", "employees.json"), []);
-  const employee = (Array.isArray(people) ? people : []).find(row => employeeId(row) === session.employeeId && row.active !== false);
+  const employee = (Array.isArray(people) ? people : []).find(row => employeeId(row) === session.employeeId && row.active !== false && row.kristineAccess === true);
   if (!employee) return null;
   const alex = isAlexander(employee);
   const stored = readJson(path.join(root(), "user-access.json"), { users:{} }).users?.[session.employeeId] || {};

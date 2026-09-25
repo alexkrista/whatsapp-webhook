@@ -4279,6 +4279,10 @@ function cleanEmployeeMaster(e, existingId = "") {
     finkzeitPersonalNumber: String(e?.finkzeitPersonalNumber ?? e?.personalNumberFinkzeit ?? "").trim().slice(0, 30),
     shortCode: String(e?.shortCode || "").trim().slice(0, 20),
     phone: String(e?.phone || "").trim().slice(0, 40),
+    // KGO remains available to active employees; these two grants are separate.
+    kristineAccess: e?.kristineAccess === true,
+    ...(typeof e?.brainAccess === "boolean" ? { brainAccess: e.brainAccess } :
+      typeof e?.canUseBrain === "boolean" ? { brainAccess: e.canUseBrain } : {}),
     role: String(e?.role || "Maler").trim().slice(0, 80),
     team: String(e?.team || "").trim().slice(0, 80),
     specialties: Array.isArray(e?.specialties)

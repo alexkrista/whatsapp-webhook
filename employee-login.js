@@ -34,7 +34,7 @@ function registerEmployeeLogin(app, { dataDir, readEmployees, sendWhatsApp }) {
   }
   async function employeeFor(phone) {
     const rows = await readEmployees();
-    const matches = (Array.isArray(rows) ? rows : []).filter(row => row.active !== false &&
+    const matches = (Array.isArray(rows) ? rows : []).filter(row => row.active !== false && row.kristineAccess === true &&
       normalizePhone(row.phone || row.phoneNumber || row.whatsapp || row.mobile || (isAlexander(row) ? process.env.CHEF_PHONE : "")) === phone && String(row.id || row.employeeId || ""));
     return matches.length === 1 ? matches[0] : null;
   }
