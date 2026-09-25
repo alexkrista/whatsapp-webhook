@@ -6,6 +6,8 @@ const path = require("path");
 const crypto = require("crypto");
 const { isAlexander } = require("./kristine-user-access");
 
+const { personalLoginEnabled, personalLoginAllowed } = require('./employee-login-policy');
+
 const COOKIE = "kristine_user_session";
 const THIRTY_DAYS = 30 * 86400000;
 const root = () => path.join(process.env.DATA_DIR || "/var/data", "_kristine");
@@ -23,14 +25,14 @@ function employeeId(row) { return String(row?.id || row?.employeeId || "").trim(
 function employeeName(row) { return String(row?.nickname || row?.rufname || row?.name || row?.employeeName || employeeId(row)).trim(); }
 function currentActor(req) {
   // Personal login stays unavailable until explicit KRISTINE entitlements are in place.
-  if (process.env.KRISTINE_PERSONAL_LOGIN_ENABLED !== "true") return null;
+  if (!personalLoginEnabled()) return null;
   const token = cookieValue(req);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   const session = readJson(sessionPath(token), null);
   if (!session || session.expiresAt <= Date.now()) return null;
   const people = readJson(path.join(process.env.DATA_DIR || "/var/data", "_system", "employees.json"), []);
   const employee = (Array.isArray(people) ? people : []).find(row => employeeId(row) === session.employeeId && row.active !== false);
-  if (!employee) return null;
+  if (!personalLoginAllowed(employee)) return null;
   const alex = isAlexander(employee);
   const stored = readJson(path.join(root(), "user-access.json"), { users:{} }).users?.[session.employeeId] || {};
   const role = alex ? "admin" : stored.role === "office" ? "office" : "user";
