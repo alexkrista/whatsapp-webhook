@@ -257,6 +257,58 @@ def install(ns,client,write_allowed,csrf):
         from brain_konfipay_expected import expected_balances
         return jsonify({'ok':True,**expected_balances(client)})
 
+    @app.post('/konfipay/api/reconcile-confirm')
+    @safe
+    def reconcile_confirm():
+        guard()
+        if request.remote_addr not in {'127.0.0.1','::1'}:
+            raise ConnectionError('Manueller Bankabgleich nur direkt am Brain-PC.')
+        body=request.get_json(silent=True) or {}
+        transfer=uid(body.get('transfer'));booked_rid=uid(body.get('bookedRid'));pending_rid=uid(body.get('pendingRid'))
+        if type(body.get('index')) is not int or body['index']<0:
+            raise ConnectionError('Ungültige Einzelzahlung.')
+        index=body['index']
+        item=payments.content(transfer)['items']
+        if index>=len(item):raise ConnectionError('Einzelzahlung fehlt.')
+        item=item[index]
+        account=next((a for a in client.accounts(client.auth_token()) if a['iban'].replace(' ','').upper()==item['debtorIban'].replace(' ','').upper()),None)
+        if not account or not account['date']:raise ConnectionError('Konto oder Standdatum fehlt.')
+        from brain_konfipay_pending import pending_transactions
+        start=item['date']
+        booked_data=client.authenticated('GET','/transactions?'+urllib.parse.urlencode({
+            'bank-account-rid':account['id'],'booking-status':'booked','min-booking-date':start,
+            'max-booking-date':date.today().isoformat(),'page-size':100,'page-number':1}))
+        if int(booked_data.get('totalPages',1))>1:
+            raise ConnectionError('Zu viele Buchungen für die manuelle Prüfung.')
+        booked=next((x for x in (booked_data.get('results') or {}).get('transactions',[]) if x.get('rId')==booked_rid),None)
+        pending=next((x for x in pending_transactions(client,{
+            'bank-account-rid':account['id'],'booking-status':'pending','min-booking-date':date.today().isoformat(),
+            'max-booking-date':date.today().isoformat()}) if x.get('rId')==pending_rid),None)
+        def same_debit(tx):
+            return (tx and tx.get('creditDebitIndicator')=='DBIT' and tx.get('currency')==account['currency']
+                and (tx.get('bankAccount') or {}).get('rId')==account['id']
+                and abs(Decimal(str(tx['amount'])))==Decimal(str(item['amount'])))
+        if not same_debit(booked) or not same_debit(pending):
+            raise ConnectionError('Gebuchter Umsatz und Vormerkung stimmen nicht mit der Zahlung überein.')
+        if not (item['date']<=str(booked.get('bookingDate') or '')[:10]<=account['date'][:10]
+                and str(booked['bookingDate'])[:10]<=str(pending.get('bookingDate') or '')[:10]):
+            raise ConnectionError('Die Buchung ist nicht sicher im Ausgangssaldo enthalten.')
+        if item['iban'].replace(' ','').upper() not in str(booked.get('bookingText') or '').replace(' ','').upper():
+            raise ConnectionError('Empfängerkonto fehlt im gebuchten Umsatz.')
+        db=payments.db()
+        try:
+            db.execute('CREATE TABLE IF NOT EXISTS bank_seen_payments(transfer_id TEXT,item_index INTEGER,bank_rid TEXT,PRIMARY KEY(transfer_id,item_index))')
+            db.execute('CREATE TABLE IF NOT EXISTS bank_duplicate_pending(pending_rid TEXT PRIMARY KEY,booked_rid TEXT NOT NULL)')
+            existing=db.execute('SELECT bank_rid FROM bank_seen_payments WHERE transfer_id=? AND item_index=?',(transfer,index)).fetchone()
+            duplicate=db.execute('SELECT booked_rid FROM bank_duplicate_pending WHERE pending_rid=?',(pending_rid,)).fetchone()
+            if (existing and existing['bank_rid']!=booked_rid) or (duplicate and duplicate['booked_rid']!=booked_rid):
+                raise ConnectionError('Die Buchung ist bereits anders zugeordnet.')
+            db.execute('INSERT OR IGNORE INTO bank_seen_payments VALUES(?,?,?)',(transfer,index,booked_rid))
+            db.execute('INSERT OR IGNORE INTO bank_duplicate_pending VALUES(?,?)',(pending_rid,booked_rid))
+            db.commit()
+        finally:db.close()
+        return jsonify({'ok':True,'matched':format(Decimal(str(item['amount'])),'.2f'),'bookedDate':booked['bookingDate']})
+
     @app.get('/konfipay/api/context')
     def context():return jsonify({'ok':True,'csrf':csrf,'configured':client.store.exists()})
 
@@ -388,8 +440,8 @@ def install(ns,client,write_allowed,csrf):
             raise ConnectionError('Dateigröße überschritten.')
         body=request.get_json(silent=True) or {}
         from brain_payroll_banking import prepare_payroll_file
-        payroll=prepare_payroll_file(body.get('xml'),body.get('category'),body.get('period'),body.get('instant',False),body.get('executionDate'))
-        draft=payments.prepare(payroll['files'])
+        payroll=prepare_payroll_file(body.get('xml'),body.get('category'),body.get('period'),body.get('instant',False),body.get('executionDate'),body.get('selectedIndexes'))
+        draft=payments.prepare(payroll['files']) if body.get('previewOnly') is not True else {'draft':None}
         return jsonify({'ok':True,'label':payroll['label'],'draft':draft['draft'],
                         'count':payroll['count'],'total':payroll['total'],'items':payroll['items'],
                         'originalDates':payroll['originalDates'],'executionDate':payroll['executionDate'],'taxCount':payroll['taxCount'],

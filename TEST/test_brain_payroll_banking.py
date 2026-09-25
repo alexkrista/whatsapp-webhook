@@ -40,6 +40,16 @@ class PayrollTests(unittest.TestCase):
         self.assertIn('>INST<', result['xml'])
         self.assertEqual(len(review_xml(result['xml'])['items']), 2)
 
+    def test_one_selected_payment_rebuilds_sepa_and_total(self):
+        result=prepare_payroll_file(self.xml.decode(),'wages','2026-09',selected_indexes=[1])
+        checked=review_xml(result['files'][0]['xml'])
+        self.assertEqual(result['count'],1)
+        self.assertEqual(checked['total'],'200.50')
+        self.assertEqual(checked['items'][0]['name'],'Person B')
+        self.assertEqual(checked['items'][0]['endToEndId'],'WAGE-2')
+        with self.assertRaises(ConnectionError):
+            prepare_payroll_file(self.xml.decode(),'wages','2026-09',selected_indexes=[0,0])
+
     def test_invalid_period_rejected(self):
         with self.assertRaises(ConnectionError):
             prepare_payroll_file(self.xml.decode(), 'wages', '2026-13')
@@ -74,6 +84,11 @@ class PayrollTests(unittest.TestCase):
         outgoing=ET.fromstring(result['files'][1]['xml'])
         actual=next(x for x in outgoing.iter() if x.tag.endswith('}CdtTrfTxInf'))
         self.assertEqual(ET.tostring(first),ET.tostring(actual))
+        only_tax=prepare_payroll_file(source,'contributions',date.today().isoformat(),selected_indexes=[0])
+        self.assertEqual((only_tax['count'],only_tax['taxCount'],len(only_tax['files'])),(1,1,1))
+        self.assertEqual(review_xml(only_tax['files'][0]['xml'])['total'],'100.00')
+        only_other=prepare_payroll_file(source,'contributions',date.today().isoformat(),selected_indexes=[1])
+        self.assertEqual((only_other['count'],only_other['taxCount'],len(only_other['files'])),(1,0,1))
         with self.assertRaisesRegex(ConnectionError,'Finanzamtszahlungen'):
             prepare_payroll_file(source,'contributions',date.today().isoformat(),True)
 

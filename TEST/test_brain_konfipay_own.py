@@ -80,6 +80,20 @@ class Tests(unittest.TestCase):
         self.c.booked=[dict(tx(booking='booked'),bookingDate=ACCOUNT['date'])]
         with patch('brain_konfipay_own.outstanding',return_value=[item]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[]):
             result=expected_balances(self.c)['accounts'][0];self.assertEqual(result['expected'],'1000.00');self.assertEqual(result['ownOutgoing'],'0.00')
+    def test_confirmed_duplicate_pending_is_not_charged_again(self):
+        booked=dict(tx(booking='booked'),bookingDate=ACCOUNT['date'],rId='booked-1500')
+        pending=dict(tx(booking='pending'),endToEndId=None,iban=None,rId='pending-1500')
+        self.c.booked=[booked]
+        db=self.p.db()
+        db.execute('CREATE TABLE bank_duplicate_pending(pending_rid TEXT PRIMARY KEY,booked_rid TEXT NOT NULL)')
+        db.execute('INSERT INTO bank_duplicate_pending VALUES(?,?)',('pending-1500','booked-1500'))
+        db.commit();db.close()
+        with patch('brain_konfipay_own.outstanding',return_value=[]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[pending]):
+            result=expected_balances(self.c)['accounts'][0]
+        self.assertEqual(result['reportedBalance'],'1000.00')
+        self.assertEqual(result['expected'],'1000.00')
+        self.assertTrue(result['bankMovements'][0]['excluded'])
+
     def test_historical_unmatched_payment_stays_reserved(self):
         item=local();item['item']['date']=ACCOUNT['date']
         self.assertEqual(reconcile(self.c,ACCOUNT,[item],[])['ownOutgoing'],'100.00')

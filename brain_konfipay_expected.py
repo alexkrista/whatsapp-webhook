@@ -1,5 +1,6 @@
 """Read-only expected balances, keeping statement balances separate."""
 from datetime import date, datetime, timedelta, timezone
+from contextlib import closing
 from decimal import Decimal
 from urllib.parse import urlencode
 from brain_konfipay import ConnectionError
@@ -8,6 +9,13 @@ def expected_balances(client):
     accounts=client.accounts(client.auth_token())
     from brain_konfipay_own import outstanding,reconcile,iban
     local=outstanding(client)
+    duplicates={}
+    payments=getattr(client,'brain_payments',None)
+    if payments:
+        with closing(payments.db()) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS bank_duplicate_pending (pending_rid TEXT PRIMARY KEY, booked_rid TEXT NOT NULL)')
+            db.commit()
+            duplicates=dict(db.execute('SELECT pending_rid,booked_rid FROM bank_duplicate_pending'))
     results=[];observed=[]
     for account in accounts:
         result={**account,'expected':None,'error':None}
@@ -23,7 +31,7 @@ def expected_balances(client):
             result['ownPaymentCount']=len(own)
             result['ownPaymentTotal']=format(sum((Decimal(str(x['item']['amount'])) for x in own),Decimal(0)),'.2f')
             result['ownPayments']=[{'name':x['item'].get('name') or 'Empfänger unbekannt','amount':x['item']['amount'],'date':x['item']['date'],'transfer':x['transfer'],'index':x['index']} for x in own[-20:]]
-            lookup_start=min([start]+[date.fromisoformat(x['item']['date']) for x in own])
+            lookup_start=min([start]+[date.fromisoformat(x['item']['date']) for x in own])-timedelta(days=2)
             seen=set();count=0;bank=[];movements=[]
             for booking in ['booked','pending']:
                 if booking=='booked' and lookup_start>date.today():continue
@@ -46,6 +54,16 @@ def expected_balances(client):
                         seen.add(rid)
                         if (tx.get('bankAccount') or {}).get('rId')!=account['id'] or tx.get('currency')!=account['currency']:
                             raise ConnectionError('Kontozuordnung oder Währung eines Umsatzes ist unklar.')
+                        if booking=='pending' and rid in duplicates:
+                            booked=next((x for x in bank if x['rId']==duplicates[rid] and x['_booking']=='booked'),None)
+                            if (booked and booked.get('creditDebitIndicator')==tx.get('creditDebitIndicator')=='DBIT'
+                                and booked.get('currency')==tx.get('currency')
+                                and (booked.get('bankAccount') or {}).get('rId')==account['id']
+                                and abs(Decimal(str(booked['amount'])))==abs(Decimal(str(tx['amount'])))):
+                                movements.append({'booking':'pending','date':str(tx.get('bookingDate') or '')[:10],
+                                    'name':'Bereits gebucht – doppelte Vormerkung','amount':format(abs(Decimal(str(tx['amount']))),'.2f'),
+                                    'direction':'DBIT','excluded':True,'purpose':'Gleicher Umsatz ist im Bankstand enthalten.'})
+                                continue
                         bank.append({**tx,'_booking':booking})
                         if booking=='booked' and str(tx.get('bookingDate') or '')[:10]<start.isoformat():continue
                         observed.append({'booking':booking,'account':account['id'],**{k:tx.get(k) for k in ['amount','currency','creditDebitIndicator','bookingDate','valueDate','name','iban','purpose','endToEndId','bankReference','paymentIdentificationId']}})

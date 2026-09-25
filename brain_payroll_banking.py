@@ -13,7 +13,7 @@ from brain_konfipay import ConnectionError
 from brain_konfipay_banking import child, day, localname, review_xml, value
 
 
-def prepare_payroll_file(xml, category, period, instant=False, execution_date=None):
+def prepare_payroll_file(xml, category, period, instant=False, execution_date=None, selected_indexes=None):
     if category not in ('wages', 'contributions'):
         raise ConnectionError('Bitte Löhne oder Abgaben auswählen.')
     if not isinstance(instant, bool):
@@ -26,6 +26,15 @@ def prepare_payroll_file(xml, category, period, instant=False, execution_date=No
         period = day(period)
         label = 'Abgaben ' + period[8:] + '.' + period[5:7] + '.' + period[:4]
     reviewed = review_xml(xml,strict_ids=False,allow_past=True)
+    count = len(reviewed['items'])
+    if selected_indexes is None:
+        selected = set(range(count))
+    elif (not isinstance(selected_indexes, list) or not selected_indexes or
+          any(type(i) is not int or i < 0 or i >= count for i in selected_indexes) or
+          len(set(selected_indexes)) != len(selected_indexes)):
+        raise ConnectionError('Bitte gültige Einzelzahlungen auswählen.')
+    else:
+        selected = set(selected_indexes)
     if execution_date:
         execution_date=day(execution_date)
         if execution_date<date.today().isoformat():
@@ -42,10 +51,15 @@ def prepare_payroll_file(xml, category, period, instant=False, execution_date=No
     prefix = 'KR' + secrets.token_hex(5).upper()  # 12 characters
     child(header, 'MsgId').text = prefix + 'M'
     index = 0
+    source_index = 0
     tax_indexes=[]
     for block in blocks:
         transactions = [x for x in block if localname(x) == 'CdtTrfTxInf']
         for transaction in transactions:
+            position = source_index
+            source_index += 1
+            if position not in selected:
+                continue
             index += 1
             if index > 500:
                 raise ConnectionError('Höchstens 500 Einzelzahlungen pro Sammler möglich.')
@@ -112,9 +126,14 @@ def prepare_payroll_file(xml, category, period, instant=False, execution_date=No
                     node = ET.SubElement(pt, pt.tag.replace('PmtTpInf', 'LclInstrm'))
                     ET.SubElement(node, pt.tag.replace('PmtTpInf', 'Cd')).text = 'INST'
             init.append(one)
+    if source_index != count:
+        raise ConnectionError('Einzelzahlungen und XML-Inhalt stimmen nicht überein.')
+    selected_total = sum((Decimal(reviewed['items'][i]['amount']) for i in selected), Decimal('0'))
+    child(header, 'NbOfTxs').text = str(index)
+    child(header, 'CtrlSum').text = f'{selected_total:.2f}'
     transformed = ET.tostring(root, encoding='unicode', xml_declaration=True)
     checked = review_xml(transformed)
-    if checked['total'] != reviewed['total'] or len(checked['items']) != len(reviewed['items']):
+    if Decimal(checked['total']) != selected_total or len(checked['items']) != len(selected):
         raise ConnectionError('Die Kontrollsumme des Sammlers hat sich geändert.')
     for position in tax_indexes:checked['items'][position]['taxPayment']=True
     files=[]
