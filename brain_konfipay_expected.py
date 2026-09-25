@@ -21,9 +21,10 @@ def expected_balances(client):
             sums={'bookedIn':Decimal(0),'bookedOut':Decimal(0),'pendingIn':Decimal(0),'pendingOut':Decimal(0),'todayIn':Decimal(0),'todayOut':Decimal(0),'earlierNet':Decimal(0)}
             own=[x for x in local if iban(x['item']['debtorIban'])==iban(account['iban'])]
             result['ownPaymentCount']=len(own)
-            result['ownPayments']=[{'name':x['item'].get('name') or 'Empfänger unbekannt','amount':x['item']['amount'],'date':x['item']['date'],'transfer':x['transfer']} for x in own[-20:]]
+            result['ownPaymentTotal']=format(sum((Decimal(str(x['item']['amount'])) for x in own),Decimal(0)),'.2f')
+            result['ownPayments']=[{'name':x['item'].get('name') or 'Empfänger unbekannt','amount':x['item']['amount'],'date':x['item']['date'],'transfer':x['transfer'],'index':x['index']} for x in own[-20:]]
             lookup_start=min([start]+[date.fromisoformat(x['item']['date']) for x in own])
-            seen=set();count=0;bank=[]
+            seen=set();count=0;bank=[];movements=[]
             for booking in ['booked','pending']:
                 if booking=='booked' and lookup_start>date.today():continue
                 params={'bank-account-rid':account['id'],'booking-status':booking,'page-size':100}
@@ -58,12 +59,13 @@ def expected_balances(client):
                         elif booking=='booked' and start<=booking_day<date.today():sums['earlierNet']+=amount if direction=='CRDT' else -amount
                         else:raise ConnectionError('Ein Umsatz liegt außerhalb des angeforderten Zeitraums.')
                         if booking=='pending':count+=1
+                        movements.append({'booking':booking,'date':str(tx.get('bookingDate') or '')[:10],'name':tx.get('name') or 'Ohne Empfängerangabe','amount':format(amount,'.2f'),'direction':direction,'purpose':tx.get('purpose') or '', 'endToEndId':tx.get('endToEndId') or '', 'paymentIdentificationId':tx.get('paymentIdentificationId') or ''})
                     if page>=pages:break
                     page+=1
             expected=base+sums['bookedIn']-sums['bookedOut']+sums['pendingIn']-sums['pendingOut']
             # The bank movements are known even when an own payment cannot be
             # uniquely matched. Keep their subtotal separate from the estimate.
-            result.update(reportedBalance=format(expected,'.2f'),pendingCount=count)
+            result.update(reportedBalance=format(expected,'.2f'),pendingCount=count,bankMovements=movements[-50:],bankMovementCount=len(movements))
             result.update({k:format(v,'.2f') for k,v in sums.items()})
             own_state=reconcile(client,account,local,bank)
             result.update(own_state)

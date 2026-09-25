@@ -29,10 +29,12 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <section class="card" id="signatureApproval"><div class="row"><div><h2>Bankunterschrift</h2><p id="signatureStatus" class="small" role="status" aria-live="polite">Zahlungsstatus wird geprüft …</p></div><div><a id="signatureLink" class="bank-action" href="https://portal.konfipay.de/App/Home" target="_blank" rel="noopener noreferrer" hidden>Jetzt in konfipay unterschreiben ↗</a><span id="signatureInactive" class="badge">Noch keine Unterschrift bereit</span></div></div><p class="small">Sobald konfipay „Wartet auf Unterschrift“ meldet, öffnet der Button das konfipay-Portal. Eine Anmeldung oder die Freigabe bei der Bank kann weiterhin erforderlich sein.</p></section>
 <section class="card"><div class="row"><div><h2>Zahlungen über Brain</h2><p class="small">Sammler aufteilen, Inhalt prüfen und bewusst freigeben.</p></div><a class="bank-action" href="/sepa-split?konfipay=1">Neue Zahlung / Sammler →</a></div>
 <button id="historyLoad" class="secondary">Brain-Zahlungsarchiv anzeigen / aktualisieren</button><p id="historyMessage" class="small" role="status"></p><div class="scroll"><table><thead><tr><th>Datei / Zeitpunkt</th><th>Anzahl</th><th>Summe</th><th>Status</th><th>Details</th></tr></thead><tbody id="historyRows"></tbody></table></div></section>
-<section class="card" id="payrollBanking"><h2>Löhne und Abgaben</h2><p class="small">SEPA-Sammler vom Lohnbüro einlesen. Jede enthaltene Zahlung wird als eigener Auftrag ohne Sammelbuchung vorbereitet; Empfänger, Betrag, Verwendungszweck und EndToEndId bleiben erhalten.</p>
-<div class="formrow"><div class="field"><label for="payrollCategory">Bereich</label><select id="payrollCategory"><option value="wages">Löhne</option><option value="contributions">Abgaben</option></select></div><div class="field" id="payrollMonthField"><label for="payrollMonth">Lohnmonat</label><input id="payrollMonth" type="month"></div><div class="field" id="payrollDueField" hidden><label for="payrollDue">Fälligkeit der Abgaben</label><input id="payrollDue" type="date"></div></div>
-<div class="formrow"><div class="field"><label for="payrollFile">SEPA-Sammler vom Lohnbüro (.xml)</label><input id="payrollFile" type="file" accept=".xml,application/xml,text/xml"></div><div class="field"><label for="payrollExecution">Neuer Ausführungstermin (falls Original abgelaufen)</label><input id="payrollExecution" type="date"><div id="payrollDateHint" class="small">Leer lassen, um den Originaltermin zu übernehmen.</div></div><div class="field"><label for="payrollPriority">Überweisungsart</label><select id="payrollPriority"><option value="normal">Standard-SEPA</option><option value="instant">SEPA Instant / Eilüberweisung (heute)</option></select></div><button id="payrollPrepare" type="button">Sammler prüfen</button></div>
-<p id="payrollMessage" class="small" role="status" aria-live="polite"></p><div id="payrollGroups"></div><p class="small">Die Bank kann Eilaufträge ablehnen oder eine zusätzliche Unterschrift verlangen. „Übergeben“ bestätigt keine erfolgte Abbuchung; den Status im Zahlungsarchiv prüfen.</p></section>
+<section class="card" id="payrollBanking"><h2>Löhne und Abgaben</h2><p class="small">Alle XML-Dateien gemeinsam laden und jede Einzelzahlung prüfen. Die Checkbox bestimmt, welche Datei übergeben wird. Eine Datei mit Finanzamtszahlung wird beim Vorbereiten bankgerecht in getrennte SEPA-Dateien aufgeteilt.</p>
+<div id="payrollDrop" class="card" style="border-style:dashed" tabindex="0"><label for="payrollFile">SEPA-XML hierher ziehen oder Dateien auswählen</label><input id="payrollFile" type="file" multiple accept=".xml,application/xml,text/xml"><p class="small">Mehrere Dateien auf einmal möglich · Löhne und Abgaben in einer Übersicht.</p></div>
+<div id="payrollStaged"></div>
+<div class="formrow"><div class="field"><label for="payrollExecution">Neuer Ausführungstermin für alle Dateien (optional)</label><input id="payrollExecution" type="date"><div class="small">Leer lassen: Originaltermin je Datei.</div></div><div class="field"><label for="payrollPriority">Überweisungsart</label><select id="payrollPriority"><option value="normal">Standard-SEPA</option><option value="instant">SEPA Instant / Eilüberweisung (heute)</option></select></div><button id="payrollPrepare" type="button">Alle Dateien prüfen</button></div>
+<p id="payrollMessage" class="small" role="status" aria-live="polite"></p><div id="payrollGroups"></div><div class="row" style="margin-top:16px"><strong id="payrollSelectedTotal">0 Dateien ausgewählt</strong><button id="payrollReviewSelected" type="button" disabled>Ausgewählte Überweisungen prüfen →</button></div>
+<p class="small">Vor der Übergabe werden die ausgewählten Dateien nochmals zusammengefasst. Bei unklarem Status zuerst das Zahlungsarchiv prüfen und nicht erneut senden.</p></section>
 <dialog id="payrollReview"><h2>Löhne und Abgaben freigeben</h2><p id="payrollReviewText" style="white-space:pre-line"></p><p>Prüfe die Einzelzahlungen in der aufgeklappten Gruppe. Mit der Freigabe werden die Aufträge an Konfipay übergeben und die Bankübertragung angestoßen. Eine Bankunterschrift kann zusätzlich nötig sein.</p><div class="row"><button id="payrollCancel" class="secondary" type="button">Abbrechen</button><button id="payrollSubmit" type="button">Verbindlich an Konfipay übergeben</button></div><p id="payrollResult" role="status"></p></dialog>
 <dialog id="paymentDetails"><div class="row"><h2 id="detailTitle">Zahlungsinhalt</h2><button id="detailClose" class="secondary">Schließen</button></div><p id="detailMessage" class="small"></p><div class="scroll"><table><thead><tr><th>Empfänger / IBAN</th><th>Betrag</th><th>Termin / Auftraggeberkonto</th><th>Verwendungszweck / EndToEndId</th></tr></thead><tbody id="detailRows"></tbody></table></div><div class="row" style="margin-top:16px"><button id="detailMore" class="secondary" hidden>Weitere Zahlungen laden</button><a id="detailXml" hidden>Original-XML herunterladen</a></div></dialog>
 <footer>Salden stammen aus den von konfipay bereitgestellten Bankauszügen. Das Datum „Bankstand“ zeigt die Aktualität des jeweiligen Saldos. Bei geöffneter Seite wird alle fünf Minuten aktualisiert. Zahlungen werden ausschließlich nach deiner ausdrücklichen Freigabe im Zahlungsbereich übergeben.</footer>
@@ -210,42 +212,121 @@ $('historyLoad').addEventListener('click',()=>loadHistory(true));
 loadHistory(true);
 setInterval(()=>{if(!document.hidden)loadHistory(true);},45000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadHistory(true);});
-let payrollDraft=null, payrollBusy=false;
-const payrollCategory=$('payrollCategory');
-payrollCategory.addEventListener('change',()=>{$('payrollMonthField').hidden=payrollCategory.value!=='wages';$('payrollDueField').hidden=payrollCategory.value!=='contributions';payrollDraft=null;});
-function payrollInputs(){return [payrollCategory.value,$('payrollMonth').value,$('payrollDue').value,$('payrollExecution').value,$('payrollPriority').value,$('payrollFile').files[0]?.name,$('payrollFile').files[0]?.lastModified].join('|');}
-$('payrollFile').addEventListener('change',async()=>{
- $('payrollExecution').value='';$('payrollDateHint').textContent='Leer lassen, um den Originaltermin zu übernehmen.';
- const file=$('payrollFile').files[0];if(!file||file.size>8_000_000)return;
- const content=await file.text();if(/<!DOCTYPE|<!ENTITY/i.test(content))return;
- const documentXml=new DOMParser().parseFromString(content,'application/xml');if(documentXml.querySelector('parsererror'))return;
- const dates=[...new Set([...documentXml.getElementsByTagName('*')].filter(x=>x.localName==='ReqdExctnDt').map(x=>x.textContent.trim()))];
- if(dates.length){$('payrollDateHint').textContent='Originaltermin: '+dates.map(bankDate).join(', ')+(dates.some(x=>x<new Date().toISOString().slice(0,10))?' · Abgelaufen: neuen Termin oben auswählen.':' · Ohne Eingabe bleibt er erhalten.');}
-});
-function payrollGroup(data){
- const details=document.createElement('details');details.open=true;details.className='card';
- const summary=document.createElement('summary');summary.textContent=data.label+' · '+data.count+' Einzelüberweisungen · '+money(data.total,'EUR')+(data.executionDate?' · Ausführung '+bankDate(data.executionDate):'');details.append(summary);
- const scroll=document.createElement('div');scroll.className='scroll';const table=document.createElement('table');const head=document.createElement('thead');head.innerHTML='<tr><th>Empfänger / IBAN</th><th>Ausführung</th><th>Verwendungszweck</th><th class="amount">Betrag</th></tr>';table.append(head);
- const body=document.createElement('tbody');for(const item of data.items){const row=document.createElement('tr');cell(row,(item.taxPayment?'Finanzamtszahlung · ':'')+item.name+'\n'+item.iban);cell(row,bankDate(item.date));cell(row,(item.purpose||'–')+'\n'+item.endToEndId);const td=cell(row,money(item.amount,'EUR'));td.className='amount';body.append(row);}table.append(body);scroll.append(table);details.append(scroll);
- if(data.taxCount){const note=document.createElement('p');note.className='small warn';note.textContent=data.taxCount+' Finanzamtszahlung(en) werden als eigene SEPA-Datei mit TAXS-Kennzeichnung, neunstelliger Steuernummer und Original-Zahlungsreferenz vorbereitet. Die übrigen Abgaben sind eine zweite Datei. Beide Status einzeln im Zahlungsarchiv prüfen.';details.append(note);}
- const button=document.createElement('button');button.type='button';button.textContent='Diese Gruppe an Konfipay übergeben';button.style.marginTop='16px';button.addEventListener('click',()=>{if(payrollBusy||!payrollDraft||payrollDraft.inputs!==payrollInputs()){ $('payrollMessage').textContent='Eingaben geändert. Bitte Sammler erneut prüfen.';return;} $('payrollReviewText').textContent=data.label+' · '+data.count+' Einzelzahlungen · '+money(data.total,'EUR')+' · '+(data.instant?'SEPA Instant / Eilüberweisung':'Standard-SEPA')+' · Ausführung: '+(data.executionDate?bankDate(data.executionDate):'laut Datei')+(payrollDraft.dateChanged?' (geändert von '+data.originalDates.map(bankDate).join(', ')+')':'')+'\n'+data.files.map(f=>f.name+' · '+f.count+' Zahlungen').join('\n');$('payrollResult').textContent='';$('payrollReview').showModal();});details.append(button);return details;
+const payrollState={files:[],prepared:[],busy:false,blocked:false};
+function payrollInputs(){return JSON.stringify({files:payrollState.files.map(x=>[x.file.name,x.file.size,x.file.lastModified,x.category,x.period]),execution:$('payrollExecution').value,priority:$('payrollPriority').value});}
+function payrollInvalidate(){payrollState.prepared=[];payrollState.blocked=false;$('payrollGroups').replaceChildren();$('payrollReviewSelected').disabled=true;$('payrollSelectedTotal').textContent='0 Dateien ausgewählt';}
+function payrollDate(xml){
+ const doc=new DOMParser().parseFromString(xml,'application/xml');
+ if(doc.querySelector('parsererror'))throw Error('XML konnte nicht gelesen werden.');
+ const dates=[...new Set([...doc.getElementsByTagName('*')].filter(x=>x.localName==='ReqdExctnDt').map(x=>x.textContent.trim()))];
+ const names=[...doc.getElementsByTagName('*')].filter(x=>x.localName==='Cdtr').map(x=>[...x.getElementsByTagName('*')].find(y=>y.localName==='Nm')?.textContent||'');
+ const category=names.some(x=>/finanzamt|gesundheitskasse|buak|gemeinde|sozialversicherung|pensionsversicherung/i.test(x))?'contributions':'wages';
+ return {dates,category};
+}
+async function payrollStage(files){
+ if(payrollState.busy)return;
+ let added=0,errors=[];
+ for(const file of files){
+  if(!file.name.toLowerCase().endsWith('.xml')||file.size>8_000_000){errors.push(file.name+': Nur XML bis 8 MB.');continue;}
+  if(payrollState.files.some(x=>x.file.name===file.name&&x.file.size===file.size&&x.file.lastModified===file.lastModified))continue;
+  try{
+   const xml=await file.text();if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('Unzulässige XML-Definition.');
+   const info=payrollDate(xml),original=info.dates[0]||'';
+   payrollState.files.push({file,xml,category:info.category,period:info.category==='wages'?original.slice(0,7):original,originalDates:info.dates});added++;
+  }catch(e){errors.push(file.name+': '+e.message);}
+ }
+ if(added)payrollInvalidate();
+ payrollRenderStage();
+ $('payrollMessage').textContent=errors.length?errors.join(' · '):payrollState.files.length+' Datei(en) bereit. Bereiche und Termine prüfen, dann alle Dateien vorbereiten.';
+}
+function payrollRenderStage(){
+ const box=$('payrollStaged');box.replaceChildren();
+ for(const entry of payrollState.files){
+  const card=document.createElement('div');card.className='card';
+  const title=document.createElement('strong');title.textContent=entry.file.name;card.append(title);
+  const row=document.createElement('div');row.className='formrow';
+  const area=document.createElement('div');area.className='field';const areaLabel=document.createElement('label');areaLabel.textContent='Bereich';const category=document.createElement('select');
+  for(const [value,label] of [['wages','Löhne'],['contributions','Abgaben']]){const option=document.createElement('option');option.value=value;option.textContent=label;category.append(option);}
+  category.value=entry.category;category.addEventListener('change',()=>{entry.category=category.value;entry.period=entry.category==='wages'?(entry.originalDates[0]||'').slice(0,7):(entry.originalDates[0]||'');payrollInvalidate();payrollRenderStage();});
+  area.append(areaLabel,category);row.append(area);
+  const when=document.createElement('div');when.className='field';const whenLabel=document.createElement('label');whenLabel.textContent=entry.category==='wages'?'Lohnmonat':'Fälligkeit der Abgaben';
+  const period=document.createElement('input');period.type=entry.category==='wages'?'month':'date';period.value=entry.period;period.addEventListener('change',()=>{entry.period=period.value;payrollInvalidate();});
+  when.append(whenLabel,period);row.append(when);
+  const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='Entfernen';remove.addEventListener('click',()=>{payrollState.files=payrollState.files.filter(x=>x!==entry);payrollInvalidate();payrollRenderStage();});
+  row.append(remove);card.append(row);const note=document.createElement('p');note.className='small';note.textContent='Originaltermin: '+(entry.originalDates.map(bankDate).join(', ')||'nicht erkennbar');card.append(note);box.append(card);
+ }
+}
+$('payrollFile').addEventListener('change',e=>{payrollStage([...e.target.files]);e.target.value='';});
+const payrollDrop=$('payrollDrop');
+payrollDrop.addEventListener('dragover',e=>{e.preventDefault();payrollDrop.style.borderColor='white';});
+payrollDrop.addEventListener('dragleave',()=>{payrollDrop.style.borderColor='';});
+payrollDrop.addEventListener('drop',e=>{e.preventDefault();payrollDrop.style.borderColor='';payrollStage([...e.dataTransfer.files]);});
+for(const id of ['payrollExecution','payrollPriority'])$(id).addEventListener('change',payrollInvalidate);
+function payrollSelection(){
+ const chosen=payrollState.prepared.filter(x=>x.selected&&!x.submitted),cents=chosen.reduce((n,x)=>n+Math.round(Number(x.data.total)*100),0);
+ $('payrollSelectedTotal').textContent=chosen.length+' von '+payrollState.prepared.length+' Dateien ausgewählt · '+money((cents/100).toFixed(2),'EUR');
+ $('payrollReviewSelected').disabled=!chosen.length||payrollState.busy||payrollState.blocked;
+}
+function payrollRenderPrepared(){
+ const box=$('payrollGroups');box.replaceChildren();
+ for(const entry of payrollState.prepared){
+  const card=document.createElement('div');card.className='card';
+  const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.style.width='auto';check.style.marginRight='10px';check.checked=entry.selected;check.disabled=entry.submitted||payrollState.blocked;
+  check.addEventListener('change',()=>{entry.selected=check.checked;payrollSelection();});
+  label.append(check,document.createTextNode(entry.file.file.name+' · '+entry.data.label+' · '+entry.data.count+' Zahlungen · '+money(entry.data.total,'EUR')+(entry.submitted?' · übergeben':'')));card.append(label);
+  const details=document.createElement('details');details.open=true;const summary=document.createElement('summary');summary.textContent='Einzelzahlungen ansehen · Ausführung '+(entry.data.executionDate?bankDate(entry.data.executionDate):'laut Datei');details.append(summary);
+  const scroll=document.createElement('div');scroll.className='scroll';const table=document.createElement('table');const head=document.createElement('thead');head.innerHTML='<tr><th>Empfänger / IBAN</th><th>Ausführung</th><th>Verwendungszweck / EndToEndId</th><th class="amount">Betrag</th></tr>';table.append(head);
+  const body=document.createElement('tbody');for(const item of entry.data.items){const row=document.createElement('tr');cell(row,(item.taxPayment?'Finanzamt · ':'')+item.name+'\n'+item.iban);cell(row,bankDate(item.date));cell(row,(item.purpose||'–')+'\n'+item.endToEndId);const amount=cell(row,money(item.amount,'EUR'));amount.className='amount';body.append(row);}
+  table.append(body);scroll.append(table);details.append(scroll);card.append(details);
+  if(entry.data.taxCount){const note=document.createElement('p');note.className='small warn';note.textContent='Finanzamt getrennt: '+entry.data.files.map(x=>x.name).join(' · ');card.append(note);}
+  if(entry.result){const note=document.createElement('p');note.className='small';note.textContent=entry.result;card.append(note);}
+  box.append(card);
+ }
+ payrollSelection();
 }
 $('payrollPrepare').addEventListener('click',async()=>{
- if(payrollBusy)return;const file=$('payrollFile').files[0];if(!file||!file.name.toLowerCase().endsWith('.xml')){$('payrollMessage').textContent='Bitte eine SEPA-XML-Datei auswählen.';return;}
- if(file.size>8_000_000){$('payrollMessage').textContent='Datei zu groß (höchstens 8 MB).';return;}
- payrollBusy=true;payrollDraft=null;$('payrollPrepare').disabled=true;$('payrollGroups').replaceChildren();$('payrollMessage').textContent='Sammler wird geprüft …';const inputs=payrollInputs();
- try{const xml=await file.text();const d=await api('payroll-prepare',{xml,category:payrollCategory.value,period:payrollCategory.value==='wages'?$('payrollMonth').value:$('payrollDue').value,executionDate:$('payrollExecution').value||null,instant:$('payrollPriority').value==='instant'});
-  if(inputs!==payrollInputs())throw Error('Eingaben geändert. Bitte Sammler erneut prüfen.');payrollDraft={id:d.draft,inputs,dateChanged:Boolean($('payrollExecution').value)&&d.originalDates.some(x=>x!==d.executionDate)};$('payrollGroups').append(payrollGroup(d));$('payrollMessage').textContent='Vorbereitet. Bitte Einzelzahlungen prüfen und Gruppe ausdrücklich freigeben.'+(d.taxCount?' Finanzamtszahlung separat in der Bankvorschau prüfen.':'');
- }catch(e){$('payrollMessage').textContent=e.message;}finally{payrollBusy=false;$('payrollPrepare').disabled=false;}
+ if(payrollState.busy)return;
+ if(!payrollState.files.length){$('payrollMessage').textContent='Bitte zuerst XML-Dateien auswählen oder hineinziehen.';return;}
+ const snapshot=payrollInputs();payrollState.busy=true;payrollInvalidate();$('payrollPrepare').disabled=true;$('payrollMessage').textContent='Alle Dateien werden geprüft …';
+ const results=[],errors=[];
+ try{
+  for(const file of payrollState.files){
+   try{
+    const data=await api('payroll-prepare',{xml:file.xml,category:file.category,period:file.period,executionDate:$('payrollExecution').value||null,instant:$('payrollPriority').value==='instant'});
+    if(snapshot!==payrollInputs())throw Error('Eingaben während der Prüfung geändert.');
+    results.push({file,id:data.draft,data,selected:false,submitted:false});
+   }catch(e){errors.push(file.file.name+': '+e.message);}
+  }
+  payrollState.prepared=results;payrollRenderPrepared();
+  $('payrollMessage').textContent=results.length+' von '+payrollState.files.length+' Dateien vorbereitet. Einzelzahlungen prüfen und gewünschte Dateien anhaken.'+(errors.length?' Fehler: '+errors.join(' · '):'');
+ }finally{payrollState.busy=false;$('payrollPrepare').disabled=false;payrollSelection();}
 });
-$('payrollCancel').addEventListener('click',()=>{$('payrollReview').close();});
+$('payrollReviewSelected').addEventListener('click',()=>{
+ const selected=payrollState.prepared.filter(x=>x.selected&&!x.submitted);if(!selected.length||payrollState.busy||payrollState.blocked)return;
+ const cents=selected.reduce((n,x)=>n+Math.round(Number(x.data.total)*100),0);
+ $('payrollReviewText').textContent=selected.map(x=>x.file.file.name+' · '+x.data.label+' · '+x.data.count+' Zahlungen · '+money(x.data.total,'EUR')+' · Ausführung '+(x.data.executionDate?bankDate(x.data.executionDate):'laut Datei')+'\n'+x.data.files.map(f=>'  '+f.name).join('\n')).join('\n\n')+'\n\nGesamt: '+money((cents/100).toFixed(2),'EUR');
+ $('payrollResult').textContent='';$('payrollReview').showModal();
+});
+$('payrollCancel').addEventListener('click',()=>$('payrollReview').close());
 $('payrollSubmit').addEventListener('click',async()=>{
- if(payrollBusy||!payrollDraft)return;
- if(payrollDraft.inputs!==payrollInputs()){$('payrollResult').textContent='Eingaben geändert. Bitte erneut prüfen.';payrollDraft=null;return;}
- const draft=payrollDraft.id;payrollDraft=null;payrollBusy=true;$('payrollSubmit').disabled=true;$('payrollResult').textContent='Übergabe läuft …';
- try{const d=await api('payment-submit',{draft,confirmed:true});$('payrollResult').textContent=d.results.map(r=>r.name+': '+(r.error||statusName(r.status||r.state))).join('\n')+(d.remaining?'\n'+d.remaining+' Datei(en) nicht übergeben. Vor erneutem Senden den Status jeder Datei im Archiv prüfen.':'');$('payrollMessage').textContent='Übergabe bearbeitet. Status jeder Datei im Zahlungsarchiv prüfen.';await loadHistory();await loadExpected();}
- catch(e){$('payrollResult').textContent=e.message+' Vor einem erneuten Versuch Zahlungsarchiv prüfen.';}
- finally{payrollBusy=false;$('payrollSubmit').disabled=false;}
+ if(payrollState.busy||payrollState.blocked)return;
+ const selected=payrollState.prepared.filter(x=>x.selected&&!x.submitted);if(!selected.length)return;
+ payrollState.busy=true;$('payrollSubmit').disabled=true;$('payrollReviewSelected').disabled=true;
+ const messages=[];
+ try{
+  for(const entry of selected){
+   $('payrollResult').textContent='Übergabe '+(messages.length+1)+' von '+selected.length+' · '+entry.file.file.name+' …';
+   try{
+    const d=await api('payment-submit',{draft:entry.id,confirmed:true});
+    entry.submitted=true;entry.selected=false;
+    entry.result=d.results.map(x=>x.name+': '+(x.error||statusName(x.status||x.state))).join(' · ');
+    messages.push(entry.file.file.name+': '+entry.result);
+    if(d.remaining){payrollState.blocked=true;messages.push('Nicht alle Teile übergeben. Zahlungsarchiv prüfen; keine automatische Wiederholung.');break;}
+   }catch(e){payrollState.blocked=true;messages.push(entry.file.file.name+': Status unklar. '+e.message+' Zahlungsarchiv prüfen; nicht erneut senden.');break;}
+  }
+  $('payrollResult').textContent=messages.join('\n');$('payrollMessage').textContent=payrollState.blocked?'Übergabe angehalten. Status im Zahlungsarchiv prüfen.':'Ausgewählte Dateien übergeben. Status im Zahlungsarchiv prüfen.';
+  payrollRenderPrepared();await loadHistory();await loadExpected();
+ }finally{payrollState.busy=false;$('payrollSubmit').disabled=false;payrollSelection();}
 });
 let revolutTransferDraft=null, revolutTransferSending=false;
 async function loadRevolutTransferContext(){
@@ -297,33 +378,51 @@ async function loadExpected(){
   for(const a of data.accounts){const card=document.createElement('div');card.className='card';const title=document.createElement('h2');title.textContent=a.name+' · '+a.iban.slice(-4);card.append(title);
    function line(label,value,strong=false){const row=document.createElement('div');row.className='row';row.style.padding='9px 0';const l=document.createElement('span'),v=document.createElement(strong?'strong':'span');l.textContent=label;v.textContent=value;if(strong){row.style.borderTop='1px solid var(--line)';v.style.fontSize='26px';}row.append(l,v);card.append(row);}
    line('Kontostand '+bankDate(a.date),money(a.amount,a.currency));
-   if(a.error){
-    if(a.reportedBalance!==undefined){
-     if(Number(a.earlierNet)!==0)line('Weitere Buchungen bis gestern',money(a.earlierNet,a.currency));
-     line('Eingänge '+bankDate(data.date)+' inkl. Vormerkungen','+ '+money(a.todayIn,a.currency));
-     line('Ausgänge '+bankDate(data.date)+' inkl. Vormerkungen','− '+money(a.todayOut,a.currency));
-     if(Number(a.pendingCount)>0){
-      const pending=document.createElement('p');pending.className='small';
-      pending.textContent='Darin vorgemerkt: Eingänge '+money(a.pendingIn,a.currency)+' · Ausgänge '+money(a.pendingOut,a.currency)+'.';
-      card.append(pending);
-     }
-     line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
-     if(a.ownPayments?.length){
-      const heading=document.createElement('h3');heading.textContent='Von Brain übergebene Überweisungen im Abgleich';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
-      for(const payment of a.ownPayments){
-       line(bankDate(payment.date)+' · '+payment.name,money(payment.amount,a.currency));
-      }
-      if(a.ownPaymentCount>a.ownPayments.length){
-       const more=document.createElement('p');more.className='small';more.textContent='Weitere '+(a.ownPaymentCount-a.ownPayments.length)+' Überweisungen im Zahlungsarchiv.';card.append(more);
-      }
-     }
-     const note=document.createElement('p');note.className='small';note.textContent='Diese Brain-Überweisungen sind bekannt. Ob sie bereits im Bankstand oder in den Vormerkungen enthalten sind, ist noch nicht eindeutig belegt; daher wird hier kein zweiter Abzug gerechnet. '+a.error;card.append(note);
-    }else line('Erwarteter Kontostand',a.error);
-   }else{
+   if(a.reportedBalance!==undefined){
     if(Number(a.earlierNet)!==0)line('Weitere Buchungen bis gestern',money(a.earlierNet,a.currency));
-    line('Eingänge '+bankDate(data.date),'+ '+money(a.todayIn,a.currency));
-    line('Ausgänge '+bankDate(data.date),'− '+money(a.todayOut,a.currency));
-    if(Number(a.ownOutgoing)>0)line('Jetzt überwiesen · noch nicht im Bankumsatz','− '+money(a.ownOutgoing,a.currency));
+    line('Eingänge '+bankDate(data.date)+' inkl. Vormerkungen','+ '+money(a.todayIn,a.currency));
+    line('Ausgänge '+bankDate(data.date)+' inkl. Vormerkungen','− '+money(a.todayOut,a.currency));
+    if(Number(a.pendingCount)>0){
+     const pending=document.createElement('p');pending.className='small';
+     pending.textContent='Darin vorgemerkt: Eingänge '+money(a.pendingIn,a.currency)+' · Ausgänge '+money(a.pendingOut,a.currency)+'.';
+     card.append(pending);
+    }
+    if(a.bankMovements?.length){
+     const details=document.createElement('details');details.open=a.bankMovements.length<=10;
+     const summary=document.createElement('summary');summary.textContent='Einzelne Bankumsätze und Vormerkungen · '+a.bankMovementCount;details.append(summary);
+     const scroll=document.createElement('div');scroll.className='scroll';const table=document.createElement('table');
+     const head=document.createElement('thead');head.innerHTML='<tr><th>Status / Datum</th><th>Name / Referenz</th><th class="amount">Betrag</th></tr>';table.append(head);
+     const body=document.createElement('tbody');
+     for(const movement of a.bankMovements){
+      const row=document.createElement('tr');cell(row,(movement.booking==='pending'?'Vorgemerkt':'Gebucht')+' · '+bankDate(movement.date));
+      cell(row,movement.name+'\n'+(movement.endToEndId||movement.paymentIdentificationId||movement.purpose||'Keine Referenz von der Bank'));
+      const amount=cell(row,(movement.direction==='DBIT'?'− ':'+ ')+money(movement.amount,a.currency));amount.className='amount';body.append(row);
+     }
+     table.append(body);scroll.append(table);details.append(scroll);card.append(details);
+     if(a.bankMovementCount>a.bankMovements.length){const more=document.createElement('p');more.className='small';more.textContent='Weitere Bankumsätze im Bereich „Umsätze“.';card.append(more);}
+    }
+    line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
+   }
+   if(a.ownPayments?.length){
+    const heading=document.createElement('h3');heading.textContent='Von Brain übergebene Überweisungen im Abgleich';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
+    const matches=new Map((a.ownMatched||[]).map(x=>[x.transfer+':'+x.index,x.booking]));
+    for(const payment of a.ownPayments){
+     const booking=matches.get(payment.transfer+':'+payment.index),included=booking==='pending'||booking==='booked';
+     const label=bankDate(payment.date)+' · '+payment.name+(booking==='pending'?' (in Vormerkungen)':booking==='booked'?' (gebucht)':'');
+     const amount=money(payment.amount,a.currency);
+     line(label,included?'('+amount+')':amount);
+    }
+    const ownTotal=a.ownPaymentTotal??a.ownPayments.reduce((sum,p)=>sum+Number(p.amount),0).toFixed(2);
+    line('Summe Brain-Überweisungen',money(ownTotal,a.currency),true);
+    if(a.ownPaymentCount>a.ownPayments.length){
+     const more=document.createElement('p');more.className='small';more.textContent='Weitere '+(a.ownPaymentCount-a.ownPayments.length)+' Überweisungen im Zahlungsarchiv. Die Summe enthält alle.';card.append(more);
+    }
+   }
+   if(a.error){
+    const note=document.createElement('p');note.className='small';note.textContent=a.error;card.append(note);
+    if(a.reportedBalance===undefined)line('Erwarteter Kontostand','Nicht berechenbar');
+   }else{
+    if(Number(a.ownOutgoing)>0)line('Davon noch nicht im Bankumsatz · zusätzlich abzuziehen','− '+money(a.ownOutgoing,a.currency));
     line('Erwarteter Kontostand',money(a.expected,a.currency),true);
    }
    $('expectedRows').append(card);

@@ -44,7 +44,7 @@ assert(home.includes("bank.textContent='🏦 Bank'"));
 assert(home.includes("window.location.href='/konfipay'"));
 assert(home.includes('Revolut Business'));
 assert(home.includes("window.location.href='/incoming/revolut'"));
-assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.82"'));
+assert(runtime.includes('BRAIN_CONNECTOR_VERSION = "0.14.83"'));
 
 const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)];
 assert.strictEqual(scripts.length, 1, 'Revolut Business page script missing');

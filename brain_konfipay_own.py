@@ -61,10 +61,10 @@ def outstanding(client):
 
 def reconcile(client,account,local,bank):
     own=[x for x in local if iban(x['item']['debtorIban'])==iban(account['iban'])]
-    if not own:return {'ownOutgoing':'0.00','ownCount':0,'ownTransfersChecked':getattr(client,'brain_payments',None) is not None}
+    if not own:return {'ownOutgoing':'0.00','ownCount':0,'ownMatched':[],'ownTransfersChecked':getattr(client,'brain_payments',None) is not None}
     if account['currency']!='EUR':raise ConnectionError('Währung der eigenen Zahlung ist unklar.')
     bank=[x for x in bank if x['creditDebitIndicator']=='DBIT']
-    used=set();retire=[];remaining=[]
+    used=set();retire=[];remaining=[];matched=[]
     groups={};group_matched=set()
     for entry in own:
         if entry.get('batchRef'):groups.setdefault((entry['transfer'],entry['batchRef']),[]).append(entry)
@@ -88,6 +88,7 @@ def reconcile(client,account,local,bank):
         tx=matches[0];used.add(tx['rId'])
         for entry in entries:
             group_matched.add((entry['transfer'],entry['index']))
+            matched.append({'transfer':entry['transfer'],'index':entry['index'],'booking':tx['_booking']})
             if tx['_booking']=='booked':retire.append((entry['transfer'],entry['index'],tx['rId']))
     for entry in own:
         if (entry['transfer'],entry['index']) in group_matched:continue
@@ -101,6 +102,7 @@ def reconcile(client,account,local,bank):
             else:raise ConnectionError('Mehrere Bankumsätze passen zur eigenen Zahlung. Bitte den Abgleich prüfen.')
         if matches:
             tx=matches[0];used.add(tx['rId'])
+            matched.append({'transfer':entry['transfer'],'index':entry['index'],'booking':tx['_booking']})
             possible=[x for x in own if reference(x['item']['endToEndId'])==ref and
                 iban(x['item']['iban'])==iban(tx.get('iban')) and Decimal(x['item']['amount'])==abs(Decimal(str(tx['amount']))) and
                 x['item']['date']<=str(tx.get('bookingDate') or '')[:10]]
@@ -109,25 +111,11 @@ def reconcile(client,account,local,bank):
         else:remaining.append(entry)
     for entry in remaining:
         if entry['uncertain']:raise ConnectionError('Der Status einer eigenen Überweisung ist unklar. Bitte im Zahlungsarchiv prüfen.')
-        item=entry['item']
-        if item['date']<=str(account.get('date') or '')[:10]:
-            raise ConnectionError('Eine eigene Zahlung könnte bereits im Ausgangssaldo enthalten sein. Der zugehörige Bankumsatz fehlt noch für den eindeutigen Abgleich.')
-        # Same amount with no usable reference may be this payment; never blindly subtract twice.
-        if any(tx['rId'] not in used and not reference(tx.get('endToEndId')) and
-               abs(Decimal(str(tx['amount'])))==Decimal(item['amount']) and
-               str(tx.get('bookingDate') or '')[:10]>=item['date'] for tx in bank):
-            raise ConnectionError('Ein Bankabgang ohne Zahlungsreferenz könnte die eigene Überweisung enthalten. Der Kontostand wartet auf eindeutigen Abgleich.')
-    # A bank may book the entire batch in one movement instead of exposing its individual payments.
-    batches={}
-    for entry in remaining:batches.setdefault(entry['transfer'],[]).append(entry)
-    for entries in batches.values():
-        total=sum((Decimal(x['item']['amount']) for x in entries),Decimal(0))
-        if len(entries)>1 and any(tx['rId'] not in used and abs(Decimal(str(tx['amount'])))==total and
-            str(tx.get('bookingDate') or '')[:10]>=min(x['item']['date'] for x in entries) for tx in bank):
-            raise ConnectionError('Ein Bankabgang könnte den ganzen Sammler enthalten. Einzelzuordnung noch nicht eindeutig.')
+    # Only a matching payment reference or complete original batch identifies a bank debit.
+    # Unmatched Brain payments stay reserved even when a bank debit has the same amount.
     payments=getattr(client,'brain_payments',None)
     if retire and payments:
         with closing(payments.db()) as db:
             db.executemany('INSERT OR IGNORE INTO bank_seen_payments VALUES(?,?,?)',retire);db.commit()
     total=sum((Decimal(x['item']['amount']) for x in remaining),Decimal(0))
-    return {'ownOutgoing':format(total,'.2f'),'ownCount':len(remaining),'ownTransfersChecked':True}
+    return {'ownOutgoing':format(total,'.2f'),'ownCount':len(remaining),'ownMatched':matched,'ownTransfersChecked':True}

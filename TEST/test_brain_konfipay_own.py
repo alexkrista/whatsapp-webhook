@@ -37,25 +37,30 @@ class Tests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
     def test_unseen_reserved(self):self.assertEqual(reconcile(self.c,ACCOUNT,[local()],[])['ownOutgoing'],'100.00')
     def test_pending_not_reserved_and_not_permanently_retired(self):
-        self.assertEqual(reconcile(self.c,ACCOUNT,[local()],[tx()])['ownOutgoing'],'0.00')
+        matched=reconcile(self.c,ACCOUNT,[local()],[tx()])
+        self.assertEqual(matched['ownOutgoing'],'0.00')
+        self.assertEqual(matched['ownMatched'],[{'transfer':'one','index':0,'booking':'pending'}])
         self.assertEqual(reconcile(self.c,ACCOUNT,[local()],[])['ownOutgoing'],'100.00')
     def test_partial_batch(self):self.assertEqual(reconcile(self.c,ACCOUNT,[local(),local('40','two')],[tx()])['ownOutgoing'],'40.00')
     def test_booked_retired(self):
         reconcile(self.c,ACCOUNT,[local()],[tx(booking='booked')])
         db=self.p.db();self.assertEqual(db.execute('SELECT count(*) FROM bank_seen_payments').fetchone()[0],1);db.close()
-    def test_missing_reference_ambiguous(self):
-        with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[local()],[dict(tx(),endToEndId='NOTPROVIDED')])
+    def test_unreferenced_equal_bank_debit_does_not_hide_own_payment(self):
+        result=reconcile(self.c,ACCOUNT,[local()],[dict(tx(),endToEndId='NOTPROVIDED')])
+        self.assertEqual(result['ownOutgoing'],'100.00')
     def test_anonymous_pending_debit_still_shows_reported_balance(self):
         pending=dict(tx(),endToEndId=None,iban=None)
         with patch('brain_konfipay_own.outstanding',return_value=[local()]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[pending]):
             result=expected_balances(self.c)['accounts'][0]
         self.assertEqual(result['reportedBalance'],'900.00')
         self.assertEqual(result['pendingCount'],1)
-        self.assertIsNone(result['expected'])
-        self.assertIn('ohne Zahlungsreferenz',result['error'])
-    def test_grouped_booking_ambiguous(self):
+        self.assertEqual(result['ownOutgoing'],'100.00')
+        self.assertEqual(result['ownPaymentTotal'],'100.00')
+        self.assertEqual(result['bankMovements'][0]['amount'],'100.00')
+        self.assertEqual(result['expected'],'800.00')
+    def test_unreferenced_batch_amount_keeps_own_payments_reserved(self):
         second=local('40','two');second.update(transfer='one',index=1)
-        with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[local(),second],[tx('140','batch')])
+        self.assertEqual(reconcile(self.c,ACCOUNT,[local(),second],[tx('140','batch')])['ownOutgoing'],'140.00')
     def test_unrelated_equal_amount_not_matched(self):self.assertEqual(reconcile(self.c,ACCOUNT,[local()],[tx(ident='other')])['ownOutgoing'],'100.00')
     def test_unknown_status_blocks(self):
         with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[dict(local(),uncertain=True)],[])
@@ -75,8 +80,8 @@ class Tests(unittest.TestCase):
         self.c.booked=[dict(tx(booking='booked'),bookingDate=ACCOUNT['date'])]
         with patch('brain_konfipay_own.outstanding',return_value=[item]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[]):
             result=expected_balances(self.c)['accounts'][0];self.assertEqual(result['expected'],'1000.00');self.assertEqual(result['ownOutgoing'],'0.00')
-    def test_missing_historical_booking_not_double_reserved(self):
+    def test_historical_unmatched_payment_stays_reserved(self):
         item=local();item['item']['date']=ACCOUNT['date']
-        with self.assertRaises(ConnectionError):reconcile(self.c,ACCOUNT,[item],[])
+        self.assertEqual(reconcile(self.c,ACCOUNT,[item],[])['ownOutgoing'],'100.00')
 
 if __name__=='__main__':unittest.main()
