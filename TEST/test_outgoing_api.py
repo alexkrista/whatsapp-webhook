@@ -227,6 +227,45 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertIn("Über 10.000 € brutto".encode(), page.data)
         self.assertIn(b"taxation_customs/vies", page.data)
 
+    def test_partial_invoice_copy_uses_same_run_and_existing_draft(self):
+        page = self.client.get("/outgoing/invoices")
+        self.assertIn("Als nächste TR kopieren".encode(), page.data)
+        run = self.client.post("/api/outgoing/runs", json={
+            "projectIndex": 27, "projectNumber": "26027", "customerIndex": 23,
+            "label": "Fassade", "customerName": "Max Muster",
+            "street": "Musterweg 27", "postalCode": "6820", "city": "Frastanz",
+        }).get_json()["run"]
+        payload = {
+            "runId": run["id"], "kind": "TR", "issueDate": "2026-09-03",
+            "dueDate": "2026-09-17", "serviceFrom": "2026-07-20",
+            "serviceTo": "2026-09-03", "taxMode": "AT20",
+            "lines": [{"description": "Arbeiten", "quantity": 1,
+                       "unit": "PA", "unitPrice": "1000"}],
+        }
+        source = self.client.post("/api/outgoing/invoices", json=payload).get_json()["invoice"]
+        self.client.post(f"/api/outgoing/invoices/{source['id']}/issue", json={})
+        payload.update({
+            "issueDate": "2026-09-29", "dueDate": "2026-10-13",
+            "serviceTo": "2026-09-29",
+        })
+        existing = self.client.post("/api/outgoing/invoices", json=payload).get_json()["invoice"]
+        missing_confirmation = self.client.post(
+            f"/api/outgoing/invoices/{source['id']}/copy", json={}
+        )
+        self.assertEqual(missing_confirmation.status_code, 400)
+
+        response = self.client.post(
+            f"/api/outgoing/invoices/{source['id']}/copy",
+            json={"replaceDraftId": existing["id"]},
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()
+        self.assertEqual(result["run"]["id"], run["id"])
+        self.assertEqual(result["invoice"]["id"], existing["id"])
+        self.assertEqual(result["invoice"]["status"], "draft")
+        self.assertIsNone(result["invoice"]["invoice_number"])
+        self.assertEqual(result["invoice"]["lines"][0]["unit_price"], "1000.00")
+
     def test_issued_invoice_can_be_copied_from_the_invoice_screen(self):
         page = self.client.get("/outgoing/invoices")
         self.assertIn(b"data-copy", page.data)
