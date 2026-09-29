@@ -184,6 +184,70 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(draft["lines"][0]["unit_price"], "1234.56")
         self.assertEqual(source["status"], "issued")
 
+    def test_partial_invoice_copy_reuses_confirmed_draft_and_recalculates_increment(self):
+        first_payload = self.payload(amount="4850", issue_date="2026-07-30")
+        first_payload["dueDate"] = "2026-08-13"
+        first = self.store.prepare_issue(self.store.save_draft(first_payload)["id"])
+        second_payload = self.payload(amount="0", issue_date="2026-09-03")
+        second_payload.update({
+            "dueDate": "2026-09-17", "serviceFrom": "2026-07-20",
+            "serviceTo": "2026-09-03",
+            "lines": [
+                {"description": "Anzahlung Gerüst", "quantity": 1, "unit": "PA", "unitPrice": "4850"},
+                {"description": "Regiearbeit lt. Berichten", "quantity": 1, "unit": "PA", "unitPrice": "24543.75"},
+                {"description": "Material lt. Berichten", "quantity": 1, "unit": "PA", "unitPrice": "5175.10"},
+            ],
+        })
+        second = self.store.prepare_issue(self.store.save_draft(second_payload)["id"])
+        blank_payload = self.payload(amount="34568.85", issue_date="2026-09-29")
+        blank_payload["dueDate"] = "2026-10-13"
+        blank = self.store.save_draft(blank_payload)
+        with self.assertRaisesRegex(ValueError, "ausdrücklich"):
+            self.store.copy_partial_invoice_as_next_draft(second["id"], "2026-09-29")
+        with self.assertRaisesRegex(ValueError, "letzte"):
+            self.store.copy_partial_invoice_as_next_draft(first["id"], "2026-09-29", blank["id"])
+
+        result = self.store.copy_partial_invoice_as_next_draft(
+            second["id"], "2026-09-29", blank["id"]
+        )
+        copied = result["invoice"]
+        self.assertEqual(result["run"]["id"], self.run["id"])
+        self.assertEqual(copied["id"], blank["id"])
+        self.assertEqual(copied["status"], "draft")
+        self.assertIsNone(copied["invoice_number"])
+        self.assertEqual(copied["issue_date"], "2026-09-29")
+        self.assertEqual(copied["due_date"], "2026-10-13")
+        self.assertEqual(copied["service_from"], "2026-07-20")
+        self.assertEqual(copied["service_to"], "2026-09-29")
+        self.assertEqual([line["description"] for line in copied["lines"]],
+                         [line["description"] for line in second["lines"]])
+        self.assertEqual(Decimal(copied["increment_gross"]), Decimal("0.00"))
+
+        edited = self.payload(amount="0", issue_date="2026-09-29")
+        edited.update({
+            "dueDate": copied["due_date"],
+            "serviceFrom": copied["service_from"],
+            "serviceTo": copied["service_to"],
+            "lines": [{
+                "description": line["description"], "quantity": line["quantity"],
+                "unit": line["unit"], "unitPrice": line["unit_price"],
+                "discountPercent": line["discount_percent"],
+            } for line in copied["lines"]],
+        })
+        edited["lines"][2]["unitPrice"] = "6000.00"
+        saved = self.store.save_draft(edited, copied["id"])
+        self.assertAlmostEqual(saved["increment_net"], 824.90, places=2)
+        self.assertAlmostEqual(saved["increment_gross"], 989.88, places=2)
+        self.assertEqual(self.store.invoice(second["id"])["status"], "issued")
+        self.assertEqual(self.store.invoice(second["id"])["invoice_number"], second["invoice_number"])
+
+    def test_partial_copy_creates_draft_in_same_run_when_none_exists(self):
+        source = self.store.prepare_issue(self.store.save_draft(self.payload())["id"])
+        result = self.store.copy_partial_invoice_as_next_draft(source["id"], "2026-09-07")
+        self.assertEqual(result["run"]["id"], self.run["id"])
+        self.assertEqual(result["invoice"]["kind"], "TR")
+        self.assertEqual(result["invoice"]["status"], "draft")
+
     def test_partial_and_final_invoices_cannot_be_copied(self):
         partial = self.store.prepare_issue(self.store.save_draft(self.payload(kind="TR"))["id"])
         with self.assertRaisesRegex(ValueError, "normale oder Extra-Rechnung"):

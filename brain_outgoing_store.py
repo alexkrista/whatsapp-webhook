@@ -1252,7 +1252,8 @@ class OutgoingStore:
             if kind == "RE" and self._previous_invoices(con, run_id, invoice_id):
                 raise ValueError("Eine normale Rechnung ist nur in einem neuen, leeren Rechnungslauf möglich.")
 
-            progress = data.get("progressBilling") or (json.loads(existing["progress_billing_json"] or "{}") if existing else {})
+            progress = (data.get("progressBilling") if "progressBilling" in data else
+                        (json.loads(existing["progress_billing_json"] or "{}") if existing else {})) or {}
             if progress:
                 from brain_progress_billing import check_snapshot
                 if not isinstance(progress, dict) or len(_json(progress)) > 60000 or str(progress.get("jobId")) != run["project_number"]:
@@ -1358,6 +1359,85 @@ class OutgoingStore:
             self._audit(con, "invoice", target_id, "save_draft", {"kind": kind, "runId": run_id, "progressBilling": progress})
             con.commit()
         return self.invoice(target_id, live=True)
+
+    def copy_partial_invoice_as_next_draft(self, invoice_id, issue_date=None, replace_draft_id=None):
+        """Copy the latest issued TR into the next cumulative draft of the same run."""
+        with _LOCK:
+            source = self.invoice(invoice_id, live=False)
+            if source.get("status") != "issued" or source.get("kind") != "TR" or source.get("source") == "WW":
+                raise ValueError("Nur eine ausgestellte KRISTINE-Teilrechnung kann als nächste TR kopiert werden.")
+            run = source.get("run") or {}
+            if run.get("status") != "open":
+                raise ValueError("Dieser Rechnungslauf ist bereits abgeschlossen.")
+            with self.connect() as con:
+                latest = con.execute(
+                    """SELECT id FROM outgoing_invoices
+                       WHERE run_id=? AND kind='TR' AND status='issued'
+                       ORDER BY issue_date DESC,id DESC LIMIT 1""", (int(run["id"]),)
+                ).fetchone()
+                drafts = con.execute(
+                    "SELECT id,kind FROM outgoing_invoices WHERE run_id=? AND status='draft'",
+                    (int(run["id"]),)
+                ).fetchall()
+            if not latest or int(latest["id"]) != int(invoice_id):
+                raise ValueError("Bitte die letzte ausgestellte Teilrechnung dieses Laufs kopieren.")
+            if len(drafts) > 1:
+                raise ValueError("Mehrere Entwürfe vorhanden. Bitte zuerst die Entwürfe prüfen.")
+            draft = drafts[0] if drafts else None
+            target_id = int(replace_draft_id or 0)
+            if draft and (draft["kind"] != "TR" or int(draft["id"]) != target_id):
+                raise ValueError("Ein Entwurf ist vorhanden. Bitte diesen ausdrücklich zum Ersetzen auswählen.")
+            if not draft and target_id:
+                raise ValueError("Der ausgewählte Entwurf ist nicht mehr vorhanden. Bitte Ansicht neu laden.")
+
+            issue = date.fromisoformat(_iso_date(
+                issue_date or date.today().isoformat(), required=True, label="Rechnungsdatum"
+            ))
+            original_issue = date.fromisoformat(source["issue_date"])
+            original_due = date.fromisoformat(source["due_date"])
+            due_days = max(0, min(365, (original_due - original_issue).days))
+            cash_until = ""
+            if _d(source.get("cash_discount_percent")):
+                original_cash = str(source.get("cash_discount_until") or "")
+                cash_days = (date.fromisoformat(original_cash) - original_issue).days if original_cash else due_days
+                cash_until = (issue + timedelta(days=max(0, min(365, cash_days)))).isoformat()
+
+            copied = self.save_draft({
+                "runId": run["id"], "kind": "TR",
+                "issueDate": issue.isoformat(),
+                "dueDate": (issue + timedelta(days=due_days)).isoformat(),
+                "serviceFrom": source["service_from"],
+                "serviceTo": max(source["service_to"], issue.isoformat()),
+                "subject": source.get("subject") or run.get("label") or "",
+                "worker": source.get("worker") or "",
+                "recipientUid": source.get("recipient_uid") or run.get("customer_uid") or "",
+                "taxMode": source.get("tax_mode") or "AT20",
+                "retentionPercent": source.get("retention_percent") or 0,
+                "discountPercent": source.get("discount_percent") or 0,
+                "cashDiscountPercent": source.get("cash_discount_percent") or 0,
+                "cashDiscountUntil": cash_until,
+                "currency": source.get("currency") or "EUR",
+                "notes": source.get("notes") or "",
+                # Old progress snapshots belong to the issued invoice. The new amounts
+                # are checked against the run's current issued total by save_draft.
+                "progressBilling": {},
+                "lines": [{
+                    "description": line.get("description") or "",
+                    "quantity": line.get("quantity"),
+                    "unit": line.get("unit") or "PA",
+                    "unitPrice": line.get("unit_price"),
+                    "discountPercent": line.get("discount_percent") or 0,
+                    "billingComponent": line.get("billing_component") or "",
+                } for line in (source.get("lines") or [])],
+            }, target_id if draft else None)
+            with self.connect() as con:
+                self._audit(con, "invoice", int(copied["id"]), "copy_partial_as_next_draft", {
+                    "sourceInvoiceId": int(invoice_id),
+                    "sourceInvoiceNumber": source.get("invoice_number"),
+                    "runId": int(run["id"]), "replacedDraftId": target_id or None,
+                })
+                con.commit()
+            return {"run": self.run(run["id"]), "invoice": copied}
 
     def copy_invoice_as_new_draft(self, invoice_id, issue_date=None):
         """Copy an issued invoice into a fresh, independent invoice run."""
