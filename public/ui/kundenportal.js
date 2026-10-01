@@ -2,7 +2,7 @@
   "use strict";
   const $=id=>document.getElementById(id),esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char])),labels={offer:"Angebot",projectFile:"Projektakte",regie:"Regieberichte",communication:"Nachrichten",projectPoints:"Punkte & Wünsche"};
   const number=value=>new Intl.NumberFormat("de-AT",{maximumFractionDigits:2}).format(Number(value)||0),money=value=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR"}).format(Number(value)||0);
-  const fragment=new URLSearchParams(location.hash.slice(1));
+  const fragment=new URLSearchParams(location.hash.slice(1)),prettyMatch=location.pathname.match(/^\/projektakte\/([^/?#]+)/),prettyLogin=prettyMatch?decodeURIComponent(prettyMatch[1]).replace(/-/g," ").trim():"";
   let ticket=fragment.get("zugang")||"",focusPoint=fragment.get("punkt")||"",data=null,selected="";
   history.replaceState(null,"",location.pathname);
   const api=async(path,options={})=>{const response=await fetch("/kundenportal/api/"+path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}}),body=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(body.error||"Das hat nicht funktioniert. Bitte erneut versuchen."),{status:response.status});return body};
@@ -165,5 +165,6 @@
   $("passwordForm").onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector("button"),message=$("accessMessage");button.disabled=true;message.textContent="Passwort wird gespeichert …";try{await api("password",{method:"POST",body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});form.reset();await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}};
   $("enter").onclick=async()=>{$("enter").disabled=true;try{await api("session",{method:"POST",body:JSON.stringify({ticket})});ticket="";await load()}catch(e){access(e.message)}finally{$("enter").disabled=false}};
   $("logout").onclick=async()=>{try{await api("logout",{method:"POST",body:"{}"});data=null;access("Sie sind abgemeldet. Sie können sich mit Namen und Passwort erneut anmelden.")}catch(e){$("status").textContent=e.message}};
+  if(prettyLogin&&!ticket)$("loginForm").elements.loginName.value=prettyLogin;
   if(ticket)access("Mit Ihrem persönlichen Link öffnen Sie die von Farben Krista freigegebene Projektakte.");else load();
 })();
