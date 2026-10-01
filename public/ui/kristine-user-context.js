@@ -171,7 +171,7 @@
 
   function openUserPicker(){
     const u=new URL(location.href);u.searchParams.delete('token');
-    location.href='/anmelden?return='+encodeURIComponent(u.pathname+u.search+u.hash);
+    location.href='/anmelden?force=1&return='+encodeURIComponent(u.pathname+u.search+u.hash);
   }
 
   function renderIdentity(){
