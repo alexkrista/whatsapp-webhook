@@ -4701,10 +4701,11 @@ customerAccess = registerCustomerAccess(app, {
   publicDir: path.join(process.cwd(), "public"), publicBaseUrl: PUBLIC_BASE_URL,
   collectionMembers: async jobId => (await collectionStore.forMain(jobId))?.memberJobIds || null,
   sendPortalInvitation: async ({jobId,portalUrl,recipient}) => {
-    const name=String(recipient?.name||"").trim(),phone=String(recipient?.phone||"").trim(),email=String(recipient?.email||"").trim(),role=String(recipient?.roleLabel||"Empfänger").trim();
-    const greeting=name?`Guten Tag ${name},`:`Guten Tag,`,message=`${greeting}\n\nhier ist Ihr persönlicher Zugang zur Projektakte #${jobId} als ${role}:\n${portalUrl}\n\nDer Einladungslink gilt 7 Tage.\n\nFreundliche Grüße\nFarben Krista`,channels=[],errors=[];
+    const name=String(recipient?.name||"").trim(),phone=String(recipient?.phone||"").trim(),email=String(recipient?.email||"").trim();
+    const greeting=name?`Guten Tag ${name},`:`Guten Tag,`,loginName=name||"Ihr Nachname bzw. Firmenname";
+    const message=`${greeting}\n\nIhre persönliche Projektakte bei Farben Krista ist für Sie eingerichtet.\n\nProjektakte:\n${portalUrl}\n\nAnmeldung\nBenutzername: ${loginName}\nStartpasswort: ${jobId}\n\nBeim ersten Einstieg werden Sie gebeten, ein eigenes Passwort festzulegen. In Ihrer Projektakte finden Sie die für Sie freigegebenen Dokumente, Fotos, Regieberichte, Materialien und weitere Informationen zu Ihrem Projekt.\n\nFreundliche Grüße\nFarben Krista`,channels=[],errors=[];
     if(phone)try{await sendWhatsAppKristineReply({to:phone,reply:message});channels.push("WhatsApp")}catch(error){errors.push(`WhatsApp: ${String(error?.message||error)}`)}
-    if(!channels.length&&email){const info=await sendMailWithLink({to:email,subject:`Ihre KRISTINE Projektakte #${jobId}`,text:message});if(info)channels.push("E-Mail");else errors.push("E-Mail konnte nicht versendet werden.")}
+    if(!channels.length&&email){const info=await sendMailWithLink({to:email,subject:`Ihre Projektakte #${jobId} · Farben Krista`,text:message});if(info)channels.push("E-Mail");else errors.push("E-Mail konnte nicht versendet werden.")}
     return {sent:channels.length>0,channels,error:errors.join(" · ")||(!phone&&!email?"Beim Empfänger fehlt WhatsApp/Telefon und E-Mail.":"")};
   },
   sendCustomerPointNotice:async({jobId,pointId,title,reason,notificationKey})=>customerNotifications.publish(jobId,{
