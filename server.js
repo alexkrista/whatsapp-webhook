@@ -1626,12 +1626,11 @@ function cleanWhatsAppButtons(buttons) {
 }
 
 function getActiveKristinePhoneNumberId(phoneNumberId = "") {
-  // Die zuletzt tatsÃ¤chlich von Meta Ã¼ber einen Kristine-Webhook gemeldete Sender-ID
-  // ist die verbindliche Quelle fÃ¼r alle Nachrichten. ENV und Parameter sind nur Fallbacks.
+  // Der explizit konfigurierte Produktions-Sender hat Vorrang.\n  // Webhook-/Disk-Werte dienen nur als Fallback und duerfen die Produktion nicht ueberschreiben.
   return String(
-    LAST_WHATSAPP_PHONE_NUMBER_ID ||
-    phoneNumberId ||
     KRISTINE_PHONE_NUMBER_ID ||
+    phoneNumberId ||
+    LAST_WHATSAPP_PHONE_NUMBER_ID ||
     ""
   ).trim();
 }
