@@ -201,7 +201,7 @@
   }
   function taskView(){return localStorage.getItem(TASK_VIEW_KEY)||"me"}
   function taskVisible(task){
-    if(financeTask(task)&&!can("financeApproval"))return false;
+    // Solange niemand persönlich angemeldet ist, Aufgaben nicht ausblenden.\n    // Rechte werden erst bei geschützten Aktionen (z.B. Rechnungsfreigabe) geprüft.\n    if(!currentId())return true;\n    if(financeTask(task)&&!can("financeApproval"))return false;
     let view=taskView();
     if(!can("taskViewAll")&&view!=="me")view="me";
     if(view==="all")return true;
