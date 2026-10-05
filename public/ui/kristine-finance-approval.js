@@ -85,8 +85,16 @@
     return Number.isFinite(number) ? number : NaN;
   }
 
+  function requireFinanceLogin() {
+    if (window.KristaUser?.currentId()) return false;
+    const u = new URL(location.href);
+    u.searchParams.delete("token");
+    location.href = "/anmelden?force=1&return=" + encodeURIComponent(u.pathname + u.search + u.hash);
+    return true;
+  }
+
   async function persistFinanceDecision(task, meta, { done }) {
-    if (!window.KristaUser?.currentId()) throw new Error("Bitte zuerst persönlich als Alexander anmelden (Menü → Anmelden).");
+    if (!window.KristaUser?.currentId()) throw new Error("LOGIN_REQUIRED");
     if (!window.KristaUser.can("financeApproval")) throw new Error("Rechnungsfreigaben sind nur für Alexander freigeschaltet.");
     if (typeof persistTasks !== "function") throw new Error("Aufgaben-Speicherung ist noch nicht bereit.");
     const previous = { reminder: task.reminder, status: task.status, completedAt: task.completedAt };
@@ -112,13 +120,15 @@
     meta.deduction = 0;
     meta.approved = Number(meta.amount || 0);
     meta.reason = "";
+    if (requireFinanceLogin()) return;
     try { await persistFinanceDecision(task, meta, { done: true }); }
-    catch (error) { alert(`Freigabe konnte nicht gespeichert werden: ${error.message || error}`); }
+    catch (error) { if (String(error?.message || error) !== "LOGIN_REQUIRED") alert(`Freigabe konnte nicht gespeichert werden: ${error.message || error}`); }
   }
 
   async function reduce(taskId) {
     const task = getTask(taskId); const meta = parseFinanceMeta(task);
     if (!task || !meta) return;
+    if (requireFinanceLogin()) return;
     const gross = Number(meta.amount || 0);
     const raw = prompt(`Kürzung um …\n\nBitte entweder Prozent oder absoluten Betrag eingeben.\nBeispiele: 5%  oder  150,00\n\nRechnungsbetrag: ${money(gross, meta.currency)}`);
     if (raw === null) return;
@@ -142,6 +152,7 @@
   async function block(taskId) {
     const task = getTask(taskId); const meta = parseFinanceMeta(task);
     if (!task || !meta) return;
+    if (requireFinanceLogin()) return;
     const reason = prompt("Warum ist diese Rechnung gesperrt?", meta.reason || "");
     if (reason === null) return;
     if (!String(reason).trim()) return alert("Bitte einen kurzen Sperrgrund eintragen.");

@@ -22,6 +22,13 @@ function employeeName(employee) {
 }
 
 function isAlexander(employee) {
+  if (!employee || employee.active === false) return false;
+  const id = employeeId(employee);
+  const configuredId = String(process.env.KRISTINE_ALEXANDER_EMPLOYEE_ID || "").trim();
+  if (configuredId) return id === configuredId;
+
+  // Migration fallback: resolve Alexander once from the existing master data.
+  // Authorization should use KRISTINE_ALEXANDER_EMPLOYEE_ID in production.
   const text = normalizeName([
     employee?.nickname,
     employee?.rufname,

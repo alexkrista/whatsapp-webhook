@@ -26,6 +26,7 @@ const cookieName = "krista_kundenportal";
 const cookieOptions = {httpOnly:true,secure:true,sameSite:"lax",path:"/kundenportal"};
 const fingerprint = portal => hash(JSON.stringify([portal.customerEmail.toLowerCase(),portal.customerPhone.replace(/\D/g,""),portal.customerName]));
 const recipientFingerprint = recipient => hash(JSON.stringify([clean(recipient?.id,80),clean(recipient?.email,180).toLowerCase(),clean(recipient?.phone,80).replace(/\D/g,""),clean(recipient?.name,180)]));
+const portalSlug = value => String(value || "projekt").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ß/g,"ss").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80) || "projekt";
 
 function currentCustomerDocuments(rows) {
   const latest = new Map();
@@ -197,6 +198,7 @@ function registerCustomerAccess(app, options) {
     res.setHeader("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");next();
   });
   app.get("/kundenportal",(_req,res)=>res.sendFile(path.join(options.publicDir,"kundenportal.html")));
+  app.get("/projektakte/:slug",(_req,res)=>res.sendFile(path.join(options.publicDir,"kundenportal.html")));
   app.get("/kundenportal/assets/:name",(req,res)=>{
     if(!["kundenportal.js","kundenportal.css"].includes(req.params.name))return res.sendStatus(404);
     res.sendFile(path.join(options.publicDir,"ui",req.params.name));
@@ -217,17 +219,27 @@ function registerCustomerAccess(app, options) {
   }));
   app.post("/admin/api/job/:jobId/customer-portal/invitations/send",guard(async(req,res)=>{
     if(!requireAdmin(req,res))return;
-    const current=await scope(req.params.jobId),requested=Array.isArray(req.body?.recipientIds)?req.body.recipientIds:current.portal.selectedRecipientIds,recipientIds=[...new Set(requested.map(id=>clean(id,80)))].filter(Boolean);
+    const jobId=await mainId(req.params.jobId),meta=await readJobMeta(jobId);
+    let portal=sanitizeCustomerPortal(meta.customerPortal);
+    if(portal.status==="off"){
+      if(typeof writeJobMeta!=="function")throw fail(503,"Kundenportal kann derzeit nicht vorbereitet werden.");
+      portal={...portal,status:"prepared",updatedAt:new Date(now()).toISOString()};
+      await writeJobMeta(jobId,{customerPortal:portal});
+    }
+    const current=await scope(jobId);
+    if(!Object.values(current.portal.modules).some(Boolean))throw fail(400,"Bitte mindestens einen Bereich freigeben.");
+    const requested=Array.isArray(req.body?.recipientIds)?req.body.recipientIds:current.portal.selectedRecipientIds,recipientIds=[...new Set(requested.map(id=>clean(id,80)))].filter(Boolean);
     if(!recipientIds.length)throw fail(400,"Bitte mindestens einen Empfänger auswählen.");
     const results=[];
     for(const recipientId of recipientIds){
-      const invitation=await issueInvitation(current.jobId,{recipientId}),recipient=invitation.recipient;
+      const recipient=selectedRecipient(current.portal,recipientId);
+      if(!recipient)throw fail(400,"Der ausgewählte Empfänger ist nicht mehr in den Stammdaten gespeichert.");
+      const portalUrl=origin+"/projektakte/"+portalSlug(recipient.name||current.portal.customerName||current.meta.name);
       let delivery={sent:false,channels:[],error:"Automatischer Versand ist nicht eingerichtet."};
-      if(typeof options.sendPortalInvitation==="function")try{delivery=await options.sendPortalInvitation({jobId:current.jobId,portalUrl:invitation.portalUrl,recipient})||delivery}catch(error){delivery={sent:false,channels:[],error:String(error?.message||error)}}
-      const grant=read(grantPath(invitation.grantId),null),sentAt=delivery.sent?now():null;if(grant)write(grantPath(invitation.grantId),{...grant,sentAt,channels:delivery.channels||[],error:clean(delivery.error,500)});
-      results.push({recipient,portalUrl:invitation.portalUrl,expiresAt:invitation.expiresAt,sent:!!delivery.sent,channels:delivery.channels||[],error:clean(delivery.error,500)});
+      if(typeof options.sendPortalInvitation==="function")try{delivery=await options.sendPortalInvitation({jobId:current.jobId,portalUrl,recipient})||delivery}catch(error){delivery={sent:false,channels:[],error:String(error?.message||error)}}
+      results.push({recipient,portalUrl,expiresAt:null,sent:!!delivery.sent,channels:delivery.channels||[],error:clean(delivery.error,500)});
     }
-    try{await options.appendJobHistory?.(current.jobId,{type:"customer_portal_invitations_sent",title:`${results.length} persönliche Kundenportal-Einladung(en) erstellt`,detail:results.map(row=>`${row.recipient?.roleLabel||"Empfänger"}: ${row.recipient?.name||row.recipient?.email||row.recipient?.phone||"–"} · ${row.sent?(row.channels||[]).join(" + "):"Versand offen"}`).join("\n"),source:"KRISTINE Kundenportal"})}catch{}
+    try{await options.appendJobHistory?.(current.jobId,{type:"customer_portal_access_sent",title:`${results.length} Projektakte(n) versendet`,detail:results.map(row=>`${row.recipient?.roleLabel||"Empfänger"}: ${row.recipient?.name||row.recipient?.email||row.recipient?.phone||"–"} · ${row.sent?(row.channels||[]).join(" + "):"Versand offen"}`).join("\n"),source:"KRISTINE Kundenportal"})}catch{}
     res.json({ok:true,jobId:current.jobId,results});
   }));
   app.post("/kundenportal/api/session",guard(async(req,res)=>{
