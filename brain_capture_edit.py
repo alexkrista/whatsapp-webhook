@@ -140,7 +140,12 @@ def install(ns):
                     now = datetime.now().isoformat(timespec="seconds")
                     invoice_iban = re.sub(r"\s+", "", str(body.get("invoiceIban") or "")).upper().strip()
                     master_iban = re.sub(r"\s+", "", str(body.get("masterIban") or "")).upper().strip()
-                    accepted = bool(body.get("acceptNewIban"))
+                    accepted = ns["_capture_truthy"](body.get("acceptNewIban"))
+                    if not master_iban:
+                        master_iban = ns["_norm_iban"](ns["_capture_supplier_context"](address_id, area).get("latestIban"))
+                    if accepted and not ns["_iban_valid"](invoice_iban):
+                        raise ValueError("Die neue IBAN ist leer oder formal ungültig.")
+                    effective_iban = invoice_iban if accepted else master_iban
                     con.execute("""
                         UPDATE incoming_invoices SET
                             document_type=?, supplier_address_id=?, supplier_name=?, supplier_address=?,
@@ -161,7 +166,7 @@ def install(ns):
                         _money(body.get("skontoPercent")) if body.get("skontoEnabled") else None,
                         str(body.get("skontoDueDate") or ""), str(body.get("paymentTerms") or ""),
                         net, _money(body.get("vatAmount")), _money(body.get("grossAmount")),
-                        str(body.get("currency") or "EUR").upper()[:3], invoice_iban, invoice_iban,
+                        str(body.get("currency") or "EUR").upper()[:3], effective_iban, invoice_iban,
                         master_iban, 1 if accepted else 0, str(body.get("customerNumberExternal") or ""),
                         str(body.get("bookingText") or "")[:1000], str(body.get("note") or "")[:2000],
                         str(body.get("createdBy") or row["created_by"] or "Dunja")[:100], now, invoice_id,
