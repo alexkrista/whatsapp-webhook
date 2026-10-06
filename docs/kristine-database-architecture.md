@@ -64,3 +64,9 @@ PDFs, Fotos und andere Binärdateien bleiben zunächst in der bestehenden Dateia
 - Sämtliche Leser/Schreiber eines zusammenhängenden Datenbereichs gemeinsam umstellen; keine unkoordinierten Doppel-Schreibpfade.
 - Isolierte Testdatenbank, produktnaher Backup-Test, dokumentierter finaler Abgleich und Rückfallweg vor Live-Umschaltung.
 - Implementiert: erster Block mit 32 Fachtabellen, Datenbanktrigger für festgeschriebene Monats-Snapshots, Herkunftszuordnung und Revisionshistorie; elf Szenarien gegen PGlite/PostgreSQL sowie acht bisherige lokale Tests grün.\n- Noch offen: weitere Fachbereiche, Quellimporter, Abschluss-/Speicherdienste, produktive SQL-Anbindung und echte Mehrverbindungs-/Render-Tests. Keine Live-Migration.
+
+## Zweiter Tabellenblock umgesetzt
+
+Migration 003 ergänzt 32 weitere Tabellen für Angebote, Aufträge, Rechnungen, Konten/Zahlungszuordnungen, Regie, Material, Einkauf und Lager. Insgesamt 64 normalisierte Fachtabellen. Einzelheiten und verbleibende Altbestandsfälle: [database-business-tables.md](database-business-tables.md).
+
+17 neue und elf Kern-Szenarien gegen eingebettetes PostgreSQL grün (Node: 30 Tests inklusive übergeordneter Tests). Der erste Monatsabschluss-Schutz bleibt unverändert. Die frühere Liste ausstehender weiterer Fachbereiche ist für diese nun implementierten Bereiche überholt; fachliche Dienste, Quellimport, historische OP-Übernahme, Rollen und echte Mehrverbindungs-/Render-Tests bleiben offen. Kein Live-Rollout.
