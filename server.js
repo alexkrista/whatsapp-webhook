@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 71226)
-Total output lines: 4967
-
 // server.js (CommonJS) â€“ Baustellenprotokoll FINAL + Admin UI
 // âœ… WhatsApp Webhook (Text/Foto/Audio/PDF) -> speichert alles
 // âœ… Trigger per WhatsApp: "pdf" (oder "#260016 pdf")
@@ -2694,7 +2691,793 @@ async function writeJobMeta(jobId, patch) {
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
     regieHourlyRate: Math.max(0, Number(patch.regieHourlyRate ?? existing.regieHourlyRate ?? 75)),
-    regieMaterialMarkup: Math.max(0, Number(patch.regieMaterialMarkup ?? exis…11226 tokens truncated…t fsp.readFile(offerCounterPath,"utf8").then(JSON.parse).catch(()=>({})),prefix=offerNumberPrefix(),next=Math.max(0,Number(counters[prefix]||0))+1;if(next>999)throw new Error(`Angebotsnummernkreis ${prefix} ist ausgeschöpft.`);counters[prefix]=next;await fsp.writeFile(offerCounterPath,JSON.stringify(counters,null,2),"utf8");return `${prefix}${String(next).padStart(3,"0")}`}finally{release()}}
+    regieMaterialMarkup: Math.max(0, Number(patch.regieMaterialMarkup ?? existing.regieMaterialMarkup ?? 80)),
+    plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
+    surfaceMaterialMeta: cleanSurfaceMaterialMeta(patch.surfaceMaterialMeta ?? existing.surfaceMaterialMeta),
+    hoursCutoverDate: cleanOperationalDate(patch.hoursCutoverDate ?? existing.hoursCutoverDate),
+    hoursOverlapExcludedWwKeys: cleanHoursOverlapKeys(patch.hoursOverlapExcludedWwKeys ?? existing.hoursOverlapExcludedWwKeys),
+    hoursOverlapResolvedAt: patch.hoursOverlapResolvedAt ?? existing.hoursOverlapResolvedAt ?? null,
+    customerPortal: sanitizeCustomerPortal(patch.customerPortal, existing.customerPortal),
+    updatedAt: new Date().toISOString(),
+  };
+  const masterContactIds = await contactMasterStore.captureJob(jobId, next);
+  for (const role of ["owner", "siteManager", "architect"]) {
+    if (masterContactIds[role] && next.projectContacts?.[role]) next.projectContacts[role].masterContactId = masterContactIds[role];
+  }
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  await fsp.writeFile(metaPathForJob(jobId), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+function sanitizeFileNamePart(s) {
+  return String(s || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9 _.-]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Baustellenprotokoll";
+}
+async function dirSizeBytes(dir) {
+  let total = 0;
+  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const full = path.join(dir, ent.name);
+    try {
+      if (ent.isDirectory()) total += await dirSizeBytes(full);
+      else if (ent.isFile()) total += (await fsp.stat(full)).size;
+    } catch {}
+  }
+  return total;
+}
+async function removeEmptyParentsAfterDay(jobId, day) {
+  const [Y, M] = String(day).split("-");
+  const monthDir = path.join(DATA_DIR, String(jobId), Y, M);
+  const yearDir = path.join(DATA_DIR, String(jobId), Y);
+  for (const dir of [monthDir, yearDir]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      if (entries.length === 0) await fsp.rmdir(dir);
+    } catch {}
+  }
+}
+
+async function deleteGeneratedPdfsForJob(jobId) {
+  // Wenn der Baustellenname geÃ¤ndert wird, lÃ¶schen wir nur die automatisch erzeugten
+  // Protokoll-PDFs. Originale WhatsApp-PDFs bleiben erhalten. Beim nÃ¤chsten Ã–ffnen
+  // wird das Protokoll mit dem aktuellen Namen neu erzeugt.
+  const base = path.join(DATA_DIR, String(jobId));
+  if (!fs.existsSync(base)) return 0;
+  let deleted = 0;
+  async function walk(dir) {
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) await walk(full);
+      else if (ent.isFile() && /^Baustellenprotokoll_.*\.pdf$/i.test(ent.name)) {
+        try { await fsp.unlink(full); deleted++; } catch {}
+      }
+    }
+  }
+  await walk(base);
+  return deleted;
+}
+
+
+async function mergeDirectoryContents(srcDir, destDir) {
+  await ensureDir(destDir);
+  const entries = await fsp.readdir(srcDir, { withFileTypes: true }).catch(() => []);
+  for (const ent of entries) {
+    const src = path.join(srcDir, ent.name);
+    const dest = path.join(destDir, ent.name);
+
+    if (ent.isDirectory()) {
+      await mergeDirectoryContents(src, dest);
+      await fsp.rm(src, { recursive: true, force: true }).catch(() => {});
+      continue;
+    }
+
+    if (!ent.isFile()) continue;
+
+    if (!fs.existsSync(dest)) {
+      await fsp.rename(src, dest).catch(async () => {
+        await fsp.copyFile(src, dest);
+        await fsp.unlink(src).catch(() => {});
+      });
+      continue;
+    }
+
+    // log.jsonl wird zusammengefÃ¼hrt; dadurch bleiben alle EintrÃ¤ge chronologisch auswertbar.
+    if (ent.name === "log.jsonl") {
+      const add = await fsp.readFile(src, "utf8").catch(() => "");
+      if (add) await fsp.appendFile(dest, add.endsWith("\n") ? add : add + "\n", "utf8").catch(() => {});
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // .meta.json: Ziel-Meta bleibt fÃ¼hrend. Falls Ziel keinen Namen hat, Ã¼bernehmen wir den Quell-Namen.
+    if (ent.name === ".meta.json") {
+      try {
+        const targetMeta = JSON.parse(await fsp.readFile(dest, "utf8"));
+        const sourceMeta = JSON.parse(await fsp.readFile(src, "utf8"));
+        if (!String(targetMeta.name || "").trim() && String(sourceMeta.name || "").trim()) {
+          targetMeta.name = String(sourceMeta.name || "").trim();
+          targetMeta.updatedAt = new Date().toISOString();
+          await fsp.writeFile(dest, JSON.stringify(targetMeta, null, 2), "utf8");
+        }
+      } catch {}
+      await fsp.unlink(src).catch(() => {});
+      continue;
+    }
+
+    // Bei Namenskollision Originale nicht Ã¼berschreiben.
+    const ext = path.extname(ent.name);
+    const base = path.basename(ent.name, ext);
+    let candidate;
+    let n = 1;
+    do {
+      candidate = path.join(destDir, `${base}_merged_${n}${ext}`);
+      n++;
+    } while (fs.existsSync(candidate));
+
+    await fsp.rename(src, candidate).catch(async () => {
+      await fsp.copyFile(src, candidate);
+      await fsp.unlink(src).catch(() => {});
+    });
+  }
+}
+
+async function protocolDownloadName(jobId, day) {
+  const meta = await readJobMeta(jobId);
+  const name = meta.name ? sanitizeFileNamePart(meta.name) : "Baustellenprotokoll";
+  return `${jobId} - ${name} - ${day}.pdf`;
+}
+
+async function listDaysForJob(jobId) {
+  const base = path.join(DATA_DIR, String(jobId));
+  if (!fs.existsSync(base)) return [];
+
+  const days = new Set();
+  const entries = await fsp.readdir(base).catch(() => []);
+
+  // NEW: YYYY/MM/DD
+  for (const y of entries) {
+    if (!/^\d{4}$/.test(y)) continue;
+    const yPath = path.join(base, y);
+    const months = await fsp.readdir(yPath).catch(() => []);
+    for (const m of months) {
+      if (!/^\d{2}$/.test(m)) continue;
+      const mPath = path.join(yPath, m);
+      const ds = await fsp.readdir(mPath).catch(() => []);
+      for (const d of ds) {
+        if (!/^\d{2}$/.test(d)) continue;
+        const day = cleanOperationalDate(`${y}-${m}-${d}`);
+        if (day) days.add(day);
+      }
+    }
+  }
+
+  // OLD: YYYY-MM-DD directly under /job
+  for (const x of entries) {
+    const day = cleanOperationalDate(x);
+    if (day) days.add(day);
+  }
+
+  return Array.from(days).sort().reverse();
+}
+
+async function readLogStats(dayDir) {
+  const logPath = path.join(dayDir, "log.jsonl");
+  let items = 0,
+    images = 0,
+    audio = 0,
+    pdfs = 0;
+
+  if (fs.existsSync(logPath)) {
+    const txt = await fsp.readFile(logPath, "utf8").catch(() => "");
+    const lines = txt.split("\n").filter(Boolean);
+    items = lines.length;
+
+    for (const line of lines) {
+      try {
+        const j = JSON.parse(line);
+        if (j.type === "audio_saved" || j.type === "audio_transcript") audio++;
+        if (j.type === "pdf") pdfs++;
+      } catch {}
+    }
+  }
+
+  const files = await fsp.readdir(dayDir).catch(() => []);
+  images = files.filter((f) => /\.(jpg|jpeg|png)$/i.test(f)).length;
+
+  return { items, images, audio, pdfs };
+}
+
+async function summarizeJobHours(jobId) {
+  if (isOfficeJobId(jobId)) return { actualHours: 0, actualRegieHours: 0 };
+  const days = await listDaysForJob(jobId);
+  let actualHours = 0;
+  let actualRegieHours = 0;
+  for (const day of days) {
+    const p = regiePathForDay(jobId, day);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const regie = JSON.parse(await fsp.readFile(p, "utf8"));
+      for (const employee of Array.isArray(regie.employees) ? regie.employees : []) {
+        actualHours += Math.max(0, Number(employee.totalHours || 0));
+        actualRegieHours += Math.max(0, Number(employee.regieHours || 0));
+      }
+    } catch {}
+  }
+  return { actualHours, actualRegieHours };
+}
+
+function calculateJobBudget(meta, defaultBillingRate = 0, hours = {}, acceptedTargets = null) {
+  const contractAmount = Math.max(0, Number(acceptedTargets?.contractAmount ?? meta.contractAmount ?? 0));
+  const externalServices = Math.max(0, Number(meta.externalServices || 0));
+  const kristaAmount = Math.max(0, contractAmount - externalServices);
+  const materialPercent = Math.min(100, Math.max(0, Number(meta.materialPercent || 0)));
+  const materialAmount = kristaAmount * materialPercent / 100;
+  const laborAmount = Math.max(0, kristaAmount - materialAmount);
+  const billingRate = Math.max(0, Number(meta.billingRate || defaultBillingRate || 0));
+  const derivedFixedHours = billingRate > 0 ? laborAmount / billingRate : 0;
+  const fixedCalculatedHours = Math.max(0, Number(acceptedTargets?.fixedCalculatedHours ?? derivedFixedHours));
+  const plannedRegieHours = Math.max(0, Number(acceptedTargets?.plannedRegieHours ?? meta.plannedRegieHours ?? 0));
+  const calculatedHours = Math.max(0, Number(acceptedTargets?.calculatedHours ?? (fixedCalculatedHours + plannedRegieHours)));
+  const actualHours = Math.max(0, Number(hours.actualHours || 0));
+  const actualRegieHours = Math.max(0, Number(hours.actualRegieHours || 0));
+  const orderHours = Math.max(0, actualHours - actualRegieHours);
+  return {
+    contractAmount, externalServices, kristaAmount, materialPercent, materialAmount,
+    laborAmount, billingRate, fixedCalculatedHours, calculatedHours, actualHours, actualRegieHours, orderHours,
+    remainingOrderHours: Math.max(0, fixedCalculatedHours - orderHours),
+    progressPercent: calculatedHours > 0 ? actualHours / calculatedHours * 100 : 0,
+    plannedRegieHours,
+    remainingRegieHours: Math.max(0, plannedRegieHours - actualRegieHours)
+  };
+}
+
+// Admin API: nÃ¤chste regulÃ¤re Baustellennummer (JJ + 3-stellig)
+app.get("/admin/api/contact-master", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const query = String(req.query.q || "").trim();
+    const role = String(req.query.role || "").trim();
+    const contacts = await contactMasterStore.search(query, role, req.query.limit);
+    res.json({ ok: true, contacts });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/admin/api/jobs/next-number", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const entries = await fsp.readdir(DATA_DIR).catch(() => []);
+    const nums = entries.filter(id => new RegExp(`^${yy}\\d{3}$`).test(String(id))).map(Number);
+    const next = nums.length ? Math.max(...nums) + 1 : Number(`${yy}001`);
+    res.json({ ok: true, nextNumber: String(next).padStart(5, "0") });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: neue Baustelle anlegen
+app.post("/admin/api/jobs", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const body = req.body || {};
+    const name = String(body.name || "").trim();
+    if (!name) return res.status(400).json({ ok: false, error: "Baustellenname fehlt." });
+
+    let jobId = String(body.jobId || "").trim() || jobIdFromName(name);
+    if (await collectionStore.reserved(jobId)) return res.status(409).json({ ok: false, error: "Diese Nummer gehört zu einer Sammelmappe." });
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "UngÃ¼ltige Baustellennummer. Erlaubt sind Buchstaben, Zahlen, _ und -." });
+    if (fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(409).json({ ok: false, error: `Baustelle #${jobId} existiert bereits.` });
+
+    await ensureDir(path.join(DATA_DIR, jobId));
+    await writeJobMeta(jobId, {
+      name,
+      status: /^\d{5}$/.test(jobId) ? "Auftrag" : String(body.status || "Angebot"),
+      street: String(body.street || ""),
+      houseNumber: String(body.houseNumber || ""),
+      postalCode: String(body.postalCode || ""),
+      city: String(body.city || ""),
+      addressExtra: String(body.addressExtra || ""),
+      contactName: String(body.contactName || ""),
+      contactPhone: String(body.contactPhone || ""),
+      contactEmail: String(body.contactEmail || ""),
+      customerMaster: body.customerMaster && typeof body.customerMaster === "object" ? body.customerMaster : null,
+      projectContacts: body.projectContacts && typeof body.projectContacts === "object" ? body.projectContacts : undefined,
+      wwProjectIndex: Math.max(0, Math.trunc(Number(body.wwProjectIndex || 0))),
+      wwProjectNumber: String(body.wwProjectNumber || ""),
+      wwAddressId: String(body.wwAddressId || body.customerMaster?.wwAddressId || ""),
+      wwCustomerNumber: String(body.wwCustomerNumber || body.customerMaster?.wwCustomerNumber || ""),
+      customerMasterStatus: String(body.customerMasterStatus || ""),
+      sourceSystem: String(body.sourceSystem || ""),
+      notes: String(body.notes || ""),
+      startDate: String(body.startDate || ""),
+      createdAt: new Date().toISOString()
+    });
+    res.status(201).json({ ok: true, jobId, name });
+  } catch (error) {
+    console.error("Create job failed:", error);
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+// Admin API: list jobs
+const attachBaustellenHours = require("./baustellen-hours-service").createBaustellenHoursService({dataDir:DATA_DIR,readBootstrap:()=>kristine.getHoursBootstrap()});
+app.get("/admin/api/jobs", async (req, res) => {
+  res.locals.buildBaustellenHours = attachBaustellenHours;
+  if (!requireAdmin(req, res)) return;
+
+  try {
+    const companySummary = await calculationSummary();
+    const company = companySummary.company;
+    const jobIds = await fsp.readdir(DATA_DIR).catch(() => []);
+    const filtered = jobIds
+      .filter((j) => j && j !== "unknown" && !jobAliases.isAlias(j) && !isInternalJobId(j) && isSafeJobId(j))
+      .filter((j) => fs.statSync(path.join(DATA_DIR, j), { throwIfNoEntry: false })?.isDirectory());
+
+    const jobs = [];
+    for (const jobId of filtered) {
+      const days = await listDaysForJob(jobId);
+      const latestDay = days[0] || null;
+      let stats = { items: 0, images: 0, audio: 0, pdfs: 0 };
+      let totalStats = { items: 0, images: 0, audio: 0, pdfs: 0 };
+
+      for (const day of days) {
+        const dayDir = resolveExistingDayDir(jobId, day);
+        if (!fs.existsSync(dayDir)) continue;
+        const s = await readLogStats(dayDir);
+        totalStats.items += s.items;
+        totalStats.images += s.images;
+        totalStats.audio += s.audio;
+        totalStats.pdfs += s.pdfs;
+        if (day === latestDay) stats = s;
+      }
+
+      const meta = await readJobMeta(jobId);
+      const offerSource = await require("./job-offer-source").readJobOfferSource(DATA_DIR, jobId, {meta,allowDraft:true});
+      const acceptedOrder = offerSource?.order || null;
+      const acceptedTargets = acceptedOrder ? acceptedOrderTargets(acceptedOrder) : null;
+      const hours = await summarizeJobHours(jobId);
+      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours, acceptedTargets);
+      const sizeBytes = await dirSizeBytes(path.join(DATA_DIR, jobId));
+      const documentation = await readDocumentation(jobId);
+      const regieReports = documentation.filter((row) => row?.type === "regie_report");
+      const documentNumber = (value) => {
+        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+        const normalized = String(value || "").replace(/\s/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".");
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const regieAmount = (row) => {
+        const material = row?.materialCost ?? row?.materialTotal;
+        if (row?.laborCost !== undefined && material !== undefined) return Math.max(0, documentNumber(row?.laborCost)) + Math.max(0, documentNumber(material));
+        return Math.max(0, documentNumber(row?.totalNet)) || Math.max(0, documentNumber(row?.laborCost)) + Math.max(0, documentNumber(material));
+      };
+      const jobIsSettled = ["geschlossen", "abgerechnet"].includes(String(meta.status || "").trim().toLowerCase());
+      const regieBillingState = (row) => {
+        if (jobIsSettled) return "billed";
+        const manualStatus = String(row?.billingStatus || "").toLowerCase();
+        const automaticBilled = Boolean(String(row?.billedDocumentId || "").trim());
+        const billed = manualStatus === "billed" || (manualStatus !== "open" && automaticBilled);
+        const open = !billed;
+        return billed ? "billed" : open ? "open" : "unknown";
+      };
+      const regieRows = regieReports.map((row) => ({ row, state: regieBillingState(row), hours: Math.max(0, documentNumber(row?.totalHours)), amount: regieAmount(row) }));
+      const regieSummary = {
+        // Minimal report references let the Tower allocate written TR amounts
+        // to Regie exactly once, without transferring descriptions or materials.
+        reports: regieRows.map(({ row, hours, amount }) => ({
+          id: String(row.id || ""), jobId, projectNumber: String(row.projectNumber || jobId), source: String(row.source || ""),
+          sourceId: String(row.sourceId || ""), reportNumber: String(row.reportNumber || row.name || ""),
+          sheetNumber: String(row.sheetNumber || ""), reportDate: String(row.reportDate || ""),
+          billedDocumentId: String(row.billedDocumentId || ""), billingStatus: String(row.billingStatus || ""),
+          totalHours: hours,
+          laborCost: row.laborCost === undefined ? undefined : Math.max(0, documentNumber(row.laborCost)),
+          materialCost: (row.materialCost ?? row.materialTotal) === undefined ? undefined : Math.max(0, documentNumber(row.materialCost ?? row.materialTotal)),
+          totalNet: amount,
+        })),
+        hours: regieRows.reduce((sum, entry) => sum + entry.hours, 0),
+        amount: regieRows.reduce((sum, entry) => sum + entry.amount, 0),
+        count: regieRows.length,
+        openHours: regieRows.filter((entry) => entry.state !== "billed").reduce((sum, entry) => sum + entry.hours, 0),
+        openAmount: regieRows.filter((entry) => entry.state !== "billed").reduce((sum, entry) => sum + entry.amount, 0),
+        openCount: regieRows.filter((entry) => entry.state !== "billed").length,
+        billedHours: regieRows.filter((entry) => entry.state === "billed").reduce((sum, entry) => sum + entry.hours, 0),
+        billedAmount: regieRows.filter((entry) => entry.state === "billed").reduce((sum, entry) => sum + entry.amount, 0),
+        billedCount: regieRows.filter((entry) => entry.state === "billed").length,
+        unknownCount: regieRows.filter((entry) => entry.state === "unknown").length,
+      };
+      const materialKeys = new Set();
+      let materialValue = 0;
+      for (const report of regieReports) {
+        const materials = Array.isArray(report?.materials) ? report.materials : [];
+        for (const material of materials) {
+          const key = String(material?.materialIndex || material?.sourceId || material?.name || "").trim().toLowerCase();
+          if (key) materialKeys.add(key);
+        }
+        materialValue += Math.max(0, documentNumber(report?.materialCost ?? report?.materialTotal));
+      }
+      for (const material of meta.surfaceMaterialMeta || []) {
+        const key = String(material?.key || material?.name || "").trim().toLowerCase();
+        if (key) materialKeys.add(key);
+      }
+
+      jobs.push({
+        jobId,
+        name: meta.name || "",
+        notes: meta.notes || "",
+        favorite: !!meta.favorite,
+        status: meta.status || "Angebot",
+        towerBillingHidden: !!meta.towerBillingHidden,
+        street: meta.street || "",
+        houseNumber: meta.houseNumber || "",
+        postalCode: meta.postalCode || "",
+        city: meta.city || "",
+        addressExtra: meta.addressExtra || "",
+        contactName: meta.contactName || "",
+        contactPhone: meta.contactPhone || "",
+        contactEmail: meta.contactEmail || "",
+        customerMaster: meta.customerMaster && typeof meta.customerMaster === "object" ? meta.customerMaster : null,
+        projectContacts: meta.projectContacts || sanitizeProjectContacts({}, meta),
+        orderSchedule: (() => { const schedule=meta.orderSchedule||cleanOrderScheduleMeta({}),requestedDate=cleanOrderScheduleDate(acceptedOrder?.customerRequest?.requestedDate);return schedule.status==="none"&&requestedDate?{...schedule,status:"requested",requestedDate,requestedAt:acceptedOrder.customerRequest.requestedAt||acceptedOrder.acceptedAt||null,requestedBy:acceptedOrder.customerRequest.requestedBy||acceptedOrder.acceptedBy||null,source:"customer"}:schedule })(),
+        wwProjectIndex: Number(meta.wwProjectIndex || 0),
+        wwProjectNumber: meta.wwProjectNumber || "",
+        previousJobIds: meta.previousJobIds || [],
+        wwAddressId: meta.wwAddressId || "",
+        wwCustomerNumber: meta.wwCustomerNumber || "",
+        customerMasterStatus: meta.customerMasterStatus || "",
+        sourceSystem: meta.sourceSystem || "",
+        collectionMemberJobIds: meta.collectionMemberJobIds || [],
+        wwProjectLinks: meta.wwProjectLinks || [],
+        startDate: meta.startDate || "",
+        createdAt: meta.createdAt || null,
+        updatedAt: meta.updatedAt || null,
+        intakeProtocol: meta.intakeProtocol || {},
+        intakeAppointment: meta.intakeAppointment || null,
+        intakeTimeline: meta.intakeTimeline || [],
+        sourceWorkflowId: meta.sourceWorkflowId || "",
+        sourceTaskId: meta.sourceTaskId || "",
+        billingRate: Number(meta.billingRate || 0),
+        contractAmount: Number(meta.contractAmount || 0),
+        externalServices: Number(meta.externalServices || 0),
+        materialPercent: Number(meta.materialPercent || 0),
+        regieHourlyRate: Number(meta.regieHourlyRate ?? 75),
+        regieMaterialMarkup: Number(meta.regieMaterialMarkup ?? 80),
+        plannedRegieHours: Number(meta.plannedRegieHours || 0),
+        surfaceMaterialMeta: meta.surfaceMaterialMeta || [],
+        hoursCutoverDate: meta.hoursCutoverDate || "",
+        hoursOverlapExcludedWwKeys: meta.hoursOverlapExcludedWwKeys || [],
+        hoursOverlapResolvedAt: meta.hoursOverlapResolvedAt || null,
+        customerPortal: sanitizeCustomerPortal(meta.customerPortal),
+        calculation,
+        regieSummary,
+        materialSummary: { positions: materialKeys.size, value: materialValue },
+        sizeBytes,
+        totalStats,
+        daysCount: days.length,
+        latestDay,
+        itemsLastDay: stats.items,
+        imagesLastDay: stats.images,
+        audioLastDay: stats.audio,
+        pdfsLastDay: stats.pdfs,
+      });
+    }
+
+    const byId = new Map(jobs.map(job => [String(job.jobId), job]));
+    const parentIds = new Map();
+    for (const head of jobs) {
+      for (const memberId of head.collectionMemberJobIds || []) {
+        if (!byId.has(String(memberId))) continue;
+        if (!parentIds.has(String(memberId))) parentIds.set(String(memberId), []);
+        parentIds.get(String(memberId)).push(String(head.jobId));
+      }
+    }
+    const addStats = (sum, value) => {
+      for (const key of ["items", "images", "audio", "pdfs"]) sum[key] += Math.max(0, Number(value?.[key] || 0));
+      return sum;
+    };
+    for (const job of jobs) {
+      job.collectionParentJobIds = parentIds.get(String(job.jobId)) || [];
+      const members = (job.collectionMemberJobIds || []).map(id => byId.get(String(id))).filter(Boolean);
+      if (!members.length) continue;
+      const all = [job, ...members];
+      const wwSeen = new Set();
+      const wwProjects = [];
+      for (const entry of all) {
+        const links = [
+          ...(entry.wwProjectLinks || []),
+          ...(entry.wwProjectNumber || entry.wwProjectIndex ? [{ projectNumber: entry.wwProjectNumber || entry.jobId, projectIndex: entry.wwProjectIndex, title: entry.name }] : []),
+        ];
+        for (const link of links) {
+          const key = Number(link.projectIndex) > 0 ? `i:${Number(link.projectIndex)}` : `n:${String(link.projectNumber || "").toLowerCase()}`;
+          if (wwSeen.has(key)) continue;
+          wwSeen.add(key);
+          wwProjects.push(link);
+        }
+      }
+      job.collectionSummary = {
+        count: all.length,
+        jobIds: all.map(entry => String(entry.jobId)),
+        searchText: all.map(entry => [entry.jobId, entry.name, entry.contactName, entry.street, entry.postalCode, entry.city, entry.wwProjectNumber].filter(Boolean).join(" ")).join(" "),
+        contractAmount: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.contractAmount || entry.calculation?.contractAmount || 0)), 0),
+        calculatedHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.calculation?.calculatedHours || 0)), 0),
+        actualHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.calculation?.actualHours || 0)), 0),
+        regieAmount: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.regieSummary?.amount || 0)), 0),
+        regieHours: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.regieSummary?.hours || 0)), 0),
+        materialPositions: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.materialSummary?.positions || 0)), 0),
+        materialValue: all.reduce((sum, entry) => sum + Math.max(0, Number(entry.materialSummary?.value || 0)), 0),
+        totalStats: all.reduce((sum, entry) => addStats(sum, entry.totalStats), { items: 0, images: 0, audio: 0, pdfs: 0 }),
+        wwProjects,
+      };
+    }
+
+    jobs.sort((a, b) => {
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+      return (b.latestDay || "").localeCompare(a.latestDay || "");
+    });
+    const collections = collectionCatalog(jobs, await collectionStore.list());
+    res.json(recalculateCollections({ ok: true, jobs, collections }));
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// Admin API: read/update metadata
+app.get("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    res.json({ ok: true, jobId, meta: await readJobMeta(jobId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.put("/admin/api/job/:jobId/meta", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const jobId = String(req.params.jobId);
+    if (!isSafeJobId(jobId)) return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    const before = await readJobMeta(jobId);
+    const meta = await writeJobMeta(jobId, {
+      name: req.body?.name,
+      notes: req.body?.notes,
+      favorite: req.body?.favorite,
+      status: req.body?.status,
+      towerBillingHidden: req.body?.towerBillingHidden,
+      offerFollowUpAt: req.body?.offerFollowUpAt,
+      offerRejectedAt: req.body?.offerRejectedAt,
+      street: req.body?.street,
+      houseNumber: req.body?.houseNumber,
+      postalCode: req.body?.postalCode,
+      city: req.body?.city,
+      addressExtra: req.body?.addressExtra,
+      contactName: req.body?.contactName,
+      contactPhone: req.body?.contactPhone,
+      contactEmail: req.body?.contactEmail,
+      customerMaster: req.body?.customerMaster,
+      wwAddressId: req.body?.wwAddressId,
+      wwCustomerNumber: req.body?.wwCustomerNumber,
+      customerMasterStatus: req.body?.customerMasterStatus,
+      projectContacts: req.body?.projectContacts,
+      billingRate: req.body?.billingRate,
+      contractAmount: req.body?.contractAmount,
+      externalServices: req.body?.externalServices,
+      materialPercent: req.body?.materialPercent,
+      regieHourlyRate: req.body?.regieHourlyRate,
+      regieMaterialMarkup: req.body?.regieMaterialMarkup,
+      plannedRegieHours: req.body?.plannedRegieHours,
+      surfaceMaterialMeta: req.body?.surfaceMaterialMeta,
+    });
+    const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
+    const changed = [];
+    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","wwAddressId","wwCustomerNumber","customerMasterStatus","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
+      if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
+    }
+    if (JSON.stringify(before.customerMaster || {}) !== JSON.stringify(meta.customerMaster || {})) changed.push("customerMaster");
+    if (JSON.stringify(before.projectContacts || {}) !== JSON.stringify(meta.projectContacts || {})) changed.push("projectContacts");
+    if (JSON.stringify(before.surfaceMaterialMeta || []) !== JSON.stringify(meta.surfaceMaterialMeta || [])) changed.push("surfaceMaterialMeta");
+    if (changed.length) {
+      await appendJobHistory(jobId, {
+        type: "job_meta_updated",
+        title: "Baustellendaten aktualisiert",
+        detail: changed.join(", "),
+        source: "admin",
+        data: { changed }
+      });
+    }
+    res.json({ ok: true, jobId, meta, deletedGeneratedPdfs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// A Sammelmappe is stored separately and refers to ordinary project records.
+app.put("/admin/api/job/:jobId/collection", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const collection = await collectionStore.save({ jobId: req.params.jobId, memberJobIds: req.body?.memberJobIds });
+    await appendJobHistory(collection.mainJobId, {
+      type: "collection_updated",
+      title: collection.active ? `Sammelmappe ${collection.id} aktualisiert` : `Sammelmappe ${collection.id} aufgelöst`,
+      detail: `Hauptakte: ${collection.mainJobId} · Einzelakten: ${collection.memberJobIds.join(", ")}`,
+      source: "KRISTINE Sammelmappe", data: collection,
+    }).catch(error => console.error("COLLECTION_HISTORY failed:", error.message));
+    res.json({ ok: true, jobId: collection.mainJobId, collectionId: collection.id, collectionMemberJobIds: collection.memberJobIds, collection });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.put("/admin/api/sammelmappe/:id/status", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const definition = await collectionStore.setStatus(req.params.id, req.body?.status);
+    if (definition.statusOverride === "Geschlossen") {
+      for (const jobId of definition.memberJobIds) {
+        const current = await readJobMeta(jobId);
+        if (current.status === "Geschlossen") continue;
+        await writeJobMeta(jobId, { status:"Geschlossen" });
+        await appendJobHistory(jobId, { type:"collection_member_closed", title:"Einzelauftrag mit Sammelmappe geschlossen", detail:`Sammelmappe ${definition.id} wurde geschlossen.`, source:"KRISTINE Sammelmappe", data:{ collectionId:definition.id } });
+      }
+    }
+    const members = await Promise.all(definition.memberJobIds.map(async jobId => ({ ...await readJobMeta(jobId), jobId })));
+    const [collection] = collectionCatalog(members, [definition]);
+    await appendJobHistory(definition.mainJobId, { type: "collection_status_updated", title: `Status der Sammelmappe ${definition.id} geändert`, detail: definition.statusOverride || `Automatisch aus Einzelakten: ${collection.status}`, source: "KRISTINE Sammelmappe" }).catch(error => console.error("COLLECTION_HISTORY failed:", error.message));
+    res.json({ ok: true, status: collection.status, statusOverride: collection.statusOverride, automaticStatus: collection.automaticStatus, statusUpdatedAt: collection.statusUpdatedAt });
+  } catch (error) { res.status(error.status || 500).json({ ok: false, error: String(error?.message || error) }); }
+});
+
+const offerNotepad = require("./public/ui/offer-notepad");
+function offerDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".offer-draft.json"); }
+function acceptedOrderPath(jobId) { return path.join(DATA_DIR, String(jobId), ".accepted-order.json"); }
+function acceptedOrderCalculationPath(jobId) { return path.join(DATA_DIR, String(jobId), ".order-calculation.json"); }
+function prepaymentInvoiceDraftPath(jobId) { return path.join(DATA_DIR, String(jobId), ".prepayment-invoice-draft.json"); }
+function orderSchedulePath(jobId) { return path.join(DATA_DIR, String(jobId), ".order-schedule.json"); }
+let orderScheduleWriteQueue = Promise.resolve();
+function serializedOrderSchedule(action) {
+  const result = orderScheduleWriteQueue.then(action, action);
+  orderScheduleWriteQueue = result.catch(() => {});
+  return result;
+}
+async function readOrderSchedule(jobId) {
+  const stored = await fsp.readFile(orderSchedulePath(jobId), "utf8").then(JSON.parse).catch(() => null);
+  const meta = await readJobMeta(jobId);
+  const source = await require("./job-offer-source").readJobOfferSource(DATA_DIR, jobId, {meta});
+  return require("./job-offer-source").scheduleWithOfferRequest(stored || meta.orderSchedule, source?.order, jobId);
+}
+async function persistOrderSchedule(jobId, value, options = {}) {
+  const schedule = scheduleBase(value, jobId);
+  await ensureDir(path.join(DATA_DIR, String(jobId)));
+  const file = orderSchedulePath(jobId), temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(temporary, JSON.stringify(schedule, null, 2), "utf8");
+  await fsp.rename(temporary, file);
+  const patch = { orderSchedule:cleanOrderScheduleMeta(schedule) };
+  if (options.startDate !== undefined) patch.startDate = options.startDate;
+  await writeJobMeta(jobId, patch);
+  return schedule;
+}
+function orderScheduleActor(req, fallback = "Alex / Büro") {
+  if (req.kristineActor) return { id:req.kristineActor.id, name:req.kristineActor.name };
+  return { id:String(req?.headers?.["x-krista-user-id"] || "admin").slice(0, 100), name:String(req?.headers?.["x-krista-user-name"] || fallback).slice(0, 160) };
+}
+async function selectedOrderEmployees(employeeIds) {
+  const ids = [...new Set((Array.isArray(employeeIds) ? employeeIds : []).map(String).filter(Boolean))].slice(0, 50);
+  if (!ids.length) return [];
+  const employees = await readEmployees();
+  const selected = ids.map(id => employees.find(row => String(row.id || row.employeeId || "") === id)).filter(Boolean).map(row => ({ id:String(row.id || row.employeeId), name:String(row.name || row.employeeName || row.id) }));
+  if (selected.length !== ids.length) throw Object.assign(new Error("Mindestens ein ausgewählter Mitarbeiter ist nicht mehr im Personalstamm."), { status:400 });
+  return selected;
+}
+async function replaceOrderScheduleAssignments(jobId, rows) {
+  const file = path.join(DATA_DIR, "_kristine", "assignments.json");
+  await ensureDir(path.dirname(file));
+  const current = await fsp.readFile(file, "utf8").then(JSON.parse).catch(() => []);
+  const keep = (Array.isArray(current) ? current : []).filter(row => !(String(row?.source || "") === "order_schedule" && String(row?.orderScheduleJobId || row?.jobId || "") === String(jobId)));
+  await fsp.writeFile(file, JSON.stringify([...keep, ...rows], null, 2), "utf8");
+  return rows;
+}
+function orderScheduleAddress(meta) {
+  return [[meta.street, meta.houseNumber].filter(Boolean).join(" "), [meta.postalCode, meta.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+function formatOrderScheduleDate(date) {
+  if (!cleanOrderScheduleDate(date)) return String(date || "");
+  return new Intl.DateTimeFormat("de-AT", { timeZone:"Europe/Vienna", weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" }).format(new Date(`${date}T12:00:00+02:00`));
+}
+async function sendOrderScheduleNotice(jobId, schedule, kind) {
+  const proposal=kind==="proposal",date=proposal?schedule.proposedDate:schedule.confirmedDate,from=proposal?schedule.proposedFrom:schedule.confirmedFrom,to=proposal?schedule.proposedTo:schedule.confirmedTo;
+  return customerNotifications.publish(jobId,{
+    key:`schedule:${kind}:${schedule.revision}:${date}:${from}:${to}`,audience:"customer",
+    title:proposal?"Neuer Terminvorschlag":schedule.requestedDate===date?"Ihr Terminwunsch wurde bestätigt":"Ihr Auftragstermin wurde bestätigt",
+    text:`${formatOrderScheduleDate(date)}, ${from}–${to} Uhr.\n${proposal?"Bitte bestätigen Sie den Termin in Ihrer Projektakte.":"Dieser Termin ist verbindlich bestätigt."}`,
+  });
+}
+
+async function recordOrderScheduleRequest(jobId, date, actor = {}, source = "office") {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId), schedule = requestSchedule(current, { jobId, date, actor, source });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_requested", title:`Terminwunsch ${formatOrderScheduleDate(schedule.requestedDate)} erfasst`, detail:"Noch nicht bestätigt und noch nicht fix eingeplant.", source:source === "customer" ? "Kundenportal" : "KRISTINE Auftrag", data:{ requestedDate:schedule.requestedDate } });
+    return schedule;
+  });
+}
+async function confirmOrderScheduleForJob(jobId, input = {}, options = {}) {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId);
+    if (current.status === "confirmed") return current;
+    const meta = await readJobMeta(jobId), employees = await selectedOrderEmployees(input.employeeIds), date = cleanOrderScheduleDate(input.date || current.proposedDate || current.requestedDate), from = String(input.from || current.proposedFrom || "07:00"), to = String(input.to || current.proposedTo || "17:00"), actor = input.actor || { id:"admin", name:"Alex / Büro" };
+    if (!date) throw Object.assign(new Error("Bitte einen gültigen Termin auswählen."), { status:400 });
+    const planning = buildPlanningAssignments({ jobId, job:meta, date, from, to, employees, scheduleRevision:current.revision + 1 });
+    await replaceOrderScheduleAssignments(jobId, planning);
+    // Auftragstermine stehen genau einmal im gemeinsamen KRISTINE-Kalender.
+    // Keinen zusaetzlichen Termin (und keinen "Jetzt los"-Block) in Alex'
+    // persoenlichem Outlook-Kalender erzeugen.
+    let schedule = confirmSchedule(current, { date, from, to, employees, assignments:planning, appointment:null, actor, customerConfirmedAt:options.customerConfirmedAt || null });
+    await persistOrderSchedule(jobId, schedule, { startDate:date });
+    await appendJobHistory(jobId, { type:"order_schedule_confirmed", title:`Auftragstermin ${formatOrderScheduleDate(date)} bestätigt`, detail:`${from}–${to} Uhr · ${employees.length ? employees.map(row => row.name).join(", ") : "Mitarbeitereinteilung noch offen"} · im gemeinsamen KRISTINE-Kalender vorgemerkt`, source:options.customerConfirmedAt ? "Kundenportal" : "KRISTINE Auftrag", data:{ date, from, to, employeeIds:employees.map(row => row.id), appointmentId:schedule.appointmentId } });
+    if (options.notifyCustomer !== false) {
+      schedule = { ...schedule, notification:await sendOrderScheduleNotice(jobId, schedule, "confirmation") };
+      await persistOrderSchedule(jobId, schedule, { startDate:date });
+    }
+    return schedule;
+  });
+}
+async function proposeOrderScheduleForJob(jobId, input = {}) {
+  return serializedOrderSchedule(async () => {
+    const current = await readOrderSchedule(jobId), employees = await selectedOrderEmployees(input.employeeIds), actor = input.actor || { id:"admin", name:"Alex / Büro" };
+    let schedule = proposeSchedule(current, { date:input.date, from:input.from, to:input.to, employees, actor });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_proposed", title:`Alternativtermin ${formatOrderScheduleDate(schedule.proposedDate)} vorgeschlagen`, detail:`${schedule.proposedFrom}–${schedule.proposedTo} Uhr · Kundenbestätigung offen`, source:"KRISTINE Auftrag", data:{ date:schedule.proposedDate, from:schedule.proposedFrom, to:schedule.proposedTo } });
+    schedule = { ...schedule, notification:await sendOrderScheduleNotice(jobId, schedule, "proposal") };
+    await persistOrderSchedule(jobId, schedule);
+    return schedule;
+  });
+}
+async function respondToOrderScheduleProposal({ jobId, confirmed, comment = "", customerName = "Kunde" } = {}) {
+  const current = await readOrderSchedule(jobId);
+  if (current.status !== "proposed") throw Object.assign(new Error("Dieser Terminvorschlag ist nicht mehr offen."), { status:409 });
+  const actor = { id:"customer-portal", name:String(customerName || "Kunde").slice(0, 160) }, at = new Date().toISOString();
+  if (confirmed) {
+    const schedule=await confirmOrderScheduleForJob(jobId,{date:current.proposedDate,from:current.proposedFrom,to:current.proposedTo,employeeIds:current.employees.map(row=>row.id),actor},{customerConfirmedAt:at,notifyCustomer:false});
+    await customerNotifications.publish(jobId,{key:`customer-schedule:${current.revision}:confirmed`,audience:"office",title:"Kunde hat den Terminvorschlag bestätigt",text:`${actor.name}: ${formatOrderScheduleDate(schedule.confirmedDate)}, ${schedule.confirmedFrom}–${schedule.confirmedTo} Uhr.`});
+    return schedule;
+  }
+  return serializedOrderSchedule(async () => {
+    const latest = await readOrderSchedule(jobId), schedule = declineProposal(latest, { comment, at, actor });
+    await persistOrderSchedule(jobId, schedule);
+    await appendJobHistory(jobId, { type:"order_schedule_proposal_declined", title:"Kunde hat den Alternativtermin nicht bestätigt", detail:schedule.customerResponse || "Kunde bittet um weitere Abstimmung.", source:"Kundenportal", data:{ proposedDate:schedule.proposedDate } });
+    await customerNotifications.publish(jobId,{key:`customer-schedule:${current.revision}:declined`,audience:"office",title:"Kunde bittet um einen anderen Termin",text:`${actor.name}: ${schedule.customerResponse}`});
+    return schedule;
+  });
+}
+function sanitizeOfferCalculationNote(value) {
+  const note = value && typeof value === "object" ? value : {};
+  const number = (input, max = 100000000) => Math.max(0, Math.min(max, Number(input) || 0));
+  return {
+    formula: String(note.formula || "").trim().slice(0, 2000),
+    pricePerSqm: number(note.pricePerSqm, 1000000),
+    note: String(note.note || "").trim().slice(0, 12000),
+    extraCalculations: (Array.isArray(note.extraCalculations) ? note.extraCalculations : []).slice(0, 50).map(row => ({
+      formula: String(row?.formula || "").trim().slice(0, 2000),
+      pricePerSqm: number(row?.pricePerSqm, 1000000),
+    })),
+    area: number(note.area),
+    estimatedPrice: number(note.estimatedPrice),
+    estimatedHours: number(note.estimatedHours, 1000000),
+  };
+}
+const offerCounterPath=path.join(DATA_DIR,"_kristine","offer-number-counter.json");let offerNumberQueue=Promise.resolve();
+const offerPositionTemplatesPath=path.join(DATA_DIR,"_kristine","offer-position-templates.json");
+app.get("/admin/api/offer-position-templates",async(req,res)=>{if(!requireAdmin(req,res))return;const templates=await fsp.readFile(offerPositionTemplatesPath,"utf8").then(JSON.parse).catch(()=>[]);res.json({ok:true,templates:Array.isArray(templates)?templates:[]})});
+app.post("/admin/api/offer-position-templates",async(req,res)=>{if(!requireAdmin(req,res))return;try{const body=req.body||{},text=String(body.text||"").trim().slice(0,1000),group=String(body.group||"Allgemein").trim().slice(0,120)||"Allgemein";if(!text)return res.status(400).json({ok:false,error:"Leistungstext fehlt."});await ensureDir(path.dirname(offerPositionTemplatesPath));const templates=await fsp.readFile(offerPositionTemplatesPath,"utf8").then(JSON.parse).catch(()=>[]),template={id:`op_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,group,text,unit:String(body.unit||"PA").trim().slice(0,20)||"PA",unitPrice:Math.max(0,Number(body.unitPrice||0)),createdAt:new Date().toISOString()};templates.push(template);await fsp.writeFile(offerPositionTemplatesPath,JSON.stringify(templates.slice(-1000),null,2),"utf8");res.status(201).json({ok:true,template})}catch(e){res.status(500).json({ok:false,error:String(e?.message||e)})}});
+function offerNumberPrefix(){const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Vienna",year:"2-digit",month:"2-digit"}).formatToParts(new Date()),year=parts.find(x=>x.type==="year")?.value||String(new Date().getFullYear()).slice(-2),month=parts.find(x=>x.type==="month")?.value||String(new Date().getMonth()+1).padStart(2,"0");return year+month}
+async function nextOfferNumber(){let release;const previous=offerNumberQueue;offerNumberQueue=new Promise(resolve=>release=resolve);await previous;try{await ensureDir(path.dirname(offerCounterPath));const counters=await fsp.readFile(offerCounterPath,"utf8").then(JSON.parse).catch(()=>({})),prefix=offerNumberPrefix(),next=Math.max(0,Number(counters[prefix]||0))+1;if(next>999)throw new Error(`Angebotsnummernkreis ${prefix} ist ausgeschöpft.`);counters[prefix]=next;await fsp.writeFile(offerCounterPath,JSON.stringify(counters,null,2),"utf8");return `${prefix}${String(next).padStart(3,"0")}`}finally{release()}}
 app.get("/admin/api/job/:jobId/offer-draft", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const jobId=String(req.params.jobId||"");if(!isSafeJobId(jobId))return res.status(400).json({ok:false,error:"Invalid jobId"});
@@ -4181,4 +4964,3 @@ async function startServer() {
   app.listen(PORT, () => console.log(`âœ… Server lÃ¤uft auf Port ${PORT}`));
 }
 startServer();
-
