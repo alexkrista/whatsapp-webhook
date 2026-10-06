@@ -2772,8 +2772,8 @@ const open = taskId
         closedAt:closed?.closedAt || null,
         releasedAt:release?.releasedAt || null,
         segments,
-        originalSegments: correction?.originalSegments || segments,
-        correction: correction ? {
+        originalSegments: closed && !project ? segments : correction?.originalSegments || segments,
+        correction: correction && !(closed && !project) ? {
           reason: correction.reason || "",
           note: correction.note || "",
           updatedAt: correction.updatedAt || null,
