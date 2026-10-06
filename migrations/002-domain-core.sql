@@ -214,6 +214,7 @@ CREATE TABLE kristine.payroll_month_closes (
   status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','closed')),
   employee_name_snapshot text NOT NULL, personnel_number_snapshot text,
   rule_version text NOT NULL,
+  calculation_rules_snapshot jsonb NOT NULL CHECK (jsonb_typeof(calculation_rules_snapshot) = 'object'),
   payroll_minutes numeric(14,4) NOT NULL CHECK (payroll_minutes >= 0),
   productive_minutes numeric(14,4) NOT NULL CHECK (productive_minutes >= 0),
   break_minutes numeric(14,4) NOT NULL CHECK (break_minutes >= 0),
