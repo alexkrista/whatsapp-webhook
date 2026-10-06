@@ -201,6 +201,8 @@ def install(ns):
     invoiceBook.id='modeInvoiceBook';invoiceBook.classList.remove('active');invoiceBook.removeAttribute('onclick');invoiceBook.textContent='📚 RECHNUNGSBUCH';
     invoiceBook.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/invoice-book'});
     invoices.row.appendChild(invoiceBook);
+    invoiceBook.textContent='📚 RECHNUNGSBUCH EINGANG';
+    const outgoingBook=captureNav.cloneNode(true);outgoingBook.id='modeOutgoingBook';outgoingBook.classList.remove('active');outgoingBook.removeAttribute('onclick');outgoingBook.textContent='📚 RECHNUNGSBUCH AUSGANG';outgoingBook.addEventListener('click',e=>{e.preventDefault();window.location.href='/outgoing/invoice-book'});invoices.row.appendChild(outgoingBook);
 
     const debtor=captureNav.cloneNode(true);
     debtor.id='modeDebtorOp';debtor.classList.remove('active');debtor.removeAttribute('onclick');debtor.textContent='💳 Debitoren-OP';
