@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="2026-09-15-billing-cutoff-1";
+  const VERSION="2026-10-06-hours-loading-1";
   const D=window.BaustellenData;
   const BRAIN_HOURS_PATH="/api/outgoing/project-hours";
   const BRAIN_HOURS_HOSTS=["http://127.0.0.1:5051","https://pc-alex02.tail610122.ts.net"];
@@ -202,6 +202,7 @@
   }
 
   function memberHourSummary(j,head=j){
+    if(!j)return {...hoursSummary(""),ww:0,kristine:0,detailTotal:0,overlaps:[],excluded:new Set(),available:false,source:"Stunden werden geladen"};
     const fused=singleFusion(j,head),regie=Math.max(num(calc(j).actualRegieHours),num(reportHoursByJob.get(String(j?.jobId)))),order=Math.max(0,fused.total-regie),target=D.totalTarget(j),fixedTarget=D.fixedTarget(j),orderBalance=D.hourBalance(fixedTarget,order);
     const settled=D.isSettled(j)||D.isSettled(head),balance=D.hourBalance(target,fused.total);
     return {...fused,order,regie,target,fixedTarget,...balance,remaining:settled?0:balance.remaining,remainingOrder:settled?0:orderBalance.remaining,orderOverrun:orderBalance.overrun,status:j?.status||"",settled};
@@ -320,6 +321,8 @@
     refresh();timer=setInterval(refresh,60000);window.addEventListener("beforeunload",()=>timer&&clearInterval(timer),{once:true});
   }
 
+  // Public summaries can be requested before the first async refresh finishes.
+  buildLiveMaps();
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);else install();
   window.BaustellenLiveHours={version:VERSION,refresh,personDayHours,laborCost,summary:hoursSummary,sourceStatus,summarySingle:(id,headId)=>memberHourSummary(job(id),job(headId)||job(id)),completedSummarySingle};
 })();
