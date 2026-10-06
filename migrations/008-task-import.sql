@@ -1,5 +1,7 @@
 BEGIN;
 ALTER TABLE kristine.tasks
+ DROP CONSTRAINT tasks_task_type_check,
+ ADD CONSTRAINT tasks_task_type_check CHECK(task_type IN ('callback','offer','problem','appointment','complaint','other','portal_request','goods_receipt','approval')),
  ADD COLUMN note text,
  ADD COLUMN completed_at timestamptz,
  ADD COLUMN legacy_creator_id text,
