@@ -10,7 +10,7 @@ Stand: 06.10.2026. Fachliche Entscheidungen von Alexander bestätigt.
 - Start-, Mittag-, Abend-, Pausen- und Berechnungsregeln bleiben bei der Speicherumstellung erhalten. Die neu bestätigte Entkopplung erfolgt am Monatsabschluss; vorhandene Tagesfreigabe-/Abkopplungspfade müssen dazu gesondert angepasst und geprüft werden.
 
 ## Zielmodell: technische Ausarbeitung
-Die folgenden Tabellen sind ein Zielentwurf, noch keine ausgeführten Migrationen. Ausgestaltung anhand der echten Quellschemata verifizieren.
+Die Übersicht beschreibt das gesamte Zielmodell. Der erste Block mit 32 normalisierten Fachtabellen ist in migrations/002-domain-core.sql implementiert und lokal gegen eine eingebettete PostgreSQL-Engine geprüft. Siehe database-core-tables.md. Ausgestaltung und Quellmapping vor produktivem Import verifizieren.
 
 | Bereich | Tabellen / Beziehungen |
 |---|---|
@@ -63,4 +63,4 @@ PDFs, Fotos und andere Binärdateien bleiben zunächst in der bestehenden Dateia
 - Echte PostgreSQL-Tests: wiederholter Import, Fremdschlüssel, Dubletten, parallele Änderungen, atomarer Monatsabschluss und Snapshot-Unveränderlichkeit.
 - Sämtliche Leser/Schreiber eines zusammenhängenden Datenbereichs gemeinsam umstellen; keine unkoordinierten Doppel-Schreibpfade.
 - Isolierte Testdatenbank, produktnaher Backup-Test, dokumentierter finaler Abgleich und Rückfallweg vor Live-Umschaltung.
-- Noch nicht umgesetzt: normalisierte Tabellen, Altimport, Monatsabschluss-Regel und produktive SQL-Anbindung. Der bisherige Entwurf umfasst Inventur, isolierten Dokumentstore und acht lokale Tests; echte PostgreSQL-Integration steht aus.
+- Implementiert: erster Block mit 32 Fachtabellen, Datenbanktrigger für festgeschriebene Monats-Snapshots, Herkunftszuordnung und Revisionshistorie; elf Szenarien gegen PGlite/PostgreSQL sowie acht bisherige lokale Tests grün.\n- Noch offen: weitere Fachbereiche, Quellimporter, Abschluss-/Speicherdienste, produktive SQL-Anbindung und echte Mehrverbindungs-/Render-Tests. Keine Live-Migration.
