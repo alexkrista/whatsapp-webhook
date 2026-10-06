@@ -4,14 +4,14 @@ on:
     paths:
       - 'migrations/**'
       - 'storage/**'
-      - 'TEST/database-core.pg.cjs'
+      - 'TEST/*.pg.cjs'
       - '.github/workflows/sql-schema-test.yml'
   push:
     branches: [main]
     paths:
       - 'migrations/**'
       - 'storage/**'
-      - 'TEST/database-core.pg.cjs'
+      - 'TEST/*.pg.cjs'
       - '.github/workflows/sql-schema-test.yml'
 permissions:
   contents: read
@@ -26,4 +26,4 @@ jobs:
       - name: Install isolated embedded PostgreSQL runtime
         run: npm install --prefix "$RUNNER_TEMP/sql-test-runtime" --no-save --ignore-scripts @electric-sql/pglite@0.5.8
       - name: Test DDL, constraints, snapshots and document store
-        run: PGLITE_MODULE_PATH="$RUNNER_TEMP/sql-test-runtime/node_modules/@electric-sql/pglite" node --test TEST/database-core.pg.cjs
+        run: PGLITE_MODULE_PATH="$RUNNER_TEMP/sql-test-runtime/node_modules/@electric-sql/pglite" node --test TEST/*.pg.cjs
