@@ -1,5 +1,7 @@
 # PostgreSQL compatibility storage: stage 2
 
+Historical stage-2 description. Stage 3 now adds 32 normalized tables and embedded PostgreSQL integration checks; see [current table block](database-core-tables.md). The compatibility store remains isolated, and native multi-session PostgreSQL/Render validation remains pending.
+
 Target selected by Alexander on 2026-10-06: PostgreSQL on Render.
 
 ## Implemented in this draft
