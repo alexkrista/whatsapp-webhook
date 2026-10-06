@@ -25,11 +25,21 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
   const DAY_CONTROLS = path.join(ROOT, "day-controls.json");
   const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
+  const MONTH_CLOSURES = path.join(ROOT, "month-closures.json");
   const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
   const MATERIAL_NOTIFY_STATE = path.join(ROOT, "material-notify-state.json");
   const EMPLOYEE_WORK_RULES = path.join(ROOT, "employee-work-rules.json");
   const ZA_OLD_LEDGER = path.join(ROOT, "za-old-ledger.json");
+
+  let timeMutationTail = Promise.resolve();
+  function serializedTimeMutation(handler) {
+    return (req,res) => {
+      const result = timeMutationTail.then(() => handler(req,res));
+      timeMutationTail = result.catch(() => {});
+      return result;
+    };
+  }
 
   async function ensureRoot() {
     await fsp.mkdir(ROOT, { recursive: true });
@@ -37,10 +47,17 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function readJson(file, fallback) {
     try {
-      const value = JSON.parse(await fsp.readFile(file, "utf8"));
+      let value = JSON.parse(await fsp.readFile(file, "utf8"));
+      if (file === TIME_EVENTS) {
+        const closures = await readJson(MONTH_CLOSURES, []);
+        const days = closures.flatMap(row => row.days || []);
+        const keys = new Set(days.map(row => `${row.employeeId}|${row.date}`));
+        value = [...value.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...days.flatMap(row => row.events || [])];
+      }
       if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []);
       return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
-    } catch {
+    } catch (error) {
+      if ([MONTH_CLOSURES,TIME_EVENTS].includes(file) && error.code !== "ENOENT") throw error;
       if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, []);
       return fallback;
     }
@@ -48,10 +65,21 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function writeJson(file, value) {
     await ensureRoot();
+    // Every writer must preserve the fixed payroll snapshot of closed months.
+    if (file === TIME_EVENTS) {
+      const closures = await readJson(MONTH_CLOSURES, []);
+      const frozen = closures.flatMap(row => row.days || []);
+      const keys = new Set(frozen.map(row => `${row.employeeId}|${row.date}`));
+      value = [...value.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...frozen.flatMap(row => row.events || [])];
+    }
     const previousPortalTasks = file === TASKS ? await readJson(TASKS, []) : null;
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     const customerPointChanges = file === TASKS ? require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value) : [];
-    await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+    if (file === MONTH_CLOSURES) {
+      const temporary = `${file}.tmp`;
+      await fsp.writeFile(temporary,JSON.stringify(value,null,2),"utf8");
+      await fsp.rename(temporary,file);
+    } else await fsp.writeFile(file, JSON.stringify(value, null, 2), "utf8");
     if (typeof notifyCustomerPoint === "function") for (const change of customerPointChanges.filter(row=>["assigned","internal_done","office_reopened"].includes(row.type))) {
       try { change.notification = await notifyCustomerPoint(change); }
       catch (error) { change.notification = { sent:false, error:String(error?.message || error) }; }
@@ -579,7 +607,8 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       enrichedAssignments.push(row);
     }
 
-    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, projectTimeArchive, employees, gpsImport: gpsImportSummary(latestGps) };
+    const projectTimeEvents = projectEventsForBootstrap(timeEvents, projectTimeArchive);
+    return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, projectTimeEvents, projectTimeArchive, employees, gpsImport: gpsImportSummary(latestGps) };
   }
 
   async function handleMessage({ employeeId, employeeName, text, date }) {
@@ -1616,6 +1645,7 @@ const open = taskId
 
   app.get("/kristine/api/bootstrap", async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    await startupReady;
     try {
       const [bootstrap, employeeWorkRules] = await Promise.all([
         getBootstrap(),
@@ -2239,6 +2269,7 @@ const open = taskId
     const key = `${String(release.employeeId)}|${String(release.date)}`;
     let row = archive.find(item => `${String(item.employeeId)}|${String(item.date)}` === key);
     if (row) {
+      if (row.updatedAt) return row; // An intentionally corrected/deleted project day is never backfilled.
       const existingJobs=(row.segments||[]).filter(segment=>segment?.type==="work"&&(segment.jobId||segment.jobName)).length;
       const candidateJobs=(segments||[]).filter(segment=>segment?.type==="work"&&(segment.jobId||segment.jobName)).length;
       if(existingJobs||!candidateJobs)return row;
@@ -2270,39 +2301,84 @@ const open = taskId
     return row;
   }
 
-  async function detachReleasedEmployeeTime({ employeeId, employeeName, date, segments, allEvents }) {
-    const retained = allEvents.filter(row => !(String(row.employeeId) === String(employeeId) && String(row.date) === String(date)));
-    const createdAt = new Date().toISOString();
-    const replacement = (segments || []).map(segment => ({
-      employeeId, employeeName, date, type:employeeEventType(segment), at:segment.from,
-      jobId:null, jobName:"", reason:segment.type === "up" ? String(segment.reason || "") : "",
-      activityMode:employeeTimeKind(segment), segmentId:segment.id, source:"released_employee_time",
-      ...(segment.type === "up" && (unproductiveDetails(segment).category || unproductiveDetails(segment).code === "022") ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:String(segment.absenceType || "")} : {}),
-      manual:true, detachedFromProject:true, createdAt,
-    }));
-    const last=(segments || []).at(-1);
-    if(last?.to) replacement.push({employeeId,employeeName,date,type:"ende",at:last.to,jobId:null,jobName:"",activityMode:"boundary",source:"released_employee_time",manual:true,detachedFromProject:true,createdAt});
-    await writeJson(TIME_EVENTS,[...retained,...replacement].slice(-20000));
+  function eventsForEmployeeSegments({employeeId,employeeName,date,segments}) {
+    return eventsForProjectSegments({employeeId,employeeName,date,segments}).map(event => {
+      const segment = (segments || []).find(row => row.from === event.at && event.type !== "ende");
+      return {...event,jobId:null,jobName:"",type:segment ? employeeEventType(segment) : event.type,
+        activityMode:segment ? employeeTimeKind(segment) : "boundary",source:"closed_employee_time",detachedFromProject:true,
+        ...(segment?.type === "up" ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code} : {})};
+    });
+  }
+
+  function eventsForProjectSegments(row) {
+    const segments = row.segments || [];
+    const events = segments.flatMap((segment,index) => {
+      const base = {employeeId:row.employeeId,employeeName:row.employeeName,date:row.date,segmentId:segment.id || `project_${row.employeeId}_${row.date}_${index}`,source:"project_time",manual:true};
+      const job = {jobId:segment.type === "work" ? segment.jobId : null,jobName:segment.type === "work" ? segment.jobName : ""};
+      return [{...base,...job,type:eventTypeForSegment(segment),at:segment.from,reason:segment.reason || "",activityMode:productiveKind(segment),unproductiveCode:segment.unproductiveCode,unproductiveCategory:segment.unproductiveCategory,absenceType:segment.absenceType},
+        ...(segment.to ? [{...base,...job,type:"ende",at:segment.to}] : [])];
+    });
+    return events;
+  }
+
+  function projectEventsForBootstrap(events, archive) {
+    // Archived project blocks stay visible forever, also after monthly closing.
+    const liveKeys = new Set(events.filter(row => row.jobId && !row.detachedFromProject).map(row => `${row.employeeId}|${row.date}`));
+    const effectiveArchive = archive.filter(row => !liveKeys.has(`${row.employeeId}|${row.date}`));
+    const keys = new Set(effectiveArchive.map(row => `${row.employeeId}|${row.date}`));
+    return [...events.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...effectiveArchive.flatMap(eventsForProjectSegments)];
+  }
+
+  async function closedMonthFor(employeeId, date) {
+    const closures = await readJson(MONTH_CLOSURES, []);
+    return closures.find(row => row.month === String(date).slice(0,7) && String(row.employeeId) === String(employeeId)) || null;
+  }
+
+  async function saveProjectSegments({employeeId,employeeName,date,segments,source}) {
+    const archive = await readJson(PROJECT_TIME_ARCHIVE, []);
+    let row = archive.find(item => String(item.employeeId) === String(employeeId) && item.date === date);
+    const now = new Date().toISOString();
+    if (!row) { row = {id:`project_time_${employeeId}_${date}`,employeeId,employeeName,date,archivedAt:now,segments:[]}; archive.push(row); }
+    row.history = [...(row.history || []), {at:now,source,before:row.segments,after:segments}].slice(-100);
+    Object.assign(row,{employeeName,segments,updatedAt:now,source});
+    await writeJson(PROJECT_TIME_ARCHIVE, archive);
+    return row;
   }
 
   async function migrateHistoricalReleasedTime() {
-    const [releases,corrections,states]=await Promise.all([
-      readJson(DAY_RELEASES,[]),readJson(DAY_CORRECTIONS,[]),readJson(STATES,{})
+    const [releases,corrections,states,closures] = await Promise.all([
+      readJson(DAY_RELEASES,[]),readJson(DAY_CORRECTIONS,[]),readJson(STATES,{}),readJson(MONTH_CLOSURES,[])
     ]);
-    let events=await readJson(TIME_EVENTS,[]);
-    const releasedRows=(releases || []).filter(row=>row?.released===true && row.employeeId && row.date);
-    for(const release of releasedRows){
-      const employeeId=String(release.employeeId),date=String(release.date);
-      const currentSegments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
-      const correction=corrections.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
-      await archiveReleasedProjectTime({release,segments:segmentsAtRelease({release,correction,currentSegments}),source:"historical_backfill"});
-      events=events.map(event=>{
-        if(String(event.employeeId)!==employeeId||String(event.date)!==date)return event;
-        const detail=unproductiveDetails(event),operationalUp=event.type==="up"&&!detail.category;
-        return normalizeOfficeTimeRow({...event,type:operationalUp?"start":event.type,jobId:null,jobName:"",activityMode:operationalUp||["start","weiter"].includes(event.type)?"productive":event.type==="up"?"unproductive":event.activityMode||"boundary",...(event.type==="up"&&detail.category?{unproductiveCategory:detail.category,unproductiveCode:detail.code}:{}),detachedFromProject:true});
+    let events = await readJson(TIME_EVENTS,[]);
+    const originalEvents = events;
+    let changed = false;
+    for (const release of releases.filter(row => row?.released === true && row.employeeId && row.date)) {
+      const employeeId = String(release.employeeId), date = String(release.date);
+      if (closures.some(row => row.month === date.slice(0,7) && String(row.employeeId) === employeeId)) continue;
+      const currentSegments = buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+      const correction = corrections.find(row => String(row.employeeId) === employeeId && row.date === date);
+      const archived = await archiveReleasedProjectTime({release,segments:segmentsAtRelease({release,correction,currentSegments}),source:"historical_backfill"});
+      const dayEvents = events.filter(row => String(row.employeeId) === employeeId && row.date === date);
+      if (!dayEvents.some(row => row.detachedFromProject === true)) continue;
+      let segments = archived.segments || [];
+      // Keep later personal corrections; recover only the project assignments.
+      const editedAfter = (correction?.history || []).some(row => Date.parse(row.at) > Date.parse(release.releasedAt));
+      if (editedAfter) segments = currentSegments.map(segment => {
+        if (segment.type !== "work") return segment;
+        const match = (archived.segments || []).find(old => old.type === "work" &&
+          (old.id && old.id === segment.id || (minutesFromHM(old.from) <= minutesFromHM(segment.from) && minutesFromHM(old.to) > minutesFromHM(segment.from))));
+        return match ? {...segment,jobId:match.jobId,jobName:match.jobName} : segment;
       });
+      if (!segments.length) continue;
+      const replacement = eventsForProjectSegments({...release,segments});
+      events = [...events.filter(row => !(String(row.employeeId) === employeeId && row.date === date)), ...replacement];
+      await saveProjectSegments({employeeId,employeeName:release.employeeName,date,segments,source:"restore_shared_time"});
+      changed = true;
     }
-    if(releasedRows.length) await writeJson(TIME_EVENTS,events.slice(-20000));
+    if (changed) {
+      await fsp.writeFile(path.join(ROOT,"time-events-before-month-separation.json"),JSON.stringify(originalEvents,null,2),{encoding:"utf8",flag:"wx"}).catch(error => {if(error.code !== "EEXIST") throw error});
+      await writeJson(TIME_EVENTS,events);
+    }
   }
 
   function entryMinutes(entry) {
@@ -2410,12 +2486,14 @@ const open = taskId
     }
   });
 
-  app.put("/kristine/api/day-release/:employeeId/:date", async (req, res) => {
+  app.put("/kristine/api/day-release/:employeeId/:date", serializedTimeMutation(async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    await startupReady;
     try {
       const employeeId=String(req.params.employeeId||"").trim();
       const date=String(req.params.date||localDateISO()).slice(0,10);
       if(!employeeId||!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ok:false,error:"Mitarbeiter oder Datum fehlt."});
+      if (await closedMonthFor(employeeId,date)) return res.status(409).json({ok:false,error:"Der Monat ist bereits abgeschlossen."});
       const checks=req.body?.checks&&typeof req.body.checks==="object"?req.body.checks:{};
       const required=["times","regie","close","diet","fl","ch"];
       if(required.some(key=>checks[key]!==true)) return res.status(400).json({ok:false,error:"Bitte alle Kontrollpunkte bestätigen."});
@@ -2446,20 +2524,16 @@ const open = taskId
         employeeIdentityKey:fink?`fink:${fink}`:`legacy:${String(master.id||master.employeeId||employeeId)}`,
         checks:{...checks},reviewer,note,released:true,returned:false,returnedAt:null,returnedBy:"",returnedReason:"",releasedAt:now,updatedAt:now
       });
-      const [events,states,corrections]=await Promise.all([
-        readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_CORRECTIONS,[])
-      ]);
+      const [events,states]=await Promise.all([readJson(TIME_EVENTS,[]),readJson(STATES,{})]);
       const currentSegments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
-      const correction=corrections.find(row=>String(row.employeeId)===employeeId&&String(row.date)===date);
-      const projectSegments=segmentsAtRelease({release,correction,currentSegments});
-      await archiveReleasedProjectTime({release,segments:projectSegments});
-      await detachReleasedEmployeeTime({employeeId:release.employeeId,employeeName:release.employeeName,date,segments:projectSegments,allEvents:events});
+      await saveProjectSegments({employeeId:release.employeeId,employeeName:release.employeeName,date,segments:currentSegments,source:"day_release_shared"});
+      await writeJson(TIME_EVENTS,events);
       await writeJson(DAY_RELEASES,releases);
       res.json({ok:true,release});
     } catch(error) {
       res.status(500).json({ok:false,error:String(error?.message||error)});
     }
-  });
+  }));
 
   function dayControlReleaseForEmployee(releases, employee, date) {
     const employeeId=String(employee?.id||employee?.employeeId||"").trim();
@@ -2649,11 +2723,12 @@ const open = taskId
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
 
-  app.post("/kristine/api/day-control/:date/return", async (req,res)=>{
+  app.post("/kristine/api/day-control/:date/return", serializedTimeMutation(async (req,res)=>{
     if(!requireAdmin(req,res))return;
     try{
       const date=String(req.params.date||localDateISO()).slice(0,10);
       const employeeId=String(req.body?.employeeId||"").trim();
+      if (await closedMonthFor(employeeId,date)) return res.status(409).json({ok:false,error:"Der Monat ist bereits abgeschlossen."});
       const reason=String(req.body?.reason||"Bitte Tageszeiten nochmals prüfen.").trim().slice(0,300);
       const returnedBy=String(req.body?.returnedBy||"Bettina / Büro").trim().slice(0,120);
       if(!employeeId||!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({ok:false,error:"Mitarbeiter oder Datum fehlt."});
@@ -2672,23 +2747,29 @@ const open = taskId
       await Promise.all([writeJson(DAY_RELEASES,releases),writeJson(DAY_CONTROLS,controls)]);
       res.json({ok:true,release,control});
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
-  });
+  }));
 
   app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    await startupReady;
     try {
       const employeeId = String(req.params.employeeId || "");
       const date = String(req.params.date || localDateISO()).slice(0, 10);
       const [events, states, corrections, releases] = await Promise.all([
         readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(DAY_CORRECTIONS, []), readJson(DAY_RELEASES, []),
       ]);
-      const segments = buildEditableSegments(events, employeeId, date, states[employeeId] || {});
+      const closed = await closedMonthFor(employeeId,date);
+      const archive = req.query?.scope === "project" ? await readJson(PROJECT_TIME_ARCHIVE,[]) : [];
+      const project = archive.find(row => String(row.employeeId) === employeeId && row.date === date);
+      const segments = project && (closed || !events.some(row => String(row.employeeId) === employeeId && row.date === date && row.jobId)) ? project.segments : closed ? (closed.days.find(row => row.date === date)?.segments || []) : buildEditableSegments(events, employeeId, date, states[employeeId] || {});
       const correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date) || null;
       const release = releases.find(row => row?.released === true && String(row.employeeId) === employeeId && String(row.date) === date) || null;
       res.json({
         ok: true,
         released:Boolean(release&&release.returned!==true),
-        timeSeparated:Boolean(release),
+        timeSeparated:Boolean(closed),
+        monthClosed:Boolean(closed),
+        closedAt:closed?.closedAt || null,
         releasedAt:release?.releasedAt || null,
         segments,
         originalSegments: correction?.originalSegments || segments,
@@ -2705,10 +2786,79 @@ const open = taskId
     }
   });
 
+  app.get("/kristine/api/month-closures", async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    const closures = await readJson(MONTH_CLOSURES,[]);
+    res.json({ok:true,closures:closures.filter(row => !req.query?.month || row.month === req.query.month)});
+  });
+
+  app.post("/kristine/api/month-close", serializedTimeMutation(async (req,res) => {
+    if (!requireAdmin(req,res)) return;
+    await startupReady;
+    try {
+      const month = String(req.body?.month || "");
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ok:false,error:"Monat prüfen."});
+      const from = `${month}-01`, end = new Date(`${from}T12:00:00Z`);
+      end.setUTCMonth(end.getUTCMonth()+1,0);
+      const to = end.toISOString().slice(0,10);
+      if (to >= localDateISO()) return res.status(400).json({ok:false,error:"Nur vollständig vergangene Monate können abgeschlossen werden."});
+      const people = Array.isArray(req.body?.people) ? req.body.people : [];
+      if (!people.length) return res.status(400).json({ok:false,error:"Mindestens einen Mitarbeiter auswählen."});
+      const [closures,events,states,releases,employees,assignments] = await Promise.all([
+        readJson(MONTH_CLOSURES,[]),readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_RELEASES,[]),
+        typeof readEmployees === "function" ? readEmployees() : [],readJson(ASSIGNMENTS,[])
+      ]);
+      const created = [], pendingProjects = [];
+      for (const person of people) {
+        const employeeId = String(person.employeeId || "");
+        const employee = employees.find(row => String(row.id || row.employeeId) === employeeId);
+        if (!employee) return res.status(400).json({ok:false,error:"Mitarbeiter nicht gefunden."});
+        if (closures.some(row => row.month === month && row.employeeId === employeeId) || created.some(row => row.employeeId === employeeId)) continue;
+        const days = [];
+        for (let d = new Date(`${from}T12:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate()+1)) {
+          const date = d.toISOString().slice(0,10);
+          const segments = buildEditableSegments(events,employeeId,date,states[employeeId] || {});
+          if (segments.length && (!dayControlReleaseForEmployee(releases,employee,date)?.released || dayControlReleaseForEmployee(releases,employee,date)?.returned)) {
+            return res.status(409).json({ok:false,error:`${employee.name || employeeId}: ${date} ist noch nicht freigegeben.`});
+          }
+          if (segments.some(row => !row.to || minutesFromHM(row.to) <= minutesFromHM(row.from))) return res.status(409).json({ok:false,error:`${employee.name || employeeId}: ${date} enthält offene oder ungültige Zeiten.`});
+          const employeeName = String(employee.name || employeeId);
+          pendingProjects.push({employeeId,employeeName,date,segments,source:"month_close"});
+          const frozenEvents = eventsForEmployeeSegments({employeeId,employeeName,date,segments});
+          days.push({employeeId,date,events:frozenEvents,segments:buildEditableSegments(frozenEvents,employeeId,date,{})});
+        }
+        const reportDays = Array.isArray(person.days) ? person.days : [];
+        const reportedByDate = new Map(reportDays.map(row => [row.date,row]));
+        if (reportDays.length !== days.length || reportedByDate.size !== days.length || days.some(day => !reportedByDate.has(day.date))) {
+          return res.status(400).json({ok:false,error:"Die vollständige Monatsübersicht zuerst neu aufbauen."});
+        }
+        for (const day of days) {
+          const actual = day.segments.filter(row => ["work","up"].includes(row.type)).reduce((sum,row) => sum + minutesFromHM(row.to) - minutesFromHM(row.from),0);
+          const reportedActual = Number(reportedByDate.get(day.date).actualMinutes);
+          const release = dayControlReleaseForEmployee(releases,employee,day.date);
+          const paidAbsence = actual === 0 && reportedActual > 0 && employeeAbsenceForDay(assignments,employee,day.date) && release?.released && !release.returned;
+          if (!Number.isFinite(reportedActual) || reportedActual < 0 || (reportedActual !== actual && !paidAbsence)) {
+            return res.status(409).json({ok:false,error:`${employee.name || employeeId}: Die Zeiten am ${day.date} wurden geändert. Monatsübersicht neu aufbauen.`});
+          }
+        }
+        const reportedTotal = reportDays.reduce((sum,row) => sum + Number(row.actualMinutes || 0),0);
+        if (!Number.isFinite(reportedTotal) || Number(person.totals?.actualMinutes) !== reportedTotal) return res.status(400).json({ok:false,error:"Die Monatssumme stimmt nicht. Monatsübersicht neu aufbauen."});
+        created.push({month,employeeId,employeeName:employee.name || employeeId,from,to,closedAt:new Date().toISOString(),days,report:person});
+      }
+      // Validate all employees first. Failed closing never closes a partial selection.
+      for (const row of pendingProjects) await saveProjectSegments(row);
+      await writeJson(MONTH_CLOSURES,[...closures,...created]);
+      await writeJson(TIME_EVENTS,events);
+      res.json({ok:true,month,closures:[...closures,...created].filter(row => row.month === month)});
+    } catch(error) {res.status(500).json({ok:false,error:String(error?.message || error)});}
+  }));
+
   app.post("/kristine/api/monthly-report.pdf", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const people = Array.isArray(req.body?.people) ? req.body.people : [];
+      const closures = await readJson(MONTH_CLOSURES,[]);
+      const people = (Array.isArray(req.body?.people) ? req.body.people : []).map(person =>
+        closures.find(row => row.employeeId === String(person.employeeId) && row.from === req.body?.from && row.to === req.body?.to)?.report || person);
       if (!people.length) return res.status(400).json({ ok:false, error:"Mindestens einen Mitarbeiter auswählen." });
       const pdf = await createKriszeitMonthlyPdf({
         company: "Farben Krista GmbH & Co KG, 6820 Frastanz",
@@ -2978,12 +3128,16 @@ const open = taskId
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
 
-  app.put("/kristine/api/segments/:employeeId/:date", async (req, res) => {
+  app.put("/kristine/api/segments/:employeeId/:date", serializedTimeMutation(async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    await startupReady;
     try {
       const employeeId = String(req.params.employeeId || "").trim();
       const date = String(req.params.date || localDateISO()).slice(0, 10);
       const employeeName = String(req.body?.employeeName || employeeId).trim();
+      const closed = await closedMonthFor(employeeId,date);
+      const projectScope = req.query?.scope === "project" || req.body?.scope === "project";
+      if (closed && !projectScope) return res.status(409).json({ok:false,error:"Der Monat ist abgeschlossen. Änderungen sind nur noch in der Baustelle möglich."});
       const correctionReason = String(req.body?.reason || "").trim().slice(0, 160);
       const correctionNote = String(req.body?.note || "").trim().slice(0, 500);
       const correctedBy = String(req.body?.correctedBy || "Bettina / Büro").trim().slice(0, 120);
@@ -3017,11 +3171,15 @@ const open = taskId
         }
       }
 
-      const [allEvents, states, reviewEntries, corrections, releases] = await Promise.all([
-        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []), readJson(DAY_CORRECTIONS, []), readJson(DAY_RELEASES, []),
+      const [allEvents, states, reviewEntries, corrections] = await Promise.all([
+        readJson(TIME_EVENTS, []), readJson(STATES, {}), readJson(REVIEW_ENTRIES, []), readJson(DAY_CORRECTIONS, []),
       ]);
-      const oldSegments = buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
-      const released = releases.find(row => row?.released === true && String(row.employeeId) === employeeId && String(row.date) === date);
+      const projectArchive = closed ? await readJson(PROJECT_TIME_ARCHIVE,[]) : [];
+      const oldSegments = closed ? (projectArchive.find(row => String(row.employeeId) === employeeId && row.date === date)?.segments || []) : buildEditableSegments(allEvents, employeeId, date, states[employeeId] || {});
+      if (closed) {
+        const row = await saveProjectSegments({employeeId,employeeName,date,segments,source:"project_correction_after_month_close"});
+        return res.json({ok:true,segments,monthClosed:true,correction:{history:row.history},movedLinkedEntries:0});
+      }
       let correction = corrections.find(row => String(row.employeeId) === employeeId && String(row.date) === date);
       if (!correction) {
         correction = {
@@ -3050,11 +3208,7 @@ const open = taskId
       correction.history = correction.history.slice(-100);
       await writeJson(DAY_CORRECTIONS, corrections);
 
-      if(released) await archiveReleasedProjectTime({
-        release:released,
-        segments:segmentsAtRelease({release:released,correction,currentSegments:oldSegments}),
-        source:"historical_backfill",
-      });
+      await saveProjectSegments({employeeId,employeeName,date,segments,source:"shared_time_correction"});
 
       const retained = allEvents.filter((row) => !(String(row.employeeId) === employeeId && String(row.date) === date));
       const createdAt = new Date().toISOString();
@@ -3062,28 +3216,28 @@ const open = taskId
       for (const segment of segments) {
         replacement.push({
           employeeId, employeeName, date,
-          type: released ? employeeEventType(segment) : eventTypeForSegment(segment), at: segment.from,
-          jobId: released ? null : (segment.type === "work" ? segment.jobId : null),
-          jobName: released ? "" : (segment.type === "work" ? segment.jobName : ""),
+          type: eventTypeForSegment(segment), at: segment.from,
+          jobId: segment.type === "work" ? segment.jobId : null,
+          jobName: segment.type === "work" ? segment.jobName : "",
           reason: segment.type === "up" ? segment.reason : "",
-          activityMode:released ? employeeTimeKind(segment) : productiveKind(segment), detachedFromProject:Boolean(released),
-          ...(released && segment.type === "up" && unproductiveDetails(segment).category ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:segment.absenceType} : {}),
-          segmentId: segment.id, source: released ? "released_employee_time" : "office", manual: true, createdAt,
+          activityMode:productiveKind(segment), detachedFromProject:false,
+          ...(segment.type === "up" && unproductiveDetails(segment).category ? {unproductiveCategory:unproductiveDetails(segment).category,unproductiveCode:unproductiveDetails(segment).code,absenceType:segment.absenceType} : {}),
+          segmentId: segment.id, source: "office", manual: true, createdAt,
         });
       }
       const last = segments.at(-1);
       // WICHTIG: "Bis" leer = laufender Abschnitt. Speichern darf keinen Ende-Event erzeugen.
       if (last?.to) replacement.push({
         employeeId, employeeName, date, type: "ende", at: last.to,
-        jobId: released ? null : (last.type === "work" ? last.jobId : null),
-        jobName: released ? "" : (last.type === "work" ? last.jobName : ""),
-        activityMode:"boundary", detachedFromProject:Boolean(released),
-        source: released ? "released_employee_time" : "office", manual: true, createdAt,
+        jobId: last.type === "work" ? last.jobId : null,
+        jobName: last.type === "work" ? last.jobName : "",
+        activityMode:"boundary", detachedFromProject:false,
+        source: "office", manual: true, createdAt,
       });
       await writeJson(TIME_EVENTS, [...retained, ...replacement].slice(-20000));
 
       let moved = 0;
-      if (moveLinked && !released) {
+      if (moveLinked) {
         for (const entry of reviewEntries) {
           if (String(entry.employeeId) !== employeeId || String(entry.date) !== date) continue;
           const minute = entryMinutes(entry);
@@ -3105,7 +3259,7 @@ const open = taskId
       // Tagesreport ist nur eine Ansicht: nach Zeitblockänderungen immer neu erzeugen.
       const reportFile = path.join(ROOT, "reports", `Tagesreport_${date}.pdf`);
       await fsp.rm(reportFile, { force: true }).catch(() => {});
-      const affectedJobs = released ? new Set() : new Set([
+      const affectedJobs = new Set([
         ...oldSegments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
         ...segments.filter((segment) => segment.type === "work" && segment.jobId).map((segment) => String(segment.jobId)),
       ]);
@@ -3147,7 +3301,7 @@ const open = taskId
     } catch (error) {
       res.status(400).json({ ok: false, error: String(error?.message || error) });
     }
-  });
+  }));
 
   app.post("/kristine/api/manual-action", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -3364,13 +3518,13 @@ const open = taskId
     }
   });
 
-  // Bestehende freigegebene Tage beim Start einmalig sauber trennen.
+  // Restore the shared project assignment of previously detached, open months.
   // Das Promise bleibt nach außen verfügbar, damit geordnete Shutdowns und
   // Tests auf die tatsächlich abgeschlossene Startmigration warten können.
   const startupReady = new Promise(resolve => setImmediate(resolve))
     .then(() => migrateHistoricalReleasedTime())
     .catch(error => {
-      console.error("KRISZEIT historische Zeittrennung:", error);
+      console.error("KRISZEIT Wiederherstellung gemeinsamer Zeiten:", error);
     });
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.

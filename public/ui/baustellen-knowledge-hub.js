@@ -270,7 +270,7 @@ function groupRegieComparisonRows(rows = []) {
   function assignmentHours(a){const explicit=num(a?.hours??a?.plannedHours??a?.durationHours);if(explicit>0)return explicit;const f=hmMinutes(a?.from??a?.startTime),t=hmMinutes(a?.to??a?.endTime);return f!==null&&t!==null&&t>f?(t-f)/60:0}
   function plannedFor(id){const ids=new Set(window.BaustellenData.memberIds(jobById(id)));return assignmentRows().filter(a=>ids.has(assignmentJobId(a))).reduce((s,a)=>s+assignmentHours(a),0)}
   function futurePlanning(id){const today=new Date().toISOString().slice(0,10);return assignmentRows().filter(a=>assignmentJobId(a)===String(id)&&String(a.date||a.day||"").slice(0,10)>=today).sort((a,b)=>String(a.date||a.day||"").localeCompare(String(b.date||b.day||"")))}
-  function eventRows(id){const ids=new Set(window.BaustellenData.memberIds(jobById(id)));return (cache.bootstrap?.timeEvents||[]).filter(e=>ids.has(String(e.jobId||""))).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(b.at||"").localeCompare(String(a.at||"")))}
+  function eventRows(id){const ids=new Set(window.BaustellenData.memberIds(jobById(id)));return (cache.bootstrap?.projectTimeEvents||cache.bootstrap?.timeEvents||[]).filter(e=>ids.has(String(e.jobId||""))).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(b.at||"").localeCompare(String(a.at||"")))}
   function eventLabel(type){return ({start:"Start",weiter:"Weiter / Wechsel",pause:"Pause",mittag:"Mittag",ende:"Ende"})[type]||String(type||"Buchung")}
 
   let timeEdit={employeeId:"",employeeName:"",date:"",segments:[],originalCount:0};
@@ -318,7 +318,7 @@ function groupRegieComparisonRows(rows = []) {
     const dialog=ensureTimeDialog(),status=dialog.querySelector("#bkTimeStatus");
     timeEdit={employeeId:String(employeeId||""),employeeName:String(employeeName||employeeId||""),date:String(date||"").slice(0,10),segments:[],originalCount:0};
     dialog.showModal();status.textContent="Tagesbuchungen werden geladen …";
-    try{const result=await api(`/kristine/api/segments/${encodeURIComponent(timeEdit.employeeId)}/${encodeURIComponent(timeEdit.date)}`);timeEdit.segments=(result.segments||[]).map(row=>({...row}));timeEdit.originalCount=timeEdit.segments.length;renderTimeDialog()}catch(error){status.textContent="Laden nicht möglich: "+error.message}
+    try{const result=await api(`/kristine/api/segments/${encodeURIComponent(timeEdit.employeeId)}/${encodeURIComponent(timeEdit.date)}?scope=project`);timeEdit.segments=(result.segments||[]).map(row=>({...row}));timeEdit.originalCount=timeEdit.segments.length;renderTimeDialog()}catch(error){status.textContent="Laden nicht möglich: "+error.message}
   }
   function validTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value||""))}
   async function saveTimeCorrection(){
@@ -327,7 +327,7 @@ function groupRegieComparisonRows(rows = []) {
     if(timeEdit.segments.length<timeEdit.originalCount&&!confirm("Mindestens ein Zeitabschnitt wird gelöscht. Korrektur jetzt speichern?"))return;
     button.disabled=true;status.textContent="Korrektur wird gespeichert …";
     try{
-      const result=await api(`/kristine/api/segments/${encodeURIComponent(timeEdit.employeeId)}/${encodeURIComponent(timeEdit.date)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeName:timeEdit.employeeName,segments:timeEdit.segments,reason:"Korrektur in der Baustellenakte",correctedBy:"Büro",moveLinked:true})});
+      const result=await api(`/kristine/api/segments/${encodeURIComponent(timeEdit.employeeId)}/${encodeURIComponent(timeEdit.date)}?scope=project`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeName:timeEdit.employeeName,segments:timeEdit.segments,reason:"Korrektur in der Baustellenakte",correctedBy:"Büro",moveLinked:true})});
       timeEdit.segments=(result.segments||[]).map(row=>({...row}));timeEdit.originalCount=timeEdit.segments.length;renderTimeDialog();dialog.querySelector("#bkTimeStatus").textContent=`✓ Gespeichert${result.movedLinkedEntries?` · ${result.movedLinkedEntries} verknüpfte Einträge mit umgebucht`:""}`;
       const wantedJob=currentJobId;cache.bootstrap=null;await loadJob(wantedJob);selectTab("hours");
     }catch(error){status.textContent="Speichern nicht möglich: "+error.message}finally{button.disabled=false}
