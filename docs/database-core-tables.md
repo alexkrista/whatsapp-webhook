@@ -51,7 +51,7 @@ PGlite ist hier eine einzelne Sitzung. Echte parallele PostgreSQL-Verbindungen, 
 
 ## Ausstehende Blöcke
 
-Angebote/Aufträge, Ein-/Ausgangsrechnungen, Zahlungszuordnungen, Regie, Produkte/Preishistorie, Bestellungen/Lager, Aufgaben/Kommunikation, weitere Importziele, Kontaktpersonen und Reconciliation-Tabellen folgen. Auch Modellzeitraum-Überlappungen, Tagesprüfungen, interne UP-/Büro-Codes und konkrete Quellfeld-Abbildungen sind noch mit den vorhandenen Daten zu vervollständigen. Das Schema ist keine vollständige Ablöse aller bisherigen JSON-Felder.
+Angebote/Aufträge, Ein-/Ausgangsrechnungen, Zahlungszuordnungen, Regie, Produkte/Preishistorie und Bestellungen/Lager sind inzwischen im [zweiten Block](database-business-tables.md) umgesetzt; insgesamt bestehen 64 Fachtabellen. Aufgaben/Kommunikation, weitere Importziele, Kontaktpersonen und Reconciliation-Tabellen folgen. Auch Modellzeitraum-Überlappungen, Tagesprüfungen, interne UP-/Büro-Codes und konkrete Quellfeld-Abbildungen sind noch mit den vorhandenen Daten zu vervollständigen. Das Schema ist keine vollständige Ablöse aller bisherigen JSON-Felder.
 
 Migration 002 ist eigenständig in einer leeren Testdatenbank ausführbar. Beide Migrationen sind absichtlich explizit und atomar; eine zweite Ausführung scheitert, statt unbemerkt ein anderes Schema zu akzeptieren. Ein versionierter Migration-Runner mit Prüfsummen und Datenbankidentitätsprüfung ist vor dem produktiven Betrieb erforderlich.
 
