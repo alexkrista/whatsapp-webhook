@@ -26,7 +26,7 @@ test('PostgreSQL core schema and integrity', async t => {
     const project = (await q("INSERT INTO kristine.projects(company_id,project_number,name,status) VALUES ($1,'00023','Büro',2) RETURNING id",[a])).rows[0].id;
     const foreignProject = (await q("INSERT INTO kristine.projects(company_id,project_number,name,status) VALUES ($1,'00023','Foreign',2) RETURNING id",[b])).rows[0].id;
     const s = (await q("INSERT INTO kristine.time_segments(company_id,employee_id,project_id,work_date,activity_code,origin,payroll_minutes,productive_minutes,break_minutes,rule_version) VALUES ($1,$2,$3,'2026-10-06','work','manual',468,450,15,'existing-v1') RETURNING id",[a,e,project])).rows[0].id;
-    const makeClose = async () => (await q("INSERT INTO kristine.payroll_month_closes(company_id,employee_id,month_start,employee_name_snapshot,rule_version,payroll_minutes,productive_minutes,break_minutes) VALUES ($1,$2,'2026-10-01','Test','existing-v1',468,450,15) RETURNING id",[a,e])).rows[0].id;
+    const makeClose = async () => (await q("INSERT INTO kristine.payroll_month_closes(company_id,employee_id,month_start,employee_name_snapshot,rule_version,calculation_rules_snapshot,payroll_minutes,productive_minutes,break_minutes) VALUES ($1,$2,'2026-10-01','Test','existing-v1','{\"fixture\":\"existing-v1\"}',468,450,15) RETURNING id",[a,e])).rows[0].id;
     const copySnapshot = async close => q("INSERT INTO kristine.payroll_snapshot_segments(company_id,employee_id,close_id,source_segment_id,source_revision,work_date,activity_code,project_number_snapshot,project_name_snapshot,starts_at,ends_at,payroll_minutes,productive_minutes,break_minutes,rule_version) SELECT s.company_id,s.employee_id,$1,s.id,s.revision,s.work_date,s.activity_code,p.project_number,p.name,s.starts_at,s.ends_at,s.payroll_minutes,s.productive_minutes,s.break_minutes,s.rule_version FROM kristine.time_segments s LEFT JOIN kristine.projects p ON p.id=s.project_id WHERE s.id=$2",[close,s]);
     const finish = close => q("UPDATE kristine.payroll_month_closes SET status='closed',closed_at=clock_timestamp(),closed_by='test' WHERE id=$1",[close]);
     const isolated = async (name,fn) => t.test(name, async () => { await q('BEGIN'); try { await fn(); } finally { await q('ROLLBACK'); } });
@@ -92,7 +92,7 @@ test('PostgreSQL core schema and integrity', async t => {
     });
     await isolated('month keys and direct closed inserts are rejected', async () => {
       await rejectsSQL("INSERT INTO kristine.time_month_locks VALUES ($1,$2,'2026-10-06')",[a,e]);
-      await rejectsSQL("INSERT INTO kristine.payroll_month_closes(company_id,employee_id,month_start,status,employee_name_snapshot,rule_version,payroll_minutes,productive_minutes,break_minutes,closed_at,closed_by) VALUES ($1,$2,'2026-10-01','closed','Test','v1',0,0,0,clock_timestamp(),'test')",[a,e],/inserted as draft/);
+      await rejectsSQL("INSERT INTO kristine.payroll_month_closes(company_id,employee_id,month_start,status,employee_name_snapshot,rule_version,calculation_rules_snapshot,payroll_minutes,productive_minutes,break_minutes,closed_at,closed_by) VALUES ($1,$2,'2026-10-01','closed','Test','v1','{}',0,0,0,clock_timestamp(),'test')",[a,e],/inserted as draft/);
     });
     await isolated('time event history cannot be rewritten', async () => {
       await q("INSERT INTO kristine.time_events(company_id,employee_id,work_date,event_type,origin,rule_version) VALUES ($1,$2,'2026-10-06','start','kgo','v1')",[a,e]);
