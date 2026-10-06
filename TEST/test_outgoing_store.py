@@ -464,6 +464,17 @@ class OutgoingStoreTests(unittest.TestCase):
         self.assertEqual(run["paidGross"], 10500.0)
         self.assertEqual(run["currentOpen"], 1500.0)
         self.assertEqual(run["payments"][0]["paymentDate"], "2026-08-10")
+        payment_id = run["payments"][0]["id"]
+        self.store.reverse_payment(payment_id)
+        self.store.sync_ww_project_history([row])
+        self.assertEqual(self.store.run(result["runId"])["paidGross"], 0)
+        row["paidGross"] = "0"
+        self.store.sync_ww_project_history([row])
+        with self.store.connect() as con:
+            payment = con.execute("SELECT * FROM outgoing_payments WHERE id=?", (payment_id,)).fetchone()
+            self.assertIsNotNone(payment)
+            self.assertTrue(payment["reversed_at"])
+
 
 
 if __name__ == "__main__":

@@ -1828,9 +1828,10 @@ class OutgoingStore:
 
                 payment_source_id = f"HISTORY:{source_id}"
                 existing_payment = con.execute(
-                    "SELECT id FROM outgoing_payments WHERE source='WW' AND source_id=?", (payment_source_id,)
+                    "SELECT id,reversed_at FROM outgoing_payments WHERE source='WW' AND source_id=?", (payment_source_id,)
                 ).fetchone()
-                if paid_gross > 0:
+                reversed_import = bool(existing_payment and existing_payment["reversed_at"])
+                if paid_gross > 0 and not reversed_import:
                     if existing_payment:
                         con.execute("""
                             UPDATE outgoing_payments SET run_id=?,invoice_id=?,payment_date=?,net=?,vat=?,gross=?,
@@ -1845,7 +1846,7 @@ class OutgoingStore:
                         """, (run_id, invoice_id, payment_date, str(paid_net), str(paid_vat), str(paid_gross),
                               f"In WinWorker bereits verbucht · Rechnung {number}", payment_source_id, now))
                     payment_count += 1
-                elif existing_payment:
+                elif existing_payment and not reversed_import:
                     con.execute("DELETE FROM outgoing_payments WHERE id=?", (int(existing_payment["id"]),))
 
                 try:
