@@ -85,6 +85,8 @@ def install(ns):
     _home_nav_install(ns)
     _op_tools_install(ns)
     _outgoing_invoices_install(ns)
+    from brain_outgoing_book import install as _outgoing_book_install
+    _outgoing_book_install(ns)
     _tower_billing_snapshot_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
     _header_dedup_install(ns)
