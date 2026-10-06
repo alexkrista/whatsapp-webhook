@@ -70,3 +70,10 @@ PDFs, Fotos und andere Binärdateien bleiben zunächst in der bestehenden Dateia
 Migration 003 ergänzt 32 weitere Tabellen für Angebote, Aufträge, Rechnungen, Konten/Zahlungszuordnungen, Regie, Material, Einkauf und Lager. Insgesamt 64 normalisierte Fachtabellen. Einzelheiten und verbleibende Altbestandsfälle: [database-business-tables.md](database-business-tables.md).
 
 17 neue und elf Kern-Szenarien gegen eingebettetes PostgreSQL grün (Node: 30 Tests inklusive übergeordneter Tests). Der erste Monatsabschluss-Schutz bleibt unverändert. Die frühere Liste ausstehender weiterer Fachbereiche ist für diese nun implementierten Bereiche überholt; fachliche Dienste, Quellimport, historische OP-Übernahme, Rollen und echte Mehrverbindungs-/Render-Tests bleiben offen. Kein Live-Rollout.
+
+
+## Implementierter Tabellenblock: Personen, Aufgaben und Kommunikation
+
+Migration 004 ergänzt 28 Fachtabellen für Ansprechpartner, Mitarbeiterprofile und Beschäftigungshistorie, Personaldokumente, Aufgaben samt Revisionen, Nachrichten samt Originalen und Anlagen sowie Kundenwünsche. Insgesamt sind 92 Fachtabellen definiert. Firmenbezogene Fremdschlüssel und Herkunftszuordnungen bleiben erhalten. Interner Aufgabenabschluss und Kundenbestätigung sind getrennte Ereignisse. Details und noch offene Dienste: [Personen und Kommunikation](database-people-communications.md).
+
+37 PostgreSQL-Schematests bestanden. Die Migrationen sind noch nicht auf der Live-Datenbank ausgeführt; Importer, Anwendungseinbindung und Tests mit mehreren Render-Verbindungen stehen aus.
