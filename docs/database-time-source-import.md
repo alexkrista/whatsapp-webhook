@@ -11,3 +11,9 @@ Auch vollständig identische Stempelzeilen werden erhalten: Quellen-ID aus Zeile
 Die beiden vollständigen Originaldateien sowie Tagesabschlüsse, Tageskorrekturen, Freigaben und Prüfeinträge werden als exakte Quellen mit Hash archiviert. Die vier ergänzenden Quellen werden in diesem Schritt noch nicht normalisiert. Vorher werden alle sechs Dateien auf dem persistenten Disk gesichert. Alle Datensätze, Zuordnungen und Blockfelder werden in einer Transaktion geprüft. Schemaänderung und Datenimport sind getrennte Transaktionen.
 
 Die Anwendung bleibt auf JSON. Vor Umschaltung müssen der aktuelle Berechnungsweg, Korrekturvorrang, Archivvorrang und bestehende Lohnabschlüsse abgeglichen werden. Regieberichte und finanzielle Daten sind nicht Teil dieses Imports.
+
+## Live-Import am 06.10.2026
+
+Migration 009 angewendet; insgesamt 98 Tabellen. Verifiziert importiert: 1.651 Stempelereignisse, 396 Archivtage, 716 Archivblöcke. 109 Ereignisse und 38 Blöcke tragen Prüfvermerke zu Herkunft oder Baustellenzuordnung; darunter 2 Arbeitsblöcke ohne Endzeit. Sämtliche Mitarbeiterreferenzen wurden über bestehende Quellen-IDs aufgelöst. Alle sechs Originaldateien exakt gesichert und nach Import unverändert bestätigt.
+
+44 Datenbanktests bestanden. Wiederholung, geänderte Quelle, ungültige Mitarbeiter-/Firmenzuordnung, identische doppelte Stempel und offene Endzeiten getestet. Stempel und Archiv werden getrennt gespeichert; keine Lohnsegmente oder Monatsabschlüsse erzeugt. Vier Tageszusatzquellen sind vollständig archiviert, ihre Normalisierung und die spätere Berechnungsumstellung bleiben offen. Regieberichte noch nicht importiert.
