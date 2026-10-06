@@ -57,6 +57,27 @@ class OutgoingStoreTests(unittest.TestCase):
             "lines": [{"description": "Arbeiten", "quantity": 1, "unit": "PA", "unitPrice": amount}],
         }
 
+    def test_delete_sr_draft_allows_tr_and_retains_audit(self):
+        draft = self.store.save_draft(self.payload(kind="SR"))
+        result = self.store.delete_draft(draft["id"])
+        self.assertEqual(result["runId"], self.run["id"])
+        with self.assertRaisesRegex(ValueError, "nicht gefunden"):
+            self.store.invoice(draft["id"])
+        with self.store.connect() as con:
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM outgoing_lines WHERE invoice_id=?", (draft["id"],)).fetchone()[0], 0)
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM outgoing_audit WHERE action='delete_draft'").fetchone()[0], 1)
+        self.assertEqual(self.store.save_draft(self.payload(kind="TR"))["kind"], "TR")
+
+    def test_delete_rejects_issued_invoice_and_revision(self):
+        draft = self.store.save_draft(self.payload())
+        issued = self.store.prepare_issue(draft["id"])
+        with self.assertRaisesRegex(ValueError, "nicht ausgestellter"):
+            self.store.delete_draft(draft["id"])
+        self.store.begin_revision(draft["id"])
+        with self.assertRaisesRegex(ValueError, "nicht ausgestellter"):
+            self.store.delete_draft(draft["id"])
+        self.assertEqual(self.store.invoice(draft["id"])["invoice_number"], issued["invoice_number"])
+
     def test_multiple_independent_runs_per_project(self):
         second = self.store.create_run({
             "projectIndex": 2602119, "projectNumber": "26025", "label": "Zusatzauftrag",

@@ -1531,6 +1531,25 @@ class OutgoingStore:
             con.commit()
         return {"run": self.run(new_run["id"]), "invoice": self.invoice(copied["id"], live=True)}
 
+    def delete_draft(self, invoice_id):
+        """Delete an unissued draft, retaining its contents in the audit trail."""
+        with _LOCK, self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (int(invoice_id),)).fetchone()
+            if not row:
+                raise ValueError("Rechnung nicht gefunden.")
+            if row["status"] != "draft" or row["invoice_number"] or row["issued_at"] or row["source"] == "WW":
+                raise ValueError("Nur ein noch nicht ausgestellter Entwurf kann gelöscht werden.")
+            if con.execute("SELECT 1 FROM outgoing_revisions WHERE invoice_id=?", (int(invoice_id),)).fetchone():
+                raise ValueError("Eine bereits ausgestellte Rechnung kann nicht gelöscht werden.")
+            if con.execute("SELECT 1 FROM outgoing_payments WHERE invoice_id=?", (int(invoice_id),)).fetchone():
+                raise ValueError("Dem Entwurf sind Zahlungen zugeordnet; er kann nicht gelöscht werden.")
+            run_id = int(row["run_id"])
+            self._audit(con, "invoice", int(invoice_id), "delete_draft", self._invoice_public(con, row, live=False))
+            con.execute("DELETE FROM outgoing_invoices WHERE id=?", (int(invoice_id),))
+            con.commit()
+        return {"deletedInvoiceId": int(invoice_id), "runId": run_id}
+
     def invoice(self, invoice_id, live=False):
         with self.connect() as con:
             row = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (int(invoice_id),)).fetchone()
