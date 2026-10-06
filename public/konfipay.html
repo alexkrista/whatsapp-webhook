@@ -593,8 +593,8 @@ function renderAssignment(data){
  aNode('p',(tx.name||'Ohne Namen')+' · '+aMoney(tx.amount,tx.currency)+' · '+bankDate(tx.bookingDate),assignmentDialog);
  aNode('p',tx.purpose||tx.bookingText||'',assignmentDialog).className='assignment-note';
  const error=aNode('p','',assignmentDialog);error.className='assignment-error';
- if(data.assigned){
-  aNode('p','🟢 Zugeordnet',assignmentDialog);
+ if(data.assigned||data.partial){
+  aNode('p',data.partial?'🟡 Teilzugeordnet: '+aMoney(data.allocated,tx.currency)+' · Rest '+aMoney(data.remaining,tx.currency):'🟢 Zugeordnet',assignmentDialog);
   for(const line of data.lines){const box=aNode('div',null,assignmentDialog);box.className='assignment-line';aNode('strong',line.label,box);
    aNode('p','Zugeordnet: '+aMoney(line.paid,tx.currency)+(line.category==='invoice'?' · Noch offen in der OP: '+aMoney(line.open,tx.currency):''),box);
    if(line.reason)aNode('p',line.reason,box);
@@ -612,17 +612,17 @@ function renderAssignment(data){
   }
   if(data.frequency&&data.frequency!=='none')aNode('p','Wiederholung: '+(data.frequencyLabel||data.frequency)+(data.scheduleDates?.length?' · '+data.scheduleDates.map(bankDate).join(' / '):''),assignmentDialog);
   if(data.note)aNode('p',data.note,assignmentDialog);
-  aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());return;
+  if(data.assigned){aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());return;}
  }
  const search=aInput(assignmentDialog,'Rechnung suchen – Name oder Rechnungsnummer');search.placeholder='z. B. Müller oder 2026-123';
  const list=aNode('div',null,assignmentDialog);const rows=[];
  const total=aNode('p','',assignmentDialog);total.className='assignment-note';
- function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=Math.abs(aCents(String(tx.amount).replace(/^[-+]/,'')))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
+ function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=aCents(data.remaining??String(tx.amount).replace(/^[-+]/,''))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
  function addLine(){
   const box=aNode('div',null,list);box.className='assignment-line';const grid=aNode('div',null,box);grid.className='assignment-grid';const left=aNode('div',null,grid),right=aNode('div',null,grid);
   const category=aSelect(left,'Zuordnung',[['invoice','Rechnung'],['electricity','Strom'],['municipality','Wasser / Kanal / Müll Gemeinde'],['heating','Heizung'],['rent','Miete'],['vehicle_insurance','KFZ Versicherung'],['vehicle_leasing','KFZ Leasing'],['bike_leasing','Bike Leasing'],['software','Software'],['liability_insurance','Haftpflicht Versicherung'],['bank_fee','Bankgebühren'],['interest','Zinsen'],['wage','Löhne'],['telephone','Telefon'],['renovation_installment','1 · Rate Sanierung'],['internal_revolut','Umbuchung · Revolut'],['internal_revolut_old','Umbuchung · Revolut alt'],['internal_aircash','Umbuchung · Aircash'],['internal_cash','Umbuchung · Kassa'],['alex_private','Alex Privat'],['tax','Steuer'],['other','+ Neue Kostenart']]);
   const select=aSelect(left,'Rechnung',[['','Bitte Rechnung auswählen']]);
-  const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(tx.amount).replace(/^[-+]/,'');
+  const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(data.remaining??tx.amount).replace(/^[-+]/,'');
   const mode=aSelect(right,'Bei fehlendem Betrag',[['partial','Teilzahlung – Rest offen'],['discount','Skonto – Alex prüft'],['deduction','Abzug – Alex prüft']]);
   const info=aNode('p','',box);info.className='assignment-note';const reason=aInput(box,'Hinweis (bei „Neue Kostenart“: Bezeichnung)');
   const row={box,category,select,paid,mode,reason};rows.push(row);
@@ -638,13 +638,13 @@ function renderAssignment(data){
  const actions=aNode('div',null,assignmentDialog);actions.className='assignment-actions';
  const save=aButton('Zuordnung speichern',actions,async()=>{
   error.textContent='';const lines=rows.map(r=>{const [source='',target='']=r.select.value.split('|');return {category:r.category.value,source,target,amount:r.paid.value.replace(',','.'),mode:r.mode.value,reason:r.reason.value};});
-  save.disabled=true;try{const result=await api('assignment-save',{rid:tx.rId,lines,note:note.value,frequency:frequency.value});renderAssignment(result);await refreshAssignmentButtons();}catch(e){error.textContent=e.message;save.disabled=false;}
+  save.disabled=true;try{const result=await api('assignment-save',{rid:tx.rId,lines,expectedAllocated:data.allocated||'0.00',note:note.value,frequency:frequency.value});renderAssignment(result);await refreshAssignmentButtons();}catch(e){error.textContent=e.message;save.disabled=false;}
  });aButton('Abbrechen',actions,()=>assignmentDialog.close());
 }
 async function refreshAssignmentButtons(){
  const buttons=[...document.querySelectorAll('[data-assignment-rid]')];if(!buttons.length)return;
  const data=await api('assignment-status',{ids:buttons.map(b=>b.dataset.assignmentRid)});
- for(const b of buttons){const assigned=data.statuses[b.dataset.assignmentRid];b.textContent=assigned?'🟢 Zugeordnet':'🟡 Nicht zugeordnet';b.className='assignment-status '+(assigned?'assigned':'unassigned');}
+ for(const b of buttons){const assigned=data.statuses[b.dataset.assignmentRid];const balance=data.balances?.[b.dataset.assignmentRid];b.textContent=assigned?'🟢 Zugeordnet':balance?.status==='partial'?'🟡 Teilzugeordnet · Rest '+aMoney(balance.remaining):'🟡 Nicht zugeordnet';b.className='assignment-status '+(assigned?'assigned':'unassigned');}
 }
 function assignmentCell(tr,item,pending){const td=cell(tr,'');if(pending){td.textContent='Vorgemerkt';return;}const b=aButton('Zuordnung laden …',td,()=>openAssignment(item.rId));b.dataset.assignmentRid=item.rId;b.className='assignment-status';}
 const reviewButton=aButton('Abzüge prüfen · Alex',$('banking'),async()=>{
