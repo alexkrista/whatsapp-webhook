@@ -35,11 +35,21 @@ async function reconcileMasterData(pool,{companyId,sourceInstanceId,contactsText
    if(!isDeepStrictEqual(actual,row))throw Error('Master projection readback failed');
    return {id,created:!prior.length};
   }
-  const result={runId,contactsVerified:0,contactVersionsCreated:0,projectsVerified:0,projectVersionsCreated:0,membersVerified:0,linksVerified:0,withReview:0,unresolvedContactLinks:0,withoutAddress:0};
+  const result={runId,contactsVerified:0,contactVersionsCreated:0,canonicalContactsCreated:0,projectsVerified:0,projectVersionsCreated:0,canonicalProjectsCreated:0,membersVerified:0,linksVerified:0,withReview:0,unresolvedContactLinks:0,withoutAddress:0};
   await source('master_reconciliation_file','_kristine/contact-master.json',contactsText);
   const versions=new Map();
   for(const r of contacts){
-   const {sid,vid}=await source('contact_group',r.id,r.originalText);const mapped=contactIds.get(r.id)||null;
+   const {sid,vid}=await source('contact_group',r.id,r.originalText);let mapped=contactIds.get(r.id)||null;
+   if(!mapped){
+    mapped=(await c.query('INSERT INTO kristine.contact_groups(company_id,display_name,phone,email,import_review_reasons) VALUES($1,$2,$3,$4,$5) RETURNING id',[companyId,r.name,r.phone,r.email,r.reasons])).rows[0].id;
+    await c.query('INSERT INTO kristine.external_references(company_id,source_record_id,contact_group_id) VALUES($1,$2,$3)',[companyId,sid,mapped]);
+    for(const m of r.members){
+     const party=(await c.query('INSERT INTO kristine.parties(company_id,kind,display_name,email,phone) VALUES($1,$2,$3,$4,$5) RETURNING id',[companyId,m.kind,m.name,m.email,m.phone])).rows[0].id;
+     await c.query('INSERT INTO kristine.contact_group_members(company_id,group_id,member_key,party_id) VALUES($1,$2,$3,$4)',[companyId,mapped,m.key,party]);
+     if(m.kind==='person')await c.query('INSERT INTO kristine.contact_people(company_id,person_party_id) VALUES($1,$2)',[companyId,party]);
+    }
+    contactIds.set(r.id,mapped);result.canonicalContactsCreated++;
+   }
    const reasons=[...r.reasons,...(mapped?[]:['contact_mapping_unresolved'])];
    const row={source_record_id:sid,source_version_id:vid,legacy_id:r.id,contact_group_id:mapped,display_name:r.name,phone:r.phone,email:r.email,import_review_reasons:reasons};row.projection_sha256=hash(JSON.stringify([row,r.members]));
    const saved=await projection('imported_contact_versions',row);
@@ -51,7 +61,12 @@ async function reconcileMasterData(pool,{companyId,sourceInstanceId,contactsText
    result.contactsVerified++;result.membersVerified+=members.length;if(saved.created)result.contactVersionsCreated++;if(reasons.length)result.withReview++;
   }
   for(const r of prepared){
-   const {sid,vid}=await source('project',r.externalId,r.originalText),address=prepareAddress(r.raw),mapped=projectIds.get(r.externalId)||null;
+   const {sid,vid}=await source('project',r.externalId,r.originalText),address=prepareAddress(r.raw);let mapped=projectIds.get(r.externalId)||null;
+   if(!mapped){
+    mapped=(await c.query('INSERT INTO kristine.projects(company_id,project_number,name,status,offer_outcome,import_review_reasons) VALUES($1,$2,$3,$4,$5,$6) RETURNING id',[companyId,r.externalId,r.name,r.status,r.offerOutcome,r.reasons])).rows[0].id;
+    await c.query('INSERT INTO kristine.external_references(company_id,source_record_id,project_id) VALUES($1,$2,$3)',[companyId,sid,mapped]);
+    projectIds.set(r.externalId,mapped);result.canonicalProjectsCreated++;
+   }
    const reasons=[...r.reasons,...(mapped?[]:['project_mapping_unresolved']),...(address?[]:['address_missing'])];if(!address)result.withoutAddress++;
    const [street,house_number,postal_code,city,address_extra]=address||[null,null,null,null,null];
    const row={source_record_id:sid,source_version_id:vid,legacy_id:r.externalId,project_id:mapped,name:r.name,status:r.status,offer_outcome:r.offerOutcome,street,house_number,postal_code,city,address_extra,country_original:text(r.raw.country),import_review_reasons:reasons};row.projection_sha256=hash(JSON.stringify(row));
