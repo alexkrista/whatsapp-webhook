@@ -12,7 +12,7 @@ async function fixture(t,withOffice=false,overrides={}){
  const app=express();app.use(express.json());const access=registerCustomerAccess(app,{dataDir:dir,publicDir:path.join(__dirname,"../public"),publicBaseUrl:"https://protokoll.krista.at",now:()=>time,
  requireAdmin:(req,res)=>{if(req.headers["x-test-admin"]==="yes")return true;res.sendStatus(401);return false},readJobMeta:async id=>metas[id]||{},writeJobMeta:async(id,patch)=>{Object.assign(metas[id],patch);write(id+"/.meta.json",metas[id]);},collectionMembers:async id=>id==="24177"?members:null,onCustomerOfferAccepted:async payload=>{acceptedOffers.push(payload);return overrides.onCustomerOfferAccepted?overrides.onCustomerOfferAccepted(payload):{created:true,schedule:{status:"requested",requestedDate:payload.acceptance.preferredDate}}},
  listDaysForJob:async()=>["2026-09-01"],regiePathForDay:(id,day)=>path.join(dir,id,day,"regie.json"),readInvoicePdf:async entry=>{await beforePdf?.();return Buffer.from("%PDF-invoice-"+entry.projectNumber);},sendPortalInvitation:async payload=>{portalInvitations.push(payload);return {sent:true,channels:[payload.recipient.email?"E-Mail":"WhatsApp"]};},appendJobHistory:async()=>{},readOrderSchedule:overrides.readOrderSchedule,respondToOrderScheduleProposal:overrides.respondToOrderScheduleProposal,
- readDocumentation:async id=>documentation[id]||(["26001","25018"].includes(id)?[{id:"report-1",type:"regie_report",reportNumber:"M01",totalHours:12,totalNet:1000,storedName:"report.pdf",materials:[{name:"Farbe",quantity:5,unit:"l",purchaseCost:123456}],internal:"DO_NOT_EXPOSE"}]:[{id:"internal-mail",type:"mail",name:"DO_NOT_EXPOSE"}]),writeDocumentation:async(id,rows)=>{documentation[id]=rows;write(id+"/_documentation/index.json",rows)},listJobMedia:async()=>[],readEmployees:async()=>[{id:"alex",name:"Alexander Krista"},{id:"mario",name:"Mario"}],sendCustomerPointNotice:async payload=>{customerNotices.push(payload);return {sent:true,channels:["WhatsApp"]};},onCustomerPointReopened:async payload=>reopenedNotices.push(payload)});
+ readDocumentation:async id=>documentation[id]||(["26001","25018"].includes(id)?[{id:"report-1",type:"regie_report",reportNumber:"M01",totalHours:12,totalNet:1000,storedName:"report.pdf",materials:[{name:"Farbe",quantity:5,unit:"l",purchaseCost:123456}],internal:"DO_NOT_EXPOSE"}]:[{id:"internal-mail",type:"mail",name:"DO_NOT_EXPOSE"}]),writeDocumentation:async(id,rows)=>{documentation[id]=rows;write(id+"/_documentation/index.json",rows)},listJobMedia:overrides.listJobMedia||(async()=>[]),readEmployees:async()=>[{id:"alex",name:"Alexander Krista"},{id:"mario",name:"Mario"}],sendCustomerPointNotice:async payload=>{customerNotices.push(payload);return {sent:true,channels:["WhatsApp"]};},onCustomerPointReopened:async payload=>reopenedNotices.push(payload)});
  if(withOffice)require("../kristine").registerKristine(app,{dataDir:dir,requireAdmin:(req,res)=>{if(req.headers["x-test-admin"]==="yes")return true;res.sendStatus(401);return false;},readEmployees:async()=>[],readJobMeta:async id=>metas[id]||{},notifyCustomerPoint:overrides.notifyOnCompletion?change=>access.notifyPoint({jobId:change.jobId,pointId:change.pointId,reason:change.type==="internal_done"?"confirmation":"update",onlyPublished:change.type!=="internal_done"}):undefined});
  const server=await new Promise(resolve=>{const s=app.listen(0,"127.0.0.1",()=>resolve(s))});t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve)}));
  const request=(route,opts={})=>fetch(`http://127.0.0.1:${server.address().port}`+route,{...opts,headers:{"Content-Type":"application/json",Origin:"https://protokoll.krista.at",...opts.headers}});
@@ -240,4 +240,28 @@ test("incomplete exports cannot close the portal, preview cannot close it, and a
  const otherCookie=await f.login((await f.invite()).portalUrl);assert.equal((await f.request(job.downloadUrl,{headers:{Cookie:otherCookie}})).status,404);
  const previewCookie=await f.login((await f.invite(true)).portalUrl),preview=await(await f.request("/kundenportal/api/project",{headers:{Cookie:previewCookie}})).json();assert.equal((await f.request("/kundenportal/api/close",{method:"POST",headers:{Cookie:previewCookie,"x-csrf-token":preview.csrf},body:"{}"})).status,403);
  assert.equal((await f.request("/kundenportal/api/close",{method:"POST",headers,body:"{}"})).status,200);assert.equal(fs.readFileSync(path.join(f.dir,"26001/_documentation/report.pdf"),"utf8"),"%PDF-authorized-report");
+});
+
+test("reassigned photos appear in customer files, remain downloadable only while assigned, and export",async t=>{
+ const {listJobMedia}=require("../media-migration");
+ const f=await fixture(t,false,{listJobMedia});
+ const file="25018/2026-10-07/reassigned.jpg";
+ f.write(file,"assigned-photo");
+ f.write("25018/2026-10-07/private.jpg","private-photo");
+ f.write("_kristine/media-assignments.json",{[file]:{jobId:"24177",originalJobId:"25018"}});
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie};
+ let project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ const photo=project.files.find(row=>row.group==="photos"&&row.name==="reassigned.jpg");
+ assert(photo,"photo stored at the original job must be included");
+ assert.equal(photo.jobId,"24177");assert(!project.files.some(row=>row.name==="private.jpg"));
+ assert.equal(await(await f.request(photo.url,{headers})).text(),"assigned-photo");
+ assert.equal((await f.request(photo.url)).status,401);
+ const job=await preparedExport(f,{...headers,"x-csrf-token":project.csrf});
+ assert.equal(job.status,"ready");
+ const zip=path.join(f.dir,"photos-export.zip");fs.writeFileSync(zip,Buffer.from(await(await f.request(job.downloadUrl,{headers})).arrayBuffer()));
+ const inspect=require("node:child_process").spawnSync("python3",["-c","import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); print([z.read(n).decode() for n in z.namelist() if n.endswith('.jpg')])",zip],{encoding:"utf8"});
+ assert.equal(inspect.status,0,inspect.stderr);assert(inspect.stdout.includes("assigned-photo"));assert(!inspect.stdout.includes("private-photo"));
+ f.write("_kristine/media-assignments.json",{[file]:{jobId:"25018",originalJobId:"25018"}});
+ project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ assert(!project.files.some(row=>row.id===photo.id));assert.equal((await f.request(photo.url,{headers})).status,404);
 });
