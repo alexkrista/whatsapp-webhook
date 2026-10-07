@@ -265,3 +265,21 @@ test("reassigned photos appear in customer files, remain downloadable only while
  project=await(await f.request("/kundenportal/api/project",{headers})).json();
  assert(!project.files.some(row=>row.id===photo.id));assert.equal((await f.request(photo.url,{headers})).status,404);
 });
+
+test("site visit photos enter customer file and ZIP without internal calculation notes",async t=>{
+ const f=await fixture(t),headersAdmin={"x-test-admin":"yes"};
+ const file={id:"photo-123-abcd",taskId:"visit-one",name:"IMG_0706.jpeg",mimeType:"image/jpeg",createdAt:"2026-09-02T10:00:00Z",url:"/kristine/api/tasks/visit-one/visit-file/photo-123-abcd"};
+ f.write("_kristine/visit-files/visit-one/photo-123-abcd.json",file);f.write("_kristine/visit-files/visit-one/photo-123-abcd.jpg","visit-photo");
+ f.write("_kristine/visit-files/visit-one/photo-unreferenced.jpg","private-unreferenced");
+ f.metas["24177"].intakeProtocol={files:[file,{...file,id:"photo-internal",internal:true,url:"/kristine/api/tasks/visit-one/visit-file/photo-internal"}],recordings:[{kind:"own_memo",transcript:"SECRET_CALCULATION"}]};
+ f.write("_kristine/visit-files/visit-one/photo-internal.json",{...file,id:"photo-internal"});f.write("_kristine/visit-files/visit-one/photo-internal.jpg","private-internal");
+ const cookie=await f.login((await f.invite()).portalUrl),headers={Cookie:cookie};
+ let project=await(await f.request("/kundenportal/api/project",{headers})).json();
+ const photos=project.files.filter(row=>row.group==="photos");assert.equal(photos.length,1);assert.equal(photos[0].name,"IMG_0706.jpeg");
+ assert.equal(await(await f.request(photos[0].url,{headers})).text(),"visit-photo");assert(!JSON.stringify(project).includes("SECRET_CALCULATION"));
+ const job=await preparedExport(f,{...headers,"x-csrf-token":project.csrf});assert.equal(job.status,"ready");
+ const zip=path.join(f.dir,"visit-export.zip");fs.writeFileSync(zip,Buffer.from(await(await f.request(job.downloadUrl,{headers})).arrayBuffer()));
+ const inspect=require("node:child_process").spawnSync("python3",["-c","import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); print([z.read(n).decode() for n in z.namelist() if n.endswith('.jpg') or n.endswith('.json')])",zip],{encoding:"utf8"});
+ assert.equal(inspect.status,0,inspect.stderr);assert(inspect.stdout.includes("visit-photo"));assert(!inspect.stdout.includes("private-internal"));assert(!inspect.stdout.includes("SECRET_CALCULATION"));
+ f.metas["24177"].intakeProtocol.files=[];assert.equal((await f.request(photos[0].url,{headers})).status,404);
+});
