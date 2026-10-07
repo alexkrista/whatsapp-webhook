@@ -326,10 +326,12 @@ function registerCustomerAccess(app, options) {
           if(!/\.(jpe?g|png|webp|gif|mp4|mov|webm)$/i.test(row.file||""))continue;
           const normalized=String(row.file).replace(/\\/g,"/"),first=normalized.split("/")[0];
           let physical=null;
-          if(aliases.canonical(first)===jobId)physical=secureFile(jobId,normalized.split("/").slice(1).join("/"));
+          // listJobMedia already applies the current photo assignment. A reassigned
+          // photo can still be stored in its original job's directory.
+          if(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(first))physical=secureFile(first,normalized.split("/").slice(1).join("/"));
           else if(normalized.startsWith("_kristine/media/")) {
             const full=path.resolve(dataDir,normalized),mediaRoot=path.resolve(dataDir,"_kristine/media")+path.sep;
-            if(!normalized.includes("..")&&fs.existsSync(full)&&fs.realpathSync(full).startsWith(mediaRoot))physical=full;
+            if(!normalized.includes("..")&&fs.existsSync(full)&&fs.realpathSync(full).startsWith(mediaRoot)&&fs.statSync(full).isFile())physical=full;
           }
           add(jobId,/\.(mp4|mov|webm)$/i.test(normalized)?"video":"photo",row.content||row.filename||"Baustellenfoto",physical,"photos",row.date||"");
         }
