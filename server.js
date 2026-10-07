@@ -84,6 +84,7 @@ const { registerCustomerAccess } = require("./customer-portal-access");
 const { renderOfferHtmlPdf } = require("./offer-html-pdf");
 const { createJobDocumentPdfRenderer } = require("./document-recipient");
 const { OFFER_TERMS } = require("./offer-terms");
+const { mergeContactKnowledge, completeProjectContacts } = require("./project-contact-knowledge");
 const { structuredAddress, projectContactsFromMaster } = require("./workflow-contacts");
 const { positionId, applyAcceptedPaymentTerm, buildAcceptedOrder, buildOrderCalculation, acceptedOrderTargets, buildPrepaymentInvoiceDraft } = require("./offer-order-workflow");
 const { cleanDate: cleanOrderScheduleDate, scheduleBase, requestSchedule, proposeSchedule, confirmSchedule, declineProposal, buildPlanningAssignments, customerScheduleView } = require("./order-schedule-workflow");
@@ -2668,7 +2669,7 @@ async function writeJobMeta(jobId, patch) {
     contactName: String(patch.contactName ?? existing.contactName ?? "").trim().slice(0, 120),
     contactPhone: String(patch.contactPhone ?? existing.contactPhone ?? "").trim().slice(0, 60),
     contactEmail: String(patch.contactEmail ?? existing.contactEmail ?? "").trim().slice(0, 180),
-    customerMaster: patch.customerMaster && typeof patch.customerMaster === "object" ? patch.customerMaster : (existing.customerMaster || null),
+    customerMaster: patch.customerMaster && typeof patch.customerMaster === "object" ? mergeContactKnowledge(existing.customerMaster || {}, patch.customerMaster) : (existing.customerMaster || null),
     wwProjectIndex: Math.max(0, Math.trunc(Number(patch.wwProjectIndex ?? existing.wwProjectIndex ?? 0))),
     wwProjectNumber: String(patch.wwProjectNumber ?? existing.wwProjectNumber ?? "").trim().slice(0, 80),
     wwAddressId: String(patch.wwAddressId ?? existing.wwAddressId ?? "").trim().slice(0, 80),
@@ -2677,7 +2678,7 @@ async function writeJobMeta(jobId, patch) {
     sourceSystem: String(patch.sourceSystem ?? existing.sourceSystem ?? "").trim().slice(0, 40),
     collectionMemberJobIds: cleanCollectionMemberJobIds(patch.collectionMemberJobIds ?? existing.collectionMemberJobIds, jobId),
     wwProjectLinks: cleanWwProjectLinks(patch.wwProjectLinks ?? existing.wwProjectLinks),
-    projectContacts: sanitizeProjectContacts(patch.projectContacts ?? existing.projectContacts, { ...existing, ...patch }),
+    projectContacts: sanitizeProjectContacts(completeProjectContacts(existing.projectContacts, patch.projectContacts, { ...existing, ...patch, customerMaster: mergeContactKnowledge(existing.customerMaster || {}, patch.customerMaster || {}) }), { ...existing, ...patch }),
     orderSchedule: cleanOrderScheduleMeta(patch.orderSchedule ?? existing.orderSchedule),
     startDate: cleanOperationalDate(patch.startDate ?? existing.startDate),
     createdAt: patch.createdAt ?? existing.createdAt ?? null,
