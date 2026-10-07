@@ -409,9 +409,16 @@ function registerRegieAssistant(app, options) {
       : `${safeId(jobId)}${String(sequence).padStart(3, "0")}`;
   }
 
-  async function nextReportSequence(jobId, reports, date) {
+  const isDelivery = report => report?.documentType === "delivery_note";
+  const missingPrices = report => (report.materials || []).filter(row => num(row.quantity) > 0 && num(row.salePrice) <= 0);
+  function enforcePrices(report) {
+    if (!isDelivery(report) && missingPrices(report).length) throw new Error("Materialpreis fehlt. Bitte Preis ergänzen oder eine Materiallieferung als Lieferschein erfassen.");
+  }
+
+  async function nextReportSequence(jobId, reports, date, documentType = "regie") {
     const month = expressMonth(date);
     const serials = (reports || [])
+      .filter(row => isDelivery(row) === (documentType === "delivery_note"))
       .filter(row => isExpressJob(jobId)
         ? isExpressJob(row.jobId) && expressMonth(row.date) === month
         : String(row.jobId) === String(jobId))
@@ -422,9 +429,9 @@ function registerRegieAssistant(app, options) {
 
   function normalizeLegacyExpressNumbers(reports) {
     let changed = false;
-    const months = [...new Set((reports || []).filter(row => isExpressJob(row.jobId)).map(row => expressMonth(row.date)))];
+    const months = [...new Set((reports || []).filter(row => !isDelivery(row) && isExpressJob(row.jobId)).map(row => expressMonth(row.date)))];
     for (const month of months) {
-      const rows = reports.filter(row => isExpressJob(row.jobId) && expressMonth(row.date) === month)
+      const rows = reports.filter(row => !isDelivery(row) && isExpressJob(row.jobId) && expressMonth(row.date) === month)
         .sort((a, b) => String(a.createdAt || a.id).localeCompare(String(b.createdAt || b.id)));
       const used = new Set(rows.map(row => String(row.reportNumber || "").match(new RegExp(`^Express ${month}(\\d{3})$`))?.[1]).filter(Boolean).map(Number));
       for (const row of rows) {
@@ -593,12 +600,13 @@ function registerRegieAssistant(app, options) {
     const newPage = () => { page = pdf.addPage(size); y = size[1] - margin; page.drawText("KRISTA GmbH", { x: margin, y, size: 15, font: bold, color: rgb(.12,.34,.2) }); y -= 30; };
     const ensure = height => { if (y - height < margin) newPage(); };
     const text = (value, options = {}) => { const font = options.bold ? bold : regular, fontSize = options.size || 10, rows = wrap(value, options.width || size[0] - margin * 2, font, fontSize); ensure(rows.length * (options.line || line)); for (const row of rows) { page.drawText(row, { x: options.x || margin, y, size: fontSize, font, color: options.color || rgb(.08,.12,.09) }); y -= options.line || line; } };
-    newPage(); text(`Regiebericht Nr. ${reportSequenceOf(report, report.jobId) || report.reportNumber}`, { bold: true, size: 20, line: 26 });
+    newPage(); text(`${isDelivery(report) ? "Lieferschein" : "Regiebericht"} Nr. ${report.reportNumber}`, { bold: true, size: 20, line: 26 });
     text(`Projekt ${report.jobId} · ${report.jobName}`, { bold: true, size: 11 }); text(`Datum: ${dateLabel(report.date)}`); y -= 10;
     text("Durchgeführte Arbeiten", { bold: true, size: 12, color: rgb(.12,.34,.2) }); text(report.description, { size: 11, line: 16 }); y -= 10;
-    text("Arbeitszeit", { bold: true, size: 12, color: rgb(.12,.34,.2) });
+    if (!isDelivery(report)) text("Arbeitszeit", { bold: true, size: 12, color: rgb(.12,.34,.2) });
     for (const row of report.employees) text(`${row.name} · ${row.from || ""}–${row.to || ""} · ${num(row.hours).toLocaleString("de-AT")} Std. · ${money(num(row.hours) * employeeRate(row, report.hourlyRate))}`);
-    if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product}${row.color ? ` · Farbton ${row.color}` : ""} · ${num(row.quantity).toLocaleString("de-AT")} × ${num(row.containerSize || 1).toLocaleString("de-AT")} ${row.unit} · ${money(num(row.quantity) * num(row.salePrice))}`); }
+    if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product}${row.color ? ` · Farbton ${row.color}` : ""} · ${num(row.quantity).toLocaleString("de-AT")} × ${num(row.containerSize || 1).toLocaleString("de-AT")} ${row.unit} · ${num(row.salePrice) > 0 ? money(num(row.quantity) * num(row.salePrice)) : "Preis offen"}`); }
+    if (isDelivery(report) && missingPrices(report).length) text("PREIS OFFEN – noch nicht verrechenbar", { bold: true, color: rgb(.8,.1,.1) });
     y -= 12; text(`Arbeit: ${money(report.totals.laborTotal)}`, { bold: true }); text(`Material: ${money(report.totals.materialTotal)}`, { bold: true }); text(`Netto: ${money(report.totals.net)} · 20 % MwSt.: ${money(report.totals.vat)} · Brutto: ${money(report.totals.gross)}`, { bold: true });
     y -= 35; ensure(80); page.drawLine({ start: { x: margin, y }, end: { x: margin + 190, y }, thickness: .7 }); page.drawLine({ start: { x: size[0] - margin - 190, y }, end: { x: size[0] - margin, y }, thickness: .7 }); y -= 14; text("Ort, Datum                              Auftraggeber", { size: 9 });
     const bytes = await pdf.save(); return Buffer.from(bytes);
@@ -610,7 +618,10 @@ function registerRegieAssistant(app, options) {
     const item = {
       id: `regie-office-${report.id}`,
       type: "regie_report",
-      name: `Regiebericht ${report.reportNumber}`,
+      documentType: report.documentType || "regie",
+      billingReady: !isDelivery(report) || (report.status === "completed" && !missingPrices(report).length),
+      pricePending: missingPrices(report).length > 0,
+      name: `${isDelivery(report) ? "Lieferschein" : "Regiebericht"} ${report.reportNumber}`,
       reportNumber: report.reportNumber,
       reportDate: report.date,
       description: report.description,
@@ -618,9 +629,11 @@ function registerRegieAssistant(app, options) {
       totalHours: report.totals.laborHours,
       employeeDetails: report.employees.map(row => ({ name: row.name, hours: row.hours, hourlyRate: employeeRate(row, report.hourlyRate), cost: round(num(row.hours) * employeeRate(row, report.hourlyRate)) })),
       laborCost: report.totals.laborTotal,
-      materialTotal: money(report.totals.materialTotal),
-      materialCost: report.totals.materialTotal,
-      materials: report.materials.map(row => ({ name: row.product, quantity: row.quantity, unit: row.unit, containerSize: row.containerSize, supplier: row.supplier, color: row.color, component: row.component, machineBookingId: row.machineBookingId, machineHistoryId: row.machineHistoryId, sourceSystem: row.sourceSystem, machineExcessFor: row.machineExcessFor, cost: round(num(row.quantity) * num(row.salePrice)) })),
+      materialTotal: money(isDelivery(report) && (missingPrices(report).length || report.status !== "completed") ? 0 : report.totals.materialTotal),
+      totalNet: isDelivery(report) && (missingPrices(report).length || report.status !== "completed") ? 0 : report.totals.net,
+      materialCost: isDelivery(report) && (missingPrices(report).length || report.status !== "completed") ? 0 : report.totals.materialTotal,
+      deliveryValue: isDelivery(report) ? report.totals.materialTotal : 0,
+      materials: report.materials.map(row => ({ name: row.product, quantity: row.quantity, unit: row.unit, containerSize: row.containerSize, supplier: row.supplier, color: row.color, component: row.component, machineBookingId: row.machineBookingId, machineHistoryId: row.machineHistoryId, sourceSystem: row.sourceSystem, pricePending: num(row.salePrice) <= 0, unitPrice: row.salePrice, machineExcessFor: row.machineExcessFor, cost: round(num(row.quantity) * num(row.salePrice)) })),
       importedAt: report.completedAt || report.updatedAt,
       source: report.source || "office",
       url: `/kristine/regie-report/${encodeURIComponent(report.id)}/print`,
@@ -638,6 +651,7 @@ function registerRegieAssistant(app, options) {
     return [events,archive,[...system,...legacy]];
   }
   async function checkHours(report,reports,sources) {
+    if (isDelivery(report)) return { blocked: false, warnings: [], exceeded: [] };
     return require('./regie-hours-check').auditReport(report,reports,...(sources||await hourSources()));
   }
   const hoursCheckKey = check => JSON.stringify((check?.exceeded || []).map(row => [
@@ -647,6 +661,7 @@ function registerRegieAssistant(app, options) {
     check?.blocked && report?.hoursCheckConfirmedAt && report?.hoursCheckConfirmationKey === hoursCheckKey(check)
   );
   async function enforceHours(report,reports) {
+    enforcePrices(report);
     const check=await checkHours(report,reports);
     if(check.blocked&&!hoursCheckAccepted(report,check))throw new Error(check.warnings[0]);
     return check;
@@ -656,6 +671,8 @@ function registerRegieAssistant(app, options) {
     const id = safeId(body.id) || `regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const existingIndex = reports.findIndex(row => row.id === id);
     const existing = existingIndex >= 0 ? reports[existingIndex] : {};
+    const documentType = existing.documentType || (existingIndex >= 0 ? "regie" : body.documentType === "delivery_note" ? "delivery_note" : "regie");
+    const delivery = documentType === "delivery_note";
     const jobId = safeId(body.jobId || existing.jobId);
     if (!jobId) throw new Error("Bitte eine Baustelle auswählen.");
     if (!clean(body.description || existing.description, 4000)) throw new Error("Beschreibung der Arbeit fehlt.");
@@ -667,21 +684,21 @@ function registerRegieAssistant(app, options) {
     if (!priceLocked && typeof writeJobMeta === "function") await writeJobMeta(jobId, { regieHourlyRate: hourlyRate, regieMaterialMarkup: materialMarkup });
     const now = new Date().toISOString();
     const correctReport = body.correctReport === true;
-    const employeeSource = priceLocked && !correctReport ? existing.employees : (Array.isArray(body.employees) ? body.employees : existing.employees || []);
+    const employeeSource = delivery ? [] : priceLocked && !correctReport ? existing.employees : (Array.isArray(body.employees) ? body.employees : existing.employees || []);
     const employees = employeeSource
       .map(normalizeEmployee)
       .map(row => priceLocked ? row : { ...row, hourlyRate: null })
       .filter(row => row.name && row.hours > 0);
-    if (!employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
+    if (!delivery && !employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
     const materialSource = priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
     const materials = materialSource
       .map(row => normalizeMaterial(row, materialMarkup, priceLocked))
       .filter(row => row.product && row.quantity > 0);
     let reportSequence = Number(body.reportSequence);
     if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = reportSequenceOf(body, jobId) || reportSequenceOf(existing, jobId);
-    if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = await nextReportSequence(jobId, reports, body.date || existing.date);
+    if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = await nextReportSequence(jobId, reports, body.date || existing.date, documentType);
     if (reportSequence > 999) throw new Error("Für diese Baustelle sind bereits 999 Rapportnummern vergeben.");
-    if (reports.some(row => row.id !== id &&
+    if (reports.some(row => row.id !== id && isDelivery(row) === delivery &&
       (isExpressJob(jobId) ? isExpressJob(row.jobId) && expressMonth(row.date) === expressMonth(body.date || existing.date) : String(row.jobId) === jobId) &&
       reportSequenceOf(row, jobId) === reportSequence)) {
       throw new Error(`Rapport-Nr. ${reportSequence} ist bei dieser Baustelle bereits vergeben.`);
@@ -689,12 +706,13 @@ function registerRegieAssistant(app, options) {
     const report = {
       ...existing,
       id,
+      documentType,
       status: precheckPending ? "prepared" : (priceLocked ? existing.status : (finish ? "prepared" : "draft")),
       processingStatus: precheckPending ? "issued" : (priceLocked ? existing.processingStatus : (finish ? "issued" : (existing.processingStatus || "draft"))),
       billingStatus: existing.billingStatus || body.billingStatus || "open",
       source: clean(existing.source || body.source || "office", 30),
       reportSequence,
-      reportNumber: fullReportNumber(jobId, reportSequence, body.date || existing.date),
+      reportNumber: `${delivery ? "LS-" : ""}${fullReportNumber(jobId, reportSequence, body.date || existing.date)}`,
       date: validDate(body.date) ? body.date : new Date().toISOString().slice(0, 10),
       jobId,
       jobName: clean(body.jobName || meta.name || existing.jobName || jobId, 220),
@@ -712,6 +730,9 @@ function registerRegieAssistant(app, options) {
       reviewStatus: finish ? "pending" : (precheckPending ? "bettina_pending" : (existing.reviewStatus || "draft")),
       completedAt: existing.status === "completed" ? existing.completedAt || now : null,
     };
+    if (delivery && !materials.length) throw new Error("Mindestens ein Material mit Menge fehlt.");
+    report.pricePending = missingPrices(report).length > 0;
+    if (finish || existing.status === "completed") enforcePrices(report);
     report.totals = calculateTotals(report);
     report.hoursCheck = await checkHours(report,reports);
     if(body.hoursCheckConfirmed===true&&report.hoursCheck.blocked){
@@ -724,7 +745,7 @@ function registerRegieAssistant(app, options) {
     if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
     await writeJson(REPORTS, reports.slice(-10000));
     if (correctReport) {
-      await storeInDayRegie(report);
+      if (!delivery) await storeInDayRegie(report);
       await storeInJobFile(report);
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
         type: "regie_report_corrected", title: `Regiebericht ${report.reportNumber} gespeichert`,
@@ -757,7 +778,7 @@ function registerRegieAssistant(app, options) {
 @page{size:A4;margin:22mm 18mm 18mm;@top-right{content:"";width:30mm;height:13mm;background:url('/public/krista-logo.png') no-repeat right bottom/25mm auto;}@bottom-left{content:"Seite " counter(page) " / " counter(pages);font-family:Titillium,Arial,sans-serif;font-size:9px;color:#49604f}}
 @page:first{@top-right{content:none}}
 *{box-sizing:border-box}body{font-family:Titillium,Arial,sans-serif;color:#142019;font-size:12px;margin:0}.page{display:block}.head{display:flex;justify-content:space-between;align-items:flex-start}.brand{width:48mm}.logo{display:block;width:48mm;height:auto}.address{line-height:1.35;margin-top:15mm}.project{text-align:left;margin-top:7mm}.project strong{font-size:13px}.title{margin-top:13mm;border-bottom:2px solid #31583b;padding-bottom:4px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}.title h1,.title-meta{font-size:23px;line-height:1.1;margin:0}.title-meta{font-weight:600;white-space:nowrap}.work-box{border:1.5px solid #879b89;border-radius:5px;margin:12px 0 15px;padding:8px 10px;display:grid;grid-template-columns:125px 1fr;gap:10px;background:#fbfcfa;break-inside:avoid}.work-box strong{font-size:14px}.work-description{white-space:pre-wrap;line-height:1.4;font-size:14px}.section{margin-top:12px;font-size:15px;font-weight:600;color:#31583b}table{width:100%;border-collapse:collapse;margin-top:5px;break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid}th{font-weight:600;text-align:left;border-bottom:1.5px solid #31583b;padding:4px 6px}td{padding:5px 6px;border-bottom:1px solid #d9ded9}.n{text-align:right;white-space:nowrap}.totals{margin:16px 0 0 auto;width:75mm;break-inside:avoid}.totals div{display:flex;justify-content:space-between;padding:3px 2px}.totals .net{border-top:2px solid #31583b;font-weight:600}.totals .gross{border-top:1.5px solid #31583b;font-weight:600;font-size:13px}.closing{break-inside:avoid}.accept{margin-top:18px;line-height:1.5}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:22mm;margin-top:18mm}.signature{border-top:1px solid #333;padding-top:4px}.footer{margin-top:7mm;padding-top:4px;font-size:9px;color:#49604f;display:flex;justify-content:space-between}@media print{.no-print{display:none!important}}
-</style></head><body><main class="page"><header class="head"><div class="address">${address.map(esc).join("<br>")}</div><div class="brand"><img class="logo" src="/public/krista-logo.png" alt="Krista"><div class="project"><strong>Projekt ${esc(report.jobId)}</strong><br>${esc(report.jobName)}</div></div></header><section class="title"><h1>Regiebericht</h1><div class="title-meta">Nr. ${esc(sequence)} vom ${dateLabel(report.date)}</div></section><div class="work-box"><strong>Durchgeführte Arbeiten</strong><span class="work-description">${esc(report.description)}</span></div><div class="section">Arbeitszeit</div><table><thead><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th class="n">Stunden</th><th class="n">Stundensatz</th><th class="n">Betrag</th></tr></thead><tbody>${employeeRows}</tbody></table>${materialRows ? `<div class="section">Material</div><table><thead><tr><th>Material</th><th class="n">Menge</th><th class="n">Einzelpreis</th><th class="n">Betrag</th></tr></thead><tbody>${materialRows}</tbody></table>` : ""}<div class="totals"><div><span>Arbeit</span><strong>${money(report.totals.laborTotal)}</strong></div><div><span>Material</span><strong>${money(report.totals.materialTotal)}</strong></div><div class="net"><span>Netto</span><strong>${money(report.totals.net)}</strong></div><div><span>20 % MwSt.</span><strong>${money(report.totals.vat)}</strong></div><div class="gross"><span>Brutto</span><strong>${money(report.totals.gross)}</strong></div></div><div class="closing"><div class="accept">Die angeführten Arbeiten und Materialien wurden ordnungsgemäß ausgeführt bzw. geliefert. Mit der Unterschrift bestätigt der Auftraggeber die Richtigkeit dieses Regieberichts.</div><div class="signatures"><div class="signature">Ort, Datum</div><div class="signature">Auftraggeber</div></div><footer class="footer"><span>Krista GmbH · Studa 104 · 6800 Feldkirch</span><span>Regiebericht ${esc(report.reportNumber)}</span></footer></div></main><script>if(new URLSearchParams(location.search).has('print'))setTimeout(()=>print(),350)<\/script></body></html>`;
+</style></head><body><main class="page"><header class="head"><div class="address">${address.map(esc).join("<br>")}</div><div class="brand"><img class="logo" src="/public/krista-logo.png" alt="Krista"><div class="project"><strong>Projekt ${esc(report.jobId)}</strong><br>${esc(report.jobName)}</div></div></header><section class="title"><h1>${isDelivery(report) ? "Lieferschein" : "Regiebericht"}</h1><div class="title-meta">Nr. ${esc(sequence)} vom ${dateLabel(report.date)}</div></section><div class="work-box"><strong>${isDelivery(report) ? "Materiallieferung" : "Durchgeführte Arbeiten"}</strong><span class="work-description">${esc(report.description)}</span></div><div class="section">Arbeitszeit</div><table><thead><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th class="n">Stunden</th><th class="n">Stundensatz</th><th class="n">Betrag</th></tr></thead><tbody>${employeeRows}</tbody></table>${materialRows ? `<div class="section">Material</div><table><thead><tr><th>Material</th><th class="n">Menge</th><th class="n">Einzelpreis</th><th class="n">Betrag</th></tr></thead><tbody>${materialRows}</tbody></table>` : ""}${isDelivery(report) && missingPrices(report).length ? '<p style="color:#b4232c;font-weight:bold">PREIS OFFEN – noch nicht verrechenbar</p>' : ""}<div class="totals"><div><span>Arbeit</span><strong>${money(report.totals.laborTotal)}</strong></div><div><span>Material</span><strong>${money(report.totals.materialTotal)}</strong></div><div class="net"><span>Netto</span><strong>${money(report.totals.net)}</strong></div><div><span>20 % MwSt.</span><strong>${money(report.totals.vat)}</strong></div><div class="gross"><span>Brutto</span><strong>${money(report.totals.gross)}</strong></div></div><div class="closing"><div class="accept">Die angeführten Arbeiten und Materialien wurden ordnungsgemäß ausgeführt bzw. geliefert. Mit der Unterschrift bestätigt der Auftraggeber die Richtigkeit dieses Regieberichts.</div><div class="signatures"><div class="signature">Ort, Datum</div><div class="signature">Auftraggeber</div></div><footer class="footer"><span>Krista GmbH · Studa 104 · 6800 Feldkirch</span><span>Regiebericht ${esc(report.reportNumber)}</span></footer></div></main><script>if(new URLSearchParams(location.search).has('print'))setTimeout(()=>print(),350)<\/script></body></html>`;
   }
 
   const sendPage = (name, req, res) => {
@@ -811,8 +832,9 @@ function registerRegieAssistant(app, options) {
   app.get("/kristine/api/regie-reports/next-number", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []), jobId = safeId(req.query.jobId), date = clean(req.query.date, 10);
-    const reportSequence = await nextReportSequence(jobId, reports, date);
-    res.json({ ok: true, reportSequence, reportNumber: fullReportNumber(jobId, reportSequence, date) });
+    const documentType = req.query.documentType === "delivery_note" ? "delivery_note" : "regie";
+    const reportSequence = await nextReportSequence(jobId, reports, date, documentType);
+    res.json({ ok: true, reportSequence, reportNumber: `${documentType === "delivery_note" ? "LS-" : ""}${fullReportNumber(jobId, reportSequence, date)}` });
   });
   app.get("/kristine/api/regie-reports/time-suggestions", async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -971,6 +993,7 @@ function registerRegieAssistant(app, options) {
       const allowedProcessing = ["issued", "approved", "sent", "signed"];
       const allowedBilling = ["open", "billed"];
       if (processing && !allowedProcessing.includes(processing)) return res.status(400).json({ ok: false, error: "Ungültiger Bearbeitungsstatus" });
+      if (billing === "billed" && missingPrices(report).length) return res.status(409).json({ok:false,error:"Preis offen – noch nicht verrechenbar."});
       if (billing && !allowedBilling.includes(billing)) return res.status(400).json({ ok: false, error: "Ungültiger Abrechnungsstatus" });
       if (["approved", "sent", "signed"].includes(processing) && report.reviewStatus === "bettina_pending") return res.status(409).json({ ok: false, error: "Der Regiebericht muss zuerst von Bettina vorgeprüft und an Alex weitergegeben werden." });
       if (["approved","sent","signed"].includes(processing) || billing === "billed") await enforceHours(report,reports);
@@ -1009,12 +1032,12 @@ function registerRegieAssistant(app, options) {
       report.totals = report.totals || calculateTotals(report);
       const meta = typeof readJobMeta === "function" ? await readJobMeta(report.jobId) : {};
       const directory = path.join(FILES, safeId(report.id)); await fsp.mkdir(directory, { recursive: true });
-      const filename = `Regiebericht_${safeId(report.reportNumber)}.pdf`, filePath = path.join(directory, filename);
+      const filename = `${isDelivery(report) ? "Lieferschein" : "Regiebericht"}_${safeId(report.reportNumber)}.pdf`, filePath = path.join(directory, filename);
       await fsp.writeFile(filePath, await createRegiePdf(report, meta));
       const info = await sendRegieMail({
         to,
-        subject: `Regiebericht ${reportSequenceOf(report, report.jobId) || report.reportNumber} · ${report.jobName}`,
-        text: `Guten Tag,\n\nim Anhang erhalten Sie den Regiebericht ${report.reportNumber} vom ${dateLabel(report.date)}.\n\nFreundliche Grüße\nKrista GmbH`,
+        subject: `${isDelivery(report) ? "Lieferschein" : "Regiebericht"} ${report.reportNumber} · ${report.jobName}`,
+        text: `Guten Tag,\n\nim Anhang erhalten Sie den ${isDelivery(report) ? "Lieferschein" : "Regiebericht"} ${report.reportNumber} vom ${dateLabel(report.date)}.\n\nFreundliche Grüße\nKrista GmbH`,
         filePath,
       });
       if (!info) return res.status(502).json({ ok: false, error: "E-Mail konnte nicht versendet werden." });

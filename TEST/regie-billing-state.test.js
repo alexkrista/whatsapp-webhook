@@ -74,3 +74,14 @@ test("uses whole-euro material subtotals for the reviewed Regie statement",()=>{
   assert.equal(result.openAmount,5990.25);
   assert.equal(result.totalAmount,37003);
 });
+
+
+test("keeps delivery numbers separate and excludes pending prices from invoicing",()=>{
+ const base={jobId:'26099',reportDate:'2026-10-07',reportNumber:'1',laborCost:0,materialCost:30};
+ const reports=[{...base,id:'regie',laborCost:75},{...base,id:'ls',documentType:'delivery_note',billingReady:true},{...base,id:'pending',reportNumber:'2',documentType:'delivery_note',pricePending:true,materialCost:99}];
+ assert.equal(dedupeReports(reports).length,3);
+ const result=summarize(reports);
+ assert.equal(result.totalAmount,135);
+ assert.equal(result.openAmount,135);
+ assert.deepEqual(result.openRows.map(x=>x.report.id).sort(),['ls','regie']);
+});
