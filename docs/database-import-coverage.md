@@ -33,3 +33,16 @@ Validierung: 53 Tests im abschließenden vollständigen Lauf bestanden, einschli
 Der abschließende Delta-Durchlauf über vier während des Imports geänderte Quellen wurde am 2026-10-07 um 13:51:03 UTC geprüft; unmittelbar nach dieser Prüfung waren 0 weitere Änderungen dieser vier Quellen offen. Das ist ein dokumentierter Snapshotzeitpunkt, keine laufende Synchronisation.
 
 Live-Prüfung der Materialkorrektur: 514 Zeilen, 325 boolean-Schalter, 0 korrigierte Quellprüffälle, 0 Schalterabweichungen, 0 Preisabweichungen. Quelltext, Raw-Payload und ursprüngliche Importmarker wurden erhalten.
+
+
+## Nachtrag am 2026-10-07, 15:30 UTC
+
+Der live erreichbare SQL-Bestand wurde erneut geprüft: 108 Tabellen. Eine neue Inventur enthielt 944 Geschäfts-JSON/JSONL-Dateien und 94.348.110 Bytes. 40 neue Originaldateiversionen (7.733.961 Bytes) wurden gesichert, importiert und exakt aus SQL zurückgelesen; ein weiterer begrenzter Nachtrag ergänzte sechs Versionen (2.154.152 Bytes). Beide Läufe hatten 0 Parsing-Prüffälle. Während des ersten Imports änderten sich drei Quellen weiter; beim zweiten Nachtrag waren zwei seiner sechs Quellen erneut verändert. Das ist ausdrücklich keine laufende Synchronisation und keine vollständige Normalisierung dieser Änderungen.
+
+Der neue Materialstamm wurde zusätzlich strukturiert als eigene Quellversion übernommen: 329 Zeilen, 0 Quellprüffälle. Live-Abgleich gegen die Raw-Payload: 0 Verkaufspreisabweichungen, 0 Festpreisschalterabweichungen. Die 329 neuen Fachzeilen sind ein neuer versionierter Materialstand, keine 329 zusätzlichen aktuellen Artikel. Alte Stände bleiben erhalten.
+
+Dokumente: 1.592 Dateien mit 946.976.347 Bytes erneut gehasht, in unabhängigen Originalobjekten geprüft und gegen SQL gelesen. Zwei neue Dokumente/Versionen ergänzt; 1.590 vorhandene Versionen wiederverwendet. 875 exakte Projektverknüpfungen. Die 94 unverknüpften Projektpfade verteilen sich auf `022` (8 Dateien) und `unknown` (86 Dateien); keine automatische Vermutung einer Baustelle.
+
+Prüfnachweise und Inventare: `/var/data/_sql-import-originals/delta-1791386721702` und `/var/data/_sql-import-originals/delta-1791386915596`; abschließende Preis-/Schalterprüfung am 15:30:21 UTC. SQL-Importläufe `9c500e2f-c284-4567-8e67-d8d9213fb423`, `7172724b-e681-4c48-93bc-fc3493efff3d`, Material-Snapshot `cdda268a-d83c-49fe-8813-4fbfe799202a`, Dokumentlauf `dfa2f773-fbc3-44ee-bfe9-3f289d17bac5`.
+
+Weiter offen: Fachabgleich geänderter Zeit-, Tages-, Kontakt- und Projektdatensätze; weitere aktive Domain-Zuordnungen; vollständiger externer WinWorker-/Obelisk-Bestand; ungeklärte Dokumentzuordnungen. Der produktive JSON-Betrieb bleibt unverändert. Kein Merge, Anwendungsdeploy oder Storage-Cutover.
