@@ -35,9 +35,11 @@ async function importPersonnelTracking(pool,{companyId,sourceInstanceId,files}){
    let slices=f.slices;if(slices===null)slices=(await c.query('SELECT value::text AS original FROM jsonb_each($1::jsonb) ORDER BY key',[f.originalText])).rows.map(r=>r.original);
    const spec=fields[f.kind],keys=[...Object.keys(spec.texts),...Object.keys(spec.bools),...Object.keys(spec.jsons)],expressions=[...Object.values(spec.texts).map(k=>"raw->>'"+k+"'"),...Object.values(spec.bools).map(k=>"kristine.strict_source_boolean(raw->'"+k+"')"),...Object.values(spec.jsons).map(k=>"raw->'"+k+"'")];
    const table='kristine.imported_'+f.kind+'_entries';
+   const priorCount=(await c.query(`SELECT count(*)::int n FROM ${table} WHERE company_id=$1 AND source_version_id=$2`,[companyId,vid])).rows[0].n;
+   if(priorCount!==0&&priorCount!==f.count)throw Error('Incomplete personnel/tracking projection');
    for(let offset=0;offset<slices.length;offset+=200){const batch=slices.slice(offset,offset+200),original='['+batch.join(',')+']',src='SELECT value AS raw,((ordinality-1)+$3::int)::int AS pos FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY';
     const args=[companyId,vid,offset,original],sql=`WITH src AS (${src}) INSERT INTO ${table}(company_id,source_version_id,position,raw_payload,${keys.join(',')}) SELECT $1,$2,pos,raw,${expressions.join(',')} FROM src ON CONFLICT DO NOTHING RETURNING position`;
-    result.entriesCreated+=(await c.query(sql,args)).rows.length;
+    if(!priorCount)result.entriesCreated+=(await c.query(sql,args)).rows.length;
     const mismatch=keys.map((k,i)=>'dst.'+k+' IS DISTINCT FROM ('+expressions[i]+')').join(' OR ');
     const check=(await c.query(`WITH src AS (${src}) SELECT count(*)::int n,count(*) FILTER(WHERE dst.position IS NULL OR dst.raw_payload IS DISTINCT FROM raw OR ${mismatch})::int mismatch FROM src LEFT JOIN ${table} dst ON dst.company_id=$1 AND dst.source_version_id=$2 AND dst.position=pos`,args)).rows[0];
     if(check.n!==batch.length||check.mismatch)throw Error('Personnel/tracking typed readback mismatch');
