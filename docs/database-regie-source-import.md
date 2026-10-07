@@ -7,3 +7,7 @@ Original report totals, hourly rates, discounts and material prices are copied a
 The archive does not create new invoices, stock movements, signatures, approvals, document links or deliveries. Binary files are indexed in the separate document migration. The active JSON source file remains authoritative until reconciliation and cutover. Original text is preserved, changes require explicit reconciliation, replay verifies targets, and archive rows/children are immutable.
 
 Validation: `TEST/database-regie-import.pg.cjs` covers arbitrary precision amounts, leading-zero report numbers, explicit free price versus unknown price, 100 percent discounts, unchanged replay, raw employee blocks/attachments, original prepared delivery note state, append-only children and source drift rollback. Active reports, outgoing invoices and stock movements remain empty. PGlite does not exercise real PostgreSQL concurrency.
+
+## Live-Import
+
+Live am 2026-10-07: 72 Berichte, 232 Mitarbeitereinträge, 139 Materialpositionen und 128 Anhangseinträge erstellt und geprüft; Quelldatei unverändert. Originalbackup `/var/data/_sql-import-originals/regie-1791379656817`.
