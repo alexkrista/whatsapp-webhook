@@ -258,10 +258,7 @@ async function createNewJob(){
   save.disabled=true;save.textContent='Speichert …';error.style.display='none';
   try{
     const result=await api('/admin/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    closeNewJob();
-    ['newJobId','newJobName','newJobStreet','newJobHouse','newJobPostal','newJobCity','newJobContact','newJobPhone','newJobExtra','newJobNotes'].forEach(id=>document.getElementById(id).value='');
-    await loadJobs();
-    const card=document.getElementById('job-'+result.jobId);if(card){card.scrollIntoView({behavior:'smooth',block:'center'});const edit=document.getElementById('edit-'+result.jobId);if(edit)edit.style.display='block';}
+    location.href=tokenJoin('/kristine/baustellen?editMaster='+encodeURIComponent(result.jobId))+'#'+encodeURIComponent(result.jobId);
   }catch(e){error.textContent=e.message;error.style.display='block'}finally{save.disabled=false;save.textContent='Speichern'}
 }
 

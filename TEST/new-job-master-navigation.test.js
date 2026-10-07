@@ -22,3 +22,11 @@ test("Stammdaten öffnen einmalig und nur für die gerade neu angelegte Baustell
  context.openCreatedJobMaster({jobId:"26107"});assert.deepEqual(calls,["master","26107"]);assert.equal(new URL(context.location.href).searchParams.has("editMaster"),false);
  context.openCreatedJobMaster({jobId:"26107"});assert.equal(calls.length,2);
 });
+
+test("Auch die Admin-Neuanlage öffnet die Stammdaten des gespeicherten Projekts",async()=>{
+ const html=fs.readFileSync(path.join(__dirname,"../public/admin.html"),"utf8"),dom=new JSDOM(html),doc=dom.window.document;
+ doc.getElementById("newJobName").value="Hutter";
+ const fn=html.slice(html.indexOf("async function createNewJob(){"),html.indexOf("async function api(url,"));
+ const ctx={document:doc,location:{href:""},tokenJoin:p=>p,api:async()=>({jobId:"26107"})};vm.createContext(ctx);vm.runInContext(fn,ctx);await ctx.createNewJob();
+ assert.equal(ctx.location.href,"/kristine/baustellen?editMaster=26107#26107");
+});
