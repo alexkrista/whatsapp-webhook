@@ -1,0 +1,43 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const {PGlite}=require(process.env.PGLITE_MODULE_PATH||'@electric-sql/pglite');
+const {importTimeSources}=require('../storage/import-time-sources');
+const {reconcileTimeSources}=require('../storage/reconcile-time-sources');
+test('time reconciliation preserves duplicate events, changed archive revisions and exact latest membership with rollback',async()=>{
+ const db=new PGlite(),pool={connect:async()=>({query:(s,a)=>db.query(s,a),release(){}})};
+ try{
+  for(const f of ['002-domain-core.sql','003-business-domain.sql','004-people-communications.sql','006-address-source-mapping.sql','007-contact-groups.sql','009-time-source-import.sql','018-time-reconciliation.sql'])await db.exec(fs.readFileSync(__dirname+'/../migrations/'+f,'utf8'));
+  const companyId=(await db.query("INSERT INTO kristine.companies(name) VALUES('A') RETURNING id")).rows[0].id;
+  const sourceInstanceId=(await db.query("INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,'kristine','A') RETURNING id",[companyId])).rows[0].id;
+  const employee=(await db.query("INSERT INTO kristine.employees(company_id,display_name) VALUES($1,'E') RETURNING id",[companyId])).rows[0].id;
+  const source=(await db.query("INSERT INTO kristine.source_records(company_id,source_instance_id,entity_type,external_id) VALUES($1,$2,'employee','E') RETURNING id",[companyId,sourceInstanceId])).rows[0].id;
+  await db.query('INSERT INTO kristine.external_references(company_id,source_record_id,employee_id) VALUES($1,$2,$3)',[companyId,source,employee]);
+  const event={employeeId:'E',date:'2026-07-29',type:'start',at:'07:00',actualAt:'07:12'};
+  const day={id:'D',employeeId:'E',date:'2026-07-29',segments:[{type:'work',from:'07:00',to:'17:00'}]};
+  const files=(events,days)=>({eventsText:JSON.stringify(events),archiveText:JSON.stringify(days)});
+  const first=files([event,event],[day]),scope={companyId,sourceInstanceId};
+  await importTimeSources(pool,{...scope,...first});const run=f=>reconcileTimeSources(pool,{...scope,...f});
+  const a=await run(first);assert.equal(a.eventsCreated,0);assert.equal(a.eventsVerified,2);assert.equal(a.archiveDaysCreated,1);
+  const b=await run(files([event],[{...day,segments:[{type:'work',from:'07:00',to:'17:06'}]}]));
+  assert.equal(b.eventsCreated,0);assert.equal(b.archiveDaysCreated,1);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_imported_time_events')).rows[0].n,1);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.time_events')).rows[0].n,2);
+  assert.equal((await db.query('SELECT s.ends_local FROM kristine.project_time_archive_segment_versions s JOIN kristine.latest_imported_archive_days d ON d.id=s.day_id')).rows[0].ends_local,'17:06:00');
+  assert.equal((await db.query('SELECT ends_local FROM kristine.project_time_archive_segments')).rows[0].ends_local,'17:00:00');
+  const back=await run(first);assert.equal(back.archiveDaysCreated,0);assert.equal(back.eventsVerified,2);
+  const changedEvent=await run(files([event,{...event,actualAt:'07:13'}],[day]));
+  assert.equal(changedEvent.eventsCreated,1);assert.equal(changedEvent.eventsVerified,2);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.time_events')).rows[0].n,3);
+  await run(files([],[]));assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_imported_archive_days')).rows[0].n,0);
+  const counts=async()=> (await db.query('SELECT (SELECT count(*) FROM kristine.import_runs)::int runs,(SELECT count(*) FROM kristine.source_record_versions)::int versions')).rows[0];
+  const before=await counts();await assert.rejects(run(files([{...event,employeeId:'missing'}],[day])),/employee/);assert.deepEqual(await counts(),before);
+  await assert.rejects(run({...first,supplementary:[{name:'unknown.json',originalText:'[]'}]}),/supplementary/);assert.deepEqual(await counts(),before);
+  await assert.rejects(db.query('UPDATE kristine.project_time_archive_segment_versions SET ends_local=\'16:00\''),/append-only/);
+  for(const t of ['project_time_archive_day_versions','project_time_archive_segment_versions','time_reconciliation_runs','time_reconciliation_events','time_reconciliation_days'])await assert.rejects(db.query('TRUNCATE kristine.'+t+' CASCADE'),/append-only/);
+  const other=(await db.query("INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,'kristine','B') RETURNING id",[companyId])).rows[0].id;
+  const empty=await reconcileTimeSources(pool,{companyId,sourceInstanceId:other,...files([],[])});
+  const revision=(await db.query('SELECT id FROM kristine.project_time_archive_day_versions LIMIT 1')).rows[0].id;
+  await assert.rejects(db.query('INSERT INTO kristine.time_reconciliation_days(company_id,source_instance_id,import_run_id,day_id) VALUES($1,$2,$3,$4)',[companyId,other,empty.runId,revision]),/source mismatch/);
+  for(const t of ['time_segments','payroll_month_closes'])assert.equal((await db.query('SELECT count(*)::int n FROM kristine.'+t)).rows[0].n,0);
+ }finally{await db.close();}
+});
