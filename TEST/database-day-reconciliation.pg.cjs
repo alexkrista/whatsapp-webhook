@@ -4,7 +4,7 @@ const {PGlite}=require(process.env.PGLITE_MODULE_PATH||'@electric-sql/pglite');
 const {importDayHistory}=require('../storage/import-day-history');
 const {reconcileDayHistory}=require('../storage/reconcile-day-history');
 test('day reconciliation preserves baseline and revisions; latest full snapshot handles replay, removal and rollback',async()=>{
- const db=new PGlite(),pool={connect:async()=>({query:(s,a)=>db.query(s,a),release(){}})};
+ const db=new PGlite(),pool={connect:async()=>({query:async(s,a)=>{const r=await db.query(s,a);if(!s.includes('work_date::text'))for(const row of r.rows)if(typeof row.work_date==='string')row.work_date=new Date(row.work_date+'T00:00:00+02:00');return r;},release(){}})};
  try{
   for(const f of ['002-domain-core.sql','011-day-history-import.sql','017-day-reconciliation.sql'])await db.exec(fs.readFileSync(__dirname+'/../migrations/'+f,'utf8'));
   const companyId=(await db.query("INSERT INTO kristine.companies(name) VALUES('A') RETURNING id")).rows[0].id;
