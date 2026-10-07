@@ -1,10 +1,18 @@
 """First/last actual working day, combining WW and Kristine project times."""
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def local_now():
+    try:
+        return datetime.now(ZoneInfo("Europe/Vienna"))
+    except ZoneInfoNotFoundError:
+        # Windows Brain uses the computer timezone when IANA data is unavailable.
+        return datetime.now().astimezone()
 
 
 def project_service_period(project_number, ww_rows, bootstrap, today=None):
-    today = today or datetime.now(ZoneInfo('Europe/Vienna')).date().isoformat()
+    today = today or local_now().date().isoformat()
     days = set()
     def add(day):
         day = str(day or '')[:10]
@@ -45,7 +53,7 @@ def project_service_period(project_number, ww_rows, bootstrap, today=None):
             start = minute(row['at'])
             end = minute(rows[i+1]['at']) if i+1 < len(rows) else None
             if end is None and key[1] == today and bootstrap.get('states', {}).get(key[0], {}).get('mode') in ('working', 'pause', 'lunch'):
-                now = datetime.now(ZoneInfo('Europe/Vienna'))
+                now = local_now()
                 end = now.hour*60+now.minute
             if end is not None and 0 < end-start <= 18*60:
                 add(key[1])

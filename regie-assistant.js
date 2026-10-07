@@ -114,6 +114,7 @@ function registerRegieAssistant(app, options) {
       timeLabel: blocks.map(block => `${block.from}–${block.to}`).join(" / "),
       bookedTo: clean(row?.bookedTo, 5),
       bookedBlocks: Array.isArray(row?.bookedBlocks) ? row.bookedBlocks : [],
+      discountPercent: Math.min(100, Math.max(0, round(num(row?.discountPercent)))),
       hourlyRate: hasHourlyRate ? Math.max(0, round(num(row.hourlyRate))) : null,
     };
   }
@@ -277,13 +278,15 @@ function registerRegieAssistant(app, options) {
       : Math.max(0, num(row.hourlyRate));
   }
 
+  function laborAmount(row, fallback) { return round(num(row.hours) * employeeRate(row, fallback) * (1 - Math.min(100, Math.max(0, num(row.discountPercent))) / 100)); }
+
   function normalizeMaterial(row, defaultMarkup = 80, preservePrice = false) {
     const purchasePrice = round(num(row?.purchasePrice ?? row?.unitPrice ?? row?.ek));
     const explicitSale = num(row?.salePrice ?? row?.vkNet);
     const fixedSalePrice = row?.fixedSalePrice === true || (!purchasePrice && explicitSale > 0);
     const markup = fixedSalePrice
       ? 0
-      : Math.max(0, round(num(preservePrice ? (row?.markup ?? row?.markupPercent ?? defaultMarkup) : defaultMarkup)));
+      : Math.max(0, round(num(preservePrice || row?.markupOverride === true ? (row?.markup ?? row?.markupPercent ?? defaultMarkup) : defaultMarkup)));
     const salePrice = round(
       fixedSalePrice || preservePrice
         ? (explicitSale || purchasePrice * (1 + markup / 100))
@@ -298,6 +301,7 @@ function registerRegieAssistant(app, options) {
       containerSize: round(num(row?.containerSize) || 1),
       purchasePrice,
       markup,
+      markupOverride: row?.markupOverride === true,
       salePrice,
       fixedSalePrice,
       salePriceGross: round(salePrice * 1.2),
@@ -379,7 +383,7 @@ function registerRegieAssistant(app, options) {
 
   function calculateTotals(report) {
     const laborHours = round((report.employees || []).reduce((sum, row) => sum + num(row.hours), 0));
-    const laborTotal = round((report.employees || []).reduce((sum, row) => sum + num(row.hours) * employeeRate(row, report.hourlyRate), 0));
+    const laborTotal = round((report.employees || []).reduce((sum, row) => sum + laborAmount(row, report.hourlyRate), 0));
     const materialTotal = round((report.materials || []).reduce((sum, row) => sum + num(row.quantity) * num(row.salePrice), 0));
     const net = round(laborTotal + materialTotal);
     const vat = round(net * 0.2);
@@ -604,7 +608,9 @@ function registerRegieAssistant(app, options) {
     text(`Projekt ${report.jobId} · ${report.jobName}`, { bold: true, size: 11 }); text(`Datum: ${dateLabel(report.date)}`); y -= 10;
     text("Durchgeführte Arbeiten", { bold: true, size: 12, color: rgb(.12,.34,.2) }); text(report.description, { size: 11, line: 16 }); y -= 10;
     if (!isDelivery(report)) text("Arbeitszeit", { bold: true, size: 12, color: rgb(.12,.34,.2) });
-    for (const row of report.employees) text(`${row.name} · ${row.from || ""}–${row.to || ""} · ${num(row.hours).toLocaleString("de-AT")} Std. · ${money(num(row.hours) * employeeRate(row, report.hourlyRate))}`);
+    for (const row of report.employees) { text(`${row.name} · ${row.from || ""}–${row.to || ""} · ${num(row.hours).toLocaleString("de-AT")} Std. · ${money(laborAmount(row, report.hourlyRate))}`); if (num(row.discountPercent)>0) text(`${num(row.discountPercent)} % Nachlass${num(row.discountPercent)===100?" - geschenkt":""}: ${money(round(num(row.hours)*employeeRate(row,report.hourlyRate))-laborAmount(row,report.hourlyRate))}`, {bold:true}); }
+    if (report.materialDeliveryNumber) text(`Material siehe Lieferschein ${report.materialDeliveryNumber}`, {bold:true});
+    if (report.sourceRegieNumber) text(`Zu Regiebericht ${report.sourceRegieNumber}`, {bold:true});
     if (report.materials.length) { y -= 8; text("Material", { bold: true, size: 12, color: rgb(.12,.34,.2) }); for (const row of report.materials) text(`${row.product}${row.color ? ` · Farbton ${row.color}` : ""} · ${num(row.quantity).toLocaleString("de-AT")} × ${num(row.containerSize || 1).toLocaleString("de-AT")} ${row.unit} · ${num(row.salePrice) > 0 ? money(num(row.quantity) * num(row.salePrice)) : "Preis offen"}`); }
     if (isDelivery(report) && missingPrices(report).length) text("PREIS OFFEN – noch nicht verrechenbar", { bold: true, color: rgb(.8,.1,.1) });
     y -= 12; text(`Arbeit: ${money(report.totals.laborTotal)}`, { bold: true }); text(`Material: ${money(report.totals.materialTotal)}`, { bold: true }); text(`Netto: ${money(report.totals.net)} · 20 % MwSt.: ${money(report.totals.vat)} · Brutto: ${money(report.totals.gross)}`, { bold: true });
@@ -619,6 +625,7 @@ function registerRegieAssistant(app, options) {
       id: `regie-office-${report.id}`,
       type: "regie_report",
       documentType: report.documentType || "regie",
+      materialDeliveryId: report.materialDeliveryId, materialDeliveryNumber: report.materialDeliveryNumber, sourceRegieId: report.sourceRegieId, sourceRegieNumber: report.sourceRegieNumber,
       billingReady: !isDelivery(report) || (report.status === "completed" && !missingPrices(report).length),
       pricePending: missingPrices(report).length > 0,
       name: `${isDelivery(report) ? "Lieferschein" : "Regiebericht"} ${report.reportNumber}`,
@@ -627,7 +634,7 @@ function registerRegieAssistant(app, options) {
       description: report.description,
       employees: report.employees.map(row => row.name).filter(Boolean).join(", "),
       totalHours: report.totals.laborHours,
-      employeeDetails: report.employees.map(row => ({ name: row.name, hours: row.hours, hourlyRate: employeeRate(row, report.hourlyRate), cost: round(num(row.hours) * employeeRate(row, report.hourlyRate)) })),
+      employeeDetails: report.employees.map(row => ({ name: row.name, hours: row.hours, hourlyRate: employeeRate(row, report.hourlyRate), unitPrice: employeeRate(row, report.hourlyRate), discountPercent: num(row.discountPercent), originalCost: round(num(row.hours) * employeeRate(row, report.hourlyRate)), cost: laborAmount(row, report.hourlyRate) })),
       laborCost: report.totals.laborTotal,
       materialTotal: money(isDelivery(report) && (missingPrices(report).length || report.status !== "completed") ? 0 : report.totals.materialTotal),
       totalNet: isDelivery(report) && (missingPrices(report).length || report.status !== "completed") ? 0 : report.totals.net,
@@ -690,9 +697,9 @@ function registerRegieAssistant(app, options) {
       .map(row => priceLocked ? row : { ...row, hourlyRate: null })
       .filter(row => row.name && row.hours > 0);
     if (!delivery && !employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
-    const materialSource = priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
+    const materialSource = existing.materialDeliveryId ? [] : priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
     const materials = materialSource
-      .map(row => normalizeMaterial(row, materialMarkup, priceLocked))
+      .map(row => normalizeMaterial(row, materialMarkup, priceLocked && !correctReport))
       .filter(row => row.product && row.quantity > 0);
     let reportSequence = Number(body.reportSequence);
     if (!Number.isInteger(reportSequence) || reportSequence < 1 || reportSequence > 999) reportSequence = reportSequenceOf(body, jobId) || reportSequenceOf(existing, jobId);
@@ -769,7 +776,7 @@ function registerRegieAssistant(app, options) {
   }
 
   function printHtml(report, meta) {
-    const employeeRows = report.employees.map(row => { const rate = employeeRate(row, report.hourlyRate), time = clean(row.timeLabel, 300); const timeCells = time && (row.blocks || []).length > 1 ? `<td colspan="2">${esc(time)}</td>` : `<td>${esc(row.from || "")}</td><td>${esc(row.to || "")}</td>`; return `<tr><td>${esc(row.name)}</td>${timeCells}<td class="n">${num(row.hours).toLocaleString("de-AT")} Std</td><td class="n">${money(rate)}</td><td class="n">${money(num(row.hours) * rate)}</td></tr>`; }).join("");
+    const employeeRows = report.employees.map(row => { const rate = employeeRate(row, report.hourlyRate), time = clean(row.timeLabel, 300); const timeCells = time && (row.blocks || []).length > 1 ? `<td colspan="2">${esc(time)}</td>` : `<td>${esc(row.from || "")}</td><td>${esc(row.to || "")}</td>`; return `<tr><td>${esc(row.name)}${num(row.discountPercent)>0?`<br><strong>${num(row.discountPercent)} % Nachlass${num(row.discountPercent)===100?" – geschenkt":""} (${money(round(num(row.hours)*rate)-laborAmount(row,report.hourlyRate))})</strong>`:""}</td>${timeCells}<td class="n">${num(row.hours).toLocaleString("de-AT")} Std</td><td class="n">${money(rate)}</td><td class="n">${money(laborAmount(row, report.hourlyRate))}</td></tr>`; }).join("");
     const materialRows = report.materials.map(row => `<tr><td>${esc(row.product)}</td><td class="n">${num(row.quantity).toLocaleString("de-AT")} ${esc(row.unit)}</td><td class="n">${money(row.salePrice)}</td><td class="n">${money(num(row.quantity) * num(row.salePrice))}</td></tr>`).join("");
     const address = [meta?.contactName || meta?.name || report.jobName, `${meta?.street || ""} ${meta?.houseNumber || ""}`.trim(), `${meta?.postalCode || ""} ${meta?.city || ""}`.trim()].filter(Boolean);
     const sequence = reportSequenceOf(report, report.jobId) || report.reportNumber;
@@ -778,7 +785,7 @@ function registerRegieAssistant(app, options) {
 @page{size:A4;margin:22mm 18mm 18mm;@top-right{content:"";width:30mm;height:13mm;background:url('/public/krista-logo.png') no-repeat right bottom/25mm auto;}@bottom-left{content:"Seite " counter(page) " / " counter(pages);font-family:Titillium,Arial,sans-serif;font-size:9px;color:#49604f}}
 @page:first{@top-right{content:none}}
 *{box-sizing:border-box}body{font-family:Titillium,Arial,sans-serif;color:#142019;font-size:12px;margin:0}.page{display:block}.head{display:flex;justify-content:space-between;align-items:flex-start}.brand{width:48mm}.logo{display:block;width:48mm;height:auto}.address{line-height:1.35;margin-top:15mm}.project{text-align:left;margin-top:7mm}.project strong{font-size:13px}.title{margin-top:13mm;border-bottom:2px solid #31583b;padding-bottom:4px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}.title h1,.title-meta{font-size:23px;line-height:1.1;margin:0}.title-meta{font-weight:600;white-space:nowrap}.work-box{border:1.5px solid #879b89;border-radius:5px;margin:12px 0 15px;padding:8px 10px;display:grid;grid-template-columns:125px 1fr;gap:10px;background:#fbfcfa;break-inside:avoid}.work-box strong{font-size:14px}.work-description{white-space:pre-wrap;line-height:1.4;font-size:14px}.section{margin-top:12px;font-size:15px;font-weight:600;color:#31583b}table{width:100%;border-collapse:collapse;margin-top:5px;break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid}th{font-weight:600;text-align:left;border-bottom:1.5px solid #31583b;padding:4px 6px}td{padding:5px 6px;border-bottom:1px solid #d9ded9}.n{text-align:right;white-space:nowrap}.totals{margin:16px 0 0 auto;width:75mm;break-inside:avoid}.totals div{display:flex;justify-content:space-between;padding:3px 2px}.totals .net{border-top:2px solid #31583b;font-weight:600}.totals .gross{border-top:1.5px solid #31583b;font-weight:600;font-size:13px}.closing{break-inside:avoid}.accept{margin-top:18px;line-height:1.5}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:22mm;margin-top:18mm}.signature{border-top:1px solid #333;padding-top:4px}.footer{margin-top:7mm;padding-top:4px;font-size:9px;color:#49604f;display:flex;justify-content:space-between}@media print{.no-print{display:none!important}}
-</style></head><body><main class="page"><header class="head"><div class="address">${address.map(esc).join("<br>")}</div><div class="brand"><img class="logo" src="/public/krista-logo.png" alt="Krista"><div class="project"><strong>Projekt ${esc(report.jobId)}</strong><br>${esc(report.jobName)}</div></div></header><section class="title"><h1>${isDelivery(report) ? "Lieferschein" : "Regiebericht"}</h1><div class="title-meta">Nr. ${esc(sequence)} vom ${dateLabel(report.date)}</div></section><div class="work-box"><strong>${isDelivery(report) ? "Materiallieferung" : "Durchgeführte Arbeiten"}</strong><span class="work-description">${esc(report.description)}</span></div><div class="section">Arbeitszeit</div><table><thead><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th class="n">Stunden</th><th class="n">Stundensatz</th><th class="n">Betrag</th></tr></thead><tbody>${employeeRows}</tbody></table>${materialRows ? `<div class="section">Material</div><table><thead><tr><th>Material</th><th class="n">Menge</th><th class="n">Einzelpreis</th><th class="n">Betrag</th></tr></thead><tbody>${materialRows}</tbody></table>` : ""}${isDelivery(report) && missingPrices(report).length ? '<p style="color:#b4232c;font-weight:bold">PREIS OFFEN – noch nicht verrechenbar</p>' : ""}<div class="totals"><div><span>Arbeit</span><strong>${money(report.totals.laborTotal)}</strong></div><div><span>Material</span><strong>${money(report.totals.materialTotal)}</strong></div><div class="net"><span>Netto</span><strong>${money(report.totals.net)}</strong></div><div><span>20 % MwSt.</span><strong>${money(report.totals.vat)}</strong></div><div class="gross"><span>Brutto</span><strong>${money(report.totals.gross)}</strong></div></div><div class="closing"><div class="accept">Die angeführten Arbeiten und Materialien wurden ordnungsgemäß ausgeführt bzw. geliefert. Mit der Unterschrift bestätigt der Auftraggeber die Richtigkeit dieses Regieberichts.</div><div class="signatures"><div class="signature">Ort, Datum</div><div class="signature">Auftraggeber</div></div><footer class="footer"><span>Krista GmbH · Studa 104 · 6800 Feldkirch</span><span>Regiebericht ${esc(report.reportNumber)}</span></footer></div></main><script>if(new URLSearchParams(location.search).has('print'))setTimeout(()=>print(),350)<\/script></body></html>`;
+</style></head><body><main class="page"><header class="head"><div class="address">${address.map(esc).join("<br>")}</div><div class="brand"><img class="logo" src="/public/krista-logo.png" alt="Krista"><div class="project"><strong>Projekt ${esc(report.jobId)}</strong><br>${esc(report.jobName)}</div></div></header><section class="title"><h1>${isDelivery(report) ? "Lieferschein" : "Regiebericht"}</h1><div class="title-meta">Nr. ${esc(sequence)} vom ${dateLabel(report.date)}</div></section><div class="work-box"><strong>${isDelivery(report) ? "Materiallieferung" : "Durchgeführte Arbeiten"}</strong><span class="work-description">${esc(report.description)}</span></div><div class="section">Arbeitszeit</div><table><thead><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th class="n">Stunden</th><th class="n">Stundensatz</th><th class="n">Betrag</th></tr></thead><tbody>${employeeRows}</tbody></table>${report.materialDeliveryNumber?`<p>Material siehe Lieferschein <strong>${esc(report.materialDeliveryNumber)}</strong></p>`:""}${report.sourceRegieNumber?`<p>Zu Regiebericht <strong>${esc(report.sourceRegieNumber)}</strong></p>`:""}${materialRows ? `<div class="section">Material</div><table><thead><tr><th>Material</th><th class="n">Menge</th><th class="n">Einzelpreis</th><th class="n">Betrag</th></tr></thead><tbody>${materialRows}</tbody></table>` : ""}${isDelivery(report) && missingPrices(report).length ? '<p style="color:#b4232c;font-weight:bold">PREIS OFFEN – noch nicht verrechenbar</p>' : ""}<div class="totals"><div><span>Arbeit</span><strong>${money(report.totals.laborTotal)}</strong></div><div><span>Material</span><strong>${money(report.totals.materialTotal)}</strong></div><div class="net"><span>Netto</span><strong>${money(report.totals.net)}</strong></div><div><span>20 % MwSt.</span><strong>${money(report.totals.vat)}</strong></div><div class="gross"><span>Brutto</span><strong>${money(report.totals.gross)}</strong></div></div><div class="closing"><div class="accept">Die angeführten Arbeiten und Materialien wurden ordnungsgemäß ausgeführt bzw. geliefert. Mit der Unterschrift bestätigt der Auftraggeber die Richtigkeit dieses Regieberichts.</div><div class="signatures"><div class="signature">Ort, Datum</div><div class="signature">Auftraggeber</div></div><footer class="footer"><span>Krista GmbH · Studa 104 · 6800 Feldkirch</span><span>Regiebericht ${esc(report.reportNumber)}</span></footer></div></main><script>if(new URLSearchParams(location.search).has('print'))setTimeout(()=>print(),350)<\/script></body></html>`;
   }
 
   const sendPage = (name, req, res) => {
@@ -943,6 +950,36 @@ function registerRegieAssistant(app, options) {
     if (!requireAdmin(req, res)) return;
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
     catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
+  });
+  app.post("/kristine/api/regie-reports/:id/material-delivery", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
+      if (!report || isDelivery(report)) return res.status(404).json({ok:false,error:"Regiebericht nicht gefunden."});
+      if (report.materialDeliveryId) {
+        const delivery = reports.find(row => row.id === report.materialDeliveryId);
+        if (!delivery) throw Error("Verknüpfter Lieferschein fehlt. Bitte prüfen lassen.");
+        await storeInJobFile(report); await storeInJobFile(delivery);
+        return res.json({ok:true,report,delivery});
+      }
+      if (report.status === "completed" || report.billingStatus === "billed" || report.reviewStatus === "bettina_pending") return res.status(409).json({ok:false,error:"Material vor dem Abschluss und nach der Vorprüfung auslagern."});
+      if (!report.materials?.length || !report.employees?.length) return res.status(400).json({ok:false,error:"Material und Arbeitsstunden fehlen."});
+      const candidate = {...report,materials:[]};
+      await enforceHours(candidate,reports);
+      const now = new Date().toISOString(), sequence = await nextReportSequence(report.jobId,reports,report.date,"delivery_note");
+      if (sequence > 999) throw Error("Alle Lieferscheinnummern sind vergeben.");
+      const delivery = {id:`regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,documentType:"delivery_note",jobId:report.jobId,jobName:report.jobName,date:report.date,description:`Material zu Regiebericht ${report.reportNumber}: ${report.description}`,source:report.source,sourceRegieId:report.id,sourceRegieNumber:report.reportNumber,reportSequence:sequence,reportNumber:`LS-${fullReportNumber(report.jobId,sequence,report.date)}`,employees:[],people:[],materials:report.materials,hourlyRate:report.hourlyRate,materialMarkup:report.materialMarkup,attachments:[],status:"draft",processingStatus:"draft",reviewStatus:"draft",billingStatus:"open",createdAt:now,updatedAt:now};
+      delivery.pricePending = missingPrices(delivery).length > 0; delivery.totals = calculateTotals(delivery);
+      Object.assign(report,{materials:[],materialDeliveryId:delivery.id,materialDeliveryNumber:delivery.reportNumber,status:"completed",processingStatus:"approved",reviewStatus:"approved",approvedAt:now,completedAt:now,updatedAt:now,pricePending:false});
+      report.totals = calculateTotals(report);
+      reports.push(delivery);
+      // Commit the move and both links together; never leave billable material in both records.
+      await writeJson(REPORTS,reports);
+      await storeInJobFile(report); await storeInJobFile(delivery);
+      if (typeof storeInDayRegie === "function") await storeInDayRegie(report);
+      await completeRegieReviewTask(report,"archive",req.body?.taskId);
+      res.json({ok:true,report,delivery});
+    } catch(error) { res.status(400).json({ok:false,error:String(error.message||error)}); }
   });
   app.post("/kristine/api/regie-reports/:id/review", async (req, res) => {
     if (!requireAdmin(req, res)) return;
