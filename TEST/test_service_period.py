@@ -1,7 +1,13 @@
 import unittest
+from unittest.mock import patch
+from zoneinfo import ZoneInfoNotFoundError
 from brain_service_period import project_service_period
 
 class ServicePeriodTests(unittest.TestCase):
+    def test_windows_without_iana_timezone_data(self):
+        with patch("brain_service_period.ZoneInfo", side_effect=ZoneInfoNotFoundError("missing")):
+            self.assertEqual(project_service_period("1", [{"date":"2020-01-01","hours":1}], {})["serviceFrom"], "2020-01-01")
+
     def test_merges_old_ww_days_with_archived_and_live_kristine(self):
         bootstrap={'projectTimeArchive':[{'employeeId':'1','date':'2026-09-30','segments':[{'type':'work','jobId':'24138','from':'07:00','to':'12:00'}]}],
         'timeEvents':[{'employeeId':'1','date':'2026-10-06','type':'start','jobId':'24138','at':'07:00'},{'employeeId':'1','date':'2026-10-06','type':'ende','jobId':'24138','at':'17:00'}]}
