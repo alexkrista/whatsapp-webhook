@@ -31,6 +31,12 @@ test('master reconciliation retains original names and addresses, latest contact
   await assert.rejects(reconcileMasterData(pool,{companyId:'00000000-0000-0000-0000-000000000001',sourceInstanceId,contactsText:'[]',projects:[]}),/mismatch/);
   await run([],[]);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_imported_projects')).rows[0].n,0);
   assert.equal((await db.query('SELECT count(*)::int n FROM kristine.imported_project_versions')).rows[0].n,2);
+  const newContact={...contact,id:'N'},newProject={...raw,jobId:'002',projectContacts:{siteManager:{masterContactId:'N'}}};
+  const created=await run([newContact],[newProject]);assert.equal(created.canonicalContactsCreated,1);assert.equal(created.canonicalProjectsCreated,1);assert.equal(created.unresolvedContactLinks,0);
+  const repeated=await run([newContact],[newProject]);assert.equal(repeated.canonicalContactsCreated,0);assert.equal(repeated.canonicalProjectsCreated,0);assert.equal(repeated.contactVersionsCreated,0);assert.equal(repeated.projectVersionsCreated,0);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.projects')).rows[0].n,2);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.contact_groups')).rows[0].n,2);
+  await assert.rejects(run([{...newContact,id:'ROLLBACK'}],[{...newProject,jobId:'003',projectContacts:{owner:'invalid'}}]),/role reference/);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.projects')).rows[0].n,2);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.contact_groups')).rows[0].n,2);
   for(const t of ['imported_contact_versions','imported_project_versions','master_reconciliation_project_contacts'])await assert.rejects(db.query('DELETE FROM kristine.'+t),/append-only/);
  }finally{await db.close();}
 });
