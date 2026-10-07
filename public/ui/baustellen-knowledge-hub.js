@@ -357,6 +357,13 @@ function groupRegieComparisonRows(rows = []) {
     const balance=hoursReady?(hoursSnapshot.overrun>0?`${hour(hoursSnapshot.overrun)} über Soll · keine offenen Stunden`:`${hour(hoursSnapshot.target)} Soll − ${hour(hoursSnapshot.total)} Ist = ${hour(hoursSnapshot.remaining)} offen`):"Stunden der Einzelakten werden geladen …";
     host.innerHTML=`<details${expanded?" open":""}><summary style="cursor:pointer;font-weight:800">Daten aus ${local}/${data.rows.length} Akten geladen · Regie: ${current(regie)}/${regie.length} WW-Akten aktuell · Rechnungen: ${current(billing)}/${billing.length} aktuell</summary><div class="bk-note">Jede Zeile zeigt ausschließlich die Stunden dieser Einzelakte. Die Summe unten ist der Gesamt-Istwert oben. Gespeicherte Daten bleiben bei fehlendem Abgleich sichtbar.</div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Akte</th><th>Stunden</th><th>Regieberichte</th><th>Rechnungen</th><th>Datenstand</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th>Summe aus ${data.rows.length} Akten</th><th class="num" data-collection-hours>${hoursReady?hour(hoursSnapshot.total):"Wird geladen …"}</th><th>${totals.reports} Berichte</th><th>${totals.invoices} Belege</th><td>${hoursReady?esc(hoursSnapshot.complete?"Stunden aktuell":"Gespeicherter Stundenstand · Abgleich ausstehend"):"Noch nicht vollständig geladen"}</td></tr><tr><td colspan="5" class="bk-note">${esc(balance)}</td></tr></tfoot></table></div></details>`;
   }
+  function openCreatedJobMaster(job){
+    const target=new URL(location.href);
+    if(target.searchParams.get("editMaster")!==String(job.jobId))return;
+    selectTab("master");renderMasterDataEditor(job);
+    target.searchParams.delete("editMaster");
+    history.replaceState(history.state,"",target.pathname+target.search+target.hash);
+  }
   async function loadJob(id){
     const previous=currentJobId,active=previous===String(id)?document.querySelector("[data-bk-tab].active")?.dataset.bkTab:"overview";
     const serial=++loadSerial;currentJobId=String(id||"");if(!currentJobId)return;
@@ -378,6 +385,7 @@ function groupRegieComparisonRows(rows = []) {
       const sources=data.rows.flatMap(row=>row.regieSources),done=sources.filter(source=>source.data&&!source.error).length,status=document.getElementById("bkRegieStatus");
       if(status)status.textContent=done===sources.length?`✓ ${done}/${sources.length} WW-Akten abgeglichen.`:`${done}/${sources.length} WW-Akten abgeglichen. Die gespeicherten Berichte werden angezeigt; fehlende Abgleiche siehe Datenstand oben.`;
       renderCollectionStatus();
+      openCreatedJobMaster(j);
       window.dispatchEvent(new CustomEvent("krista:collection-rendered",{detail:{jobId:currentJobId}}));
     }catch(e){
       if(serial!==loadSerial)return;
