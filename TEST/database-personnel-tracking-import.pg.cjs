@@ -19,7 +19,7 @@ test('personnel and tracking preserve precise numbers, false flags, duplicate po
   await assert.rejects(importPersonnelTracking(pool,{companyId:'00000000-0000-0000-0000-000000000001',sourceInstanceId,files}),/mismatch/);
   let interrupted=false;const failing={connect:async()=>({query:async(sql,args)=>{const r=await db.query(sql,args);if(!interrupted&&sql.includes('INSERT INTO kristine.imported_vehicle_positions_entries')){interrupted=true;throw Error('simulated typed interruption');}return r;},release(){}})};
   const beforeTyped=(await db.query('SELECT count(*)::int n FROM kristine.personnel_tracking_runs')).rows[0].n;
-  await assert.rejects(importPersonnelTracking(failing,{...scope,files}),/simulated typed interruption/);
+  await assert.rejects(importPersonnelTracking(failing,{...scope,files:files.map(f=>f.path.endsWith("jsonl")?{...f,originalText:f.originalText+'\n{"vehicleId":"V","lat":1,"ignition":false}'}:f)}),/simulated typed interruption/);
   assert.equal((await db.query('SELECT count(*)::int n FROM kristine.personnel_tracking_runs')).rows[0].n,beforeTyped);
   assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_imported_vehicle_positions')).rows[0].n,401);
   const empty=files.map(f=>({...f,originalText:f.path.endsWith('sessions.json')?'{}':f.path.endsWith('latest.json')?'{"rows":[]}':f.path.endsWith('jsonl')?'':'[]'}));await run(empty);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_imported_vehicle_positions')).rows[0].n,0);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.imported_vehicle_positions_entries')).rows[0].n,401);
