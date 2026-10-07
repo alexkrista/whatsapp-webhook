@@ -4,7 +4,7 @@ const {PGlite}=require(process.env.PGLITE_MODULE_PATH||'@electric-sql/pglite');
 const {importTimeSources}=require('../storage/import-time-sources');
 const {reconcileTimeSources}=require('../storage/reconcile-time-sources');
 test('time reconciliation preserves duplicate events, changed archive revisions and exact latest membership with rollback',async()=>{
- const db=new PGlite(),pool={connect:async()=>({query:(s,a)=>db.query(s,a),release(){}})};
+ const db=new PGlite(),pool={connect:async()=>({query:async(s,a)=>{const r=await db.query(s,a);if(!s.includes('work_date::text'))for(const row of r.rows)if(typeof row.work_date==='string')row.work_date=new Date(row.work_date+'T00:00:00+02:00');return r;},release(){}})};
  try{
   for(const f of ['002-domain-core.sql','003-business-domain.sql','004-people-communications.sql','006-address-source-mapping.sql','007-contact-groups.sql','009-time-source-import.sql','018-time-reconciliation.sql'])await db.exec(fs.readFileSync(__dirname+'/../migrations/'+f,'utf8'));
   const companyId=(await db.query("INSERT INTO kristine.companies(name) VALUES('A') RETURNING id")).rows[0].id;
