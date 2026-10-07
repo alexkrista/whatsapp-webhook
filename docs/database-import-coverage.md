@@ -11,7 +11,7 @@ Originalsicherung und Fachübernahme sind unterschiedliche Prüfungen. Noch auss
 - 1.106 Tagesdatensätze: 78 Abschlüsse, 407 Freigaben, 262 Korrekturen, 359 Reviews; 669 historische Änderungsschritte. 13 Datensätze mit Zuordnungsprüfung.
 - 72 Regieberichte mit 232 Mitarbeitereinträgen, 139 Materialpositionen, 128 Anhangseinträgen.
 - 1.590 Dokumentdateien, 946.811.405 Bytes, mit unabhängiger Originalobjekt-Prüfung; 873 exakte Projektverknüpfungen, 94 noch nicht zuordenbare Projektpfade. Andere Dateien sind allgemeine Geschäftsdateien ohne projektbezogenen Quellpfad.
-- 328 aktuelle Materialien und 186 frühere Materialstände, 24 Lieferanten, 62 Rechnungseingänge. 325 aktuelle Materialien besitzen keinen verwertbaren Verkaufspreis und bleiben offen. Historische, deaktivierte, zusammengeführte und gelöschte Datensätze bleiben in ihrem ursprünglichen Status.
+- 328 aktuelle Materialien und 186 frühere Materialstände, 24 Lieferanten, 62 Rechnungseingänge. 325 aktuelle Materialien besitzen ein boolean-Festpreiskennzeichen. Die zunächst fehlerhaften Preisprüfmarker wurden durch Migration 016 fachlich korrigiert; die vorhandenen Verkaufspreise bleiben erhalten. Historische, deaktivierte, zusammengeführte und gelöschte Datensätze bleiben in ihrem ursprünglichen Status.
 - 149.714 Farbkatalog- und Farbgeschäftseinträge einschließlich früherem Katalog erstellt und geprüft; keine Lager-, Bestell-, Druck- oder Zahlungsaktion.
 
 ## Externe Quellen
@@ -28,4 +28,8 @@ Die 256-MB-Datenbank startete während des ersten großen Farbimports neu; das L
 
 Am 2026-10-07 wurden 941 Geschäfts-JSON/JSONL-Dateien mit 94.245.347 Bytes aus einem frischen Dateisystemlauf erneut gelesen und in SQL geprüft. 32 neue Dateiversionen wurden ergänzt, 909 unveränderte wiederverwendet; 0 Parsing-Prüffälle. Vollständiges Laufmanifest plus Ausschlüsse und Projektalias separat in SQL erhalten. Alle 1.590 Dokumente wurden erneut aus Dateien und Originalobjekten gehasht und ohne neue Fachversionen geprüft. Backup und Ergebnisse: `/var/data/_sql-import-originals/coverage-1791380893052`. Vier während dieses Durchlaufs weitergeschriebene Quellen wurden als separater Delta-Durchlauf nachgezogen; das ersetzt noch keinen automatischen SQL-Schreibpfad.
 
-Validierung: 51 PostgreSQL/PGlite-Tests im vollständigen Lauf bestanden; nach Paketumstellung gezielter Farbimport-Test mit mehr als 200 Einträgen bestanden; zusätzlicher Dateiquellen-Sammlertest bestanden. Alle Migrationen 001–015 gemeinsam in frischer PGlite-Datenbank angewendet: 108 Tabellen im Schema `kristine`. PGlite prüft SQL-Invarianten, ersetzt aber keine PostgreSQL-Server-/Parallelitätsprüfung. Die Live-Importe wurden zusätzlich gegen die tatsächliche Render-Datenbank gelesen/geprüft.
+Validierung: 53 Tests im abschließenden vollständigen Lauf bestanden, einschließlich Farbimport mit mehr als 200 Einträgen, Dateiquellen-Sammler und Festpreiskennzeichen-Korrektur. Alle Migrationen 001–016 gemeinsam in frischer PGlite-Datenbank angewendet: 108 Tabellen im Schema `kristine`. PGlite prüft SQL-Invarianten, ersetzt aber keine PostgreSQL-Server-/Parallelitätsprüfung. Die Live-Importe wurden zusätzlich gegen die tatsächliche Render-Datenbank gelesen/geprüft.
+
+Der abschließende Delta-Durchlauf über vier während des Imports geänderte Quellen wurde am 2026-10-07 um 13:51:03 UTC geprüft; unmittelbar nach dieser Prüfung waren 0 weitere Änderungen dieser vier Quellen offen. Das ist ein dokumentierter Snapshotzeitpunkt, keine laufende Synchronisation.
+
+Live-Prüfung der Materialkorrektur: 514 Zeilen, 325 boolean-Schalter, 0 korrigierte Quellprüffälle, 0 Schalterabweichungen, 0 Preisabweichungen. Quelltext, Raw-Payload und ursprüngliche Importmarker wurden erhalten.
