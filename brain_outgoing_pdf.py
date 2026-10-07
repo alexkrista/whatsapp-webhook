@@ -210,6 +210,10 @@ def render_invoice_pdf(invoice, settings, destination):
     title = ParagraphStyle("WWTitle", parent=base, fontName=bold_font, fontSize=layout["titleSizePt"], leading=15.5 * layout["titleSizePt"] / 12.76)
     right_text = ParagraphStyle("WWRight", parent=base, alignment=TA_RIGHT)
     heading = ParagraphStyle("WWHeading", parent=base, fontName=bold_font, fontSize=font_size, leading=leading)
+    table_text = ParagraphStyle("WWTableText", parent=base, fontSize=8.3, leading=10.3)
+    def table_cell(value):
+        return Paragraph(escape(" ".join(str(value or "").split())), table_text)
+
     note = ParagraphStyle("WWNote", parent=base, fontSize=9.2, leading=11.2)
 
     run = invoice.get("run") or {}
@@ -527,7 +531,7 @@ def render_invoice_pdf(invoice, settings, destination):
         rows = [[Paragraph("Übersicht der bisher gestellten Rechnungen:", heading), "", "", "", ""],
                 ["Rech.Nr.", "Datum", "Netto", "USt", "Brutto"]]
         for old in previous:
-            rows.append([old.get("invoiceNumber") or "", de_date(old.get("issueDate")), money(old.get("net")), money(old.get("vat")), money(old.get("gross"))])
+            rows.append([table_cell(old.get("invoiceNumber")), table_cell(de_date(old.get("issueDate"))), money(old.get("net")), money(old.get("vat")), money(old.get("gross"))])
         rows.append(["Summe bisher:", "", money(invoice.get("prior_net")), money(invoice.get("prior_vat")), money(invoice.get("prior_gross"))])
         rows.append(["Zuwachs mit dieser Rechnung:", "", money(invoice.get("increment_net")), money(invoice.get("increment_vat")), money(invoice.get("increment_gross"))])
         rows.append(["Summe:", "", money(invoice.get("cumulative_net")), money(invoice.get("cumulative_vat")), money(invoice.get("cumulative_gross"))])
@@ -535,7 +539,7 @@ def render_invoice_pdf(invoice, settings, destination):
         t.setStyle(TableStyle([
             ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), bold_font),
             ("FONTNAME", (0, 2), (-1, -1), regular_font),
-            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
+            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
             ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black),
             ("LINEABOVE", (0, -3), (-1, -3), .4, colors.black),
             ("LINEABOVE", (0, -2), (-1, -2), .4, colors.black),
@@ -551,13 +555,13 @@ def render_invoice_pdf(invoice, settings, destination):
                 ["", "Datum", "Netto", "USt", "Brutto"]]
         for index, pay in enumerate(payments, 1):
             label = "In WW verbucht" if str(pay.get("source") or "").upper() == "WW" else (pay.get("reference") or f"{index}. Zahlung")
-            rows.append([label, de_date(pay.get("paymentDate")), money(pay.get("net")), money(pay.get("vat")), money(pay.get("gross"))])
+            rows.append([table_cell(label), table_cell(de_date(pay.get("paymentDate"))), money(pay.get("net")), money(pay.get("vat")), money(pay.get("gross"))])
         rows.append(["Summe Zahlungen:", "", money(invoice.get("paid_net_snapshot")), money(invoice.get("paid_vat_snapshot")), money(invoice.get("paid_gross_snapshot"))])
         t = Table(rows, colWidths=columns([60, 27, 29, 29, 30]), repeatRows=2)
         t.setStyle(TableStyle([
             ("SPAN", (0, 0), (-1, 0)), ("FONTNAME", (0, 0), (-1, 1), bold_font),
             ("FONTNAME", (0, 2), (-1, -1), regular_font),
-            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
+            ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("FONTSIZE", (0, 0), (-1, -1), 8.3),
             ("LINEBELOW", (0, 1), (-1, 1), .4, colors.black), ("LINEABOVE", (0, -1), (-1, -1), .4, colors.black),
             ("FONTNAME", (0, -1), (-1, -1), bold_font),
             ("TOPPADDING", (0, 0), (-1, -1), 1.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),

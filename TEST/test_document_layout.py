@@ -39,6 +39,25 @@ class DocumentLayoutTests(unittest.TestCase):
                     self.assertAlmostEqual(word["x0"], 48.189, places=2)
                     self.assertAlmostEqual(word["top"], 286.07, places=1)
 
+    def test_payment_references_wrap_inside_their_column(self):
+        invoice = {"kind": "TR", "run": {"project_number": "24138"}, "lines": [],
+                   "payments": [{"reference": "Projekt 24138                                             RE 2026 09008", "paymentDate": "2026-09-25", "net": 10000, "vat": 2000, "gross": 12000} for _ in range(2)],
+                   "paid_net_snapshot": 20000, "paid_vat_snapshot": 4000, "paid_gross_snapshot": 24000}
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "payments.pdf"
+            render_invoice_pdf(invoice, {}, target)
+            with pdfplumber.open(target) as pdf:
+                words = [w for page in pdf.pages for w in page.extract_words()]
+                dates = [w for w in words if w["text"] == "25.09.2026"]
+                references = [w for w in words if w["text"] == "RE"]
+                self.assertEqual(len(dates), 2)
+                self.assertEqual(len(references), 2)
+                boundary = min(w["x0"] for w in dates)
+                for word in references:
+                    self.assertLess(word["x1"], boundary, "Reference must not overlap payment date")
+                for page in pdf.pages:
+                    self.assertNotIn("2255..0099", page.extract_text())
+
     def test_invalid_central_settings_do_not_enter_the_renderer(self):
         with self.assertRaises(ValueError):
             clean_layout({"fontSizePt": float("nan")})
