@@ -8,7 +8,7 @@ test('Backfills voice/text, collapses audio log entries and updates late transcr
  const {root,put}=await fixture(t),at='2026-10-06T07:15:00Z',audio='unknown/2026/10/06/note.ogg';await put(audio,'audio');
  const rows=[{type:'audio_saved',file:'note.ogg',at,from:'43123456789'},{type:'audio_transcript',file:'note.ogg',at,from:'43123456789',transcript:'Müller braucht Farbe'},{type:'text',at,from:'43123456789',text:'Bitte morgen liefern',raw:{id:'wamid1'}}];await put('unknown/2026/10/06/log.jsonl',rows.map(JSON.stringify).join('\n'));
  await put('_kristine/events.jsonl',JSON.stringify({type:'employee_message',employeeId:'alex',employeeName:'Alexander Krista',at,date:'2026-10-06',detail:'Notiz ohne Baustelle'}));
- await put('_kristine/states.json',{alex:{employeeId:'alex',employeeName:'Alexander Krista',timeline:[{type:'message',at,detail:'Notiz ohne Baustelle'}]}});
+ await put('_kristine/states.json',{alex:{employeeId:'alex',employeeName:'Alexander Krista',timeline:[{type:'message',at:'2026-10-06T07:14:59.920Z',detail:'Notiz ohne Baustelle'}]}});
  await put('_kristine/time-events.json',[{employeeId:'alex',date:'2026-10-06',at:'07:00',type:'start',jobId:'26108'}]);
  const inbox=createPhotoInbox(root);let state=await inbox.sync();assert.equal(Object.keys(state.items).length,3);assert.equal(state.items[audio].content,'Müller braucht Farbe');assert.equal(state.items[audio].employeeName,'Alexander Krista');assert.equal(state.items[audio].at,'09:15');assert.equal(state.items[audio].suggestion.jobId,'26108');
  await assert.rejects(inbox.confirm([{file:audio,jobId:'26108'},{file:Object.keys(state.items)[1],jobId:'missing'}]));assert.equal((await inbox.sync()).items[audio].status,'pending');
@@ -20,4 +20,11 @@ test('Own spoken memos and missing originals remain readable; text is never serv
  const {root,put}=await fixture(t);await put('_kristine/tasks.json',[{id:'t1',assigneeId:'alex',assigneeName:'Alexander Krista',jobId:'26108'}]);await put('_kristine/visit-recordings/t1/visit-123-ab.json',{id:'visit-123-ab',recordedAt:'2026-10-06T10:00:00Z',kind:'own_memo',transcript:'Meine gesprochene Notiz'});
  const messages=await collectMessages(root);assert.equal(messages[0].missingAudio,true);assert.equal(messages[0].source,'Gesprochene Notiz');assert.equal(messages[0].previousJobId,'26108');
  await put('_kristine/events.jsonl',JSON.stringify({type:'employee_message',at:'2026-10-06T10:00:00Z',detail:'Text'}));const routes=new Map(),app={get:(p,h)=>routes.set(p,h),post:(p,h)=>routes.set(p,h)};const inbox=registerPhotoInbox(app,{dataDir:root,requireAdmin:()=>true});const state=await inbox.sync();const text=Object.values(state.items).find(x=>x.category==='text');let status;const res={status:s=>{status=s;return res},send:()=>{},sendFile:()=>assert.fail('Text must not be served'),setHeader:()=>{}};await routes.get('/kristine/api/photo-inbox/file')({query:{file:text.file}},res);assert.equal(status,404);
+});
+test('Existing duplicate timeline copies are hidden without losing their reviewed status',async t=>{
+ const {root,put}=await fixture(t),crypto=require('node:crypto'),at='2026-10-06T09:28:45.684Z',timelineAt='2026-10-06T09:28:45.605Z',detail='Zimmer vier';
+ await put('_kristine/events.jsonl',JSON.stringify({type:'employee_message',employeeId:'alex',employeeName:'Alexander Krista',at,detail}));await put('_kristine/states.json',{alex:{employeeId:'alex',employeeName:'Alexander Krista',timeline:[{type:'message',at:timelineAt,detail}]}});
+ const alias='message:'+crypto.createHash('sha256').update(JSON.stringify([timelineAt,'alex',detail])).digest('hex').slice(0,32);
+ await put('_kristine/photo-inbox.json',{enabledAt:at,seen:[],items:{[alias]:{file:alias,category:'text',employeeId:'alex',date:'2026-10-06',content:detail,status:'acknowledged',acknowledgedAt:at}}});
+ const state=await createPhotoInbox(root).sync(),canonical=Object.values(state.items).find(x=>x.file!==alias);assert.equal(canonical.status,'acknowledged');assert.equal(state.items[alias].status,'duplicate');assert.equal(state.items[alias].duplicateOf,canonical.file);assert.equal((await collectMessages(root)).length,1);
 });
