@@ -19,6 +19,11 @@ function createPhotoInbox(dataDir){
  async function synchronize(){
   const [state,reviews,events]=await Promise.all([read(file,null),read(path.join(root,'day-review-entries.json'),[]),read(path.join(root,'time-events.json'),[])]);
   const data=state||{enabledAt:startedAt,items:{},seen:[]},seen=new Set(data.seen);let changed=!state;
+  const messages=await require('./message-inbox-sources').collectMessages(dataDir);
+  for(const message of messages){const previous=data.items[message.file],groupId=crypto.createHash('sha256').update(String(message.employeeId||'unknown')+'|'+message.date).digest('hex').slice(0,24);
+   const item={...message,groupId,status:'pending',jobId:'',suggestion:suggestJob(message,events),...previous,content:message.content,transcriptionError:message.transcriptionError,missingAudio:message.missingAudio};
+   if(JSON.stringify(previous)!==JSON.stringify(item)){data.items[message.file]=item;changed=true}
+  }
   for(const photo of reviews){
    if(!photo.file||!['photo','video'].includes(photo.category)||photo.reportId||photo.lateUpload)continue;
    if(data.items[photo.file]||seen.has(photo.file))continue;
@@ -54,7 +59,7 @@ function createPhotoInbox(dataDir){
   let changed=false;
   for(const [groupId,items] of groups){const pending=items.filter(x=>x.status==='pending'),id='photo_review_'+groupId,existing=tasks.find(t=>t.id===id),now=new Date().toISOString();
    if(!pending.length){if(existing&&existing.status!=='done'){Object.assign(existing,{status:'done',completedAt:now,updatedAt:now});changed=true}continue}
-   const title='Fotos zuordnen · '+(items[0].employeeName||'Mitarbeiter offen')+' · '+items[0].date+' · '+pending.length+' Foto(s)/Video(s)';
+   const title=(items.some(x=>['audio','text'].includes(x.category))?'Fotos und Nachrichten prüfen · ':'Fotos zuordnen · ')+(items[0].employeeName||'Mitarbeiter offen')+' · '+items[0].date+' · '+pending.length+' Eingangseintrag/-einträge';
    if(existing?.status==='open'&&existing.title===title)continue;
    const task={...(existing||{}),id,title,taskType:'Freigabe',priority:'heute',assigneeId:alex?.id||'admin',assigneeName:alex?.name||'Alexander Krista',dueDate:items[0].date,reminder:'[PHOTO_INBOX]groupId='+groupId,creatorId:'photo-inbox',creatorName:'KRISTINE Fotoeingang',status:'open',createdAt:existing?.createdAt||now,updatedAt:now,completedAt:null};
    if(existing)Object.assign(existing,task);else tasks.unshift(task);changed=true;
@@ -83,13 +88,14 @@ function createPhotoInbox(dataDir){
   }),
   dismiss:(files,restore=false)=>serial(async()=>{
    const data=await synchronize();if(!Array.isArray(files)||!files.length||files.length>100)throw Error('Bitte 1 bis 100 Fotos wählen.');
-   for(const file of files){const item=data.items[file];if(!item||!['pending','dismissed'].includes(item.status))throw Error('Foto nicht mehr im offenen Eingang.');}
+   for(const file of files){const item=data.items[file];if(!item||!(['audio','text'].includes(item.category)?['pending','dismissed','confirmed','acknowledged']:['pending','dismissed']).includes(item.status))throw Error('Eintrag nicht mehr im offenen Eingang.');}
    for(const file of files){const item=data.items[file];item.status=restore?'pending':'dismissed';item.dismissedAt=restore?null:new Date().toISOString();}
    await write(file,data);await syncReviews(data);await syncTasks(data);return files.length;
   }),
+  acknowledge:files=>serial(async()=>{const data=await synchronize();if(!Array.isArray(files)||!files.length||files.length>100)throw Error('Bitte 1 bis 100 Nachrichten wählen.');for(const key of files){const item=data.items[key];if(!item||!['audio','text'].includes(item.category)||!['pending','acknowledged'].includes(item.status))throw Error('Nachricht nicht mehr offen.');}for(const key of files)Object.assign(data.items[key],{status:'acknowledged',acknowledgedAt:data.items[key].acknowledgedAt||new Date().toISOString()});await write(file,data);await syncTasks(data);return files.length;}),
   confirm:changes=>serial(async()=>{const data=await synchronize();if(!Array.isArray(changes)||!changes.length||changes.length>100)throw Error('Bitte 1 bis 100 Fotos bestätigen.');
-   for(const change of changes){if(!data.items[change.file]||data.items[change.file].status==='dismissed')throw Error('Foto nicht im Eingang.');if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(change.jobId||'')||!(await fs.stat(path.join(dataDir,change.jobId)).catch(()=>null))?.isDirectory())throw Error('Bitte für jedes Foto eine gültige Baustelle wählen.');if(data.items[change.file].status==='confirmed'&&data.items[change.file].jobId!==change.jobId)throw Error('Foto bereits bestätigt. Bitte in der Galerie ändern.')}
-   for(const change of changes)Object.assign(data.items[change.file],{status:'confirmed',jobId:change.jobId,confirmedAt:data.items[change.file].confirmedAt||new Date().toISOString()});await write(file,data);await syncAssignments(data);await syncReviews(data);await syncTasks(data);return changes.length;
+   for(const change of changes){if(!data.items[change.file]||data.items[change.file].status==='dismissed')throw Error('Foto nicht im Eingang.');if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(change.jobId||'')||!(await fs.stat(path.join(dataDir,change.jobId)).catch(()=>null))?.isDirectory())throw Error('Bitte für jedes Foto eine gültige Baustelle wählen.');if(data.items[change.file].status==='confirmed'&&!['audio','text'].includes(data.items[change.file].category)&&data.items[change.file].jobId!==change.jobId)throw Error('Foto bereits bestätigt. Bitte in der Galerie ändern.')}
+   for(const change of changes){const item=data.items[change.file],at=new Date().toISOString();if(item.status==='confirmed'&&item.jobId!==change.jobId)item.assignmentHistory=[...(item.assignmentHistory||[]),{from:item.jobId,to:change.jobId,at}];Object.assign(item,{status:'confirmed',jobId:change.jobId,confirmedAt:item.confirmedAt||at});}await write(file,data);await syncAssignments(data);await syncReviews(data);await syncTasks(data);return changes.length;
   })
  };
 }
@@ -97,10 +103,11 @@ function registerPhotoInbox(app,{dataDir,requireAdmin,ready}){
  const inbox=createPhotoInbox(dataDir);
  const startImport=()=>{inbox.importHistory().catch(console.error);const timer=setInterval(()=>inbox.importHistory().catch(console.error),15000);timer.unref();};
  if(ready)Promise.resolve(ready).then(startImport).catch(console.error);else startImport();
- app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>i.status===(req.query.dismissed==='true'?'dismissed':'pending')).map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
+ app.get('/kristine/api/photo-inbox',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await inbox.sync();res.json({ok:true,historyImport:state.historyImport||null,items:Object.values(state.items).filter(i=>req.query.processed==='true'?['confirmed','acknowledged'].includes(i.status):i.status===(req.query.dismissed==='true'?'dismissed':'pending')).map(i=>({...i,url:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(i.file)}))})}catch(e){res.status(500).json({ok:false,error:e.message})}});
+ app.post('/kristine/api/photo-inbox/acknowledge',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.acknowledge(req.body?.files)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/dismiss',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.dismiss(req.body?.files,req.body?.restore===true)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
  app.post('/kristine/api/photo-inbox/confirm',async(req,res)=>{if(!requireAdmin(req,res))return;try{res.json({ok:true,count:await inbox.confirm(req.body?.changes)})}catch(e){res.status(400).json({ok:false,error:e.message})}});
- app.get('/kristine/api/photo-inbox/file',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await read(path.join(dataDir,'_kristine','photo-inbox.json'),{items:{}}),item=state.items[String(req.query.file||'')];if(!item)return res.status(404).send('Foto nicht gefunden');const full=path.resolve(dataDir,item.file),root=path.resolve(dataDir,'_kristine','media')+path.sep,originalRoot=/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(item.originalJobId||'')?path.resolve(dataDir,item.originalJobId)+path.sep:null;if(!full.startsWith(root)&&!(originalRoot&&full.startsWith(originalRoot)))return res.status(404).send('Foto nicht gefunden');res.setHeader('Cache-Control','private, no-store');res.sendFile(full)}catch(e){res.status(500).send(e.message)}});
+ app.get('/kristine/api/photo-inbox/file',async(req,res)=>{if(!requireAdmin(req,res))return;try{const state=await read(path.join(dataDir,'_kristine','photo-inbox.json'),{items:{}}),item=state.items[String(req.query.file||'')];if(!item)return res.status(404).send('Foto nicht gefunden');const full=path.resolve(dataDir,item.file),root=path.resolve(dataDir,'_kristine','media')+path.sep,recordingRoot=path.resolve(dataDir,'_kristine','visit-recordings')+path.sep,originalRoot=/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(item.originalJobId||'')?path.resolve(dataDir,item.originalJobId)+path.sep:null;if(item.category==='text'||(!full.startsWith(root)&&!full.startsWith(recordingRoot)&&!(originalRoot&&full.startsWith(originalRoot))))return res.status(404).send('Foto nicht gefunden');res.setHeader('Cache-Control','private, no-store');res.sendFile(full)}catch(e){res.status(500).send(e.message)}});
  return inbox;
 }
 module.exports={createPhotoInbox,registerPhotoInbox,suggestJob};
