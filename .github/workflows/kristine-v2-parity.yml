@@ -1,0 +1,64 @@
+name: KRISTINE 2.0 - KGO and SQL safety
+on:
+  pull_request:
+    paths:
+      - 'public/kristine-go*'
+      - 'public/ui/kgo-brain-access.js'
+      - 'public/ui/krista-photo-followup.js'
+      - 'kristine.js'
+      - 'server.js'
+      - 'day-close.js'
+      - 'kgo-office-core.js'
+      - 'regie-assistant.js'
+      - 'storage/**'
+      - 'migrations/**'
+      - 'tools/kristine-v2-parity-audit.js'
+      - 'docs/kristine-2-0-kgo-baseline.json'
+      - 'TEST/kristine-v2-*'
+      - '.github/workflows/kristine-v2-parity.yml'
+  push:
+    branches: [feat/kristine-2-0]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: kristine-v2-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  feature-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test-only dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/kristine-v2-tests" --no-save --ignore-scripts --no-audit --no-fund \
+            jsdom@26.1.0 qrcode@1.5.4 pdf-lib@1.17.1 pdf-parse@2.4.5 @electric-sql/pglite@0.5.8
+      - name: Reject missing or changed KGO contracts
+        run: node tools/kristine-v2-parity-audit.js
+      - name: KGO and new shared navigation checks
+        run: |
+          NODE_PATH="$RUNNER_TEMP/kristine-v2-tests/node_modules" \
+            node --test --test-concurrency=1 \
+              TEST/kristine-v2-parity-audit.test.js \
+              TEST/kristine-v2-shell.test.js \
+              TEST/kristine-v2-fatal-monitor.test.js \
+              TEST/kristine-end-is-immediate.test.js \
+              TEST/kristine-no-duplicate-start.test.js \
+              TEST/kristine-stale-state-next-day.test.js \
+              TEST/kristine-early-alternate-site.test.js \
+              TEST/kristine-site-switch-marker.test.js \
+              TEST/kristine-baustellen-navigation.test.js \
+              TEST/kristine-planning-calendar-notices.test.js \
+              TEST/sql-migration-audit.test.js
+      - name: Embedded SQL consistency checks
+        run: |
+          NODE_PATH="$RUNNER_TEMP/kristine-v2-tests/node_modules" \
+            node --test --test-concurrency=1 \
+              TEST/database-core.pg.cjs \
+              TEST/database-people.pg.cjs \
+              TEST/database-master-import.pg.cjs \
+              TEST/database-time-import.pg.cjs \
+              TEST/database-time-reconciliation.pg.cjs
