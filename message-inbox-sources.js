@@ -14,7 +14,8 @@ async function collectMessages(dataDir){
  for(const [employeeId,state] of Object.entries(states))for(const row of state.timeline||[]){
   if(row.type!=='message'||!String(row.detail||'').trim())continue;
   const id=state.employeeId||employeeId,file='message:'+hash(JSON.stringify([row.at,String(id),row.detail]));
-  if(items.has(file))continue;
+  const existing=[...items.values()].find(item=>item.category==='text'&&String(item.employeeId)===String(id)&&item.content===String(row.detail)&&Math.abs(Date.parse(item.createdAt)-Date.parse(row.at))<=2000);
+  if(existing){if(existing.file!==file)existing.duplicateKeys=[...(existing.duplicateKeys||[]),file];continue;}
   put({...localStamp(row.at),employeeId:id,employeeName:state.employeeName||employees.find(e=>String(e.id)===String(id))?.name||'Mitarbeiter',file,category:'text',content:String(row.detail),originalJobId:row.jobId||'',previousJobId:row.jobId||'',createdAt:row.at,source:'Mitarbeiterverlauf'});
  }
  async function walk(dir,jobId,depth){

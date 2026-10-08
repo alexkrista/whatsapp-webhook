@@ -22,6 +22,11 @@ function createPhotoInbox(dataDir){
   const messages=await require('./message-inbox-sources').collectMessages(dataDir);
   for(const message of messages){const previous=data.items[message.file],groupId=crypto.createHash('sha256').update(String(message.employeeId||'unknown')+'|'+message.date).digest('hex').slice(0,24);
    const item={...message,groupId,status:'pending',jobId:'',suggestion:suggestJob(message,events),...previous,content:message.content,transcriptionError:message.transcriptionError,missingAudio:message.missingAudio};
+   for(const duplicateKey of message.duplicateKeys||[]){const duplicate=data.items[duplicateKey];if(!duplicate||duplicate.status==='duplicate')continue;
+    if(item.status==='confirmed'&&duplicate.status==='confirmed'&&item.jobId!==duplicate.jobId)continue;
+    if(item.status==='pending'&&['confirmed','acknowledged','dismissed'].includes(duplicate.status))Object.assign(item,{status:duplicate.status,jobId:duplicate.jobId||'',confirmedAt:duplicate.confirmedAt,acknowledgedAt:duplicate.acknowledgedAt,dismissedAt:duplicate.dismissedAt});
+    duplicate.duplicateStatus=duplicate.status;duplicate.status='duplicate';duplicate.duplicateOf=message.file;changed=true;
+   }
    if(JSON.stringify(previous)!==JSON.stringify(item)){data.items[message.file]=item;changed=true}
   }
   for(const photo of reviews){

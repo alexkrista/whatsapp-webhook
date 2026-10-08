@@ -4761,6 +4761,7 @@ registerMediaMigration(app, {
 let resumePhotoInboxImport;
 const photoInboxImportReady = new Promise(resolve => { resumePhotoInboxImport = resolve; });
 require('./photo-inbox').registerPhotoInbox(app,{dataDir:DATA_DIR,requireAdmin,ready:photoInboxImportReady});
+require('./project-color-concept').registerProjectColorConcept(app,{dataDir:DATA_DIR,requireAdmin,appendHistory:appendJobHistory});
 // ==================== KRISTINE Brain-Stundenquelle ====================
 // Liefert dem Gehirn die produktiven KRISTINE-Rohdaten direkt aus Render /var/data.
 // Geschützt mit demselben ADMIN_TOKEN wie die übrigen Admin-APIs.
