@@ -485,16 +485,16 @@ async function loadExpected(){
     line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
    }
    if(a.ownPayments?.length){
-    const heading=document.createElement('h3');heading.textContent='Von Brain übergebene Überweisungen im Abgleich';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
+    const heading=document.createElement('h3');heading.textContent='Brain-Überweisungen · Abgleich, kein zusätzlicher Abzug';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
     const matches=new Map((a.ownMatched||[]).map(x=>[x.transfer+':'+x.index,x.booking]));
     for(const payment of a.ownPayments){
      const booking=matches.get(payment.transfer+':'+payment.index),included=booking==='pending'||booking==='booked';
-     const label=bankDate(payment.date)+' · '+payment.name+(booking==='pending'?' (in Vormerkungen)':booking==='booked'?' (gebucht)':'');
+     const label=bankDate(payment.date)+' · '+payment.name+(booking==='pending'?' (in Vormerkungen)':booking==='booked'?' (gebucht)':' (Bankzuordnung noch offen)');
      const amount=money(payment.amount,a.currency);
      line(label,included?'('+amount+')':amount);
     }
     const ownTotal=a.ownPaymentTotal??a.ownPayments.reduce((sum,p)=>sum+Number(p.amount),0).toFixed(2);
-    line('Summe Brain-Überweisungen',money(ownTotal,a.currency),true);
+    line('Summe im Abgleich · bereits oben enthalten oder noch zu klären',money(ownTotal,a.currency),true);
     if(a.ownPaymentCount>a.ownPayments.length){
      const more=document.createElement('p');more.className='small';more.textContent='Weitere '+(a.ownPaymentCount-a.ownPayments.length)+' Überweisungen im Zahlungsarchiv. Die Summe enthält alle.';card.append(more);
     }
@@ -503,13 +503,13 @@ async function loadExpected(){
     const note=document.createElement('p');note.className='small';note.textContent=a.error;card.append(note);
     if(a.reportedBalance===undefined)line('Erwarteter Kontostand','Nicht berechenbar');
    }else{
-    if(Number(a.ownOutgoing)>0)line('Davon noch nicht im Bankumsatz · zusätzlich abzuziehen','− '+money(a.ownOutgoing,a.currency));
-    line('Erwarteter Kontostand',money(a.expected,a.currency),true);
+    if(Number(a.ownOutgoing)>0)line('Bankzuordnung noch offen · kein zusätzlicher Abzug',money(a.ownOutgoing,a.currency));
+    line('Kontostand inkl. Bankumsätzen und Vormerkungen',money(a.expected,a.currency),true);
    }
    $('expectedRows').append(card);
   }
   await renderLiquidity(data);
-  $('expectedMessage').textContent='Abgerufen: '+stamp(data.fetchedAt)+'. Eigene übergebene Zahlungen werden zusätzlich abgezogen, solange sie noch nicht in den Bankumsätzen erscheinen. Eine eventuell nötige Bankunterschrift bleibt erforderlich. Kein bestätigter verfügbarer Banksaldo.';
+  $('expectedMessage').textContent='Abgerufen: '+stamp(data.fetchedAt)+'. Brain-Überweisungen ohne eindeutige Bankzuordnung bleiben im Abgleich sichtbar und werden nicht nochmals vom Bankstand abgezogen. Eine eventuell nötige Bankunterschrift bleibt erforderlich. Kein bestätigter verfügbarer Banksaldo.';
  }catch(e){$('expectedMessage').textContent=e.message;$('dataChanged').textContent='Letzte Datenänderung: Abruf fehlgeschlagen';}finally{expectedBusy=false;}
 }
 async function renderLiquidity(bank){
@@ -652,3 +652,4 @@ const reviewButton=aButton('Abzüge prüfen · Alex',$('banking'),async()=>{
 });reviewButton.style.marginTop='18px';
 
 </script></body></html>
+

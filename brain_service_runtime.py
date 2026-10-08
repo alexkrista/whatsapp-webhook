@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-BRAIN_CONNECTOR_VERSION = "0.14.89"
+BRAIN_CONNECTOR_VERSION = "0.14.90"
 SERVICE_MANAGER_PORT = int(os.environ.get("KRISTA_SERVICE_MANAGER_PORT", "8765"))
 REPO_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = Path(tempfile.gettempdir()) / "krista-service-manager"
@@ -261,3 +261,4 @@ def install(ns) -> None:
         if started:
             print(f"✅ KRISTA Dienstemanager gestartet · Port {SERVICE_MANAGER_PORT}")
     ns["BRAIN_CONNECTOR_VERSION"] = BRAIN_CONNECTOR_VERSION
+
