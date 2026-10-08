@@ -14,6 +14,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { sqlPanel } = require('./kristine-v2-preview-sql-panel');
 const { readSqlOverview, verifyTestDatabaseUrl } = require('../storage/kristine-v2-sql-read-model');
+const { initializeTestSchema } = require('./kristine-v2-test-schema');
 
 const ROOT = path.resolve(__dirname, '..');
 const WORLD_NAMES = Object.freeze({
@@ -250,6 +251,7 @@ if (require.main === module) {
   // The explicit database name, user and Render hostname must match our
   // isolated test DB. The production DATABASE_URL remains forbidden above.
   let readOverview = null;
+  let testPool = null;
   const testUrl = process.env.KRISTINE_V2_TEST_DATABASE_URL;
   if (testUrl) {
     verifyTestDatabaseUrl(testUrl);
@@ -264,14 +266,31 @@ if (require.main === module) {
       application_name:'kristine-v2-readonly-preview',
     });
     pool.on('error', () => {}); // Never log a credential-bearing URI.
+    testPool = pool;
     readOverview = () => readSqlOverview(pool,{
       companyId:process.env.KRISTINE_V2_COMPANY_ID || null,
     });
   }
   const port = Number(process.env.PORT || 10000);
-  createPreviewServer({ password: process.env.KRISTINE_V2_PREVIEW_PASSWORD, readOverview })
-    .listen(port, '0.0.0.0', () => {
-      process.stdout.write('KRISTINE_V2_ISOLATED_PREVIEW_READY\n');
+  Promise.resolve()
+    .then(async () => {
+      // Explicitly opted-in; creates schema only when ALL core tables are
+      // missing and only on the allocated TEST database.
+      if (testPool && process.env.KRISTINE_V2_INIT_SCHEMA === '1') {
+        const result = await initializeTestSchema(testPool);
+        process.stdout.write('KRISTINE_V2_TEST_SCHEMA_' + result.state.toUpperCase() + '\n');
+      }
+    })
+    .then(() => {
+      createPreviewServer({ password: process.env.KRISTINE_V2_PREVIEW_PASSWORD, readOverview })
+        .listen(port, '0.0.0.0', () => {
+          process.stdout.write('KRISTINE_V2_ISOLATED_PREVIEW_READY\n');
+        });
+    })
+    .catch(() => {
+      // Fail closed; raw Postgres error text may contain connection details.
+      process.stderr.write('KRISTINE 2.0 test SQL initialization failed.\n');
+      process.exitCode = 1;
     });
 }
 
