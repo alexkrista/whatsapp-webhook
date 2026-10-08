@@ -13,7 +13,7 @@ async function main(){
  for(const [p,body] of Object.entries(payload)){if(typeof body!=='string'||p.startsWith('/')||p.split('/').includes('..'))throw Error('Invalid external file');const dest=path.join(backup,p);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,body);}
  const {Pool}=require(path.join(root,'node_modules/pg'));const pool=new Pool({connectionString:process.env.DATABASE_URL});
  try{
-  const c=await pool.connect();try{if(!(await c.query("SELECT to_regclass('kristine.external_dataset_runs') name")).rows[0].name)await c.query(fs.readFileSync(path.join(root,'024-external-dataset-import.sql'),'utf8'));}finally{c.release();}
+  {const c=await pool.connect();try{if(!(await c.query("SELECT to_regclass('kristine.external_dataset_runs') name")).rows[0].name)await c.query(fs.readFileSync(path.join(root,'024-external-dataset-import.sql'),'utf8'));}finally{c.release();}}
   const companyId='89f06754-feaf-4daa-a5d4-2ee0091dfb4a',importer=require('./import-external-datasets.js'),reports=[];
   for(const [system,key,include] of [['kristine','pc-alex02-brain-archive-index',p=>p.startsWith('archive/')],['winworker','srv-db01-winworker-standard-core',p=>p.startsWith('sql/')]]){
    let sourceInstanceId;const c=await pool.connect();try{sourceInstanceId=(await c.query('INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,$2,$3) ON CONFLICT(company_id,system_code,instance_key) DO UPDATE SET instance_key=EXCLUDED.instance_key RETURNING id',[companyId,system,key])).rows[0].id;}finally{c.release();}
