@@ -58,6 +58,7 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/kristine-v2-tests/node_modules" \
             node --test --test-concurrency=1 \
               TEST/database-core.pg.cjs \
+              TEST/database-obelisk-readonly.pg.cjs \
               TEST/database-people.pg.cjs \
               TEST/database-master-import.pg.cjs \
               TEST/database-time-import.pg.cjs \
