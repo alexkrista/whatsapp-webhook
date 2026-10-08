@@ -38,7 +38,9 @@ test('preview requires a dedicated password and rejects unauthenticated data acc
     response=await request(port,'/preview');
     assert.equal(response.status,200);
     assert.match(response.body,/ISOLIERTE TESTVORSCHAU/);
-    assert.match(response.body,/Demodaten/);
+    assert.match(response.body,/SQL-Testdaten/);
+    assert.match(response.body,/Datenbankverbindung ist noch nicht eingerichtet/);
+    assert.doesNotMatch(response.body,/Musterprojekt A|Musterprojekt B|TEST-01|TEST-02/);
     assert.doesNotMatch(response.body,/mailto:|https:\/\/protokoll\.krista\.at|Datenbank-URL|SECRET/);
   });
 });
