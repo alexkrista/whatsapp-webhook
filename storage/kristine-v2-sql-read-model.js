@@ -18,7 +18,7 @@ function verifyTestDatabaseUrl(value) {
       url.pathname !== '/' + TEST_DB_NAME ||
       decodeURIComponent(url.username) !== TEST_DB_USER ||
       !url.password ||
-      !/^dpg-[a-z0-9-]+(?:\.frankfurt-postgres\.render\.com)?$/.test(url.hostname)) {
+      !/^dpg-db3u5cui0phs73eaa700-a(?:\.frankfurt-postgres\.render\.com)?$/.test(url.hostname)) {
     throw new Error('Only the explicitly allocated KRISTINE 2.0 test database is permitted');
   }
   return value;
