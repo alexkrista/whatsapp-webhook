@@ -65,7 +65,7 @@ function safeTopbarScript() {
   const before = '    cleanModuleNavigation();';
   if (!rewritten.includes(before)) throw new Error('Cannot disable production module loaders');
   rewritten = rewritten.replace(before,
-    '    if (window.KRISTINE_V2_SAFE_PREVIEW === true) return;\n' + before);
+    '    if (window.KRISTINE_V2_SAFE_PREVIEW === true) { activateKristineHash = () => {}; return; }\n' + before);
   return rewritten;
 }
 
