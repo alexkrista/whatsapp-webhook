@@ -16,7 +16,8 @@ async function testSchemaState(client) {
     "SELECT current_database() AS db, to_regclass('kristine.projects')::text AS projects, " +
     "to_regclass('kristine_storage.documents')::text AS docs, " +
     "to_regclass('kristine.external_dataset_files')::text AS external_files, " +
-    "to_regclass('kristine.imported_company_rule_models')::text AS models"
+    "to_regclass('kristine.imported_company_rule_models')::text AS models, " +
+    "EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='guard_obelisk_import_runs' AND NOT tgisinternal) AS obelisk_guard"
   )).rows[0];
   return result;
 }
@@ -33,7 +34,7 @@ async function initializeTestSchema(pool, {
     if(state?.db!==expectedDatabase) throw new Error('Unexpected database identity: test initialization denied');
 
     if (state.projects || state.docs || state.external_files || state.models) {
-      if(state.projects && state.docs && state.external_files && state.models) {
+      if(state.projects && state.docs && state.external_files && state.models && state.obelisk_guard) {
         return {state:'already_initialized',migrationsApplied:0};
       }
       throw new Error('Partial schema detected; manual review required before any further migration');
@@ -56,7 +57,7 @@ async function initializeTestSchema(pool, {
     }
 
     const done=await testSchemaState(client);
-    if(!done.projects||!done.docs||!done.external_files||!done.models)
+    if(!done.projects||!done.docs||!done.external_files||!done.models||!done.obelisk_guard)
       throw new Error('Test schema verification failed');
     return {state:'initialized',migrationsApplied:expected.length};
   } finally {
