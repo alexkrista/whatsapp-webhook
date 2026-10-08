@@ -253,7 +253,8 @@ if (require.main === module) {
   const testUrl = process.env.KRISTINE_V2_TEST_DATABASE_URL;
   if (testUrl) {
     verifyTestDatabaseUrl(testUrl);
-    const { Pool } = require('pg');
+    // Pinned, licensed driver bundled for this isolated preview only.
+    const { Pool } = require('./kristine-v2-pg-bundle.cjs');
     const pool = new Pool({
       connectionString:testUrl, max:2,
       connectionTimeoutMillis:3000,
