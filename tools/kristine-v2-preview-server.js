@@ -24,6 +24,7 @@ const WORLD_NAMES = Object.freeze({
   krisadmin: 'KRISADMIN',
   tasks: 'AUFGABEN',
 });
+const PREVIEW_PANELS = Object.freeze({ ...WORLD_NAMES, tueren: 'TÜREN', dienste: 'DIENSTE' });
 
 function htmlEscape(value) {
   return String(value).replace(/[&<>"']/g, ch => ({
@@ -53,6 +54,12 @@ function safeTopbarScript() {
   const knownBrain = 'const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";';
   if (!original.includes(knownBrain)) throw new Error('Topbar source changed; review preview rewrite');
   let rewritten = original.replace(knownBrain, 'const BRAIN_URL = window.location.origin + "/preview?world=brain";');
+  const brandTarget = 'tokenized("/kontrollzentrum")';
+  if (!rewritten.includes(brandTarget)) throw new Error('Topbar brand target changed');
+  rewritten = rewritten.replace(brandTarget, 'tokenized("/preview?world=kristower")');
+  const signin = 'href="/anmelden"';
+  if (!rewritten.includes(signin)) throw new Error('Topbar sign-in target changed');
+  rewritten = rewritten.replace(signin, 'href="/preview?world=krisadmin"');
 
   let found = 0;
   rewritten = rewritten.replace(/(\{ key: "([a-z]+)",[^\r\n]*?href: )("[^"]*"|BRAIN_URL)/g, (whole, prefix, key) => {
@@ -69,15 +76,47 @@ function safeTopbarScript() {
   return rewritten;
 }
 
+function previewFeaturePanel(key) {
+  if (key === 'tueren') {
+    const names = ['Tor', 'Eingang', 'Lager', 'Büro'];
+    return [
+      '<section class="fixture" aria-label="Türen und Tor – Test ohne Echtsteuerung">',
+      '<h2>🚪 Türen und Tor</h2>',
+      '<p><strong>TEST – NICHT VERBUNDEN.</strong> Keine Echtzustände, keine Tür- oder Torsteuerung.</p>',
+      '<div class="preview-grid">',
+      ...names.map(name => '<div class="preview-card"><strong>' + name + '</strong><small>Status: unbekannt · Steuerung in dieser Vorschau gesperrt</small></div>'),
+      '</div>',
+      '<p class="preview-note">Die Live-Kristine bietet für diese Bereiche eigene Statuslampen und Schaltbefehle. Hier sind ausschließlich Darstellung und Navigation sichtbar.</p>',
+      '</section>'
+    ].join('');
+  }
+  if (key === 'dienste') {
+    const names = ['KRISTINE Cloud', 'THE BRAIN / Archiv', 'Zutritt / Türsteuerung', 'Outlook'];
+    return [
+      '<section class="fixture" aria-label="Dienste – Test ohne echte Dienstanbindung">',
+      '<h2>🩺 Dienste</h2>',
+      '<p><strong>TEST – NICHT VERBUNDEN.</strong> Keine Echtzustände, kein Starten oder Neustarten von Diensten.</p>',
+      '<div class="preview-grid">',
+      ...names.map(name => '<div class="preview-card"><strong>' + name + '</strong><small>Live-Status: nicht abgefragt · Aktionen deaktiviert</small></div>'),
+      '</div>',
+      '<p class="preview-note">Der vorhandene produktive Dienstemanager bleibt weiterhin ausschließlich in der bisherigen Kristine bedienbar.</p>',
+      '</section>'
+    ].join('');
+  }
+  return '';
+}
+
 function previewHtml(world) {
-  const key = Object.prototype.hasOwnProperty.call(WORLD_NAMES, world) ? world : 'kristine';
-  const label = WORLD_NAMES[key];
+  const key = Object.prototype.hasOwnProperty.call(PREVIEW_PANELS, world) ? world : 'kristine';
+  const label = PREVIEW_PANELS[key];
+  const navActive = Object.prototype.hasOwnProperty.call(WORLD_NAMES, key) ? key : 'kristine';
   return [
     '<!doctype html>',
     '<html lang="de"><head>',
     '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex,nofollow"><title>KRISTINE 2.0 · Isolierte Vorschau</title>',
     '<link rel="stylesheet" href="/public/ui/krista-ui.css">',
+    '<link rel="stylesheet" href="/public/ui/kristine-v2-preview-access.css">',
     '<style>',
     'body{margin:0;min-height:165vh;font:15px/1.5 system-ui,sans-serif}',
     'main.preview{max-width:1120px;margin:28px auto 100px;padding:0 20px}',
@@ -92,7 +131,7 @@ function previewHtml(world) {
     '.preview-note{color:#58655c;font-size:13px}.demo-sticky{position:sticky;top:var(--krista-topbar-height,0px);z-index:25;background:#f1f5ed;border:1px solid #dee5db;border-radius:10px;padding:12px;margin-top:18px}',
     '@media(max-width:640px){main.preview{padding:0 12px}.fixture-grid{grid-template-columns:80px 1fr 60px;font-size:12px}}',
     '</style></head><body>',
-    '<div id="kristaTopbar" data-krista-active="' + htmlEscape(key) + '" data-krista-build="2.0-TEST"></div>',
+    '<div id="kristaTopbar" data-krista-active="' + htmlEscape(navActive) + '" data-krista-build="2.0-TEST"></div>',
     '<main class="preview">',
     '<div class="preview-head"><div><h1>KRISTINE 2.0 · ' + htmlEscape(label) + '</h1>',
     '<p>Gemeinsame Navigation, neue Struktur – zunächst ohne echte Geschäftsdaten.</p></div>',
@@ -103,6 +142,7 @@ function previewHtml(world) {
     '<section class="preview-card"><strong>KGO</strong><small>Mitarbeiterabläufe bleiben unverändert</small></section>',
     '</div>',
     '<div class="demo-sticky"><strong>Planungsleiste – Test</strong> · Bleibt unter dem gemeinsamen Kopf sichtbar.</div>',
+    previewFeaturePanel(key),
     '<section class="fixture"><h2>Demodaten · keine echten Mitarbeiter oder Baustellen</h2>',
     '<div class="fixture-grid" role="table" aria-label="Künstliche Beispieldaten">',
     '<strong>Nummer</strong><strong>Testbaustelle</strong><strong>Status</strong>',
@@ -117,6 +157,7 @@ function previewHtml(world) {
     '</main>',
     '<script>window.KRISTINE_V2_SAFE_PREVIEW = true;</script>',
     '<script src="/public/ui/topbar.js"></script>',
+    '<script src="/public/ui/kristine-v2-preview-access.js"></script>',
     '</body></html>'
   ].join('\n');
 }
@@ -166,12 +207,19 @@ function createPreviewServer({ password, onRequest = () => {} } = {}) {
       res.writeHead(200);
       return res.end(req.method === 'HEAD' ? undefined : data);
     }
-    if (page.pathname === '/public/ui/krista-ui.css' || page.pathname === '/public/ui/topbar.js') {
+    const allowedAssets = {
+      '/public/ui/krista-ui.css': 'krista-ui.css',
+      '/public/ui/kristine-v2-preview-access.css': 'kristine-v2-preview-access.css',
+      '/public/ui/kristine-v2-preview-access.js': 'kristine-v2-preview-access.js',
+      '/public/ui/topbar.js': 'topbar.js',
+    };
+    if (Object.prototype.hasOwnProperty.call(allowedAssets, page.pathname)) {
       try {
-        const value = page.pathname.endsWith('.css')
-          ? fs.readFileSync(path.join(ROOT, 'public', 'ui', 'krista-ui.css'), 'utf8')
-          : safeTopbarScript();
-        res.setHeader('Content-Type', page.pathname.endsWith('.css')
+        const isStylesheet = page.pathname.endsWith('.css');
+        const value = page.pathname === '/public/ui/topbar.js'
+          ? safeTopbarScript()
+          : fs.readFileSync(path.join(ROOT, 'public', 'ui', allowedAssets[page.pathname]), 'utf8');
+        res.setHeader('Content-Type', isStylesheet
           ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8');
         res.writeHead(200);
         return res.end(req.method === 'HEAD' ? undefined : value);
