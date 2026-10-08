@@ -5,9 +5,12 @@ const {importJsonSnapshots}=require('./import-json-snapshots');
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const allowed={WinWorker_Adressen_Standard:['Kunden','Ansprechpartner','WeitereEmailAdressen','Lieferanten_Eigenschaften'],WinWorker_Projekte_Standard:['Projekte','Projekt Info']};
 const calculationAllowed={WinWorker_Stammdaten_Standard:['LohnInfo','Verzeichnisse']};
+const performanceAllowed={WinWorker_Stammdaten_Standard:['Leistungstexte','LMaterial','LMaterialIndex','Floskeltexte']};
+const performanceKey='srv-db01-winworker-standard-performance-material';
 const calculationKey='srv-db01-winworker-standard-calculation';
 function prepareExternalDatasets(files){
- const selected=files.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))?calculationAllowed:allowed;
+ const performance=files.some(f=>performanceAllowed.WinWorker_Stammdaten_Standard.some(t=>f.path==='sql/WinWorker_Stammdaten_Standard/dbo/'+t+'.json'));
+ const selected=performance?performanceAllowed:files.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))?calculationAllowed:allowed;
  const seen=new Set();if(!files.length)throw Error('External snapshot must list datasets');
  const prepared=files.map(f=>{
   if(seen.has(f.path))throw Error('Duplicate external dataset');seen.add(f.path);const root=JSON.parse(f.originalText);let slices,kind;
@@ -29,7 +32,10 @@ async function importExternalDatasets(pool,{companyId,sourceInstanceId,files}){
  const probe=await pool.connect();try{
   const source=(await probe.query('SELECT system_code,instance_key FROM kristine.source_instances WHERE company_id=$1 AND id=$2',[companyId,sourceInstanceId])).rows[0];
   if(!source)throw Error('Source/company mismatch');
-  const calculation=prepared.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'));
+  const performance=prepared.some(f=>performanceAllowed.WinWorker_Stammdaten_Standard.some(t=>f.path==='sql/WinWorker_Stammdaten_Standard/dbo/'+t+'.json'));
+  const calculation=prepared.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))&&!performance;
+  if(performance&&(source.system_code!=='winworker'||source.instance_key!==performanceKey))throw Error('Performance snapshot requires its separate source instance');
+  if(!performance&&source.instance_key===performanceKey)throw Error('Performance source cannot accept other snapshots');
   if(calculation&&(source.system_code!=='winworker'||source.instance_key!==calculationKey))throw Error('Calculation snapshot requires its separate source instance');
   if(!calculation&&source.instance_key===calculationKey)throw Error('Calculation source cannot accept core or archive snapshots');
  }finally{probe.release();}
