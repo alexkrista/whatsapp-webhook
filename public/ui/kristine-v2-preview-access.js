@@ -6,7 +6,7 @@
  * that module can submit physical door/gate commands.
  *
  * Every item below is an ordinary navigation link to another static preview
- * page; NO status polling, fetch(), forms or hardware command exists here.
+ * page; NO status polling, network requests, forms or hardware commands.
  */
 (function () {
   if (window.KRISTINE_V2_SAFE_PREVIEW !== true) return;
