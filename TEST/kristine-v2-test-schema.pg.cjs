@@ -7,7 +7,7 @@ const {initializeTestSchema,MIGRATIONS}=require('../tools/kristine-v2-test-schem
 
 const poolFor=db=>({
   connect:async()=>({
-    query:(sql,args)=>sql.startsWith('BEGIN;')?db.exec(sql):db.query(sql,args),
+    query:(sql,args)=>sql.includes('BEGIN;')?db.exec(sql):db.query(sql,args),
     release(){}
   }),
 });
