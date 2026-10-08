@@ -82,3 +82,83 @@ test('shared original header and CSS are served with only staging navigation tar
     assert.match(mobile.body,/data-krista-active="kriszeit"/);
   });
 });
+
+
+test('Türen/Tor and Dienste exist as safe preview links and never report made-up status', async()=>{
+  await withServer(async port=>{
+    const home=await request(port,'/preview?world=kristine');
+    assert.equal(home.status,200);
+    assert.match(home.body,/kristine-v2-preview-access\.js/);
+    assert.match(home.body,/kristine-v2-preview-access\.css/);
+
+    const doors=await request(port,'/preview?world=tueren');
+    assert.equal(doors.status,200);
+    assert.match(doors.body,/Türen und Tor/);
+    assert.match(doors.body,/Tor/);
+    assert.match(doors.body,/Eingang/);
+    assert.match(doors.body,/Lager/);
+    assert.match(doors.body,/Büro/);
+    assert.match(doors.body,/Status: unbekannt/);
+    assert.match(doors.body,/keine Tür- oder Torsteuerung/);
+
+    const services=await request(port,'/preview?world=dienste');
+    assert.equal(services.status,200);
+    assert.match(services.body,/Dienste/);
+    assert.match(services.body,/Live-Status: nicht abgefragt/);
+    assert.match(services.body,/Aktionen deaktiviert/);
+
+    const script=await request(port,'/public/ui/kristine-v2-preview-access.js');
+    const css=await request(port,'/public/ui/kristine-v2-preview-access.css');
+    assert.equal(script.status,200);
+    assert.equal(css.status,200);
+    assert.match(script.body,/TEST · Kein Live-Status/);
+    assert.match(script.body,/\/preview\?world=/);
+    assert.doesNotMatch(script.body,/\b(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(/);
+    assert.doesNotMatch(script.body,/access-control\/toggle|access-control\/gate/);
+    assert.match(css.body,/krista-v2-preview-access/);
+    assert.match(css.body,/@media\(max-width:760px\)/);
+    assert.match(script.headers['content-security-policy'],/connect-src 'none'/);
+
+    for(const path of ['/access-control/toggle/1','/access-control/gate','/admin/api/services','/kristine/api/access-status']){
+      assert.equal((await request(port,path)).status,404,path);
+      assert.equal((await request(port,path,{method:'POST'})).status,405,path);
+    }
+  });
+});
+
+test('safe header mounts exactly five nonfunctional door/service links, also after rerender',async()=>{
+  const {JSDOM}=require('jsdom');
+  const fs=require('node:fs');
+  const path=require('node:path');
+  const previewAccess=fs.readFileSync(path.join(__dirname,'../public/ui/kristine-v2-preview-access.js'),'utf8');
+  const dom=new JSDOM('<!doctype html><html><body><div id="kristaTopbar" data-krista-active="kristine"></div></body></html>',{
+    url:'https://kristine-2-0-preview.onrender.com/preview?world=kristine',
+    runScripts:'outside-only',
+  });
+  try{
+    const {window}=dom;
+    window.KRISTINE_V2_SAFE_PREVIEW=true;
+    window.ResizeObserver=class{observe(){}};
+    window.document.getElementById('kristaTopbar').getBoundingClientRect=()=>({height:95});
+    window.fetch=()=>{throw new Error('Preview must never fetch live access data')};
+    window.eval(safeTopbarScript());
+    window.eval(previewAccess);
+    window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
+    let links=window.document.querySelectorAll('[data-krista-preview-access] .krista-v2-preview-access-link');
+    assert.equal(links.length,5);
+    assert.deepEqual(Array.from(links,link=>link.textContent.replace(/\s+/g,' ').trim()),
+      ['🚧TOR?','🚪Eingang?','🚪Lager?','🚪Büro?','🩺Dienste?']);
+    for(const link of links){
+      assert.equal(link.dataset.previewStatus,'unknown');
+      assert.match(link.getAttribute('href'),/^\/preview\?world=(tueren|dienste)$/);
+      assert.match(link.title,/keine Steuerung möglich/);
+      assert.equal(link.tagName,'A');
+    }
+    assert.match(window.document.querySelector('[data-krista-preview-access]').textContent,/TEST · Kein Live-Status/);
+    window.dispatchEvent(new window.Event('hashchange'));
+    await Promise.resolve();
+    links=window.document.querySelectorAll('[data-krista-preview-access] .krista-v2-preview-access-link');
+    assert.equal(links.length,5);
+    assert.equal(window.document.querySelectorAll('[data-krista-preview-access]').length,1);
+  }finally{dom.window.close()}
+});
