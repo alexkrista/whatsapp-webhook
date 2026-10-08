@@ -45,8 +45,8 @@ test('OBELISK stays an external read-only source across every SQL import path', 
     const content = '{"id":"001","date":"2026-10-01"}';
     const sha = require('node:crypto').createHash('sha256').update(content).digest('hex');
     await db.query(
-      'INSERT INTO kristine.source_record_versions(company_id,source_instance_id,source_record_id,import_run_id,raw_payload,original_text,source_sha256) VALUES($1,$2,$3,$4,$5,$5,$6)',
-      [companyId,kriszeit,rowId,runId,content,sha]);
+      'INSERT INTO kristine.source_record_versions(company_id,source_instance_id,source_record_id,import_run_id,raw_payload,original_text,source_sha256) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)',
+      [companyId,kriszeit,rowId,runId,content,content,sha]);
     await db.query("UPDATE kristine.import_runs SET status='validated', finished_at=clock_timestamp() WHERE id=$1", [runId]);
     assert.equal((await db.query('SELECT count(*)::int AS n FROM kristine.source_record_versions')).rows[0].n,1);
     const wwRun = (await db.query('INSERT INTO kristine.import_runs(company_id,source_instance_id) VALUES($1,$2) RETURNING id', [companyId,legacy])).rows[0].id;
