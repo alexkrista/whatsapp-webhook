@@ -3,15 +3,17 @@
 /**
  * KRISTINE 2.0 – sealed, read-only preview for a separate Render service.
  *
- * IMPORTANT: This is deliberately NOT the production server. It imports no
- * domain modules, opens no database, mounts no disk, and never contacts
- * WhatsApp, banking, vehicles, access control, Outlook or the production API.
- * Only anonymous fixtures are rendered. Every mutation method is rejected.
+ * IMPORTANT: This is deliberately NOT the production server. It mounts no
+ * production disk and never contacts banking, door control, WhatsApp, Outlook
+ * or production APIs. When explicitly configured, it only READS from the
+ * separate KRISTINE 2.0 test PostgreSQL. Every mutation method is rejected.
  */
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { sqlPanel } = require('./kristine-v2-preview-sql-panel');
+const { readSqlOverview, verifyTestDatabaseUrl } = require('../storage/kristine-v2-sql-read-model');
 
 const ROOT = path.resolve(__dirname, '..');
 const WORLD_NAMES = Object.freeze({
@@ -106,7 +108,7 @@ function previewFeaturePanel(key) {
   return '';
 }
 
-function previewHtml(world) {
+function previewHtml(world, sqlOverview = null) {
   const key = Object.prototype.hasOwnProperty.call(PREVIEW_PANELS, world) ? world : 'kristine';
   const label = PREVIEW_PANELS[key];
   const navActive = Object.prototype.hasOwnProperty.call(WORLD_NAMES, key) ? key : 'kristine';
@@ -134,21 +136,16 @@ function previewHtml(world) {
     '<div id="kristaTopbar" data-krista-active="' + htmlEscape(navActive) + '" data-krista-build="2.0-TEST"></div>',
     '<main class="preview">',
     '<div class="preview-head"><div><h1>KRISTINE 2.0 · ' + htmlEscape(label) + '</h1>',
-    '<p>Gemeinsame Navigation, neue Struktur – zunächst ohne echte Geschäftsdaten.</p></div>',
+    '<p>Gemeinsame Navigation, neue Struktur – mit gesondertem, schreibgeschütztem SQL-Testbestand.</p></div>',
     '<span class="stage-label">ISOLIERTE TESTVORSCHAU</span></div>',
     '<div class="preview-grid">',
     '<section class="preview-card"><strong>Live-Kristine</strong><small>Unverändert · kein Schreibzugriff von hier</small></section>',
-    '<section class="preview-card"><strong>SQL-Testumgebung</strong><small>Separat eingerichtet · fachliche Anbindung folgt</small></section>',
+    '<section class="preview-card"><strong>SQL-Testumgebung</strong><small>Separat · Lesemodell für Baustellen, Mitarbeiter und Zeiten</small></section>',
     '<section class="preview-card"><strong>KGO</strong><small>Mitarbeiterabläufe bleiben unverändert</small></section>',
     '</div>',
     '<div class="demo-sticky"><strong>Planungsleiste – Test</strong> · Bleibt unter dem gemeinsamen Kopf sichtbar.</div>',
     previewFeaturePanel(key),
-    '<section class="fixture"><h2>Demodaten · keine echten Mitarbeiter oder Baustellen</h2>',
-    '<div class="fixture-grid" role="table" aria-label="Künstliche Beispieldaten">',
-    '<strong>Nummer</strong><strong>Testbaustelle</strong><strong>Status</strong>',
-    '<span>TEST-01</span><span>Musterprojekt A</span><span>Geplant</span>',
-    '<span>TEST-02</span><span>Musterprojekt B</span><span>Laufend</span>',
-    '</div></section>',
+    sqlPanel(sqlOverview,key),
     '<section class="fixture"><h2>Was hier geprüft wird</h2>',
     '<p>Navigation, mobiler Kopf, Scrollen und die optische Struktur der neuen Arbeitswelten.</p>',
     '<p>Die echten KRISZEIT-, Regie-, Buchhaltungs-, Bank- und KGO-Funktionen werden erst in der abgekoppelten fachlichen Testinstanz freigegeben – nach bestandenen Tests.</p>',
@@ -171,7 +168,7 @@ const HEADERS = Object.freeze({
   'Content-Security-Policy': "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
 });
 
-function createPreviewServer({ password, onRequest = () => {} } = {}) {
+function createPreviewServer({ password, onRequest = () => {}, readOverview = null } = {}) {
   if (typeof password !== 'string' || password.length < 16) {
     throw new Error('A strong, dedicated preview password is required');
   }
@@ -203,9 +200,15 @@ function createPreviewServer({ password, onRequest = () => {} } = {}) {
 
     if (page.pathname === '/' || page.pathname === '/preview') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      const data = previewHtml(page.searchParams.get('world') || 'kristine');
-      res.writeHead(200);
-      return res.end(req.method === 'HEAD' ? undefined : data);
+      // No SQL query is performed until after the user has authenticated.
+      const world = page.searchParams.get('world') || 'kristine';
+      return Promise.resolve().then(() => readOverview ? readOverview() : null)
+        .catch(() => ({state:'connection_error'}))
+        .then(overview => {
+          const data = previewHtml(world, overview);
+          res.writeHead(200);
+          res.end(req.method === 'HEAD' ? undefined : data);
+        });
     }
     const allowedAssets = {
       '/public/ui/krista-ui.css': 'krista-ui.css',
@@ -244,8 +247,28 @@ if (require.main === module) {
     process.stderr.write('Preview isolation validation failed; not starting.\n');
     process.exit(1);
   }
+  // The explicit database name, user and Render hostname must match our
+  // isolated test DB. The production DATABASE_URL remains forbidden above.
+  let readOverview = null;
+  const testUrl = process.env.KRISTINE_V2_TEST_DATABASE_URL;
+  if (testUrl) {
+    verifyTestDatabaseUrl(testUrl);
+    const { Pool } = require('pg');
+    const pool = new Pool({
+      connectionString:testUrl, max:2,
+      connectionTimeoutMillis:3000,
+      idleTimeoutMillis:10000,
+      query_timeout:5000,
+      statement_timeout:5000,
+      application_name:'kristine-v2-readonly-preview',
+    });
+    pool.on('error', () => {}); // Never log a credential-bearing URI.
+    readOverview = () => readSqlOverview(pool,{
+      companyId:process.env.KRISTINE_V2_COMPANY_ID || null,
+    });
+  }
   const port = Number(process.env.PORT || 10000);
-  createPreviewServer({ password: process.env.KRISTINE_V2_PREVIEW_PASSWORD })
+  createPreviewServer({ password: process.env.KRISTINE_V2_PREVIEW_PASSWORD, readOverview })
     .listen(port, '0.0.0.0', () => {
       process.stdout.write('KRISTINE_V2_ISOLATED_PREVIEW_READY\n');
     });
