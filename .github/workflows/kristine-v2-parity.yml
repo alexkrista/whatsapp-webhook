@@ -12,7 +12,7 @@ on:
       - 'regie-assistant.js'
       - 'storage/**'
       - 'migrations/**'
-      - 'tools/kristine-v2-parity-audit.js'
+      - 'tools/kristine-v2-*'
       - 'docs/kristine-2-0-kgo-baseline.json'
       - 'TEST/kristine-v2-*'
       - '.github/workflows/kristine-v2-parity.yml'
@@ -45,6 +45,8 @@ jobs:
               TEST/kristine-v2-parity-audit.test.js \
               TEST/kristine-v2-shell.test.js \
               TEST/kristine-v2-fatal-monitor.test.js \
+              TEST/kristine-v2-preview-server.test.js \
+              TEST/kristine-v2-pg-bundle.test.js \
               TEST/kristine-end-is-immediate.test.js \
               TEST/kristine-no-duplicate-start.test.js \
               TEST/kristine-stale-state-next-day.test.js \
@@ -62,4 +64,6 @@ jobs:
               TEST/database-people.pg.cjs \
               TEST/database-master-import.pg.cjs \
               TEST/database-time-import.pg.cjs \
-              TEST/database-time-reconciliation.pg.cjs
+              TEST/database-time-reconciliation.pg.cjs \
+              TEST/kristine-v2-sql-read-model.pg.cjs \
+              TEST/kristine-v2-test-schema.pg.cjs
