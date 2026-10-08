@@ -16,7 +16,7 @@ async function testSchemaState(client) {
     "SELECT current_database() AS db, to_regclass('kristine.projects')::text AS projects, " +
     "to_regclass('kristine_storage.documents')::text AS docs, " +
     "to_regclass('kristine.external_dataset_files')::text AS external_files, " +
-    "to_regclass('kristine.company_rules_models')::text AS models"
+    "to_regclass('kristine.imported_company_rule_models')::text AS models"
   )).rows[0];
   return result;
 }
