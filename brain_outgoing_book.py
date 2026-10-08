@@ -29,6 +29,7 @@ class OutgoingBook:
                     COALESCE(b.sKunde,'') AS customerRaw,
                     COALESCE(p.sProjektNummer,b.sProjektNummer,'') AS projectNumber,
                     COALESCE(p.sProjekt,b.sProjekt,'') AS projectTitle,
+                    r.ZahlungsZiel AS dueDate,
                     r.cUmsatzNetto AS net,
                     COALESCE(r.cForderungBrutto,r.cOffenerPostenBrutto,0) AS gross,
                     COALESCE(r.cOffenerPostenBrutto,0) AS openGross,
@@ -59,6 +60,7 @@ class OutgoingBook:
                 result.append({"source":"WW", "sourceId":str(x["sourceId"]), "id":None,
                     "invoiceNumber":str(x["invoiceNumber"]),
                     "invoiceDate":day.date().isoformat() if hasattr(day,"date") else str(day or '')[:10],
+                    "dueDate":x.get("dueDate").date().isoformat() if hasattr(x.get("dueDate"),"date") else str(x.get("dueDate") or "")[:10],
                     "customer":x["company"] or x["customer"] or x["customerRaw"] or "Ohne Kunde",
                     "projectNumber":str(x["projectNumber"]), "projectTitle":x["projectTitle"],
                     "kind":"GS" if gross < 0 else "SR" if x["isFinal"] else "TR" if x["isPartial"] else "RE",
@@ -81,6 +83,7 @@ class OutgoingBook:
             opened = money(outstanding.get(x["id"], 0)) if x["status"] == "issued" else 0
             result.append({"id":x["id"], "source":x["source"], "sourceId":x["source_id"],
                 "invoiceNumber":x["invoice_number"] or "Entwurf", "invoiceDate":x["issue_date"],
+                "dueDate":str(x["due_date"] or "")[:10],
                 "customer":x["customer_company"] or x["customer_name"] or "Ohne Kunde",
                 "projectNumber":x["project_number"], "projectTitle":x["project_title"],
                 "kind":x["kind"], "status":x["status"], "currency":x["currency"],
