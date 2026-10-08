@@ -1,14 +1,14 @@
 /* Safe, clearly non-live accessory strip for the KRISTINE 2.0 preview only. */
 .krista-shell-main.krista-v2-preview-with-access{
-  grid-template-columns:minmax(0,1fr)!important;
-  grid-template-rows:auto auto auto;
+  grid-template-columns:220px minmax(0,1fr)!important;
+  grid-template-rows:auto auto;
   max-width:1660px!important;
   gap:7px 14px!important;
   padding:9px 18px!important;
 }
 .krista-v2-preview-with-access .krista-brand{grid-column:1;grid-row:1;justify-self:start}
 .krista-v2-preview-with-access .krista-world-nav{
-  grid-column:1;grid-row:2;justify-content:flex-start!important;
+  grid-column:2;grid-row:1;justify-content:flex-end!important;
   flex-wrap:wrap;gap:5px!important;overflow:visible;
 }
 .krista-v2-preview-with-access .krista-world-link{
@@ -16,7 +16,7 @@
 }
 .krista-v2-preview-with-access .krista-user{display:none!important}
 .krista-v2-preview-access{
-  grid-column:1;grid-row:3;
+  grid-column:1/-1;grid-row:2;
   display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;
   gap:7px;min-width:0;padding:5px 0 0;
   border-top:1px solid rgba(255,255,255,.13);
@@ -46,10 +46,10 @@
 }
 @media(max-width:1180px){
   .krista-shell-main.krista-v2-preview-with-access{
-    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-columns:180px minmax(0,1fr)!important;
   }
   .krista-v2-preview-with-access .krista-world-nav{
-    overflow-x:auto;justify-content:flex-start!important;flex-wrap:nowrap;
+    overflow-x:auto;justify-content:flex-end!important;flex-wrap:nowrap;
     padding-bottom:3px;
   }
 }
