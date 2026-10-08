@@ -1,0 +1,8 @@
+ 'use strict';
+const fs=require('node:fs'),path=require('node:path'),{importLargeHours,KEY}=require('./import-large-winworker-hours.cjs');
+async function main(){const [input]=process.argv.slice(2);if(!input)throw Error('Source gzip required');const {Pool}=require('pg');const pool=new Pool({connectionString:process.env.DATABASE_URL,max:1});const companyId='89f06754-feaf-4daa-a5d4-2ee0091dfb4a';try{
+const c=await pool.connect();let sourceInstanceId;try{if((await c.query('SELECT current_database() name')).rows[0].name!=='kristine_postgres')throw Error('Unexpected target database');sourceInstanceId=(await c.query("INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,'winworker',$2) ON CONFLICT(company_id,system_code,instance_key) DO UPDATE SET instance_key=EXCLUDED.instance_key RETURNING id",[companyId,KEY])).rows[0].id;}finally{c.release();}
+const args={input,companyId,sourceInstanceId,expectedGzip:'c32fa4315260dcf290c0e79f3dfb67a77e59ff56100e0f906eb8e863d20a9c4d',expectedOriginal:'dae56561d00e6bc8780fa9c16972422ca3bf06bc4ee24afe9b33fa4d494c5080',expectedBytes:152930091,expectedRows:61481};
+const first=await importLargeHours(pool,args);console.log('FIRST '+JSON.stringify(first));const repeat=await importLargeHours(pool,args);if(repeat.rowsCreated||repeat.versionsCreated)throw Error('Repeat created duplicates');const report={checkedAt:new Date().toISOString(),sourceInstanceId,first,repeat};fs.writeFileSync(path.join(path.dirname(input),'hours-result-20261008.json'),JSON.stringify(report,null,2),{flag:'wx'});console.log('RESULT '+JSON.stringify(report));
+}finally{await pool.end();}}
+if(require.main===module)main().catch(e=>{console.error(e.message);process.exitCode=1});
