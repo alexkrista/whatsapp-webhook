@@ -4,12 +4,15 @@ const {arraySourceTexts}=require('./json-source-slices');
 const {importJsonSnapshots}=require('./import-json-snapshots');
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const allowed={WinWorker_Adressen_Standard:['Kunden','Ansprechpartner','WeitereEmailAdressen','Lieferanten_Eigenschaften'],WinWorker_Projekte_Standard:['Projekte','Projekt Info']};
+const calculationAllowed={WinWorker_Stammdaten_Standard:['LohnInfo','Verzeichnisse']};
+const calculationKey='srv-db01-winworker-standard-calculation';
 function prepareExternalDatasets(files){
+ const selected=files.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))?calculationAllowed:allowed;
  const seen=new Set();if(!files.length)throw Error('External snapshot must list datasets');
  const prepared=files.map(f=>{
   if(seen.has(f.path))throw Error('Duplicate external dataset');seen.add(f.path);const root=JSON.parse(f.originalText);let slices,kind;
   if(f.path==='archive/pdf-index-metadata.json'){kind='archive_index';slices=arraySourceTexts(f.originalText);const paths=new Set();for(const r of root){if(typeof r.path!=='string'||!r.path||paths.has(r.path))throw Error('Invalid or duplicate archive path');paths.add(r.path);}}
-  else{const match=/^sql\/(WinWorker_[A-Za-z]+_Standard)\/dbo\/([^/]+)\.json$/.exec(f.path);if(!match||!allowed[match[1]]?.includes(match[2]))throw Error('Unsupported external dataset path');
+  else{const match=/^sql\/(WinWorker_[A-Za-z]+_Standard)\/dbo\/([^/]+)\.json$/.exec(f.path);if(!match||!selected[match[1]]?.includes(match[2]))throw Error('Unsupported external dataset path');
    if(root.database!==match[1]||root.schema!=='dbo'||root.table!==match[2]||!Array.isArray(root.columns)||!Array.isArray(root.primaryKey))throw Error('External table metadata mismatch');
    if(root.columns.some(c=>!Array.isArray(c)||typeof c[0]!=='string'||/password|passwort|secret|token|credential/i.test(c[0])))throw Error('Invalid or excluded external table column');
    kind='sql_table';slices=arraySourceTexts(f.originalText,['rows']);
@@ -17,12 +20,20 @@ function prepareExternalDatasets(files){
   for(const s of slices){const r=JSON.parse(s);if(!r||typeof r!=='object'||Array.isArray(r))throw Error('External row must be object');}
   return {...f,kind,slices,sha256:hash(f.originalText)};
  }).sort((a,b)=>a.path.localeCompare(b.path));
- const expected=seen.has('archive/pdf-index-metadata.json')?['archive/pdf-index-metadata.json']:Object.entries(allowed).flatMap(([db,tables])=>tables.map(t=>'sql/'+db+'/dbo/'+t+'.json'));
+ const expected=seen.has('archive/pdf-index-metadata.json')?['archive/pdf-index-metadata.json']:Object.entries(selected).flatMap(([db,tables])=>tables.map(t=>'sql/'+db+'/dbo/'+t+'.json'));
  if(files.length!==expected.length||expected.some(p=>!seen.has(p)))throw Error('Full external snapshot requires all datasets for its source');
  return prepared;
 }
 async function importExternalDatasets(pool,{companyId,sourceInstanceId,files}){
- const prepared=prepareExternalDatasets(files),snapshots=await importJsonSnapshots(pool,{companyId,sourceInstanceId,files});const c=await pool.connect();let begun=false;
+ const prepared=prepareExternalDatasets(files);
+ const probe=await pool.connect();try{
+  const source=(await probe.query('SELECT system_code,instance_key FROM kristine.source_instances WHERE company_id=$1 AND id=$2',[companyId,sourceInstanceId])).rows[0];
+  if(!source)throw Error('Source/company mismatch');
+  const calculation=prepared.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'));
+  if(calculation&&(source.system_code!=='winworker'||source.instance_key!==calculationKey))throw Error('Calculation snapshot requires its separate source instance');
+  if(!calculation&&source.instance_key===calculationKey)throw Error('Calculation source cannot accept core or archive snapshots');
+ }finally{probe.release();}
+ const snapshots=await importJsonSnapshots(pool,{companyId,sourceInstanceId,files});const c=await pool.connect();let begun=false;
  try{await c.query('BEGIN');begun=true;
   if((await c.query('SELECT id FROM kristine.source_instances WHERE company_id=$1 AND id=$2 FOR UPDATE',[companyId,sourceInstanceId])).rows.length!==1)throw Error('Source/company mismatch');
   const runId=(await c.query('INSERT INTO kristine.import_runs(company_id,source_instance_id,manifest_sha256) VALUES($1,$2,$3) RETURNING id',[companyId,sourceInstanceId,hash(JSON.stringify(prepared.map(f=>[f.path,f.sha256])))])).rows[0].id;
