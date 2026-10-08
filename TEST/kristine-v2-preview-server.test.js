@@ -17,8 +17,8 @@ function request(port,pathname,{method='GET',password=PASSWORD}={}) {
     req.on('error',reject);req.end();
   });
 }
-async function withServer(fn){
-  const server=createPreviewServer({password:PASSWORD});
+async function withServer(fn,options={}){
+  const server=createPreviewServer({password:PASSWORD,...options});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{return await fn(server.address().port)}
   finally{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()))}
@@ -179,4 +179,49 @@ test('KRISTINE 2.0 header: logo left, main navigation upper right, access row lo
     assert.match(css,/@media\(max-width:760px\)\{[\s\S]*?\.krista-v2-preview-access\{[^}]*grid-column:1\/-1;grid-row:2;[^}]*justify-content:flex-start/);
     assert.match(css,/\.krista-v2-preview-access-note\{[^}]*order:99/);
   });
+});
+
+
+test('SQL project rows render from the injected database model only after authentication',async()=>{
+  let reads=0;
+  const readOverview=async()=>{
+    reads++;
+    return {
+      state:'ready',source:'test_postgres',company:{name:'Testbetrieb',id:'not-shown'},
+      counts:{projects:1,employees:1,assignments:2,time_events_since_cutoff:3,document_records:4,validated_imports:1},
+      sources:[{system:'kristine',validatedRuns:1}],
+      projects:[{number:'00042',name:'Maler <script>alert("x")</script>',status:3}],
+      employees:[{name:'Beispiel Mitarbeiter',active:true,personalNumber:'023'}],
+    };
+  };
+  await withServer(async port=>{
+    assert.equal((await request(port,'/preview',{password:null})).status,401);
+    assert.equal(reads,0);
+    const html=await request(port,'/preview?world=kristine');
+    assert.equal(html.status,200);
+    assert.equal(reads,1);
+    assert.match(html.body,/data-sql-state="ready"/);
+    assert.match(html.body,/Echte SQL-Daten – isolierter Testbestand/);
+    assert.match(html.body,/00042/);
+    assert.match(html.body,/Maler &lt;script&gt;alert/);
+    assert.doesNotMatch(html.body,/<script>alert/);
+    assert.doesNotMatch(html.body,/Musterprojekt/);
+    const time=await request(port,'/preview?world=kriszeit');
+    assert.match(time.body,/Personalstamm in SQL/);
+    assert.match(time.body,/023/);
+    assert.match(time.body,/Beispiel Mitarbeiter/);
+    assert.match(time.body,/2026-10-01/);
+    assert.equal(reads,2);
+  },{readOverview});
+});
+
+test('SQL errors are handled without leaking database addresses or raw error text',async()=>{
+  const readOverview=async()=>{throw new Error('password=user-secret@database-host')};
+  await withServer(async port=>{
+    const result=await request(port,'/preview?world=kristine');
+    assert.equal(result.status,200);
+    assert.match(result.body,/Die Verbindung zur Testdatenbank konnte nicht gelesen werden/);
+    assert.doesNotMatch(result.body,/user-secret|database-host/);
+    assert.doesNotMatch(result.body,/Musterprojekt/);
+  },{readOverview});
 });
