@@ -4099,6 +4099,7 @@ function ideasPath() { return path.join(systemDataDir(), "ideas.json"); }
 async function readJsonArrayFile(file) { try { const d=JSON.parse(await fsp.readFile(file,"utf8")); return Array.isArray(d)?d:[]; } catch { return []; } }
 async function writeJsonArrayFile(file, rows) { await ensureDir(systemDataDir()); await fsp.writeFile(file, JSON.stringify(rows,null,2), "utf8"); }
 function uid(prefix="id") { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`; }
+function cleanVehicleDocuments(value){if(!Array.isArray(value))return [];let size=0;return value.map(d=>{const data=String(d.data||'');if(!/^data:[^,]*;base64,[A-Za-z0-9+/]*={0,2}$/.test(data))throw new Error('Ungültige Fahrzeugdatei');const bytes=Buffer.from(data.slice(data.indexOf(',')+1),'base64').length;size+=bytes;if(size>15*1024*1024)throw new Error('Fahrzeugdateien überschreiten 15 MB');return {name:String(d.name||'Datei').replace(/[\\/]/g,'_').slice(0,200),data,size:bytes}})}
 function cleanVehicle(v={}, id="") { return {
   id: String(id || v.id || uid("vehicle")).slice(0,80),
   label: String(v.label||"").trim().slice(0,100), plate: String(v.plate||"").trim().slice(0,30),
@@ -4106,6 +4107,7 @@ function cleanVehicle(v={}, id="") { return {
   inspectionUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.inspectionUntil||""))?String(v.inspectionUntil):"",
   insuranceType: ["Haftpflicht","Vollkasko"].includes(String(v.insuranceType||"")) ? String(v.insuranceType) : "", insuranceUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.insuranceUntil||""))?String(v.insuranceUntil):"",
   leasingRate: Math.max(0,Number(v.leasingRate||0)), kmPerYear: Math.max(0,Number(v.kmPerYear||0)), kmRate: Math.max(0,Number(v.kmRate??0.52)), leasingUntil: /^\d{4}-\d{2}-\d{2}$/.test(String(v.leasingUntil||""))?String(v.leasingUntil):"",
+  registrationDocuments: cleanVehicleDocuments(v.registrationDocuments),
   registrationImage: String(v.registrationImage||"").startsWith("data:image/") ? String(v.registrationImage).slice(0,1800000) : "",
   updatedAt: new Date().toISOString()
 }; }
