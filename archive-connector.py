@@ -8106,7 +8106,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.14.85",
+        "version": "0.14.91",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -9491,3 +9491,5 @@ if __name__ == "__main__":
         clear_untrusted_proxy_headers=True,
         ident="KRISTINE",
     )
+
+

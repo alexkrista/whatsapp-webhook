@@ -11,6 +11,7 @@
     return key&&!/^0+$/.test(key)?key:"";
   };
   const reportAmount=report=>{
+    if(report?.documentType==="delivery_note" && (report.pricePending || report.billingReady === false))return 0;
     const material=report?.materialCost??report?.materialTotal;
     if(report?.laborCost!==undefined&&material!==undefined)return number(report?.laborCost)+number(material);
     return number(report?.totalNet)||number(report?.laborCost)+number(material);
@@ -34,7 +35,7 @@
   const reportDedupeKey=report=>{
     const date=String(report?.reportDate||"").slice(0,10),sequence=reportSequence(report);
     const scope=String(report?.projectNumber||report?.jobId||"");
-    if(date&&sequence)return `report:${scope}|${date}|${sequence}`;
+    if(date&&sequence)return `report:${report?.documentType||"regie"}|${scope}|${date}|${sequence}`;
     const sourceId=documentKey(report?.sourceId??report?.source_id);
     return sourceId?`source:${sourceId}`:`row:${scope}|${date}|${String(report?.reportNumber||report?.name||"").trim().toLowerCase()}`;
   };
@@ -262,7 +263,7 @@
       const billed=manualBilled||(manualStatus!=="open"&&automaticBilled),open=!billed;
       return {report,billed,open,unknown:!billed&&!open,billedDocumentId,invoice,amount:reportAmount(report),hours:number(report?.totalHours)};
     });
-    const openRows=rows.filter(row=>row.open),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);
+    const openRows=rows.filter(row=>row.open && !(row.report.documentType==="delivery_note" && (row.report.pricePending || row.report.billingReady===false))),billedRows=rows.filter(row=>row.billed),unknownRows=rows.filter(row=>row.unknown);
     let openSeen=false,hasGap=false,lastContinuousBilled=null;
     for(const row of rows.filter(row=>!row.unknown)){
       if(row.billed){if(openSeen)hasGap=true;else lastContinuousBilled=row;}
@@ -284,6 +285,7 @@
     let labor=0,material=0,other=0;
     for(const row of rows||[]){
       const report=row.report||row,materialValue=report?.materialCost??report?.materialTotal;
+      if(report.documentType==="delivery_note"){other+=reportAmount(report);continue}
       if(report?.laborCost!==undefined&&materialValue!==undefined){labor+=number(report.laborCost);material+=number(materialValue)}
       else other+=number(row.amount??reportAmount(report));
     }

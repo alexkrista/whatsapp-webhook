@@ -72,7 +72,7 @@
   function assignmentJobId(a){return String(a?.jobId??a?.siteId??a?.job?.jobId??a?.job?.id??"")}
   function getAssignments(b){for(const c of [b?.assignments,b?.planning?.assignments,b?.data?.assignments]){if(Array.isArray(c))return c;if(c&&typeof c==="object")return Object.values(c).flat().filter(Boolean)}return[]}
   function futurePlans(b,id){const today=new Date().toISOString().slice(0,10);return getAssignments(b).filter(a=>assignmentJobId(a)===String(id)&&String(a.date||a.day||"").slice(0,10)>=today).sort((a,b)=>String(a.date||a.day||"").localeCompare(String(b.date||b.day||"")))}
-  function getEvents(b,id){return (b?.timeEvents||[]).filter(e=>String(e.jobId||"")===String(id)).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(b.at||"").localeCompare(String(a.at||"")))}
+  function getEvents(b,id){return (b?.projectTimeEvents||b?.timeEvents||[]).filter(e=>String(e.jobId||"")===String(id)).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(b.at||"").localeCompare(String(a.at||"")))}
   async function mapLimit(items,limit,fn){const out=new Array(items.length);let next=0;async function w(){while(next<items.length){const i=next++;try{out[i]=await fn(items[i])}catch{out[i]=null}}}await Promise.all(Array.from({length:Math.min(limit,items.length||1)},w));return out}
 
   function personStats(regies){const map=new Map();for(const row of regies){const r=row?.regie;if(!r)continue;for(const e of r.employees||[]){const k=String(e.employeeId||e.name||"");if(!k)continue;if(!map.has(k))map.set(k,{name:e.name||k,hours:0,regie:0,days:new Set()});const p=map.get(k);p.hours+=num(e.totalHours);p.regie+=num(e.regieHours);p.days.add(row.day)}}return[...map.values()].sort((a,b)=>b.hours-a.hours)}

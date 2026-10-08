@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import date
 from pathlib import Path
 
@@ -19,6 +20,8 @@ import brain_outgoing_invoices
 class OutgoingApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.network = patch("urllib.request.urlopen", side_effect=OSError("Network disabled in invoice API tests"))
+        cls.network.start()
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name)
         os.environ["KRISTINE_OUTGOING_DB"] = str(root / "api.db")
@@ -70,6 +73,7 @@ class OutgoingApiTests(unittest.TestCase):
         os.environ.pop("KRISTINE_OUTGOING_DIR", None)
         os.environ.pop("KRISTINE_ADMIN_TOKEN", None)
         cls.tmp.cleanup()
+        cls.network.stop()
 
     def test_open_items_print_layout_allows_table_to_flow_across_pages(self):
         page = self.client.get("/outgoing/open-items")
@@ -81,6 +85,26 @@ class OutgoingApiTests(unittest.TestCase):
         self.assertIn("thead{display:table-header-group}", html)
         self.assertIn("tr{break-inside:avoid", html)
         self.assertNotIn(".group{break-inside:avoid}", html)
+
+    def test_delete_draft_after_pdf_preview_allows_partial_invoice(self):
+        run = self.client.post("/api/outgoing/runs", json={
+            "projectIndex": 99, "projectNumber": "26999", "label": "Delete draft test",
+            "customerName": "Max Muster", "street": "Weg 1", "postalCode": "6820", "city": "Frastanz",
+        }).get_json()["run"]
+        payload = {"runId": run["id"], "kind": "SR", "issueDate": "2026-10-06",
+                   "dueDate": "2026-10-20", "serviceFrom": "2026-10-01", "serviceTo": "2026-10-06",
+                   "lines": [{"description": "Arbeiten", "quantity": 1, "unitPrice": 1000}]}
+        draft = self.client.post("/api/outgoing/invoices", json=payload).get_json()["invoice"]
+        preview = self.client.get(f"/api/outgoing/invoices/{draft['id']}/preview.pdf")
+        self.assertEqual(preview.status_code, 200)
+        preview.close()
+        deleted = self.client.delete(f"/api/outgoing/invoices/{draft['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.get_data(as_text=True))
+        payload["kind"] = "TR"
+        self.assertEqual(self.client.post("/api/outgoing/invoices", json=payload).status_code, 200)
+        html = self.client.get("/outgoing/invoices").get_data(as_text=True)
+        self.assertIn('data-delete-draft', html)
+        self.assertIn('id="deleteDraft"', html)
 
     def test_full_invoice_flow_creates_pdf(self):
         self.assertEqual(self.client.get("/outgoing/invoices").status_code, 200)
