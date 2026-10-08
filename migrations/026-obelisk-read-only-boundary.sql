@@ -20,15 +20,15 @@ END;
 $$;
 
 CREATE TRIGGER guard_obelisk_import_runs
-  BEFORE INSERT OR UPDATE OF company_id, source_instance_id ON kristine.import_runs
+  BEFORE INSERT OR UPDATE ON kristine.import_runs
   FOR EACH ROW EXECUTE FUNCTION kristine.reject_obelisk_import();
 
 CREATE TRIGGER guard_obelisk_source_records
-  BEFORE INSERT OR UPDATE OF company_id, source_instance_id ON kristine.source_records
+  BEFORE INSERT OR UPDATE ON kristine.source_records
   FOR EACH ROW EXECUTE FUNCTION kristine.reject_obelisk_import();
 
 CREATE TRIGGER guard_obelisk_source_versions
-  BEFORE INSERT OR UPDATE OF company_id, source_instance_id ON kristine.source_record_versions
+  BEFORE INSERT OR UPDATE ON kristine.source_record_versions
   FOR EACH ROW EXECUTE FUNCTION kristine.reject_obelisk_import();
 
 CREATE FUNCTION kristine.guard_obelisk_instance_identity() RETURNS trigger
