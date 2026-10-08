@@ -93,6 +93,31 @@ def review_xml(xml, *, strict_ids=True, allow_past=False):
     return {'items':entries,'keys':keys,'ids':ids,'total':format(sum((Decimal(x['amount']) for x in entries),Decimal(0)),'.2f')}
 
 
+def refresh_handover_dates(xml, now=None):
+    """Refresh transmission dates without changing payees, amounts or payment IDs."""
+    review_xml(xml, allow_past=True)
+    if now is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now=datetime.now(ZoneInfo('Europe/Vienna'))
+        except (ImportError, KeyError):
+            now=datetime.now().astimezone()
+    root=ET.fromstring(xml)
+    namespace=root.tag.split('}')[0][1:]
+    ET.register_namespace('',namespace)
+    init=child(root,'CstmrCdtTrfInitn')
+    child(child(init,'GrpHdr'),'CreDtTm').text=now.isoformat(timespec='seconds')
+    today=now.date().isoformat()
+    for block in [x for x in init if localname(x)=='PmtInf']:
+        execution=child(block,'ReqdExctnDt')
+        node=execution[0] if len(execution) else execution
+        original=day((node.text or '').strip()[:10])
+        instant=any(localname(node)=='LclInstrm' and any(localname(code)=='Cd' and (code.text or '').strip()=='INST' for code in node) for node in block.iter())
+        if instant or original<today:
+            node.text=today if localname(node)!='DtTm' else now.isoformat(timespec='seconds')
+    return ET.tostring(root,encoding='unicode')
+
+
 class Payments:
     def __init__(self,client):
         self.client=client;self.lock=threading.RLock();self.drafts={}
@@ -196,7 +221,9 @@ class Payments:
             try:
                 for f in files:
                     if not isinstance(f,dict):raise ConnectionError('Ungültige Dateiliste.')
-                    r=review_xml(f.get('xml'));r.update({'xml':f['xml'],'name':str(f.get('name') or 'SEPA.xml')[:150]})
+                    original=review_xml(f.get('xml'),allow_past=True)
+                    outgoing=refresh_handover_dates(f['xml'])
+                    r=review_xml(outgoing);r['keys']=list(dict.fromkeys(original['keys']+r['keys']));r.update({'xml':outgoing,'name':str(f.get('name') or 'SEPA.xml')[:150]})
                     for item in r['items']:
                         if item['debtorIban'].replace(' ','').upper() not in debtors:raise ConnectionError('Ein Auftraggeberkonto ist nicht als aktives Konto in konfipay eingerichtet.')
                     for key in r['keys']:
@@ -206,7 +233,7 @@ class Payments:
                     for ident in r['ids']:
                         if ident[:16] in allids:raise ConnectionError('Doppelte Dateikennung in der Zusammenstellung.')
                         allids.add(ident[:16])
-                    r['digest']=hashlib.sha256(f['xml'].encode()).hexdigest();reviewed.append(r)
+                    r['digest']=hashlib.sha256(outgoing.encode()).hexdigest();reviewed.append(r)
             finally:db.close()
             self.drafts={k:v for k,v in self.drafts.items() if v['expires']>time.time()}
             if len(self.drafts)>=10:raise ConnectionError('Zu viele offene Vorschauen. Bitte in 15 Minuten erneut versuchen.')
@@ -223,6 +250,9 @@ class Payments:
             if not draft or draft['expires']<time.time():raise ConnectionError('Vorschau abgelaufen oder bereits verwendet. Bitte neu prüfen.')
             results=[]
             for f in draft['files']:
+                outgoing=refresh_handover_dates(f['xml'])
+                current=review_xml(outgoing)
+                f={**f,'xml':outgoing,'items':current['items'],'digest':hashlib.sha256(outgoing.encode()).hexdigest(),'keys':list(dict.fromkeys(f['keys']+current['keys']))}
                 transfer=str(uuid.uuid4());db=self.db()
                 try:
                     db.execute('BEGIN IMMEDIATE')
