@@ -65,3 +65,25 @@ test('performance/material sources are isolated, complete, repeatable and rollba
   await importExternalDatasets(pool,args);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_external_dataset_rows')).rows[0].n,401);
  }finally{await db.close();}
 });
+
+test('project document sources are isolated, complete, repeatable and rollback safely',async()=>{
+ const db=new PGlite(),pool={connect:async()=>({query:(s,a)=>db.query(s,a),release(){}})};
+ try{
+  for(const f of fs.readdirSync(__dirname+'/../migrations').filter(f=>f.endsWith('.sql')).sort())await db.exec(fs.readFileSync(__dirname+'/../migrations/'+f,'utf8'));
+  const companyId=(await db.query("INSERT INTO kristine.companies(name) VALUES('B') RETURNING id")).rows[0].id;
+  const sourceInstanceId=(await db.query("INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,'winworker','srv-db01-winworker-standard-project-documents') RETURNING id",[companyId])).rows[0].id;
+  const other=(await db.query("INSERT INTO kristine.source_instances(company_id,system_code,instance_key) VALUES($1,'winworker','core') RETURNING id",[companyId])).rows[0].id;
+  const make=(table,rows)=>({path:'sql/WinWorker_Projekte_Standard/dbo/'+table+'.json',originalText:JSON.stringify({database:'WinWorker_Projekte_Standard',schema:'dbo',table,columns:[['Time','decimal',9,20,2,true]],primaryKey:[],rows})});
+  const files=[make('Kalkulation',Array(401).fill({Time:'9007199254740993.17',code:'001'})),make('Angebot',[]),make('Rechnung',[])],args={companyId,sourceInstanceId,files};
+  await assert.rejects(importExternalDatasets(pool,{...args,sourceInstanceId:other}),/separate source/);
+  assert.equal((await db.query('SELECT count(*)::int n FROM kristine.source_record_versions')).rows[0].n,0);
+  const first=await importExternalDatasets(pool,args);assert.equal(first.rowsCreated,401);assert.equal((await importExternalDatasets(pool,args)).rowsCreated,0);
+  await assert.rejects(importExternalDatasets(pool,{...args,files:files.slice(0,1)}),/Full external/);
+  await assert.rejects(importExternalDatasets(pool,{...args,files:[{path:'archive/pdf-index-metadata.json',originalText:'[]'}]}),/cannot accept/);
+  const changed={...args,files:[make('Kalkulation',[{Time:'12.0000'}]),...files.slice(1)]};let fail=true;
+  const broken={connect:async()=>({query:async(s,a)=>{const r=await db.query(s,a);if(fail&&s.includes('INSERT INTO kristine.imported_external_dataset_rows')){fail=false;throw Error('rollback check');}return r;},release(){}})};
+  await assert.rejects(importExternalDatasets(broken,changed),/rollback check/);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_external_dataset_rows')).rows[0].n,401);
+  await importExternalDatasets(pool,changed);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_external_dataset_rows')).rows[0].n,1);
+  await importExternalDatasets(pool,args);assert.equal((await db.query('SELECT count(*)::int n FROM kristine.latest_external_dataset_rows')).rows[0].n,401);
+ }finally{await db.close();}
+});

@@ -6,11 +6,14 @@ const hash=x=>createHash('sha256').update(x).digest('hex');
 const allowed={WinWorker_Adressen_Standard:['Kunden','Ansprechpartner','WeitereEmailAdressen','Lieferanten_Eigenschaften'],WinWorker_Projekte_Standard:['Projekte','Projekt Info']};
 const calculationAllowed={WinWorker_Stammdaten_Standard:['LohnInfo','Verzeichnisse']};
 const performanceAllowed={WinWorker_Stammdaten_Standard:['Leistungstexte','LMaterial','LMaterialIndex','Floskeltexte']};
+const projectAllowed={WinWorker_Projekte_Standard:['Kalkulation','Angebot','Rechnung']};
+const projectKey='srv-db01-winworker-standard-project-documents';
 const performanceKey='srv-db01-winworker-standard-performance-material';
 const calculationKey='srv-db01-winworker-standard-calculation';
 function prepareExternalDatasets(files){
  const performance=files.some(f=>performanceAllowed.WinWorker_Stammdaten_Standard.some(t=>f.path==='sql/WinWorker_Stammdaten_Standard/dbo/'+t+'.json'));
- const selected=performance?performanceAllowed:files.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))?calculationAllowed:allowed;
+ const project=files.some(f=>projectAllowed.WinWorker_Projekte_Standard.some(t=>f.path==='sql/WinWorker_Projekte_Standard/dbo/'+t+'.json'));
+ const selected=project?projectAllowed:performance?performanceAllowed:files.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))?calculationAllowed:allowed;
  const seen=new Set();if(!files.length)throw Error('External snapshot must list datasets');
  const prepared=files.map(f=>{
   if(seen.has(f.path))throw Error('Duplicate external dataset');seen.add(f.path);const root=JSON.parse(f.originalText);let slices,kind;
@@ -33,6 +36,9 @@ async function importExternalDatasets(pool,{companyId,sourceInstanceId,files}){
   const source=(await probe.query('SELECT system_code,instance_key FROM kristine.source_instances WHERE company_id=$1 AND id=$2',[companyId,sourceInstanceId])).rows[0];
   if(!source)throw Error('Source/company mismatch');
   const performance=prepared.some(f=>performanceAllowed.WinWorker_Stammdaten_Standard.some(t=>f.path==='sql/WinWorker_Stammdaten_Standard/dbo/'+t+'.json'));
+  const project=prepared.some(f=>projectAllowed.WinWorker_Projekte_Standard.some(t=>f.path==='sql/WinWorker_Projekte_Standard/dbo/'+t+'.json'));
+  if(project&&(source.system_code!=='winworker'||source.instance_key!==projectKey))throw Error('Project documents snapshot requires its separate source instance');
+  if(!project&&source.instance_key===projectKey)throw Error('Project documents source cannot accept other snapshots');
   const calculation=prepared.some(f=>f.path.startsWith('sql/WinWorker_Stammdaten_Standard/'))&&!performance;
   if(performance&&(source.system_code!=='winworker'||source.instance_key!==performanceKey))throw Error('Performance snapshot requires its separate source instance');
   if(!performance&&source.instance_key===performanceKey)throw Error('Performance source cannot accept other snapshots');
