@@ -51,7 +51,7 @@ async function importExternalDatasets(pool,{companyId,sourceInstanceId,files}){
     const check=(await c.query(src+'SELECT count(*)::int n,count(*) FILTER(WHERE dst.position IS NULL OR dst.raw_payload IS DISTINCT FROM raw)::int mismatch FROM src LEFT JOIN kristine.imported_external_dataset_rows dst ON dst.company_id=$1 AND dst.source_version_id=$2 AND dst.position=pos',args)).rows[0];if(check.n!==batch.length||check.mismatch)throw Error('External typed readback mismatch');
    }
    const count=(await c.query('SELECT count(*)::int n FROM kristine.imported_external_dataset_rows WHERE company_id=$1 AND source_version_id=$2',[companyId,vid])).rows[0].n;if(count!==f.slices.length)throw Error('External row count mismatch');
-   const metadata=f.kind==='sql_table'?(await c.query("SELECT ($1::jsonb)-'rows' value",[f.originalText])).rows[0].value:{scope:'index-metadata-only',pdfBytesIncluded:false,ocrTextIncluded:false};
+   const metadata=f.kind==='sql_table'?(({rows,...metadata})=>metadata)(JSON.parse(f.originalText)):{scope:'index-metadata-only',pdfBytesIncluded:false,ocrTextIncluded:false};
    await c.query('INSERT INTO kristine.external_dataset_files(company_id,source_instance_id,import_run_id,source_version_id,source_path,dataset_kind,source_metadata) VALUES($1,$2,$3,$4,$5,$6,$7)',[companyId,sourceInstanceId,runId,vid,f.path,f.kind,metadata]);
    const saved=(await c.query('SELECT source_metadata=$3::jsonb same FROM kristine.external_dataset_files WHERE import_run_id=$1 AND source_path=$2',[runId,f.path,JSON.stringify(metadata)])).rows[0];if(!saved.same)throw Error('External metadata mismatch');
    result.filesVerified++;result.rowsVerified+=count;result.datasets.push({path:f.path,kind:f.kind,rows:count});
