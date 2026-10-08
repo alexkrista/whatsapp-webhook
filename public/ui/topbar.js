@@ -4,6 +4,22 @@
   const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";
   const BRAIN_ORIGIN = new URL(BRAIN_URL).origin;
 
+  // KRISTINE 2.0: every page uses this measured offset for subordinate sticky bars.
+  const observedTopbars = new WeakSet();
+  function syncTopbarHeight(mount) {
+    if (!mount) return;
+    const height = Math.ceil(mount.getBoundingClientRect().height);
+    if (height > 0) document.documentElement.style.setProperty("--krista-topbar-height", height + "px");
+  }
+  function watchTopbarHeight(mount) {
+    syncTopbarHeight(mount);
+    if (observedTopbars.has(mount)) return;
+    observedTopbars.add(mount);
+    if (typeof window.ResizeObserver === "function") {
+      new window.ResizeObserver(() => syncTopbarHeight(mount)).observe(mount);
+    }
+  }
+
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
@@ -301,14 +317,16 @@
     const setOpen = (open) => {
       mount.classList.toggle("menu-open", !!open);
       button.setAttribute("aria-expanded", open ? "true" : "false");
+      // The expanded menu changes the sticky header height on mobile.
       button.innerHTML = open
         ? '<span aria-hidden="true">×</span><span>Schließen</span>'
         : `<span aria-hidden="true">${activeWorld.icon}</span><span>${activeWorld.label}</span><span aria-hidden="true">▾</span>`;
+      syncTopbarHeight(mount);
     };
 
     button.addEventListener("click", () => setOpen(!mount.classList.contains("menu-open")));
     nav.querySelectorAll("a").forEach(link => link.addEventListener("click", () => setOpen(false)));
-    window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); }, { passive: true });
+    window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); syncTopbarHeight(mount); }, { passive: true });
     setOpen(false);
   }
 
@@ -336,6 +354,7 @@
       </div>`;
     document.body.classList.add("krista-ui");
     setupMobileMenu(mount, active);
+    watchTopbarHeight(mount);
   }
 
   window.createKristaTopbar = function createKristaTopbar(options = {}) {
