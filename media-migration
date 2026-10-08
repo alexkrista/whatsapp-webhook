@@ -508,6 +508,8 @@ async function listJobKnowledge({ dataDir, jobId }) {
       });
     }
   }
+  const messageInbox=await readJson(path.join(root,"photo-inbox.json"),{items:{}});
+  const inboxMessages=Object.values(messageInbox.items||{}).filter(item=>["audio","text"].includes(item.category));
   const protocolEntries = [];
   for (const day of await listJobDayDirectories(dataDir, safeId)) {
     const logs = await readJsonLines(path.join(day.dir, "log.jsonl"));
@@ -516,6 +518,8 @@ async function listJobKnowledge({ dataDir, jobId }) {
         row?.transcript || row?.text || row?.raw?.image?.caption || row?.raw?.video?.caption || ""
       ).trim();
       if (!text && !["pdf", "audio_saved", "transcription_failed"].includes(String(row?.type || ""))) continue;
+      const relative=path.relative(dataDir,path.join(day.dir,String(row?.file||""))).split(path.sep).join("/");
+      if(inboxMessages.some(item=>item.status==="confirmed"&&item.jobId!==safeId&&((item.category==="audio"&&item.file===relative)||(item.category==="text"&&item.originalJobId===safeId&&item.createdAt===row.at&&item.content===text))))continue;
       protocolEntries.push({
         date: day.date,
         at: row?.at || "",
@@ -526,6 +530,16 @@ async function listJobKnowledge({ dataDir, jobId }) {
         error: String(row?.error || ""),
       });
     }
+  }
+
+  for(const item of inboxMessages){
+    if(item.status==="confirmed"&&item.category==="text")for(const event of events)if(event.type==="employee_message"&&event.at===item.createdAt&&event.detail===item.content&&String(event.employeeId||"")===String(item.employeeId||""))event.jobId=item.jobId;
+    if(item.status!=="confirmed"||item.jobId!==safeId||!["audio","text"].includes(item.category))continue;
+    if(item.category==="audio"){
+      const existing=protocolEntries.find(row=>row.file&&item.file.endsWith('/'+row.file)&&row.text===item.content);
+      if(existing)continue;
+      protocolEntries.push({date:item.date,at:item.createdAt,type:"audio_transcript",text:item.content||"Sprachnachricht ohne Transkript",file:item.file,sender:item.employeeName,audioUrl:'/kristine/api/photo-inbox/file?file='+encodeURIComponent(item.file),source:"Eingang · bestätigt"});
+    }else if(!events.some(row=>row.type==="employee_message"&&row.at===item.createdAt&&row.detail===item.content&&row.jobId===safeId))events.push({type:"employee_message",at:item.createdAt,date:item.date,time:item.at,jobId:safeId,employeeId:item.employeeId,employeeName:item.employeeName,detail:item.content,source:"Eingang · bestätigt"});
   }
 
   return {
