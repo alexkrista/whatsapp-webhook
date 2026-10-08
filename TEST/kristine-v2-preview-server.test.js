@@ -162,3 +162,19 @@ test('safe header mounts exactly five nonfunctional door/service links, also aft
     assert.equal(window.document.querySelectorAll('[data-krista-preview-access]').length,1);
   }finally{dom.window.close()}
 });
+
+
+test('entire KRISTINE 2.0 preview header is left-aligned on desktop and mobile',async()=>{
+  await withServer(async port=>{
+    const stylesheet=await request(port,'/public/ui/kristine-v2-preview-access.css');
+    assert.equal(stylesheet.status,200);
+    const css=stylesheet.body;
+    assert.match(css,/\.krista-shell-main\.krista-v2-preview-with-access\s*\{[^}]*grid-template-columns:minmax\(0,1fr\)!important/);
+    assert.match(css,/\.krista-v2-preview-with-access \.krista-brand\{[^}]*justify-self:start/);
+    assert.match(css,/\.krista-v2-preview-with-access \.krista-world-nav\{[^}]*grid-column:1;grid-row:2;justify-content:flex-start!important/);
+    assert.match(css,/\.krista-v2-preview-access\{[^}]*grid-column:1;grid-row:3;[^}]*justify-content:flex-start/);
+    assert.doesNotMatch(css,/\.krista-v2-preview-access\{[^}]*justify-content:flex-end/);
+    assert.match(css,/@media\(max-width:760px\)\{[\s\S]*?\.krista-v2-preview-access\{[^}]*justify-content:flex-start/);
+    assert.match(css,/\.krista-v2-preview-access-note\{[^}]*order:99/);
+  });
+});
