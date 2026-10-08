@@ -21,6 +21,7 @@ test('KRISTINE 2.0 accepts its own Render TEST database only',()=>{
     '', 'https://example.org',
     'postgresql://kristine_postgres_user:password@dpg-db2e70ek1f9s73a4q4ig-a/kristine_postgres',
     'postgresql://kristine_2_0_test_db_user:password@evil.example/kristine_2_0_test_db',
+    'postgresql://kristine_2_0_test_db_user:password@dpg-other-region-a/kristine_2_0_test_db',
     'postgresql://other:password@dpg-db3u5cui0phs73eaa700-a/kristine_2_0_test_db',
     'postgresql://kristine_2_0_test_db_user:password@dpg-db3u5cui0phs73eaa700-a/kristine_postgres',
     'postgresql://kristine_2_0_test_db_user@dpg-db3u5cui0phs73eaa700-a/kristine_2_0_test_db',
