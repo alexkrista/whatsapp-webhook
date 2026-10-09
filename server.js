@@ -58,6 +58,7 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { registerKristine } = require("./kristine");
 const { isInternalJobId, isOfficeJobId, normalizeOfficeTimeData } = require("./office-time");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
+const {createWhatsAppDeliveryAudit} = require("./whatsapp-delivery-audit");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration, listJobMedia } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
@@ -112,6 +113,7 @@ app.get("/api/offer-terms", (_req, res) => res.json({ ok: true, terms: OFFER_TER
 // ===================== ENV =====================
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const whatsAppDeliveryAudit = createWhatsAppDeliveryAudit(DATA_DIR);
 const jobRenumber = require("./job-renumber");
 const jobRenumberResult = jobRenumber.renumberJansen({ dataDir: DATA_DIR });
 console.info("JOB_RENUMBER_RESULT", JSON.stringify(jobRenumberResult));
@@ -1637,7 +1639,7 @@ function getActiveKristinePhoneNumberId(phoneNumberId = "") {
   ).trim();
 }
 
-async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [], includeGoLink = true }) {
+async function sendWhatsAppKristineReply({ phoneNumberId, to, reply, buttons = [], includeGoLink = true, purpose = "" }) {
   if (!WHATSAPP_TOKEN) throw new Error("WHATSAPP_TOKEN missing");
   const senderId = getActiveKristinePhoneNumberId(phoneNumberId);
   if (!senderId) {
@@ -1749,6 +1751,20 @@ ${kgoLink}`
     recipientTail: recipient.slice(-6),
     payloadType: payload.type,
   });
+  // Meta acknowledged the request, NOT actual delivery. The subsequent
+  // statuses[] webhook is the only way to confirm delivered/failed/read.
+  try {
+    await whatsAppDeliveryAudit.recordAccepted({
+      id:responseJson?.messages?.[0]?.id,
+      to:recipient,
+      payloadType:payload.type,
+      purpose,
+    });
+  } catch (error) {
+    console.error("WHATSAPP_AUDIT_WRITE_FAILED",{
+      code:typeof error?.code==="string" ? error.code : "ERROR",
+    });
+  }
   if (cleanedButtons.length && kgoLink) {
   const kgoPayload = {
     messaging_product: "whatsapp",
@@ -1869,6 +1885,20 @@ installKristineSharedCalendar(app, {
 });
 
 // ===================== WhatsApp Incoming =====================
+// Operator-only read endpoint. No messages, phone numbers or delivery
+// retries are exposed; only hashed IDs, last-six and Meta status codes.
+app.get("/admin/api/whatsapp/delivery", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    res.json(await whatsAppDeliveryAudit.latest({days:4,limit:150}));
+  } catch (error) {
+    console.error("WHATSAPP_AUDIT_READ_FAILED",{
+      code:typeof error?.code==="string" ? error.code : "ERROR",
+    });
+    res.status(500).json({ok:false,error:"Zustellkontrolle derzeit nicht verfügbar"});
+  }
+});
+
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
@@ -1880,6 +1910,16 @@ app.post("/webhook", async (req, res) => {
     const msgs = value?.messages || [];
     const phoneNumberId = value?.metadata?.phone_number_id || "";
     if (phoneNumberId) await rememberWhatsAppSenderId(phoneNumberId);
+    // Meta sends delivery receipts as statuses[], without messages[].
+    // Handle them before the existing early return.
+    if (Array.isArray(value?.statuses) && value.statuses.length) {
+      try { await whatsAppDeliveryAudit.recordStatuses(value.statuses); }
+      catch (error) {
+        console.error("WHATSAPP_DELIVERY_AUDIT_FAILED",{
+          code:typeof error?.code==="string" ? error.code : "ERROR",
+        });
+      }
+    }
     if (!Array.isArray(msgs) || msgs.length === 0) return;
 
     for (const msg of msgs) {
