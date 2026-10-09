@@ -3836,15 +3836,25 @@ app.delete("/admin/api/job/:jobId", async (req, res) => {
   }
 });
 
+const {listInvoiceDocuments}=require("./issued-invoice-project-archive");
+const {registerInvoiceArchiveRoute}=require("./issued-invoice-project-routes");
+registerInvoiceArchiveRoute(app,{dataDir:DATA_DIR,requireAdmin});
 function documentationDir(jobId) { return path.join(DATA_DIR, String(jobId), "_documentation"); }
 function documentationIndex(jobId) { return path.join(documentationDir(jobId), "index.json"); }
 require("./company-lookup").registerCompanyLookup(app,{requireAdmin,apiKey:OPENAI_API_KEY,model:process.env.OPENAI_COMPANY_MODEL||"gpt-4.1-mini"});
 require("./documentation-mail").registerDocumentationMail(app,{requireAdmin,isSafeJobId,readDocumentation,documentationDir,readJobMeta,writeJobMeta,appendJobHistory});
-async function readDocumentation(jobId) { return fsp.readFile(documentationIndex(jobId), "utf8").then(JSON.parse).catch(() => []); }
+async function readDocumentation(jobId) {
+  const ordinary=await fsp.readFile(documentationIndex(jobId),"utf8").then(JSON.parse).catch(()=>[]);
+  const originalInvoices=await listInvoiceDocuments(DATA_DIR,jobId);
+  const ids=new Set(originalInvoices.map(item=>item.id));
+  return [...originalInvoices,...(Array.isArray(ordinary)?ordinary:[]).filter(item=>!ids.has(item?.id))];
+}
 async function writeDocumentation(jobId, rows) {
   const before=await readDocumentation(jobId);
-  await ensureDir(documentationDir(jobId));await fsp.writeFile(documentationIndex(jobId),JSON.stringify(rows,null,2),"utf8");
-  if(customerNotifications)await customerNotifications.documents(jobId,before,rows).catch(error=>console.error("CUSTOMER_DOCUMENT_NOTICE_FAILED",{jobId,error:error.message}));
+  const ordinary=(Array.isArray(rows)?rows:[]).filter(item=>item?.type!=="issued_invoice");
+  await ensureDir(documentationDir(jobId));await fsp.writeFile(documentationIndex(jobId),JSON.stringify(ordinary,null,2),"utf8");
+  const after=await readDocumentation(jobId);
+  if(customerNotifications)await customerNotifications.documents(jobId,before,after).catch(error=>console.error("CUSTOMER_DOCUMENT_NOTICE_FAILED",{jobId,error:error.message}));
 }
 async function markRegieReportsBilledByInvoice(jobId, reportIds, invoice = {}) {
   const wanted = new Set((Array.isArray(reportIds) ? reportIds : []).map(value => String(value || "").trim()).filter(value => value && value.length <= 160).slice(0, 2000));
