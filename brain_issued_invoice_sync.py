@@ -103,12 +103,14 @@ def sync_once(store,base,secret,post=None,max_batch=75):
                 continue
             key=str(row["id"])
             try:
-                data,digest=safe_pdf(store,row)
-                if state.get(key)==digest:
+                saved_digest=str(row.get("pdf_sha256") or "").lower()
+                if (saved_digest and state.get(key)==saved_digest
+                        and Path(str(row.get("pdf_path") or "")).is_file()):
                     continue
                 if synced>=max_batch:
                     pending+=1
                     continue
+                data,digest=safe_pdf(store,row)
                 send_original(base,secret,row,data,digest,post=post)
                 state[key]=digest
                 synced+=1
