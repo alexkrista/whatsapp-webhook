@@ -1,0 +1,25 @@
+name: KRISTINE access mode safety
+on:
+  pull_request:
+    paths:
+      - 'public/ui/access-status-ui.js'
+      - 'TEST/door-mode-honesty.test.js'
+      - '.github/workflows/access-mode-safety.yml'
+  push:
+    branches:
+      - fix/door-mode-honesty-20261009
+permissions:
+  contents: read
+jobs:
+  access-mode-display:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax and DOM checks
+        run: |
+          node --check public/ui/access-status-ui.js
+          node --test TEST/door-mode-honesty.test.js
