@@ -43,6 +43,9 @@ test('out of order accepted and duplicate callback remain auditable without coun
   const audit=createWhatsAppDeliveryAudit(dir,{clock:()=>new Date('2026-10-09T04:00:00Z')});
   const id='wamid.HBgMTESTCASE002==';
   assert.equal(await audit.recordStatuses([{id,recipient_id:'11111111',status:'delivered'}]),1);
+  const unverified=await audit.latest();
+  assert.equal(unverified.rows.length,0);
+  assert.equal(unverified.totals.delivered,0);
   await audit.recordAccepted({id,to:'11111111',payloadType:'text',purpose:'planningReminder'});
   assert.equal(await audit.recordStatuses([{id,recipient_id:'11111111',status:'sent'},{id,recipient_id:'11111111',status:'delivered'}]),2);
   let status=await audit.latest();
