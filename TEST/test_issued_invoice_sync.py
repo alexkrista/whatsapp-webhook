@@ -9,6 +9,14 @@ from unittest.mock import Mock
 from brain_issued_invoice_sync import sync_once, send_original
 
 
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, kind, value, tb):
+        try:
+            return super().__exit__(kind, value, tb)
+        finally:
+            self.close()
+
+
 class Store:
     def __init__(self, root):
         self.db_path = root / "outgoing.db"
@@ -25,7 +33,7 @@ class Store:
         """)
         con.close()
     def connect(self):
-        con=sqlite3.connect(self.db_path)
+        con=sqlite3.connect(self.db_path,factory=ClosingConnection)
         con.row_factory=sqlite3.Row
         return con
 
