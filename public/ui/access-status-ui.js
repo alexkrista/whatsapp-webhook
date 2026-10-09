@@ -66,7 +66,7 @@
       .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
       .krista-system-lamp,.krista-services-lamp{padding-inline:7px!important}
       .krista-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#e7b34d}
-      .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}
+      .krista-dot.green{background:#55c77a}.krista-dot.red{background:#ef6860}.krista-dot.yellow{background:#e7b34d}.krista-dot.blue{background:#80b8e5}
       .krista-door-state{font-weight:950!important;opacity:.9}
       .krista-door-lamp.pending,.krista-gate-lamp.pending{opacity:.6!important;pointer-events:none!important}
       .krista-door-lamp.syncing,.krista-gate-lamp.syncing{opacity:.82!important;pointer-events:none!important;cursor:wait!important}
@@ -206,10 +206,17 @@
   }
 
   function doorVisual(d,x){
-    if(!d?.online)return{color:"yellow",state:"?"};
-    if(x?.mode==="OPEN")return{color:"green",state:"OFFEN"};
-    if(x?.mode==="NORMAL")return{color:"red",state:"ZU"};
-    return{color:"yellow",state:"?"};
+    // GANTNER reports the software's requested operating MODE, not an
+    // independent door-contact or lock sensor. Device commands previously
+    // returned empty replies but were still stored as successful changes.
+    // Never present these modes as physically OPEN/CLOSED or securely locked.
+    if(!d?.online||d?.stale||d?.gantner?.ok===false)
+      return{color:"yellow",state:"?",title:"Keine frische Rückmeldung der Zutrittssteuerung. Tür-/Schlosszustand unbekannt."};
+    if(x?.mode==="OPEN")
+      return{color:"blue",state:"FREI?",title:"Sollmodus: generelle Freigabe. Ob die Tür tatsächlich entriegelt oder offen ist, wird nicht gemessen."};
+    if(x?.mode==="NORMAL")
+      return{color:"blue",state:"CHIP?",title:"Sollmodus: Chip-/Normalbetrieb. Keine bestätigte Verriegelung oder Türpositionsmessung."};
+    return{color:"yellow",state:"?",title:"Sollmodus unbekannt; keine bestätigte Türposition oder Verriegelung."};
   }
 
   function draw(d){
@@ -232,9 +239,10 @@
       const x=doors[String(n)]||{};
       const v=doorVisual(d,x);
       const locked=isDoorLocked(n);
-      const action=locked?"Schaltung bestätigt · bitte kurz warten":v.state==="OFFEN"?"Klick: auf ZU stellen":v.state==="ZU"?"Klick: generell öffnen":"Status unbekannt";
-      const reason=String(x.reason||"").replace(/"/g,"&quot;");
-      doorHtml+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" title="${action}${reason?" · "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
+      const valid=d?.online&&!d?.stale&&d?.gantner?.ok!==false&&["OPEN","NORMAL"].includes(String(x.mode||""));
+      const action=locked?"Schaltbefehl gesendet · Antwort des Schlosses nicht garantiert":!valid?"Keine Bedienung bei unbekanntem Steuerungsstatus":x.mode==="OPEN"?"Klick: Chip-/Normalbetrieb anfordern":"Klick: Freigabemodus anfordern";
+      const reason=String(x.reason||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+      doorHtml+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" ${valid?"":"disabled"} aria-label="${labels[n]}: ${v.title} ${action}" title="${v.title} · ${action}${reason?" · Grund: "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
     const svcColor=servicesColor();
     h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-services-lamp" data-services title="${servicesTitle()}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
