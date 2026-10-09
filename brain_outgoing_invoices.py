@@ -2184,6 +2184,9 @@ def install(ns):
 
         threading.Thread(target=nightly_ww_sync, name="kristine-ww-debtor-sync", daemon=True).start()
 
+    from brain_issued_invoice_sync import start_from_environment
+    start_from_environment(store)
+
     app._krista_outgoing = True
     _INSTALLED = True
     print("KRISTINE outgoing invoices + debtor open items: WW sync 02:15 | TR/SR | payments | corrections")
