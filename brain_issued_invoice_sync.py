@@ -143,7 +143,11 @@ def start_worker(store,base,secret,logger=print,first_delay=20,period=75):
 
 
 def start_from_environment(store):
-    """Use the same existing authorized KRISTINE cloud connection as other Brain functions."""
+    """Never start external uploads from tests, development copies or a disabled worker."""
+    if (store.db_path.name != "kristine_outgoing_invoices.db"
+            or store.output_root.name != "Ausgangsrechnungen"
+            or os.environ.get("KRISTINE_INVOICE_ARCHIVE_SYNC_DISABLED") == "1"):
+        return None
     base=str(os.environ.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
     secret=str(os.environ.get("KRISTINE_ADMIN_TOKEN") or os.environ.get("ADMIN_TOKEN") or "").strip()
     return start_worker(store,base,secret)
