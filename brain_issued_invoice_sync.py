@@ -138,3 +138,10 @@ def start_worker(store,base,secret,logger=print,first_delay=20,period=75):
     thread=threading.Thread(target=run,name="kristine-invoice-archive-sync",daemon=True)
     thread.start()
     return thread
+
+
+def start_from_environment(store):
+    """Use the same existing authorized KRISTINE cloud connection as other Brain functions."""
+    base=str(os.environ.get("KRISTINE_API_BASE") or "https://protokoll.krista.at").rstrip("/")
+    secret=str(os.environ.get("KRISTINE_ADMIN_TOKEN") or os.environ.get("ADMIN_TOKEN") or "").strip()
+    return start_worker(store,base,secret)
