@@ -102,9 +102,13 @@ function createWhatsAppDeliveryAudit(dataDir,{logger=console,clock=()=>new Date(
       }
       combined.set(row.key,current);
     }
-    const values=[...combined.values()].sort((a,b)=>String(b.lastUpdateAt||b.acceptedAt).localeCompare(String(a.lastUpdateAt||a.acceptedAt))).slice(0,limit);
+    // A public webhook must never create an apparent delivery of an
+    // unrecognized message. Only outbound IDs previously acknowledged by Meta
+    // and recorded by this process may appear in the operator report.
+    const known=[...combined.values()].filter(v=>Boolean(v.acceptedAt));
+    const values=known.sort((a,b)=>String(b.lastUpdateAt||b.acceptedAt).localeCompare(String(a.lastUpdateAt||a.acceptedAt))).slice(0,limit);
     const counts={accepted:0,sent:0,delivered:0,read:0,failed:0,deleted:0};
-    for(const v of combined.values())counts[v.status]++;
+    for(const v of known)counts[v.status]++;
     return {ok:true,source:'meta_status_webhook',totals:counts,rows:values};
   }
   return {recordAccepted,recordStatuses,latest};
