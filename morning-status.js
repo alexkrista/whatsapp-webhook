@@ -963,7 +963,7 @@ async function registerMorningStatus({
     return Number.isFinite(age) && age >= 0 && age < minutes * 60_000;
   }
 
-  async function sendToChef(reply) {
+  async function sendToChef(reply, purpose = "chef") {
     const to = normalizePhone(chefPhone);
 
     if (!to) {
@@ -982,6 +982,7 @@ async function registerMorningStatus({
       phoneNumberId,
       to,
       reply,
+      purpose,
     });
 
     return {
@@ -1243,7 +1244,7 @@ async function runSevenOClock(
     const report = buildChefReport(statuses, date);
 
     try {
-      const result = await sendToChef(report);
+      const result = await sendToChef(report, "chefReport");
 
       if (!result.sent) {
         await saveFailure(
@@ -1343,7 +1344,7 @@ async function runSevenOClock(
     const message = buildPlanningReminder(status, followUp);
 
     try {
-      const result = await sendToChef(message);
+      const result = await sendToChef(message, schedulerKey);
 
       if (!result.sent) {
         await saveFailure(

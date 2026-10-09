@@ -4,6 +4,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const {writeVehicleJsonAtomic} = require("./vehicle-json-atomic");
 
 function registerVehicleTracking(app, options = {}) {
   const express = options.express || require("express");
@@ -44,9 +45,7 @@ function registerVehicleTracking(app, options = {}) {
 
   async function writeJson(file, value) {
     await ensureRoot();
-    const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-    await fsp.writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
-    await fsp.rename(tmp, file);
+    await writeVehicleJsonAtomic(file, value);
   }
 
   async function appendEvent(type, payload = {}) {
@@ -212,10 +211,18 @@ function registerVehicleTracking(app, options = {}) {
     const delay = Math.max(0, deadline - Date.now());
     const timer = setTimeout(async () => {
       buzzerTimers.delete(vehicleId);
-      const all = await sessions();
-      const current = all[vehicleId];
-      if (!current || current.closedAt || current.driver?.employeeId) return;
-      await setBuzzer(vehicleId, true, "driver_missing_after_grace_period");
+      try {
+        const all = await sessions();
+        const current = all[vehicleId];
+        if (!current || current.closedAt || current.driver?.employeeId) return;
+        await setBuzzer(vehicleId, true, "driver_missing_after_grace_period");
+      } catch (error) {
+        // Timer rejections previously could terminate the entire Node server,
+        // taking KRISTINE WhatsApp and scheduled notices offline with it.
+        console.error("KRISDRIVE Buzzer-Timer fehlgeschlagen", {
+          code: typeof error?.code === "string" ? error.code : "ERROR"
+        });
+      }
     }, delay);
     buzzerTimers.set(vehicleId, timer);
   }
