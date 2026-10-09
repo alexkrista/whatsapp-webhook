@@ -1,0 +1,46 @@
+name: KRISTINE WhatsApp and vehicle stability
+on:
+  pull_request:
+    paths:
+      - 'server.js'
+      - 'morning-status.js'
+      - 'vehicle-tracking.js'
+      - 'vehicle-json-atomic.js'
+      - 'whatsapp-delivery-audit.js'
+      - 'TEST/whatsapp-delivery-*.test.js'
+      - 'TEST/vehicle-json-atomic.test.js'
+      - '.github/workflows/whatsapp-stability.yml'
+  push:
+    branches:
+      - fix/whatsapp-delivery-tracker-vehicle-crashes-20261009
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install existing project dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Static syntax checks
+        run: |
+          node --check server.js
+          node --check morning-status.js
+          node --check vehicle-tracking.js
+          node --check vehicle-json-atomic.js
+          node --check whatsapp-delivery-audit.js
+      - name: WhatsApp, timer, vehicle and finance regression suite
+        run: |
+          node --test --test-concurrency=1 \
+            TEST/vehicle-json-atomic.test.js \
+            TEST/whatsapp-delivery-audit.test.js \
+            TEST/whatsapp-delivery-integration.test.js \
+            TEST/finance-task-whatsapp.test.js \
+            TEST/office-whatsapp-end.test.js \
+            TEST/task-digest.test.js \
+            TEST/krisdrive-logbook.test.js
