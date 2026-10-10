@@ -697,7 +697,7 @@ function registerRegieAssistant(app, options) {
       .map(row => priceLocked ? row : { ...row, hourlyRate: null })
       .filter(row => row.name && row.hours > 0);
     if (!delivery && !employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
-    const materialSource = existing.materialDeliveryId ? [] : priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
+    const materialSource = priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
     const materials = materialSource
       .map(row => normalizeMaterial(row, materialMarkup, priceLocked && !correctReport))
       .filter(row => row.product && row.quantity > 0);
@@ -964,20 +964,25 @@ function registerRegieAssistant(app, options) {
       }
       if (report.status === "completed" || report.billingStatus === "billed" || report.reviewStatus === "bettina_pending") return res.status(409).json({ok:false,error:"Material vor dem Abschluss und nach der Vorprüfung auslagern."});
       if (!report.materials?.length || !report.employees?.length) return res.status(400).json({ok:false,error:"Material und Arbeitsstunden fehlen."});
-      const candidate = {...report,materials:[]};
+      // Only unknown/unpriced material is parked in a delivery note.
+      // Known material and all labor remain in the original Regiebericht.
+      const unresolved = report.materials.filter(row =>
+        row.unknownMaterialId || row.provisional === true || !row.materialId || Number(row.salePrice || 0) <= 0);
+      if (!unresolved.length) return res.status(409).json({ok:false,error:"Keine unbekannten Materialpositionen vorhanden."});
+      const unresolvedSet = new Set(unresolved);
+      const known = report.materials.filter(row => !unresolvedSet.has(row));
+      const candidate = {...report,materials:known};
       await enforceHours(candidate,reports);
       const now = new Date().toISOString(), sequence = await nextReportSequence(report.jobId,reports,report.date,"delivery_note");
       if (sequence > 999) throw Error("Alle Lieferscheinnummern sind vergeben.");
-      const delivery = {id:`regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,documentType:"delivery_note",jobId:report.jobId,jobName:report.jobName,date:report.date,description:`Material zu Regiebericht ${report.reportNumber}: ${report.description}`,source:report.source,sourceRegieId:report.id,sourceRegieNumber:report.reportNumber,reportSequence:sequence,reportNumber:`LS-${fullReportNumber(report.jobId,sequence,report.date)}`,employees:[],people:[],materials:report.materials,hourlyRate:report.hourlyRate,materialMarkup:report.materialMarkup,attachments:[],status:"draft",processingStatus:"draft",reviewStatus:"draft",billingStatus:"open",createdAt:now,updatedAt:now};
-      delivery.pricePending = missingPrices(delivery).length > 0; delivery.totals = calculateTotals(delivery);
-      Object.assign(report,{materials:[],materialDeliveryId:delivery.id,materialDeliveryNumber:delivery.reportNumber,status:"completed",processingStatus:"approved",reviewStatus:"approved",approvedAt:now,completedAt:now,updatedAt:now,pricePending:false});
+      const delivery = {id:`regie_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,documentType:"delivery_note",jobId:report.jobId,jobName:report.jobName,date:report.date,description:`Material zu Regiebericht ${report.reportNumber}: ${report.description}`,source:report.source,sourceRegieId:report.id,sourceRegieNumber:report.reportNumber,reportSequence:sequence,reportNumber:`LS-${fullReportNumber(report.jobId,sequence,report.date)}`,employees:[],people:[],materials:unresolved.map(row=>({...row,salePrice:0,purchasePrice:0,fixedSalePrice:false,total:0})),hourlyRate:report.hourlyRate,materialMarkup:report.materialMarkup,attachments:[],status:"draft",processingStatus:"draft",reviewStatus:"draft",billingStatus:"open",createdAt:now,updatedAt:now};
+      delivery.pricePending = true; delivery.totals = calculateTotals(delivery);
+      Object.assign(report,{materials:known,materialDeliveryId:delivery.id,materialDeliveryNumber:delivery.reportNumber,updatedAt:now});
       report.totals = calculateTotals(report);
       reports.push(delivery);
-      // Commit the move and both links together; never leave billable material in both records.
       await writeJson(REPORTS,reports);
       await storeInJobFile(report); await storeInJobFile(delivery);
       if (typeof storeInDayRegie === "function") await storeInDayRegie(report);
-      await completeRegieReviewTask(report,"archive",req.body?.taskId);
       res.json({ok:true,report,delivery});
     } catch(error) { res.status(400).json({ok:false,error:String(error.message||error)}); }
   });
