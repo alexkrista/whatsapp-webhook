@@ -326,12 +326,29 @@ function registerCustomerAccess(app, options) {
           if(!/\.(jpe?g|png|webp|gif|mp4|mov|webm)$/i.test(row.file||""))continue;
           const normalized=String(row.file).replace(/\\/g,"/"),first=normalized.split("/")[0];
           let physical=null;
-          if(aliases.canonical(first)===jobId)physical=secureFile(jobId,normalized.split("/").slice(1).join("/"));
+          // listJobMedia already applies the current photo assignment. A reassigned
+          // photo can still be stored in its original job's directory.
+          if(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(first))physical=secureFile(first,normalized.split("/").slice(1).join("/"));
           else if(normalized.startsWith("_kristine/media/")) {
             const full=path.resolve(dataDir,normalized),mediaRoot=path.resolve(dataDir,"_kristine/media")+path.sep;
-            if(!normalized.includes("..")&&fs.existsSync(full)&&fs.realpathSync(full).startsWith(mediaRoot))physical=full;
+            if(!normalized.includes("..")&&fs.existsSync(full)&&fs.realpathSync(full).startsWith(mediaRoot)&&fs.statSync(full).isFile())physical=full;
           }
           add(jobId,/\.(mp4|mov|webm)$/i.test(normalized)?"video":"photo",row.content||row.filename||"Baustellenfoto",physical,"photos",row.date||"");
+        }
+        // Intake photographs are attached to the job metadata, separately from
+        // the daily gallery. Only referenced images are published, never memos.
+        for(const row of (Array.isArray(meta.intakeProtocol?.files)?meta.intakeProtocol.files:[])) {
+          if(!row||row.internal===true||row.customerVisible===false)continue;
+          const match=String(row.url||"").match(/^\/kristine\/api\/tasks\/([A-Za-z0-9_-]+)\/visit-file\/(photo-[A-Za-z0-9_-]+)$/);
+          if(!match)continue;
+          const [,taskId,fileId]=match,root=path.resolve(dataDir,"_kristine","visit-files"),dir=path.join(root,taskId);
+          const info=read(path.join(dir,fileId+".json"),null);
+          if(!info||info.id!==fileId||info.taskId!==taskId||!/^image\/(jpeg|png|webp|gif)$/i.test(info.mimeType||""))continue;
+          const name=fs.existsSync(dir)&&fs.readdirSync(dir).find(name=>name.startsWith(fileId+".")&&/\.(jpe?g|png|webp|gif)$/i.test(name));
+          if(!name)continue;
+          const physical=path.join(dir,name),actualRoot=fs.realpathSync(root)+path.sep,actual=fs.realpathSync(physical);
+          if(!actual.startsWith(actualRoot)||!fs.statSync(actual).isFile())continue;
+          add(jobId,"photo",row.name||info.name||"Termin-Foto",actual,"photos",String(row.createdAt||info.createdAt||"").slice(0,10));
         }
         if (materialSources) materials.push(...collectCustomerMaterials({ jobId, metaRows:meta.surfaceMaterialMeta, documents, days:materialSources.days.get(jobId), bookings:materialSources.bookings.get(jobId) }));
       }

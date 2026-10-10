@@ -24,6 +24,7 @@ select{background:#0e0f11;color:var(--text);border:1px solid #5f6774;border-radi
 <section class="card" id="revolutTransfer"><div class="row"><div><h2>Bank → Revolut</h2><p class="small">Interne Umbuchung als SEPA Instant/Eilüberweisung vorbereiten. Nach deiner Prüfung direkt an Konfipay übergeben.</p></div><button id="revolutTransferLoad" class="secondary" type="button">Konten neu laden</button></div>
 <div class="formrow"><div class="field"><label for="revolutTransferSource">Von Bankkonto</label><select id="revolutTransferSource"><option value="">Konten werden geladen …</option></select></div><div class="field"><label for="revolutTransferTarget">Auf Revolut / Revolut Business</label><select id="revolutTransferTarget"><option value="">Revolut wird geladen …</option></select></div></div>
 <div class="formrow"><div class="field"><label for="revolutTransferAmount">Betrag EUR</label><input id="revolutTransferAmount" inputmode="decimal" placeholder="0,00"></div><div class="field"><label for="revolutTransferPurpose">Verwendungszweck</label><input id="revolutTransferPurpose" value="Interne Umbuchung Bank an Revolut" maxlength="140"></div><button id="revolutTransferPrepare" type="button">Umbuchung prüfen</button></div>
+<p class="small"><label><input id="revolutTransferDirect" type="checkbox"> Direkter Test nur für diese eigene Umbuchung: ohne Empfängerprüfung an die Bank senden. Eine bankseitige Unterschrift kann weiterhin erforderlich sein.</label></p>
 <p id="revolutTransferMessage" class="small" role="status" aria-live="polite"></p><dialog id="revolutTransferReview"><h2>Eilüberweisung prüfen</h2><p id="revolutTransferReviewText" style="white-space:pre-line"></p><p class="small">Die Übergabe erfolgt als interne Umbuchung. Eine erforderliche Bankunterschrift bleibt bestehen.</p><div class="row"><button id="revolutTransferCancel" class="secondary" type="button">Schließen</button><button id="revolutTransferSubmit" type="button">Jetzt an Konfipay übergeben</button></div><p id="revolutTransferResult" role="status"></p></dialog>
 <p class="small">Der spätere Bankumsatz wird nur bei exakter Übereinstimmung von Konten, Betrag und EndToEnd-ID automatisch als „Umbuchung · Revolut“ erkannt – ohne Aufwand oder Ertrag.</p></section>
 <section class="card" id="signatureApproval"><div class="row"><div><h2>Bankunterschrift</h2><p id="signatureStatus" class="small" role="status" aria-live="polite">Zahlungsstatus wird geprüft …</p></div><div><a id="signatureLink" class="bank-action" href="https://portal.konfipay.de/App/Home" target="_blank" rel="noopener noreferrer" hidden>Jetzt in konfipay unterschreiben ↗</a><span id="signatureInactive" class="badge">Noch keine Unterschrift bereit</span></div></div><p class="small">Sobald konfipay „Wartet auf Unterschrift“ meldet, öffnet der Button das konfipay-Portal. Eine Anmeldung oder die Freigabe bei der Bank kann weiterhin erforderlich sein.</p></section>
@@ -419,16 +420,16 @@ async function loadRevolutTransferContext(){
  }catch(e){$('revolutTransferMessage').textContent=e.message;}finally{button.disabled=false;}
 }
 $('revolutTransferLoad').addEventListener('click',loadRevolutTransferContext);
-function revolutTransferInputs(){return JSON.stringify(['revolutTransferSource','revolutTransferTarget','revolutTransferAmount','revolutTransferPurpose'].map(id=>$(id).value));}
+function revolutTransferInputs(){return JSON.stringify(['revolutTransferSource','revolutTransferTarget','revolutTransferAmount','revolutTransferPurpose'].map(id=>$(id).value).concat($('revolutTransferDirect').checked));}
 $('revolutTransferPrepare').addEventListener('click',async()=>{
  const button=$('revolutTransferPrepare');if(button.disabled||revolutTransferSending)return;
  button.disabled=true;revolutTransferDraft=null;const inputs=revolutTransferInputs();
  $('revolutTransferMessage').textContent='Eilüberweisung wird zur Prüfung vorbereitet …';
- try{const d=await api('revolut-transfer-prepare',{sourceAccountId:$('revolutTransferSource').value,revolutAccountId:$('revolutTransferTarget').value,amount:$('revolutTransferAmount').value.replace(',','.'),purpose:$('revolutTransferPurpose').value});
-  const review=await api('payment-prepare',{files:[{name:d.filename,xml:d.xml}]});
+ try{const d=await api('revolut-transfer-prepare',{sourceAccountId:$('revolutTransferSource').value,revolutAccountId:$('revolutTransferTarget').value,amount:$('revolutTransferAmount').value.replace(',','.'),purpose:$('revolutTransferPurpose').value,directOwnTransfer:$('revolutTransferDirect').checked});
+  const review=d.directOwnTransfer?d:await api('payment-prepare',{files:[{name:d.filename,xml:d.xml}]});
   if(inputs!==revolutTransferInputs())throw Error('Eingaben wurden geändert. Bitte die Umbuchung erneut prüfen.');
   revolutTransferDraft={id:review.draft,inputs};
-  $('revolutTransferReviewText').textContent='Von: '+d.source.name+' · '+d.source.iban+'\nAn: '+d.target.name+' · '+d.target.iban+'\nKontoinhaber: '+d.target.beneficiary+'\nBetrag: '+money(d.amount,'EUR')+'\nVerwendungszweck: '+d.purpose+'\nAusführung: SEPA Instant / Eilüberweisung';
+  $('revolutTransferReviewText').textContent='Von: '+d.source.name+' · '+d.source.iban+'\nAn: '+d.target.name+' · '+d.target.iban+'\nKontoinhaber: '+d.target.beneficiary+'\nBetrag: '+money(d.amount,'EUR')+'\nVerwendungszweck: '+d.purpose+'\nAusführung: SEPA Instant / Eilüberweisung'+(d.directOwnTransfer?'\nDirekter Test: ohne Empfängerprüfung. Bankentscheidung über weitere Unterschrift bleibt bestehen.':'');
   $('revolutTransferResult').textContent='';$('revolutTransferSubmit').disabled=false;
   $('revolutTransferReview').showModal();
   $('revolutTransferMessage').textContent='Vorbereitet. Bitte Betrag und Konten prüfen und anschließend die Übergabe bestätigen.';
@@ -485,16 +486,16 @@ async function loadExpected(){
     line('Stand nach Bankumsätzen'+(Number(a.pendingCount)>0?' inkl. Vormerkungen':''),money(a.reportedBalance,a.currency),true);
    }
    if(a.ownPayments?.length){
-    const heading=document.createElement('h3');heading.textContent='Von Brain übergebene Überweisungen im Abgleich';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
+    const heading=document.createElement('h3');heading.textContent='Brain-Überweisungen · Abgleich, kein zusätzlicher Abzug';heading.style.fontSize='16px';heading.style.margin='20px 0 8px';card.append(heading);
     const matches=new Map((a.ownMatched||[]).map(x=>[x.transfer+':'+x.index,x.booking]));
     for(const payment of a.ownPayments){
      const booking=matches.get(payment.transfer+':'+payment.index),included=booking==='pending'||booking==='booked';
-     const label=bankDate(payment.date)+' · '+payment.name+(booking==='pending'?' (in Vormerkungen)':booking==='booked'?' (gebucht)':'');
+     const label=bankDate(payment.date)+' · '+payment.name+(booking==='pending'?' (in Vormerkungen)':booking==='booked'?' (gebucht)':' (Bankzuordnung noch offen)');
      const amount=money(payment.amount,a.currency);
      line(label,included?'('+amount+')':amount);
     }
     const ownTotal=a.ownPaymentTotal??a.ownPayments.reduce((sum,p)=>sum+Number(p.amount),0).toFixed(2);
-    line('Summe Brain-Überweisungen',money(ownTotal,a.currency),true);
+    line('Summe im Abgleich · bereits oben enthalten oder noch zu klären',money(ownTotal,a.currency),true);
     if(a.ownPaymentCount>a.ownPayments.length){
      const more=document.createElement('p');more.className='small';more.textContent='Weitere '+(a.ownPaymentCount-a.ownPayments.length)+' Überweisungen im Zahlungsarchiv. Die Summe enthält alle.';card.append(more);
     }
@@ -503,13 +504,13 @@ async function loadExpected(){
     const note=document.createElement('p');note.className='small';note.textContent=a.error;card.append(note);
     if(a.reportedBalance===undefined)line('Erwarteter Kontostand','Nicht berechenbar');
    }else{
-    if(Number(a.ownOutgoing)>0)line('Davon noch nicht im Bankumsatz · zusätzlich abzuziehen','− '+money(a.ownOutgoing,a.currency));
-    line('Erwarteter Kontostand',money(a.expected,a.currency),true);
+    if(Number(a.ownOutgoing)>0)line('Bankzuordnung noch offen · kein zusätzlicher Abzug',money(a.ownOutgoing,a.currency));
+    line('Kontostand inkl. Bankumsätzen und Vormerkungen',money(a.expected,a.currency),true);
    }
    $('expectedRows').append(card);
   }
   await renderLiquidity(data);
-  $('expectedMessage').textContent='Abgerufen: '+stamp(data.fetchedAt)+'. Eigene übergebene Zahlungen werden zusätzlich abgezogen, solange sie noch nicht in den Bankumsätzen erscheinen. Eine eventuell nötige Bankunterschrift bleibt erforderlich. Kein bestätigter verfügbarer Banksaldo.';
+  $('expectedMessage').textContent='Abgerufen: '+stamp(data.fetchedAt)+'. Brain-Überweisungen ohne eindeutige Bankzuordnung bleiben im Abgleich sichtbar und werden nicht nochmals vom Bankstand abgezogen. Eine eventuell nötige Bankunterschrift bleibt erforderlich. Kein bestätigter verfügbarer Banksaldo.';
  }catch(e){$('expectedMessage').textContent=e.message;$('dataChanged').textContent='Letzte Datenänderung: Abruf fehlgeschlagen';}finally{expectedBusy=false;}
 }
 async function renderLiquidity(bank){
@@ -593,8 +594,8 @@ function renderAssignment(data){
  aNode('p',(tx.name||'Ohne Namen')+' · '+aMoney(tx.amount,tx.currency)+' · '+bankDate(tx.bookingDate),assignmentDialog);
  aNode('p',tx.purpose||tx.bookingText||'',assignmentDialog).className='assignment-note';
  const error=aNode('p','',assignmentDialog);error.className='assignment-error';
- if(data.assigned){
-  aNode('p','🟢 Zugeordnet',assignmentDialog);
+ if(data.assigned||data.partial){
+  aNode('p',data.partial?'🟡 Teilzugeordnet: '+aMoney(data.allocated,tx.currency)+' · Rest '+aMoney(data.remaining,tx.currency):'🟢 Zugeordnet',assignmentDialog);
   for(const line of data.lines){const box=aNode('div',null,assignmentDialog);box.className='assignment-line';aNode('strong',line.label,box);
    aNode('p','Zugeordnet: '+aMoney(line.paid,tx.currency)+(line.category==='invoice'?' · Noch offen in der OP: '+aMoney(line.open,tx.currency):''),box);
    if(line.reason)aNode('p',line.reason,box);
@@ -612,17 +613,17 @@ function renderAssignment(data){
   }
   if(data.frequency&&data.frequency!=='none')aNode('p','Wiederholung: '+(data.frequencyLabel||data.frequency)+(data.scheduleDates?.length?' · '+data.scheduleDates.map(bankDate).join(' / '):''),assignmentDialog);
   if(data.note)aNode('p',data.note,assignmentDialog);
-  aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());return;
+  if(data.assigned){aButton('Schließen',assignmentDialog,()=>assignmentDialog.close());return;}
  }
  const search=aInput(assignmentDialog,'Rechnung suchen – Name oder Rechnungsnummer');search.placeholder='z. B. Müller oder 2026-123';
  const list=aNode('div',null,assignmentDialog);const rows=[];
  const total=aNode('p','',assignmentDialog);total.className='assignment-note';
- function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=Math.abs(aCents(String(tx.amount).replace(/^[-+]/,'')))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
+ function summary(){const sum=rows.reduce((n,r)=>n+(aCents(r.paid.value)||0),0);const rest=aCents(data.remaining??String(tx.amount).replace(/^[-+]/,''))-sum;total.textContent='Zugeordnet: '+aMoney(sum/100,tx.currency)+' · Noch zu verteilen: '+aMoney(rest/100,tx.currency);}
  function addLine(){
   const box=aNode('div',null,list);box.className='assignment-line';const grid=aNode('div',null,box);grid.className='assignment-grid';const left=aNode('div',null,grid),right=aNode('div',null,grid);
   const category=aSelect(left,'Zuordnung',[['invoice','Rechnung'],['electricity','Strom'],['municipality','Wasser / Kanal / Müll Gemeinde'],['heating','Heizung'],['rent','Miete'],['vehicle_insurance','KFZ Versicherung'],['vehicle_leasing','KFZ Leasing'],['bike_leasing','Bike Leasing'],['software','Software'],['liability_insurance','Haftpflicht Versicherung'],['bank_fee','Bankgebühren'],['interest','Zinsen'],['wage','Löhne'],['telephone','Telefon'],['renovation_installment','1 · Rate Sanierung'],['internal_revolut','Umbuchung · Revolut'],['internal_revolut_old','Umbuchung · Revolut alt'],['internal_aircash','Umbuchung · Aircash'],['internal_cash','Umbuchung · Kassa'],['alex_private','Alex Privat'],['tax','Steuer'],['other','+ Neue Kostenart']]);
   const select=aSelect(left,'Rechnung',[['','Bitte Rechnung auswählen']]);
-  const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(tx.amount).replace(/^[-+]/,'');
+  const paid=aInput(right,'Teilbetrag','text');paid.inputMode='decimal';paid.value=rows.length?'':String(data.remaining??tx.amount).replace(/^[-+]/,'');
   const mode=aSelect(right,'Bei fehlendem Betrag',[['partial','Teilzahlung – Rest offen'],['discount','Skonto – Alex prüft'],['deduction','Abzug – Alex prüft']]);
   const info=aNode('p','',box);info.className='assignment-note';const reason=aInput(box,'Hinweis (bei „Neue Kostenart“: Bezeichnung)');
   const row={box,category,select,paid,mode,reason};rows.push(row);
@@ -638,13 +639,13 @@ function renderAssignment(data){
  const actions=aNode('div',null,assignmentDialog);actions.className='assignment-actions';
  const save=aButton('Zuordnung speichern',actions,async()=>{
   error.textContent='';const lines=rows.map(r=>{const [source='',target='']=r.select.value.split('|');return {category:r.category.value,source,target,amount:r.paid.value.replace(',','.'),mode:r.mode.value,reason:r.reason.value};});
-  save.disabled=true;try{const result=await api('assignment-save',{rid:tx.rId,lines,note:note.value,frequency:frequency.value});renderAssignment(result);await refreshAssignmentButtons();}catch(e){error.textContent=e.message;save.disabled=false;}
+  save.disabled=true;try{const result=await api('assignment-save',{rid:tx.rId,lines,expectedAllocated:data.allocated||'0.00',note:note.value,frequency:frequency.value});renderAssignment(result);await refreshAssignmentButtons();}catch(e){error.textContent=e.message;save.disabled=false;}
  });aButton('Abbrechen',actions,()=>assignmentDialog.close());
 }
 async function refreshAssignmentButtons(){
  const buttons=[...document.querySelectorAll('[data-assignment-rid]')];if(!buttons.length)return;
  const data=await api('assignment-status',{ids:buttons.map(b=>b.dataset.assignmentRid)});
- for(const b of buttons){const assigned=data.statuses[b.dataset.assignmentRid];b.textContent=assigned?'🟢 Zugeordnet':'🟡 Nicht zugeordnet';b.className='assignment-status '+(assigned?'assigned':'unassigned');}
+ for(const b of buttons){const assigned=data.statuses[b.dataset.assignmentRid];const balance=data.balances?.[b.dataset.assignmentRid];b.textContent=assigned?'🟢 Zugeordnet':balance?.status==='partial'?'🟡 Teilzugeordnet · Rest '+aMoney(balance.remaining):'🟡 Nicht zugeordnet';b.className='assignment-status '+(assigned?'assigned':'unassigned');}
 }
 function assignmentCell(tr,item,pending){const td=cell(tr,'');if(pending){td.textContent='Vorgemerkt';return;}const b=aButton('Zuordnung laden …',td,()=>openAssignment(item.rId));b.dataset.assignmentRid=item.rId;b.className='assignment-status';}
 const reviewButton=aButton('Abzüge prüfen · Alex',$('banking'),async()=>{
@@ -652,3 +653,5 @@ const reviewButton=aButton('Abzüge prüfen · Alex',$('banking'),async()=>{
 });reviewButton.style.marginTop='18px';
 
 </script></body></html>
+
+

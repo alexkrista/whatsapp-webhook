@@ -4,6 +4,22 @@
   const BRAIN_URL = "https://pc-alex02.tail610122.ts.net/";
   const BRAIN_ORIGIN = new URL(BRAIN_URL).origin;
 
+  // KRISTINE 2.0: every page uses this measured offset for subordinate sticky bars.
+  const observedTopbars = new WeakSet();
+  function syncTopbarHeight(mount) {
+    if (!mount) return;
+    const height = Math.ceil(mount.getBoundingClientRect().height);
+    if (height > 0) document.documentElement.style.setProperty("--krista-topbar-height", height + "px");
+  }
+  function watchTopbarHeight(mount) {
+    syncTopbarHeight(mount);
+    if (observedTopbars.has(mount)) return;
+    observedTopbars.add(mount);
+    if (typeof window.ResizeObserver === "function") {
+      new window.ResizeObserver(() => syncTopbarHeight(mount)).observe(mount);
+    }
+  }
+
   const WORLDS = [
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
@@ -222,13 +238,13 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/regie-billing-state.js?v=20260922-regie-invoice-1", "data-krista-regie-billing-state");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20261005-regie-print-3", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/regie-billing-state.js?v=20261007-lieferscheine-1", "data-krista-regie-billing-state");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20261008-ww-address-1", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20260914-progress-1", "data-krista-baustellen-cockpit");
-    loadScriptOnce("/public/ui/baustellen-chronik.js?v=20260923-lg-regie-sync-1", "data-krista-baustellen-chronik");
+    loadScriptOnce("/public/ui/baustellen-chronik.js?v=20261008-color-concept-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-hours-core.js?v=20260919-canonical-1", "data-krista-baustellen-hours-core");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20260919-canonical-1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-hours-core.js?v=20261006-hours-loading-1", "data-krista-baustellen-hours-core");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20261006-hours-loading-1", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
     loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-hours-cache-1", "data-krista-baustellen-ww-import");
     loadScriptOnce("/public/ui/baustellen-collection.js?v=20260913-sammelmappe-1", "data-krista-baustellen-collection");
@@ -242,8 +258,8 @@
 
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
-      loadScriptOnce("/public/ui/regie-billing-state.js?v=20260922-regie-invoice-1", "data-krista-regie-billing-state");
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20260919-canonical-1", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/regie-billing-state.js?v=20261007-lieferscheine-1", "data-krista-regie-billing-state");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20261006-hours-loading-1", "data-krista-tower-signals");
     }
   }
 
@@ -301,14 +317,16 @@
     const setOpen = (open) => {
       mount.classList.toggle("menu-open", !!open);
       button.setAttribute("aria-expanded", open ? "true" : "false");
+      // The expanded menu changes the sticky header height on mobile.
       button.innerHTML = open
         ? '<span aria-hidden="true">×</span><span>Schließen</span>'
         : `<span aria-hidden="true">${activeWorld.icon}</span><span>${activeWorld.label}</span><span aria-hidden="true">▾</span>`;
+      syncTopbarHeight(mount);
     };
 
     button.addEventListener("click", () => setOpen(!mount.classList.contains("menu-open")));
     nav.querySelectorAll("a").forEach(link => link.addEventListener("click", () => setOpen(false)));
-    window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); }, { passive: true });
+    window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); syncTopbarHeight(mount); }, { passive: true });
     setOpen(false);
   }
 
@@ -336,6 +354,7 @@
       </div>`;
     document.body.classList.add("krista-ui");
     setupMobileMenu(mount, active);
+    watchTopbarHeight(mount);
   }
 
   window.createKristaTopbar = function createKristaTopbar(options = {}) {

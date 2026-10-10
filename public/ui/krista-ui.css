@@ -18,7 +18,8 @@
 }
 
 .krista-shell-topbar{
-  position:relative;
+  position:sticky;
+  top:0;
   z-index:200;
   color:#fff;
   background:
@@ -103,8 +104,8 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
   .krista-world-nav{justify-content:flex-start;overflow-x:auto;padding-bottom:3px}
 }
 @media(max-width:760px){
-  /* Mobile: Kopf belegt keinen Bildschirm und ist ausdrücklich NICHT sticky. */
-  .krista-shell-topbar{position:relative!important;top:auto!important}
+  /* KRISTINE 2.0: Compact navigation remains visible on phones. */
+  .krista-shell-topbar{position:sticky!important;top:0!important}
   .krista-shell-main{
     min-height:54px;
     grid-template-columns:minmax(0,1fr) auto!important;
@@ -140,7 +141,7 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
     flex-direction:column;
     align-items:stretch;
   }
-  .krista-shell-topbar.menu-open .krista-world-nav{display:flex}
+  .krista-shell-topbar.menu-open .krista-world-nav{display:flex;max-height:min(65dvh,540px);overflow-y:auto;overscroll-behavior:contain}
   .krista-world-link{
     width:100%;
     min-height:40px;
@@ -166,3 +167,9 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
 @media(max-width:760px){
   .krista-shell-main{grid-template-columns:minmax(0,1fr) auto!important}
 }
+
+/* KRISTINE 2.0: sticky app bar remains above existing planning controls.
+   Keep local modal/drawer headers untouched: their scroll containers are independent. */
+body.krista-ui .planning-top{top:var(--krista-topbar-height,0px)!important}
+body.krista-ui .planning-calendar-toolbar{top:calc(var(--krista-topbar-height,0px) + var(--planning-sticky-top,0px))!important}
+body.krista-ui .dayhead{top:var(--krista-topbar-height,0px)!important}

@@ -1531,6 +1531,25 @@ class OutgoingStore:
             con.commit()
         return {"run": self.run(new_run["id"]), "invoice": self.invoice(copied["id"], live=True)}
 
+    def delete_draft(self, invoice_id):
+        """Delete an unissued draft, retaining its contents in the audit trail."""
+        with _LOCK, self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (int(invoice_id),)).fetchone()
+            if not row:
+                raise ValueError("Rechnung nicht gefunden.")
+            if row["status"] != "draft" or row["invoice_number"] or row["issued_at"] or row["source"] == "WW":
+                raise ValueError("Nur ein noch nicht ausgestellter Entwurf kann gelöscht werden.")
+            if con.execute("SELECT 1 FROM outgoing_revisions WHERE invoice_id=?", (int(invoice_id),)).fetchone():
+                raise ValueError("Eine bereits ausgestellte Rechnung kann nicht gelöscht werden.")
+            if con.execute("SELECT 1 FROM outgoing_payments WHERE invoice_id=?", (int(invoice_id),)).fetchone():
+                raise ValueError("Dem Entwurf sind Zahlungen zugeordnet; er kann nicht gelöscht werden.")
+            run_id = int(row["run_id"])
+            self._audit(con, "invoice", int(invoice_id), "delete_draft", self._invoice_public(con, row, live=False))
+            con.execute("DELETE FROM outgoing_invoices WHERE id=?", (int(invoice_id),))
+            con.commit()
+        return {"deletedInvoiceId": int(invoice_id), "runId": run_id}
+
     def invoice(self, invoice_id, live=False):
         with self.connect() as con:
             row = con.execute("SELECT * FROM outgoing_invoices WHERE id=?", (int(invoice_id),)).fetchone()
@@ -1809,9 +1828,10 @@ class OutgoingStore:
 
                 payment_source_id = f"HISTORY:{source_id}"
                 existing_payment = con.execute(
-                    "SELECT id FROM outgoing_payments WHERE source='WW' AND source_id=?", (payment_source_id,)
+                    "SELECT id,reversed_at FROM outgoing_payments WHERE source='WW' AND source_id=?", (payment_source_id,)
                 ).fetchone()
-                if paid_gross > 0:
+                reversed_import = bool(existing_payment and existing_payment["reversed_at"])
+                if paid_gross > 0 and not reversed_import:
                     if existing_payment:
                         con.execute("""
                             UPDATE outgoing_payments SET run_id=?,invoice_id=?,payment_date=?,net=?,vat=?,gross=?,
@@ -1826,7 +1846,7 @@ class OutgoingStore:
                         """, (run_id, invoice_id, payment_date, str(paid_net), str(paid_vat), str(paid_gross),
                               f"In WinWorker bereits verbucht · Rechnung {number}", payment_source_id, now))
                     payment_count += 1
-                elif existing_payment:
+                elif existing_payment and not reversed_import:
                     con.execute("DELETE FROM outgoing_payments WHERE id=?", (int(existing_payment["id"]),))
 
                 try:

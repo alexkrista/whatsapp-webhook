@@ -37,6 +37,8 @@ from brain_capture_learning_ui import install as _capture_learning_ui_install
 from brain_capture_tax_ui import install as _capture_tax_ui_install
 from brain_capture_accounts import install as _capture_accounts_install
 from brain_capture_prepayment import install as _capture_prepayment_install
+from brain_capture_iban import install as _capture_iban_install
+from brain_revolut_receipts import install as _revolut_receipts_install
 from brain_home_nav import install as _home_nav_install
 from brain_finance_op_tools import install as _op_tools_install
 from brain_finance_creditor_ui import install as _creditor_ui_install
@@ -73,6 +75,8 @@ def install(ns):
     _capture_tax_ui_install(ns)
     _capture_accounts_install(ns)
     _capture_prepayment_install(ns)
+    _capture_iban_install(ns)
+    _revolut_receipts_install(ns)
 
     # Bewusst NICHT mehr installieren:
     # brain_capture_standalone / stability-Frontend / scroll_fix / scroll_isolation.
@@ -81,6 +85,8 @@ def install(ns):
     _home_nav_install(ns)
     _op_tools_install(ns)
     _outgoing_invoices_install(ns)
+    from brain_outgoing_book import install as _outgoing_book_install
+    _outgoing_book_install(ns)
     _tower_billing_snapshot_install(ns)
     # Reihenfolge absichtlich so: after_request läuft rückwärts.
     _header_dedup_install(ns)
