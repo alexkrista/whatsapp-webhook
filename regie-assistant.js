@@ -974,7 +974,7 @@ function registerRegieAssistant(app, options) {
       // Only unknown/unpriced material is parked in a delivery note.
       // Known material and all labor remain in the original Regiebericht.
       const unresolved = report.materials.filter(row =>
-        row.unknownMaterialId || row.provisional === true || !row.materialId || Number(row.salePrice || 0) <= 0);
+        row.unknownMaterialId || row.provisional === true || Number(row.salePrice || 0) <= 0);
       if (!unresolved.length) return res.status(409).json({ok:false,error:"Keine unbekannten Materialpositionen vorhanden."});
       const unresolvedSet = new Set(unresolved);
       const known = report.materials.filter(row => !unresolvedSet.has(row));
