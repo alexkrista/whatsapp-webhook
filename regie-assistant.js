@@ -739,6 +739,13 @@ function registerRegieAssistant(app, options) {
     };
     if (delivery && !materials.length) throw new Error("Mindestens ein Material mit Menge fehlt.");
     report.pricePending = missingPrices(report).length > 0;
+    // Once every material-only position is priced, the linked delivery appears with Regieberichte.
+    if (delivery && report.sourceRegieId && !report.pricePending) {
+      report.status = "completed";
+      report.processingStatus = "approved";
+      report.reviewStatus = "approved";
+      report.completedAt = existing.completedAt || now;
+    }
     if (finish || existing.status === "completed") enforcePrices(report);
     report.totals = calculateTotals(report);
     report.hoursCheck = await checkHours(report,reports);
