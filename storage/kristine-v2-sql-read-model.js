@@ -43,10 +43,14 @@ async function readSqlOverview(pool, { companyId = null } = {}) {
       return { state:'schema_missing',source:'test_postgres',counts:null,projects:[],employees:[] };
     }
 
-    const companies = (await client.query('SELECT id::text id, name FROM kristine.companies ORDER BY name,id LIMIT 3')).rows;
+    // An explicit company ID must be resolved directly, regardless of list order.
+    // Without a selection, two rows suffice to distinguish one company from many.
+    const companies = companyId
+      ? (await client.query('SELECT id::text id, name FROM kristine.companies WHERE id=$1', [companyId])).rows
+      : (await client.query('SELECT id::text id, name FROM kristine.companies ORDER BY name,id LIMIT 2')).rows;
     if (!companies.length) {
       await client.query('COMMIT'); active = false;
-      return { state:'empty_database',source:'test_postgres',counts:null,projects:[],employees:[] };
+      return { state:companyId ? 'company_selection_required' : 'empty_database',source:'test_postgres',counts:null,projects:[],employees:[] };
     }
     const selected = companyId
       ? companies.find(row => row.id === companyId)
