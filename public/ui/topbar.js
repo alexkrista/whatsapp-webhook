@@ -337,7 +337,7 @@
         const data=await r.json();
         items=data.items||[];
         document.querySelectorAll(".krista-wa-count").forEach(b=>{b.textContent=data.count>99?"99+":String(data.count||0);b.hidden=!data.count});
-        document.querySelectorAll(".krista-wa-button").forEach(b=>b.setAttribute("aria-label",data.count+" neue WhatsApp-Nachrichten über Kristine"));
+        document.querySelectorAll(".krista-wa-button").forEach(b=>{b.hidden=!data.count;b.setAttribute("aria-label",data.count+" neue WhatsApp-Nachrichten über Kristine");});
         if(!panel.hidden)render();
       }catch(error){console.warn("WhatsApp-Zähler nicht erreichbar",error);}
     }
@@ -392,7 +392,7 @@
             </a>`).join("")}
           <a id="kristaLoginLink" class="krista-world-link krista-login-link" href="/anmelden"><span class="krista-world-icon" aria-hidden="true">👤</span><span>Anmelden</span></a>
         </nav>
-        <button type="button" class="krista-wa-button" aria-label="Neue WhatsApp-Nachrichten über Kristine">💬 <span>Nachrichten</span><span class="krista-wa-count" hidden>0</span></button>
+        <button type="button" class="krista-wa-button" aria-label="Neue WhatsApp-Nachrichten über Kristine" hidden>💬 <span>Neue Nachrichten über Kristine eingetroffen</span><span class="krista-wa-count" hidden>0</span></button>
         <div class="krista-user" aria-label="Angemeldeter Benutzer"><strong>Alexander Krista</strong><small>Build ${build}</small></div>
       </div>`;
     document.body.classList.add("krista-ui");
