@@ -87,10 +87,17 @@ def expected_balances(client):
             result.update({k:format(v,'.2f') for k,v in sums.items()})
             own_state=reconcile(client,account,local,bank)
             result.update(own_state)
-            # Unmatched archive entries are reconciliation items, not new bank debits.
-            # Anonymous pending debits and historical payments may already include them.
-            # Keep the bank subtotal authoritative; never infer an additional debit.
-            result.update(expected=format(expected,'.2f'),pendingCount=count)
+            # Reserve only today's new transfers not yet represented in bank movements.
+            # Older archive entries remain reconciliation tasks, not fresh deductions.
+            # Ambiguous bank debits suppress the forecast deduction to prevent double count.
+            fresh = [x for x in own if x['item']['date'] >= date.today().isoformat()
+                     and not any(m['transfer']==x['transfer'] and m['index']==x['index'] for m in own_state['ownMatched'])]
+            fresh_unbanked = [x for x in fresh if not any(
+                tx.get('creditDebitIndicator')=='DBIT'
+                and abs(Decimal(str(tx.get('amount',0))))==Decimal(str(x['item']['amount']))
+                and str(tx.get('bookingDate') or '')[:10]>=x['item']['date'] for tx in bank)]
+            reserve=sum((Decimal(str(x['item']['amount'])) for x in fresh_unbanked),Decimal(0))
+            result.update(expected=format(expected-reserve,'.2f'),newTransferReserve=format(reserve,'.2f'),pendingCount=count)
         except ConnectionError as exc:result['error']=str(exc)
         except Exception:result['error']='Die vollständige Berechnung ist derzeit nicht möglich.'
         results.append(result)
