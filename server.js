@@ -59,6 +59,7 @@ const { registerKristine } = require("./kristine");
 const { isInternalJobId, isOfficeJobId, normalizeOfficeTimeData } = require("./office-time");
 const { registerMorningStatus, clampStartTime } = require("./morning-status");
 const {createWhatsAppDeliveryAudit} = require("./whatsapp-delivery-audit");
+const {createWhatsAppInbox} = require("./whatsapp-unread-inbox");
 const { registerDailyReport } = require("./daily-report");
 const { registerMediaMigration, listJobMedia } = require("./media-migration");
 const { registerMaterialMaster } = require("./material-master");
@@ -114,6 +115,7 @@ app.get("/api/offer-terms", (_req, res) => res.json({ ok: true, terms: OFFER_TER
 const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
 const whatsAppDeliveryAudit = createWhatsAppDeliveryAudit(DATA_DIR);
+const whatsAppInbox = createWhatsAppInbox(DATA_DIR);
 const jobRenumber = require("./job-renumber");
 const jobRenumberResult = jobRenumber.renumberJansen({ dataDir: DATA_DIR });
 console.info("JOB_RENUMBER_RESULT", JSON.stringify(jobRenumberResult));
@@ -1884,6 +1886,17 @@ installKristineSharedCalendar(app, {
   logger: console,
 });
 
+// WhatsApp messages are stored independently from office reconciliation and bot actions.
+app.get("/admin/api/whatsapp/unread", async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try {res.json(await whatsAppInbox.list());}
+  catch(error){res.status(500).json({ok:false,error:"Nachrichten konnten nicht geladen werden."});}
+});
+app.post("/admin/api/whatsapp/unread/mark-read", async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  try {res.json(await whatsAppInbox.markRead(req.body?.ids));}
+  catch(error){res.status(500).json({ok:false,error:"Lesestatus konnte nicht gespeichert werden."});}
+});
 // ===================== WhatsApp Incoming =====================
 // Operator-only read endpoint. No messages, phone numbers or delivery
 // retries are exposed; only hashed IDs, last-six and Meta status codes.
@@ -1923,6 +1936,8 @@ app.post("/webhook", async (req, res) => {
     if (!Array.isArray(msgs) || msgs.length === 0) return;
 
     for (const msg of msgs) {
+      try { await whatsAppInbox.record(msg); }
+      catch(error) { console.error("WHATSAPP_INBOX_RECORD_FAILED", String(error?.message||error)); }
       const sender = msg.from || "unknown_sender";
       const tsSec = msg.timestamp || null;
       const date = isoDateFromWhatsAppTs(tsSec);
