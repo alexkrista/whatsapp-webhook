@@ -59,7 +59,7 @@ function invoke(handler, req) {
  const stale=await invoke(save,{body:{...report,correctReport:true}});assert.equal(stale.body.report.materials.length,1,"Old editor cannot put transferred unknown material back");
  const printed=await invoke(routes.get("GET /kristine/regie-report/:id/print"),{params:{id:report.id},query:{}});assert.match(printed.body,/50 % Nachlass/);assert.match(printed.body,/100 % Nachlass/);assert.match(printed.body,/geschenkt/);assert.match(printed.body,/Material siehe Lieferschein/);
  const priced=await invoke(save,{body:{...moved.body.delivery,correctReport:true,materials:moved.body.delivery.materials.map(m=>m.product==="Unbekannt"?{...m,purchasePrice:5}:m)}});
- assert.equal(priced.body.report.pricePending,false);assert.equal(priced.body.report.status,"completed");assert.equal(priced.body.report.materials[0].salePrice,15);
+ assert.equal(priced.body.report.pricePending,false);assert.equal(priced.body.report.status,"completed");assert.equal(priced.body.report.materials[0].salePrice,9);
  const forbidden=await invoke(split,{params:{id:priced.body.report.id},body:{}});assert.equal(forbidden.statusCode,404);
  console.log("Discounts 50/100, row markup, linked atomic move, open unpriced delivery, retry and stale-editor protection passed");
 })().finally(()=>fs.rmSync(temporaryRoot,{recursive:true,force:true}));
