@@ -312,6 +312,66 @@
     setOpen(false);
   }
 
+  function setupWhatsAppUnread() {
+    if (window.__kristaWhatsAppUnreadStarted) return;
+    window.__kristaWhatsAppUnreadStarted = true;
+    const style = document.createElement("style");
+    style.textContent = ".krista-wa-button{position:relative;display:flex;align-items:center;gap:7px;background:transparent;color:inherit;border:1px solid #858585;border-radius:10px;padding:6px 12px;cursor:pointer;font:inherit}.krista-wa-count{background:#c92b30;color:#fff;border-radius:999px;min-width:23px;padding:2px 6px;font-size:12px;font-weight:800;text-align:center}.krista-wa-panel{position:fixed;right:15px;top:75px;width:min(430px,calc(100vw - 30px));max-height:75vh;overflow:auto;background:#fff;color:#181818;border:1px solid #999;border-radius:14px;box-shadow:0 12px 32px #0004;padding:14px;z-index:100000}.krista-wa-item{padding:10px 0;border-top:1px solid #ddd}.krista-wa-item button{margin-top:6px;cursor:pointer}.krista-wa-item p{white-space:pre-wrap;overflow-wrap:anywhere}";
+    document.head.append(style);
+    const panel = document.createElement("section");
+    panel.className = "krista-wa-panel";
+    panel.hidden = true;
+    panel.setAttribute("aria-label","Neue WhatsApp-Nachrichten über Kristine");
+    document.body.append(panel);
+    let items = [];
+    function path(url) {
+      const u = new URL(url, location.origin);
+      const token = new URLSearchParams(location.search).get("token");
+      if(token)u.searchParams.set("token",token);
+      return u.pathname+u.search;
+    }
+    async function refresh() {
+      try {
+        const r=await fetch(path("/admin/api/whatsapp/unread"),{credentials:"same-origin",cache:"no-store"});
+        if(!r.ok)return;
+        const data=await r.json();
+        items=data.items||[];
+        document.querySelectorAll(".krista-wa-count").forEach(b=>{b.textContent=data.count>99?"99+":String(data.count||0);b.hidden=!data.count});
+        document.querySelectorAll(".krista-wa-button").forEach(b=>b.setAttribute("aria-label",data.count+" neue WhatsApp-Nachrichten über Kristine"));
+        if(!panel.hidden)render();
+      }catch(error){console.warn("WhatsApp-Zähler nicht erreichbar",error);}
+    }
+    function render() {
+      panel.replaceChildren();
+      const heading=document.createElement("div");
+      heading.style.cssText="display:flex;justify-content:space-between;align-items:center;gap:10px";
+      const title=document.createElement("strong");title.textContent="Neue Nachrichten über Kristine";
+      const close=document.createElement("button");close.textContent="Schließen";close.onclick=()=>panel.hidden=true;
+      heading.append(title,close);panel.append(heading);
+      if(!items.length){const empty=document.createElement("p");empty.textContent="Keine ungelesenen Nachrichten.";panel.append(empty);}
+      for(const msg of items){
+        const wrap=document.createElement("div");wrap.className="krista-wa-item";
+        const head=document.createElement("strong");head.textContent=(msg.from||"Unbekannt")+" · "+new Date(msg.receivedAt).toLocaleString("de-AT");
+        const body=document.createElement("p");body.textContent=msg.text||("["+msg.type+"]");
+        const read=document.createElement("button");read.textContent="Als gelesen markieren";
+        read.onclick=async()=>{
+          read.disabled=true;
+          try {
+            const r=await fetch(path("/admin/api/whatsapp/unread/mark-read"),{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:[msg.id]})});
+            if(!r.ok)throw Error("Speichern fehlgeschlagen");
+            await refresh();
+          }catch(error){read.disabled=false;alert(error.message);}
+        };
+        wrap.append(head,body,read);panel.append(wrap);
+      }
+    }
+    document.addEventListener("click",event=>{
+      if(event.target.closest(".krista-wa-button")){panel.hidden=!panel.hidden;if(!panel.hidden)render();}
+    });
+    refresh();
+    window.setInterval(refresh,15000);
+  }
+
   function buildTopbar(mount, options = {}) {
     const configured = options.active || mount.dataset.kristaActive || "";
     const active = activeForLocation(configured);
@@ -332,6 +392,7 @@
             </a>`).join("")}
           <a id="kristaLoginLink" class="krista-world-link krista-login-link" href="/anmelden"><span class="krista-world-icon" aria-hidden="true">👤</span><span>Anmelden</span></a>
         </nav>
+        <button type="button" class="krista-wa-button" aria-label="Neue WhatsApp-Nachrichten über Kristine">💬 <span>Nachrichten</span><span class="krista-wa-count" hidden>0</span></button>
         <div class="krista-user" aria-label="Angemeldeter Benutzer"><strong>Alexander Krista</strong><small>Build ${build}</small></div>
       </div>`;
     document.body.classList.add("krista-ui");
@@ -349,6 +410,7 @@
       mount.dataset.kristaRendered = "1";
       buildTopbar(mount);
     });
+    setupWhatsAppUnread();
     cleanModuleNavigation();
     loadKristineUserContext();
     loadKristineEmployeeSort();
