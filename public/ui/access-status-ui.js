@@ -294,6 +294,9 @@
   async function pulseGate(btn){
     if(Date.now()<gateLockedUntil)return;
     if(!token){alert("Admin-Token fehlt.");return;}
+    // An impulse can OPEN, STOP or CLOSE the garage door.
+    // Only the manual trigger changes; HmIP and sensor logic stay untouched.
+    if(!window.confirm("Garagentor betätigen?\n\nEin Impuls kann das Tor öffnen, stoppen oder schließen."))return;
     btn.classList.add("pending");
     try{
       const r=await fetch(`${BRAIN}/access-control/gate`,{method:"POST",headers:{"X-Krista-Token":token},mode:"cors",cache:"no-store"});
@@ -308,6 +311,15 @@
     const door=Number(btn.dataset.door);
     if(isDoorLocked(door))return;
     if(!token){alert("Admin-Token fehlt.");return;}
+    // Confirmation only for the user-initiated NORMAL -> OPEN transition.
+    // OPEN -> NORMAL is immediate; scheduled 15-min/18:00 closure and
+    // the local GANTNER mode/ACK implementation are unchanged.
+    const currentMode=String(last?.gantner?.doors?.[String(door)]?.mode||"");
+    if(currentMode==="NORMAL"){
+      const doorName=({1:"Eingang",2:"Lager",3:"Büro"})[door]||"Tür";
+      if(!window.confirm(doorName+" für alle freigeben?\n\nErst mit OK wird der bisherige FREI-Befehl gesendet."))return;
+    }
+    if(!["NORMAL","OPEN"].includes(currentMode))return;
     btn.classList.add("pending");
     const dot=btn.querySelector(".krista-dot");if(dot)dot.className="krista-dot yellow";
     const state=btn.querySelector(".krista-door-state");if(state)state.textContent="…";
