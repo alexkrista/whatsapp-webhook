@@ -4,10 +4,12 @@ on:
     paths:
       - 'public/ui/access-status-ui.js'
       - 'TEST/door-mode-honesty.test.js'
+      - 'TEST/access-manual-confirmation.test.js'
       - '.github/workflows/access-mode-safety.yml'
   push:
     branches:
       - fix/door-mode-honesty-20261009
+      - fix/confirm-manual-door-release-20261010
 permissions:
   contents: read
 jobs:
@@ -22,4 +24,5 @@ jobs:
       - name: Syntax and DOM checks
         run: |
           node --check public/ui/access-status-ui.js
-          node --test TEST/door-mode-honesty.test.js
+          node --check public/ui/topbar.js
+          node --test TEST/door-mode-honesty.test.js TEST/access-manual-confirmation.test.js
