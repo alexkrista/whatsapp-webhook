@@ -505,7 +505,8 @@ async function loadExpected(){
     if(a.reportedBalance===undefined)line('Erwarteter Kontostand','Nicht berechenbar');
    }else{
     if(visibleOwnPayments.length && Number(a.ownOutgoing)>0)line('Neue Bankzuordnung noch offen · kein zusätzlicher Abzug',money(visibleOwnPayments.reduce((sum,p)=>sum+Number(p.amount),0),a.currency));
-    line('Kontostand inkl. Bankumsätzen und Vormerkungen',money(a.expected,a.currency),true);
+    if(Number(a.newTransferReserve)>0)line('Neue Überweisungen noch nicht am Bankkonto · Abzug','− '+money(a.newTransferReserve,a.currency));
+    line('Erwarteter Kontostand nach neuen Überweisungen',money(a.expected,a.currency),true);
    }
    $('expectedRows').append(card);
   }
