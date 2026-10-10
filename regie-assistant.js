@@ -697,7 +697,7 @@ function registerRegieAssistant(app, options) {
       .map(row => priceLocked ? row : { ...row, hourlyRate: null })
       .filter(row => row.name && row.hours > 0);
     if (!delivery && !employees.length) throw new Error("Mindestens ein Mitarbeiter mit Stunden fehlt.");
-    const materialSource = priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
+    const materialSource = existing.materialDeliveryId ? (existing.materials || []) : priceLocked && !correctReport ? existing.materials : (Array.isArray(body.materials) ? body.materials : existing.materials || []);
     const materials = materialSource
       .map(row => normalizeMaterial(row, materialMarkup, priceLocked && !correctReport))
       .filter(row => row.product && row.quantity > 0);
