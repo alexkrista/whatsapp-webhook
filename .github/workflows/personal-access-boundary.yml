@@ -1,0 +1,24 @@
+name: Personal access boundary
+on:
+  pull_request:
+    paths:
+      - 'admin-auth.js'
+      - 'employee-login*.js'
+      - 'employee-sessions.js'
+      - 'kristine-user-access.js'
+      - 'TEST/employee-login-auth.test.js'
+      - 'TEST/personal-access-boundary.test.js'
+      - '.github/workflows/personal-access-boundary.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --test TEST/personal-access-boundary.test.js TEST/employee-login-auth.test.js TEST/finance-approval-session.test.cjs TEST/access-status-session.test.js TEST/paint-job-material-session.test.js TEST/lg-service-auth.test.js

@@ -123,12 +123,10 @@ function registerKristineUserAccess(app, { dataDir, requireAdmin, readEmployees 
   }
 
   async function actorFromRequest(req) {
-    if (req.kristineActor) {
-      return (await employees()).find((employee) => employeeId(employee) === req.kristineActor.id) || null;
-    }
-    const actorId = String(req.headers["x-krista-user-id"] || req.body?.actorId || req.query?.actorId || "").trim();
-    if (!actorId) return null;
-    return (await employees()).find((employee) => employeeId(employee) === actorId) || null;
+    // A machine token and caller-supplied identity are not a personal login.
+    const actor = require('./employee-sessions').currentActor(req);
+    if (!actor) return null;
+    return (await employees()).find((employee) => employeeId(employee) === actor.id) || null;
   }
 
   async function requireAlexander(req, res) {
