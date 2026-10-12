@@ -380,9 +380,12 @@ function registerKrisdriveLogbook(app, options = {}) {
   const json = express.json({ limit: "24kb" });
   const locks = new Map(), refreshed = new Map(), inFlight = new Map();
   const inlineAddresses = options.inlineAddresses === true;
+  const { createStreetLookup, DEFAULT_FALLBACK_URL } = require("./krisdrive-street-geocoder");
+  const fallbackUrl = options.geocoderFallbackUrl ?? process.env.KRISDRIVE_GEOCODER_FALLBACK_URL ?? DEFAULT_FALLBACK_URL;
   const addressQueue = require("./krisdrive-address-queue").createAddressQueue({
-    file: path.join(root, "address-queue.json"), now: options.now || Date.now,
-    lookup: async point => {
+    file: path.join(root, "address-queue.json"), now: options.now || Date.now, resolverVersion: 2,
+    lookup: createStreetLookup({ request, fallbackUrl, minIntervalMs: options.geocoderFallbackMinIntervalMs ?? 5000,
+      primary: async point => {
       const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
       const response = await request(base + "/api/server/geocode?" + params, {
         headers: { Accept: "application/json, text/plain, */*", Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000),
@@ -394,7 +397,7 @@ function registerKrisdriveLogbook(app, options = {}) {
       const address = streetAndTown(result);
       if (!usableAddress(address)) throw Object.assign(Error("Unusable geocoder format"), { code: "address_format" });
       return address;
-    },
+    }}),
   });
   const fileFor = id => path.join(root, "logbook", hash(id) + ".json");
   async function stateFor(id) {
@@ -845,6 +848,7 @@ function createCsv(data) {
     ["Beginn", "Ende", "Fahrer", "Fahrtart", "Start", "Ziel", "Zweck / Kunde / Baustelle", "km Beginn (Tracker/Korrektur)", "km Ende (Tracker/Korrektur)", "Kilometer", "Zu ergänzen", "Geändert am"],
     ...data.rows.map(row => [displayDate(row.startedAt), displayDate(row.closedAt), row.driver?.employeeName || "", (row.activity === "standstill" ? "Stillstand" : categoryLabel(row.category)), row.category === "private" ? "" : (row.startLocation || "Adresse derzeit nicht verfügbar") + (row.inferredStart ? " (aus vorheriger Fahrt)" : ""), row.category === "private" ? "" : (row.endLocation || "Adresse derzeit nicht verfügbar") + (row.inferredEnd ? " (aus nächster Fahrt)" : ""), row.category === "private" ? "" : row.purpose, decimal(row.odometerStartKm), decimal(row.odometerEndKm), decimal(row.distanceKm), row.missing.join(", "), displayDate(row.updatedAt)]),
     [], ["Summe km", decimal(data.totals.km)], ["Geschäftlich km", decimal(data.totals.businessKm)], ["Privat km", decimal(data.totals.privateKm)], ["Nicht zugeordnet km", decimal(data.totals.unassignedKm)], ["Fahrten ohne Kilometerangabe", data.totals.missingKm],
+    ["Straßenadressen", "© OpenStreetMap-Mitwirkende / Photon"],
   ];
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
 }

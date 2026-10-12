@@ -25,6 +25,7 @@
     <div id="lb-totals" class="lb-totals"></div>
     <div class="lb-columns"><span>Datum / Zeit</span><span>Strecke</span><span>Zuordnung / Zweck</span><span>Kilometer</span><span></span></div>
     <div id="lb-rows" aria-live="polite"></div><div id="lb-stamp" class="lb-stamp"></div>
+    <div class="lb-hint">Straßenadressen: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap-Mitwirkende</a> · Photon</div>
     <dialog id="lb-dialog" class="lb-dialog" aria-labelledby="lb-edit-title">
       <form id="lb-edit-form"><h3 id="lb-edit-title">Fahrt ergänzen</h3><div id="lb-edit-sub" class="lb-sub"></div>
         <div id="lb-edit-error" class="lb-error" role="alert" hidden></div>

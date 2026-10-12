@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 
 // One consumer in the existing disk-backed web service. Jobs and successful
 // results survive restarts; no browser, extra service or third-party key needed.
-function createAddressQueue({ file, lookup, now = Date.now }) {
+function createAddressQueue({ file, lookup, now = Date.now, resolverVersion = 1 }) {
   let state, lock = Promise.resolve(), running;
   async function transaction(fn) {
     const task = lock.catch(() => {}).then(async () => {
@@ -36,6 +36,9 @@ function createAddressQueue({ file, lookup, now = Date.now }) {
       const result = {};
       for (const [key, point] of points) {
         const job = state.jobs[key] ||= { point, createdAt: now(), attempts: 0, nextAttemptAt: 0 };
+        if (!job.address && job.resolverVersion !== resolverVersion) {
+          job.resolverVersion = resolverVersion; job.attempts = 0; job.nextAttemptAt = 0; delete job.error;
+        }
         result[key] = job.address || "";
       }
       return result;
@@ -50,13 +53,13 @@ function createAddressQueue({ file, lookup, now = Date.now }) {
         .slice(0, limit));
       for (const [key, job] of jobs) {
         if (shouldRequest && !await shouldRequest(key)) continue;
-        let address = "", error = "empty_response";
-        try { address = await lookup(job.point); }
+        let address = "", provider = "", error = "empty_response";
+        try { const result = await lookup(job.point); address = typeof result === "string" ? result : result?.address || ""; provider = result?.provider || ""; }
         catch (e) { error = ["empty_address", "address_format"].includes(e.code) ? e.code : e.name === "TimeoutError" ? "timeout" : Number.isInteger(e.status) ? `http_${e.status}` : "provider_unavailable"; }
         await transaction(state => {
           const current = state.jobs[key];
           current.attempts++; current.lastAttemptAt = now();
-          if (address) { current.address = address; current.resolvedAt = now(); delete current.error; current.nextAttemptAt = 0; }
+          if (address) { current.address = address; current.provider = provider; current.resolvedAt = now(); delete current.error; current.nextAttemptAt = 0; }
           else { current.error = error; current.nextAttemptAt = now() + Math.min(3600000, 60000 * 2 ** Math.min(current.attempts - 1, 6)); }
         });
       }
@@ -69,7 +72,9 @@ function createAddressQueue({ file, lookup, now = Date.now }) {
       const jobs = Object.entries(state.jobs).filter(([key]) => !wanted || wanted.has(key)).map(([, job]) => job);
       const pending = jobs.filter(job => !job.address), errors = {};
       for (const job of pending) if (job.error) errors[job.error] = (errors[job.error] || 0) + 1;
-      return { pending: pending.length, resolved: jobs.length - pending.length, errors,
+      const providers = {};
+      for (const job of jobs) if (job.address) { const provider = job.provider || "cached"; providers[provider] = (providers[provider] || 0) + 1; }
+      return { pending: pending.length, resolved: jobs.length - pending.length, errors, providers,
         lastAttemptAt: Math.max(0, ...jobs.map(job => job.lastAttemptAt || 0)),
         nextAttemptAt: pending.length ? Math.min(...pending.map(job => job.nextAttemptAt || 0)) : null };
     });

@@ -5,7 +5,7 @@ const express = require("express");
 const { registerKrisdriveLogbook, dateRange, trackerMileage, normalizeLocal, streetAndTown } = require("../krisdrive-logbook");
 
 const trip = (extra = {}) => ({ deviceId: 17, startPositionId: 101, startTime: "2026-09-22T06:00:00Z", endTime: "2026-09-22T06:30:00Z", startAddress: "Frastanz Werkstatt", endAddress: "Feldkirch Baustelle", startLat: 47.21, startLon: 9.62, endLat: 47.24, endLon: 9.59, distance: 12500, startOdometer: 26734817.503, endOdometer: 26747317.503, ...extra });
-async function harness(t, { local = [], config, request, inlineAddresses = true, background = false, now } = {}) {
+async function harness(t, { local = [], config, request, inlineAddresses = true, background = false, now, fallbackUrl = "" } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "krisdrive-logbook-"));
   const root = path.join(dir, "_kristine", "vehicle-tracking");
   await fs.mkdir(path.join(dir, "_system"), { recursive: true }); await fs.mkdir(root, { recursive: true });
@@ -15,7 +15,7 @@ async function harness(t, { local = [], config, request, inlineAddresses = true,
   await fs.writeFile(path.join(root, "rides.json"), JSON.stringify(local));
   const calls = [], state = { offline: false, trips: [trip()] };
   const app = express();
-  const service = registerKrisdriveLogbook(app, { background, inlineAddresses, now, dataDir: dir, traccarBaseUrl: "https://gps.example", traccarToken: "gps-test-only", request: async (raw, opts) => {
+  const service = registerKrisdriveLogbook(app, { background, inlineAddresses, now, geocoderFallbackUrl: fallbackUrl, geocoderFallbackMinIntervalMs: 0, dataDir: dir, traccarBaseUrl: "https://gps.example", traccarToken: "gps-test-only", request: async (raw, opts) => {
     const url = new URL(raw); calls.push({ url, opts });
     if (request) return request(url, opts, state);
     if (state.offline) throw Error("Network unavailable");
@@ -131,6 +131,29 @@ test("missing trip addresses use point-specific geocoding and preserve manual ed
   assert.equal(rows[0].startLocation, "Mein Ziel");
   assert.equal(rows[1].startLocation, rows[0].endLocation);
   assert.equal(h.calls.filter(call => call.url.pathname === "/api/server/geocode").length, 3);
+});
+
+test("empty Traccar responses resolve through Photon and survive offline refreshes", async t => {
+  const h = await harness(t, { fallbackUrl:"https://photon.example/reverse", request:async(url,opts,state)=>{
+    if (url.hostname === "photon.example") {
+      assert.equal(opts.headers.Authorization,undefined);
+      const lat=Number(url.searchParams.get("lat")),lng=Number(url.searchParams.get("lon"));
+      return {ok:true,json:async()=>({features:[{geometry:{type:"Point",coordinates:[lng,lat]},properties:{street:"Walgaustraße",city:"Frastanz",postcode:"6820"}}]})};
+    }
+    if (url.pathname === "/api/server/geocode") return {ok:true,text:async()=>""};
+    if (url.pathname === "/api/reports/trips") return {ok:true,json:async()=>state.trips};
+    if (url.pathname === "/api/positions") return {ok:true,json:async()=>[]};
+    throw Error("Unexpected request");
+  }});
+  h.state.trips=[trip({startAddress:"",endAddress:""})];
+  const first=await (await h.get()).json();
+  assert.equal(first.rows[0].startLocation,"Walgaustraße, 6820 Frastanz");
+  assert.equal(first.rows[0].endLocation,"Walgaustraße, 6820 Frastanz");
+  const requests=h.calls.filter(c=>c.url.hostname==="photon.example").length;
+  await h.get(h.query+"&refresh=1");
+  assert.equal(h.calls.filter(c=>c.url.hostname==="photon.example").length,requests);
+  const queue=JSON.parse(await fs.readFile(path.join(h.root,"address-queue.json"),"utf8"));
+  assert.ok(Object.values(queue.jobs).every(job=>job.provider==="photon"));
 });
 
 test("old saved coordinates stay hidden when GPS and geocoding are offline", async t => {

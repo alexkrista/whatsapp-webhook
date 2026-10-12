@@ -36,3 +36,16 @@ test("obsolete/private jobs are not requested, and corrupt storage is never repl
   await assert.rejects(restarted.enqueue([]));
   assert.equal(await fs.readFile(file, "utf8"), "broken");
 });
+
+test("a new resolver retries old failed jobs immediately without erasing cached addresses", async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"krisdrive-upgrade-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const file=path.join(dir,"queue.json");
+  await fs.writeFile(file,JSON.stringify({version:1,jobs:{failed:{point:{lat:47,lng:9},attempts:9,nextAttemptAt:Date.now()+3600000,error:"empty_address"},cached:{point:{lat:48,lng:9},address:"Bahnhofstraße, Feldkirch"}}}));
+  let calls=0;const queue=createAddressQueue({file,resolverVersion:2,lookup:async()=>{calls++;return{address:"Walgaustraße, Frastanz",provider:"photon"}}});
+  const points=[["failed",{lat:47,lng:9}],["cached",{lat:48,lng:9}]];
+  await queue.enqueue(points);await queue.drain();
+  const cached=await queue.enqueue(points);
+  assert.equal(calls,1);assert.equal(cached.cached,"Bahnhofstraße, Feldkirch");
+  assert.equal(cached.failed,"Walgaustraße, Frastanz");assert.equal((await queue.status()).providers.photon,1);
+});
