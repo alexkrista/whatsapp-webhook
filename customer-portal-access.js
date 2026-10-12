@@ -66,6 +66,7 @@ function registerCustomerAccess(app, options) {
   };
   const root=path.join(dataDir,"_system/customer-access"), origin=new URL(options.publicBaseUrl || "https://protokoll.krista.at").origin;
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
+  const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
   const portalEventsFile=path.join(root,"portal-activity.jsonl");
   const portalReadFile=path.join(root,"portal-activity-read.json");
   const portalEvent=(ctx,action,detail="")=>{
@@ -119,7 +120,7 @@ function registerCustomerAccess(app, options) {
     }
     write(offerPdfManifestPath(jobId,offer.number,offer.revision),nextManifest);return nextManifest;
   }
-  const guard=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({ok:false,error:e.status?e.message:"Kundenportal derzeit nicht verfügbar. Bitte erneut versuchen."})}};
+
   async function mainId(id) {
     if(!safeId(id))throw fail(404,"Akte nicht gefunden.");
     const resolved=await options.resolveMain?.(id) || id;
