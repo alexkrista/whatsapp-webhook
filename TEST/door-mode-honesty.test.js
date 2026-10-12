@@ -37,7 +37,7 @@ test('fresh GANTNER modes are not misleading physical door or lock states',async
   try {
     const buttons=[1,2,3].map(n=>dom.window.document.querySelector('[data-door="'+n+'"]'));
     assert.ok(buttons.every(Boolean));
-    assert.deepEqual(buttons.map(x=>x.querySelector('.krista-door-state').textContent),['CHIP?','FREI?','CHIP?']);
+    assert.deepEqual(buttons.map(x=>x.querySelector('.krista-door-state').textContent),['CHIP','FREI','CHIP']);
     assert.ok(buttons.every(x=>x.querySelector('.krista-dot').classList.contains('blue')));
     assert.doesNotMatch(buttons.map(x=>x.textContent).join(','),/\bZU\b|\bOFFEN\b|verschlossen/i);
     assert.match(buttons[0].title,/Keine bestätigte Verriegelung/);
