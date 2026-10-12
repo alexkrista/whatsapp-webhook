@@ -21,6 +21,7 @@ button:disabled{opacity:.55;cursor:wait}
 .kicker{font-size:12px;color:var(--muted);letter-spacing:.04em}
 .money{font-size:29px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
 .card small{color:var(--muted)}
+.alex-summary{width:100%;max-width:900px}.alex-summary-heading{font-size:18px;margin-bottom:15px}.alex-summary-line{display:flex;justify-content:space-between;gap:18px;align-items:baseline;padding:11px 0;font-size:17px}.alex-summary-line strong{font-variant-numeric:tabular-nums;white-space:nowrap}.alex-summary-total{border-top:2px solid #758590;margin-top:8px;padding-top:4px}.alex-summary-total .alex-summary-line{font-weight:800;font-size:23px}.alex-summary small{display:block;margin-top:12px}
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 h2{font-size:19px;margin:0}.hint{color:var(--muted);font-size:13px;margin:5px 0 16px}
 .formgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
@@ -124,10 +125,27 @@ async function post(action,payload,form=false){
   return request(params({action}),options);
 }
 function renderBalances(data){
-  const items=account==="alex"?[
-    ["Verrechnungssaldo Alex Privat",data.balances.private,"Einlagen und privat bezahlte Firmenausgaben +, Entnahmen −"],
-    ["Offene Lohnforderung",data.balances.wage,"Lohnanspruch separat; Auszahlungen gleichen ihn aus"]
-  ]:[["DLZ-Guthaben / Verrechnungssaldo",data.balances.clearing,"Kundeneingänge +, ÖGK/Abgabenverrechnungen −"]];
+  if(account==="alex"){
+    const year="2026", rows=(data.rows||[]).filter(row=>String(row.date||"").startsWith(year+"-")&&String(row.currency||"EUR")==="EUR");
+    const sum=kinds=>rows.filter(row=>kinds.includes(row.kind)).reduce((n,row)=>n+Math.round(Number(row.amount||0)*100),0);
+    // The wages here are outstanding claims generated in 2026 minus wage payouts
+    // booked in 2026, not a second salary-expense posting.
+    const contributions=sum(["contribution","private_expense"]);
+    const wages=sum(["wage_due","wage_paid"]);
+    const withdrawals=sum(["withdrawal"]);
+    const total=contributions+wages+withdrawals;
+    const line=(label,cents)=>'<div class="alex-summary-line"><span>'+esc(label)+'</span><strong>'+esc(euro(cents/100))+'</strong></div>';
+    $("balances").innerHTML='<section class="card alex-summary">'+
+      '<div class="alex-summary-heading"><strong>Alex Privat · Jahresübersicht '+year+'</strong></div>'+
+      line('Einlagen '+year,contributions)+
+      line('Nicht bezahlte Löhne '+year,wages)+
+      line('Entnahmen Privat',withdrawals)+
+      '<div class="alex-summary-total">'+line('Summe',total)+'</div>'+
+      '<small>Einlagen inkl. privat bezahlter Firmenausgaben. Löhne abzüglich Auszahlungen im Jahr '+year+'. Nur Buchungen '+year+'; ältere Salden bleiben im Buchungsjournal.</small>'+
+      '</section>';
+    return;
+  }
+  const items=[["DLZ-Guthaben / Verrechnungssaldo",data.balances.clearing,"Kundeneingänge +, ÖGK/Abgabenverrechnungen −"]];
   for(const [currency,bucket] of Object.entries(data.foreignBalances||{}))items.push(["Alex Privat · "+currency,bucket.private,"Separater Fremdwährungssaldo",currency]);
   $("balances").innerHTML=items.map(x=>'<div class="card"><div class="kicker">'+esc(x[0])+'</div><div class="money">'+esc(euro(x[1],x[3]||"EUR"))+'</div><small>'+esc(x[2])+'</small></div>').join("");
 }
