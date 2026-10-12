@@ -1570,7 +1570,7 @@ class OutgoingStore:
         data["revisionNo"] = int(con.execute(
             "SELECT COUNT(*) FROM outgoing_revisions WHERE invoice_id=?", (row["id"],)
         ).fetchone()[0])
-        if live:
+        if live and row["kind"] not in {"ST", "GS"}:
             prior = self._prior_sum(con, row["run_id"], row["id"])
             payment_rows = self._active_payments(con, row["run_id"])
             paid = self._payment_sum(payment_rows)

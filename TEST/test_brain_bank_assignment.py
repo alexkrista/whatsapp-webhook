@@ -47,6 +47,13 @@ class AssignmentTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT COUNT(*) FROM outgoing_payments WHERE reversed_at IS NULL').fetchone()[0],1)
             self.assertEqual(c.execute('SELECT COUNT(*) FROM bank_assignment_line_history').fetchone()[0],1)
 
+    def test_correction_live_preview_preserves_negative_fixed_amount(self):
+        correction=self.store.create_correction_draft(self.invoice['id'],{'kind':'GS','gross':'20.00','reason':'Skonto'})
+        live=self.store.invoice(correction['id'],live=True)
+        self.assertEqual(float(live['increment_gross']),-20.0)
+        issued=self.store.prepare_issue(correction['id'])
+        self.assertEqual(issued['status'],'issued')
+
     def test_reopen_legacy_bank_payment_reference(self):
         first=self.s.assign(self.body())
         with self.s.db() as c:
