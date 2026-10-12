@@ -34,6 +34,48 @@ class AssignmentTests(unittest.TestCase):
 
     def tearDown(self): self.temp.cleanup()
 
+    def test_reopen_then_reassign_does_not_double_count_payment(self):
+        first=self.s.assign(self.body())
+        result=self.s.reopen(dict(rid='tx-1',confirmed=True,revision=first['revision']))
+        self.assertFalse(result['assigned'])
+        self.assertEqual(result['remaining'],'100.00')
+        self.assertEqual(result['previousLines'][0]['paid'],'100.00')
+        second=self.s.assign(self.body(mode='discount'))
+        self.assertEqual(second['lines'][0]['difference'],'20.00')
+        self.assertNotEqual(first['lines'][0]['id'],second['lines'][0]['id'])
+        with self.s.db() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM outgoing_payments WHERE reversed_at IS NULL').fetchone()[0],1)
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM bank_assignment_line_history').fetchone()[0],1)
+
+    def test_reopen_legacy_bank_payment_reference(self):
+        first=self.s.assign(self.body())
+        with self.s.db() as c:
+            c.execute("UPDATE outgoing_payments SET source_id='tx-1:'||invoice_id")
+            c.commit()
+        result=self.s.reopen(dict(rid='tx-1',confirmed=True,revision=first['revision']))
+        self.assertFalse(result['assigned'])
+        with self.s.db() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM outgoing_payments WHERE reversed_at IS NULL').fetchone()[0],0)
+
+    def test_reopen_requires_confirmation_and_fresh_revision(self):
+        first=self.s.assign(self.body())
+        for body in [dict(rid='tx-1',revision=first['revision']),dict(rid='tx-1',confirmed=True,revision='old')]:
+            with self.assertRaises(ValueError):self.s.reopen(body)
+        self.assertTrue(self.s.detail('tx-1')['assigned'])
+
+    def test_reopen_blocks_issued_correction(self):
+        first=self.s.assign(self.body(mode='discount'))
+        with self.app.test_request_context():self.s.decide(first['lines'][0]['id'],True)
+        data=self.s.detail('tx-1')
+        with self.assertRaises(ValueError):self.s.reopen(dict(rid='tx-1',confirmed=True,revision=data['revision']))
+        self.assertEqual(self.s.detail('tx-1')['lines'][0]['decision'],'approved')
+
+    def test_reopen_route_checks_write_permission(self):
+        first=self.s.assign(self.body())
+        response=self.app.test_client().post('/konfipay/api/assignment-reopen',json=dict(rid='tx-1',confirmed=True,revision=first['revision']))
+        self.assertEqual(response.status_code,200)
+        self.assertFalse(response.json['assigned'])
+
     def test_partial_green_op_open_and_retry_idempotent(self):
         data=self.s.assign(self.body());self.assertTrue(data['assigned']);self.assertEqual(data['lines'][0]['open'],'20.00')
         self.s.assign(self.body())

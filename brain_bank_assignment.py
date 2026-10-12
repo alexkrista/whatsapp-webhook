@@ -67,6 +67,7 @@ class Assignments:
                 label TEXT NOT NULL, paid INTEGER NOT NULL, difference INTEGER NOT NULL,
                 mode TEXT NOT NULL, reason TEXT NOT NULL, decision TEXT NOT NULL,
                 task_id TEXT, task_error TEXT, correction_id INTEGER, decided TEXT);
+            CREATE TABLE IF NOT EXISTS bank_assignment_line_history(id INTEGER PRIMARY KEY, payload TEXT NOT NULL, reopened TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS bank_internal_transfer_intents(
                 end_to_end TEXT PRIMARY KEY, debtor_iban TEXT NOT NULL, creditor_iban TEXT NOT NULL,
                 amount INTEGER NOT NULL, currency TEXT NOT NULL, purpose TEXT NOT NULL,
@@ -198,7 +199,7 @@ class Assignments:
             frequency=str(a['frequency'] or ('monthly' if a['recurring'] else 'none'))
             try:schedule=json.loads(a['schedule_json'] or '[]')
             except Exception:schedule=[]
-            return dict(transaction=tx, assigned=balance['remaining']=='0.00', partial=balance['status']=='partial', candidates=self.candidates(tx), **balance, lines=lines, note=a['note'], recurring=bool(a['recurring']),
+            return dict(transaction=tx, assigned=balance['remaining']=='0.00', partial=balance['status']=='partial', candidates=self.candidates(tx), **balance, lines=lines, revision=self.revision(lines), note=a['note'], recurring=bool(a['recurring']),
                         frequency=frequency, frequencyLabel=FREQUENCIES.get(frequency,frequency), scheduleDates=schedule)
         recurring = False
         if tx.get('iban'):
@@ -224,6 +225,51 @@ class Assignments:
     def statuses(self, rids):
         balances=self.balances(rids)
         return {rid:balances.get(rid,{}).get('status')=='assigned' for rid in rids}
+
+    @staticmethod
+    def revision(lines):
+        return hashlib.sha256(json.dumps(lines,sort_keys=True,default=str).encode()).hexdigest()
+
+    def reopen(self, body):
+        rid=str(body.get('rid') or '')
+        if body.get('confirmed') is not True:
+            raise ValueError('Bitte das erneute Öffnen der Zuordnung bestätigen.')
+        with LOCK, self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            assignment=c.execute('SELECT * FROM bank_assignments WHERE rid=?',(rid,)).fetchone()
+            if not assignment: raise ValueError('Die Zuordnung wurde bereits geöffnet. Bitte neu laden.')
+            raw=[dict(x) for x in c.execute('SELECT * FROM bank_assignment_lines WHERE rid=? ORDER BY id',(rid,))]
+            # Use the public snapshot for the same revision the editor displayed.
+            view=self.detail(rid)
+            if str(body.get('revision') or '')!=view.get('revision'):
+                raise ValueError('Die Zuordnung hat sich geändert. Bitte neu öffnen.')
+            if any(x['correction_id'] or x['decision'] in ('approved','issuing') for x in raw):
+                raise ValueError('Zu dieser Zuordnung wurde bereits eine Gutschrift erstellt. Diese bitte zuerst prüfen bzw. stornieren.')
+            stamp=now()
+            payments=[]
+            for line in raw:
+                if line['source']=='OUTGOING':
+                    source_id=rid+':'+line['target']+':'+str(line['id'])
+                    rows=list(c.execute("SELECT id FROM outgoing_payments WHERE source='KONFIPAY' AND source_id=? AND reversed_at IS NULL",(source_id,)))
+                    if not rows and sum(1 for x in raw if x['source']=='OUTGOING' and x['target']==line['target'])==1:
+                        rows=list(c.execute("SELECT id FROM outgoing_payments WHERE source='KONFIPAY' AND source_id=? AND reversed_at IS NULL",(rid+':'+line['target'],)))
+                    if len(rows)!=1:
+                        raise ValueError('Die bisherige Zahlung konnte nicht eindeutig gefunden werden. Bitte die Buchung prüfen.')
+                    for payment in rows:
+                        c.execute('UPDATE outgoing_payments SET reversed_at=? WHERE id=?',(stamp,payment['id']))
+                        payments.append(payment['id'])
+                c.execute('INSERT INTO bank_assignment_line_history(id,payload,reopened) VALUES(?,?,?)',(line['id'],json.dumps(line),stamp))
+            self.outgoing._audit(c,'bank_assignment',rid,'reopen',{'assignment':dict(assignment),'lines':raw,'reversedPayments':payments})
+            c.execute('DELETE FROM bank_assignment_lines WHERE rid=?',(rid,))
+            c.execute('DELETE FROM bank_assignments WHERE rid=?',(rid,))
+            c.commit()
+        for line in raw:
+            self.finish_task(line)
+        result=self.detail(rid)
+        result['previousLines']=view['lines']
+        result['previousNote']=assignment['note']
+        result['previousFrequency']=assignment['frequency']
+        return result
 
     def legacy_check(self, tx):
         """Do not post an already reconciled imported CAMT movement a second time."""
@@ -304,8 +350,9 @@ class Assignments:
                 c.execute('INSERT OR IGNORE INTO bank_assignments(rid,fingerprint,payload,note,recurring,created,frequency,schedule_json) VALUES(?,?,?,?,?,?,?,?)',
                     (rid,row['fingerprint'],row['payload'],str(body.get('note') or '')[:1000],int(frequency!='none'),now(),frequency,json.dumps(schedule)))
                 for x in clean:
-                    line_cursor=c.execute('INSERT INTO bank_assignment_lines(rid,category,source,target,label,paid,difference,mode,reason,decision) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                        (rid,x['category'],x['source'],x['target'],x['label'],x['paid'],x['difference'],x['mode'],x['reason'],x['decision']))
+                    next_id=c.execute('SELECT COALESCE(MAX(id),0)+1 FROM (SELECT id FROM bank_assignment_lines UNION ALL SELECT id FROM bank_assignment_line_history)').fetchone()[0]
+                    line_cursor=c.execute('INSERT INTO bank_assignment_lines(id,rid,category,source,target,label,paid,difference,mode,reason,decision) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                        (next_id,rid,x['category'],x['source'],x['target'],x['label'],x['paid'],x['difference'],x['mode'],x['reason'],x['decision']))
                     if x['source']=='OUTGOING':
                         invoice=c.execute('SELECT * FROM outgoing_invoices WHERE id=?',(int(x['target']),)).fetchone()
                         if not invoice or invoice['status']!='issued': raise ValueError('Rechnung nicht buchbar.')
@@ -406,7 +453,7 @@ def install(ns, write_allowed):
     app=ns['app']; service=Assignments(ns)
     ns['bank_assignments']=service
     ns['bank_supplier_overlay']=service.supplier_overlay
-    paths=['assignment-status','assignment','assignment-save','assignment-review','assignment-decide','assignment-tasks']
+    paths=['assignment-status','assignment','assignment-save','assignment-reopen','assignment-review','assignment-decide','assignment-tasks']
     ns['MOBILE_ALLOWED_PATHS'].update('/konfipay/api/'+p for p in paths)
     def endpoint(fn):
         from functools import wraps
@@ -432,6 +479,9 @@ def install(ns, write_allowed):
     @app.post('/konfipay/api/assignment-save')
     @endpoint
     def bank_assignment_save(): return service.assign(request.get_json() or {})
+    @app.post('/konfipay/api/assignment-reopen')
+    @endpoint
+    def bank_assignment_reopen(): return service.reopen(request.get_json() or {})
     @app.get('/konfipay/api/assignment-review')
     @endpoint
     def bank_assignment_review():
