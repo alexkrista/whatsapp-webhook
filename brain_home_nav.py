@@ -13,6 +13,8 @@ def install(ns):
     brain_cash_book.install(ns)
     import brain_invoice_book
     brain_invoice_book.install(ns)
+    import brain_settlement_accounts
+    brain_settlement_accounts.install(ns)
 
     page = str(ns.get("MOBILE_PAGE") or "")
     if not page:
@@ -153,11 +155,18 @@ def install(ns):
     }
     const first=nodes.map(n=>({n,idx:[...host.children].indexOf(n)})).filter(x=>x.idx>=0).sort((a,b)=>a.idx-b.idx)[0]?.n;
     if(first&&first.parentElement===host)host.insertBefore(wrapper,first);else host.insertBefore(wrapper,host.firstChild);
+    const alexArea=section('Alex Privat','brain-home-personal');
     const knowledge=section('Wissen & Suche','brain-home-knowledge');
     const invoices=section('Rechnungen bearbeiten','brain-home-invoices');
     const accounts=section('Konten & Kassa','brain-home-accounts');
     knowledge.row.append(material,project);
     invoices.row.append(captureNav);
+
+    const alexNav=captureNav.cloneNode(true);
+    alexNav.id='modeAlexPrivate';alexNav.classList.remove('active');
+    alexNav.removeAttribute('onclick');alexNav.textContent='👤 Alex Privat · Verrechnung & Lohn';
+    alexNav.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/alex-privat'});
+    alexArea.row.appendChild(alexNav);
     const searchRow=document.getElementById('mainSearchRow'),searchMeta=document.getElementById('meta'),searchLoader=document.getElementById('loader');
     if(searchRow)knowledge.box.append(searchRow);
     if(searchMeta)knowledge.box.append(searchMeta);
@@ -197,6 +206,12 @@ def install(ns):
     kassa.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/kassa'});
     accounts.row.appendChild(kassa);
 
+    const dlz=captureNav.cloneNode(true);
+    dlz.id='modeDLZ';dlz.classList.remove('active');
+    dlz.removeAttribute('onclick');dlz.textContent='🏗️ DLZ';
+    dlz.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/dlz'});
+    accounts.row.appendChild(dlz);
+
     const invoiceBook=captureNav.cloneNode(true);
     invoiceBook.id='modeInvoiceBook';invoiceBook.classList.remove('active');invoiceBook.removeAttribute('onclick');invoiceBook.textContent='📚 RECHNUNGSBUCH';
     invoiceBook.addEventListener('click',e=>{e.preventDefault();window.location.href='/incoming/invoice-book'});
@@ -229,4 +244,4 @@ def install(ns):
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
-    print("Brain navigation V3: Wissen & Suche | Rechnungen | Konten & Kassa")
+    print("Brain navigation V3: Alex Privat | Wissen & Suche | Rechnungen | Konten & Kassa (+ DLZ)")
