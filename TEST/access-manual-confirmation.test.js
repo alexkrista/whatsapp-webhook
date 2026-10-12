@@ -66,7 +66,7 @@ test('confirmed single manual door release uses unchanged toggle endpoint once',
     const posts=ctx.calls.filter(x=>x.method==='POST');
     assert.equal(posts.length,1);
     assert.match(posts[0].url,/\/access-control\/toggle\/2$/);
-    assert.equal(ctx.window.document.querySelector('[data-door="2"] .krista-door-state').textContent,'FREI?');
+    assert.equal(ctx.window.document.querySelector('[data-door="2"] .krista-door-state').textContent,'FREI');
   }finally{ctx.dom.window.close()}
 });
 test('return to CHIP closes immediately with no confirmation',async()=>{
