@@ -45,7 +45,7 @@ for(const text of ["renderOfferPdfPreview","PDF-Vorschau des Angebots",'title="P
   assert.ok(ui.includes(text),`Angebotsvorschau ist dauerhaft eine PDF: ${text}`);
 for(const text of ["offerPortalPrintBlock","Ihr Angebot im KRISTINE Kundenportal","Angebot verbindlich beauftragen",'purpose:"offer"',"qrSvg"])
   assert.ok(ui.includes(text),`Angebotsdruck enthält den funktionsfähigen Kundenportal-QR: ${text}`);
-for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","Verbindliche PDF und E-Mail sind geöffnet."])
+for(const text of ["prepareOfferDispatch","Angebot senden","WhatsApp-Vorschlag","E-Mail öffnen","WhatsApp öffnen","wa.me","E-Mail mit persönlichem Portal-Link und Erklärung geöffnet."])
   assert.ok(ui.includes(text),`Angebotsversand bereitet E-Mail und WhatsApp gemeinsam vor: ${text}`);
 for(const text of ["Optional: andere freigegebene Original-PDF verwenden","X-Approved-Pdf-Correction","await prepareFinalOfferPortal(context)","await storeCanonicalOfferPdf(context)","Genau diese PDF sieht der Kunde im Portal"])
   assert.ok(ui.includes(text),`Verbindlicher Versand erzeugt und speichert automatisch die Kunden-PDF: ${text}`);
