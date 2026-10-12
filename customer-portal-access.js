@@ -66,6 +66,31 @@ function registerCustomerAccess(app, options) {
   };
   const root=path.join(dataDir,"_system/customer-access"), origin=new URL(options.publicBaseUrl || "https://protokoll.krista.at").origin;
   const now=options.now || Date.now, aliases=createAliasResolver(dataDir);
+  const portalEventsFile=path.join(root,"portal-activity.jsonl");
+  const portalReadFile=path.join(root,"portal-activity-read.json");
+  const portalEvent=(ctx,action,detail="")=>{
+    if(ctx?.grant?.preview)return;
+    const row={id:crypto.randomUUID(),at:new Date(now()).toISOString(),jobId:ctx.jobId,customer:clean(ctx.recipient?.name||ctx.portal.customerName||ctx.meta.name,160),action:clean(action,100),detail:clean(detail,200)};
+    fs.mkdirSync(root,{recursive:true});fs.appendFileSync(portalEventsFile,JSON.stringify(row)+"\n");
+  };
+  const portalEntries=()=>{
+    if(!fs.existsSync(portalEventsFile))return [];
+    return fs.readFileSync(portalEventsFile,"utf8").split(/\r?\n/).filter(Boolean).slice(-500).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean).reverse();
+  };
+  app.get("/admin/api/customer-portal/activity",guard(async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    const read=readPortalActivityIds();
+    res.setHeader("Cache-Control","no-store");
+    res.json({ok:true,items:portalEntries().map(row=>({...row,read:!!read[row.id]}))});
+  }));
+  const readPortalActivityIds=()=>read(portalReadFile,{});
+  app.post("/admin/api/customer-portal/activity/read",guard(async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    const ids=Array.isArray(req.body?.ids)?req.body.ids.filter(id=>typeof id==="string"&&/^[a-f0-9-]{36}$/.test(id)).slice(0,500):[];
+    const known=new Set(portalEntries().map(x=>x.id)),state=readPortalActivityIds();
+    ids.filter(id=>known.has(id)).forEach(id=>state[id]=new Date(now()).toISOString());
+    write(portalReadFile,state);res.json({ok:true});
+  }));
   const grantPath=id=>path.join(root,"invitations",id+".json");
   const sessionPath=value=>path.join(root,"sessions",hash(value)+".json");
   const accountPath=jobId=>path.join(root,"password-accounts",String(jobId)+".json");
@@ -273,6 +298,7 @@ function registerCustomerAccess(app, options) {
     if(account&&account.contact!==fingerprint(current.portal))throw fail(401,"Dieser Zugang wurde geändert. Bitte Farben Krista kontaktieren.");
     const secret=random(),session={authMode:"password",jobId:current.jobId,loginName,contact:fingerprint(current.portal),mustChangePassword,expiresAt:now()+(mustChangePassword?15*60000:30*86400000),csrf:random()};
     write(sessionPath(secret),session);res.cookie(cookieName,secret,{...cookieOptions,maxAge:session.expiresAt-now()});
+    if(!mustChangePassword)portalEvent({...current,recipient:null,grant:{preview:false}},"Angemeldet");
     res.json({ok:true,mustChangePassword});
   }));
   app.post("/kundenportal/api/password",guard(async(req,res)=>{
@@ -499,6 +525,7 @@ function registerCustomerAccess(app, options) {
     const ctx=await context(req),offer=customerOffer(ctx),offerPdf=await ensureOfferPdf(ctx,offer),data=await catalog(ctx);
     const billing = ctx.portal.modules.projectFile ? await readCustomerInvoices(dataDir, await Promise.all(ctx.jobIds.map(async jobId=>({...await readJobMeta(jobId),jobId})))) : {entries:[],complete:true,unavailable:[],syncedAt:null};
     const orderSchedule=typeof options.readOrderSchedule==="function"?customerScheduleView(await options.readOrderSchedule(ctx.jobId)):customerScheduleView({});
+    portalEvent(ctx,"Projektakte geöffnet");
     res.json({ok:true,name:ctx.meta.name,customerName:ctx.recipient?.name||ctx.portal.customerName,recipient:ctx.recipient||null,number:ctx.label,mainJobId:ctx.jobId,modules:ctx.portal.modules,csrf:ctx.session.csrf,preview:!!ctx.grant.preview,offer:offer?{...offer,pdfUrl:offerPdf?"/kundenportal/api/offer/pdf":""}:offer,orderSchedule,projects:data.projects,reports:data.reports,regieSummary:data.regieSummary,materials:data.materials,materialStatus:data.materialStatus,invoices:billing.entries.map(entry=>invoiceView(entry,!!options.readInvoicePdf)),invoiceStatus:{complete:billing.complete,unavailable:billing.unavailable,syncedAt:billing.syncedAt},files:[...data.files.values()].map(({physical,...row})=>row),points:pointRows(ctx)});
   }));
   app.get("/kundenportal/api/offer/pdf",guard(async(req,res)=>{
@@ -506,6 +533,7 @@ function registerCustomerAccess(app, options) {
     // Only this authenticated PDF may be framed by the customer portal itself.
     // The general portal keeps frame-ancestors 'none' against third-party embedding.
     res.setHeader("Content-Security-Policy","default-src 'none'; frame-ancestors 'self'");
+    portalEvent(ctx,"Angebot geöffnet",String(offer.number||""));
     res.type("application/pdf").setHeader("Content-Disposition",`inline; filename="Angebot-${String(offer.number).replace(/[^A-Za-z0-9_-]/g,"")}.pdf"`);res.sendFile(file,{headers:{"Cache-Control":"private, no-store"}});
   }));
   app.post("/kundenportal/api/offer/accept",guard(async(req,res)=>{
@@ -552,6 +580,7 @@ function registerCustomerAccess(app, options) {
     if(!ctx.jobIds.includes(req.params.jobId))throw fail(404,"Datei nicht freigegeben.");
     const data=await catalog({...ctx,jobIds:[req.params.jobId]},false),file=data.files.get(req.params.id);
     if(!file)throw fail(404,"Datei nicht freigegeben.");
+    portalEvent(ctx,"Dokument geöffnet",file.name);
     res.sendFile(file.physical,{headers:{"Cache-Control":"private, no-store"}});
   }));
   app.get("/kundenportal/api/point-photo/:pointId/:photoId",guard(async(req,res)=>{
