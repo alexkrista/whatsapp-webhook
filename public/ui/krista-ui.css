@@ -102,7 +102,7 @@ body.krista-ui .rapport-primary:hover{background:var(--kr-green-deep)!important}
   .krista-world-nav .krista-login-link{display:inline-flex!important}
   .krista-world-nav{justify-content:flex-start;overflow-x:auto;padding-bottom:3px}
 }
-@media(max-width:760px){
+@media(max-width:1120px){
   /* Mobile: Kopf belegt keinen Bildschirm und ist ausdrücklich NICHT sticky. */
   .krista-shell-topbar{position:relative!important;top:auto!important}
   .krista-shell-main{
