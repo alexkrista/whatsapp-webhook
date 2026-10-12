@@ -210,6 +210,26 @@ class FinanceStore:
             if st=="paid" and not include_resolved: continue
             out.append(dict(id=sid,docId=str(r["doc_id"] or ""),supplier=str(r["supplier_name"] or ""),invoiceNumber=str(r["supplier_invoice_number"] or ""),invoiceDate=str(r["invoice_date"] or ""),dueDate=str(r["due_date_effective"] or ""),amount=float(r["gross_amount"] or 0),currency=str(r["currency"] or "EUR"),iban=str(r["iban"] or ""),bic=str(r["swift"] or ""),accountHolder=str(r["account_holder"] or ""),paymentState=st,paymentStatus=st,paymentMethod=m,paymentId=str(ex.get("paymentId") or (payment_id("KRISTINE",sid) if m=="transfer" else "")),workflowStatus=str(r["workflow_status"] or ""),path=str(r["pdf_path"] or ""),source="KRISTINE",brainOverride=""))
         return out
+    def allocation_overlay(self, rows):
+        """Apply existing statement allocations to the selectable invoice remainder."""
+        factory=self.ns.get('_capture_connection')
+        if not callable(factory):return rows
+        c=factory(self.ns['CAPTURE_DB'])
+        try:
+            exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='brain_statement_allocations'").fetchone()
+            totals={} if not exists else {(str(x['target_source']),str(x['target_id'])):round(float(x['allocated'] or 0),2) for x in c.execute("SELECT target_source,target_id,SUM(ABS(amount)) AS allocated FROM brain_statement_allocations WHERE category IN ('supplier_payment','direct_debit') GROUP BY target_source,target_id")}
+        finally:c.close()
+        for row in rows:
+            original=round(float(row.get('amount') or 0),2)
+            allocated=totals.get((str(row.get('source') or ''),str(row.get('id') or '')),0)
+            row['invoiceAmount']=round(float(row.get('invoiceAmount') or original),2)
+            row['allocatedAmount']=allocated
+            if allocated:
+                row['amount']=round(max(0,original-allocated),2)
+                if row['amount']<=.005:
+                    row['paymentStatus']=row['paymentState']='paid'
+        return rows
+
     def items(self,include_resolved=False):
         ww=self.ww(include_resolved); local=self.kristine(include_resolved); docs={str(x.get("docId") or "").strip() for x in local if str(x.get("docId") or "").strip()}; rows=[x for x in ww if str(x.get("docId") or "").strip() not in docs]+local
         if not include_resolved:
@@ -220,4 +240,6 @@ class FinanceStore:
         for row in rows:
             row["invoiceAmount"]=round(float(row.get("amount") or 0),2)
             row.update(details.get((str(row.get("source") or ""),str(row.get("id") or "")),{"dunningLevel":0,"feesAmount":0.0,"creditorNote":"","creditorUpdatedBy":"","creditorUpdatedAt":""}))
+        rows=self.allocation_overlay(rows)
+        if not include_resolved:rows=[x for x in rows if norm_status(x.get('paymentStatus'))!='paid' and float(x.get('amount') or 0)>.005]
         rows.sort(key=lambda x:(str(x.get("dueDate") or x.get("invoiceDate") or ""),str(x.get("supplier") or "").lower(),float(x.get("amount") or 0))); return rows

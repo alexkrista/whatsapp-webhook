@@ -170,10 +170,10 @@ class Assignments:
             from brain_finance_source_v2 import FinanceStore
             source_rows = self.supplier_overlay(FinanceStore(self.ns).items(True), True)
             source_rows = [x for x in source_rows if float(x.get('amount') or 0) > .005 and
-                           (x.get('paymentStatus') != 'paid' or x.get('paymentMethod') == 'direct_debit')]
+                           x.get('paymentStatus') != 'paid']
             rows = [dict(source=x['source'], target=str(x['id']),
                     label=x['supplier']+' · '+str(x.get('invoiceNumber') or '')+(' · Einzug aus WW' if x.get('source')=='WinWorker' and x.get('paymentMethod')=='direct_debit' else ''),
-                    open=amount(cents(x['amount'])), currency=x['currency'], number=x.get('invoiceNumber'), e2e=x.get('paymentId'),
+                    open=amount(cents(x['amount'])), invoiceAmount=x.get('invoiceAmount') or x['amount'], allocatedAmount=float(x.get('allocatedAmount') or 0)+float(x.get('bankPaid') or 0), currency=x['currency'], number=x.get('invoiceNumber'), e2e=x.get('paymentId'),
                     skontoEnabled=bool(x.get('skontoEnabled')), skontoPercent=x.get('skontoPercent'),
                     skontoAmount=x.get('skontoAmount'), skontoDueDate=x.get('skontoDueDate') or '')
                     for x in source_rows]
