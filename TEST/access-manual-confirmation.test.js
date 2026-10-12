@@ -94,7 +94,7 @@ test('header garage impulse also requires explicit consent',async()=>{
 });
 test('no change to existing server endpoints or automatic closures',()=>{
   const topbar=fs.readFileSync(path.join(__dirname,'../public/ui/topbar.js'),'utf8');
-  assert.match(topbar,/20261010-manual-confirm-1/);
+  assert.match(topbar,/20261012-ipad-nav-1/);
   assert.match(SOURCE,/\/access-control\/toggle\/\$\{door\}/);
   assert.doesNotMatch(SOURCE,/\/alex\/away|\/failsafe\/normal/);
 });
