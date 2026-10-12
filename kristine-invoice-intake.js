@@ -37,6 +37,18 @@ async function readAllInvoiceItems(dataDir) {
   return rows;
 }
 
+function existingInvoiceByHash(rows, hash) {
+  if (!hash) return null;
+  const matches = rows.filter(row => String(row.fileSha256 || "") === hash);
+  const deleted = matches.filter(row => row.status === "deleted")
+    .sort((a,b) => String(b.deletedAt || b.updatedAt || "").localeCompare(String(a.deletedAt || a.updatedAt || "")))[0];
+  // Only an explicit reopen may override a deletion. Automatic mail backfill
+  // and another upload of the same bytes must retain the deletion marker.
+  return matches.filter(row => row.status !== "deleted" && row.restoredAt &&
+    String(row.restoredAt) > String(deleted?.deletedAt || deleted?.updatedAt || ""))
+    .sort((a,b) => String(b.restoredAt).localeCompare(String(a.restoredAt)))[0] || deleted || matches[0] || null;
+}
+
 async function importInvoiceBuffer({ dataDir, buffer, name, mimeType, submittedById="", submittedByName="Unbekannt", source="Eingang", capturedAt="", paymentContext="", note="" }) {
   const filename = safeFilename(name);
   const ext = path.extname(filename).toLowerCase();
@@ -46,10 +58,8 @@ async function importInvoiceBuffer({ dataDir, buffer, name, mimeType, submittedB
 
   const storage = intakeStorage(dataDir);
   const fileSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-  const duplicate = (await readAllInvoiceItems(dataDir)).find(
-    row => String(row.fileSha256 || "") === fileSha256 && String(row.status || "") !== "deleted"
-  );
-  if (duplicate) return { item:duplicate, duplicate:true };
+  const duplicate = existingInvoiceByHash(await readAllInvoiceItems(dataDir), fileSha256);
+  if (duplicate) return { item:duplicate, duplicate:true, suppressed:duplicate.status === "deleted" };
 
   const id = `invoice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const dir = path.join(storage.files, id);
@@ -181,7 +191,7 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
   async function existingByHash(hash) {
     if (!hash) return null;
     const rows = await allItems();
-    return rows.find(row => String(row.fileSha256 || "") === hash && String(row.status || "") !== "deleted") || null;
+    return existingInvoiceByHash(rows, hash);
   }
 
   app.post("/kristine/api/invoice-intake/import", async (req, res) => {
@@ -214,7 +224,14 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
     try {
       const includeProcessed = ["1", "true", "yes", "ja"].includes(String(req.query?.includeProcessed || "").toLowerCase());
       let rows = await allItems();
-      if (!includeProcessed) rows = rows.filter(row => !["processed", "deleted"].includes(String(row.status || "queued")));
+      if (!includeProcessed) {
+        const all = rows;
+        rows = rows.filter(row => {
+          if (["processed", "deleted"].includes(String(row.status || "queued"))) return false;
+          const existing = existingInvoiceByHash(all, String(row.fileSha256 || ""));
+          return !existing || existing.status !== "deleted" && existing.id === row.id;
+        });
+      }
       res.json({ ok: true, count: rows.length, items: rows.slice(0, 250) });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error?.message || error) });
@@ -254,11 +271,14 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
     try {
       const item = await readItem(req.params.id);
       if (!item) return res.status(404).json({ ok: false, error: "Rechnungseingang nicht gefunden" });
+      const matches = (await allItems()).filter(row => row.fileSha256 && row.fileSha256 === item.fileSha256);
+      const latestDeletion = Math.max(0, ...matches.map(row => Date.parse(row.deletedAt || "") || 0));
+      item.restoredAt = new Date(Math.max(Date.now(), latestDeletion + 1)).toISOString();
       item.status = "queued";
       item.processedAt = "";
       item.processedBy = "";
       item.processedDocId = "";
-      item.updatedAt = new Date().toISOString();
+      item.updatedAt = item.restoredAt;
       await writeItem(item);
       res.json({ ok: true, item });
     } catch (error) {
@@ -273,8 +293,10 @@ function registerKristineInvoiceIntake(app, { dataDir, requireAdmin }) {
       if (!item) return res.status(404).json({ ok: false, error: "Rechnungseingang nicht gefunden" });
       const reason = cleanText(req.body?.reason, 500);
       if (reason.length < 3) return res.status(400).json({ ok: false, error: "Bitte einen kurzen Löschgrund angeben." });
+      const matches = (await allItems()).filter(row => row.fileSha256 && row.fileSha256 === item.fileSha256);
+      const latestRestore = Math.max(0, ...matches.map(row => Date.parse(row.restoredAt || "") || 0));
       item.status = "deleted";
-      item.deletedAt = new Date().toISOString();
+      item.deletedAt = new Date(Math.max(Date.now(), latestRestore + 1)).toISOString();
       item.deletedBy = cleanText(req.body?.deletedBy || "Dunja", 160);
       item.deleteReason = reason;
       item.updatedAt = item.deletedAt;
