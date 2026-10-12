@@ -213,9 +213,9 @@
     if(!d?.online||d?.stale||d?.gantner?.ok===false)
       return{color:"yellow",state:"?",title:"Keine frische Rückmeldung der Zutrittssteuerung. Tür-/Schlosszustand unbekannt."};
     if(x?.mode==="OPEN")
-      return{color:"blue",state:"FREI?",title:"Sollmodus: generelle Freigabe. Ob die Tür tatsächlich entriegelt oder offen ist, wird nicht gemessen."};
+      return{color:"blue",state:"FREI",title:"Sollmodus: generelle Freigabe. Ob die Tür tatsächlich entriegelt oder offen ist, wird nicht gemessen."};
     if(x?.mode==="NORMAL")
-      return{color:"blue",state:"CHIP?",title:"Sollmodus: Chip-/Normalbetrieb. Keine bestätigte Verriegelung oder Türpositionsmessung."};
+      return{color:"blue",state:"CHIP",title:"Sollmodus: Chip-/Normalbetrieb. Keine bestätigte Verriegelung oder Türpositionsmessung."};
     return{color:"yellow",state:"?",title:"Sollmodus unbekannt; keine bestätigte Türposition oder Verriegelung."};
   }
 
