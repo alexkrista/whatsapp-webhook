@@ -2,11 +2,12 @@
 """KRISTINE Eingangsrechnung: erfasste, noch ungepruefte Rechnungen erneut bearbeiten.
 
 Die interne Belegnummer und die gespeicherte PDF bleiben unveraendert. Nach
-workflow_status=geprueft ist die Bearbeitung sowohl in der UI als auch serverseitig gesperrt.
+Geprüfte Erfassungen können nach Bestätigung mit protokollierter Änderung erneut bearbeitet werden.
 """
 from __future__ import annotations
 
 import re
+import json
 from datetime import datetime
 
 
@@ -126,8 +127,8 @@ def install(ns):
                     row = con.execute("SELECT * FROM incoming_invoices WHERE id=?", (invoice_id,)).fetchone()
                     if not row:
                         return jsonify({"ok": False, "error": "Rechnung nicht gefunden."}), 404
-                    if str(row["workflow_status"] or "").lower() == "geprueft":
-                        return jsonify({"ok": False, "error": "Diese Rechnung ist bereits geprüft und deshalb gesperrt."}), 409
+                    if str(row["workflow_status"] or "").lower() == "geprueft" and body.get('confirmReopen') is not True:
+                        return jsonify({"ok": False, "error": "Bitte die erneute Bearbeitung der geprüften Erfassung bestätigen."}), 409
 
                     duplicate = con.execute("""
                         SELECT id,doc_id FROM incoming_invoices
@@ -138,6 +139,9 @@ def install(ns):
                         raise ValueError(f"Diese Lieferanten-Rechnungsnummer ist bereits als {duplicate['doc_id']} vorhanden.")
 
                     now = datetime.now().isoformat(timespec="seconds")
+                    con.execute("CREATE TABLE IF NOT EXISTS incoming_capture_edit_history(id INTEGER PRIMARY KEY,invoice_id INTEGER,changed_at TEXT,changed_by TEXT,invoice_json TEXT,allocations_json TEXT)")
+                    old_allocations=[dict(x) for x in con.execute('SELECT * FROM incoming_allocations WHERE invoice_id=?',(invoice_id,))]
+                    con.execute('INSERT INTO incoming_capture_edit_history(invoice_id,changed_at,changed_by,invoice_json,allocations_json) VALUES(?,?,?,?,?)',(invoice_id,now,str(body.get('createdBy') or 'Büro'),json.dumps(dict(row),default=str),json.dumps(old_allocations,default=str)))
                     invoice_iban = re.sub(r"\s+", "", str(body.get("invoiceIban") or "")).upper().strip()
                     master_iban = re.sub(r"\s+", "", str(body.get("masterIban") or "")).upper().strip()
                     accepted = ns["_capture_truthy"](body.get("acceptNewIban"))
@@ -147,7 +151,7 @@ def install(ns):
                         raise ValueError("Die neue IBAN ist leer oder formal ungültig.")
                     effective_iban = invoice_iban if accepted else master_iban
                     con.execute("""
-                        UPDATE incoming_invoices SET
+                        UPDATE incoming_invoices SET workflow_status='zu_pruefen',
                             document_type=?, supplier_address_id=?, supplier_name=?, supplier_address=?,
                             supplier_number=?, our_customer_number=?, supplier_invoice_number=?,
                             supplier_invoice_number_norm=?, invoice_date=?, due_date=?, net_due_date=?,
@@ -183,6 +187,10 @@ def install(ns):
                             str(item.get("projectId") or ""), str(item.get("description") or ""),
                             _money(item.get("netAmount")), _money(item.get("vatRate")),
                         ))
+                    if 'tax_class' in {x['name'] for x in con.execute('PRAGMA table_info(incoming_allocations)')}:
+                        for index,item in enumerate(allocations,1):
+                            previous_tax=old_allocations[index-1].get('tax_class') if index<=len(old_allocations) else None
+                            con.execute('UPDATE incoming_allocations SET tax_class=? WHERE invoice_id=? AND line_no=?',(item.get('taxClass') or previous_tax,invoice_id,index))
                     if accepted and invoice_iban:
                         con.execute("""
                             INSERT INTO supplier_bank_accounts
@@ -226,7 +234,7 @@ def install(ns):
 <script id="kristaCaptureEditV1">
 (function(){
   if(typeof captureRecent==='undefined'||typeof captureSave==='undefined')return;
-  let editingId=0,editingDoc='',editingPath='';
+  let editingId=0,editingDoc='',editingPath='',editingReopened=false;
   const originalSave=typeof saveCaptureInvoice==='function'?saveCaptureInvoice:null;
   const banner=document.createElement('div');banner.id='captureEditBanner';banner.className='capture-edit-banner';banner.hidden=true;
   banner.innerHTML='<div><strong id="captureEditTitle">Rechnung bearbeiten</strong><div class="sub">Nur solange sie noch nicht geprüft ist. Die interne Belegnummer und PDF bleiben unverändert.</div></div><div class="actions"><a id="captureEditPdf" class="action" target="_blank" rel="noopener">PDF öffnen</a><button id="captureEditCancel" type="button" class="secondary">Bearbeitung abbrechen</button></div>';
@@ -241,7 +249,7 @@ def install(ns):
   async function startEdit(id){
     const r=await fetch('/incoming/capture/'+encodeURIComponent(id)+'/edit-data?area='+encodeURIComponent(captureArea),{cache:'no-store'}),d=await r.json();
     if(!r.ok||!d.ok)throw new Error(d.error||'Rechnung konnte nicht geöffnet werden');
-    const x=d.invoice||{};if(String(x.workflowStatus||'').toLowerCase()==='geprueft')throw new Error('Diese Rechnung ist bereits geprüft und gesperrt.');
+    const x=d.invoice||{};editingReopened=String(x.workflowStatus||'').toLowerCase()==='geprueft';if(editingReopened&&!confirm('Geprüfte Erfassung erneut bearbeiten? Änderungen werden protokolliert; die Erfassung wird anschließend wieder zur Prüfung vorgelegt.'))return;
     editingId=Number(x.id||id);editingDoc=x.docId||'';editingPath=x.path||'';
     captureFile.value='';try{showCapturePdf(null)}catch(_){}
     captureDocumentType.value=x.documentType||'Rechnung';
@@ -271,17 +279,19 @@ def install(ns):
     if(!updateCaptureAllocationTotal())return setCaptureMessage('Kontierung stimmt noch nicht mit dem Netto überein.','error');
     captureSave.disabled=true;setCaptureMessage('Änderungen werden gespeichert …');
     try{
-      const payload=capturePayload();
+      const payload=capturePayload();payload.confirmReopen=editingReopened;
       const r=await fetch('/incoming/capture/'+encodeURIComponent(editingId)+'/edit',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json();
       if(!r.ok||!d.ok)throw new Error(d.error||'Änderungen konnten nicht gespeichert werden');
       const doc=d.invoice?.docId||editingDoc;stopEdit(true);setCaptureMessage('✓ '+doc+' geändert · weiterhin Zu prüfen','success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
     }catch(e){setCaptureMessage(e.message||String(e),'error')}finally{captureSave.disabled=false}
   }
   captureSave.onclick=()=>editingId?saveEdit():(originalSave?originalSave():undefined);
+  const requestedEdit=new URLSearchParams(location.search).get('editInvoice');
+  if(requestedEdit&&/^\d+$/.test(requestedEdit))setTimeout(()=>startEdit(Number(requestedEdit)).catch(e=>setCaptureMessage(e.message||String(e),'error')),0);
 
   if(typeof renderCaptureRecent==='function'){
     const originalRender=renderCaptureRecent;
-    renderCaptureRecent=function(rows){const result=originalRender.apply(this,arguments);const cards=[...captureRecent.querySelectorAll(':scope > .card')];(rows||[]).forEach((x,i)=>{if(String(x.workflowStatus||'').toLowerCase()==='geprueft')return;const actions=cards[i]?.querySelector('.actions');if(!actions||actions.querySelector('[data-edit-invoice]'))return;const b=document.createElement('button');b.type='button';b.className='capture-edit-button';b.dataset.editInvoice=String(x.id||'');b.textContent='✎ Bearbeiten';b.onclick=()=>startEdit(x.id).catch(e=>alert(e.message||String(e)));actions.insertBefore(b,actions.firstChild)});return result};
+    renderCaptureRecent=function(rows){const result=originalRender.apply(this,arguments);const cards=[...captureRecent.querySelectorAll(':scope > .card')];(rows||[]).forEach((x,i)=>{const actions=cards[i]?.querySelector('.actions');if(!actions||actions.querySelector('[data-edit-invoice]'))return;const b=document.createElement('button');b.type='button';b.className='capture-edit-button';b.dataset.editInvoice=String(x.id||'');b.textContent='✎ Bearbeiten';b.onclick=()=>startEdit(x.id).catch(e=>alert(e.message||String(e)));actions.insertBefore(b,actions.firstChild)});return result};
   }
 })();
 </script>

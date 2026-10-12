@@ -80,10 +80,10 @@ class FinanceStore:
             else:c.execute("INSERT INTO brain_invoice_status_overrides(source,source_id,status,updated_at) VALUES(?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at",(source,source_id,norm_status(status),datetime.now().isoformat(timespec="seconds")))
             c.commit()
         finally:c.close()
-    def set_meta(self,source,source_id,method=None,status=None,note=None):
+    def set_meta(self,source,source_id,method=None,status=None,note=None,connection=None):
         source=str(source or "").strip(); source_id=str(source_id or "").strip()
         if source not in {"WinWorker","KRISTINE"} or not source_id: raise ValueError("Ungültige Rechnung.")
-        c=self.con()
+        c=connection if connection is not None else self.con()
         try:
             old=c.execute("SELECT payment_method,payment_status,payment_id,note FROM brain_payment_meta WHERE source=? AND source_id=?",(source,source_id)).fetchone()
             m=norm_method(method if method is not None else (old["payment_method"] if old else "unknown")); s=norm_status(status if status is not None else (old["payment_status"] if old else "open"))
@@ -91,8 +91,10 @@ class FinanceStore:
             if m=="transfer" and not pid: pid=payment_id(source,source_id)
             if m!="transfer" and s=="sepa_submitted": s="open"
             c.execute("INSERT INTO brain_payment_meta(source,source_id,payment_method,payment_status,payment_id,note,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET payment_method=excluded.payment_method,payment_status=excluded.payment_status,payment_id=excluded.payment_id,note=excluded.note,updated_at=excluded.updated_at",(source,source_id,m,s,pid,n,datetime.now().isoformat(timespec="seconds")))
-            c.commit(); return {"paymentMethod":m,"paymentStatus":s,"paymentId":pid,"paymentNote":n}
-        finally:c.close()
+            if connection is None:c.commit()
+            return {"paymentMethod":m,"paymentStatus":s,"paymentId":pid,"paymentNote":n}
+        finally:
+            if connection is None:c.close()
     def pending_supplier_totals(self):
         c=self.con()
         try:
@@ -217,7 +219,9 @@ class FinanceStore:
         c=factory(self.ns['CAPTURE_DB'])
         try:
             exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='brain_statement_allocations'").fetchone()
-            totals={} if not exists else {(str(x['target_source']),str(x['target_id'])):round(float(x['allocated'] or 0),2) for x in c.execute("SELECT target_source,target_id,SUM(ABS(amount)) AS allocated FROM brain_statement_allocations WHERE category IN ('supplier_payment','direct_debit') GROUP BY target_source,target_id")}
+            has_skonto=exists and 'skonto_amount' in {x['name'] for x in c.execute('PRAGMA table_info(brain_statement_allocations)')}
+            sum_expr='ABS(amount)+skonto_amount' if has_skonto else 'ABS(amount)'
+            totals={} if not exists else {(str(x['target_source']),str(x['target_id'])):round(float(x['allocated'] or 0),2) for x in c.execute("SELECT target_source,target_id,SUM("+sum_expr+") AS allocated FROM brain_statement_allocations WHERE category IN ('supplier_payment','direct_debit') GROUP BY target_source,target_id")}
         finally:c.close()
         for row in rows:
             original=round(float(row.get('amount') or 0),2)
@@ -226,8 +230,7 @@ class FinanceStore:
             row['allocatedAmount']=allocated
             if allocated:
                 row['amount']=round(max(0,original-allocated),2)
-                if row['amount']<=.005:
-                    row['paymentStatus']=row['paymentState']='paid'
+                row['paymentStatus']=row['paymentState']='paid' if row['amount']<=.005 else 'open'
         return rows
 
     def items(self,include_resolved=False):
