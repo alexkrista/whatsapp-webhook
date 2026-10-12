@@ -308,7 +308,7 @@
 
     button.addEventListener("click", () => setOpen(!mount.classList.contains("menu-open")));
     nav.querySelectorAll("a").forEach(link => link.addEventListener("click", () => setOpen(false)));
-    window.addEventListener("resize", () => { if (window.innerWidth > 760) setOpen(false); }, { passive: true });
+    window.addEventListener("resize", () => { if (window.innerWidth > 1120) setOpen(false); }, { passive: true });
     setOpen(false);
   }
 
@@ -432,7 +432,7 @@
     loadKriszeitToolbar();
     loadCurrentBeulen();
     loadScriptOnce("/public/ui/outlook-services.js?v=20260919-outlook-1", "data-krista-outlook-services");
-    loadScriptOnce("/public/ui/access-status-ui.js?v=20261010-manual-confirm-1", "data-krista-access-status-v3");
+    loadScriptOnce("/public/ui/access-status-ui.js?v=20261012-ipad-nav-1", "data-krista-access-status-v3");
     activateKristineHash();
   });
 
