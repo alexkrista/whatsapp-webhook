@@ -84,7 +84,7 @@
         .krista-shell-main.krista-access-v4 .krista-world-link{padding-inline:6px!important;font-size:10px!important}
         .krista-quick-task{padding-inline:7px!important}
       }
-      @media(max-width:900px){
+      @media(max-width:1120px){
         .krista-shell-topbar{position:relative!important;top:auto!important}
         .krista-shell-main.krista-access-v4{grid-template-columns:minmax(0,1fr) auto!important;padding:8px 10px!important}
         .krista-shell-main.krista-access-v4 .krista-brand{grid-column:1!important}
