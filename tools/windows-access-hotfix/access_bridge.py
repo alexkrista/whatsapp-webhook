@@ -28,7 +28,7 @@ REMOTE_BASE = str(
 ).rstrip("/")
 ADMIN_TOKEN = str(os.environ.get("KRISTINE_ADMIN_TOKEN", "")).strip()
 
-ACCESS_SYNC_VERSION = "ACCESS-BRIDGE-ON-DEMAND-V5"
+ACCESS_SYNC_VERSION = "ACCESS-BRIDGE-MANUAL-READ-V6"
 ACCESS_SYNC_SECONDS = 30
 LOCAL_JOB_POLL_SECONDS = 5.0
 
@@ -537,7 +537,7 @@ def send_heartbeat():
 
 
 def main():
-    log.info("KRISTINE Access Bridge V5 startet · Chip-Lesen nur auf Abruf + 30s Cloud-Sync.")
+    log.info("KRISTINE Access Bridge V6 startet · manuelles GAT-Lesen mit lokaler Sicherung + 30s Chip-Sync.")
 
     while not http_health("http://127.0.0.1:8788/health"):
         log.info("Warte auf Gantner 8788 ...")
