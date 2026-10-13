@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -67,7 +67,12 @@ def pdf_lines(pdf_text: str) -> list[dict]:
 
 
 def load_invoices(now=None) -> list[dict]:
-    now = now or datetime.now(ZoneInfo("Europe/Vienna"))
+    if now is None:
+        try:
+            now = datetime.now(ZoneInfo("Europe/Vienna"))
+        except ZoneInfoNotFoundError:
+            # Windows may lack the separate IANA tzdata package. PC-ALEX02 runs in Austria.
+            now = datetime.now().astimezone()
     cutoff = (now.date() - timedelta(days=21)).isoformat()
     if not INCOMING_DB.is_file():
         raise RuntimeError("Brain-Eingangsrechnungsdatenbank nicht verfügbar.")
