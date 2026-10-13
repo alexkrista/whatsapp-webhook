@@ -90,9 +90,10 @@ class ManualBookTests(unittest.TestCase):
 
     def test_interrupted_job_must_not_auto_read(self):
         self.spool.save_event(self.e(10))
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection:
             connection.execute("INSERT INTO jobs(id,state,result) VALUES(?,?,?)",
                                ("read_interrupted","reading","{}"))
+            connection.commit()
         result=self.spool.execute({"id":"read_interrupted","type":"bookings-read"})
         self.assertEqual(result["state"],"error")
         self.assertEqual(self.reader_calls,[])
