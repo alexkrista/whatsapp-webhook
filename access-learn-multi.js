@@ -29,6 +29,18 @@ async function writeJson(file, value) {
   await fsp.rename(tmp, file);
 }
 function nowIso(){ return new Date().toISOString(); }
+async function readManualJob(){
+  const job=await readJson(READ_JOB_FILE,null);
+  const startedAt=Date.parse(job?.at||"");
+  if(job?.state==="queued" && Number.isFinite(startedAt) && Date.now()-startedAt>15*60*1000){
+    job.state="error";
+    job.error="Manueller Leseauftrag nach 15 Minuten abgelaufen. Bitte erneut auf „Zutritte jetzt auslesen“ klicken.";
+    job.finishedAt=nowIso();
+    await writeJson(READ_JOB_FILE,job);
+  }
+  return job;
+}
+
 function clean(value){ return String(value || "").trim(); }
 function parseAccessEventTime(value) {
   const raw = clean(value);
@@ -224,14 +236,14 @@ function installRoutes(app) {
             type:finishing?"learn-finish":"learn-read",terminalId:session.terminalId || "3",expiresAt:session.expiresAt}});
         }
       }
-      const read = await readJson(READ_JOB_FILE,null);
+      const read = await readManualJob();
       res.json({ok:true,job:read?.state==="queued" ? read : null});
     } catch(e) {res.status(500).json({ok:false,error:String(e.message||e)});}
   });
   route("post", "/admin/api/access/bookings/read", async (req,res)=>{
     if (!requireAdmin(req,res)) return;
     try {
-      const existing=await readJson(READ_JOB_FILE,null);
+      const existing=await readManualJob();
       if(existing?.state==="queued")return res.json({ok:true,job:existing});
       const status=await readJson(STATUS_FILE,null);
       const readerVersion=String(status?.accessSyncVersion||"");
@@ -244,7 +256,7 @@ function installRoutes(app) {
   });
   route("get", "/admin/api/access/bookings/read", async(req,res)=>{
     if(!requireAdmin(req,res))return;
-    res.json({ok:true,job:await readJson(READ_JOB_FILE,null)});
+    res.json({ok:true,job:await readManualJob()});
   });
   route("post", "/admin/api/access/local-job/ack",async(req,res)=>{
     if(!requireAdmin(req,res))return;
