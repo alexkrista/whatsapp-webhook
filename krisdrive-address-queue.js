@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 
 // One consumer in the existing disk-backed web service. Jobs and successful
 // results survive restarts; no browser, extra service or third-party key needed.
-function createAddressQueue({ file, lookup, now = Date.now, resolverVersion = 1 }) {
+function createAddressQueue({ file, lookup, now = Date.now, resolverVersion = 1, validateAddress = () => true }) {
   let state, lock = Promise.resolve(), running;
   async function transaction(fn) {
     const task = lock.catch(() => {}).then(async () => {
@@ -36,6 +36,7 @@ function createAddressQueue({ file, lookup, now = Date.now, resolverVersion = 1 
       const result = {};
       for (const [key, point] of points) {
         const job = state.jobs[key] ||= { point, createdAt: now(), attempts: 0, nextAttemptAt: 0 };
+        if (job.address && !validateAddress(job.address)) { delete job.address; job.nextAttemptAt = 0; job.attempts = 0; }
         if (!job.address && job.resolverVersion !== resolverVersion) {
           job.resolverVersion = resolverVersion; job.attempts = 0; job.nextAttemptAt = 0; delete job.error;
         }

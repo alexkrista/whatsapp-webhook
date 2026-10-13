@@ -49,3 +49,12 @@ test("a new resolver retries old failed jobs immediately without erasing cached 
   assert.equal(calls,1);assert.equal(cached.cached,"Bahnhofstraße, Feldkirch");
   assert.equal(cached.failed,"Walgaustraße, Frastanz");assert.equal((await queue.status()).providers.photon,1);
 });
+
+test("invalid cached street labels are requeued while valid addresses remain cached", async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "address-invalid-")); t.after(() => fs.rm(dir, {recursive:true,force:true}));
+  const file=path.join(dir,"queue.json"), point={lat:47.2,lng:9.6};
+  await fs.writeFile(file,JSON.stringify({version:1,jobs:{bad:{point,address:"L, 6820 Frastanz",nextAttemptAt:999999},good:{point,address:"Feldkircher Straße, 6820 Frastanz"}}}));
+  const q=createAddressQueue({file,validateAddress:address=>address.split(',')[0].length>1,lookup:async()=>"Rungeldonweg, 6820 Frastanz"});
+  const cached=await q.enqueue([["bad",point],["good",point]]);assert.equal(cached.bad,"");assert.equal(cached.good,"Feldkircher Straße, 6820 Frastanz");
+  await q.drain();assert.equal((await q.enqueue([["bad",point]])).bad,"Rungeldonweg, 6820 Frastanz");
+});

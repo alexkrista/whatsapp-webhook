@@ -22,6 +22,7 @@
       <div class="lb-export"><button type="button" class="btn secondary" id="lb-pdf" disabled>PDF</button><button type="button" class="btn secondary" id="lb-csv" disabled>CSV / Excel</button></div>
     </form>
     <div id="lb-warning" class="lb-warning" role="status" hidden></div><div id="lb-error" class="lb-error" role="alert" hidden></div>
+    <div id="lb-reviews" class="lb-reviews"></div>
     <div id="lb-totals" class="lb-totals"></div>
     <div class="lb-columns"><span>Datum / Zeit</span><span>Strecke</span><span>Zuordnung / Zweck</span><span>Kilometer</span><span></span></div>
     <div id="lb-rows" aria-live="polite"></div><div id="lb-stamp" class="lb-stamp"></div>
@@ -54,8 +55,9 @@
   function exportsEnabled(enabled) { $("pdf").disabled = !enabled; $("csv").disabled = !enabled; }
   function render() {
     const sum = data.totals;
+    $("reviews").innerHTML = '<h3>Tageskontrolle · Alex</h3>' + ((data.reviews || []).filter(review => review.status !== "approved" || review.date >= data.range.from && review.date <= data.range.to).map(review => `<div class="lb-day"><strong>${esc(review.date)}</strong> · ${review.count} Fahrten · ${review.open} zu ergänzen${review.warnings ? ` · ${review.warnings} mit auffälligen Zeiten` : ""} · ${review.status === "approved" ? "Freigegeben von " + esc(review.approvedName) : "Zur Freigabe bei Alex"}<div>${review.vehicles.map(id => `<button type="button" class="btn secondary" data-review-vehicle="${esc(id)}" data-review-date="${esc(review.date)}">${esc(review.vehicleNames?.[id] || id)} prüfen</button>`).join(" ")} <button type="button" class="btn" data-approve="${esc(review.date)}" ${review.status === "approved" || review.open || !review.count ? "disabled" : ""}>Tag freigeben</button></div></div>`).join("") || '<p>Für abgeschlossene Tage mit Fahrten wird automatisch eine Aufgabe erstellt. Heute bleibt bis Tagesende offen.</p>');
     $("totals").innerHTML = [[format(sum.km) + " km", `${sum.count} ${sum.count === 1 ? "Fahrt" : "Fahrten"} insgesamt`], [format(sum.businessKm) + " km", "Geschäftlich"], [format(sum.privateKm) + " km", "Privat"], [String(sum.open), `${sum.open === 1 ? "Fahrt" : "Fahrten"} zu ergänzen`]].map(([n, title], i) => `<div class="lb-total ${i === 3 && sum.open ? "lb-open-count" : ""}"><strong>${esc(n)}</strong><span>${esc(title)}</span></div>`).join("");
-    const notices = [data.warning, data.addressIssue].filter(Boolean);
+    const notices = [data.warning, data.addressIssue, data.missingAddresses ? `${data.missingAddresses} Fahrten mit fehlender Start- oder Zieladresse. GPS-Abfragen: ${data.addressStatus?.pending || 0} ausstehend. Fehlende Angaben bleiben zur Kontrolle offen.` : ""].filter(Boolean);
     $("warning").textContent = notices.join(" "); $("warning").hidden = !notices.length;
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
@@ -149,6 +151,17 @@
     } catch (e) { error(e.message); }
     finally { exportsEnabled(Boolean(data)); }
   }
+  $("reviews").addEventListener("click", async event => {
+    const select = event.target.closest("[data-review-vehicle]");
+    if (select) { $("from").value = $("to").value = select.dataset.reviewDate; window.dispatchEvent(new CustomEvent("krisdrive:logbook", { detail: { id: select.dataset.reviewVehicle } })); return; }
+    const button = event.target.closest("[data-approve]");
+    if (!button) return;
+    const review = data.reviews.find(row => row.date === button.dataset.approve);
+    if (!review || !confirm(`Alle ${review.count} Fahrten vom ${review.date} geprüft und Tagesfahrtenbuch freigeben?`)) return;
+    button.disabled = true;
+    try { await jsonRequest(url(`${endpoint}/daily/${review.date}/approve`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true, fingerprint: review.fingerprint, actorId: review.assigneeId }) }); await load(); }
+    catch (e) { error(e.message); button.disabled = false; }
+  });
   $("rows").addEventListener("click", event => { const button = event.target.closest("[data-edit]"); if (button) edit(button.dataset.edit); });
   $("category").addEventListener("change", togglePrivate);
   $("cancel").addEventListener("click", () => $("dialog").close());
@@ -161,6 +174,8 @@
   window.addEventListener("krisdrive:logbook", event => {
     vehicle = event.detail; if (!vehicle?.id) return;
     host.hidden = false; $("title").textContent = `Fahrtenbuch · ${vehicle.label || "Fahrzeug"}`; $("vehicle").textContent = vehicle.plate || "";
+    const requestedDay = new URLSearchParams(location.search).get("reviewDay");
+    if (!$("from").value && /^\d{4}-\d{2}-\d{2}$/.test(requestedDay || "")) $("from").value = $("to").value = requestedDay;
     if (!$("from").value) { $("to").value = today(); $("from").value = today().slice(0, 8) + "01"; }
     host.scrollIntoView({ behavior: "smooth", block: "start" }); $("title").focus({ preventScroll: true }); load();
   });

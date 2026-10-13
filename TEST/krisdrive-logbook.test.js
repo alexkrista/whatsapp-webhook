@@ -28,7 +28,7 @@ async function harness(t, { local = [], config, request, inlineAddresses = true,
   const query = "?vehicleId=byd&from=2026-09-22&to=2026-09-22";
   const get = async (suffix = query, auth = true) => fetch(base + suffix, { headers: auth ? { "x-admin-token": "logbook-test-only" } : {} });
   const patch = async (row, extra = {}, vehicleId = "byd") => fetch(base + `/${vehicleId}/${row.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-token": "logbook-test-only" }, body: JSON.stringify({ revision: row.revision, category: "business", employeeId: "alex", purpose: "Baustellenbesprechung", startLocation: row.startLocation, endLocation: row.endLocation, odometerStartKm: "", odometerEndKm: "", ...extra }) });
-  return { dir, root, state, calls, get, patch, query, service };
+  return { dir, root, state, calls, get, patch, query, service, base };
 }
 
 test("Austrian date filters handle both DST changes and invalid ranges", () => {
@@ -698,4 +698,22 @@ test("a geocoder response slower than five seconds is still saved", async t => {
   h.state.trips = [trip({ endAddress: "" })];
   const row = (await (await h.get()).json()).rows[0];
   assert.equal(row.endLocation, "Buchholzstrasse, Rüthi (SG)");
+});
+
+
+test("daily API requires Alex and a complete snapshot, and an edit reopens approval immediately", async t => {
+  const h = await harness(t, { now: () => Date.parse("2026-09-23T06:00:00Z") });
+  const book = await (await h.get()).json();
+  let reviews = (await (await h.get("/daily")).json()).reviews;
+  assert.equal(reviews.length, 1); assert.equal(reviews[0].open, 1);
+  const approve = (review, actorId = "alex") => fetch(h.base + "/daily/2026-09-22/approve", { method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": "logbook-test-only" }, body: JSON.stringify({ confirmed: true, actorId, fingerprint: review.fingerprint }) });
+  assert.equal((await approve(reviews[0])).status, 409);
+  assert.equal((await approve(reviews[0], "inactive")).status, 403);
+  const edited = await (await h.patch(book.rows[0], { category: "private" })).json();
+  reviews = (await (await h.get("/daily")).json()).reviews;
+  assert.equal(reviews[0].open, 0); assert.equal((await approve(reviews[0])).status, 200);
+  assert.equal((await approve(reviews[0])).status, 200);
+  assert.equal((await h.patch(edited.row, { category: "private", odometerStartKm: 10, odometerEndKm: 15 })).status, 200);
+  reviews = (await (await h.get("/daily")).json()).reviews;
+  assert.equal(reviews[0].status, "open"); assert.equal((await approve(book.reviews[0])).status, 409);
 });

@@ -35,7 +35,7 @@ function coordinateLabel(value) {
   return match ? coordinates(match[1], match[2]) : null;
 }
 const isCoordinates = value => Boolean(coordinateLabel(value));
-const hasAddress = value => Boolean(text(value)) && !isCoordinates(value);
+const hasAddress = value => Boolean(text(value)) && !isCoordinates(value) && text(value).split(",")[0].trim().length > 1;
 // Only unambiguous places already used by this logbook. Other postal codes
 // must come from the address provider or a manual correction.
 const knownPostcodes = new Map([
@@ -383,7 +383,7 @@ function registerKrisdriveLogbook(app, options = {}) {
   const { createStreetLookup, DEFAULT_FALLBACK_URL } = require("./krisdrive-street-geocoder");
   const fallbackUrl = options.geocoderFallbackUrl ?? process.env.KRISDRIVE_GEOCODER_FALLBACK_URL ?? DEFAULT_FALLBACK_URL;
   const addressQueue = require("./krisdrive-address-queue").createAddressQueue({
-    file: path.join(root, "address-queue.json"), now: options.now || Date.now, resolverVersion: 2,
+    file: path.join(root, "address-queue.json"), now: options.now || Date.now, resolverVersion: 3, validateAddress: address => usableAddress(address),
     lookup: createStreetLookup({ request, fallbackUrl, minIntervalMs: options.geocoderFallbackMinIntervalMs ?? 5000,
       primary: async point => {
       const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });
@@ -660,6 +660,11 @@ function registerKrisdriveLogbook(app, options = {}) {
     inFlight.set(key, work);
     try { return await work; } finally { inFlight.delete(key); }
   }
+  const dailyReview = require("./krisdrive-daily-review").createDailyReview({ dataDir, day, now: options.now || Date.now, collect: async () => {
+    const rows = [], vehicles = await readJson(path.join(dataDir, "_system", "vehicles.json"), []);
+    for (const id of await vehicleIds()) rows.push(...resolvedRows(Object.values((await stateFor(id)).records)).map(row => ({ ...row, vehicleId: id, vehicleLabel: vehicles.find(vehicle => String(vehicle.id) === id)?.label || id })));
+    return rows;
+  }});
   let stopped = false, importTimer, addressTimer, importWork, addressWork, lastAddressStatus = "";
   const logFailure = (phase, error) => (options.logger || console).error(`[KRISDRIVE] ${phase}: ${error.status || error.code || error.name || "failed"}`);
   async function vehicleIds() {
@@ -683,7 +688,7 @@ function registerKrisdriveLogbook(app, options = {}) {
         } catch (error) { logFailure("import", error); }
       }
     })();
-    try { return await importWork; } finally { importWork = null; }
+    try { await importWork; await dailyReview.update(); } finally { importWork = null; }
   }
   async function processAddresses() {
     if (addressWork) return addressWork;
@@ -772,7 +777,8 @@ function registerKrisdriveLogbook(app, options = {}) {
     const addressIssue = addressStatus?.pending && addressStatus.errors.empty_address === addressStatus.pending
       ? "Der GPS-Adressdienst liefert derzeit keine Straßenadressen. Die GPS-Punkte sind gespeichert; Start und Ziel können auch unter „Ergänzen“ eingetragen werden."
       : "";
-    return { ok: true, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, addressIssue, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
+    const reviews = await dailyReview.update();
+    return { ok: true, reviews, addressStatus, missingAddresses: rows.filter(row => row.category !== "private" && row.activity !== "standstill" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))).length, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, addressIssue, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
   const api = "/kristine/api/krisdrive/logbook";
   const route = handler => async (req, res) => {
@@ -781,6 +787,14 @@ function registerKrisdriveLogbook(app, options = {}) {
     try { await handler(req, res); }
     catch (error) { res.status(error.status || 500).json({ ok: false, error: error.status ? error.message : "Das Fahrtenbuch konnte nicht verarbeitet werden." }); }
   };
+  app.get(api + "/daily", route(async (req, res) => res.json({ ok: true, reviews: await dailyReview.update() })));
+  app.post(api + "/daily/:date/approve", json, route(async (req, res) => {
+    const people = await readJson(path.join(dataDir, "_system", "employees.json"), []);
+    const actorId = req.kristineActor?.id || req.headers["x-krista-user-id"] || req.body?.actorId;
+    const actor = people.find(person => String(person.id || person.employeeId) === String(actorId || ""));
+    if (req.body?.confirmed !== true) throw fail("Bitte die Tagesfreigabe bestätigen.");
+    res.json({ ok: true, review: await dailyReview.approve(req.params.date, req.body.fingerprint, actor) });
+  }));
   app.get(api, route(async (req, res) => res.json(await report(req.query))));
   app.patch(api + "/:vehicleId/:rideId", json, route(async (req, res) => {
     const ctx = await context(text(req.params.vehicleId, 100));
@@ -823,6 +837,7 @@ function registerKrisdriveLogbook(app, options = {}) {
       }
       return view(record);
     });
+    await dailyReview.update();
     res.json({ ok: true, row: result });
   }));
   app.get(api + "/export.:format", route(async (req, res) => {
@@ -833,7 +848,7 @@ function registerKrisdriveLogbook(app, options = {}) {
     if (req.params.format === "csv") res.type("text/csv; charset=utf-8").send(createCsv(data));
     else res.type("application/pdf").send(await require("./krisdrive-logbook-pdf").createLogbookPdf(data));
   }));
-  return { report, importRecent, processAddresses, close };
+  return { report, importRecent, processAddresses, dailyReview, close };
 }
 
 const categoryLabel = category => ({ business: "Geschäftlich", private: "Privat", unassigned: "Offen" })[category] || "Offen";

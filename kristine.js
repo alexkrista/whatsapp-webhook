@@ -54,11 +54,11 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         const keys = new Set(days.map(row => `${row.employeeId}|${row.date}`));
         value = [...value.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...days.flatMap(row => row.events || [])];
       }
-      if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []);
+      if (file === TASKS) return require("./krisdrive-daily-review").mergeTasks(dataDir, await require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []));
       return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
     } catch (error) {
       if ([MONTH_CLOSURES,TIME_EVENTS].includes(file) && error.code !== "ENOENT") throw error;
-      if (file === TASKS) return require("./customer-portal-access").mergePortalTasks(dataDir, []);
+      if (file === TASKS) return require("./krisdrive-daily-review").mergeTasks(dataDir, await require("./customer-portal-access").mergePortalTasks(dataDir, []));
       return fallback;
     }
   }
@@ -72,6 +72,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       const keys = new Set(frozen.map(row => `${row.employeeId}|${row.date}`));
       value = [...value.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...frozen.flatMap(row => row.events || [])];
     }
+    if (file === TASKS) value = value.filter(task => !String(task.id).startsWith("krisdrive-day-"));
     const previousPortalTasks = file === TASKS ? await readJson(TASKS, []) : null;
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     const customerPointChanges = file === TASKS ? require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value) : [];
@@ -1260,6 +1261,7 @@ const open = taskId
       if (!open) {
         return { reply: "Ich finde gerade keine offene Aufgabe für dich.", buttons: [], state };
       }
+      if (String(open.id).startsWith("krisdrive-day-")) return { reply: "Bitte die Fahrten in KRISDRIVE prüfen und den Tag dort freigeben: https://protokoll.krista.at/public/krisdrive.html?reviewDay=" + String(open.id).slice("krisdrive-day-".length), buttons: [], state };
       open.status = "done";
       open.completedAt = now;
       await writeJson(TASKS, tasks);
@@ -3375,6 +3377,7 @@ const open = taskId
     if (!requireAdmin(req, res)) return;
     try {
       const previousTasks = await readJson(TASKS, []);
+      if ((req.body?.tasks || []).some(task => String(task.id).startsWith("krisdrive-day-") && task.status === "done" && previousTasks.find(old => old.id === task.id)?.status !== "done")) return res.status(409).json({ ok: false, error: "Bitte das Tagesfahrtenbuch in KRISDRIVE prüfen und dort freigeben." });
       const previousIds = new Set(previousTasks.map(t => String(t.id || "")));
       const previousById = new Map(previousTasks.map(t => [String(t.id || ""), t]));
       const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
