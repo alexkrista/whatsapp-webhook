@@ -42,7 +42,7 @@
     load("/public/ui/baustellen-calculation-grid-v2.js?v=20260826-grid2", "data-krista-kalkulation-grid-v2");
   }
   if (location.pathname.toLowerCase().includes("access-admin.html")) {
-    load("/public/ui/access-learn-multi.js?v=20261013-manual-zutritte-1", "data-krista-access-learn-multi");
+    load("/public/ui/access-learn-multi.js?v=20261013-manual-zutritte-v7", "data-krista-access-learn-multi");
     load("/public/ui/access-events-ui.js?v=20261013-manual-zutritte-1", "data-krista-access-events");
   }
 })();
