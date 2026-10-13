@@ -15,7 +15,7 @@ function task(row) {
     status: row.status === "approved" ? "done" : "open", completedAt: row.status === "approved" ? row.approvedAt : null,
     reminder: `${row.count} Fahrten · ${row.open} zu ergänzen. Tagesfreigabe in KRISDRIVE.`, jobId: "", jobName: "", reviewDate: row.date };
 }
-async function mergeTasks(dir, tasks) { const state = await read(dir); return [...tasks.filter(t => !String(t.id).startsWith(PREFIX)), ...Object.values(state.days).map(task)]; }
+async function mergeTasks(dir, tasks) { const state = await read(dir); return [...tasks.filter(t => !String(t.id).startsWith(PREFIX)), ...Object.values(state.days).filter(row => row.count > 0).map(task)]; }
 function createDailyReview({ dataDir, collect, day, now = Date.now }) {
   let tail = Promise.resolve();
   function serialized(fn) { const work = tail.catch(() => {}).then(fn); tail = work; return work; }

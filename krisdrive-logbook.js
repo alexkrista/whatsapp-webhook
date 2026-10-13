@@ -330,6 +330,7 @@ function reuseStopAddresses(rows) {
   return rows;
 }
 function resolvedRows(records) {
+  records = records.filter(record => !record.removedAt);
   const rows = records.map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const corrections = new Map();
   for (const record of records) {
@@ -778,7 +779,7 @@ function registerKrisdriveLogbook(app, options = {}) {
       ? "Der GPS-Adressdienst liefert derzeit keine Straßenadressen. Die GPS-Punkte sind gespeichert; Start und Ziel können auch unter „Ergänzen“ eingetragen werden."
       : "";
     const reviews = await dailyReview.update();
-    return { ok: true, reviews, addressStatus, missingAddresses: rows.filter(row => row.category !== "private" && row.activity !== "standstill" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))).length, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, addressIssue, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
+    return { ok: true, reviews, removedRows: Object.values(state.records).filter(record => record.removedAt && day(record.data.startedAt) >= range.from && day(record.data.startedAt) <= range.to).map(record => ({ ...view(record), removedAt: record.removedAt, removedBy: record.removedBy })), addressStatus, missingAddresses: rows.filter(row => row.category !== "private" && row.activity !== "standstill" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))).length, vehicle: ctx.vehicle, employees: ctx.employees, range: { from: range.from, to: range.to }, rows, totals: totals(rows), warning, addressIssue, processing: state.processing || null, lastSync: state.lastSync, generatedAt: new Date().toISOString() };
   }
   const api = "/kristine/api/krisdrive/logbook";
   const route = handler => async (req, res) => {
@@ -801,7 +802,7 @@ function registerKrisdriveLogbook(app, options = {}) {
     const body = req.body || {};
     const result = await mutate(ctx.vehicle.id, state => {
       const record = state.records[text(req.params.rideId, 100)];
-      if (!record) throw fail("Fahrt nicht gefunden. Bitte die Liste aktualisieren.", 404);
+      if (!record || record.removedAt) throw fail("Fahrt nicht gefunden. Bitte die Liste aktualisieren.", 404);
       if (!Number.isInteger(body.revision) || body.revision !== record.revision) throw fail("Diese Fahrt wurde inzwischen geändert. Bitte neu laden.", 409);
       if (!["unassigned", "business", "private"].includes(body.category)) throw fail("Bitte eine gültige Fahrtart auswählen.");
       const employeeId = text(body.employeeId, 100);
@@ -839,6 +840,25 @@ function registerKrisdriveLogbook(app, options = {}) {
     });
     await dailyReview.update();
     res.json({ ok: true, row: result });
+  }));
+  for (const action of ["remove", "restore"]) app.post(api + "/:vehicleId/:rideId/" + action, json, route(async (req, res) => {
+    const ctx = await context(text(req.params.vehicleId, 100)), body = req.body || {};
+    if (body.confirmed !== true) throw fail("Bitte die Änderung bestätigen.");
+    const result = await mutate(ctx.vehicle.id, state => {
+      const record = state.records[text(req.params.rideId, 100)];
+      if (!record) throw fail("Fahrt nicht gefunden.", 404);
+      if (!Number.isInteger(body.revision) || body.revision !== record.revision) throw fail("Diese Fahrt wurde inzwischen geändert. Bitte neu laden.", 409);
+      const row = view(record);
+      if (action === "remove" && row.distanceKm !== 0 && row.distanceKm !== null) throw fail("Nur Fahrten mit 0 km oder unbekannter Strecke können ausgeblendet werden.");
+      if (action === "remove" && record.removedAt || action === "restore" && !record.removedAt) throw fail("Der Status dieser Fahrt wurde inzwischen geändert.", 409);
+      const at = new Date().toISOString(), actor = text(req.kristineActor?.name || "KRISTINE-Administration", 160);
+      record.history.push({ type: action, at, actor, actorId: text(req.kristineActor?.id || req.headers["x-krista-user-id"], 100), distanceKm: row.distanceKm, reason: action === "remove" ? row.distanceKm === null ? "Strecke unbekannt, manuell ausgeblendet" : "0-km-Fahrt, manuell ausgeblendet" : "Manuell wiederhergestellt" });
+      if (action === "remove") { record.removedAt = at; record.removedBy = actor; }
+      else { delete record.removedAt; delete record.removedBy; }
+      record.revision++;
+      return { id: record.data.id, revision: record.revision };
+    });
+    await dailyReview.update(); res.json({ ok: true, row: result });
   }));
   app.get(api + "/export.:format", route(async (req, res) => {
     if (!["csv", "pdf"].includes(req.params.format)) throw fail("Unbekanntes Exportformat.");

@@ -717,3 +717,28 @@ test("daily API requires Alex and a complete snapshot, and an edit reopens appro
   reviews = (await (await h.get("/daily")).json()).reviews;
   assert.equal(reviews[0].status, "open"); assert.equal((await approve(book.reviews[0])).status, 409);
 });
+
+test("zero-km removal is audited, survives GPS refresh, reopens daily approval and can be restored", async t => {
+  const h = await harness(t, { now: () => Date.parse("2026-09-23T06:00:00Z") });
+  let book = await (await h.get()).json();
+  const action = (row, name, extra={}) => fetch(h.base+`/byd/${row.id}/${name}`, {method:"POST",headers:{"Content-Type":"application/json","x-admin-token":"logbook-test-only"},body:JSON.stringify({confirmed:true,revision:row.revision,...extra})});
+  assert.equal((await action(book.rows[0],"remove")).status,400);
+  const zero=await (await h.patch(book.rows[0],{category:"private",odometerStartKm:100,odometerEndKm:100})).json();
+  book=await (await h.get()).json();const review=book.reviews[0];
+  assert.equal((await fetch(h.base+"/daily/2026-09-22/approve",{method:"POST",headers:{"Content-Type":"application/json","x-admin-token":"logbook-test-only"},body:JSON.stringify({confirmed:true,actorId:"alex",fingerprint:review.fingerprint})})).status,200);
+  assert.equal((await action(zero.row,"remove",{confirmed:false})).status,400);
+  assert.equal((await action(zero.row,"remove",{revision:-1})).status,409);
+  assert.equal((await action(zero.row,"remove")).status,200);
+  book=await (await h.get(h.query+"&refresh=1")).json();assert.equal(book.rows.length,0);assert.equal(book.removedRows.length,1);assert.equal(book.totals.count,0);
+  const raw=JSON.parse(await fs.readFile(path.join(h.root,"logbook",(await fs.readdir(path.join(h.root,"logbook")))[0]),"utf8"));const record=Object.values(raw.records)[0];assert.ok(record.removedAt);assert.ok(record.history.some(entry=>entry.type==="remove"));assert.ok(record.original);
+  const daily=JSON.parse(await fs.readFile(path.join(h.root,"daily-reviews.json"),"utf8"));assert.equal(daily.days[review.date].status,"open");assert.equal((await require("../krisdrive-daily-review").mergeTasks(h.dir,[])).length,0);
+  const csv=await (await h.get("/export.csv"+h.query)).text();assert.ok(!csv.includes("Privat"+";"));
+  assert.equal((await action(book.removedRows[0],"restore")).status,200);
+  book=await (await h.get()).json();assert.equal(book.rows.length,1);assert.equal(book.removedRows.length,0);assert.equal(book.reviews[0].status,"open");
+});
+
+test("unknown distance can be explicitly hidden without changing it to zero",async t=>{
+  const h=await harness(t);h.state.trips=[trip({distance:999999999})];const book=await (await h.get()).json();assert.equal(book.rows[0].distanceKm,null);
+  const row=book.rows[0],r=await fetch(h.base+`/byd/${row.id}/remove`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-token":"logbook-test-only"},body:JSON.stringify({confirmed:true,revision:row.revision})});assert.equal(r.status,200);
+  const removed=(await (await h.get()).json()).removedRows;assert.equal(removed[0].distanceKm,null);
+});
