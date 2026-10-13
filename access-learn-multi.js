@@ -248,7 +248,7 @@ function installRoutes(app) {
       const status=await readJson(STATUS_FILE,null);
       const readerVersion=String(status?.accessSyncVersion||"");
       if(!readerVersion.startsWith("ACCESS-BRIDGE-MANUAL-READ-V7")){
-        return res.status(503).json({ok:false,error:"Sicherer Zutrittsprotokoll-Leser am Büro-PC noch nicht gestartet. Erst die Access Bridge V6 neu starten; die GANTNER-Türen bleiben unverändert."});
+        return res.status(503).json({ok:false,error:"Sicherer Zutrittsprotokoll-Leser am Büro-PC noch nicht gestartet. Erst die Access Bridge V7 neu starten; die GANTNER-Türen bleiben unverändert."});
       }
       const job={id:"read_"+crypto.randomBytes(12).toString("hex"),type:"bookings-read",state:"queued",at:nowIso()};
       await writeJson(READ_JOB_FILE,job);res.json({ok:true,job});
