@@ -49,7 +49,7 @@ const {JSDOM}=require("jsdom");
  const options=picker.querySelectorAll("select option");
  assert.equal(options.length,3,"Both invoices must be in the list");
  assert.equal(picker.querySelector("select").value,"CIN000628894","Matching order suggested first");
- assert.match(picker.textContent,/vor 21 Tagen/);
+ assert.match(picker.textContent,/Rechnungen ab 2026-09-22/);
  const accept=[...picker.querySelectorAll("button")].find(button=>/übernehmen/i.test(button.textContent));
  accept.click();
  await new Promise(resolve=>setTimeout(resolve,35));
