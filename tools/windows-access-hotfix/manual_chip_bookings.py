@@ -3,6 +3,7 @@
 This module NEVER polls the hardware on its own and NEVER changes GAT door modes.
 Only an explicit, cloud-queued 'bookings-read' job triggers the injected reader.
 """
+from contextlib import contextmanager
 import hashlib
 import json
 import sqlite3
@@ -34,8 +35,14 @@ class ManualChipBookings:
                 "id TEXT PRIMARY KEY, state TEXT NOT NULL, result TEXT NOT NULL)"
             )
 
+    @contextmanager
     def db(self):
-        return sqlite3.connect(self.path, timeout=15)
+        connection = sqlite3.connect(self.path, timeout=15)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def event_key(item):
