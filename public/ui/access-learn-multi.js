@@ -243,10 +243,13 @@
                 button.textContent="Zutritte jetzt auslesen";
                 const report=job.result||{},num=Number(report.count||0);
                 const partial=(report.limitedTerminals||[]).length>0;
+                const uncertain=(report.unverifiedTerminals||[]).length>0;
                 const message=job.state==="error"?
                   "Auslesung nicht vollständig: "+(job.error||report.error||"Unbekannter Fehler.") :
                   num+" Chip-Buchungen gelesen · "+Number(report.stored??num)+" neu gesichert."+
-                  (partial?" Leselimit erreicht; eventuell liegen weitere Buchungen vor. Bitte erneut klicken.":" Keine weiteren Buchungen in diesem Durchgang.");
+                  (partial?" Leselimit erreicht; weitere Buchungen könnten vorhanden sein.":
+                   uncertain?" Die alten GANTNER-Leser bestätigen das Ende des Speichers nicht zuverlässig. Auch nach 0 erkannten Chips können weitere System- und Chipereignisse folgen.":
+                   " GANTNER hat das Ende seines Puffers bestätigt.");
                 updateStatus(message);
                 window.dispatchEvent(new Event("krista:access-read-finished"));
                 return;
