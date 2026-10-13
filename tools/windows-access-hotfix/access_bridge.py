@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from threading import Thread
+from manual_chip_bookings import ManualChipBookings
 
 APP = Path(r"C:\Kristine\AccessBridge")
 APP.mkdir(parents=True, exist_ok=True)
@@ -444,22 +445,36 @@ def sync_access_loop():
 
 
 def monitor_learning_jobs():
-    # #610 wird ausschliesslich waehrend eines aktiven Lernauftrags verwendet.
-    # Pro Durchlauf wird nur ein Satz vom ausgewaehlten Terminal gelesen.
-    log.info("Chip-Lesen auf Abruf aktiv (keine dauernden Tibbo-Abfragen).")
+    # The reader is called only after an explicit, cloud-queued manual job.
+    # Hardware #610 is throttled, and every event is locally saved before upload.
+    handoff = ManualChipBookings(
+        APP / "manual_chip_bookings.sqlite3",
+        read_fn=gantner_read_bookings,
+        post_fn=lambda route, payload: remote_json(
+            route, method="POST", payload=payload, timeout=20
+        ),
+        log=log,
+    )
+    log.info("GAT-610 nur auf Abruf; lokale Buchungs-Sicherung und Wiederholungsversand aktiv.")
     while True:
         try:
+            # Cloud can be unavailable. Upload already-saved events without touching GAT.
+            if handoff.pending_count():
+                try:
+                    handoff.flush()
+                except Exception as exc:
+                    log.debug("GAT-Lokalspeicher wartet auf Cloud: %s", exc)
             response = remote_json("/admin/api/access/local-job", timeout=15)
             job = response.get("job") or {}
             job_type = str(job.get("type") or "")
-            if job_type in ("learn-read", "bookings-read"):
-                terminals = [int(job.get("terminalId") or 3)] if job_type == "learn-read" else [1, 2, 3]
-                all_bookings = []
-                for terminal_id in terminals:
-                    result = gantner_read_bookings(terminal_id, max_records=1)
-                    all_bookings.extend(result.get("bookings") or [])
-                    if len(terminals) > 1:
-                        time.sleep(0.5)
+            if job_type == "bookings-read":
+                # A retry of the SAME cloud job never reads the GAT hardware twice.
+                handoff.execute(job)
+            elif job_type == "learn-read":
+                # Preserve the existing one-reader chip-learning flow unchanged.
+                terminal_id = int(job.get("terminalId") or 3)
+                result = gantner_read_bookings(terminal_id, max_records=1)
+                all_bookings = result.get("bookings") or []
                 for event in all_bookings:
                     remote_json(
                         "/admin/api/access/chip-read",
@@ -467,23 +482,26 @@ def monitor_learning_jobs():
                         payload=event,
                         timeout=15,
                     )
-                    log.info("Chip gelesen: %s an Terminal %s", event.get("hardwareId"), event.get("terminalId"))
-                if job_type in ("learn-read", "bookings-read"):
-                    remote_json(
-                        "/admin/api/access/local-job/ack",
-                        method="POST",
-                        payload={"id": job.get("id"), "sessionId": job.get("sessionId"), "type": job_type, "ok": True, "result": {"bookings": all_bookings}},
-                        timeout=15,
-                    )
+                    log.info("Chip eingelesen: %s an Terminal %s",
+                             event.get("hardwareId"), event.get("terminalId"))
+                remote_json(
+                    "/admin/api/access/local-job/ack",
+                    method="POST",
+                    payload={"id": job.get("id"), "sessionId": job.get("sessionId"),
+                             "type": "learn-read", "ok": True,
+                             "result": {"bookings": all_bookings}},
+                    timeout=15,
+                )
             elif job_type == "learn-finish":
                 remote_json(
                     "/admin/api/access/local-job/ack",
                     method="POST",
-                    payload={"id": job.get("id"), "sessionId": job.get("sessionId"), "type": job_type, "ok": True, "result": {}},
+                    payload={"id": job.get("id"), "sessionId": job.get("sessionId"),
+                             "type": job_type, "ok": True, "result": {}},
                     timeout=15,
                 )
         except Exception as exc:
-            log.debug("Chip-Lernauftrag: %s", exc)
+            log.debug("Chip-Lernauftrag/Protokollleser: %s", exc)
         time.sleep(LOCAL_JOB_POLL_SECONDS)
 
 
