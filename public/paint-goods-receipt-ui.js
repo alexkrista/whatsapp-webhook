@@ -43,6 +43,7 @@
         hint.textContent='Rechnungen ab '+(candidateWindowStart||'vor 21 Tagen')+' · keine obere Datumsgrenze · bereits bezahlte Rechnungen eingeschlossen.';
         picker.append(hint);
         const available=invoiceCandidates.filter(c=>c.status!=='booking' && (!c.linkedOrderId||c.linkedOrderId===order.id));
+        available.sort((a,b)=>Number((b.matchingOrderIds||[]).includes(order.id))-Number((a.matchingOrderIds||[]).includes(order.id))||b.invoiceDate.localeCompare(a.invoiceDate));
         if(!available.length){
           const empty=document.createElement('p');
           empty.textContent=candidateError||'Noch keine offenen LG-Rechnungen aus THE BRAIN verfügbar. Letzte Synchronisierung: '+(candidateSyncAt?new Date(candidateSyncAt).toLocaleString('de-AT'):'ausstehend');
@@ -52,10 +53,12 @@
         const initial=document.createElement('option');initial.value='';initial.textContent='— Bitte Rechnung auswählen —';select.append(initial);
         for(const c of available){
           const option=document.createElement('option');option.value=c.invoiceRef;option.disabled=!!c.issue;
-          option.textContent=c.invoiceDate+' · '+c.invoiceRef+' · '+money(c.netAmount)+' · '+c.positionCount+' Positionen'+(c.paymentStatus?' · '+c.paymentStatus:'')+(c.issue?' · NICHT BUCHBAR: '+c.issue:'');
+          option.textContent=((c.matchingOrderIds||[]).includes(order.id)?'✓ Mengen passen · ':'⚠ Andere Bestellung? · ')+c.invoiceDate+' · '+c.invoiceRef+' · '+money(c.netAmount)+' · '+c.positionCount+' Positionen'+(c.paymentStatus?' · '+c.paymentStatus:'')+(c.issue?' · NICHT BUCHBAR: '+c.issue:'');
           select.append(option);
         }
         picker.append(select);
+        const matching=available.filter(c=>!c.issue&&(c.matchingOrderIds||[]).includes(order.id));
+        if(matching.length===1)select.value=matching[0].invoiceRef;
         const accept=document.createElement('button');accept.type='button';accept.className='btn primary';
         accept.textContent='Rechnung übernehmen und Material prüfen';
         const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Abbrechen';cancel.style.marginLeft='8px';
