@@ -149,7 +149,8 @@ def sync() -> dict:
     if data.get("ok") is not True or data.get("count") != len(payload["invoices"]):
         raise RuntimeError("Cloud hat die LG-Rechnungsliste nicht bestätigt.")
     return {"count": len(payload["invoices"]), "syncedAt": data.get("syncedAt"),
-            "openRefs": [row["invoiceRef"] for row in payload["invoices"]]}
+            "openRefs": [row["invoiceRef"] for row in payload["invoices"]],
+            "orderMatches": data.get("orderMatches", [])}
 
 
 if __name__ == "__main__":
