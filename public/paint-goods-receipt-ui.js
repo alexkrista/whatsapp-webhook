@@ -85,8 +85,33 @@
     detail.querySelector('[data-save]')?.addEventListener('click',async e=>{if(busy)return;busy=true;e.target.disabled=true;try{const positions=[...detail.querySelectorAll('[data-position]')].map(row=>({sku:order.positions[Number(row.dataset.position)].sku,quantity:row.querySelector('[data-qty]').value,unitPrice:row.querySelector('[data-price]').value}));const d=await api('/admin/api/paint/sent-orders/'+encodeURIComponent(order.id)+'/correct',{fingerprint:order.fingerprint,positions});await load(d.order.id);status.textContent='Korrekturen gespeichert. Lagerstand unverändert.';}catch(e){status.textContent=e.message;}finally{busy=false;const b=detail.querySelector('[data-save]');if(b)b.disabled=false;}});
   }
   function showReceipts(){
-    receiptsEl.innerHTML=receipts.length?receipts.slice().reverse().map(r=>'<article class="card" data-receipt="'+esc(r.id)+'"><b>Rechnung '+esc(r.invoiceRef)+' · '+(r.amountSource==='order'?'Bestellwert ':'')+money(r.netAmount)+'</b><p>'+esc(state(r.status))+(r.issue?' · '+esc(r.issue):'')+'</p><table class="rtable"><thead><tr><th>Artikel</th><th>Menge laut Rechnung</th><th>EK netto</th></tr></thead><tbody>'+r.lines.map(l=>'<tr><td>'+esc([l.product,l.baseName,l.size,l.sku].filter(Boolean).join(' · '))+'</td><td>'+esc(l.quantity)+'</td><td>'+money(l.unitPrice)+'</td></tr>').join('')+'</tbody></table>'+(r.status==='received'?'<p>✓ Wareneingang gebucht</p>':'<p><label>Zuordnung zur Bestellung <select data-order><option value="">Ohne Bestellzuordnung</option>'+orders.filter(o=>o.status==='sent').map(o=>'<option value="'+esc(o.id)+'" '+(r.orderId===o.id?'selected':'')+'>'+esc(o.id+' · '+(o.fileName||''))+'</option>').join('')+'</select></label></p><p>Bei fehlenden Artikeln oder Teillieferung die Aufgabe offen lassen.</p><button class="btn primary" data-confirm '+(r.issue?'disabled':'')+'>Ware angekommen und geprüft – einbuchen</button>')+'</article>').join(''):'<p>Noch kein offener Wareneingang aus einer Rechnung.</p>';
-    receiptsEl.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=async()=>{if(busy)return;const box=b.closest('[data-receipt]'),r=receipts.find(r=>r.id===box.dataset.receipt);if(!confirm('Alle angezeigten Mengen sind tatsächlich vollständig eingetroffen? Jetzt ins Lager einbuchen?'))return;busy=true;b.disabled=true;try{await api('/admin/api/paint/goods-receipts/'+encodeURIComponent(r.id)+'/confirm',{goodsReceived:true,revision:r.revision,orderId:box.querySelector('[data-order]').value});await load();status.textContent='Wareneingang eingebucht. Die Aufgabe ist erledigt.';}catch(e){status.textContent=e.message;b.disabled=false;}finally{busy=false;}});
+    const open=receipts.filter(r=>r.status!=='received').slice().reverse();
+    const booked=receipts.filter(r=>r.status==='received').slice().reverse();
+    const positionTable=r=>'<div style="overflow:auto"><table class="rtable"><thead><tr><th>Artikel</th><th>Menge laut Rechnung</th><th>EK netto</th></tr></thead><tbody>'+
+      (r.lines||[]).map(l=>'<tr><td>'+esc([l.product,l.baseName,l.size,l.sku].filter(Boolean).join(' · '))+'</td><td>'+esc(l.quantity)+'</td><td>'+money(l.unitPrice)+'</td></tr>').join('')+
+      '</tbody></table></div>';
+    const openRow=r=>'<article class="card" data-receipt="'+esc(r.id)+'"><b>Rechnung '+esc(r.invoiceRef)+' · '+(r.amountSource==='order'?'Bestellwert ':'')+money(r.netAmount)+'</b><p>'+esc(state(r.status))+(r.issue?' · '+esc(r.issue):'')+'</p>'+
+      positionTable(r)+'<p><label>Zuordnung zur Bestellung <select data-order><option value="">Ohne Bestellzuordnung</option>'+
+      orders.filter(o=>o.status==='sent').map(o=>'<option value="'+esc(o.id)+'" '+(r.orderId===o.id?'selected':'')+'>'+esc(o.id+' · '+(o.fileName||''))+'</option>').join('')+
+      '</select></label></p><p>Bei fehlenden Artikeln oder Teillieferung die Aufgabe offen lassen.</p><button class="btn primary" data-confirm '+(r.issue?'disabled':'')+'>Ware angekommen und geprüft – einbuchen</button></article>';
+    const bookedRow=r=>'<details class="card" style="margin:8px 0" data-receipt-archived="'+esc(r.id)+'"><summary style="cursor:pointer"><strong>✓ Rechnung '+esc(r.invoiceRef)+'</strong> · '+money(r.netAmount)+' · '+esc(r.orderId||r.sourceOrderId||'Ohne Bestellzuordnung')+'</summary>'+
+      '<p>Im Lager gebucht'+(r.receivedAt?' · '+esc(new Date(r.receivedAt).toLocaleString('de-AT')):'')+'</p>'+positionTable(r)+'</details>';
+    receiptsEl.innerHTML='<h4>Offene Wareneingänge ('+open.length+')</h4>'+
+      (open.length?open.map(openRow).join(''):'<p>Keine offenen Wareneingänge aus Rechnungen.</p>')+
+      '<details data-lg-received-archive style="margin-top:14px"><summary style="cursor:pointer;font-weight:750;padding:10px 0">Gebuchte Wareneingänge · Archiv ('+booked.length+')</summary>'+
+      (booked.length?booked.map(bookedRow).join(''):'<p>Noch keine gebuchten Wareneingänge.</p>')+'</details>';
+    receiptsEl.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=async()=>{
+      if(busy)return;
+      const box=b.closest('[data-receipt]'),r=receipts.find(r=>r.id===box.dataset.receipt);
+      if(!r||!confirm('Alle angezeigten Mengen sind tatsächlich vollständig eingetroffen? Jetzt ins Lager einbuchen?'))return;
+      busy=true;b.disabled=true;
+      try{
+        await api('/admin/api/paint/goods-receipts/'+encodeURIComponent(r.id)+'/confirm',
+          {goodsReceived:true,revision:r.revision,orderId:box.querySelector('[data-order]').value});
+        await load();status.textContent='Wareneingang eingebucht. Die Aufgabe ist erledigt und steht im eingeklappten Archiv.';
+      }catch(e){status.textContent=e.message;b.disabled=false;}
+      finally{busy=false;}
+    });
   }
   async function load(selectedId){status.textContent='Wird geladen …';const [o,r,c]=await Promise.all([api('/admin/api/paint/sent-orders'),api('/admin/api/paint/goods-receipts'),api('/admin/api/paint/lg-invoice-candidates').catch(e=>({invoices:[],error:e.message}))]);orders=o.orders;receipts=r.receipts;invoiceCandidates=c.invoices||[];candidateSyncAt=c.syncedAt||null;candidateWindowStart=c.windowStart||'';candidateError=c.error||'';ordersEl.innerHTML='<h3>Importierte / gesendete Bestellungen</h3>'+ (orders.length?orders.map(o=>'<p><button class="btn" data-open-order="'+esc(o.id)+'">'+esc(o.id)+' · '+esc(o.fileName||'Bestellung')+' · '+money(o.total)+' · '+esc(state(o.status))+'</button></p>').join(''):'<p>Noch keine importierte Bestellung gespeichert.</p>');ordersEl.querySelectorAll('[data-open-order]').forEach(b=>b.onclick=()=>showOrder(orders.find(o=>o.id===b.dataset.openOrder)));showReceipts();const selected=orders.find(o=>o.id===selectedId)||orders[0];if(selected)showOrder(selected);else detail.innerHTML='';status.textContent='';}
   function open(id){if(!dialog.open)dialog.showModal();load(id).catch(e=>status.textContent=e.message);}
