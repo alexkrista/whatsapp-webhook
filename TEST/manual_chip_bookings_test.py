@@ -35,7 +35,9 @@ class ManualBookTests(unittest.TestCase):
 
     def _reader(self, term, limit):
         self.reader_calls.append((term, limit))
-        return {"bookings":self.read_batches.get(term,[]).pop(0) if self.read_batches.get(term) else []}
+        if self.read_batches.get(term):
+            return {"bookings":self.read_batches[term].pop(0)}
+        return {"bookings":[], "readerEmpty":True}
 
     def _post(self, path, payload):
         if self.fail_upload and path == "/admin/api/access/chip-read":
@@ -59,7 +61,8 @@ class ManualBookTests(unittest.TestCase):
         result=self.spool.execute(job)
         self.assertEqual(result["state"],"waiting")
         self.assertEqual(result["pending"],4)
-        self.assertEqual(len(self.reader_calls),4)
+        initial_calls=len(self.reader_calls)
+        self.assertGreaterEqual(initial_calls,4)
         with closing(sqlite3.connect(self.db)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0],4)
             self.assertEqual(connection.execute("SELECT state FROM jobs").fetchone()[0],"done")
@@ -68,9 +71,36 @@ class ManualBookTests(unittest.TestCase):
         self.assertEqual(second["state"],"done")
         self.assertEqual(second["count"],4)
         self.assertEqual(self.spool.pending_count(),0)
-        self.assertEqual(len(self.reader_calls),4,"Cloud retry must never read #610 twice")
+        self.assertEqual(len(self.reader_calls),initial_calls,"Cloud retry must never read #610 twice")
         self.assertEqual(len([x for x in self.posted if x[0].endswith("/chip-read")]),4)
         self.assertEqual(self.posted[-1][0],"/admin/api/access/local-job/ack")
+
+    def test_empty_chip_batch_is_not_the_end_of_gat_events(self):
+        # Device returned multiple real #610 frames with code N/no chip
+        # followed by a valid card event. Previous implementation stopped at
+        # the first blank 'bookings' result and lost later chip accesses.
+        manuel={"hardwareId":"00064074108","terminalId":"1",
+                "code":"1","at":"2026-10-13T06:35:00"}
+        self.read_batches={1:[[],[],[],[manuel]],2:[],3:[]}
+        result=self.spool.execute({"id":"read_manuel_test","type":"bookings-read"})
+        self.assertEqual(result["count"],1)
+        self.assertEqual(result["stored"],1)
+        self.assertEqual(result["byTerminal"]["1"],1)
+        self.assertGreaterEqual(result["batchesByTerminal"]["1"],5)
+        self.assertEqual(len([x for x in self.posted if x[0]=="/admin/api/access/chip-read"]),1)
+        self.assertEqual(self.spool.pending_count(),0)
+
+    def test_legacy_zero_without_end_marker_remains_unverified(self):
+        calls=[]
+        def always_system(term,limit):
+            calls.append((term,limit))
+            return {"bookings":[]}
+        self.spool.reader=always_system
+        result=self.spool.execute({"id":"read_unknown_only","type":"bookings-read"})
+        self.assertEqual(result["count"],0)
+        self.assertEqual(result["unverifiedTerminals"],["1","2","3"])
+        self.assertEqual(len(calls),3*module.EMPTY_BATCHES_PER_TERMINAL)
+        self.assertEqual(result["limitedTerminals"],[])
 
     def test_limit_and_repeat_explicit_new_job(self):
         self.read_batches={
