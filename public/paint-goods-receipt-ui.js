@@ -22,6 +22,10 @@
       row.append(prepare);detail.append(row);
       prepare.onclick=async()=>{
         if(busy)return;
+        const unsaved=[...detail.querySelectorAll('[data-position]')].some((row,i)=>
+          Number(row.querySelector('[data-qty]').value)!==Number(order.positions[i].quantity)||
+          Number(row.querySelector('[data-price]').value)!==Number(order.positions[i].unitPrice));
+        if(unsaved){status.textContent='Bitte geänderte Mengen oder Preise zuerst mit „Korrekturen speichern“ übernehmen.';return;}
         const existing=receipts.find(r=>(r.orderId===order.id||r.sourceOrderId===order.id)&&r.status!=='received');
         if(existing){
           receiptsEl.querySelector('[data-receipt="'+existing.id+'"]')?.scrollIntoView({block:'center',behavior:'smooth'});
