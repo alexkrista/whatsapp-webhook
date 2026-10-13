@@ -14,6 +14,21 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
   function wrap(fn,allowSync=false){return async(req,res)=>{if(!(allowSync?require("./paint-lg-service-auth").requirePaintLgSync(req,res):auth(req,res)))return;try{res.json({ok:true,...await serial(()=>fn(req))});}catch(e){res.status(e.status||400).json({ok:false,error:e.message});}};}
   const round=n=>Math.round(Number(n)*1000)/1000;
   const rev=r=>crypto.createHash("sha256").update(JSON.stringify([r.invoiceRef,r.invoiceDate,r.netAmount,r.lines])).digest("hex");
+
+  function matchingOrdersByQuantity(row,orders){
+    const invoiceAmounts=new Map((row.lines||[]).map(line=>[line.sku,round(line.quantity)]));
+    return orders.filter(order=>{
+      if(order.status!=="sent")return false;
+      const orderAmounts=new Map();
+      for(const pos of order.positions||[])if(Number(pos.quantity)>0){
+        const sku=String(pos.sku||"").toUpperCase().replace(/\s+/g,"");
+        orderAmounts.set(sku,round((orderAmounts.get(sku)||0)+Number(pos.quantity)));
+      }
+      return invoiceAmounts.size===orderAmounts.size &&
+        [...invoiceAmounts].every(([sku,amount])=>orderAmounts.get(sku)===amount);
+    }).map(order=>order.id);
+  }
+
   async function task(receipt,done=false){
     const tasks=await read(tasksFile,[]), id="lg_receipt_"+receipt.id;
     let t=tasks.find(t=>t.id===id);
@@ -31,7 +46,11 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
     if(!requireLgCandidatesSync(req,res))return;
     try {
       const result=await candidateStore.replace(req.body?.invoices);
-      res.json({ok:true,...result});
+      const orders=await read(path.join(root,"lg-sent-orders.json"),[]);
+      const invoices=(await candidateStore.read()).invoices;
+      res.json({ok:true,...result,orderMatches:invoices.map(row=>({
+        invoiceRef:row.invoiceRef,orderIds:matchingOrdersByQuantity(row,orders),issue:row.issue
+      }))});
     }catch(error){res.status(400).json({ok:false,error:String(error.message||error)});}
   });
   app.get("/admin/api/paint/lg-invoice-candidates",wrap(async()=>{
@@ -53,17 +72,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
       if(row.invoiceDate<cutoff || Object.keys(legacy).some(key=>key.toUpperCase()===reference) || posted.has(reference))return false;
       return !receipts.some(r=>String(r.invoiceRef||"").trim().toUpperCase()===reference && r.status==="received");
     }).map(row=>{
-      const invoiceAmounts=new Map(row.lines.map(line=>[line.sku,round(line.quantity)]));
-      const matchingOrderIds=orders.filter(order=>{
-        if(order.status!=="sent")return false;
-        const orderAmounts=new Map();
-        for(const pos of order.positions||[])if(Number(pos.quantity)>0){
-          const sku=String(pos.sku||"").toUpperCase().replace(/\s+/g,"");
-          orderAmounts.set(sku,round((orderAmounts.get(sku)||0)+Number(pos.quantity)));
-        }
-        return invoiceAmounts.size===orderAmounts.size &&
-          [...invoiceAmounts].every(([sku,amount])=>orderAmounts.get(sku)===amount);
-      }).map(order=>order.id);
+      const matchingOrderIds=matchingOrdersByQuantity(row,orders);
       const receipt=receipts.find(r=>String(r.invoiceRef||"").trim().toUpperCase()===row.invoiceRef);
       return {invoiceRef:row.invoiceRef,invoiceDate:row.invoiceDate,netAmount:row.netAmount,
         paymentStatus:row.paymentStatus,positionCount:row.lines.length,
