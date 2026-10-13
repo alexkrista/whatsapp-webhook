@@ -146,7 +146,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
       return {receipt:existing,duplicate:true,awaitingGoods:true};
     }
     const now=new Date().toISOString();
-    const receipt={id,invoiceRef,invoiceDate:candidate?.invoiceDate||null,netAmount:candidate?.netAmount??Number(order.total)||0,
+    const receipt={id,invoiceRef,invoiceDate:candidate?.invoiceDate||null,netAmount:candidate ? candidate.netAmount : (Number(order.total)||0),
       amountSource:candidate?"invoice":"order",sourceOrderId:order.id,orderId:order.id,sourceInvoiceId:candidate?.sourceInvoiceId||null,
       lines,status:"awaiting_goods",createdAt:now,updatedAt:now,issue:""};
     receipt.revision=rev(receipt);
