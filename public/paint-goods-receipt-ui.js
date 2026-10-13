@@ -10,7 +10,7 @@
   const dialog=document.createElement('dialog');dialog.style.cssText='width:min(1100px,95vw);max-height:90vh;overflow:auto;border:1px solid #cfd1ca;border-radius:16px;padding:20px';
   dialog.innerHTML='<div style="display:flex;justify-content:space-between;gap:12px"><h2>Bestellungen & Wareneingang</h2><button class="btn" data-close>Schließen</button></div><p>Importierte Bestellungen bleiben erhalten und können geprüft und korrigiert werden. Erst „Ware vollständig da & einbuchen“ erhöht den Lagerstand.</p><p role="status" data-status></p><section data-orders></section><section data-detail></section><h3>Rechnung da · Ware da?</h3><section data-receipts></section>';
   document.body.append(dialog);dialog.querySelector('[data-close]').onclick=()=>dialog.close();
-  const status=dialog.querySelector('[data-status]'), ordersEl=dialog.querySelector('[data-orders]'), detail=dialog.querySelector('[data-detail]'),receiptsEl=dialog.querySelector('[data-receipts]');let orders=[],receipts=[],busy=false;
+  const status=dialog.querySelector('[data-status]'), ordersEl=dialog.querySelector('[data-orders]'), detail=dialog.querySelector('[data-detail]'),receiptsEl=dialog.querySelector('[data-receipts]');let orders=[],receipts=[],invoiceCandidates=[],candidateSyncAt=null,candidateWindowStart="",candidateError="",busy=false;
   const state=s=>({sent:'Bestellt',received:'Ware eingebucht',invoiced:'Abgerechnet',cancelled:'Storniert',superseded:'Ersetzt',awaiting_goods:'Ware noch zu bestätigen',booking:'Buchung abschließen'}[s]||s);
   function showOrder(order){
     const editable=!['received','invoiced','cancelled','superseded'].includes(order.status);
@@ -32,20 +32,51 @@
           status.textContent='Wareneingang zur Bestellung bereits vorbereitet. Bitte die Materialmengen kontrollieren.';
           return;
         }
-        const invoiceRef=window.prompt('Welche Little-Greene-Rechnungsnummer gehört zu dieser Bestellung? (z. B. CIN000628236)','');
-        if(!invoiceRef||!invoiceRef.trim())return;
-        if(!window.confirm('Bestellung '+order.id+' mit Rechnung '+invoiceRef.trim()+' verknüpfen?\nDanach die angezeigten Mengen kontrollieren und ausdrücklich einbuchen.'))return;
-        busy=true;prepare.disabled=true;
-        try{
-          const result=await api('/admin/api/paint/sent-orders/'+encodeURIComponent(order.id)+'/prepare-goods-receipt',
-            {invoiceRef:invoiceRef.trim(),fingerprint:order.fingerprint});
-          await load(order.id);
-          if(result.alreadyBooked){status.textContent='Diese Bestellung wurde bereits eingebucht. Keine zweite Zubuchung.';return;}
-          status.textContent='Wareneingang vorbereitet. Bitte alle Positionen prüfen und erst dann den grünen Buchungsbutton bestätigen.';
-          const box=receiptsEl.querySelector('[data-receipt="'+result.receipt.id+'"]');
-          if(box){box.style.outline='2px solid #37664a';box.scrollIntoView({block:'center',behavior:'smooth'});}
-        }catch(error){status.textContent=error.message;}
-        finally{busy=false;prepare.disabled=false;}
+        const oldPicker=detail.querySelector('[data-lg-invoice-picker]');
+        if(oldPicker){oldPicker.remove();return;}
+        const picker=document.createElement('section');
+        picker.dataset.lgInvoicePicker='1';
+        picker.style.cssText='padding:15px;border:1px solid #8fa796;border-radius:12px;background:rgba(77,118,85,.07);margin:12px 0';
+        const heading=document.createElement('h4');heading.textContent='Offene Little-Greene-Rechnung auswählen';
+        picker.append(heading);
+        const hint=document.createElement('p');
+        hint.textContent='Rechnungen ab '+(candidateWindowStart||'vor 21 Tagen')+' · keine obere Datumsgrenze · bereits bezahlte Rechnungen eingeschlossen.';
+        picker.append(hint);
+        const available=invoiceCandidates.filter(c=>c.status!=='booking' && (!c.linkedOrderId||c.linkedOrderId===order.id));
+        if(!available.length){
+          const empty=document.createElement('p');
+          empty.textContent=candidateError||'Noch keine offenen LG-Rechnungen aus THE BRAIN verfügbar. Letzte Synchronisierung: '+(candidateSyncAt?new Date(candidateSyncAt).toLocaleString('de-AT'):'ausstehend');
+          picker.append(empty);row.after(picker);return;
+        }
+        const select=document.createElement('select');select.style.cssText='width:100%;max-width:850px;min-height:42px;margin-bottom:10px';
+        const initial=document.createElement('option');initial.value='';initial.textContent='— Bitte Rechnung auswählen —';select.append(initial);
+        for(const c of available){
+          const option=document.createElement('option');option.value=c.invoiceRef;option.disabled=!!c.issue;
+          option.textContent=c.invoiceDate+' · '+c.invoiceRef+' · '+money(c.netAmount)+' · '+c.positionCount+' Positionen'+(c.paymentStatus?' · '+c.paymentStatus:'')+(c.issue?' · NICHT BUCHBAR: '+c.issue:'');
+          select.append(option);
+        }
+        picker.append(select);
+        const accept=document.createElement('button');accept.type='button';accept.className='btn primary';
+        accept.textContent='Rechnung übernehmen und Material prüfen';
+        const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Abbrechen';cancel.style.marginLeft='8px';
+        cancel.onclick=()=>picker.remove();picker.append(accept,cancel);row.after(picker);
+        accept.onclick=async()=>{
+          if(busy)return;
+          const invoiceRef=select.value;
+          if(!invoiceRef){status.textContent='Bitte eine offene LG-Rechnung auswählen.';return;}
+          if(!window.confirm('Rechnung '+invoiceRef+' zur Bestellung '+order.id+' übernehmen? Danach alle Rechnungspositionen kontrollieren und erst anschließend buchen.'))return;
+          busy=true;accept.disabled=true;
+          try{
+            const result=await api('/admin/api/paint/sent-orders/'+encodeURIComponent(order.id)+'/prepare-goods-receipt',
+              {invoiceRef,fingerprint:order.fingerprint,fromInvoiceSelection:true});
+            await load(order.id);
+            if(result.alreadyBooked){status.textContent='Bereits eingebucht – keine zweite Zubuchung.';return;}
+            status.textContent='Rechnung '+invoiceRef+' mit ALLEN Rechnungspositionen vorbereitet. Unten Mengen prüfen und dann endgültig einbuchen.';
+            const box=receiptsEl.querySelector('[data-receipt="'+result.receipt.id+'"]');
+            if(box){box.style.outline='2px solid #37664a';box.scrollIntoView({block:'center',behavior:'smooth'});}
+          }catch(error){status.textContent=error.message;accept.disabled=false;}
+          finally{busy=false;}
+        };
       };
     }
     detail.querySelector('[data-save]')?.addEventListener('click',async e=>{if(busy)return;busy=true;e.target.disabled=true;try{const positions=[...detail.querySelectorAll('[data-position]')].map(row=>({sku:order.positions[Number(row.dataset.position)].sku,quantity:row.querySelector('[data-qty]').value,unitPrice:row.querySelector('[data-price]').value}));const d=await api('/admin/api/paint/sent-orders/'+encodeURIComponent(order.id)+'/correct',{fingerprint:order.fingerprint,positions});await load(d.order.id);status.textContent='Korrekturen gespeichert. Lagerstand unverändert.';}catch(e){status.textContent=e.message;}finally{busy=false;const b=detail.querySelector('[data-save]');if(b)b.disabled=false;}});
@@ -54,7 +85,7 @@
     receiptsEl.innerHTML=receipts.length?receipts.slice().reverse().map(r=>'<article class="card" data-receipt="'+esc(r.id)+'"><b>Rechnung '+esc(r.invoiceRef)+' · '+(r.amountSource==='order'?'Bestellwert ':'')+money(r.netAmount)+'</b><p>'+esc(state(r.status))+(r.issue?' · '+esc(r.issue):'')+'</p><table class="rtable"><thead><tr><th>Artikel</th><th>Menge laut Rechnung</th><th>EK netto</th></tr></thead><tbody>'+r.lines.map(l=>'<tr><td>'+esc([l.product,l.baseName,l.size,l.sku].filter(Boolean).join(' · '))+'</td><td>'+esc(l.quantity)+'</td><td>'+money(l.unitPrice)+'</td></tr>').join('')+'</tbody></table>'+(r.status==='received'?'<p>✓ Wareneingang gebucht</p>':'<p><label>Zuordnung zur Bestellung <select data-order><option value="">Ohne Bestellzuordnung</option>'+orders.filter(o=>o.status==='sent').map(o=>'<option value="'+esc(o.id)+'" '+(r.orderId===o.id?'selected':'')+'>'+esc(o.id+' · '+(o.fileName||''))+'</option>').join('')+'</select></label></p><p>Bei fehlenden Artikeln oder Teillieferung die Aufgabe offen lassen.</p><button class="btn primary" data-confirm '+(r.issue?'disabled':'')+'>Ware angekommen und geprüft – einbuchen</button>')+'</article>').join(''):'<p>Noch kein offener Wareneingang aus einer Rechnung.</p>';
     receiptsEl.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=async()=>{if(busy)return;const box=b.closest('[data-receipt]'),r=receipts.find(r=>r.id===box.dataset.receipt);if(!confirm('Alle angezeigten Mengen sind tatsächlich vollständig eingetroffen? Jetzt ins Lager einbuchen?'))return;busy=true;b.disabled=true;try{await api('/admin/api/paint/goods-receipts/'+encodeURIComponent(r.id)+'/confirm',{goodsReceived:true,revision:r.revision,orderId:box.querySelector('[data-order]').value});await load();status.textContent='Wareneingang eingebucht. Die Aufgabe ist erledigt.';}catch(e){status.textContent=e.message;b.disabled=false;}finally{busy=false;}});
   }
-  async function load(selectedId){status.textContent='Wird geladen …';const [o,r]=await Promise.all([api('/admin/api/paint/sent-orders'),api('/admin/api/paint/goods-receipts')]);orders=o.orders;receipts=r.receipts;ordersEl.innerHTML='<h3>Importierte / gesendete Bestellungen</h3>'+ (orders.length?orders.map(o=>'<p><button class="btn" data-open-order="'+esc(o.id)+'">'+esc(o.id)+' · '+esc(o.fileName||'Bestellung')+' · '+money(o.total)+' · '+esc(state(o.status))+'</button></p>').join(''):'<p>Noch keine importierte Bestellung gespeichert.</p>');ordersEl.querySelectorAll('[data-open-order]').forEach(b=>b.onclick=()=>showOrder(orders.find(o=>o.id===b.dataset.openOrder)));showReceipts();const selected=orders.find(o=>o.id===selectedId)||orders[0];if(selected)showOrder(selected);else detail.innerHTML='';status.textContent='';}
+  async function load(selectedId){status.textContent='Wird geladen …';const [o,r,c]=await Promise.all([api('/admin/api/paint/sent-orders'),api('/admin/api/paint/goods-receipts'),api('/admin/api/paint/lg-invoice-candidates').catch(e=>({invoices:[],error:e.message}))]);orders=o.orders;receipts=r.receipts;invoiceCandidates=c.invoices||[];candidateSyncAt=c.syncedAt||null;candidateWindowStart=c.windowStart||'';candidateError=c.error||'';ordersEl.innerHTML='<h3>Importierte / gesendete Bestellungen</h3>'+ (orders.length?orders.map(o=>'<p><button class="btn" data-open-order="'+esc(o.id)+'">'+esc(o.id)+' · '+esc(o.fileName||'Bestellung')+' · '+money(o.total)+' · '+esc(state(o.status))+'</button></p>').join(''):'<p>Noch keine importierte Bestellung gespeichert.</p>');ordersEl.querySelectorAll('[data-open-order]').forEach(b=>b.onclick=()=>showOrder(orders.find(o=>o.id===b.dataset.openOrder)));showReceipts();const selected=orders.find(o=>o.id===selectedId)||orders[0];if(selected)showOrder(selected);else detail.innerHTML='';status.textContent='';}
   function open(id){if(!dialog.open)dialog.showModal();load(id).catch(e=>status.textContent=e.message);}
   button.onclick=()=>open();window.addEventListener('krista:lg-order-imported',e=>open(e.detail?.id));
 })();
