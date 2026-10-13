@@ -101,7 +101,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-order-excel-ui.js?v=20260822-1845"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-goods-receipt-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-goods-receipt-ui.js?v=20260923"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-goods-receipt-ui.js?v=20261013-lg-receipt-confirm"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-lg-sent-order-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-lg-sent-order-ui.js?v=20260923-receipts"></script>\n</body>');
