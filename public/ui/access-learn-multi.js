@@ -243,7 +243,7 @@
                 button.textContent="Zutritte jetzt auslesen";
                 const report=job.result||{},num=Number(report.count||0);
                 const partial=(report.limitedTerminals||[]).length>0;
-                const uncertain=(report.unverifiedTerminals||[]).length>0;
+                const uncertain=!Array.isArray(report.unverifiedTerminals)||report.unverifiedTerminals.length>0;
                 const message=job.state==="error"?
                   "Auslesung nicht vollständig: "+(job.error||report.error||"Unbekannter Fehler.") :
                   num+" Chip-Buchungen gelesen · "+Number(report.stored??num)+" neu gesichert."+
