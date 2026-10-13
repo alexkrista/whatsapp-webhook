@@ -417,7 +417,7 @@
     loadKristinePlanningSidebarFix();
     loadKristineControlHistoryFix();
     loadKristineTaskList();
-    if(isKristineMainPath())loadScriptOnce("/public/ui/customer-portal-task-activity.js?v=20261012-1","data-krista-customer-portal-activity");
+    if(isKristineMainPath())loadScriptOnce("/public/ui/customer-portal-task-activity.js?v=20261013-1","data-krista-customer-portal-activity");
     loadKristineTaskCreateModal();
     loadKristineFinanceApproval();
     loadKristineRegieApproval();
