@@ -22,6 +22,82 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
     t.goodsReceiptId=receipt.id;await write(tasksFile,tasks);
   }
   app.get("/admin/api/paint/goods-receipts",wrap(async()=>({receipts:await read(file,[])})));
+
+  // A received order can be prepared for booking even when Brain's invoice
+  // workflow did not generate an invoice-based receipt. Preparation NEVER books stock.
+  app.post("/admin/api/paint/sent-orders/:id/prepare-goods-receipt",wrap(async req=>{
+    const invoiceRef=String(req.body?.invoiceRef||"").trim().toUpperCase();
+    if(!/^[A-Z0-9][A-Z0-9._/-]{2,99}$/.test(invoiceRef))throw Error("Bitte die originale LG-Rechnungsnummer eingeben.");
+    const legacy=await read(path.join(root,"lg-incoming-sync.json"),{});
+    if(Object.keys(legacy).some(key=>key.toUpperCase()===invoiceRef))throw Error("Diese Rechnung wurde bereits im früheren Lagerverfahren gebucht.");
+    const orders=await read(path.join(root,"lg-sent-orders.json"),[]);
+    const order=orders.find(row=>row.id===req.params.id);
+    if(!order)throw Error("Bestellung nicht gefunden.");
+    const receipts=await read(file,[]);
+    const previousForOrder=receipts.find(row=>row.orderId===order.id||row.sourceOrderId===order.id);
+    if(order.status==="received"){
+      return {duplicate:true,alreadyBooked:true,receipt:previousForOrder||null};
+    }
+    if(order.status!=="sent")throw Error("Nur offene Bestellungen können eingebucht werden.");
+    if(String(req.body?.fingerprint||"")!==String(order.fingerprint||""))throw Error("Bestellung wurde zwischenzeitlich geändert. Bitte neu öffnen.");
+    if(previousForOrder && previousForOrder.invoiceRef.toUpperCase()!==invoiceRef)
+      throw Error("Diese Bestellung ist bereits mit einer anderen Rechnung verknüpft.");
+    const id=crypto.createHash("sha256").update(invoiceRef).digest("hex").slice(0,24);
+    const existing=receipts.find(row=>row.id===id||String(row.invoiceRef||"").toUpperCase()===invoiceRef);
+    if(existing && existing.orderId && existing.orderId!==order.id)
+      throw Error("Diese Rechnung ist bereits einer anderen Bestellung zugeordnet.");
+    if(existing?.status==="received")
+      throw Error("Diese Rechnung wurde bereits als Wareneingang gebucht. Keine zweite Zubuchung.");
+    if(existing?.status==="booking")throw Error("Lagerbuchung für diese Rechnung läuft bereits.");
+    if(existing?.issue)throw Error("Rechnungspositionen sind nicht eindeutig. Bitte zuerst klären.");
+    const articles=await read(path.join(root,"articles.json"),[]);
+    const byId=new Map(articles.map(a=>[String(a.id||""),a]));
+    const bySku=new Map();
+    for(const article of articles){
+      const sku=String(article.stockCode||"").trim().toUpperCase().replace(/\s+/g,"");
+      if(!sku)continue;
+      if(bySku.has(sku))bySku.set(sku,null);
+      else bySku.set(sku,article);
+    }
+    const lines=[],seen=new Set();
+    for(const pos of order.positions||[]){
+      const quantity=Number(pos.quantity),unitPrice=Number(pos.unitPrice);
+      if(!Number.isFinite(quantity)||quantity<0||!Number.isFinite(unitPrice)||unitPrice<0)
+        throw Error("Ungültige Menge oder Einkaufspreis in der Bestellung.");
+      if(quantity===0)continue;
+      const sku=String(pos.sku||"").trim().toUpperCase().replace(/\s+/g,"");
+      if(!sku||seen.has(sku))throw Error("SKU fehlt oder ist doppelt: "+sku);
+      seen.add(sku);
+      const article=byId.get(String(pos.articleId||""))||bySku.get(sku);
+      if(!article||String(article.stockCode||"").replace(/\s+/g,"").toUpperCase()!==sku)
+        throw Error("Material nicht eindeutig im Lagerstamm gefunden: "+sku);
+      lines.push({articleId:article.id,sku,product:article.product||pos.product||sku,
+        size:article.size||pos.size||"",baseName:article.baseName||pos.baseName||"",
+        quantity:round(quantity),unitPrice});
+    }
+    if(!lines.length)throw Error("Keine bestellten Materialmengen vorhanden.");
+    const totals=rows=>{const map=new Map();
+      for(const row of rows)if(Number(row.quantity)>0){
+        const sku=String(row.sku||"").trim().toUpperCase().replace(/\s+/g,"");
+        map.set(sku,round((map.get(sku)||0)+Number(row.quantity)));
+      }return map;};
+    if(existing){
+      const a=totals(existing.lines||[]),b=totals(lines);
+      if(a.size!==b.size||[...a].some(([sku,qty])=>b.get(sku)!==qty))
+        throw Error("Rechnungspositionen und Bestellung haben unterschiedliche Mengen. Bitte prüfen.");
+      existing.orderId=order.id;existing.sourceOrderId=order.id;
+      await write(file,receipts);
+      return {receipt:existing,duplicate:true,awaitingGoods:true};
+    }
+    const now=new Date().toISOString();
+    const receipt={id,invoiceRef,invoiceDate:null,netAmount:Number(order.total)||0,
+      amountSource:"order",sourceOrderId:order.id,orderId:order.id,sourceInvoiceId:null,
+      lines,status:"awaiting_goods",createdAt:now,updatedAt:now,issue:""};
+    receipt.revision=rev(receipt);
+    receipts.push(receipt);await write(file,receipts);await task(receipt);
+    return {receipt,awaitingGoods:true,created:true};
+  }));
+
   app.post("/admin/api/paint/lg-incoming-sync",wrap(async req=>{
     const b=req.body||{}, invoiceRef=String(b.invoiceRef||b.invoiceNumber||"").trim().slice(0,120), invoiceDate=String(b.invoiceDate||"").slice(0,10), netAmount=Number(b.netAmount);
     if(!invoiceRef||!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||!Number.isFinite(netAmount))throw Error("Rechnungsnummer, Datum und Netto erforderlich");
@@ -50,6 +126,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
     if(r.lines.some(x=>!map.has(x.articleId)))throw Error("Ein Lagerartikel fehlt. Bitte zuerst klären.");
     const orders=await read(path.join(root,"lg-sent-orders.json"),[]);
     const orderId=String(r.booking?r.orderId||"":req.body.orderId||"");const order=orderId?orders.find(o=>o.id===orderId):null;
+    if(r.sourceOrderId && orderId!==r.sourceOrderId)throw Error("Diese Warenlieferung muss mit ihrer ursprünglichen Bestellung gebucht werden.");
     if(orderId&&!order)throw Error("Bestellung nicht gefunden");
     if(order&&(["invoiced","cancelled","superseded"].includes(order.status)||(order.status==="received"&&!(r.booking&&order.invoiceRef===r.invoiceRef))))throw Error("Diese Bestellung ist bereits abgeschlossen.");
     if(order){const totals=rows=>{const m=new Map();for(const x of rows.filter(x=>Number(x.quantity)>0))m.set(x.sku,round((m.get(x.sku)||0)+Number(x.quantity)));return m;};const a=totals(order.positions),b=totals(r.lines);if(a.size!==b.size||[...a].some(([k,v])=>b.get(k)!==v))throw Error("Rechnung und Bestellung haben unterschiedliche Mengen. Zuordnung bitte klären; die Bestellung bleibt offen.");}
