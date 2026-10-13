@@ -52,6 +52,7 @@ const {cutoffVienna}=require("../paint-lg-invoice-candidates");
    let list=(await req("/admin/api/paint/lg-invoice-candidates")).body;
    assert.deepEqual(list.invoices.map(row=>row.invoiceRef),["CIN-FUTURE-2027","CIN-RECENT-2026"]);
    assert.equal(list.invoices[1].paymentStatus,"Bezahlt (Vorauskassa)");
+   assert.deepEqual(list.invoices[1].matchingOrderIds,[order.id],"Exact SKU quantities suggest the correct order");
    assert.equal(list.windowStart,cutoffVienna());
    const prepare=await req("/admin/api/paint/sent-orders/"+order.id+"/prepare-goods-receipt",{
      fromInvoiceSelection:true,invoiceRef:"CIN-RECENT-2026",fingerprint:order.fingerprint
