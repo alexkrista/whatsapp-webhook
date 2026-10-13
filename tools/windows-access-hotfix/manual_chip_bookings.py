@@ -13,6 +13,7 @@ from pathlib import Path
 
 BATCH_SIZE = 3  # Local GAT API currently allows at most three records per call.
 BATCHES_PER_TERMINAL = 8  # At most 24 records per terminal per manual click.
+EMPTY_BATCHES_PER_TERMINAL = 5  # Three GAT frames may all be housekeeping records, not a true EOF.
 
 
 class ManualChipBookings:
@@ -97,27 +98,45 @@ class ManualChipBookings:
             )
 
     def read_manual(self):
-        """Read a bounded batch from each terminal; persist each batch before continuing."""
-        result = {"count": 0, "stored": 0, "byTerminal": {}, "limitedTerminals": []}
+        """Scan a bounded number of GAT responses, not only recognized chip IDs.
+
+        Legacy GAT API returns only chip-bearing rows: an empty 'bookings'
+        array can also mean three consumed SYSTEM records (code N), rather
+        than an empty reader queue. Therefore len(rows)<BATCH_SIZE is NOT EOF.
+        Never claim the reader is empty without an explicit hardware marker.
+        """
+        result = {"count": 0, "stored": 0, "byTerminal": {},
+                  "limitedTerminals": [], "unverifiedTerminals": [], "batchesByTerminal": {}}
         for terminal_id in (1, 2, 3):
-            total = 0
+            total, empty_streak, reader_empty = 0, 0, False
+            batches = 0
             for batch_index in range(BATCHES_PER_TERMINAL):
                 response = self.reader(terminal_id, BATCH_SIZE)
                 rows = response.get("bookings") if isinstance(response, dict) else None
                 if not isinstance(rows, list) or len(rows) > BATCH_SIZE:
                     raise RuntimeError(f"GAT-Leser {terminal_id}: unplausible Antwort")
+                batches += 1
                 for item in rows:
                     if self.save_event(item):
                         result["stored"] += 1
                 total += len(rows)
                 result["count"] += len(rows)
                 result["byTerminal"][str(terminal_id)] = total
-                if len(rows) < BATCH_SIZE:
+                result["batchesByTerminal"][str(terminal_id)] = batches
+                # Newer GAT APIs may explicitly report a real end-of-buffer.
+                # The legacy API does not: never infer EOF from len(rows).
+                if response.get("readerEmpty") is True:
+                    reader_empty = True
                     break
-                if batch_index + 1 == BATCHES_PER_TERMINAL:
-                    result["limitedTerminals"].append(str(terminal_id))
-                else:
+                empty_streak = empty_streak + 1 if not rows else 0
+                if empty_streak >= EMPTY_BATCHES_PER_TERMINAL:
+                    break
+                if batch_index + 1 < BATCHES_PER_TERMINAL:
                     self.pause(0.4)
+            if not reader_empty:
+                result["unverifiedTerminals"].append(str(terminal_id))
+            if not reader_empty and batches >= BATCHES_PER_TERMINAL:
+                result["limitedTerminals"].append(str(terminal_id))
         return result
 
     def handle(self, job):
