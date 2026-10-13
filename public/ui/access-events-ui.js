@@ -154,8 +154,10 @@
     const section=document.createElement("section");
     section.id="tab-access-events";
     section.className="hidden";
-    section.innerHTML=`<div class="toolbar access-filterbar"><button data-access-filter="all" class="active">Alle</button><button data-access-filter="allowed">Erlaubt</button><button data-access-filter="denied">Abgewiesen</button><button data-access-filter="unknown">Unbekannt</button><button id="accessChipFilter" class="hidden"></button><button id="accessEventsRefresh">↻ Aktualisieren</button></div><p class="access-meta">„Erlaubt“ und „Abgewiesen“ zeigen nur ausdrücklich bestätigte Ergebnisse. „Unbekannt“ umfasst noch unbenannte Chips. Aktualisieren lädt gespeicherte Daten.</p><div id="accessEventsList" class="history"></div>`;
+    section.innerHTML=`<div class="toolbar access-filterbar"><button data-access-filter="all" class="active">Alle</button><button data-access-filter="allowed">Erlaubt</button><button data-access-filter="denied">Abgewiesen</button><button data-access-filter="unknown">Unbekannt</button><button id="accessChipFilter" class="hidden"></button><button id="accessEventsRefresh">↻ Aktualisieren</button></div><p class="access-meta">„Erlaubt“ und „Abgewiesen“ zeigen nur ausdrücklich bestätigte Ergebnisse. „Unbekannt“ umfasst noch unbenannte Chips. Aktualisieren lädt gespeicherte Daten.</p><p id="manualBookingReadStatus" class="access-meta" role="status" aria-live="polite">Das Auslesen ist manuell. Änderungen an Chip-Rechten laufen davon unabhängig.</p><div id="accessEventsList" class="history"></div>`;
     history.parentNode.insertBefore(section,history);
+    const existingReadButton=document.getElementById("manualBookingRead");
+    if(existingReadButton)section.querySelector(".toolbar")?.appendChild(existingReadButton);
 
     const style=document.createElement("style");
     style.textContent=`
@@ -196,6 +198,7 @@
     section.querySelectorAll("[data-access-filter]").forEach(b=>b.onclick=()=>{filter=b.dataset.accessFilter;chipFilter="";render()});
     document.getElementById("accessChipFilter").onclick=()=>{chipFilter="";render()};
     document.getElementById("accessEventsRefresh").onclick=loadEvents;
+    window.addEventListener("krista:access-read-finished",loadEvents);
 
     const lists=document.querySelectorAll("#activeList,#reserveList");
     const observer=new MutationObserver(()=>augmentChipLists());
