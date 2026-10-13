@@ -78,6 +78,38 @@ const { registerPaintInventory } = require("../paint-inventory");
     const legacy=await post("/admin/api/paint/lg-incoming-sync",{...payload,invoiceRef:"OLD"});
     assert.equal(legacy.body.alreadyBooked,true);
     assert.equal(stock(),5,"historical receipts never rebook");
+    // User-confirmed delivery can be prepared from a sent LG order even if
+    // the invoice did not reach the incoming-sync workflow.
+    const orderId="LG-20261013-001",fp="fingerprint-test-lg-order";
+    fs.writeFileSync(path.join(paintDir,"lg-sent-orders.json"),JSON.stringify([{
+      id:orderId,status:"sent",fingerprint:fp,source:"test",fileName:"LG order",
+      total:224.4,positions:[{articleId:"LG-00123456789",sku:"00123456789",product:"Absolute Matt",
+        quantity:3,unitPrice:74.8,lineTotal:224.4}]
+    }]),"utf8");
+    const prepUrl="/admin/api/paint/sent-orders/"+orderId+"/prepare-goods-receipt";
+    const preview=await post(prepUrl,{invoiceRef:"CIN-TEST-1",fingerprint:fp});
+    assert.equal(preview.status,200,preview.body.error);
+    assert.equal(preview.body.awaitingGoods,true);
+    assert.equal(preview.body.receipt.sourceOrderId,orderId);
+    assert.equal(stock(),5,"Preparing order delivery must never book stock");
+    const repeatedPreview=await post(prepUrl,{invoiceRef:"CIN-TEST-1",fingerprint:fp});
+    assert.equal(repeatedPreview.body.duplicate,true,"Same invoice/order must reuse the receipt");
+    const otherInvoice=await post(prepUrl,{invoiceRef:"CIN-TEST-2",fingerprint:fp});
+    assert.equal(otherInvoice.status,400,"Order cannot be linked to a second invoice");
+    const previewConfirm="/admin/api/paint/goods-receipts/"+preview.body.receipt.id+"/confirm";
+    const wrongOrder=await post(previewConfirm,{goodsReceived:true,revision:preview.body.receipt.revision,orderId:""});
+    assert.equal(wrongOrder.status,400,"Prepared goods receipt must be booked to its original order");
+    assert.equal(stock(),5);
+    const bookedOrder=await post(previewConfirm,{goodsReceived:true,revision:preview.body.receipt.revision,orderId});
+    assert.equal(bookedOrder.status,200,bookedOrder.body.error);
+    assert.equal(stock(),8,"Stock increments only after explicit confirmed order delivery");
+    const secondConfirm=await post(previewConfirm,{goodsReceived:true,revision:preview.body.receipt.revision,orderId});
+    assert.equal(secondConfirm.body.duplicate,true);
+    assert.equal(stock(),8,"Repeated booking must not change stock");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(paintDir,"lg-sent-orders.json"),"utf8"))[0].status,"received");
+    const subsequentSync=await post("/admin/api/paint/lg-incoming-sync",{...payload,invoiceRef:"CIN-TEST-1"});
+    assert.equal(subsequentSync.body.duplicate,true,"Later invoice sync must never book the delivery twice");
+    assert.equal(stock(),8);
     console.log("LG incoming stock sync checks passed");
   } finally {
     await new Promise(resolve => server.close(resolve));
