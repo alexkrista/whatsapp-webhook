@@ -4,6 +4,7 @@ import importlib.util
 import json
 import logging
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,7 +60,7 @@ class ManualBookTests(unittest.TestCase):
         self.assertEqual(result["state"],"waiting")
         self.assertEqual(result["pending"],4)
         self.assertEqual(len(self.reader_calls),4)
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0],4)
             self.assertEqual(connection.execute("SELECT state FROM jobs").fetchone()[0],"done")
         self.fail_upload=False
