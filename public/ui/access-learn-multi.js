@@ -216,28 +216,59 @@
       return;
     }
     ensureUi();
-    const toolbar = document.querySelector(".toolbar");
+    const toolbar = document.querySelector("#tab-access-events .toolbar") || document.querySelector("#tab-active .toolbar");
     if (toolbar && !document.getElementById("manualBookingRead")) {
-      const button=document.createElement("button");button.id="manualBookingRead";button.textContent="Türprotokoll jetzt auslesen";
+      const button=document.createElement("button");
+      button.id="manualBookingRead";
+      button.type="button";
+      button.textContent="Zutritte jetzt auslesen";
+      const updateStatus=text=>{
+        const panel=document.getElementById("manualBookingReadStatus");
+        if(panel)panel.textContent=text;
+      };
       button.onclick=async()=>{
+        if(button.disabled)return;
         button.disabled=true;
-        try{
+        button.textContent="GANTNER wird ausgelesen …";
+        updateStatus("Leseauftrag an PC-ALEX02 gesendet. Nur dieser Knopfdruck startet den GANTNER-Leser.");
+        try {
           await api("/admin/api/access/bookings/read",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-          button.textContent="Auslesen angefordert …";
-          const end=Date.now()+180000;
+          const deadline=Date.now()+4*60*1000;
           const check=async()=>{
-            try{
-              const d=await api("/admin/api/access/bookings/read");
-              if(d.job?.state==="done"||d.job?.state==="error"){
-                button.disabled=false;button.textContent="Türprotokoll jetzt auslesen";
-                alert(d.job.state==="error"?d.job.error:((d.job.result?.count||0)+" Buchungen ausgelesen."+(d.job.result?.limitedTerminals?.length?" Leselimit erreicht; weitere Buchungen können noch vorhanden sein.":"")));return;
+            try {
+              const response=await api("/admin/api/access/bookings/read");
+              const job=response.job||{};
+              if(job.state==="done"||job.state==="error"){
+                button.disabled=false;
+                button.textContent="Zutritte jetzt auslesen";
+                const report=job.result||{},num=Number(report.count||0);
+                const partial=(report.limitedTerminals||[]).length>0;
+                const message=job.state==="error"?
+                  "Auslesung nicht vollständig: "+(job.error||report.error||"Unbekannter Fehler.") :
+                  num+" Chip-Buchungen gelesen · "+Number(report.stored??num)+" neu gesichert."+
+                  (partial?" Leselimit erreicht; eventuell liegen weitere Buchungen vor. Bitte erneut klicken.":" Keine weiteren Buchungen in diesem Durchgang.");
+                updateStatus(message);
+                window.dispatchEvent(new Event("krista:access-read-finished"));
+                return;
               }
-            }catch{}
-            if(Date.now()<end)setTimeout(check,2000);
-            else{button.disabled=false;button.textContent="Status unbestätigt – später prüfen";}
-          };check();
-        }catch(e){button.disabled=false;button.textContent="Türprotokoll jetzt auslesen";alert(e.message);}
-      };toolbar.appendChild(button);
+            }catch(error){
+              updateStatus("Warte auf Verbindung zum Zutritts-PC … "+error.message);
+            }
+            if(Date.now()<deadline)setTimeout(check,2000);
+            else {
+              button.disabled=false;
+              button.textContent="Zutritte jetzt auslesen";
+              updateStatus("Auftrag noch nicht bestätigt. Der lokale Speicher schützt bereits gelesene Ereignisse. Bitte später den Status prüfen.");
+            }
+          };
+          check();
+        }catch(error){
+          button.disabled=false;
+          button.textContent="Zutritte jetzt auslesen";
+          updateStatus("Leseauftrag konnte nicht gestartet werden: "+error.message);
+        }
+      };
+      toolbar.appendChild(button);
     }
     installEditorQueue();
     window.startLearn = startMultiLearn;
