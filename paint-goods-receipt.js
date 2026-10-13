@@ -35,7 +35,7 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
     }catch(error){res.status(400).json({ok:false,error:String(error.message||error)});}
   });
   app.get("/admin/api/paint/lg-invoice-candidates",wrap(async()=>{
-    const data=await candidateStore.read(),receipts=await read(file,[]);
+    const data=await candidateStore.read(),receipts=await read(file,[]),orders=await read(path.join(root,"lg-sent-orders.json"),[]);
     const legacy=await read(path.join(root,"lg-incoming-sync.json"),{});
     const cutoff=cutoffVienna(),posted=new Set();
     const movementFile=path.join(root,"movements.jsonl");
@@ -53,11 +53,23 @@ function registerPaintGoodsReceipt(app, {dataDir, parseLines}) {
       if(row.invoiceDate<cutoff || Object.keys(legacy).some(key=>key.toUpperCase()===reference) || posted.has(reference))return false;
       return !receipts.some(r=>String(r.invoiceRef||"").trim().toUpperCase()===reference && r.status==="received");
     }).map(row=>{
+      const invoiceAmounts=new Map(row.lines.map(line=>[line.sku,round(line.quantity)]));
+      const matchingOrderIds=orders.filter(order=>{
+        if(order.status!=="sent")return false;
+        const orderAmounts=new Map();
+        for(const pos of order.positions||[])if(Number(pos.quantity)>0){
+          const sku=String(pos.sku||"").toUpperCase().replace(/\s+/g,"");
+          orderAmounts.set(sku,round((orderAmounts.get(sku)||0)+Number(pos.quantity)));
+        }
+        return invoiceAmounts.size===orderAmounts.size &&
+          [...invoiceAmounts].every(([sku,amount])=>orderAmounts.get(sku)===amount);
+      }).map(order=>order.id);
       const receipt=receipts.find(r=>String(r.invoiceRef||"").trim().toUpperCase()===row.invoiceRef);
       return {invoiceRef:row.invoiceRef,invoiceDate:row.invoiceDate,netAmount:row.netAmount,
         paymentStatus:row.paymentStatus,positionCount:row.lines.length,
         status:receipt?.status==="booking"?"booking":receipt?"prepared":"open",
         linkedOrderId:receipt?.sourceOrderId||receipt?.orderId||"",
+        matchingOrderIds,
         issue:row.issue || receipt?.issue || ""};
     }).sort((a,b)=>b.invoiceDate.localeCompare(a.invoiceDate)||a.invoiceRef.localeCompare(b.invoiceRef));
     return {invoices:candidates,syncedAt:data.syncedAt,windowStart:cutoff};
