@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>KRISTINE · Angebotsstudio V2 · ISOLIERTER TEST</title>
+  <link rel="stylesheet" href="/public/ui/offer-v2.css">
+</head>
+<body>
+  <header class="studio-head">
+    <div class="studio-brand">KRISTINE <span>ANGEBOTSSTUDIO V2</span><small>GETRENNTE TESTUMGEBUNG · kein Zugriff auf produktive Baustellen</small></div>
+    <nav class="head-controls" aria-label="Aktionen">
+      <a class="action secondary compact" href="/preview?world=kristine">← Testübersicht</a>
+      <button id="newBtn" type="button">+ Leeres Angebot</button>
+      <button id="wallnerBtn" type="button">Wallner-Testfall</button>
+      <button id="undoBtn" type="button" title="Letzte Änderung rückgängig">↶ Rückgängig</button>
+      <button id="redoBtn" type="button" title="Wiederholen">↷</button>
+      <button id="importBtn" type="button" title="KRISTINE-Entwurf als JSON importieren">JSON importieren</button>
+      <button id="exportBtn" type="button">JSON sichern</button>
+      <button id="printBtn" class="primary" type="button">▣ Drucken / PDF</button>
+      <input id="importInput" type="file" accept=".json,application/json" hidden>
+    </nav>
+  </header>
+  <main class="studio-app">
+    <div class="notice">
+      <div><strong>Das ist der neue Editor – du kannst ihn ausprobieren.</strong> Er läuft isoliert, speichert zunächst nur in diesem Browser und verändert keine LIVE-Angebote.</div>
+      <small class="sample" id="saveMark">TEST-Entwurf wird geladen …</small>
+    </div>
+    <div class="studio-grid">
+      <div class="editor" id="editor" aria-label="Angebotseditor"></div>
+      <aside class="preview-pane" aria-label="Druckansicht">
+        <div class="preview-head"><div><strong>Live-Ausdruck</strong><div class="muted">Genau dieselben Abschnitte, Mengen und Preise wie im Editor</div></div><span class="status-mark">A4 / PDF</span></div>
+        <div class="preview-content">
+          <div style="width:100%">
+            <div id="printErrors" class="preview-errors hide" role="alert"></div>
+            <div id="printPreview">Druckansicht wird geladen …</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <div class="summary-banner"><span>Aktuelle Angebotssumme brutto · TESTDATEN</span><strong id="summaryTotal">–</strong><span>Positionsliste und Ausdruck rechnen identisch</span></div>
+    <div class="footer-hint">Angebote werden automatisch nur im Browser dieses Testgeräts gesichert. Mit „JSON sichern“ kannst du ein Ergebnis exportieren. Die spätere Produktivspeicherung und WinWorker-Preise werden erst nach Abnahme verbunden.</div>
+  </main>
+  <div id="toast" class="toast hide" role="status" aria-live="polite"></div>
+  <script src="/public/ui/offer-v2-core.js"></script>
+  <script src="/public/ui/offer-v2-app.js"></script>
+</body>
+</html>
