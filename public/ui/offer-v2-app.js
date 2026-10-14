@@ -97,8 +97,10 @@
     return '<div class="measurement-panel"><div class="measurement-heading"><div><div class="sheet-label">📐 Aufmaß für den gesamten Abschnitt</div><div class="sheet-note">Eine Aufmaßzeile kann mehreren Positionen zugeordnet werden. Formeln mit Klammern, ×, + und − sind möglich.</div></div>'+button("+ Aufmaßzeile","add-measure")+'</div>'+
       head+(lines||'<div class="empty-note">Noch keine Aufmaßzeile. Du kannst Positionen trotzdem mit freier Menge erfassen.</div>')+'</div>';
   }
-  function measurementOptions(sec,p){
-    return '<option value="">– Aufmaß wählen –</option>'+sec.measurements.filter(m=>m.unit===p.unit).map(m=>'<option value="'+e(m.id)+'"'+((p.measurementIds||[]).includes(m.id)?' selected':'')+'>'+e(m.label)+' · '+e(m.unit)+'</option>').join("");
+  function measurementChoices(sec,p){
+    const matching=sec.measurements.filter(m=>m.unit===p.unit);
+    if(!matching.length)return '<span class="muted">Keine Aufmaßzeile mit Einheit '+e(p.unit)+'. Bitte oben eine anlegen.</span>';
+    return '<div class="source-checklist">'+matching.map(m=>'<label><input type="checkbox" data-p-source value="'+e(m.id)+'"'+((p.measurementIds||[]).includes(m.id)?' checked':'')+'> '+e(m.label)+' <small>('+e(m.unit)+')</small></label>').join("")+'</div>';
   }
   function positionRow(sec,r,p,index,summary){
     const q=summary.positions[index];
@@ -116,7 +118,7 @@
       del("remove-pos","Leistungsposition einzeln löschen")+'</div>'+
       '<div class="position-bottom">'+
       '<label>Menge <select data-p-field="quantityMode"><option value="manual"'+(!linked?' selected':'')+'>frei</option><option value="linked"'+(linked?' selected':'')+'>aus Aufmaß</option></select></label>'+
-      (linked?'<label>Aufmaß <select class="source-select" data-p-field="measurementIds" aria-label="Zugeordnetes Aufmaß">'+measurementOptions(sec,p)+'</select></label>':'')+
+      (linked?'<div class="source-choices"><strong>Aufmaß:</strong> '+measurementChoices(sec,p)+'</div>':'')+
       '<label><input type="checkbox" data-p-field="alternative"'+(p.alternative?' checked':'')+'> Alternative Position</label>'+
       iconButton("⧉","duplicate-pos","Position kopieren")+
       iconButton("↑","move-pos-up","Position nach oben")+
@@ -269,7 +271,16 @@
     all();
   }
   function documentChange(event){
-    const t=event.target;if(t.matches("[data-offer-field],[data-section-field],[data-room-field],[data-measure-field],[data-p-field]")){
+    const t=event.target;
+    if(t.matches("[data-p-source]")){
+      const n=findNodes(t);
+      if(!n.pos)return;
+      n.pos.measurementIds=Array.isArray(n.pos.measurementIds)?n.pos.measurementIds:[];
+      if(t.checked&&!n.pos.measurementIds.includes(t.value))n.pos.measurementIds.push(t.value);
+      if(!t.checked)n.pos.measurementIds=n.pos.measurementIds.filter(id=>id!==t.value);
+      updatePreview();autosave();return;
+    }
+    if(t.matches("[data-offer-field],[data-section-field],[data-room-field],[data-measure-field],[data-p-field]")){
       changeField(t);
     }
   }
