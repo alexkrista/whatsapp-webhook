@@ -146,6 +146,9 @@ function previewHtml(world, sqlOverview = null) {
     '</div>',
     '<div class="demo-sticky"><strong>Planungsleiste – Test</strong> · Bleibt unter dem gemeinsamen Kopf sichtbar.</div>',
     previewFeaturePanel(key),
+    key === 'kristine'
+      ? '<section class="fixture" aria-label="Angebots-Express"><div style="display:flex;align-items:center;gap:18px;justify-content:space-between;flex-wrap:wrap"><div><h2 style="margin:0 0 5px">⚡ Angebots-Express V2</h2><p style="margin:0;color:#5b695c">Kurzbrief → Leistungspaket → Einzelpositionen → A4-Vorschau. Vollständig im Browser, nur Testdaten.</p></div><a href="/angebot/express" style="background:#1e5933;color:white;border-radius:10px;padding:12px 19px;text-decoration:none;font-weight:900">Angebotswerkstatt öffnen →</a></div></section>'
+      : '',
     sqlPanel(sqlOverview,key),
     '<section class="fixture"><h2>Was hier geprüft wird</h2>',
     '<p>Navigation, mobiler Kopf, Scrollen und die optische Struktur der neuen Arbeitswelten.</p>',
@@ -199,6 +202,17 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
     try { page = new URL(req.url || '/', 'https://preview.invalid'); }
     catch { res.writeHead(400); return res.end(); }
 
+    if (page.pathname === '/angebot/express') {
+      try {
+        const data = fs.readFileSync(path.join(ROOT, 'public', 'kristine-v2-offer-express.html'), 'utf8');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.writeHead(200);
+        return res.end(req.method === 'HEAD' ? undefined : data);
+      } catch {
+        res.writeHead(503);
+        return res.end('Offer preview unavailable.');
+      }
+    }
     if (page.pathname === '/' || page.pathname === '/preview') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       // No SQL query is performed until after the user has authenticated.
@@ -216,6 +230,9 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
       '/public/ui/kristine-v2-preview-access.css': 'kristine-v2-preview-access.css',
       '/public/ui/kristine-v2-preview-access.js': 'kristine-v2-preview-access.js',
       '/public/ui/topbar.js': 'topbar.js',
+      '/public/ui/kristine-v2-offer-express-core.js': 'kristine-v2-offer-express-core.js',
+      '/public/ui/kristine-v2-offer-express-ui.js': 'kristine-v2-offer-express-ui.js',
+      '/public/ui/kristine-v2-offer-express.css': 'kristine-v2-offer-express.css',
     };
     if (Object.prototype.hasOwnProperty.call(allowedAssets, page.pathname)) {
       try {
