@@ -40,7 +40,9 @@
   const money=n=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
   const parseNumber=v=>{
     if(v==null||String(v).trim()==="")return null;
-    const n=typeof v==="number"?v:Number(String(v).trim().replace(/\s/g,"").replace(/\./g,"").replace(",","."));
+    const raw=String(v).trim().replace(/\s/g,"");
+    const normalized=raw.includes(",")?raw.replace(/\./g,"").replace(",","."):(raw.match(/\./g)||[]).length>1?raw.replace(/\./g,""):raw;
+    const n=typeof v==="number"?v:Number(normalized);
     return Number.isFinite(n)&&n>=0?n:null;
   };
   const round2=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -54,9 +56,9 @@
     return{id:nextId(draft,"room"),name:name||"Raum / Bauteil",measures:m};
   }
   function section(draft,name,mode,source){
-    const original=source?.rooms?.[0]||null;
-    const firstRoom=room(draft,mode==="neu"?"Raum / Bauteil":original?.name||"Raum / Bauteil",mode==="neu"?null:original);
-    const value={id:nextId(draft,"section"),name:name||"Malerarbeiten",rooms:[firstRoom],positions:[],notes:""};
+    const originals=mode==="neu"?[]:source?.rooms||[];
+    const rooms=originals.length?originals.map(src=>room(draft,src.name,src)):[room(draft,"Raum / Bauteil",null)];
+    const value={id:nextId(draft,"section"),name:name||"Malerarbeiten",rooms,positions:[],notes:""};
     draft.sections.push(value);
     return value;
   }
