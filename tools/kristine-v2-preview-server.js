@@ -148,7 +148,7 @@ function previewHtml(world, sqlOverview = null) {
     previewFeaturePanel(key),
     '<section class="fixture" aria-label="Neuer Angebotseditor V2"><h2>✍ Angebotsstudio V2 – jetzt ausprobieren</h2>',
     '<p>Abschnitte, gemeinsames Aufmaß, Räume/Bauteile und einzeln löschbare Positionen. Im Testfall Wallner sofort ausprobieren, inklusive identischer Druckvorschau.</p>',
-    '<p><a href="/angebot-v2" style="display:inline-block;background:#205a35;color:#fff;border-radius:9px;padding:12px 18px;text-decoration:none;font-weight:900">Angebotsstudio V2 öffnen →</a></p>',
+    '<p style="display:flex;flex-wrap:wrap;gap:9px"><a href="/angebot-v2/schnell" style="display:inline-block;background:#205a35;color:#fff;border-radius:9px;padding:12px 18px;text-decoration:none;font-weight:900">⚡ 30-Sekunden-Angebot starten →</a><a href="/angebot-v2" style="display:inline-block;background:white;border:1px solid #98b39d;color:#205a35;border-radius:9px;padding:12px 18px;text-decoration:none;font-weight:900">Detail-Editor V2 öffnen →</a></p>',
     '<p class="preview-note">TEST · nur Browser-Speicherung und JSON-Export; keine Produktivangebote, keine Backend-Schreibzugriffe.</p></section>',
     sqlPanel(sqlOverview,key),
     '<section class="fixture"><h2>Was hier geprüft wird</h2>',
@@ -174,10 +174,15 @@ function verifyOfferV2Startup(){
       sample.sections.length < 2){
     throw Error('Offer V2 calculation/print parity check failed');
   }
-  for(const asset of ['angebot-v2.html']){
+  const quick=require('../public/ui/offer-v2-quickstart-core');
+  const first=quick.build({customer:'Wallner TEST',title:'Eingang',brief:'Eingang: Wände 48,2 m², Boden 16,4 m². Abdecken und streichen.',preset:'innen'});
+  if(first.missingQuantity!==0 || first.offer.sections[0].rooms[0].positions.length!==2 ||
+     first.offer.sections[0].measurements.length!==2 ||
+     studio.totals(first.offer).errors.length) throw Error('Offer V2 quick handoff self-check failed');
+  for(const asset of ['angebot-v2.html','angebot-v2-schnell.html']){
     if(!fs.statSync(path.join(ROOT,'public',asset)).isFile())throw Error('Offer V2 test page missing');
   }
-  for(const asset of ['offer-v2-app.js','offer-v2.css']){
+  for(const asset of ['offer-v2-app.js','offer-v2.css','offer-v2-quickstart-core.js','offer-v2-quickstart-ui.js']){
     if(!fs.statSync(path.join(ROOT,'public','ui',asset)).isFile())throw Error('Offer V2 test asset missing');
   }
   return true;
@@ -234,6 +239,17 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
           res.end(req.method === 'HEAD' ? undefined : data);
         });
     }
+    if (page.pathname === '/angebot-v2/schnell') {
+      try {
+        const html=fs.readFileSync(path.join(ROOT,'public','angebot-v2-schnell.html'),'utf8');
+        res.setHeader('Content-Type','text/html; charset=utf-8');
+        res.writeHead(200);
+        return res.end(req.method === 'HEAD' ? undefined : html);
+      } catch {
+        res.writeHead(503);
+        return res.end('Angebots-Schnellstart V2 nicht bereit.');
+      }
+    }
     if (page.pathname === '/angebot-v2') {
       try {
         const html = fs.readFileSync(path.join(ROOT, 'public', 'angebot-v2.html'), 'utf8');
@@ -248,6 +264,8 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
     const allowedAssets = {
       '/public/ui/offer-v2-core.js': 'offer-v2-core.js',
       '/public/ui/offer-v2-app.js': 'offer-v2-app.js',
+      '/public/ui/offer-v2-quickstart-core.js': 'offer-v2-quickstart-core.js',
+      '/public/ui/offer-v2-quickstart-ui.js': 'offer-v2-quickstart-ui.js',
       '/public/ui/offer-v2.css': 'offer-v2.css',
       '/public/ui/krista-ui.css': 'krista-ui.css',
       '/public/ui/kristine-v2-preview-access.css': 'kristine-v2-preview-access.css',
