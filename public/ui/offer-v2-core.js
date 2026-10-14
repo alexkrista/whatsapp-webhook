@@ -37,6 +37,7 @@
   }
   // Strict arithmetic parser; deliberately never evaluate JS supplied by a user.
   function formulaValue(source){
+    if(/\b0[xX][0-9a-fA-F]+\b/.test(String(source??"")))throw new Error("Hex-Zahlen sind im Aufmaß nicht erlaubt.");
     const input=String(source??"").trim().replace(/,/g,".").replace(/[×xX]/g,"*").replace(/[÷:]/g,"/").replace(/[−–]/g,"-").replace(/\s+/g,"");
     if(!input)return null;
     const tokens=[];let p=0;
