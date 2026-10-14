@@ -37,6 +37,7 @@ function groupRegieComparisonRows(rows = []) {
   const LOCAL_BRAIN_REGIE="http://127.0.0.1:5051/api/outgoing/project-regie-reports";
   const token=new URLSearchParams(location.search).get("token")||"";
   let currentJobId="";
+  let newOfferDraft=null;
   let loadSerial=0;
   let cache={jobs:null,bootstrap:null,employees:null};
 
@@ -357,6 +358,55 @@ function groupRegieComparisonRows(rows = []) {
     const balance=hoursReady?(hoursSnapshot.overrun>0?`${hour(hoursSnapshot.overrun)} über Soll · keine offenen Stunden`:`${hour(hoursSnapshot.target)} Soll − ${hour(hoursSnapshot.total)} Ist = ${hour(hoursSnapshot.remaining)} offen`):"Stunden der Einzelakten werden geladen …";
     host.innerHTML=`<details${expanded?" open":""}><summary style="cursor:pointer;font-weight:800">Daten aus ${local}/${data.rows.length} Akten geladen · Regie: ${current(regie)}/${regie.length} WW-Akten aktuell · Rechnungen: ${current(billing)}/${billing.length} aktuell</summary><div class="bk-note">Jede Zeile zeigt ausschließlich die Stunden dieser Einzelakte. Die Summe unten ist der Gesamt-Istwert oben. Gespeicherte Daten bleiben bei fehlendem Abgleich sichtbar.</div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Akte</th><th>Stunden</th><th>Regieberichte</th><th>Rechnungen</th><th>Datenstand</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th>Summe aus ${data.rows.length} Akten</th><th class="num" data-collection-hours>${hoursReady?hour(hoursSnapshot.total):"Wird geladen …"}</th><th>${totals.reports} Berichte</th><th>${totals.invoices} Belege</th><td>${hoursReady?esc(hoursSnapshot.complete?"Stunden aktuell":"Gespeicherter Stundenstand · Abgleich ausstehend"):"Noch nicht vollständig geladen"}</td></tr><tr><td colspan="5" class="bk-note">${esc(balance)}</td></tr></tfoot></table></div></details>`;
   }
+  function clearNewOfferMode(){
+    if(!newOfferDraft)return;
+    newOfferDraft=null;
+    document.getElementById("detail")?.classList.remove("bk-new-offer");
+  }
+  async function openNewOffer(){
+    if(newOfferDraft)return;
+    ++loadSerial;
+    currentJobId="";
+    loadedCollection=null;
+    const detail=document.getElementById("detail");
+    if(!detail)return;
+    installHub();
+    if(!document.getElementById("bkNewOfferStyles")){
+      const style=document.createElement("style");style.id="bkNewOfferStyles";
+      style.textContent="#detail.bk-new-offer .detail-kpis,#detail.bk-new-offer .detail-actions,#detail.bk-new-offer [data-bk-tab]:not([data-bk-tab=master]){display:none!important}";
+      document.head.append(style);
+    }
+    const target=new URL(location.href);
+    target.searchParams.delete("newOffer");target.hash="";
+    history.replaceState(history.state,"",target.pathname+target.search);
+    newOfferDraft={jobId:"",name:"",status:"Angebot",customerMaster:{},projectContacts:{},__newOffer:true};
+    detail.classList.add("open","bk-new-offer");
+    detail.setAttribute("aria-hidden","false");
+    document.body.style.overflow="hidden";
+    document.getElementById("detailNumber").textContent="Neues Angebot";
+    document.getElementById("detailName").textContent="Baustellenmappe · Stammdaten · noch nicht gespeichert";
+    selectTab("master");
+    renderMasterDataEditor(newOfferDraft);
+    const numberField=document.getElementById("bkDraftJobId");
+    numberField?.addEventListener("input",()=>{
+      const text=numberField.value.trim();
+      document.getElementById("detailNumber").textContent=text?"Neues Angebot · #"+text:"Neues Angebot";
+    });
+    try {
+      const result=await api("/admin/api/jobs/next-number");
+      if(newOfferDraft && numberField && !numberField.value.trim()){
+        numberField.value=String(result.nextNumber||"");
+        numberField.dispatchEvent(new Event("input",{bubbles:true}));
+      }
+    }catch(error){
+      const status=document.getElementById("bkMasterSaveStatus");
+      if(status)status.textContent="Baustellennummer konnte nicht vorgeschlagen werden: "+error.message+". Bitte eine freie Nummer eingeben.";
+    }
+    document.getElementById("bkJobName")?.focus();
+  }
+  document.addEventListener("krista:baustelle-closed",clearNewOfferMode);
+  document.addEventListener("krista:baustelle-opened",clearNewOfferMode);
+
   function openCreatedJobMaster(job){
     const target=new URL(location.href);
     if(target.searchParams.get("editMaster")!==String(job.jobId))return;
@@ -365,6 +415,7 @@ function groupRegieComparisonRows(rows = []) {
     history.replaceState(history.state,"",target.pathname+target.search+target.hash);
   }
   async function loadJob(id){
+    clearNewOfferMode();
     const previous=currentJobId,active=previous===String(id)?document.querySelector("[data-bk-tab].active")?.dataset.bkTab:"overview";
     const serial=++loadSerial;currentJobId=String(id||"");if(!currentJobId)return;
     installHub();wireMasterLinks();selectTab(active||"overview");
@@ -418,6 +469,7 @@ function groupRegieComparisonRows(rows = []) {
   }
 
   function renderMasterDataEditor(j){
+    const isNewOffer=j.__newOffer===true;
     const pc=j.projectContacts||{},owner=pc.owner||{},siteManager=pc.siteManager||{},architect=pc.architect||{},master=j.customerMaster||{};
     const legacyManMail=(owner.extraLines||[]).find(row=>/^e?-?mail$/i.test(String(row.label||"").replace(/\s+/g,""))&&/@/.test(String(row.value||"")))?.value||"",womanEmail=owner.womanEmail||owner.email||master.email||j.contactEmail||"",manEmail=owner.manEmail||legacyManMail;
     const delivery=pc.deliveryRecipients||{},deliveryCell=(doc,group)=>`<td><input type="checkbox" data-delivery-doc="${doc}" data-delivery-group="${group}" ${(delivery[doc]?.[group]??(group==="owner"))?'checked':''}></td>`;
@@ -432,12 +484,12 @@ function groupRegieComparisonRows(rows = []) {
       architect:{...companyMeta(architect),masterContactId:architect.masterContactId||"",source:architect.source||"kristine",wwAddressId:architect.wwAddressId||"",wwCustomerNumber:architect.wwCustomerNumber||"",wwKey:architect.wwKey||""},
     };
     const el=document.getElementById("bkMasterData");el.className="";el.innerHTML=`<div class="bk-master-form">
-      <div class="bk-card"><div class="bk-section-title"><div><h3>Baustelle</h3><div class="bk-note">Die Baustellenadresse ist unabhängig von der Wohnadresse der Bauherrschaft.</div></div><div class="bk-actions"><a id="bkSiteMaps" href="${esc(masterMapsUrl(j.street,j.houseNumber,j.postalCode,j.city))}" target="_blank" rel="noopener">🚩 Maps</a><span class="bk-badge">#${esc(j.jobId)}</span></div></div><div class="bk-form-grid">${field("Bezeichnung","bkJobName",j.name,true)}${field("Straße","bkSiteStreet",j.street,true)}${field("Hausnummer","bkSiteHouse",j.houseNumber)}${field("PLZ","bkSitePostal",j.postalCode)}${field("Ort","bkSiteCity",j.city,true)}${field("Adresszusatz / Zufahrt","bkSiteExtra",j.addressExtra,true)}</div></div>
+      <div class="bk-card"><div class="bk-section-title"><div><h3>Baustelle</h3><div class="bk-note">Die Baustellenadresse ist unabhängig von der Wohnadresse der Bauherrschaft.</div></div><div class="bk-actions"><a id="bkSiteMaps" href="${esc(masterMapsUrl(j.street,j.houseNumber,j.postalCode,j.city))}" target="_blank" rel="noopener">🚩 Maps</a>${isNewOffer?'<span class="bk-badge">Neues Angebot · noch nicht gespeichert</span>':`<span class="bk-badge">#${esc(j.jobId)}</span>`}</div></div><div class="bk-form-grid">${isNewOffer?`${field("Baustellennummer","bkDraftJobId",j.jobId)}<label>Status<strong class="bk-badge blue">Angebot</strong></label>`:""}${field("Bezeichnung","bkJobName",j.name,true)}${field("Straße","bkSiteStreet",j.street,true)}${field("Hausnummer","bkSiteHouse",j.houseNumber)}${field("PLZ","bkSitePostal",j.postalCode)}${field("Ort","bkSiteCity",j.city,true)}${field("Adresszusatz / Zufahrt","bkSiteExtra",j.addressExtra,true)}</div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Bauherrschaft</h3><div class="bk-note">Aus KRISTINE oder WinWorker übernehmen – Name und Wohnadresse bleiben strukturierte Stammdaten.</div></div><span class="bk-badge blue">Kunde</span></div>${lookupBox("bkOwner",ownerQuery)}<div class="bk-form-grid"><label>Kontaktart<select id="bkOwnerRole">${["Bauherrschaft","Bauherrin","Bauherr","Familie","Firma"].map(x=>`<option value="${x}" ${x===(isCompany(owner)?"Firma":owner.ownerRole||"Bauherrschaft")?'selected':''}>${x}</option>`).join('')}</select></label>${field("Kunde / Firma","bkOwnerCustomer",owner.customer,true)}${field("Anrede Bauherrin","bkOwnerWomanTitle",owner.womanTitle)}${field("Vorname Bauherrin","bkOwnerWomanFirstName",owner.womanFirstName||owner.firstName)}${field("Nachname Bauherrin","bkOwnerWomanLastName",owner.womanLastName||(isCompany(owner)?"":owner.sharedLastName||owner.customer))}${field("E-Mail Bauherrin","bkOwnerWomanEmail",womanEmail,false,"email")}${field("Anrede Bauherr","bkOwnerManTitle",owner.manTitle)}${field("Vorname Bauherr","bkOwnerManFirstName",owner.manFirstName)}${field("Nachname Bauherr","bkOwnerManLastName",owner.manLastName||(isCompany(owner)?"":owner.sharedLastName||owner.customer))}${field("E-Mail Bauherr","bkOwnerManEmail",manEmail,false,"email")}${field("Wohnstraße","bkHomeStreet",owner.residentialStreet,true)}${field("Hausnummer","bkHomeHouse",owner.residentialHouseNumber)}${field("PLZ","bkHomePostal",owner.residentialPostalCode)}${field("Wohnort","bkHomeCity",owner.residentialCity,true)}${field("Telefon Bauherrin","bkOwnerWomanPhone",owner.phoneOwnerWoman)}${field("Telefon Bauherr","bkOwnerManPhone",owner.phoneOwnerMan)}${field("UID / ATU","bkOwnerUid",owner.uid)}${field("Website","bkOwnerWebsite",owner.website)}</div><div id="bkOwnerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddOwnerExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Bauleitung</h3><div class="bk-note">Nur mit diesem Projekt verknüpft; der Kontakt bleibt für spätere Projekte in KRISTINE suchbar.</div></div><span class="bk-badge blue">eigene Maske</span></div>${lookupBox("bkSiteManager",siteManagerQuery)}<div class="bk-form-grid">${personFields("bkSiteManager",siteManager)}</div><div id="bkSiteManagerExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddSiteManagerExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Architekt</h3><div class="bk-note">Nur mit diesem Projekt verknüpft; der Kontakt bleibt für spätere Projekte in KRISTINE suchbar.</div></div><span class="bk-badge blue">eigene Maske</span></div>${lookupBox("bkArchitect",architectQuery)}<div class="bk-form-grid">${personFields("bkArchitect",architect)}</div><div id="bkArchitectExtras" class="bk-extra-lines"></div><div class="bk-actions" style="justify-content:flex-start;margin-top:8px"><button type="button" id="bkAddArchitectExtra">+ freie Kontaktzeile</button></div></div>
       <div class="bk-card"><div class="bk-section-title"><div><h3>Versand</h3><div class="bk-note">Je Dokument können eine oder mehrere Empfängergruppen gewählt werden.</div></div></div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Empfänger</th><th>Angebot</th><th>Auftrag</th><th>Regieberichte</th><th>Rechnungen</th></tr></thead><tbody>${[["owner","Bauherrschaft"],["siteManager","Bauleitung"],["architect","Architekt"]].map(([group,label])=>`<tr><th>${label}</th>${deliveryCell("offer",group)}${deliveryCell("order",group)}${deliveryCell("regie",group)}${deliveryCell("invoice",group)}</tr>`).join("")}</tbody></table></div></div>
-      <div class="bk-card"><div class="bk-section-title"><div id="bkMasterSaveStatus" class="bk-save-status">Neue Kontakte werden automatisch als KRISTINE-Wissen gespeichert; WinWorker bleibt unverändert.</div><div class="bk-actions"><button type="button" id="bkCancelMaster">Abbrechen</button><button type="button" class="primary" id="bkSaveMaster">Stammdaten speichern</button></div></div></div>
+      <div class="bk-card"><div class="bk-section-title"><div id="bkMasterSaveStatus" class="bk-save-status">${isNewOffer?"Noch nichts angelegt: Erst Speichern erzeugt die Baustellenmappe mit Status Angebot.":"Neue Kontakte werden automatisch als KRISTINE-Wissen gespeichert; WinWorker bleibt unverändert."}</div><div class="bk-actions"><button type="button" id="bkCancelMaster">Abbrechen</button><button type="button" class="primary" id="bkSaveMaster">${isNewOffer?"Angebot anlegen":"Stammdaten speichern"}</button></div></div></div>
       <div class="bk-note bk-wide">Vorarlberg: PLZ und Ort ergänzen sich automatisch. Die Eingabe kann jederzeit überschrieben werden.</div>
     </div>`;
 
@@ -513,7 +565,7 @@ function groupRegieComparisonRows(rows = []) {
     const syncSiteMaps=()=>{const link=document.getElementById("bkSiteMaps");if(link)link.href=masterMapsUrl(val("bkSiteStreet"),val("bkSiteHouse"),val("bkSitePostal"),val("bkSiteCity"))};for(const id of ["bkSiteStreet","bkSiteHouse","bkSitePostal","bkSiteCity"])document.getElementById(id)?.addEventListener("input",syncSiteMaps);
     installVorarlbergAddressAssist("bkSitePostal","bkSiteCity");
     installVorarlbergAddressAssist("bkHomePostal","bkHomeCity");
-    document.getElementById("bkCancelMaster").onclick=()=>renderMasterData(j);
+    document.getElementById("bkCancelMaster").onclick=()=>isNewOffer?document.getElementById("detailBack")?.click():renderMasterData(j);
     document.getElementById("bkSaveMaster").onclick=async()=>{
       const button=document.getElementById("bkSaveMaster"),status=document.getElementById("bkMasterSaveStatus"),projectContacts={
         owner:{...selectedLinks.owner,uid:val("bkOwnerUid"),website:val("bkOwnerWebsite"),sharedLastName:val("bkOwnerRole")==="Firma"?"":owner.sharedLastName||"",customer:val("bkOwnerCustomer"),ownerRole:val("bkOwnerRole"),womanTitle:val("bkOwnerWomanTitle"),womanFirstName:val("bkOwnerWomanFirstName"),womanLastName:val("bkOwnerWomanLastName"),womanEmail:val("bkOwnerWomanEmail"),manTitle:val("bkOwnerManTitle"),manFirstName:val("bkOwnerManFirstName"),manLastName:val("bkOwnerManLastName"),manEmail:val("bkOwnerManEmail"),residentialStreet:val("bkHomeStreet"),residentialHouseNumber:val("bkHomeHouse"),residentialPostalCode:val("bkHomePostal"),residentialCity:val("bkHomeCity"),phoneOwnerWoman:val("bkOwnerWomanPhone"),phoneOwnerMan:val("bkOwnerManPhone"),email:val("bkOwnerWomanEmail")||val("bkOwnerManEmail"),extraLines:cleanExtras("owner")},
@@ -521,9 +573,18 @@ function groupRegieComparisonRows(rows = []) {
         architect:{...selectedLinks.architect,uid:val("bkArchitectUid"),website:val("bkArchitectWebsite"),company:val("bkArchitectCompany"),title:val("bkArchitectTitle"),firstName:val("bkArchitectFirstName"),lastName:val("bkArchitectLastName"),phone:val("bkArchitectPhone"),email:val("bkArchitectEmail"),street:val("bkArchitectStreet"),houseNumber:val("bkArchitectHouse"),postalCode:val("bkArchitectPostal"),city:val("bkArchitectCity"),extraLines:cleanExtras("architect")},
       };
       projectContacts.deliveryRecipients={};for(const doc of ["offer","order","regie","invoice"]){projectContacts.deliveryRecipients[doc]={};for(const group of ["owner","siteManager","architect"])projectContacts.deliveryRecipients[doc][group]=!!document.querySelector(`[data-delivery-doc="${doc}"][data-delivery-group="${group}"]`)?.checked}
-      button.disabled=true;status.textContent="Stammdaten und neues Kontaktwissen werden gespeichert …";
+      button.disabled=true;status.textContent=isNewOffer?"Angebot und Stammdaten werden angelegt …":"Stammdaten und neues Kontaktwissen werden gespeichert …";
       try{
-        const ownerName=projectContacts.owner.ownerRole==="Firma"?projectContacts.owner.customer:[[projectContacts.owner.womanTitle,projectContacts.owner.womanFirstName,projectContacts.owner.womanLastName].filter(Boolean).join(" "),[projectContacts.owner.manTitle,projectContacts.owner.manFirstName,projectContacts.owner.manLastName].filter(Boolean).join(" ")].filter(Boolean).join(" und ")||projectContacts.owner.customer,ownerAddress=masterAddress(projectContacts.owner.residentialStreet,projectContacts.owner.residentialHouseNumber,projectContacts.owner.residentialPostalCode,projectContacts.owner.residentialCity),customerMaster={...master,...companyMeta(projectContacts.owner),status:selectedLinks.owner.wwAddressId?"linked":"kristine",role:"customer",name:projectContacts.owner.customer||ownerName,phone:projectContacts.owner.phoneOwnerWoman||projectContacts.owner.phoneOwnerMan,email:projectContacts.owner.womanEmail||projectContacts.owner.manEmail,address:ownerAddress==="–"?"":ownerAddress,street:projectContacts.owner.residentialStreet,houseNumber:projectContacts.owner.residentialHouseNumber,postalCode:projectContacts.owner.residentialPostalCode,city:projectContacts.owner.residentialCity,wwAddressId:selectedLinks.owner.wwAddressId,wwCustomerNumber:selectedLinks.owner.wwCustomerNumber,wwKey:selectedLinks.owner.wwKey,pendingWwCreate:false},payload={name:val("bkJobName"),street:val("bkSiteStreet"),houseNumber:val("bkSiteHouse"),postalCode:val("bkSitePostal"),city:val("bkSiteCity"),addressExtra:val("bkSiteExtra"),contactName:ownerName,contactPhone:customerMaster.phone,contactEmail:customerMaster.email,customerMaster,wwAddressId:selectedLinks.owner.wwAddressId,wwCustomerNumber:selectedLinks.owner.wwCustomerNumber,customerMasterStatus:selectedLinks.owner.wwAddressId?"linked":"kristine_only",projectContacts},result=await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/meta`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        const ownerName=projectContacts.owner.ownerRole==="Firma"?projectContacts.owner.customer:[[projectContacts.owner.womanTitle,projectContacts.owner.womanFirstName,projectContacts.owner.womanLastName].filter(Boolean).join(" "),[projectContacts.owner.manTitle,projectContacts.owner.manFirstName,projectContacts.owner.manLastName].filter(Boolean).join(" ")].filter(Boolean).join(" und ")||projectContacts.owner.customer,ownerAddress=masterAddress(projectContacts.owner.residentialStreet,projectContacts.owner.residentialHouseNumber,projectContacts.owner.residentialPostalCode,projectContacts.owner.residentialCity),customerMaster={...master,...companyMeta(projectContacts.owner),status:selectedLinks.owner.wwAddressId?"linked":"kristine",role:"customer",name:projectContacts.owner.customer||ownerName,phone:projectContacts.owner.phoneOwnerWoman||projectContacts.owner.phoneOwnerMan,email:projectContacts.owner.womanEmail||projectContacts.owner.manEmail,address:ownerAddress==="–"?"":ownerAddress,street:projectContacts.owner.residentialStreet,houseNumber:projectContacts.owner.residentialHouseNumber,postalCode:projectContacts.owner.residentialPostalCode,city:projectContacts.owner.residentialCity,wwAddressId:selectedLinks.owner.wwAddressId,wwCustomerNumber:selectedLinks.owner.wwCustomerNumber,wwKey:selectedLinks.owner.wwKey,pendingWwCreate:false},payload={name:val("bkJobName"),street:val("bkSiteStreet"),houseNumber:val("bkSiteHouse"),postalCode:val("bkSitePostal"),city:val("bkSiteCity"),addressExtra:val("bkSiteExtra"),contactName:ownerName,contactPhone:customerMaster.phone,contactEmail:customerMaster.email,customerMaster,wwAddressId:selectedLinks.owner.wwAddressId,wwCustomerNumber:selectedLinks.owner.wwCustomerNumber,customerMasterStatus:selectedLinks.owner.wwAddressId?"linked":"kristine_only",projectContacts};
+        if(isNewOffer){
+          const id=val("bkDraftJobId");
+          if(!/^[A-Za-z0-9_-]+$/.test(id))throw new Error("Bitte eine gültige Baustellennummer eingeben.");
+          if(!payload.name)throw new Error("Bitte die Bezeichnung des Angebots eingeben.");
+          const created=await api("/admin/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,jobId:id,status:"Angebot",creationMode:"offer"})});
+          location.href=tokenUrl("/kristine/baustellen?editMaster="+encodeURIComponent(created.jobId)+"#"+encodeURIComponent(created.jobId));
+          return;
+        }
+        const result=await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/meta`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
         Object.assign(j,result.meta||{});const cached=jobById(j.jobId);if(cached&&cached!==j)Object.assign(cached,result.meta||{});renderMasterData(j);
       }catch(error){button.disabled=false;status.textContent="Speichern nicht möglich: "+error.message}
     };
@@ -790,8 +851,8 @@ function groupRegieComparisonRows(rows = []) {
     renderProtocols(loadedCollection.job,loadedCollection.days,loadedCollection.documents);
   });
   window.addEventListener("krista:live-hours-updated",renderCollectionStatus);
-  function init(){installCss();installKrisadminSubnav();installHub();wireMasterLinks();hookRows();const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
+  function init(){installCss();installKrisadminSubnav();installHub();wireMasterLinks();hookRows();const params=new URLSearchParams(location.search);if(params.get("newOffer")==="1"){setTimeout(()=>openNewOffer(),100);return}const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
-  window.BaustellenKnowledgeHub={version:VERSION,load:loadJob,tab:selectTab};
+  window.BaustellenKnowledgeHub={version:VERSION,load:loadJob,tab:selectTab,newOffer:openNewOffer};
 })();
 
