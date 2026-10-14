@@ -3034,7 +3034,9 @@ app.post("/admin/api/jobs", async (req, res) => {
     await ensureDir(path.join(DATA_DIR, jobId));
     await writeJobMeta(jobId, {
       name,
-      status: /^\d{5}$/.test(jobId) ? "Auftrag" : String(body.status || "Angebot"),
+      // Five-digit IDs normally mean Auftrag. Only the explicit "Neues Angebot"
+      // workflow may start with that number as Angebot; other creation flows stay unchanged.
+      status: body.creationMode === "offer" && body.status === "Angebot" ? "Angebot" : /^\d{5}$/.test(jobId) ? "Auftrag" : String(body.status || "Angebot"),
       street: String(body.street || ""),
       houseNumber: String(body.houseNumber || ""),
       postalCode: String(body.postalCode || ""),
