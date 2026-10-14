@@ -212,7 +212,7 @@
     const pos=room&&positionElement?room.positions.find(p=>p.id===positionElement.dataset.pid):null;
     return{sec,room,measure,pos,secElement,roomElement};
   }
-  function changeField(target){
+  function changeField(target,eventType){
     const n=findNodes(target),key=target.dataset.offerField||target.dataset.sectionField||target.dataset.roomField||target.dataset.measureField||target.dataset.pField;
     if(!key)return;
     const subject=target.dataset.offerField?offer:target.dataset.sectionField?n.sec:target.dataset.roomField?n.room:target.dataset.measureField?n.measure:n.pos;
@@ -226,7 +226,7 @@
     }}
     else subject[key]=target.value;
     if(key==="unit"&&subject.quantityMode==="linked")subject.measurementIds=[];
-    if(["quantityMode","unit","measurementIds","alternative"].includes(key))renderEditor();
+    if(["quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
     updatePreview();autosave();
   }
   function structural(action,target){
@@ -281,7 +281,7 @@
       updatePreview();autosave();return;
     }
     if(t.matches("[data-offer-field],[data-section-field],[data-room-field],[data-measure-field],[data-p-field]")){
-      changeField(t);
+      changeField(t,event.type);
     }
   }
   function documentClick(event){
