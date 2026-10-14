@@ -164,6 +164,25 @@ function previewHtml(world, sqlOverview = null) {
   ].join('\n');
 }
 
+function verifyOfferV2Startup(){
+  const studio = require('../public/ui/offer-v2-core');
+  const sample = studio.sample();
+  const sum = studio.totals(sample);
+  const printed = studio.printMarkup(sample);
+  if(sum.errors.length || !printed.includes(studio.currency(sum.net)) ||
+      !printed.includes(studio.currency(sum.gross)) ||
+      sample.sections.length < 2){
+    throw Error('Offer V2 calculation/print parity check failed');
+  }
+  for(const asset of ['angebot-v2.html']){
+    if(!fs.statSync(path.join(ROOT,'public',asset)).isFile())throw Error('Offer V2 test page missing');
+  }
+  for(const asset of ['offer-v2-app.js','offer-v2.css']){
+    if(!fs.statSync(path.join(ROOT,'public','ui',asset)).isFile())throw Error('Offer V2 test asset missing');
+  }
+  return true;
+}
+
 const HEADERS = Object.freeze({
   'Cache-Control': 'no-store, max-age=0',
   'X-Robots-Tag': 'noindex, nofollow',
@@ -291,6 +310,7 @@ if (require.main === module) {
   }
   const port = Number(process.env.PORT || 10000);
   Promise.resolve()
+    .then(() => verifyOfferV2Startup())
     .then(async () => {
       // Explicitly opted-in; creates schema only when ALL core tables are
       // missing and only on the allocated TEST database.
@@ -312,4 +332,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { createPreviewServer, previewHtml, safeTopbarScript, authenticated };
+module.exports = { createPreviewServer, previewHtml, safeTopbarScript, authenticated, verifyOfferV2Startup };
