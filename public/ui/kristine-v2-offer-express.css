@@ -72,6 +72,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .ox-collapse{background:white;color:#2f5a3b;border:1px solid #b9cbb8;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850}
 .ox-section-body{padding:20px}
 .ox-section-hint{font-size:11px;color:#657467;margin-bottom:12px}
+.ox-section-note{display:block;color:#536b59;font-size:11px;font-weight:850;margin:0 0 13px}.ox-section-note textarea{display:block;width:100%;margin-top:5px;border:1px solid #d9e4d9;border-radius:9px;background:#fbfdf9;padding:9px 11px;color:#283d2b;font:500 12px/1.5 inherit;min-height:48px;resize:vertical}
+.ox-paper-description{font-size:10px;line-height:1.5;color:#3d5344;margin:6px 0 9px;white-space:pre-line}
 .ox-room-list{display:grid;gap:10px}
 .ox-room{border:1px solid #dfe8e0;border-radius:12px;background:#fcfefb;padding:13px}
 .ox-room-top{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center}
