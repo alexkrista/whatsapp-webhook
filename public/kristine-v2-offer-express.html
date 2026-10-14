@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="de"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>KRISTINE 2.0 · Angebots-Express · TEST</title>
+<link rel="stylesheet" href="/public/ui/kristine-v2-offer-express.css">
+</head><body>
+<header class="ox-top"><div class="ox-top-inner">
+  <a href="/preview?world=kristine" class="ox-brand" aria-label="Zur KRISTINE 2.0 Testübersicht">
+    <span class="ox-logo">K</span><span>KRISTINE <small>ANGEBOTSWERKSTATT 2.0</small></span>
+  </a>
+  <div class="ox-top-actions">
+    <span class="ox-lab">ISOLIERTER TEST</span>
+    <a class="ox-back" href="/preview?world=kristine">← Testübersicht</a>
+  </div>
+</div></header>
+<main class="ox-shell">
+  <div class="ox-intro">
+    <div><span class="ox-eyebrow">Vom Gedanken zum Angebot</span>
+      <h1>30 Sekunden bis zum<br>ersten Entwurf.</h1>
+      <p>Leistungen schnell zusammenstellen – und danach alles selbst bestimmen: Abschnitte, Aufmaß, Einzelpositionen und die identische Druckansicht.</p>
+    </div>
+    <div class="ox-metric"><strong>3</strong><span>Wege zum Angebot<br>Kurzbrief · Paket · Einzelposition</span></div>
+  </div>
+  <div id="ox-message" class="ox-message" role="status"></div>
+  <section id="ox-launch">
+    <div class="ox-launch-wrap">
+      <div class="ox-card">
+        <h2 class="ox-step"><span>01</span> Worum geht es?</h2>
+        <div class="ox-form-grid">
+          <label class="ox-field">Kunde
+            <input id="ox-customer" placeholder="z. B. Familie Wallner" autocomplete="off">
+          </label>
+          <label class="ox-field">Angebot / Projekt
+            <input id="ox-project" placeholder="z. B. Eingang und Stiegenhaus" autocomplete="off">
+          </label>
+          <label class="ox-field full">Beschreibe die Arbeiten
+            <textarea id="ox-brief" placeholder="Eingang und Stiegenhaus: Wände 48,2 m², Decke 16,4 m², Boden 16,4 m². Abdecken, spachteln, grundieren und streichen."></textarea>
+          </label>
+        </div>
+        <div class="ox-presets" aria-label="Startvorlagen">
+          <button type="button" data-template="innen" class="active">Malerarbeiten</button>
+          <button type="button" data-template="einfach">Schnell ausmalen</button>
+          <button type="button" data-template="tapete">Tapete</button>
+          <button type="button" data-template="fassade">Fassade</button>
+          <button type="button" data-template="bad">Fugenloses Bad</button>
+          <button type="button" data-template="regie">Regie</button>
+        </div>
+        <div class="ox-actions">
+          <button id="ox-generate" type="button" class="ox-primary">⚡ Bearbeitbaren Entwurf erstellen</button>
+          <button id="ox-microphone" type="button" class="ox-lite" title="Nur wenn der Browser Sprachdiktat unterstützt">🎙 Diktieren</button>
+          <button id="ox-demo" type="button" class="ox-lite">Beispiel Wallner</button>
+        </div>
+        <p class="ox-muted">Ohne Kontoanbindung: Du kannst den Ablauf gefahrlos mit Musterdaten ausprobieren.</p>
+      </div>
+      <aside class="ox-tips">
+        <div>
+          <span class="ox-eyebrow" style="color:#c4e9bc">Der neue Ansatz</span>
+          <h2>Erst Leistungen.<br>Dann Details.</h2>
+          <p>Der Kurztext wählt passende Leistungsbausteine. Was nicht eindeutig ist, bleibt offen. Kein Preis wird erfunden.</p>
+          <strong>1 → 2 → 3</strong>
+          <p>Entwurf · prüfen · Vorschau</p>
+        </div>
+        <div class="ox-tips-footer">Abschnitte mit eigenen Aufmaßen · Positionen einzeln oder als Paket · unabhängig löschbar · ein gemeinsamer Stand für Bildschirm und A4-Druck</div>
+      </aside>
+    </div>
+  </section>
+  <section id="ox-workspace" hidden>
+    <div class="ox-editor-toolbar">
+      <label>Kunde<input id="ox-customer-name" autocomplete="off"></label>
+      <label>Projekt<input id="ox-title" autocomplete="off"></label>
+      <div class="ox-actions">
+        <button type="button" id="ox-undo" class="ox-lite">↶ Rückgängig</button>
+        <button type="button" id="ox-export" class="ox-lite">↓ Entwurf sichern</button>
+        <label class="ox-lite" style="cursor:pointer">↑ Entwurf laden
+          <input type="file" id="ox-import" accept="application/json,.json" hidden>
+        </label>
+        <button type="button" id="ox-new" class="ox-lite">+ Neu</button>
+      </div>
+    </div>
+    <div class="ox-work-layout">
+      <div class="ox-editor">
+        <div class="ox-overview"><b>Dein Angebot – alles direkt bearbeitbar</b>
+          <span><strong id="ox-count">0</strong> Positionen · <span id="ox-issues">0 Prüfungen</span></span>
+        </div>
+        <nav id="ox-section-nav" class="ox-section-nav" aria-label="Abschnitte"></nav>
+        <div id="ox-sections"></div>
+        <div class="ox-section-new">
+          <h3>+ Nächsten Abschnitt anlegen</h3>
+          <div class="ox-section-new-grid">
+            <label>Name<input id="ox-new-section-name" placeholder="z. B. 2 · Weitere Bauteile"></label>
+            <label>Aufmaß
+              <select id="ox-copy-mode">
+                <option value="uebernehmen">Vom vorigen Abschnitt übernehmen</option>
+                <option value="ergaenzen">Übernehmen und ergänzen</option>
+                <option value="neu">Komplett neues Aufmaß</option>
+              </select>
+            </label>
+          </div>
+          <label><input type="checkbox" id="ox-copy-positions"> Auch vorhandene Leistungspositionen übernehmen</label>
+          <div style="margin-top:10px"><button type="button" class="ox-primary small" data-action="add-section">+ Abschnitt anlegen</button></div>
+        </div>
+      </div>
+      <aside class="ox-preview">
+        <div class="ox-preview-header"><h2>Live-Angebotsansicht</h2><span class="ox-muted">Gleiche Daten wie im Editor</span></div>
+        <div class="ox-preview-bg"><article id="ox-paper" class="ox-paper" aria-label="Druckvorschau"></article></div>
+        <div class="ox-preview-tools">
+          <span class="ox-preview-pill">Zwischensumme <strong id="ox-subtotal">€ 0,00</strong></span>
+          <button type="button" id="ox-print" class="ox-primary small">↗ A4-Vorschau / Drucken</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <p class="ox-safety"><strong>Wichtig – Testbetrieb:</strong> Dies ist eine vollständig abgekoppelte Vorschau. Kunden, Angebote und Preise werden hier <strong>nicht</strong> aus LIVE geladen und nicht in KRISTINE gespeichert. Angezeigte Katalogpreise sind ausschließlich unverbindliche Musterwerte und müssen bestätigt werden. Der lokale JSON-Export sichert nur diesen Testentwurf. Sprachdiktat wird, sofern vorhanden, vom Browser verarbeitet.</p>
+</main>
+<script src="/public/ui/kristine-v2-offer-express-core.js"></script>
+<script src="/public/ui/kristine-v2-offer-express-ui.js"></script>
+</body></html>
