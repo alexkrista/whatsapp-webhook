@@ -53,6 +53,7 @@
     return '<article class="ox-section" id="ox-section-'+escape(s.id)+'"><header><div class="ox-section-num">'+(i+1)+'</div><div class="ox-section-head"><label>ABSCHNITT</label><input data-section-name="'+escape(s.id)+'" value="'+escape(s.name)+'"></div><span class="ox-muted">'+s.positions.length+' Positionen</span><button type="button" class="ox-collapse" data-action="toggle" data-section="'+escape(s.id)+'">'+(focusedSection===s.id?"Schließen":"Öffnen")+'</button></header>'+
       '<div class="ox-section-body" '+(focusedSection&&focusedSection!==s.id?"hidden":"")+'>'+
       '<div class="ox-section-hint">Aufmaß pro Raum / Bauteil – eine Menge kann beliebig vielen Positionen zugeordnet werden.</div>'+
+      '<label class="ox-section-note">Leistungsbeschreibung dieses Abschnitts (auch im Ausdruck)<textarea data-section-notes="'+escape(s.id)+'" placeholder="Was wird hier ausgeführt?">'+escape(s.notes||"")+'</textarea></label>'+
       '<div class="ox-room-list">'+s.rooms.map(r=>roomUI(s,r)).join("")+'</div>'+
       '<button type="button" class="ox-lite" data-action="room" data-section="'+escape(s.id)+'">+ Raum / Bauteil</button>'+
       '<div class="ox-position-head"><h3>Leistungspositionen <small>'+s.positions.length+' einzeln bearbeitbar</small></h3><span class="ox-muted">'+missing+' ungeprüft</span></div>'+
@@ -72,7 +73,8 @@
         return '<tr><td>'+String(i+1)+'.'+String(j+1)+'</td><td><strong>'+escape(p.text)+'</strong><small>'+escape(room?.name||"")+'</small></td>'+
           '<td>'+escape(formatQty(p.quantity))+'</td><td>'+escape(p.unit)+'</td><td>'+escape(p.unitPrice===null?"—":Core.money(p.unitPrice))+'</td><td><strong>'+escape(valid?Core.money(p.quantity*p.unitPrice):"—")+'</strong></td></tr>';
       }).join("");
-      return '<div class="ox-paper-section"><h3>'+String(i+1)+'. '+escape(s.name)+'</h3><table><thead><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>EH</th><th>EP</th><th>Gesamt</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      return '<div class="ox-paper-section"><h3>'+String(i+1)+'. '+escape(s.name)+'</h3>'+
+        (s.notes?'<p class="ox-paper-description">'+escape(s.notes)+'</p>':'')+'<table><thead><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>EH</th><th>EP</th><th>Gesamt</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     }).join("");
     paper.innerHTML='<div class="ox-paper-top"><div class="ox-paper-brand">FARBEN KRISTA <small>ANGEBOTSENTWURF · DEMO</small></div><div class="ox-paper-date">'+new Intl.DateTimeFormat("de-AT").format(new Date())+'</div></div>'+
       '<div class="ox-paper-recipient"><span>AN</span><strong>'+escape(draft.customer||"Kunde noch eintragen")+'</strong><p>'+escape(draft.title||"Angebot")+'</p></div>'+
@@ -174,6 +176,7 @@
     const secId=el.dataset.section,pid=el.dataset.text||el.dataset.qty||el.dataset.unit||el.dataset.rate||el.dataset.basis||el.dataset.positionRoom;
     const s=secId?getSection(secId):null,p=s?.positions.find(x=>x.id===pid);
     if(el.dataset.sectionName){const sec=getSection(el.dataset.sectionName);if(sec)sec.name=el.value;renderPaper();return}
+    if(el.dataset.sectionNotes){const sec=getSection(el.dataset.sectionNotes);if(sec)sec.notes=el.value;renderPaper();return}
     if(el.dataset.roomName){const r=s?.rooms.find(x=>x.id===el.dataset.roomName);if(r)r.name=el.value;renderPaper();return}
     if(el.dataset.measure){Core.changeRoomMeasure(draft,secId,el.dataset.room,el.dataset.measure,el.value);renderPaper();return}
     if(!p)return;
