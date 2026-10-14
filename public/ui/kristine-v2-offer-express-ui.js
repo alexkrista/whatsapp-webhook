@@ -126,8 +126,15 @@
       const source=draft.sections[draft.sections.length-1];
       const ns=Core.addSection(draft,nameText,mode,source.id);
       if(copy&&mode!=="neu")for(const p of source.positions){
-        const q=Core.addPosition(draft,ns.id,p.templateKey,ns.rooms[0].id);
-        if(q){Object.assign(q,{text:p.text,unit:p.unit,unitPrice:p.unitPrice,priceConfirmed:p.priceConfirmed,basis:p.basis,quantity:p.basis==="manual"?p.quantity:q.quantity})}
+        const originalRoomIndex=source.rooms.findIndex(r=>r.id===p.roomId);
+        const mappedRoom=ns.rooms[Math.max(0,originalRoomIndex)]||ns.rooms[0];
+        const q=Core.addPosition(draft,ns.id,p.templateKey==="free"?"paint":p.templateKey,mappedRoom.id);
+        if(q)Object.assign(q,{
+          text:p.text,templateKey:p.templateKey,unit:p.unit,
+          unitPrice:p.unitPrice,priceConfirmed:p.priceConfirmed,basis:p.basis,
+          roomId:mappedRoom.id,
+          quantity:p.basis==="manual"?p.quantity:(mappedRoom.measures[p.basis]??null)
+        });
       }
       focusedSection=ns.id;render();$("ox-copy-positions").checked=false;
       flash("Abschnitt angelegt: Aufmaß "+(mode==="neu"?"neu":mode==="uebernehmen"?"übernommen":"zur Ergänzung übernommen")+".");
