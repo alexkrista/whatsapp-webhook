@@ -138,7 +138,7 @@
     let net=0, missingQuantity=0,missingRate=0,unconfirmedRate=0,lines=0;
     for(const s of draft.sections)for(const p of s.positions){
       lines++;
-      if(p.quantity===null)missingQuantity++;
+      if(p.quantity===null||p.quantity<=0)missingQuantity++;
       if(p.unitPrice===null)missingRate++;
       if(p.unitPrice!==null&&!p.priceConfirmed)unconfirmedRate++;
       if(p.quantity!==null&&p.unitPrice!==null)net+=p.quantity*p.unitPrice;
@@ -168,7 +168,7 @@
     for(const key of MEASURES)measures[key]=matchArea(raw,key);
     const lower=raw.toLocaleLowerCase("de-AT");
     let name=raw.split(/[:\n]/)[0].split(",")[0].trim();
-    if(name.length>65||name.length<3||/^(bitte|angebot|malerarbeiten|neue)/i.test(name))name="Eingang / Stiegenhaus";
+    if(name.length>65||name.length<3||/^(bitte|angebot|malerarbeiten|neue)/i.test(name))name="Raum / Bauteil";
     const services=[
       [/abdeck|schutzvlies/,["cover"]],
       [/spachtel/,["filler"]],
