@@ -24,23 +24,40 @@ function normalizeName(value){
   return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
 }
 function personPresence(events,firstName,date){
-  const wanted=normalizeName(firstName), relevant=new Set(["start","weiter","pause","mittag","ende"]);
-  let last=null;
-  for(const row of Array.isArray(events)?events:[]){
-    if(String(row?.date||"").slice(0,10)!==date) continue;
-    const first=normalizeName(row?.employeeName||"").split(/\s+/)[0]||"";
-    if(first!==wanted) continue;
+  const wanted=normalizeName(firstName);
+  // Bürostarts (022) werden beim Speichern einer beliebigen Tageskorrektur
+  // durch office-time.js von "start"/"weiter" in "up" normalisiert.
+  // Eine normale Abwesenheit (Urlaub/Krankheit) vom Typ "up" bedeutet
+  // dagegen NICHT, dass eine Person physisch im Büro ist.
+  const isOfficeStart=row=>{
     const type=String(row?.type||"").toLowerCase();
-    if(relevant.has(type)) last=row;
-  }
+    if(type!=="up")return false;
+    const job=String(row?.jobId||"").trim().toLowerCase();
+    const code=String(row?.unproductiveCode||row?.upCode||"").trim();
+    return job==="022"||job==="up_022"||code==="022";
+  };
+  const relevant=new Set(["start","weiter","pause","mittag","ende","fertig","stop","stopp"]);
+  const rows=(Array.isArray(events)?events:[]).filter(row=>{
+    if(String(row?.date||"").slice(0,10)!==date)return false;
+    const first=normalizeName(row?.employeeName||"").split(/\s+/)[0]||"";
+    if(first!==wanted)return false;
+    const type=String(row?.type||"").toLowerCase();
+    return relevant.has(type)||isOfficeStart(row);
+  }).sort((a,b)=>
+    String(a.createdAt||"").localeCompare(String(b.createdAt||""))||
+    String(a.at||"").localeCompare(String(b.at||""))
+  );
+  const last=rows.at(-1)||null;
+  const ended=["ende","fertig","stop","stopp"].includes(String(last?.type||"").toLowerCase());
   return {
-    present:Boolean(last&&String(last.type||"").toLowerCase()!=="ende"),
+    present:Boolean(last&&!ended),
     name:String(last?.employeeName||firstName),
     lastType:String(last?.type||""),
     lastAt:String(last?.at||""),
     employeeId:String(last?.employeeId||"")
   };
 }
+
 function normalizePhone(value){
   let digits=String(value||"").replace(/\D/g,"");
   if(digits.startsWith("00")) digits=digits.slice(2);
