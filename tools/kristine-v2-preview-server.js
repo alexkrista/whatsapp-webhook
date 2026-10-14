@@ -146,6 +146,10 @@ function previewHtml(world, sqlOverview = null) {
     '</div>',
     '<div class="demo-sticky"><strong>Planungsleiste – Test</strong> · Bleibt unter dem gemeinsamen Kopf sichtbar.</div>',
     previewFeaturePanel(key),
+    '<section class="fixture" aria-label="Neuer Angebotseditor V2"><h2>✍ Angebotsstudio V2 – jetzt ausprobieren</h2>',
+    '<p>Abschnitte, gemeinsames Aufmaß, Räume/Bauteile und einzeln löschbare Positionen. Im Testfall Wallner sofort ausprobieren, inklusive identischer Druckvorschau.</p>',
+    '<p><a href="/angebot-v2" style="display:inline-block;background:#205a35;color:#fff;border-radius:9px;padding:12px 18px;text-decoration:none;font-weight:900">Angebotsstudio V2 öffnen →</a></p>',
+    '<p class="preview-note">TEST · nur Browser-Speicherung und JSON-Export; keine Produktivangebote, keine Backend-Schreibzugriffe.</p></section>',
     sqlPanel(sqlOverview,key),
     '<section class="fixture"><h2>Was hier geprüft wird</h2>',
     '<p>Navigation, mobiler Kopf, Scrollen und die optische Struktur der neuen Arbeitswelten.</p>',
@@ -158,6 +162,25 @@ function previewHtml(world, sqlOverview = null) {
     '<script src="/public/ui/kristine-v2-preview-access.js"></script>',
     '</body></html>'
   ].join('\n');
+}
+
+function verifyOfferV2Startup(){
+  const studio = require('../public/ui/offer-v2-core');
+  const sample = studio.sample();
+  const sum = studio.totals(sample);
+  const printed = studio.printMarkup(sample);
+  if(sum.errors.length || !printed.includes(studio.currency(sum.net)) ||
+      !printed.includes(studio.currency(sum.gross)) ||
+      sample.sections.length < 2){
+    throw Error('Offer V2 calculation/print parity check failed');
+  }
+  for(const asset of ['angebot-v2.html']){
+    if(!fs.statSync(path.join(ROOT,'public',asset)).isFile())throw Error('Offer V2 test page missing');
+  }
+  for(const asset of ['offer-v2-app.js','offer-v2.css']){
+    if(!fs.statSync(path.join(ROOT,'public','ui',asset)).isFile())throw Error('Offer V2 test asset missing');
+  }
+  return true;
 }
 
 const HEADERS = Object.freeze({
@@ -211,7 +234,21 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
           res.end(req.method === 'HEAD' ? undefined : data);
         });
     }
+    if (page.pathname === '/angebot-v2') {
+      try {
+        const html = fs.readFileSync(path.join(ROOT, 'public', 'angebot-v2.html'), 'utf8');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.writeHead(200);
+        return res.end(req.method === 'HEAD' ? undefined : html);
+      } catch {
+        res.writeHead(503);
+        return res.end('Angebotsstudio V2 noch nicht bereit.');
+      }
+    }
     const allowedAssets = {
+      '/public/ui/offer-v2-core.js': 'offer-v2-core.js',
+      '/public/ui/offer-v2-app.js': 'offer-v2-app.js',
+      '/public/ui/offer-v2.css': 'offer-v2.css',
       '/public/ui/krista-ui.css': 'krista-ui.css',
       '/public/ui/kristine-v2-preview-access.css': 'kristine-v2-preview-access.css',
       '/public/ui/kristine-v2-preview-access.js': 'kristine-v2-preview-access.js',
@@ -273,6 +310,7 @@ if (require.main === module) {
   }
   const port = Number(process.env.PORT || 10000);
   Promise.resolve()
+    .then(() => verifyOfferV2Startup())
     .then(async () => {
       // Explicitly opted-in; creates schema only when ALL core tables are
       // missing and only on the allocated TEST database.
@@ -294,4 +332,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { createPreviewServer, previewHtml, safeTopbarScript, authenticated };
+module.exports = { createPreviewServer, previewHtml, safeTopbarScript, authenticated, verifyOfferV2Startup };
