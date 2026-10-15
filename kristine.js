@@ -1,8 +1,8 @@
 
 "use strict";
 const { upFromJobId } = require("./up-reasons");
-const { normalizeOfficeTimeRow, normalizeOfficeTimeData } = require("./office-time");
-const { clampStartTime } = require("./morning-status");
+const { normalizeOfficeTimeRow, normalizeOfficeTimeData, isOfficeJobId } = require("./office-time");
+const { normalizeTimeEvents, normalizeSegments, normalizeProjectArchive } = require("./start-time-rules");
 
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -48,6 +48,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   async function readJson(file, fallback) {
     try {
       let value = JSON.parse(await fsp.readFile(file, "utf8"));
+      if ([TIME_EVENTS,PROJECT_TIME_ARCHIVE].includes(file)) {
+        const [rules,closures] = await Promise.all([readJson(EMPLOYEE_WORK_RULES,{}),readJson(MONTH_CLOSURES,[])]);
+        value = file === TIME_EVENTS ? normalizeTimeEvents(value,rules,closures) : normalizeProjectArchive(value,rules,closures);
+      }
       if (file === TIME_EVENTS) {
         const closures = await readJson(MONTH_CLOSURES, []);
         const days = closures.flatMap(row => row.days || []);
@@ -65,6 +69,10 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
 
   async function writeJson(file, value) {
     await ensureRoot();
+    if ([TIME_EVENTS,PROJECT_TIME_ARCHIVE].includes(file)) {
+      const [rules,closures] = await Promise.all([readJson(EMPLOYEE_WORK_RULES,{}),readJson(MONTH_CLOSURES,[])]);
+      value = file === TIME_EVENTS ? normalizeTimeEvents(value,rules,closures) : normalizeProjectArchive(value,rules,closures);
+    }
     // Every writer must preserve the fixed payroll snapshot of closed months.
     if (file === TIME_EVENTS) {
       const closures = await readJson(MONTH_CLOSURES, []);
@@ -396,18 +404,19 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
   }
 
-  async function officialStartForEmployee(employeeId, actualTime) {
+  async function officialStartForEmployee(employeeId, actualTime, jobId = "", date = localDateISO()) {
     const rules = await readJson(EMPLOYEE_WORK_RULES, {});
-    const activityMode = rules?.[String(employeeId)]?.activityMode || "productive";
-    return activityMode === "productive" ? clampStartTime(actualTime) : actualTime;
+    if (rules?.[String(employeeId)]?.activityMode === "unproductive" || isOfficeJobId(jobId)) return minutesFromHM(actualTime) !== null && minutesFromHM(actualTime) < 420 ? "07:00" : actualTime;
+    const rows = await readJson(TIME_EVENTS, []);
+    return normalizeTimeEvents([...rows,{employeeId,date,jobId,type:"start",at:actualTime}],rules).at(-1).at;
   }
 
   async function appendTimeEvent(event) {
     const rows = await readJson(TIME_EVENTS, []);
     const normalizedEvent = { ...event };
-    if (normalizedEvent.type === "start" && normalizedEvent.source !== "office") {
+    if (normalizedEvent.type === "start") {
       const actualAt = normalizedEvent.actualAt || normalizedEvent.at;
-      const bookedAt = await officialStartForEmployee(normalizedEvent.employeeId, normalizedEvent.at);
+      const bookedAt = await officialStartForEmployee(normalizedEvent.employeeId, normalizedEvent.at, normalizedEvent.jobId, normalizedEvent.date);
       normalizedEvent.at = bookedAt;
       normalizedEvent.actualAt = actualAt;
       normalizedEvent.adjusted = bookedAt !== actualAt;
@@ -1020,7 +1029,7 @@ const intent = rawText.startsWith("task_call:")
           state,
         };
       }
-      const bookedTime = await officialStartForEmployee(employeeId, actualTime);
+      const bookedTime = await officialStartForEmployee(employeeId, actualTime, current?.jobId, today);
       state.mode = "working";
       state.pending = null;
       state.activeAssignmentKey = assignmentKey(current);
@@ -3147,7 +3156,7 @@ const open = taskId
       const copiedFrom = copiedFromRaw ? { employeeId: String(copiedFromRaw.employeeId || "").slice(0, 100), employeeName: String(copiedFromRaw.employeeName || "").trim().slice(0, 160) } : null;
       const moveLinked = true; // Zeitblock ist die Wahrheit: verknüpfte Einträge werden immer mitgeführt.
       const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
-      const segments = incoming.map((segment, index) => ({
+      let segments = incoming.map((segment, index) => ({
         id: String(segment.id || `seg_${Date.now()}_${index}`),
         type: ["work", "pause", "lunch", "up"].includes(segment.type) ? segment.type : "work",
         from: String(segment.from || "").slice(0, 5),
@@ -3160,6 +3169,8 @@ const open = taskId
         unproductiveCode: String(segment.unproductiveCode || "").trim().slice(0, 12),
       })).map(normalizeOfficeTimeRow).filter((segment) => minutesFromHM(segment.from) !== null && (!segment.to || minutesFromHM(segment.to) !== null));
 
+      const rules = await readJson(EMPLOYEE_WORK_RULES, {});
+      segments = normalizeSegments(segments,employeeId,date,rules,closed?[closed]:[]);
       segments.sort((a, b) => minutesFromHM(a.from) - minutesFromHM(b.from));
       for (let index = 0; index < segments.length; index += 1) {
         const segment = segments[index];
@@ -3312,9 +3323,10 @@ const open = taskId
       const employeeName = String(req.body?.employeeName || employeeId).trim();
       const date = String(req.body?.date || localDateISO()).slice(0, 10);
       const action = String(req.body?.action || "").trim().toLowerCase();
-      const at = String(req.body?.at || localTimeHM()).slice(0, 5);
+      const actualAt = String(req.body?.at || localTimeHM()).slice(0, 5);
       const jobId = String(req.body?.jobId || "").trim().slice(0, 80);
       const jobName = String(req.body?.jobName || "").trim().slice(0, 140);
+      const at = action === "start" || (minutesFromHM(actualAt) !== null && minutesFromHM(actualAt) < 420) ? await officialStartForEmployee(employeeId,actualAt,jobId,date) : actualAt;
       if (!employeeId) return res.status(400).json({ ok: false, error: "employeeId erforderlich" });
       if (!/^(start|pause|lunch|resume|end)$/.test(action)) return res.status(400).json({ ok: false, error: "Ungültige Aktion" });
       if (minutesFromHM(at) === null) return res.status(400).json({ ok: false, error: "Ungültige Uhrzeit" });
@@ -3341,7 +3353,7 @@ const open = taskId
       state.timeline = state.timeline.slice(-200);
       states[employeeId] = state;
       await writeJson(STATES, states);
-      await appendTimeEvent({ employeeId, employeeName, date, type: cfg.eventType, at, jobId: effectiveJobId, jobName: effectiveJobName, createdAt: now, source: "office", manual: true });
+      await appendTimeEvent({ employeeId, employeeName, date, type: cfg.eventType, at, actualAt, adjusted:at!==actualAt, jobId: effectiveJobId, jobName: effectiveJobName, createdAt: now, source: "office", manual: true });
       await appendEvent({ type: "manual_time_action", action, employeeId, employeeName, date, at, jobId: effectiveJobId, jobName: effectiveJobName, source: "office" });
       res.json({ ok: true, state, action, at });
     } catch (e) {

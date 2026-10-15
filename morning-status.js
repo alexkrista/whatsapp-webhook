@@ -97,7 +97,7 @@ function clampStartTime(hm) {
   const official = minutesFromHm(OFFICIAL_START);
 
   if (value == null || official == null) return hm;
-  return value < official ? OFFICIAL_START : hm;
+  return value <= official + 15 ? OFFICIAL_START : hm;
 }
 
 function normalizePhone(value) {

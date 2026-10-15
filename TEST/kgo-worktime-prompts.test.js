@@ -13,7 +13,7 @@ function harness(){const app={};for(const method of ["get","post","put","patch",
  for(const file of ["assignments.json","absences.json","late-notices.json","tasks.json"])await fsp.writeFile(path.join(root,file),"[]");await fsp.writeFile(path.join(root,"scheduler-state.json"),"{}");await fsp.writeFile(path.join(root,"states.json"),"{}");
  const api=await registerMorningStatus({dataDir,readEmployees:async()=>employees,sendWhatsApp:async message=>{sent.push(message);return{}},chefPhone:"",phoneNumberId:"test",logger:{log(){},warn(){},error(){}}});
  try{
-  assert.equal(api.clampStartTime("06:55"),"07:00");assert.equal(api.clampStartTime("07:08"),"07:08");
+  assert.equal(api.clampStartTime("06:55"),"07:00");assert.equal(api.clampStartTime("07:08"),"07:00");
   const lunch=await api.runWorktimePrompt("lunch",today,true);assert.equal(lunch.booked,2);assert.equal(lunch.sent,2);assert.deepEqual(sent.at(-1).buttons,["Nein"]);
   let events=JSON.parse(await fsp.readFile(path.join(root,"time-events.json"),"utf8"));assert.equal(events.filter(row=>row.type==="mittag"&&row.at==="12:00"&&row.source==="automatic_worktime").length,2);
   const kristine=registerKristine(harness(),{dataDir,publicDir:dataDir,requireAdmin:()=>true,readEmployees:async()=>employees});
