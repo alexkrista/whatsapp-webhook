@@ -66,3 +66,6 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 .bulk-panel .catalog-browser{margin:10px 0}
 .bulk-panel>.action.solid{margin-top:10px}
 @media(max-width:750px){.catalog-entry{align-items:flex-start;flex-wrap:wrap;gap:4px}.catalog-entry small{white-space:normal}.catalog-browser-groups{max-height:390px}}
+
+.position-price-origin{font-size:10px;border-radius:8px;padding:5px 7px;background:#fff7e7;color:#765521;font-weight:850;white-space:normal}
+.position-price-origin:has(+ .action){margin-right:4px}
