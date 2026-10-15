@@ -106,5 +106,5 @@
     return{offer,detected:info,positions,summary,missingQuantity:positions.filter(p=>p.needQuantity).length,
       missingPrice:positions.filter(p=>p.needPrice).length};
   }
-  return{PACKAGES,MEASURES,detect,build,num};
+  return{PACKAGES,MEASURES,BASIS,detect,build,num};
 });
