@@ -68,7 +68,7 @@
   const iconButton=(label,action,title)=>'<button class="action secondary compact" type="button" data-action="'+e(action)+'" title="'+e(title||label)+'">'+e(label)+'</button>';
   const del=(action,title)=>'<button type="button" class="action danger compact" data-action="'+e(action)+'" title="'+e(title||"Entfernen")+'" aria-label="'+e(title||"Entfernen")+'">×</button>';
   function catalogSearchKey(value){
-    return String(value||"").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLocaleLowerCase("de-AT").replace(/ß/g,"ss").replace(/[^a-z0-9]+/g," ").trim();
+    return String(value||"").normalize("NFD").replace(/\p{M}/gu,"").toLocaleLowerCase("de-AT").replace(/ß/g,"ss").replace(/[^a-z0-9]+/g," ").trim();
   }
   function catalogGroups(kind){
     return groups.map(g=>'<details class="catalog-group" data-catalog-group data-catalog-group-name="'+e(g.name)+'"><summary>'+e(g.name)+' <small>'+g.items.length+' Positionen</small></summary><div class="catalog-entries">'+
