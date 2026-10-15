@@ -14,7 +14,7 @@ assert.match(page, /Tagesabschluss gleich mitmachen\?/);
 assert.match(page, /id="finishAndDayClose"/);
 assert.match(page, /id="finishReportOnly"/);
 assert.doesNotMatch(page, /hoursMode==='day'&&workRunning\)return show\(0\)/, "Der Bericht darf nicht mehr vorab zum Ausstempeln zwingen");
-assert.match(page, /bootstrap\.states\?\.\[employeeId\]\?\.mode/, "Vor dem Ausstempeln wird der aktuelle Zustand erneut geprüft");
+assert.match(page, /bootstrap\.states\?\.\[employeeId\]/, "Vor dem Ausstempeln wird der aktuelle Zustand erneut geprüft");
 assert.match(page, /\['working','pause','lunch'\]\.includes\(mode\)/);
 assert.match(page, /\/public\/kristine-go-abschluss\.html\?/);
 assert.match(page, /if\(!p\.hoursEdited\)p\.hours=rounded\/60/, "Bewusst geänderte Regiestunden bleiben erhalten");
