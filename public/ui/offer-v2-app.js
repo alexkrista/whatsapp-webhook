@@ -174,7 +174,7 @@
       '<div class="room-body">'+
       '<label class="edit-field room-description">Beschreibung dieses Raums (wird gedruckt)<textarea data-room-field="description">'+e(r.description||"")+'</textarea></label>'+
       '<div class="position-table">'+(r.positions.map((p,j)=>positionRow(sec,r,p,j,summary)).join("")||'<div class="empty-note">Noch keine Position. Einzelne Leistung oder Paket auswählen.</div>')+'</div>'+
-      '<div class="position-controls"><div class="catalog-panel-head"><strong>+ Leistungsposition einzeln hinzufügen</strong><span class="muted">Alle Gruppen aufklappbar · Suche nach Leistung oder Stichwort</span></div>'+catalogBrowser()+
+      '<div class="position-controls"><div class="catalog-panel-head"><strong>+ Leistungsposition einzeln hinzufügen</strong><span class="muted">Nach Gruppen aufklappbar und suchbar · aktuell Testkatalog, nicht der WinWorker-Firmenstamm</span></div>'+catalogBrowser()+
       '<div class="position-add"><button type="button" class="action secondary compact" data-action="add-pos" data-template-id="free">+ Freie Position</button><span class="muted">Jede gewählte Position ist unabhängig bearbeitbar und löschbar. Preise hier sind Musterwerte.</span></div></div>'+
       '<details class="bulk-panel"><summary>+ Leistungspaket gesammelt auswählen</summary><p class="sheet-note">Mehrere einzelne Positionen anhaken. Auch bei der Sammelauswahl bleibt jede Position einzeln löschbar.</p>'+
       catalogBrowser("bulk")+'<button type="button" class="action solid" data-action="bulk-add">✓ Markierte Positionen hinzufügen</button></details>'+
@@ -194,7 +194,38 @@
       '<div class="rooms-stack">'+sec.rooms.map((r,i)=>roomCard(sec,r,i,summary.rooms[i])).join("")+'</div>'+
       '</div></section>';
   }
+  function captureCatalogUi(){
+    const state=new Map();
+    for(const panel of $("editor").querySelectorAll("[data-catalog-browser]")){
+      const room=panel.closest(".room-card"),section=panel.closest(".section-card");
+      if(!room||!section)continue;
+      state.set(section.dataset.sid+":"+room.dataset.rid+":"+panel.dataset.catalogKind,{
+        search:panel.querySelector("[data-catalog-search]")?.value||"",
+        open:[...panel.querySelectorAll("[data-catalog-group]")].filter(g=>g.open).map(g=>g.dataset.catalogGroupName),
+        checked:[...panel.querySelectorAll("[data-bulk-check]:checked")].map(x=>x.value)
+      });
+    }
+    return state;
+  }
+  function restoreCatalogUi(state){
+    for(const panel of $("editor").querySelectorAll("[data-catalog-browser]")){
+      const room=panel.closest(".room-card"),section=panel.closest(".section-card");
+      if(!room||!section)continue;
+      const previous=state.get(section.dataset.sid+":"+room.dataset.rid+":"+panel.dataset.catalogKind);
+      if(!previous)continue;
+      const search=panel.querySelector("[data-catalog-search]");
+      if(search)search.value=previous.search;
+      filterCatalogBrowser(panel,previous.search);
+      for(const group of panel.querySelectorAll("[data-catalog-group]")){
+        if(!previous.search)group.open=previous.open.includes(group.dataset.catalogGroupName);
+      }
+      for(const checked of panel.querySelectorAll("[data-bulk-check]")){
+        checked.checked=previous.checked.includes(checked.value);
+      }
+    }
+  }
   function renderEditor(){
+    const beforeCatalog=captureCatalogUi();
     const calc=C.totals(offer);
     $("editor").innerHTML=offerHeader()+
       '<div class="button-row" style="justify-content:space-between;margin:4px 0 14px"><h2 style="margin:0">2. Abschnitte · Räume · Positionen</h2><span class="status-mark">'+offer.sections.length+' Abschnitte</span></div>'+
@@ -203,6 +234,7 @@
       '<button type="button" class="action" data-action="new-section" data-new-mode="copy">Gleiches Aufmaß übernehmen</button>'+
       '<button type="button" class="action" data-action="new-section" data-new-mode="extend">Aufmaß übernehmen + ergänzen</button>'+
       '<button type="button" class="action solid" data-action="new-section" data-new-mode="new">Ganz neuer Abschnitt</button></div></div>';
+    restoreCatalogUi(beforeCatalog);
     $("summaryTotal").textContent=C.currency(calc.gross);
     $("undoBtn").disabled=!history.length;$("redoBtn").disabled=!future.length;
   }
