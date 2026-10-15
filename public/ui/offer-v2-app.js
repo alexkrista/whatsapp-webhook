@@ -157,6 +157,7 @@
       '<label>Menge <select data-p-field="quantityMode"><option value="manual"'+(!linked?' selected':'')+'>frei</option><option value="linked"'+(linked?' selected':'')+'>aus Aufmaß</option></select></label>'+
       (linked?'<div class="source-choices"><strong>Aufmaß:</strong> '+measurementChoices(sec,p)+'</div>':'')+
       '<label><input type="checkbox" data-p-field="alternative"'+(p.alternative?' checked':'')+'> Alternative Position</label>'+
+      '<span class="position-price-origin">'+(p.priceOrigin==="manual"?"✓ Preis manuell geändert":"Musterpreis aus Testkatalog · vor Versand prüfen")+'</span>'+
       iconButton("⧉","duplicate-pos","Position kopieren")+
       iconButton("↑","move-pos-up","Position nach oben")+
       iconButton("↓","move-pos-down","Position nach unten")+
@@ -288,7 +289,7 @@
     if(!subject)return;
     if(key==="measurementIds"){subject.measurementIds=target.value?[target.value]:[];}
     else if(key==="alternative"){subject[key]=target.checked;}
-    else if(["unitPrice","quantity","discountPercent","vatRate"].includes(key)){subject[key]=Math.max(0,Number(target.value)||0);}
+    else if(["unitPrice","quantity","discountPercent","vatRate"].includes(key)){subject[key]=Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
     else if(key==="quantityMode"){subject[key]=target.value==="linked"?"linked":"manual";if(subject.quantityMode==="linked"&&!subject.measurementIds?.length){
       const eligible=n.sec.measurements.find(m=>m.unit===subject.unit&&(m.roomId===""||m.roomId===n.room.id));
       subject.measurementIds=eligible?[eligible.id]:[];
