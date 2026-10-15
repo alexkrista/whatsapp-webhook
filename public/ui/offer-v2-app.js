@@ -5,7 +5,7 @@
   const KEY="krista.angebot-v2.isolated-preview.v1";
   const $=id=>document.getElementById(id);
   const e=C.esc;
-  let offer=null,history=[],future=[],saveTimer=0,toastTimer=0;
+  let offer=null,history=[],future=[],saveTimer=0,toastTimer=0;let selectedPositions=new Set(),positionClipboard=[];
   const maxHistory=35;
   function toast(msg,bad=false){
     const host=$("toast");host.textContent=String(msg);host.className="toast"+(bad?" warn":"");
@@ -146,7 +146,7 @@
     const allSources=(p.measurementIds||[]).length;
     return '<div class="position-card'+(p.alternative?' alternative':'')+'" data-pid="'+e(p.id)+'">'+
       '<div class="position-top">'+
-      '<span class="number">'+(index+1)+'.</span>'+
+      '<label title="Position markieren"><input type="checkbox" data-multi-mark="'+e(p.id)+'"'+(selectedPositions.has(p.id)?' checked':'')+'></label><span class="number">'+(index+1)+'.</span>'+
       '<input class="position-title" data-p-field="text" aria-label="Leistungsbeschreibung" value="'+e(p.text)+'">'+
       '<input type="number" min="0" step="0.01" data-p-field="quantity" aria-label="Menge" value="'+e(linked?q.quantity:p.quantity)+'"'+(linked?' readonly title="Menge aus Aufmaß"':'')+'>'+
       '<input data-p-field="unit" aria-label="Einheit" value="'+e(p.unit)+'">'+
@@ -230,6 +230,7 @@
     const calc=C.totals(offer);
     $("editor").innerHTML=offerHeader()+
       '<div class="button-row" style="justify-content:space-between;margin:4px 0 14px"><h2 style="margin:0">2. Abschnitte · Räume · Positionen</h2><span class="status-mark">'+offer.sections.length+' Abschnitte</span></div>'+
+      '<div class="editor-card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><label><input type="checkbox" data-multi-all> Alle Positionen markieren</label><strong>'+selectedPositions.size+' gewählt</strong><button type="button" class="action compact" data-action="multi-copy">⧉ Kopieren</button><button type="button" class="action compact secondary" data-action="multi-paste">Einfügen</button><button type="button" class="action compact secondary" data-action="multi-move">Verschieben</button><button type="button" class="action compact danger" data-action="multi-delete">Löschen</button><label>Ziel <select data-multi-target>'+offer.sections.flatMap(sec=>sec.rooms.map(r=>'<option value="'+e(sec.id)+'|'+e(r.id)+'">'+e(sec.name)+' / '+e(r.name)+'</option>')).join("")+'</select></label></div>'+
       offer.sections.map((sec,i)=>sectionCard(sec,i,calc.sections[i])).join("")+
       '<div class="editor-card"><strong>Weiteren Abschnitt anlegen</strong><p class="subtle">Was soll KRISTINE aus dem letzten Abschnitt übernehmen?</p><div class="button-row">'+
       '<button type="button" class="action" data-action="new-section" data-new-mode="copy">Gleiches Aufmaß übernehmen</button>'+
@@ -301,6 +302,24 @@
   }
   function structural(action,target){
     const n=findNodes(target);const s=n.sec,r=n.room,p=n.pos,m=n.measure;
+    if(action.startsWith("multi-")){
+      const ids=selectedPositions;
+      const items=offer.sections.flatMap(sec=>sec.rooms.flatMap(r=>r.positions.filter(p=>ids.has(p.id)).map(p=>({sec,r,p}))));
+      const current=document.querySelector("[data-multi-target]")?.value||"";
+      const [sid,rid]=current.split("|");const dest=C.findRoom(offer,sid,rid);
+      if(action==="multi-copy"){if(!items.length)return toast("Bitte Positionen markieren.");positionClipboard=items.map(x=>({position:C.copy(x.p),sectionId:x.sec.id}));toast(items.length+" Position(en) zum Einfügen kopiert.");return;}
+      if(action==="multi-paste"){
+        if(!dest||!positionClipboard.length)return toast("Bitte zuerst Positionen kopieren und Ziel wählen.",true);
+        snapshot();for(const x of positionClipboard){const p=C.copy(x.position);p.id="pos-copy-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);if(sid!==x.sectionId&&p.quantityMode==="linked"){p.quantityMode="manual";p.measurementIds=[];}dest.positions.push(p);}
+        selectedPositions.clear();all();toast(positionClipboard.length+" Kopien eingefügt.");return;
+      }
+      if(!items.length)return toast("Bitte Positionen markieren.");
+      if(action==="multi-delete"&&!confirm(items.length+" Position(en) löschen? Rückgängig ist möglich."))return;
+      if(action==="multi-move"&&!dest)return toast("Bitte Zielraum auswählen.",true);
+      snapshot();
+      for(const x of items){x.r.positions=x.r.positions.filter(p=>p.id!==x.p.id);if(action==="multi-move"){if(x.sec.id!==sid&&x.p.quantityMode==="linked"){x.p.quantityMode="manual";x.p.measurementIds=[];}dest.positions.push(x.p);}}
+      selectedPositions.clear();all();toast(items.length+" Position(en) "+(action==="multi-move"?"verschoben":"gelöscht")+".");return;
+    }
     switch(action){
       case "add-measure":snapshot();C.addMeasurement(offer,s.id);break;
       case "remove-measure":{
@@ -344,6 +363,8 @@
   }
   function documentChange(event){
     const t=event.target;
+    if(t.matches("[data-multi-mark]")){if(t.checked)selectedPositions.add(t.dataset.multiMark);else selectedPositions.delete(t.dataset.multiMark);renderEditor();return;}
+    if(t.matches("[data-multi-all]")){selectedPositions.clear();if(t.checked)offer.sections.forEach(sec=>sec.rooms.forEach(r=>r.positions.forEach(p=>selectedPositions.add(p.id))));renderEditor();return;}
     if(t.matches("[data-catalog-search]")){
       filterCatalogBrowser(t.closest("[data-catalog-browser]"),t.value);
       return;
