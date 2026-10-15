@@ -137,6 +137,64 @@
     const options=materialMaster.map(m=>`<option value="${esc(m.product||m.name||m.label||m.materialId||"")}" label="${esc([m.manufacturer,m.productLine,m.unit].filter(Boolean).join(" · "))}"></option>`).join("");
     const cards=(draft.positions||[]).map((raw,i,all)=>{const p=costing(raw);Object.assign(raw,p);const group=String(p.groupName||""),before=group&&String(all[i-1]?.groupName||"")!==group?`<div class="koffer-group-title">${esc(group)}</div>`:"",after=group&&String(all[i+1]?.groupName||"")!==group?`<div class="koffer-group-total"><span>Summe ${esc(group)}</span><strong>${all.filter(x=>x.groupName===group).reduce((s,x)=>s+(+x.quantity||0)*(+x.unitPrice||0),0).toLocaleString("de-AT",{style:"currency",currency:"EUR"})}</strong></div>`:"";const steps=p.workSteps.map((s,n)=>`<tr><td><input data-work-text="${n}" value="${esc(s.text||"")}" placeholder="Arbeitsschritt"></td><td><input data-work-min="${n}" type="number" min="0" step="1" value="${s.minutes||""}" placeholder="Min."></td><td><button data-remove-work="${n}" title="Entfernen">×</button></td></tr>`).join("");const mats=p.materials.map((m,n)=>`<tr><td><input data-mat-name="${n}" list="kofferMaterialMaster" value="${esc(m.name||"")}" placeholder="Material aus Stamm"></td><td><input data-mat-price="${n}" type="number" min="0" step="0.01" value="${m.unitPrice||""}" placeholder="€/Einheit"><small>${esc(m.unit||"")}</small></td><td><input data-mat-use="${n}" type="number" min="0" step="0.001" value="${m.consumption||""}" placeholder="Verbrauch"></td><td><strong data-mat-result="${n}">€ ${((+m.unitPrice||0)*(+m.consumption||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></td><td><button data-remove-mat="${n}" title="Entfernen">×</button></td></tr>`).join("");return `${before}<div class="koffer-pos" data-i="${i}"><div class="koffer-pos-main"><strong>${i+1}.</strong><span>${esc(p.text)}</span><input data-f="quantity" type="number" min="0" step="0.01" value="${p.quantity||""}" placeholder="Menge"><input data-f="unit" value="${esc(p.unit)}"><input data-f="unitPrice" type="number" min="0" step="0.01" value="${p.unitPrice||""}" placeholder="€/Einheit"></div><div class="koffer-facts"><span class="koffer-fact" data-fact="hours">Zeit ${p.laborHoursPerUnit.toLocaleString("de-AT")} h/Einh.</span><span class="koffer-fact" data-fact="rate">Stundensatz € ${p.hourlyRate.toLocaleString("de-AT")}${p.hourlyRateOverridden?" · abweichend":""}</span><span class="koffer-fact" data-fact="material">Material € ${p.materialCostPerUnit.toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}</span><span class="koffer-fact" data-fact="markup">Materialaufschlag ${p.materialMarkupPct.toLocaleString("de-AT")} %${p.materialMarkupOverridden?" · abweichend":""}</span><span class="koffer-fact" data-fact="adjust">Ab-/Zuschlag ${p.adjustmentPct>0?"+":""}${p.adjustmentPct.toLocaleString("de-AT")} %</span></div><details class="koffer-detail"><summary>Kalkulation dieser Position</summary><div class="koffer-detail-grid"><label>Zeit je Einheit (h)<input data-calc="laborHoursPerUnit" type="number" min="0" step="0.01" value="${p.laborHoursPerUnit||""}" readonly></label><label>Stundensatz €<input data-calc="hourlyRate" type="number" min="0" step="0.01" value="${p.hourlyRate}"></label><label>Material je Einheit €<input data-calc="materialCostPerUnit" type="number" min="0" step="0.01" value="${p.materialCostPerUnit||""}" readonly></label><label>Materialaufschlag %<input data-calc="materialMarkupPct" type="number" min="-100" step="0.1" value="${p.materialMarkupPct}"></label><label>Ab-/Zuschlag auf beides %<input data-calc="adjustmentPct" type="number" min="-100" step="0.1" value="${p.adjustmentPct}"></label></div><table class="koffer-work"><thead><tr><th>Arbeitsschritt</th><th>Minuten</th><th></th></tr></thead><tbody>${steps}</tbody></table><button class="koffer-add-step" data-add-work>+ Arbeitsschritt</button><table class="koffer-work"><thead><tr><th>Material aus Stamm</th><th>Preis je Einheit</th><th>Verbrauch</th><th>Ergebnis</th><th></th></tr></thead><tbody>${mats}</tbody></table><button class="koffer-add-step" data-add-mat>+ Material</button></details></div>${after}`}).join("");
     h.innerHTML=`<datalist id="kofferMaterialMaster">${options}</datalist>${cards||'<div class="koffer-note">Bitte gewünschte Positionen auswählen.</div>'}`;
+
+    // Mehrfachbearbeitung der Angebotspositionen; Auswahl wird bei Neuzeichnung verworfen.
+    const multiKey="kofferPositionSelection";
+    const previous=window[multiKey] instanceof Set?window[multiKey]:new Set();
+    const selected=new Set([...previous].filter(i=>i>=0&&i<draft.positions.length));
+    window[multiKey]=selected;
+    const bar=document.createElement("div");
+    bar.className="koffer-position-multi";
+    bar.style.cssText="display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:10px;margin:8px 0;border:1px solid #ccd6cd;border-radius:9px;background:#f5f8f5";
+    bar.innerHTML='<label style="display:flex;align-items:center;gap:5px"><input type="checkbox" data-multi-all> Alle auswählen</label><strong data-multi-count>0 ausgewählt</strong><button type="button" data-multi-copy>Kopieren</button><button type="button" data-multi-move>Verschieben</button><button type="button" data-multi-delete>Markierte löschen</button><label>Zielraum <select data-multi-room></select></label>';
+    const roomSelect=bar.querySelector("[data-multi-room]");
+    roomSelect.innerHTML='<option value="">Aktueller Raum</option>'+(draft.rooms||[]).map(r=>'<option value="'+esc(r.id)+'">'+esc(r.name||"Raum")+'</option>').join("");
+    h.prepend(bar);
+    const allCheckbox=bar.querySelector("[data-multi-all]");
+    const refreshSelection=()=>{
+      bar.querySelector("[data-multi-count]").textContent=selected.size+" ausgewählt";
+      allCheckbox.checked=!!draft.positions.length&&selected.size===draft.positions.length;
+      allCheckbox.indeterminate=selected.size>0&&selected.size<draft.positions.length;
+      bar.querySelectorAll("[data-multi-copy],[data-multi-move],[data-multi-delete]").forEach(b=>b.disabled=!selected.size);
+    };
+    h.querySelectorAll(".koffer-pos[data-i]").forEach(row=>{
+      const i=Number(row.dataset.i),main=row.querySelector(".koffer-pos-main");
+      if(!main)return;
+      const mark=document.createElement("input");mark.type="checkbox";mark.checked=selected.has(i);mark.title="Position markieren";mark.setAttribute("aria-label","Position "+(i+1)+" auswählen");
+      mark.onchange=()=>{if(mark.checked)selected.add(i);else selected.delete(i);refreshSelection()};
+      main.prepend(mark);
+    });
+    allCheckbox.onchange=()=>{
+      selected.clear();
+      if(allCheckbox.checked)draft.positions.forEach((_,i)=>selected.add(i));
+      h.querySelectorAll(".koffer-pos[data-i]").forEach(row=>{const cb=row.querySelector('.koffer-pos-main > input[type="checkbox"]');if(cb)cb.checked=selected.has(+row.dataset.i)});
+      refreshSelection();
+    };
+    const chosen=()=>[...selected].sort((a,b)=>a-b);
+    const targetRoom=()=> (draft.rooms||[]).find(r=>String(r.id)===roomSelect.value);
+    const applyTarget=(p,r)=>{if(r){p.groupId=r.id;p.groupName=r.name||""}};
+    const afterBatch=()=>{
+      selected.clear();renderPositions();renderOfferTotals();renderLivePreview();
+      const msg=document.getElementById("kofferMsg");if(msg)msg.textContent="Positionen geändert – bitte Angebot speichern.";
+    };
+    bar.querySelector("[data-multi-copy]").onclick=()=>{
+      const room=targetRoom(),copies=chosen().map(i=>{
+        const p=JSON.parse(JSON.stringify(draft.positions[i]));
+        delete p.id;delete p.positionId;delete p.uuid;
+        applyTarget(p,room);return p;
+      });
+      draft.positions.push(...copies);afterBatch();
+    };
+    bar.querySelector("[data-multi-move]").onclick=()=>{
+      const room=targetRoom();if(!room){alert("Bitte zuerst einen Zielraum auswählen.");return}
+      chosen().forEach(i=>applyTarget(draft.positions[i],room));afterBatch();
+    };
+    bar.querySelector("[data-multi-delete]").onclick=()=>{
+      if(!confirm(selected.size+" Position(en) wirklich löschen?"))return;
+      chosen().reverse().forEach(i=>draft.positions.splice(i,1));afterBatch();
+    };
+    refreshSelection();
+
     queueMicrotask(()=>{enhanceGroupTotals();enhanceCollapsibleGroups();moveOfferPositionsIntoRooms();mountOfferNotepad()});
     const update=(row,p)=>{p.laborHoursPerUnit=+(p.workSteps.reduce((s,x)=>s+(+x.minutes||0),0)/60).toFixed(4);p.materialCostPerUnit=+p.materials.reduce((s,x)=>s+(+x.unitPrice||0)*(+x.consumption||0),0).toFixed(2);p.unitPrice=+calculatedPrice(p).toFixed(2);row.querySelector('[data-f="unitPrice"]').value=p.unitPrice||"";row.querySelector('[data-calc="laborHoursPerUnit"]').value=p.laborHoursPerUnit||"";row.querySelector('[data-calc="materialCostPerUnit"]').value=p.materialCostPerUnit||"";row.querySelector('[data-fact="hours"]').textContent=`Zeit ${p.laborHoursPerUnit.toLocaleString("de-AT")} h/Einh.`;row.querySelector('[data-fact="material"]').textContent=`Material € ${p.materialCostPerUnit.toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`};
     h.querySelectorAll("[data-i]").forEach(row=>{const p=draft.positions[Number(row.dataset.i)];row.querySelectorAll("[data-f]").forEach(input=>input.oninput=()=>{const f=input.dataset.f;p[f]=f==="unit"?input.value:Math.max(0,Number(input.value||0))});row.querySelectorAll("[data-calc]").forEach(input=>{if(input.readOnly)return;input.oninput=()=>{const f=input.dataset.calc,v=Number(input.value||0);p[f]=f==="adjustmentPct"||f==="materialMarkupPct"?Math.max(-100,v):Math.max(0,v);if(f==="hourlyRate")p.hourlyRateOverridden=true;if(f==="materialMarkupPct")p.materialMarkupOverridden=true;update(row,p);row.querySelector('[data-fact="rate"]').textContent=`Stundensatz € ${p.hourlyRate.toLocaleString("de-AT")} · abweichend`;row.querySelector('[data-fact="markup"]').textContent=`Materialaufschlag ${p.materialMarkupPct.toLocaleString("de-AT")} %${p.materialMarkupOverridden?" · abweichend":""}`;row.querySelector('[data-fact="adjust"]').textContent=`Ab-/Zuschlag ${p.adjustmentPct>0?"+":""}${p.adjustmentPct.toLocaleString("de-AT")} %`}});row.querySelectorAll("[data-work-text]").forEach(x=>x.oninput=()=>p.workSteps[+x.dataset.workText].text=x.value);row.querySelectorAll("[data-work-min]").forEach(x=>x.oninput=()=>{p.workSteps[+x.dataset.workMin].minutes=Math.max(0,+x.value||0);update(row,p)});row.querySelectorAll("[data-remove-work]").forEach(x=>x.onclick=()=>{p.workSteps.splice(+x.dataset.removeWork,1);renderPositions()});row.querySelector("[data-add-work]").onclick=()=>{p.workSteps.push({text:"",minutes:0});renderPositions()};row.querySelectorAll("[data-mat-name]").forEach(x=>x.onchange=()=>{const m=p.materials[+x.dataset.matName],found=materialMaster.find(y=>String(y.name||y.label||"").toLowerCase()===x.value.trim().toLowerCase());m.name=x.value.trim();if(found){m.materialId=found.materialId||found.id||"";m.unit=found.unit||"";m.unitPrice=Number(found.purchasePrice||found.salePrice||0)}update(row,p);renderPositions()});row.querySelectorAll("[data-mat-price]").forEach(x=>x.oninput=()=>{p.materials[+x.dataset.matPrice].unitPrice=Math.max(0,+x.value||0);update(row,p);row.querySelector(`[data-mat-result="${x.dataset.matPrice}"]`).textContent=`€ ${((+x.value||0)*(+p.materials[+x.dataset.matPrice].consumption||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`});row.querySelectorAll("[data-mat-use]").forEach(x=>x.oninput=()=>{p.materials[+x.dataset.matUse].consumption=Math.max(0,+x.value||0);update(row,p);row.querySelector(`[data-mat-result="${x.dataset.matUse}"]`).textContent=`€ ${((+x.value||0)*(+p.materials[+x.dataset.matUse].unitPrice||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`});row.querySelectorAll("[data-remove-mat]").forEach(x=>x.onclick=()=>{p.materials.splice(+x.dataset.removeMat,1);renderPositions()});row.querySelector("[data-add-mat]").onclick=()=>{p.materials.push({materialId:"",name:"",unit:"",unitPrice:0,consumption:0});renderPositions()}})
