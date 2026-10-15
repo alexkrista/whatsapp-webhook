@@ -1,0 +1,21 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const {JSDOM}=require('jsdom');
+const vm=require('node:vm');
+const html=fs.readFileSync(require.resolve('../public/kristine-go-abschluss.html'),'utf8');
+test('day close edits invalidate confirmation and display normalized saved times',async()=>{
+ const dom=new JSDOM(html,{url:'https://example.test/?employeeId=test&date=2026-10-15',runScripts:'outside-only'}),w=dom.window,d=w.document;
+ const evaluate=code=>vm.runInContext(code,dom.getInternalVMContext());
+ evaluate(html.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/init\(\);\s*$/,''));
+ evaluate(`employee={name:'Test'};editableSegments=[{type:'work',from:'07:00',to:'12:00',jobId:'A',jobName:'Site A'},{type:'lunch',from:'12:00',to:'12:30'},{type:'up',from:'12:30',to:'13:00',reason:'Werkstatt'}];window.__bootstrapAssignments=[{date:today,employeeId,jobId:'B',jobName:'Site B'}];checks={time:true,photos:true,regie:true};renderTimeline();`);
+ d.getElementById('confirm').checked=true;evaluate('updateProgress()');assert.equal(d.getElementById('finish').disabled,false);
+ const row=d.querySelector('.timeline-row');assert.equal(row.firstElementChild.className,'timeline-site');
+ const job=row.querySelector('select');job.value='B';job.dispatchEvent(new w.Event('change'));assert.equal(d.getElementById('finish').disabled,true);
+ const from=row.querySelector('.seg-from');from.value='06:45';from.dispatchEvent(new w.Event('change'));
+ assert.equal(d.querySelector('.timeline-row.up select'),null);assert.match(d.querySelector('.timeline-row.up').textContent,/Werkstatt/);
+ let sent;w.fetch=async(url,options)=>{sent=JSON.parse(options.body);return{ok:true,json:async()=>({ok:true,segments:sent.segments.map((s,i)=>i===0?{...s,from:'07:00'}:s)})}};
+ d.getElementById('saveTimes').click();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(sent.segments[0].jobId,'B');assert.equal(sent.segments[0].from,'06:45');assert.equal(sent.segments[1].type,'lunch');
+ assert.equal(d.querySelector('.seg-from').value,'07:00');assert.equal(d.querySelector('.seg-job').value,'B');assert.equal(d.getElementById('finish').disabled,false);assert.equal(d.getElementById('saveTimes').classList.contains('dirty'),false);
+ dom.window.close();
+});
