@@ -32,3 +32,37 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 .source-checklist label{display:inline-flex;gap:4px;align-items:center;border:1px solid #cde0cb;border-radius:8px;padding:3px 7px;background:#f1f8ef;cursor:pointer;font-size:11px}
 .source-checklist label:has(input:checked){background:#dcefdc;border-color:#8cbb91}
 .source-checklist label input{width:14px;height:14px}
+
+/* Offer V2: searchable grouped item catalog. Never change offer positions while filtering. */
+.catalog-panel-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;width:100%}
+.catalog-panel-head strong{font-size:13px;color:#245d3c}
+.catalog-browser{border:1px solid #d5e4d5;border-radius:12px;padding:11px 13px;background:#fcfefb;width:100%;min-width:0}
+.catalog-search-label{display:grid;gap:6px;font-size:12px;font-weight:900;color:#325b3d}
+.catalog-search-label input{width:100%;padding:10px 12px;border:1px solid #afc7b6;border-radius:9px;background:white;font-size:14px;color:#193c28;font-weight:600}
+.catalog-search-label input:focus{outline:2px solid #87b298;outline-offset:1px}
+.catalog-browser-status{color:#718472;font-weight:750;font-size:11px;margin:8px 0}
+.catalog-browser-groups{display:grid;gap:6px;max-height:420px;overflow:auto;overscroll-behavior:contain}
+.catalog-group{border:1px solid #dde7dc;border-radius:9px;overflow:hidden;background:white}
+.catalog-group>summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 13px;font-weight:900;color:#254e35;background:#f2f7ef;gap:10px;list-style:none}
+.catalog-group>summary::-webkit-details-marker{display:none}
+.catalog-group>summary:before{content:"▸";margin-right:5px;color:#5b8264}
+.catalog-group[open]>summary:before{content:"▾"}
+.catalog-group>summary small{font-size:11px;color:#6b8273;font-weight:700;margin-left:auto}
+.catalog-entries{display:grid;gap:1px;border-top:1px solid #e7eee6}
+.catalog-entry{border:0;border-bottom:1px solid #edf2eb;background:#fff;color:#203b2a;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;text-align:left;width:100%;cursor:pointer;font-size:12px}
+.catalog-entry:hover,.catalog-entry:focus-visible{background:#e9f4e7}
+.catalog-entry span{flex:1;font-weight:700}
+.catalog-entry small{white-space:nowrap;color:#3d7b4e;font-size:10px;font-weight:800}
+.catalog-check{display:flex;align-items:flex-start;gap:9px;border-bottom:1px solid #ebf0e9;padding:9px 11px;background:#fff;font-size:12px;cursor:pointer}
+.catalog-check:has(input:checked){background:#eef8ed}
+.catalog-check input{flex:none;margin:2px 0 0}
+.catalog-check span{flex:1}
+.catalog-check small{color:#6f8371;margin-left:5px}
+.catalog-empty{padding:12px;text-align:center;color:#855731;background:#fff4eb;border-radius:9px;font-size:12px}
+.catalog-browser [hidden],.catalog-browser [data-catalog-item][hidden],.catalog-browser [data-catalog-group][hidden]{display:none!important}
+.position-controls{display:block}
+.position-controls>.position-add{margin-top:10px;display:flex;align-items:center;gap:9px}
+.position-controls>.position-add .muted{flex:1}
+.bulk-panel .catalog-browser{margin:10px 0}
+.bulk-panel>.action.solid{margin-top:10px}
+@media(max-width:750px){.catalog-entry{align-items:flex-start;flex-wrap:wrap;gap:4px}.catalog-entry small{white-space:normal}.catalog-browser-groups{max-height:390px}}
