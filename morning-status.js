@@ -92,6 +92,10 @@ function inWindow(hm, from, to) {
   return value >= hmMinutes(from) && value <= hmMinutes(to);
 }
 
+function automaticFinishWindow(date) {
+  return weekdayNumber(date) === 5 ? { from: "14:15", to: "14:44" } : { from: "17:00", to: "17:29" };
+}
+
 function clampStartTime(hm) {
   const value = minutesFromHm(hm);
   const official = minutesFromHm(OFFICIAL_START);
@@ -1073,10 +1077,11 @@ async function runSixFortyFive(
   }
 
   async function runWorktimePrompt(phase, date = localIsoDate(), force = false) {
+    const finishAt = automaticFinishWindow(date).from;
     const config = {
       lunch:{key:"lunchPrompt",types:["start","weiter","up"],at:"12:00",eventType:"mittag",mode:"lunch",reply:"🍽️ Mittag wurde automatisch um 12:00 Uhr gebucht.\n\nFalls du noch nicht Mittag machst, drücke „Nein“. Dann bitte später selbst „Mittag“ stempeln.",buttons:["Nein"]},
       resume:{key:"resumePrompt",types:["mittag"],at:"12:30",eventType:"weiter",mode:"working",reply:"▶️ Mittagspause beendet. „Weiter“ wurde automatisch um 12:30 Uhr gebucht.",buttons:[]},
-      finish:{key:"finishPrompt",types:["start","weiter","up"],at:"17:00",eventType:"ende",mode:"finished_day",reply:"🏁 Feierabend wurde automatisch um 17:00 Uhr gebucht.\n\nFalls du weiterarbeitest, drücke „Nein“. Dann bitte später selbst „Ende“ stempeln.",buttons:["Nein"]},
+      finish:{key:"finishPrompt",types:["start","weiter","up"],at:finishAt,eventType:"ende",mode:"finished_day",reply:`🏁 Feierabend wurde automatisch um ${finishAt} Uhr gebucht.\n\nFalls du weiterarbeitest, drücke „Nein“. Dann bitte später selbst „Ende“ stempeln.`,buttons:["Nein"]},
     }[phase];
     if (!config) throw new Error("Unbekannte Arbeitszeit-Erinnerung");
     const state = await loadState();
@@ -1426,7 +1431,8 @@ async function runSevenOClock(
 
       if (inWindow(hm, "12:00", "12:14")) await runWorktimePrompt("lunch", date);
       if (inWindow(hm, "12:30", "12:44")) await runWorktimePrompt("resume", date);
-      if (inWindow(hm, "17:00", "17:29")) await runWorktimePrompt("finish", date);
+      const finishWindow = automaticFinishWindow(date);
+      if (inWindow(hm, finishWindow.from, finishWindow.to)) await runWorktimePrompt("finish", date);
 
       // Montag–Donnerstag: Planung für den nächsten Tag.
       if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:00", "15:29")) {
@@ -1470,7 +1476,7 @@ async function runSevenOClock(
         "08:00 Chefstatus · nur Produktion",
         "12:00 Mittag automatisch buchen · Nein hebt auf",
         "12:30 Weiter nur nach unverändertem Auto-Mittag",
-        "17:00 Feierabend automatisch buchen · Nein hebt auf",
+        "Mo–Do 17:00 / Fr 14:15 Feierabend automatisch buchen · Nein hebt auf",
         "Mo–Do 15:00 Planung morgen · nur Produktion",
         "Mo–Do 15:30 Nachfassung · nur Produktion",
         "Fr 11:00 Montagseinteilung · nur Produktion",
@@ -1509,6 +1515,7 @@ async function runSevenOClock(
 }
 
 module.exports = {
+  automaticFinishWindow,
   registerMorningStatus,
   clampStartTime,
   bookedAssignment,
