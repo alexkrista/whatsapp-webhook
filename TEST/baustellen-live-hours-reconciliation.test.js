@@ -12,9 +12,9 @@ const baustellen=fs.readFileSync(path.join(root,"public","baustellen.html"),"utf
 const leitstand=fs.readFileSync(path.join(root,"public","kristine.html"),"utf8");
 assert.match(topbar,/baustellen-live-hours\.js\?v=20261006-hours-loading-1/);
 assert.match(baustellen,/topbar\.js\?v=\d{8}-[\w-]+/);
-assert.match(leitstand,/timeEditorReleased=Boolean\(result\.released\)/);
+assert.match(leitstand,/timeEditorMonthClosed=Boolean\(result\.monthClosed\)/);
 assert.match(leitstand,/Produktiv · ohne Baustellenbezug/);
-assert.match(leitstand,/Änderungen wirken nur auf die Mitarbeiterzeit/);
+assert.match(leitstand,/Nach Monatsabschluss getrennt/);
 assert.match(leitstand,/\['Krank','Arzt','Urlaub','Sonderurlaub'\]/);
 assert.doesNotMatch(ui,/if\(!token\)return null/);
 assert.match(ui,/window\.BaustellenSources\.ww\("hours"/);

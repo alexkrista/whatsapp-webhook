@@ -418,12 +418,12 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button type="button" class="secondary" onclick="closeEmployeeActionModal()">Schließen</button>
     </div>
     <div id="employeeActionInfo" class="auto-box" style="margin-top:12px"></div>
-    <div class="time-copybar">
+    <div class="time-copybar" id="timeEditorCopyBar">
       <div><label for="timeCopyEmployee">📋 Wie …</label><select id="timeCopyEmployee"><option value="">– Korrektur übernehmen von –</option></select><div id="timeCopyHint" class="time-copy-hint">Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.</div></div>
       <button type="button" class="secondary" onclick="copyTimeEditorFromEmployee()">Übernehmen</button>
     </div>
     <div id="timeEditorTable"></div>
-    <div class="actions" style="margin-top:12px">
+    <div id="timeEditorActions" class="actions" style="margin-top:12px">
       <button id="timeAddWork" type="button" class="green" onclick="addTimeEditorRow('work')">+ Arbeit</button>
       <button id="timeAddSite" type="button" class="green" onclick="addTimeEditorRow('site')">+ Baustelle</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('lunch')">+ Mittag</button>
@@ -1095,9 +1095,9 @@ function renderDayBar(segments,dayStart,dayEnd){
 let selectedControlEmployeeId='';
 let timeEditorSegments=[];
 let timeEditorCopiedFrom=null;
-let timeEditorReleased=false;
+let timeEditorMonthClosed=false;
 const timeEditorJobGroups=new Map();
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorReleased=false;timeEditorJobGroups.clear();}
+function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorMonthClosed=false;timeEditorJobGroups.clear();}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
 const JOB_OPTION_GROUPS=[
   {key:'running',label:'1. Laufend'},
@@ -1144,12 +1144,12 @@ function addMinuteToHM(hm){
   return `${String(Math.floor(next/60)).padStart(2,'0')}:${String(next%60).padStart(2,'0')}`;
 }
 function upReasonOptions(selected=''){
-  const reasons=timeEditorReleased?['Krank','Arzt','Urlaub','Sonderurlaub']:UP_REASONS;
+  const reasons=timeEditorMonthClosed?['Krank','Arzt','Urlaub','Sonderurlaub']:UP_REASONS;
   const legacy=selected&&!reasons.includes(String(selected))?`<option value="${esc(selected)}" selected>${esc(selected)}</option>`:'';
   return legacy+reasons.map(reason=>`<option value="${esc(reason)}" ${String(selected)===reason?'selected':''}>${esc(reason)}</option>`).join('');
 }
 function timeEditorContextCell(seg,index){
-  if(timeEditorReleased&&seg.type==='work')return '<span class="fink-code-badge">Produktiv · ohne Baustellenbezug</span>';
+  if(timeEditorMonthClosed&&seg.type==='work')return '<span class="fink-code-badge">Produktiv · ohne Baustellenbezug</span>';
   if(seg.type==='work'){
     const selectedJob=masterJobs.find(job=>String(job.jobId||job.id||'')===String(seg.jobId||''));
     const groupKey=timeEditorJobGroups.get(seg)||jobOptionGroup(selectedJob);
@@ -1174,7 +1174,7 @@ function renderTimeEditor(){
     }
     rows+=`<tr class="time-editor-row-${esc(seg.type)}">
       <td><select onchange="updateTimeEditorRow(${index},'type',this.value)">
-        <option value="work" ${seg.type==='work'?'selected':''}>${timeEditorReleased?'Produktiv':'Arbeit'}</option>
+        <option value="work" ${seg.type==='work'?'selected':''}>${timeEditorMonthClosed?'Produktiv':'Arbeit'}</option>
         <option value="lunch" ${seg.type==='lunch'?'selected':''}>Mittag</option>
         <option value="pause" ${seg.type==='pause'?'selected':''}>Pause</option>
         <option value="up" ${seg.type==='up'?'selected':''}>Unproduktiv</option>
@@ -1190,6 +1190,7 @@ function renderTimeEditor(){
   const up=timeEditorSegments.filter(x=>x.type==='up').reduce((sum,x)=>{const f=hmToMinutes(x.from),t=hmToMinutes(x.to);return sum+(f!==null&&t!==null&&t>f?t-f:0)},0);
   const last=timeEditorSegments.at(-1);const continues=Boolean(last&&!last.to);
   timeEditorTable.innerHTML=`<table class="time-editor-table"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / UP-Grund</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="small">Noch keine Buchung vorhanden.</td></tr>'}</tbody></table><div class="time-editor-summary"><span>Arbeitszeit ${durationText(work)}</span><span>UP ${durationText(up)}</span><span>Pause/Mittag ${durationText(breaks)}</span><span>${timeEditorSegments.length} Abschnitt(e)</span></div>${last?`<label style="display:flex;align-items:center;gap:10px;margin:10px 0 2px;padding:10px 12px;border:1px solid ${continues?'#9bcba8':'#ddd6c8'};border-radius:10px;background:${continues?'#edf8ef':'#faf8f3'};cursor:pointer;font-weight:800"><input type="checkbox" ${continues?'checked':''} onchange="setTimeEditorContinues(this.checked)"><span>Arbeitet weiter</span><span class="small" style="font-weight:500">${continues?'Bis bleibt offen – Zeit läuft weiter.':'Haken setzen = letzten Abschnitt offen lassen.'}</span></label>`:''}`;
+  timeEditorTable.querySelectorAll("input,select,button").forEach(control=>{control.disabled=timeEditorMonthClosed});
 }
 function commitTimeEditorTime(index,key,input){
   const raw=String(input.value||'').trim();
@@ -1266,20 +1267,24 @@ async function openEmployeeActionModal(employeeId){
   timeEditorCopiedFrom=null;employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
   try{
     const date=selectedWorkDate();const result=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(date)}`);
-    timeEditorReleased=Boolean(result.released);
+    timeEditorMonthClosed=Boolean(result.monthClosed);
     timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorJobGroups.clear();
     const state=data.states?.[employeeId]||{mode:'idle'};
-    employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">${timeEditorReleased?'Zeit oder arbeitsrechtliche Art ändern und anschließend speichern.':'Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.'}</span>`;
-    if(timeEditorReleased)employeeActionInfo.innerHTML+=`<br><span class="small"><strong>Freigegeben:</strong> unabhängige KRISZEIT-Kopie – nur Zeit sowie Produktiv/Unproduktiv, ohne Baustellenverbindung.</span>`;
-    document.getElementById('timeAddSite').hidden=timeEditorReleased;
-    document.getElementById('timeAddWork').textContent=timeEditorReleased?'+ Produktiv':'+ Arbeit';
-    document.getElementById('timeEditorLinkNotice').innerHTML=timeEditorReleased?'<strong>Nach Freigabe getrennt:</strong> Änderungen wirken nur auf die Mitarbeiterzeit. Baustellenstunden, Fotos, Material und Regie bleiben unverändert.':'<strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.';
+    employeeActionInfo.innerHTML=`<strong>Datum:</strong> ${esc(date)} · <strong>Status:</strong> ${esc(statusLabel(state.mode||'idle'))}<br><span class="small">${timeEditorMonthClosed?'Monat abgeschlossen – diese Kriszeit ist nur noch lesbar.':'Zeile anklicken, Zeiten oder Baustelle ändern und anschließend speichern.'}</span>`;
+    if(result.released&&!timeEditorMonthClosed)employeeActionInfo.innerHTML+=`<br><span class="small"><strong>Tag freigegeben:</strong> Zeiten und Baustellen bleiben bis zum Monatsabschluss verbunden.</span>`;
+    if(timeEditorMonthClosed)employeeActionInfo.innerHTML+=`<br><span class="small"><strong>Monatsabschluss:</strong> Kriszeit bleibt fix. Baustellenstunden können getrennt in der Baustelle bearbeitet werden.</span>`;
+    document.getElementById('timeAddSite').hidden=timeEditorMonthClosed;
+    document.getElementById('timeAddWork').textContent=timeEditorMonthClosed?'+ Produktiv':'+ Arbeit';
+    document.getElementById('timeEditorLinkNotice').innerHTML=timeEditorMonthClosed?'<strong>Nach Monatsabschluss getrennt:</strong> Kriszeit bleibt fix. Änderungen an Baustellenstunden sind weiterhin in der Baustelle möglich.':'<strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.';
     const hint=document.getElementById('timeCopyHint');if(hint)hint.textContent='Einen bereits korrigierten Mitarbeiter wählen; die Abschnitte werden zur Kontrolle übernommen.';
     renderTimeEditor();populateTimeCopyEmployees();
+    document.getElementById("timeEditorCopyBar").hidden=timeEditorMonthClosed;
+    document.getElementById("timeEditorActions").hidden=timeEditorMonthClosed;
   }catch(error){employeeActionInfo.textContent='Fehler: '+error.message}
 }
 async function saveTimeEditor(){
   if(!selectedControlEmployeeId)return;
+  if(timeEditorMonthClosed){employeeActionNote.textContent="Monat abgeschlossen. Baustellenstunden bitte in der Baustelle ändern.";return;}
   const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
   const date=selectedWorkDate();
   const openIndexes=[];
@@ -1288,7 +1293,7 @@ async function saveTimeEditor(){
     if(!seg.from){employeeActionNote.textContent='Bei jedem Abschnitt muss „Von“ ausgefüllt sein.';return}
     if(!seg.to)openIndexes.push(index);
     if(seg.to&&hmToMinutes(seg.to)<=hmToMinutes(seg.from)){employeeActionNote.textContent=`Ungültiger Zeitraum ${seg.from}–${seg.to}.`;return}
-    if(seg.type==='work'&&!seg.jobId&&!timeEditorReleased){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
+    if(seg.type==='work'&&!seg.jobId&&!timeEditorMonthClosed){employeeActionNote.textContent='Bitte bei jedem Arbeitsabschnitt eine Baustelle wählen.';return}
     if(seg.type==='up'&&!seg.reason)seg.reason='Sonstiges';
   }
   if(openIndexes.some(index=>index!==timeEditorSegments.length-1)){employeeActionNote.textContent='Nur der letzte Abschnitt darf offen sein.';return}
