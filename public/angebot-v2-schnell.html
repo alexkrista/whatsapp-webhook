@@ -50,7 +50,33 @@ button.qsecondary{border:1px solid #b4cdb8;border-radius:10px;background:#fafff8
 .qresult-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(330px,.9fr);gap:20px}
 .qpositions,.qpaper{background:white;border:1px solid var(--line);border-radius:15px;padding:21px}
 .qpositions h3,.qpaper h3{font-size:16px;margin:0 0 15px}
-.qpos{display:grid;grid-template-columns:1fr 100px 110px 35px;align-items:center;gap:8px;border-top:1px solid #e8eee8;padding:12px 0}
+.qpos{display:grid;grid-template-columns:minmax(190px,1fr) 92px 100px 99px 35px;align-items:center;gap:9px;border-top:1px solid #e8eee8;padding:12px 0}
+.qpos-price,.qpos-qty{width:100%;padding:8px;border:1px solid #bed3c2;border-radius:8px;background:white;color:#213f2c;text-align:right;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+.qpos-price:focus,.qpos-qty:focus,.qm-input:focus{border-color:#377952;outline:2px solid #d6ead7}
+.qpos .qfield{display:grid;gap:4px;font-size:10px;font-weight:850;color:#68826d}
+.qpos .qfield em{font-size:9px;font-weight:700;font-style:normal;color:#9d4a2e;line-height:1.2}
+.qpos .qfield .linked-note{color:#2f7650}
+.qpos .qlink{color:#2a6e43;background:transparent;border:none;padding:0;text-decoration:underline;font:750 10px system-ui}
+.qtable-head{display:grid;grid-template-columns:minmax(190px,1fr) 92px 100px 99px 35px;gap:9px;color:#708674;font-size:10px;font-weight:900;margin-top:12px;align-items:center}
+.qtable-head span:nth-child(n+2){text-align:right}
+.qm-panel{margin:0 0 19px;background:#fff;border:1px solid var(--line);border-radius:17px;padding:19px 21px;box-shadow:0 8px 25px #253f2808}
+.qm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.qm-head h3{margin:0;font-size:17px}
+.qm-head p{font-size:12px;color:#647967;margin:5px 0 0}
+.qm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:15px}
+.qm-card{padding:10px 12px;border:1px solid #dae6da;border-radius:11px;background:#fcfefb;min-width:0}
+.qm-card-title{font-size:10px;color:#5a7960;font-weight:900;display:block;margin-bottom:5px}
+.qm-card input,.qm-card select{width:100%;padding:8px;border:1px solid #c5d6ca;border-radius:8px;background:white;color:#263b2b;font-weight:750}
+.qm-card .qm-result{display:block;margin-top:6px;font-size:11px;color:#537259;font-weight:850}
+.qm-card .qm-result.bad{color:#ad3c34}
+.qm-card .qm-actions{display:flex;justify-content:space-between;align-items:center;gap:5px;margin-top:7px}
+.qm-card .qm-delete{font-size:10px;color:#a34236;border:0;background:transparent;text-decoration:underline;cursor:pointer}
+.qm-actions .qm-units{width:70px;font-size:10px;padding:5px}
+.qm-measure-help{background:#eff7ed;color:#366341;font-size:11px;padding:10px 12px;border-radius:9px;margin-top:13px}
+.qm-more{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.qm-more select{min-width:190px;max-width:480px;width:100%;padding:8px;border:1px solid #c1d3c5;border-radius:8px;background:#fff;font-size:12px}
+.qm-more strong{font-size:11px;color:#4c6c56}
+.qstatus-updating{color:#805b1b}
 .qpos b{font-size:12px}.qpos small{display:block;color:#78917c;font-size:10px}.qpos .qremove{height:32px;width:32px;border:1px solid #e7c4bf;background:#fff4f2;border-radius:8px;color:#a33b31;font-size:21px;cursor:pointer}
 .qpos .value{font-size:12px;font-weight:800;text-align:right}
 .qpos .warn{color:#b05334;font-weight:850}
@@ -61,8 +87,8 @@ button.qsecondary{border:1px solid #b4cdb8;border-radius:10px;background:#fafff8
 .qcta{margin-top:18px;background:#e9f4e7;padding:19px;border:1px solid #c7e0c5;border-radius:14px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .qcta strong{display:block;margin-bottom:4px;font-size:16px}.qcta small{color:#5d7a62}
 .qcta .qbuttons{justify-content:flex-end}
-@media(max-width:900px){.qgrid,.qresult-grid{grid-template-columns:1fr}.qside{min-height:200px}.qheadline{align-items:start}.qmetric{display:none}}
-@media(max-width:560px){.qshell{padding:22px 12px 60px}.qtop{padding:9px 13px}.qtop .back{display:none}.qheadline h1{font-size:37px}.qfields{grid-template-columns:1fr}.qfields .wide{grid-column:auto}.qcard{padding:17px}.qpos{grid-template-columns:1fr 72px 76px 28px}.qpos b{font-size:11px}.qpos .value{font-size:10px}.qcta{display:block}.qcta .qbuttons{margin-top:15px}}
+@media(max-width:900px){.qgrid,.qresult-grid{grid-template-columns:1fr}.qm-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.qside{min-height:200px}.qheadline{align-items:start}.qmetric{display:none}}
+@media(max-width:560px){.qshell{padding:22px 12px 60px}.qtop{padding:9px 13px}.qtop .back{display:none}.qheadline h1{font-size:37px}.qfields{grid-template-columns:1fr}.qfields .wide{grid-column:auto}.qcard{padding:17px}.qpos,.qtable-head{grid-template-columns:minmax(150px,1fr) 69px 79px 85px 28px;gap:5px}.qm-grid{grid-template-columns:1fr 1fr}.qm-panel{padding:14px 12px}.qpos-price,.qpos-qty{padding:7px 3px;font-size:11px}.qpos b{font-size:11px}.qpos .value{font-size:10px}.qcta{display:block}.qcta .qbuttons{margin-top:15px}}
 </style>
 </head><body>
 <header class="qtop"><a href="/preview?world=kristine" class="qbrand"><span class="qlogo">K</span><span>KRISTINE <small>ANGEBOTSWERKSTATT · 2.0</small></span></a><div><span class="qtest">ISOLIERTER TEST</span> <a class="back" href="/angebot-v2" style="margin-left:15px">Zum Detail-Editor →</a></div></header>
@@ -88,8 +114,9 @@ button.qsecondary{border:1px solid #b4cdb8;border-radius:10px;background:#fafff8
   </section>
   <section class="qresult" id="quickResult" hidden>
     <div class="qresult-head"><h2>Dein Entwurf ist vorbereitet.</h2><div class="qtags"><span id="quickCount">0 Positionen</span><span id="quickCheck">Zu prüfen</span><span id="quickNet">€ 0,00</span></div></div>
+    <section class="qm-panel" aria-label="Aufmaß direkt bearbeiten"><div class="qm-head"><div><h3>📐 Aufmaß – direkt bearbeiten</h3><p>Änderst du hier eine Fläche, aktualisiert KRISTINE alle damit verknüpften Mengen und den Ausdruck.</p></div><button id="quickAddMeasure" type="button" class="qsecondary">+ Aufmaßzeile</button></div><div class="qm-grid" id="quickMeasures"></div><p class="qm-measure-help">Rechenbeispiel: <strong>(4,67 + 3,80) × 2 × 2,37 − 4</strong>. Du kannst Werte oder vollständige Formeln eintragen. Eine direkt geänderte Positionsmenge wird automatisch zur manuellen Menge.</p></section>
     <div class="qresult-grid">
-      <div class="qpositions"><h3>Positionen – schon jetzt einzeln löschbar</h3><div id="quickPositions"></div><p style="font-size:12px;color:#708275">Mengen, Preise, Aufmaßformeln, weitere Räume oder Abschnitte bearbeitest du anschließend im vollständigen Studio.</p></div>
+      <div class="qpositions"><h3>Leistungspositionen – Preis, Menge und Position direkt bearbeiten</h3><div class="qtable-head" aria-hidden="true"><span>Leistung</span><span>Menge</span><span>EP € netto</span><span>Gesamt</span><span></span></div><div id="quickPositions"></div><div class="qm-more"><strong>+ Einzelposition</strong><select id="quickCatalog" aria-label="Neue Position aus dem Katalog"></select><button id="quickAddPosition" type="button" class="qsecondary">+ Hinzufügen</button></div><p style="font-size:12px;color:#708275">Einzelpreise und Mengen sind direkt änderbar. Für mehrere Räume, zusätzliche Abschnitte oder eine detaillierte Kalkulation gibt es weiterhin den vollständigen Editor.</p></div>
       <div class="qpaper"><h3>Vorschau aus denselben Angebotsdaten</h3><div class="qpaper-preview" id="quickPrint"></div></div>
     </div>
     <div class="qcta"><div><strong>Jetzt professionell fertigstellen.</strong><small>Der Entwurf wird nur im Testbrowser gespeichert und öffnet dann den vollständigen V2-Editor.</small></div><div class="qbuttons"><button id="quickExport" type="button" class="qsecondary">↓ JSON sichern</button><button id="quickOpen" type="button" class="qprimary">Weiter zum Angebotseditor →</button></div></div>
