@@ -159,26 +159,41 @@
       '</div></section>';
   }
     function sectionMeasurements(sec){
-    const head='<div class="measure-grid measure-head"><span>Raum / Bauteil</span><span>Aufmaß / Rechnung</span><span>Einheit</span><span>Menge</span><span>Ergebnis</span><span></span></div>';
+    const head='<div class="measure-grid measure-head" aria-hidden="true"><span>Raum / Bauteil</span><span>Aufmaß / Bezeichnung</span><span>Einheit</span><span>Ergebnis</span><span></span></div>';
     const lines=sec.measurements.map(m=>{
       const computed=C.measured(m);
       const val=computed.error?'<span class="bad" title="'+e(computed.error)+'">Prüfen</span>':computed.value===null?'–':C.number(computed.value);
-      return '<div class="measure-grid" data-mid="'+e(m.id)+'">'+
-        '<select data-measure-field="roomId" aria-label="Raum / Bauteil"><option value="">Alle Räume</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'"'+(r.id===m.roomId?' selected':'')+'>'+e(r.name)+'</option>').join("")+'</select>'+
-        '<input data-measure-field="label" aria-label="Aufmaßbezeichnung" value="'+e(m.label)+'" placeholder="z. B. Wandflächen">'+
-        '<select data-measure-field="unit" aria-label="Einheit">'+["m²","m","Stk","PA","Std"].map(u=>'<option'+(u===m.unit?' selected':'')+'>'+e(u)+'</option>').join("")+'</select>'+
+      const calculationRows=(Array.isArray(m.calculations)&&m.calculations.length
+        ?m.calculations:[{label:"",formula:m.formula||"",deduction:false}]).map((c,i)=>{
+        let result="–",error="";
+        try{
+          const quantity=C.formulaValue(c.formula);
+          if(quantity!==null)result=(c.deduction?"− ":"")+C.number(quantity);
+        }catch(exc){result="Prüfen";error=String(exc.message||exc);}
+        return '<div class="measure-calc-row'+(c.deduction?' deduction':'')+'" data-calc-row="'+i+'">'+
+          '<button type="button" data-calc-sign="'+i+'" aria-label="'+(c.deduction?'Abzug in Zugang ändern':'Zugang in Abzug ändern')+'" title="Zwischen Zugang und Abzug wechseln">'+(c.deduction?'−':'+')+'</button>'+
+          '<input data-calc-label="'+i+'" aria-label="Beschreibung der Berechnungszeile" value="'+e(c.label||"")+'" placeholder="z. B. Nordwand, Fenster">'+
+          '<input data-calc-formula="'+i+'" aria-label="Rechnung" value="'+e(c.formula||"")+'" placeholder="4,5 × 2,5">'+
+          '<output data-calc-result="'+i+'" class="'+(error?'bad':'')+'" title="'+e(error)+'">'+result+'</output>'+
+          '<button type="button" data-calc-remove="'+i+'" aria-label="Diese Berechnungszeile entfernen" title="Berechnungszeile entfernen">×</button>'+
+          '</div>';
+      }).join("");
+      return '<div class="measure-entry" data-mid="'+e(m.id)+'">'+
+        '<div class="measure-grid measure-main-row">'+
+          '<select data-measure-field="roomId" aria-label="Raum / Bauteil"><option value="">Alle Räume</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'"'+(r.id===m.roomId?' selected':'')+'>'+e(r.name)+'</option>').join("")+'</select>'+
+          '<input data-measure-field="label" aria-label="Aufmaßbezeichnung" value="'+e(m.label)+'" placeholder="z. B. Wandflächen">'+
+          '<select data-measure-field="unit" aria-label="Einheit">'+["m²","m","Stk","PA","Std"].map(u=>'<option'+(u===m.unit?' selected':'')+'>'+e(u)+'</option>').join("")+'</select>'+
+          '<output class="measure-total" data-measure-result="'+e(m.id)+'">'+val+'</output>'+
+          del("remove-measure","Aufmaßzeile entfernen")+
+        '</div>'+
         '<div class="measure-calculations" data-calc-holder>'+
-        (Array.isArray(m.calculations)&&m.calculations.length?m.calculations:[{label:"",formula:m.formula||"",deduction:false}]).map((c,i)=>
-          '<div class="measure-calc-row'+(c.deduction?' deduction':'')+'">'+
-          '<button type="button" data-calc-sign="'+i+'" title="Zwischen Zugang und Abzug wechseln">'+(c.deduction?'−':'+')+'</button>'+
-          '<input data-calc-label="'+i+'" value="'+e(c.label||"")+'" placeholder="z. B. Wand, Tür">'+
-          '<input data-calc-formula="'+i+'" value="'+e(c.formula||"")+'" placeholder="4,5×2,5">'+
-          '<button type="button" data-calc-remove="'+i+'" title="Berechnungszeile entfernen">×</button></div>').join("")+
-        '<div class="measure-calc-buttons"><button type="button" data-calc-add="plus">+ Berechnungszeile</button><button type="button" data-calc-add="minus">− Abzug</button></div></div>'+
-        '<output class="measure-total" data-measure-result="'+e(m.id)+'">'+val+'</output>'+
-        del("remove-measure","Aufmaßzeile entfernen")+'</div>';
+          '<div class="measure-calc-heading" aria-hidden="true"><span>+/−</span><span>Berechnungszeile</span><span>Rechnung</span><span>Wert</span><span></span></div>'+
+          calculationRows+
+          '<div class="measure-calc-buttons"><button type="button" data-calc-add="plus">+ Berechnungszeile</button><button type="button" data-calc-add="minus">− Abzug</button></div>'+
+        '</div>'+
+      '</div>';
     }).join("");
-    return '<div class="measurement-panel"><div class="measurement-heading"><div><div class="sheet-label">📐 Aufmaß für den gesamten Abschnitt</div><div class="sheet-note">Eine Aufmaßzeile kann mehreren Positionen zugeordnet werden. Formeln mit Klammern, ×, + und − sind möglich.</div></div>'+button("+ Aufmaßzeile","add-measure")+'</div>'+
+    return '<div class="measurement-panel"><div class="measurement-heading"><div><div class="sheet-label">📐 Aufmaß für den gesamten Abschnitt</div><div class="sheet-note">Jede Berechnungszeile steht unter ihrem Aufmaß. Zusätze und Abzüge werden automatisch summiert; dieselbe Menge kann mehreren Positionen zugeordnet werden.</div></div>'+button("+ Aufmaßzeile","add-measure")+'</div>'+
       '<div class="measurement-copy-actions"><label>Aufmaß von Raum <select data-measure-copy-source><option value="">Raum auswählen …</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'">'+e(r.name)+'</option>').join("")+'</select></label><label>nach <select data-measure-copy-target><option value="">Zielraum …</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'">'+e(r.name)+'</option>').join("")+'</select></label>'+button("Aufmaß kopieren","copy-room-measure")+'</div>'+
       head+(lines||'<div class="empty-note">Noch keine Aufmaßzeile. Du kannst Positionen trotzdem mit freier Menge erfassen.</div>')+'</div>';
   }
@@ -341,6 +356,19 @@
       if(!source)return;const m=C.measured(source);
       el.textContent=m.error?"Prüfen":m.value===null?"–":C.number(m.value);
       el.title=m.error||"";
+      row.querySelectorAll("[data-calc-result]").forEach(output=>{
+        const idx=Number(output.dataset.calcResult);
+        const item=Array.isArray(source.calculations)&&source.calculations.length
+          ?source.calculations[idx]:idx===0?{formula:source.formula,deduction:false}:null;
+        if(!item)return;
+        try{
+          const value=C.formulaValue(item.formula);
+          output.textContent=value===null?"–":(item.deduction?"− ":"")+C.number(value);
+          output.title="";output.classList.remove("bad");
+        }catch(error){
+          output.textContent="Prüfen";output.title=String(error.message||error);output.classList.add("bad");
+        }
+      });
     });
     document.querySelectorAll("[data-section-total]").forEach(el=>{
       const x=calc.sections.find(s=>s.sectionId===el.dataset.sectionTotal);
