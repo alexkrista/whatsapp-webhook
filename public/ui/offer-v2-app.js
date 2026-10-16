@@ -141,6 +141,7 @@
       field("Land","country")+
       '<p class="subtle wide">Kundenstamm-Verknüpfung vorbereitet. In dieser isolierten Testversion werden die Adressfelder noch manuell bearbeitet.</p>'+
       '<label class="wide">Einleitung<textarea data-offer-field="intro">'+e(offer.intro)+'</textarea></label>'+
+      '<label class="wide"><input type="checkbox" data-global-price-toggle '+(offer.showUnitPrices===false?'checked':'')+'> Angebot ohne Menge & Einheitspreise drucken (Regie & Material immer mit)</label>'+
       '<h3 class="wide" style="margin:12px 0 0">Termine</h3>'+
       field("Termin vor Ort (intern)","siteVisitDate","date")+
       field("Uhrzeit vor Ort (intern)","siteVisitTime","time")+
@@ -213,7 +214,7 @@
       del("remove-room","Raum / Bauteil mit Positionen löschen")+
       '<button type="button" class="action compact secondary" data-action="collapse-room" aria-expanded="true">Schließen ▴</button></div>'+
       '<div class="room-body">'+
-      '<div class="room-adjust"><label>Zu-/Abschlag Raum % <input type="number" min="-100" max="100" step="0.1" data-room-field="adjustmentPercent" value="'+e(r.adjustmentPercent??0)+'"></label><small>Regie und Material ausgenommen · grün + / rot −</small></div>'+
+      '<div class="room-adjust"><label>Preise im Ausdruck <select data-room-field="showUnitPrices"><option value="inherit"'+(r.showUnitPrices===undefined?' selected':'')+'>Wie Angebot</option><option value="true"'+(r.showUnitPrices===true?' selected':'')+'>Mit Menge und EP</option><option value="false"'+(r.showUnitPrices===false?' selected':'')+'>Ohne Menge und EP</option></select></label><label>Zu-/Abschlag Raum % <input type="number" min="-100" max="100" step="0.1" data-room-field="adjustmentPercent" value="'+e(r.adjustmentPercent??0)+'"></label><small>Regie und Material ausgenommen · grün + / rot −</small></div>'+
       '<label class="edit-field room-description">Beschreibung dieses Raums (wird gedruckt)<textarea data-room-field="description">'+e(r.description||"")+'</textarea></label>'+
       '<div class="position-table">'+(r.positions.length?'<div class="position-columns"><span>Auswahl</span><span>Pos.</span><span>Leistungsbeschreibung</span><span>Menge</span><span>Einheit</span><span>Einzelpreis €</span><span>Gesamt €</span><span></span></div>':'')+(r.positions.map((p,j)=>positionRow(sec,r,p,j,summary)).join("")||'<div class="empty-note">Noch keine Position. Einzelne Leistung oder Paket auswählen.</div>')+'</div>'+
       '<div class="position-controls compact-catalog">'+
@@ -361,7 +362,8 @@
     if(!key)return;
     const subject=target.dataset.offerField?offer:target.dataset.sectionField?n.sec:target.dataset.roomField?n.room:target.dataset.measureField?n.measure:n.pos;
     if(!subject)return;
-    if(key==="measurementIds"){subject.measurementIds=target.value?[target.value]:[];}
+    if(key==="showUnitPrices"){subject[key]=target.value==="inherit"?undefined:target.value==="true";}
+    else if(key==="measurementIds"){subject.measurementIds=target.value?[target.value]:[];}
     else if(key==="alternative"){subject[key]=target.checked;}
     else if(["adjustmentPercent","unitPrice","quantity","discountPercent","vatRate","cashDiscountPercent","cashDiscountDays","netPaymentDays","advancePercent","advanceDiscountPercent"].includes(key)){subject[key]=key==="adjustmentPercent"?Math.max(-100,Math.min(100,Number(target.value)||0)):Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
     else if(key==="quantityMode"){subject[key]=target.value==="linked"?"linked":"manual";if(subject.quantityMode==="linked"&&!subject.measurementIds?.length){
@@ -370,7 +372,7 @@
     }}
     else subject[key]=target.value;
     if(key==="unit"&&subject.quantityMode==="linked")subject.measurementIds=[];
-    if((key==="adjustmentPercent"&&eventType==="change")||["executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
+    if((key==="adjustmentPercent"&&eventType==="change")||["showUnitPrices","executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
     updatePreview();autosave();
   }
   function structural(action,target){
@@ -473,6 +475,7 @@
   }
   function documentChange(event){
     const t=event.target;
+    if(t.matches("[data-global-price-toggle]")){offer.showUnitPrices=!t.checked;updatePreview();autosave();return;}
     if(t.matches("[data-multi-mark]")){if(t.checked)selectedPositions.add(t.dataset.multiMark);else selectedPositions.delete(t.dataset.multiMark);renderEditor();return;}
     if(t.matches("[data-multi-all]")){selectedPositions.clear();if(t.checked)offer.sections.forEach(sec=>sec.rooms.forEach(r=>r.positions.forEach(p=>selectedPositions.add(p.id))));renderEditor();return;}
     if(t.matches(".compact-catalog-search")){
