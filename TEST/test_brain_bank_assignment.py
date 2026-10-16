@@ -39,6 +39,27 @@ class AssignmentTests(unittest.TestCase):
         self.s.assign(self.body())
         with self.s.db() as c:self.assertEqual(c.execute("SELECT COUNT(*) FROM outgoing_payments WHERE source='KONFIPAY'").fetchone()[0],1)
 
+    def test_bank_movement_can_be_partially_allocated_then_completed(self):
+        first=self.s.assign(self.body(amount='40.00'))
+        self.assertFalse(first['assigned']);self.assertTrue(first['partial'])
+        self.assertEqual(first['remaining'],'60.00')
+        self.assertFalse(self.s.statuses(['tx-1'])['tx-1'])
+        with self.assertRaises(ValueError):self.s.assign(self.body(amount='40.00'))
+        body=self.body(amount='60.00');body['expectedAllocated']='40.00'
+        final=self.s.assign(body)
+        self.assertTrue(final['assigned']);self.assertEqual(final['remaining'],'0.00')
+        self.assertEqual(len(final['lines']),2)
+        self.s.assign(body)
+        with self.s.db() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM outgoing_payments').fetchone()[0],2)
+            self.assertEqual(c.execute('SELECT SUM(paid) FROM bank_assignment_lines').fetchone()[0],10000)
+
+    def test_partial_allocation_cannot_exceed_bank_remainder(self):
+        self.s.assign(self.body(amount='40.00'))
+        body=self.body(amount='61.00');body['expectedAllocated']='40.00'
+        with self.assertRaises(ValueError):self.s.assign(body)
+        self.assertEqual(self.s.detail('tx-1')['remaining'],'60.00')
+
     def test_deduction_task_failure_retains_assignment_and_balance(self):
         data=self.s.assign(self.body(mode='deduction',reason='Abzug prüfen'))
         self.assertTrue(data['assigned']);self.assertEqual(data['lines'][0]['decision'],'pending')
@@ -86,7 +107,7 @@ class AssignmentTests(unittest.TestCase):
 
     def test_split_and_mismatch_rollback(self):
         second=self.new_invoice();body=self.body(amount='50.00')
-        body['lines'].append(dict(body['lines'][0],target=str(second['id']),amount='49.99'))
+        body['lines'].append(dict(body['lines'][0],target=str(second['id']),amount='50.01'))
         with self.assertRaises(ValueError):self.s.assign(body)
         with self.s.db() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM outgoing_payments').fetchone()[0],0)
         body['lines'][1]['amount']='50.00';data=self.s.assign(body)

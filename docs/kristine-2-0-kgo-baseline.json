@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "description": "KGO program files and existing API contracts frozen as of KRISTINE 2.0 starting point; update only after explicit review.",
+  "productionCommit": "e3eaae04eecf7b0b21bbdee3c8f357f37921ee47",
+  "protectedFiles": [
+    {
+      "path": "public/kristine-go.html",
+      "gitBlobSha1": "eaa6744bdd6d41459501ab284c31a61fd091483f"
+    },
+    {
+      "path": "public/kristine-go.js",
+      "gitBlobSha1": "7306d6c548d152a954fae1afbe3dfb8a72c73e9c"
+    },
+    {
+      "path": "public/kristine-go.css",
+      "gitBlobSha1": "a36e475d53fed3f94baf9e25eaa36209a6d18402"
+    },
+    {
+      "path": "public/kristine-go-abschluss.html",
+      "gitBlobSha1": "a934e281f7da498f325b852ede3499fa9fcfe0a3"
+    },
+    {
+      "path": "public/ui/kgo-brain-access.js",
+      "gitBlobSha1": "d0ef05fa56418e3061b2b9f0fd4d5402635dad63"
+    },
+    {
+      "path": "public/ui/krista-photo-followup.js",
+      "gitBlobSha1": "571dd9d261b2ab472095cbfe73cfa4e5ee2dcafc"
+    }
+  ],
+  "serverRouteFiles": [
+    "kristine.js",
+    "server.js",
+    "day-close.js",
+    "kgo-office-core.js",
+    "regie-assistant.js"
+  ],
+  "requiredServerRoutes": [
+    {
+      "method": "GET",
+      "path": "/kristine/api/bootstrap"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/morning-check"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/message"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/finished-job-afterentry"
+    },
+    {
+      "method": "GET",
+      "path": "/kristine/api/material-responses/:employeeId"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/material-responses/:id/read"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/material-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/kristine/api/segments/:employeeId/:date"
+    },
+    {
+      "method": "PUT",
+      "path": "/kristine/api/segments/:employeeId/:date"
+    },
+    {
+      "method": "GET",
+      "path": "/kristine/api/regie/drafts"
+    },
+    {
+      "method": "POST",
+      "path": "/kristine/api/day-close"
+    }
+  ],
+  "requiredClientPaths": [
+    "/kristine/api/bootstrap",
+    "/kristine/api/morning-check",
+    "/kristine/api/message",
+    "/kristine/api/finished-job-afterentry",
+    "/kristine/api/material-responses/",
+    "/kristine/api/material-requests",
+    "/kristine/api/segments/",
+    "/kristine/api/regie/drafts",
+    "/kristine/api/day-close"
+  ]
+}

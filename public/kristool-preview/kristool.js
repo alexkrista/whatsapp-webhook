@@ -21,6 +21,7 @@ const state = {
   release: null,
   dayControl: null,
   modelFreeConfirmed: false,
+  monthClosed: false,
 };
 
 const $ = id => document.getElementById(id);
@@ -1125,12 +1126,13 @@ async function loadDay(){
     const seg=state.gpsImport?results[1]:results[0];
     state.dayRows=gps.ownRows||[];
     state.passengerRows=gps.passengerRows||[];
+    state.monthClosed=seg.monthClosed===true;
     state.segments=(seg.segments||[]).map(row=>({...row}));
     state.originalSegments=(seg.originalSegments||seg.segments||[]).map(row=>({...row}));
     state.correction=seg.correction||null;
     state.dietOverride=parseDietOverride(state.correction?.note||"");
-    applyAbsenceToDaySegments();
-    const lunchFix=hasForeignSiteWork(state.segments)
+    if(!state.monthClosed)applyAbsenceToDaySegments();
+    const lunchFix=!state.monthClosed&&hasForeignSiteWork(state.segments)
       ? enforceMinimumLunch(state.segments)
       : {changed:false,totalShift:0};
     renderDay(group,date);
@@ -1145,6 +1147,7 @@ async function loadDay(){
 }
 
 function clearDay(){
+  state.monthClosed=false;
   state.dayRows=[];
   state.passengerRows=[];
   state.segments=[];
@@ -1316,6 +1319,15 @@ function originalForSegment(row,index){
 }
 function renderSegments(){
   const box=$("kristineSegments"),rows=state.segments;
+  if(state.monthClosed){
+    box.className="timeline correction-list";
+    box.innerHTML=`<p><strong>Monat abgeschlossen · Kriszeit fix</strong></p>${rows.map(row=>`<div class="source-line"><div><strong>${esc(row.from)}–${esc(row.to)}</strong><small>${esc(segmentLabel(row.type))}${row.reason?` · ${esc(row.reason)}`:""}</small></div><span class="source-duration">${durationLabel(Math.max(0,minutes(row.to)-minutes(row.from)))}</span></div>`).join("")}`;
+    $("kristineTotal").textContent=durationLabel(workMinutes(rows));
+    $("checkKristine").textContent="Monatsabschluss · Änderungen nur noch in der Baustelle";
+    $("correctionToolbar").hidden=true;$("segmentActions").hidden=true;$("correctionHistory").hidden=true;
+    $("teamTransfer").hidden=true;
+    return;
+  }
   if(!rows.length){
     box.className="timeline empty";
     box.innerHTML="Für diesen Tag wurden keine KRISTINE-Zeitblöcke gefunden.";
@@ -1478,11 +1490,13 @@ function updateCorrectionTotals(){
   });
 }
 function scheduleCorrectionSave(delay=450){
+  if(state.monthClosed)return;
   if((state.segments||[]).length && (state.segments||[]).every(row=>row.lockedAbsence))return;
   clearTimeout(state.saveTimer);
   state.saveTimer=setTimeout(saveCorrection,delay);
 }
 async function saveCorrection(){
+  if(state.monthClosed)return;
   const employeeId=$("employeeSelect").value;
   if(!employeeId)return;
   const invalid=state.segments.some(row=>!normalizeTimeInput(row.from)||!normalizeTimeInput(row.to));
@@ -1521,6 +1535,7 @@ $("resetSegments").addEventListener("click",()=>{
   scheduleCorrectionSave(80);
 });
 function addSegment(type){
+  if(state.monthClosed)return;
   const last=state.segments.at(-1);
   const from=last?.to||"07:00";
   const to=minutes(from)!==null?`${String(Math.floor((minutes(from)+30)/60)).padStart(2,"0")}:${String((minutes(from)+30)%60).padStart(2,"0")}`:"07:30";
@@ -1944,6 +1959,7 @@ function currentWorkJobs(){
   return [...jobs].map(([jobId,jobName])=>({jobId,jobName}));
 }
 async function loadTeamCandidates(){
+  if(state.monthClosed){$("teamTransfer").hidden=true;return;}
   const source=selectedEmployee();
   const teamBox=$("teamTransfer");
   const candidatesBox=$("teamCandidates");

@@ -13,6 +13,7 @@ import base64
 from datetime import datetime
 
 from brain_finance_source import FinanceStore, norm_method, norm_status
+from brain_revolut_receipts import cache_receipts
 
 
 def _txt(value):
@@ -102,12 +103,14 @@ def install(ns):
                     candidate_items = []
                 c = con()
                 try:
+                    receipts_cached = cache_receipts(c, statement_source, transactions)
+                    c.commit()
                     existing = c.execute(
                         "SELECT id FROM brain_statement_imports WHERE source=? AND file_sha256=?",
                         (statement_source, digest),
                     ).fetchone()
                     if existing:
-                        return jsonify(ok=True, duplicate=True, statementId=int(existing["id"]), added=0)
+                        return jsonify(ok=True, duplicate=True, statementId=int(existing["id"]), added=0, receiptsCached=receipts_cached)
                     now = datetime.now().isoformat(timespec="seconds")
                     cur = c.execute("""
                         INSERT INTO brain_statement_imports
@@ -202,7 +205,7 @@ def install(ns):
                                 attachment_errors.append({"transactionId": external_id, "error": str(exc)})
                     c.commit()
                     return jsonify(ok=True, duplicate=False, statementId=statement_id, added=added, suggested=suggested,
-                                   autoPaid=0, attachmentsQueued=attachments_queued, attachmentErrors=attachment_errors)
+                                   autoPaid=0, receiptsCached=receipts_cached, attachmentsQueued=attachments_queued, attachmentErrors=attachment_errors)
                 finally:
                     c.close()
             except ValueError as exc:

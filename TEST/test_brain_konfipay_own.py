@@ -57,7 +57,20 @@ class Tests(unittest.TestCase):
         self.assertEqual(result['ownOutgoing'],'100.00')
         self.assertEqual(result['ownPaymentTotal'],'100.00')
         self.assertEqual(result['bankMovements'][0]['amount'],'100.00')
-        self.assertEqual(result['expected'],'800.00')
+        self.assertEqual(result['expected'],'900.00')
+    def test_payroll_and_old_archive_do_not_reduce_bank_subtotal(self):
+        amounts=['2802.66','2611.82','2758.12','382.14','2367.89','2207.42','2097.98','651.68','1386.32','1479.72']
+        own=[local(amount,str(i)) for i,amount in enumerate(amounts)]
+        own.extend([local('1000.00','old1'),local('750.00','old2')])
+        for item in own[-2:]:item['item']['date']=ACCOUNT['date']
+        pending=[dict(tx(amount,str(i)),endToEndId=None,iban=None) for i,amount in enumerate(amounts)]
+        with patch.object(self.c,'accounts',return_value=[dict(ACCOUNT,amount='28276.60')]),patch('brain_konfipay_own.outstanding',return_value=own),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=pending):
+            result=expected_balances(self.c)['accounts'][0]
+        self.assertEqual(result['reportedBalance'],'9530.85')
+        self.assertEqual(result['expected'],'9530.85')
+        self.assertEqual(result['ownOutgoing'],'20495.75')
+        self.assertEqual(result['ownMatched'],[])
+
     def test_unreferenced_batch_amount_keeps_own_payments_reserved(self):
         second=local('40','two');second.update(transfer='one',index=1)
         self.assertEqual(reconcile(self.c,ACCOUNT,[local(),second],[tx('140','batch')])['ownOutgoing'],'140.00')
@@ -71,7 +84,7 @@ class Tests(unittest.TestCase):
         with patch.object(self.p,'content',return_value={'items':[dict(local()['item'],date=(date.today()+timedelta(days=1)).isoformat())]}):self.assertEqual(outstanding(self.c),[])
     def test_full_balance_no_double_after_bank_appears(self):
         with patch('brain_konfipay_own.outstanding',return_value=[local()]),patch('brain_konfipay_changes.remember',return_value={}),patch('brain_konfipay_pending.pending_transactions',return_value=[]):
-            self.assertEqual(expected_balances(self.c)['accounts'][0]['expected'],'900.00')
+            self.assertEqual(expected_balances(self.c)['accounts'][0]['expected'],'1000.00')
             self.c.booked=[tx(booking='booked')]
             result=expected_balances(self.c)['accounts'][0]
             self.assertEqual(result['expected'],'900.00');self.assertEqual(result['ownOutgoing'],'0.00')
@@ -99,3 +112,4 @@ class Tests(unittest.TestCase):
         self.assertEqual(reconcile(self.c,ACCOUNT,[item],[])['ownOutgoing'],'100.00')
 
 if __name__=='__main__':unittest.main()
+

@@ -437,7 +437,8 @@ def install(ns):
             query = str(request.args.get("q") or "").strip()[:100]
             year = int(request.args.get("year") or 0)
             cutoff = book.apply_legacy_paid_cutoff()
-            rows = book.items(query, year)
+            from brain_book_filters import filter_rows
+            rows = filter_rows(book.items(query, year), request.args)
             return jsonify(ok=True, count=len(rows), items=rows, months=book.monthly_totals(rows), cutoff=cutoff)
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 500

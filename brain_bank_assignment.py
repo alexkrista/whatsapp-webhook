@@ -189,6 +189,7 @@ class Assignments:
             if not t: raise ValueError('Bitte die gebuchten Umsätze zuerst neu laden.')
             tx = json.loads(t['payload'])
             lines = [dict(x) for x in c.execute('SELECT * FROM bank_assignment_lines WHERE rid=? ORDER BY id',(rid,))]
+        balance=self.balances([rid])[rid]
         if a:
             current = {(x['source'],x['target']):x for x in self.candidates(tx)}
             for line in lines:
@@ -197,7 +198,7 @@ class Assignments:
             frequency=str(a['frequency'] or ('monthly' if a['recurring'] else 'none'))
             try:schedule=json.loads(a['schedule_json'] or '[]')
             except Exception:schedule=[]
-            return dict(transaction=tx, assigned=True, lines=lines, note=a['note'], recurring=bool(a['recurring']),
+            return dict(transaction=tx, assigned=balance['remaining']=='0.00', partial=balance['status']=='partial', candidates=self.candidates(tx), **balance, lines=lines, note=a['note'], recurring=bool(a['recurring']),
                         frequency=frequency, frequencyLabel=FREQUENCIES.get(frequency,frequency), scheduleDates=schedule)
         recurring = False
         if tx.get('iban'):
@@ -206,11 +207,23 @@ class Assignments:
                     other=json.loads(prior['payload'])
                     if other.get('iban')==tx.get('iban') and other.get('creditDebitIndicator')==tx.get('creditDebitIndicator'):
                         recurring=True; break
-        return dict(transaction=tx, assigned=False, candidates=self.candidates(tx), recurringSuggestion=recurring)
+        return dict(transaction=tx, assigned=False, partial=False, **balance, candidates=self.candidates(tx), recurringSuggestion=recurring)
+
+    def balances(self, rids):
+        with self.db() as c:
+            out={}
+            for rid in rids:
+                row=c.execute('SELECT payload FROM bank_assignment_transactions WHERE rid=?',(rid,)).fetchone()
+                if not row: continue
+                total=abs(cents(json.loads(row['payload'])['amount']))
+                paid=c.execute('SELECT COALESCE(SUM(paid),0) FROM bank_assignment_lines WHERE rid=?',(rid,)).fetchone()[0]
+                rest=total-paid
+                out[rid]=dict(allocated=amount(paid),remaining=amount(rest),status='assigned' if rest==0 else 'partial' if paid else 'unassigned')
+            return out
 
     def statuses(self, rids):
-        with self.db() as c:
-            return {rid:bool(c.execute('SELECT 1 FROM bank_assignments WHERE rid=?',(rid,)).fetchone()) for rid in rids}
+        balances=self.balances(rids)
+        return {rid:balances.get(rid,{}).get('status')=='assigned' for rid in rids}
 
     def legacy_check(self, tx):
         """Do not post an already reconciled imported CAMT movement a second time."""
@@ -232,11 +245,14 @@ class Assignments:
         with LOCK:
             with self.db() as c:
                 existing = c.execute('SELECT 1 FROM bank_assignments WHERE rid=?',(rid,)).fetchone()
-                if existing: return self.detail(rid)
+                previous=self.balances([rid]).get(rid,{})
+                if existing and previous.get('status')=='assigned': return self.detail(rid)
+                if existing and cents(body.get('expectedAllocated'))!=cents(previous['allocated']):
+                    raise ValueError('Die Zuordnung hat sich geändert. Bitte neu öffnen.')
                 row = c.execute('SELECT * FROM bank_assignment_transactions WHERE rid=?',(rid,)).fetchone()
                 if not row: raise ValueError('Nur geladene, gebuchte Umsätze können zugeordnet werden.')
                 tx = json.loads(row['payload'])
-                if c.execute('SELECT 1 FROM bank_assignments WHERE fingerprint=?',(row['fingerprint'],)).fetchone():
+                if c.execute('SELECT 1 FROM bank_assignments WHERE fingerprint=? AND rid<>?',(row['fingerprint'],rid)).fetchone():
                     raise ValueError('Eine Zahlung mit derselben Bankreferenz wurde bereits zugeordnet. Bitte den Doppelabruf prüfen.')
             self.legacy_check(tx)
             pool = {(x['source'],x['target']): x for x in self.candidates(tx)}
@@ -272,20 +288,23 @@ class Assignments:
                                   mode=mode,reason=reason,decision=decision))
             schedule=RENOVATION_DATES if any(x['category']=='renovation_installment' for x in clean) else []
             if schedule:frequency='fixed'
-            if sum(x['paid'] for x in clean)!=abs(cents(tx['amount'])):
-                raise ValueError('Die Teilbeträge müssen zusammen genau dem Bankumsatz entsprechen.')
+            allocated=cents(previous.get('allocated','0.00'))
+            if sum(x['paid'] for x in clean)+allocated>abs(cents(tx['amount'])):
+                raise ValueError('Die Teilbeträge sind größer als der noch nicht zugeordnete Bankbetrag.')
             with self.db() as c:
                 c.execute('BEGIN IMMEDIATE')
+                locked_paid=c.execute('SELECT COALESCE(SUM(paid),0) FROM bank_assignment_lines WHERE rid=?',(rid,)).fetchone()[0]
+                if locked_paid!=allocated: raise ValueError('Die Zuordnung hat sich geändert. Bitte neu öffnen.')
                 # Recheck invoice availability after obtaining the database write lock.
                 current={(x['source'],x['target']):x for x in self.candidates(tx)}
                 for x in clean:
                     if x['category']=='invoice':
                         old=pool[(x['source'],x['target'])]; new=current.get((x['source'],x['target']))
                         if not new or new['open']!=old['open']: raise ValueError('Der offene Betrag hat sich geändert. Bitte neu laden.')
-                c.execute('INSERT INTO bank_assignments(rid,fingerprint,payload,note,recurring,created,frequency,schedule_json) VALUES(?,?,?,?,?,?,?,?)',
+                c.execute('INSERT OR IGNORE INTO bank_assignments(rid,fingerprint,payload,note,recurring,created,frequency,schedule_json) VALUES(?,?,?,?,?,?,?,?)',
                     (rid,row['fingerprint'],row['payload'],str(body.get('note') or '')[:1000],int(frequency!='none'),now(),frequency,json.dumps(schedule)))
                 for x in clean:
-                    c.execute('INSERT INTO bank_assignment_lines(rid,category,source,target,label,paid,difference,mode,reason,decision) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    line_cursor=c.execute('INSERT INTO bank_assignment_lines(rid,category,source,target,label,paid,difference,mode,reason,decision) VALUES(?,?,?,?,?,?,?,?,?,?)',
                         (rid,x['category'],x['source'],x['target'],x['label'],x['paid'],x['difference'],x['mode'],x['reason'],x['decision']))
                     if x['source']=='OUTGOING':
                         invoice=c.execute('SELECT * FROM outgoing_invoices WHERE id=?',(int(x['target']),)).fetchone()
@@ -294,7 +313,7 @@ class Assignments:
                         net=(gross/(1+rate/100)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP); vat=gross-net
                         c.execute('INSERT INTO outgoing_payments(run_id,invoice_id,payment_date,net,vat,gross,reference,source,source_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
                             (invoice['run_id'],invoice['id'],str(tx['bookingDate'])[:10],str(net),str(vat),str(gross),str(tx.get('purpose') or '')[:1000],
-                             'KONFIPAY',rid+':'+x['target'],now()))
+                             'KONFIPAY',rid+':'+x['target']+':'+str(line_cursor.lastrowid),now()))
                 self.outgoing._audit(c,'bank_assignment',rid,'assign',{'lines':clean,'frequency':frequency,'scheduleDates':schedule})
                 c.commit()
             # A booked supplier payment consumes previously submitted partial
@@ -406,7 +425,7 @@ def install(ns, write_allowed):
     def bank_assignment_status():
         ids=(request.get_json() or {}).get('ids',[])
         if not isinstance(ids,list) or len(ids)>100: raise ValueError('Zu viele Umsätze.')
-        return {'statuses':service.statuses(ids)}
+        return {'statuses':service.statuses(ids),'balances':service.balances(ids)}
     @app.get('/konfipay/api/assignment')
     @endpoint
     def bank_assignment_detail(): return service.detail(request.args.get('rid',''))

@@ -14,10 +14,10 @@ const fs=require('fs'),path=require('path'),assert=require('assert'),{launchTest
  await page.locator('[data-job]').first().fill('26091');await page.locator('[data-job]').nth(1).fill('26080');
  page.on('dialog',dialog=>dialog.accept());
  await page.locator('[data-delete]').first().click();await page.waitForFunction(()=>document.querySelectorAll('[data-file]').length===1);
- await page.locator('[data-trash]').check();await page.getByRole('button',{name:'Wiederherstellen',exact:true}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();
+ await page.locator('[data-trash]').check();await page.getByRole('button',{name:'Wiederherstellen',exact:true}).click();await page.getByText('Keine Fotos oder Nachrichten in dieser Ansicht.').waitFor();
  await page.locator('[data-trash]').uncheck();await page.waitForFunction(()=>document.querySelectorAll('[data-file]').length===2);
- await page.getByRole('button',{name:'Ganze Gruppe löschen',exact:true}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();
- await page.locator('[data-trash]').check();await page.getByRole('button',{name:'Ganze Gruppe wiederherstellen',exact:true}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();await page.locator('[data-trash]').uncheck();await page.waitForFunction(()=>document.querySelectorAll('[data-file]').length===2);
- assert.equal(await page.locator('[data-job]').nth(1).inputValue(),'26080');await page.getByRole('button',{name:'Zuordnungen bestätigen'}).click();await page.getByText('Keine Fotos zur Zuordnung offen.').waitFor();
+ await page.getByRole('button',{name:'Ganze Gruppe löschen',exact:true}).click();await page.getByText('Keine Fotos oder Nachrichten in dieser Ansicht.').waitFor();
+ await page.locator('[data-trash]').check();await page.getByRole('button',{name:'Ganze Gruppe wiederherstellen',exact:true}).click();await page.getByText('Keine Fotos oder Nachrichten in dieser Ansicht.').waitFor();await page.locator('[data-trash]').uncheck();await page.waitForFunction(()=>document.querySelectorAll('[data-file]').length===2);
+ assert.equal(await page.locator('[data-job]').nth(1).inputValue(),'26080');await page.getByRole('button',{name:'Zuordnungen bestätigen'}).click();await page.getByText('Keine Fotos oder Nachrichten in dieser Ansicht.').waitFor();
  assert.equal(confirmAttempts,2);assert.equal(changes.length,2);assert.equal(changes.find(c=>c.file==='photo0.jpg').jobId,'26091');assert.equal(changes.find(c=>c.file==='photo1.jpg').jobId,'26080');assert.deepEqual(errors,[]);console.log('OK: Fotoeingang shows proposals, requires missing assignments and confirms the grouped photos.');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

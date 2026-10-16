@@ -87,7 +87,9 @@ def expected_balances(client):
             result.update({k:format(v,'.2f') for k,v in sums.items()})
             own_state=reconcile(client,account,local,bank)
             result.update(own_state)
-            expected-=Decimal(own_state['ownOutgoing'])
+            # Unmatched archive entries are reconciliation items, not new bank debits.
+            # Anonymous pending debits and historical payments may already include them.
+            # Keep the bank subtotal authoritative; never infer an additional debit.
             result.update(expected=format(expected,'.2f'),pendingCount=count)
         except ConnectionError as exc:result['error']=str(exc)
         except Exception:result['error']='Die vollständige Berechnung ist derzeit nicht möglich.'
@@ -96,3 +98,4 @@ def expected_balances(client):
     try:tracking=remember(client.store.folder,results,observed)
     except Exception:tracking={'changeTracking':'unavailable'}
     return {'accounts':results,'date':date.today().isoformat(),'fetchedAt':datetime.now(timezone.utc).isoformat(),**tracking}
+

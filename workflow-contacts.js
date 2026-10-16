@@ -7,6 +7,7 @@ function clean(value, max = 240) {
 function parseAddress(value = "") {
   const raw = String(value || "").replace(/\r/g, "").trim();
   const lines = raw.split(/\n|,/).map(part => clean(part, 240)).filter(Boolean);
+  if (lines.length >= 3 && /^\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?$/.test(lines[1]) && /^\d{4,6}\s+/.test(lines[2])) lines.splice(0, 2, `${lines[0]} ${lines[1]}`);
   let streetLine = lines[0] || "";
   let placeLine = lines[1] || "";
   let extraLines = lines.slice(2);

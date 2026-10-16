@@ -44,7 +44,8 @@
     // Nur ein tatsächlich brauchbarer Baustellenstand darf die Live-Ereignisse
     // dieses Tages ersetzen. Ein leerer/unvollständiger Archivsatz darf niemals
     // alle Baustellen aus dem Leitstand verschwinden lassen.
-    const usableArchive=archive.filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||"")==="work"&&String(segment?.jobId||segment?.jobName||"").trim()));
+    const livePersonDays=new Set(events.filter(row=>row?.jobId&&!row?.detachedFromProject).map(row=>`${String(row.employeeId)}|${String(row.date).slice(0,10)}`));
+    const usableArchive=archive.filter(row=>!livePersonDays.has(`${String(row.employeeId)}|${String(row.date).slice(0,10)}`)).filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||"")==="work"&&String(segment?.jobId||segment?.jobName||"").trim()));
     const groups=new Map(),archivedPersonDays=new Set(usableArchive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
 
     const addDuration=({employeeId,date,jobId,name,fink,duration})=>{

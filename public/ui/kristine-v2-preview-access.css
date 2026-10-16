@@ -1,0 +1,80 @@
+/* Safe, clearly non-live accessory strip for the KRISTINE 2.0 preview only. */
+.krista-shell-main.krista-v2-preview-with-access{
+  grid-template-columns:220px minmax(0,1fr)!important;
+  grid-template-rows:auto auto;
+  max-width:1660px!important;
+  gap:7px 14px!important;
+  padding:9px 18px!important;
+}
+.krista-v2-preview-with-access .krista-brand{grid-column:1;grid-row:1;justify-self:start}
+.krista-v2-preview-with-access .krista-world-nav{
+  grid-column:2;grid-row:1;justify-content:flex-end!important;
+  flex-wrap:wrap;gap:5px!important;overflow:visible;
+}
+.krista-v2-preview-with-access .krista-world-link{
+  min-height:35px;padding:7px 9px;font-size:11px;
+}
+.krista-v2-preview-with-access .krista-user{display:none!important}
+.krista-v2-preview-access{
+  grid-column:1/-1;grid-row:2;
+  display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;
+  gap:7px;min-width:0;padding:5px 0 0;
+  border-top:1px solid rgba(255,255,255,.13);
+}
+.krista-v2-preview-access-note{
+  color:#f4d7a0;font:800 11px/1.2 system-ui,sans-serif;
+  margin-right:0;white-space:nowrap;order:99;
+}
+.krista-v2-preview-access-link{
+  color:#fff;text-decoration:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  gap:6px;padding:7px 10px;
+  min-height:34px;box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.2);border-radius:9px;
+  background:rgba(255,255,255,.075);
+  font:800 11px/1 system-ui,sans-serif;
+}
+.krista-v2-preview-access-link:hover,.krista-v2-preview-access-link:focus-visible{
+  background:rgba(255,255,255,.18);
+  outline-offset:2px;
+}
+.krista-v2-preview-access-unknown{
+  color:#ffe0a2;font-weight:950;
+  border:1px solid rgba(255,224,162,.35);
+  border-radius:50%;width:16px;height:16px;
+  display:inline-grid;place-items:center;
+}
+@media(max-width:1180px){
+  .krista-shell-main.krista-v2-preview-with-access{
+    grid-template-columns:180px minmax(0,1fr)!important;
+  }
+  .krista-v2-preview-with-access .krista-world-nav{
+    overflow-x:auto;justify-content:flex-end!important;flex-wrap:nowrap;
+    padding-bottom:3px;
+  }
+}
+@media(max-width:760px){
+  .krista-shell-main.krista-v2-preview-with-access{
+    grid-template-columns:minmax(0,1fr) auto!important;
+    grid-template-rows:auto auto auto;
+    gap:6px!important;
+    padding:7px 10px!important;
+  }
+  .krista-v2-preview-with-access .krista-brand{grid-column:1;grid-row:1}
+  .krista-v2-preview-with-access .krista-mobile-menu{grid-column:2;grid-row:1}
+  .krista-v2-preview-access{
+    grid-column:1/-1;grid-row:2;
+    flex-wrap:nowrap;justify-content:flex-start;gap:5px;
+    overflow-x:auto;overscroll-behavior-x:contain;
+    scrollbar-width:thin;
+  }
+  .krista-v2-preview-access-note{flex:0 0 auto;font-size:10px;margin:0 0 0 4px;order:99}
+  .krista-v2-preview-access-link{flex:0 0 auto;min-height:33px;padding:6px 8px}
+  .krista-v2-preview-with-access .krista-world-nav{
+    grid-column:1/-1;grid-row:3;
+    flex-direction:column;align-items:stretch;
+    overflow-y:auto;overflow-x:hidden;
+    max-height:min(55dvh,480px);
+    padding:3px 0;
+  }
+}

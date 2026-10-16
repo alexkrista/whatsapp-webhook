@@ -93,6 +93,31 @@ def review_xml(xml, *, strict_ids=True, allow_past=False):
     return {'items':entries,'keys':keys,'ids':ids,'total':format(sum((Decimal(x['amount']) for x in entries),Decimal(0)),'.2f')}
 
 
+def refresh_handover_dates(xml, now=None):
+    """Refresh transmission dates without changing payees, amounts or payment IDs."""
+    review_xml(xml, allow_past=True)
+    if now is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now=datetime.now(ZoneInfo('Europe/Vienna'))
+        except (ImportError, KeyError):
+            now=datetime.now().astimezone()
+    root=ET.fromstring(xml)
+    namespace=root.tag.split('}')[0][1:]
+    ET.register_namespace('',namespace)
+    init=child(root,'CstmrCdtTrfInitn')
+    child(child(init,'GrpHdr'),'CreDtTm').text=now.isoformat(timespec='seconds')
+    today=now.date().isoformat()
+    for block in [x for x in init if localname(x)=='PmtInf']:
+        execution=child(block,'ReqdExctnDt')
+        node=execution[0] if len(execution) else execution
+        original=day((node.text or '').strip()[:10])
+        instant=any(localname(node)=='LclInstrm' and any(localname(code)=='Cd' and (code.text or '').strip()=='INST' for code in node) for node in block.iter())
+        if instant or original<today:
+            node.text=today if localname(node)!='DtTm' else now.isoformat(timespec='seconds')
+    return ET.tostring(root,encoding='unicode')
+
+
 class Payments:
     def __init__(self,client):
         self.client=client;self.lock=threading.RLock();self.drafts={}
@@ -196,7 +221,9 @@ class Payments:
             try:
                 for f in files:
                     if not isinstance(f,dict):raise ConnectionError('Ungültige Dateiliste.')
-                    r=review_xml(f.get('xml'));r.update({'xml':f['xml'],'name':str(f.get('name') or 'SEPA.xml')[:150]})
+                    original=review_xml(f.get('xml'),allow_past=True)
+                    outgoing=refresh_handover_dates(f['xml'])
+                    r=review_xml(outgoing);r['keys']=list(dict.fromkeys(original['keys']+r['keys']));r.update({'xml':outgoing,'name':str(f.get('name') or 'SEPA.xml')[:150]})
                     for item in r['items']:
                         if item['debtorIban'].replace(' ','').upper() not in debtors:raise ConnectionError('Ein Auftraggeberkonto ist nicht als aktives Konto in konfipay eingerichtet.')
                     for key in r['keys']:
@@ -206,7 +233,7 @@ class Payments:
                     for ident in r['ids']:
                         if ident[:16] in allids:raise ConnectionError('Doppelte Dateikennung in der Zusammenstellung.')
                         allids.add(ident[:16])
-                    r['digest']=hashlib.sha256(f['xml'].encode()).hexdigest();reviewed.append(r)
+                    r['digest']=hashlib.sha256(outgoing.encode()).hexdigest();reviewed.append(r)
             finally:db.close()
             self.drafts={k:v for k,v in self.drafts.items() if v['expires']>time.time()}
             if len(self.drafts)>=10:raise ConnectionError('Zu viele offene Vorschauen. Bitte in 15 Minuten erneut versuchen.')
@@ -216,18 +243,36 @@ class Payments:
             self.drafts[token]={'expires':time.time()+900,'files':reviewed,'summary':summary}
             return {'draft':token,**summary}
 
+    def prepare_own_revolut(self, xml, filename, source_iban, target_iban, amount):
+        """Only server-generated own-account transfers may request per-order VoP opt-out."""
+        review=review_xml(xml,allow_past=True)
+        normalize=lambda value:re.sub(r'\s+','',str(value)).upper()
+        if len(review['items'])!=1:raise ConnectionError('Direkte Umbuchung muss genau eine Zahlung enthalten.')
+        item=review['items'][0]
+        if (normalize(item['debtorIban'])!=normalize(source_iban) or normalize(item['iban'])!=normalize(target_iban)
+            or normalize(source_iban)==normalize(target_iban) or Decimal(item['amount'])!=Decimal(amount)):
+            raise ConnectionError('Konten oder Betrag der direkten Umbuchung stimmen nicht überein.')
+        prepared=self.prepare([{'name':filename,'xml':xml}])
+        with self.lock:
+            self.drafts[prepared['draft']]['ownRevolutOptOut']=True
+        return prepared
+
     def submit(self,token,confirmed):
         if confirmed is not True:raise ConnectionError('Die verbindliche Freigabe fehlt.')
         with self.lock:
             draft=self.drafts.pop(str(token),None)
             if not draft or draft['expires']<time.time():raise ConnectionError('Vorschau abgelaufen oder bereits verwendet. Bitte neu prüfen.')
             results=[]
+            vop='false' if draft.get('ownRevolutOptOut') is True else 'true'
             for f in draft['files']:
+                outgoing=refresh_handover_dates(f['xml'])
+                current=review_xml(outgoing)
+                f={**f,'xml':outgoing,'items':current['items'],'digest':hashlib.sha256(outgoing.encode()).hexdigest(),'keys':list(dict.fromkeys(f['keys']+current['keys']))}
                 transfer=str(uuid.uuid4());db=self.db()
                 try:
                     db.execute('BEGIN IMMEDIATE')
                     db.execute('INSERT INTO transfers VALUES (?,?,?,?,?,?,?,?,?,?)',(transfer,f['digest'],f['name'],f['total'],len(f['items']),datetime.now(timezone.utc).isoformat(),'creating',None,None,None))
-                    content=protect(json.dumps({'xml':f['xml'],'items':f['items']},ensure_ascii=False).encode())
+                    content=protect(json.dumps({'xml':f['xml'],'items':f['items'],'ownRevolutOptOut':draft.get('ownRevolutOptOut') is True},ensure_ascii=False).encode())
                     db.execute('INSERT INTO contents VALUES (?,?)',(transfer,content))
                     for key in f['keys']:db.execute('INSERT INTO payment_keys VALUES (?,?)',(key,transfer))
                     db.commit()
@@ -237,14 +282,14 @@ class Payments:
                     db.close()
                 rid=None;state='unknown';status=None;error=None
                 try:
-                    created=self.client.authenticated('POST','/payment-files?submit=false&scope=Sepa&verification-of-payee=true',body=f['xml'].encode('utf-8'))
+                    created=self.client.authenticated('POST','/payment-files?submit=false&scope=Sepa&verification-of-payee='+vop,body=f['xml'].encode('utf-8'))
                     info=created.get('paymentInfo') or {};rid=uid(info.get('rId'));status=(info.get('status') or {}).get('statusValue')
                     self.record(transfer,'created',rid,status,None)
                     if status=='KON_REJECTED':
                         state='rejected';error='konfipay hat die Datei abgelehnt. Details bitte im Portal prüfen.'
                     else:
                         self.record(transfer,'submitting',rid,status,None)
-                        self.client.authenticated('POST','/payment-files/'+rid+'/submit?force=false&verification-of-payee=true')
+                        self.client.authenticated('POST','/payment-files/'+rid+'/submit?force=false&verification-of-payee='+vop)
                         state='submitted';self.record(transfer,state,rid,status,None)
                         current=self.client.authenticated('GET','/payment-files/'+rid)
                         status=((current.get('paymentInfo') or {}).get('status') or {}).get('statusValue')
@@ -447,9 +492,12 @@ def install(ns,client,write_allowed,csrf):
         }],os.environ.get('KRISTINE_SEPA_DEBTOR_NAME') or 'Farben Krista GmbH & Co KG',source['iban'],'',instant=True)
         assignments.register_internal_revolut(end_to_end=e2e,debtor_iban=source['iban'],creditor_iban=target['iban'],
             amount_cents=int(transfer_amount*100),purpose=purpose)
+        direct=body.get('directOwnTransfer') is True
+        prepared=payments.prepare_own_revolut(xml.decode('utf-8'),filename,source['iban'],target['iban'],transfer_amount) if direct else {}
         return jsonify({'ok':True,'xml':xml.decode('utf-8'),'filename':filename,'amount':format(transfer_amount,'.2f'),
             'source':{'name':source.get('name'),'iban':source.get('iban')},'target':target,'purpose':purpose,'endToEndId':e2e,
-            'instant':True,'note':'SEPA Instant/Eilüberweisung vorbereitet. Vor dem Absenden bitte Bankvorschau prüfen.'})
+            'instant':True,'directOwnTransfer':direct,**prepared,
+            'note':'Direkte eigene Umbuchung ohne Empfängerprüfung angefordert. Bankfreigabe kann trotzdem erforderlich sein.' if direct else 'SEPA Instant/Eilüberweisung vorbereitet. Vor dem Absenden bitte Bankvorschau prüfen.'})
 
     @app.get('/konfipay/api/transactions')
     @safe
@@ -567,3 +615,4 @@ def install(ns,client,write_allowed,csrf):
         data=client.authenticated('GET','/payment-files/'+rid);info=data.get('paymentInfo') or {};status=(info.get('status') or {}).get('statusValue')
         payments.record(row['id'],row['state'],rid,status,row['error'])
         return jsonify({'ok':True,'status':status})
+
