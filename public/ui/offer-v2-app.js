@@ -183,7 +183,7 @@
   }
   function sectionCard(sec,index,summary){
     return '<section class="section-card" data-sid="'+e(sec.id)+'">'+
-      '<div class="section-title"><div class="button-row"><span class="section-index">'+(index+1)+'. Abschnitt</span><label><input data-section-field="name" value="'+e(sec.name)+'" aria-label="Abschnittsname"></label></div>'+
+      '<div class="section-title"><div class="button-row"><span class="section-drag" draggable="true" title="Abschnitt ziehen und verschieben" aria-label="Abschnitt verschieben" role="button">⠿</span><span class="section-index">'+(index+1)+'. Abschnitt</span><label><input data-section-field="name" value="'+e(sec.name)+'" aria-label="Abschnittsname"></label></div>'+
       '<div class="section-action">'+iconButton("↑","move-section-up","Abschnitt nach oben")+iconButton("↓","move-section-down","Abschnitt nach unten")+
       '<strong data-section-total="'+e(sec.id)+'">'+C.currency(summary.total)+'</strong>'+
       '<button type="button" class="action secondary compact" data-action="collapse-section" aria-expanded="true">Schließen ▴</button>'+
@@ -414,10 +414,53 @@
     const action=event.target.closest("[data-action]");if(!action)return;
     structural(action.dataset.action,action);
   }
+  let draggedSectionId="";
+  function sectionDragStart(ev){
+    const handle=ev.target.closest(".section-drag");
+    if(!handle)return;
+    const section=handle.closest(".section-card");
+    if(!section||!section.querySelector(".section-body")?.classList.contains("hide")){
+      ev.preventDefault();toast("Zum Verschieben bitte den Abschnitt zuerst schließen.");return;
+    }
+    draggedSectionId=section.dataset.sid;
+    ev.dataTransfer.effectAllowed="move";
+    ev.dataTransfer.setData("text/plain",draggedSectionId);
+    section.classList.add("section-dragging");
+  }
+  function sectionDragOver(ev){
+    const section=ev.target.closest(".section-card");
+    if(!draggedSectionId||!section||section.dataset.sid===draggedSectionId)return;
+    if(!section.querySelector(".section-body")?.classList.contains("hide"))return;
+    ev.preventDefault();ev.dataTransfer.dropEffect="move";
+    document.querySelectorAll(".section-drop-target").forEach(n=>n.classList.remove("section-drop-target"));
+    section.classList.add("section-drop-target");
+  }
+  function sectionDrop(ev){
+    const target=ev.target.closest(".section-card"),sourceId=draggedSectionId;
+    if(!target||!sourceId||target.dataset.sid===sourceId)return;
+    if(!target.querySelector(".section-body")?.classList.contains("hide"))return;
+    ev.preventDefault();
+    const from=offer.sections.findIndex(x=>x.id===sourceId),to=offer.sections.findIndex(x=>x.id===target.dataset.sid);
+    if(from<0||to<0)return;
+    const rect=target.getBoundingClientRect(),after=ev.clientY>rect.top+rect.height/2;
+    snapshot();
+    const [moving]=offer.sections.splice(from,1);
+    let destination=offer.sections.findIndex(x=>x.id===target.dataset.sid);
+    if(after)destination++;
+    offer.sections.splice(destination,0,moving);
+    draggedSectionId="";
+    document.querySelectorAll(".section-drop-target,.section-dragging").forEach(n=>n.classList.remove("section-drop-target","section-dragging"));
+    all();toast("Abschnitt verschoben.");
+  }
+  function sectionDragEnd(){draggedSectionId="";document.querySelectorAll(".section-drop-target,.section-dragging").forEach(n=>n.classList.remove("section-drop-target","section-dragging"));}
   function bind(){
     $("editor").addEventListener("input",documentChange);
     $("editor").addEventListener("change",documentChange);
     $("editor").addEventListener("click",documentClick);
+    $("editor").addEventListener("dragstart",sectionDragStart);
+    $("editor").addEventListener("dragover",sectionDragOver);
+    $("editor").addEventListener("drop",sectionDrop);
+    $("editor").addEventListener("dragend",sectionDragEnd);
     $("undoBtn").onclick=undo;$("redoBtn").onclick=redo;
     $("printBtn").onclick=()=>{if(C.totals(offer).errors.length)return toast("Bitte ungültiges Aufmaß korrigieren.",true);window.print();};
     $("exportBtn").onclick=downloadJson;
