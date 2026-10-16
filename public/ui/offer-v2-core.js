@@ -231,7 +231,7 @@
       html+='</section>';
     });
     html+='<section class="print-grand"><h3>Zusammenfassung</h3>';
-    offer.sections.forEach((sec,i)=>{html+='<div><span>'+esc(sec.name)+'</span><strong>'+currency(calc.sections[i].total)+'</strong></div>';});
+    offer.sections.forEach((sec,i)=>{html+='<div><span>'+(i+1)+'. '+esc(sec.name)+'</span><strong>'+currency(calc.sections[i].total)+'</strong></div>';});
     if(calc.discount)html+='<div>Rabatt '+number(offer.discountPercent)+' % <strong>− '+currency(calc.discount)+'</strong></div>';
     html+='<div class="print-summary-net">Angebotssumme netto <strong>'+currency(calc.net)+'</strong></div><div>'+number(offer.vatRate)+' % MwSt. <strong>'+currency(calc.vat)+'</strong></div><div class="final">Angebotssumme brutto <strong>'+currency(calc.gross)+'</strong></div></section><footer>KRISTINE Angebotseditor V2 · isolierte Testfassung · kein verbindliches Kundenangebot</footer></article>';
     return html;
