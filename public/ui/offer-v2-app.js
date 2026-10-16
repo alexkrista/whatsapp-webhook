@@ -174,6 +174,7 @@
       '<output class="position-amount" data-position-result="'+e(p.id)+'">'+(q.alternative?'Alternative':C.currency(q.net))+'</output>'+
       del("remove-pos","Leistungsposition einzeln löschen")+'</div>'+
       '<div class="position-bottom">'+
+      (q.adjustment?'<span class="position-adjust '+(q.adjustment>0?'positive':'negative')+'">'+(q.adjustment>0?'+':'')+C.number(q.adjustment)+' %</span>':'<span class="position-adjust neutral">0 %</span>')+
       '<label>Menge <select data-p-field="quantityMode"><option value="manual"'+(!linked?' selected':'')+'>frei</option><option value="linked"'+(linked?' selected':'')+'>aus Aufmaß</option></select></label>'+
       (linked?'<div class="source-choices"><strong>Aufmaß:</strong> '+measurementChoices(sec,p)+'</div>':'')+
       '<label><input type="checkbox" data-p-field="alternative"'+(p.alternative?' checked':'')+'> Alternative Position</label>'+
@@ -193,6 +194,7 @@
       del("remove-room","Raum / Bauteil mit Positionen löschen")+
       '<button type="button" class="action compact secondary" data-action="collapse-room" aria-expanded="true">Schließen ▴</button></div>'+
       '<div class="room-body">'+
+      '<div class="room-adjust"><label>Zu-/Abschlag Raum % <input type="number" min="-100" max="100" step="0.1" data-room-field="adjustmentPercent" value="'+e(r.adjustmentPercent??0)+'"></label><small>Regie und Material ausgenommen · grün + / rot −</small></div>'+
       '<label class="edit-field room-description">Beschreibung dieses Raums (wird gedruckt)<textarea data-room-field="description">'+e(r.description||"")+'</textarea></label>'+
       '<div class="position-table">'+(r.positions.length?'<div class="position-columns"><span>Auswahl</span><span>Pos.</span><span>Leistungsbeschreibung</span><span>Menge</span><span>Einheit</span><span>Einzelpreis €</span><span>Gesamt €</span><span></span></div>':'')+(r.positions.map((p,j)=>positionRow(sec,r,p,j,summary)).join("")||'<div class="empty-note">Noch keine Position. Einzelne Leistung oder Paket auswählen.</div>')+'</div>'+
       '<div class="position-controls"><div class="catalog-panel-head"><strong>+ Leistungsposition einzeln hinzufügen</strong><span class="muted">Nach Gruppen aufklappbar und suchbar · aktuell Testkatalog, nicht der WinWorker-Firmenstamm</span></div>'+catalogBrowser()+
@@ -337,14 +339,14 @@
     if(!subject)return;
     if(key==="measurementIds"){subject.measurementIds=target.value?[target.value]:[];}
     else if(key==="alternative"){subject[key]=target.checked;}
-    else if(["unitPrice","quantity","discountPercent","vatRate","cashDiscountPercent","cashDiscountDays","netPaymentDays","advancePercent","advanceDiscountPercent"].includes(key)){subject[key]=Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
+    else if(["adjustmentPercent","unitPrice","quantity","discountPercent","vatRate","cashDiscountPercent","cashDiscountDays","netPaymentDays","advancePercent","advanceDiscountPercent"].includes(key)){subject[key]=key==="adjustmentPercent"?Math.max(-100,Math.min(100,Number(target.value)||0)):Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
     else if(key==="quantityMode"){subject[key]=target.value==="linked"?"linked":"manual";if(subject.quantityMode==="linked"&&!subject.measurementIds?.length){
       const eligible=n.sec.measurements.find(m=>m.unit===subject.unit&&(m.roomId===""||m.roomId===n.room.id));
       subject.measurementIds=eligible?[eligible.id]:[];
     }}
     else subject[key]=target.value;
     if(key==="unit"&&subject.quantityMode==="linked")subject.measurementIds=[];
-    if(["executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
+    if(["adjustmentPercent","executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
     updatePreview();autosave();
   }
   function structural(action,target){
