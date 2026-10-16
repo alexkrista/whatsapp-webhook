@@ -731,6 +731,76 @@ function groupRegieComparisonRows(rows = []) {
     el.querySelectorAll('[data-bk-gallery-day]').forEach(b=>b.addEventListener('click',()=>document.querySelector(`.bf-day[data-bf-day="${CSS.escape(b.dataset.bkGalleryDay)}"]`)?.scrollIntoView({behavior:'smooth',block:'start'})));
   }
 
+  // Regie billing is intentionally a draft-only entry: never issue an invoice from this tab.
+  function regieInvoiceDraftHref(job,reports,kind,mode="summary"){
+    if(!["TR","SR","RE"].includes(kind))throw new Error("Ungültige Rechnungsart");
+    const days=(Array.isArray(reports)?reports:[]).filter(report=>report&&report.documentType!=="delivery_note"&&!report.pricePending&&report.billingReady!==false)
+      .sort((a,b)=>String(a.reportDate||"").localeCompare(String(b.reportDate||"")))
+      .map(x=>{
+        const employees=(x.employeeDetails||[]).map(p=>({name:p.name||"Mitarbeiter",hours:num(p.hours),cost:num(p.cost)}));
+        const materials=(x.materials||[]).map(m=>({name:m.name||"Material",quantity:num(m.quantity)||1,unit:m.unit||"PA",
+          unitPrice:num(m.unitPrice)||(num(m.cost)/(num(m.quantity)||1)),cost:num(m.cost)}));
+        const labor=num(x.laborCost||(x.employeeDetails||[]).reduce((sum,p)=>sum+num(p.cost),0));
+        const material=num(x.materialCost||String(x.materialTotal||"").replace(/\./g,"").replace(",","."));
+        return {id:x.id||"",date:x.reportDate||"",reportNumber:x.reportNumber||"",
+          component:x.component||x.room||x.workArea||x.description||"Regiearbeiten",
+          hours:num(x.totalHours),labor,material,total:num(x.totalNet)||labor+material,employees,materials};
+      });
+    if(!days.length)return "";
+    const url=new URL(invoiceActionLink(job,kind));
+    url.searchParams.set("regieDetail",linkedToken({days}));
+    url.searchParams.set("regieMode",mode==="days"?"days":"summary");
+    url.searchParams.set("regieHours",String(days.reduce((sum,d)=>sum+d.hours,0)));
+    url.searchParams.set("laborTotal",String(days.reduce((sum,d)=>sum+d.labor,0)));
+    url.searchParams.set("materialTotal",String(days.reduce((sum,d)=>sum+d.material,0)));
+    return url.href;
+  }
+  function mountRegieInvoiceStart(el,job,state,billing){
+    const grid=el.querySelector(".bk-grid"),rate=el.querySelector("#bkSaveRegieRates")?.closest(".bk-card");
+    if(!grid||!rate)return;
+    const rows=(state?.openRows||[]).filter(row=>row.open&&!row.billed&&row.amount>0&&row.report?.documentType!=="delivery_note"
+      &&!row.report?.pricePending&&row.report?.billingReady!==false);
+    const reports=rows.map(row=>row.report),openTotal=rows.reduce((sum,row)=>sum+num(row.amount),0);
+    const stale=billing?.partial===true||Boolean(billing?.error);
+    const closed=(billing?.invoices||[]).some(invoice=>invoice.status==="issued"&&String(invoice.kind||"").toUpperCase()==="SR");
+    const performance=window.BaustellenSources?.performance?.(job.jobId);
+    const canReview=!!performance?.complete&&!performance.aggregated&&!performance.hasClosingInvoice&&!stale;
+    const ready=reports.length>0&&openTotal>0&&!closed;
+    const reviewJson=canReview?esc(JSON.stringify(performance)):"";
+    const reviewButtons=canReview?`<button type="button" class="primary" data-krb-review="${reviewJson}" data-krb-kind="TR">Teilrechnung (TR) prüfen</button>
+      <button type="button" data-krb-review="${reviewJson}" data-krb-kind="SR">Schlussrechnung (SR) prüfen</button>`
+      :`<button type="button" disabled title="Rechnungsstand zuerst vollständig abgleichen">Teilrechnung (TR) · Abgleich fehlt</button>
+       <button type="button" disabled title="Rechnungsstand zuerst vollständig abgleichen">Schlussrechnung (SR) · Abgleich fehlt</button>`;
+    const summary=ready?regieInvoiceDraftHref(job,reports,"RE","summary"):"";
+    const days=ready?regieInvoiceDraftHref(job,reports,"RE","days"):"";
+    const card=document.createElement("div");card.className="bk-card bk-wide";card.id="bkRegieInvoiceCard";
+    card.innerHTML=`<div class="bk-section-title"><div><h3>Regie abrechnen</h3>
+      <div class="bk-note">${reports.length} offene, preislich vollständige Regieberichte · ${money(openTotal)} netto. Bereits verrechnete Berichte werden nicht übernommen.</div></div>
+      <div class="bk-actions"><button type="button" class="primary" id="bkRegieInvoiceStart" ${ready?"":"disabled"}>€ Regie abrechnen</button></div></div>
+      <div id="bkRegieInvoiceChoices" hidden>
+       <p class="bk-note">Welche Rechnung möchtest du vorbereiten? Es öffnet sich zuerst nur ein prüfbarer Entwurf; eine Rechnung wird hier nicht ausgestellt.</p>
+       ${stale?'<p class="bk-note bk-warn">⚠ WinWorker-Rechnungsabgleich unvollständig. Vor dem Ausstellen unbedingt Rechnungen und Regieberichte abgleichen.</p>':""}
+       <div class="bk-actions" style="justify-content:flex-start">${reviewButtons}
+         <a href="${esc(summary||"#")}" data-bk-regie-kind="RE" target="_blank" rel="noopener" class="primary">Separate Regierechnung (RE)</a>
+         <button type="button" id="bkRegieInvoiceOverview">Rechnungen ansehen</button>
+       </div>
+       <label style="display:flex;align-items:center;gap:8px;margin:12px 0" class="bk-note"><input type="checkbox" id="bkRegieInvoiceDays"> Regieberichte einzeln übernehmen statt Zusammenfassung mit PDF-Beilage</label>
+       <div class="bk-note">Bei gemischten Fix- und Regieaufträgen enthalten TR/SR auch den geprüften Leistungsstand. Eine reine Regierechnung enthält nur die offenen Rapporte.</div>
+      </div>
+      <div id="bkRegieInvoiceMsg" class="bk-note">${closed?"Schlussrechnung bereits ausgestellt – bitte Rechnungsstand prüfen.":!ready?"Keine offenen, abrechenbaren Regieberichte vorhanden.":"Der bestehende Rechnungsentwurf kann anschließend im Brain geprüft werden."}</div>`;
+    rate.insertAdjacentElement("afterend",card);
+    if(!ready)return;
+    const options=card.querySelector("#bkRegieInvoiceChoices"),open=card.querySelector("#bkRegieInvoiceStart");
+    open.onclick=()=>{options.hidden=!options.hidden;open.textContent=options.hidden?"€ Regie abrechnen":"Abrechnungsauswahl schließen"};
+    const re=card.querySelector('[data-bk-regie-kind="RE"]'),mode=card.querySelector("#bkRegieInvoiceDays");
+    mode.onchange=()=>{re.href=mode.checked?days:summary};
+    re.addEventListener("click",event=>{
+      if(!stale)return;
+      if(!confirm("Der WinWorker-Rechnungsabgleich ist unvollständig. Im Brain werden nur die aktuell bekannten offenen Regieberichte als Entwurf vorgeschlagen. Trotzdem zum Prüfen öffnen?"))event.preventDefault();
+    });
+    card.querySelector("#bkRegieInvoiceOverview").onclick=()=>selectTab("invoices");
+  }
+
   function renderRegie(j,rows,documents=[],billing={}){
     const entries=[];for(const row of rows){if(!row||row.__error)continue;const r=row.regie||{},emps=(r.employees||[]).filter(e=>num(e.regieHours)>0||String(e.regieDescription||'').trim());if(!emps.length&&!String(r.customerText||'').trim())continue;entries.push({day:row.day,status:r.status||'Entwurf',employees:emps,customerText:r.customerText||'',internalNote:r.internalNote||''})}
     const total=entries.reduce((s,x)=>s+x.employees.reduce((a,e)=>a+num(e.regieHours),0),0);
@@ -750,6 +820,7 @@ function groupRegieComparisonRows(rows = []) {
     const statusCard=document.createElement("div");statusCard.className="bk-card bk-wide";statusCard.innerHTML=`<div class="bk-section-title"><div><h3>Abrechnungsstatus der Regieberichte</h3><div class="bk-note">Automatisch folgt WinWorker. Eine manuelle Wahl bleibt auch nach dem nächsten WW-Abgleich erhalten.</div></div></div><div style="overflow:auto"><table class="bk-table"><thead><tr><th>Nr.</th><th>Automatisch erkannt</th><th>Status verwenden</th></tr></thead><tbody>${billingState.rows.map(row=>{const report=row.report||{},manual=String(report.billingStatus||"").toLowerCase(),automatic=row.billed?"Abgerechnet":row.open?"Offen":"PDF nicht zugeordnet";return `<tr><td><strong>${esc(report.reportNumber||report.name||"–")}</strong></td><td>${esc(automatic)}</td><td><select data-regie-status="${esc(report.id||"")}" ${report.id?"":"disabled"}><option value="" ${manual?"":"selected"}>Automatisch</option><option value="open" ${manual==="open"?"selected":""}>Offen</option><option value="billed" ${manual==="billed"?"selected":""}>Abgerechnet</option></select></td></tr>`}).join("")||'<tr><td colspan="3">Keine Berichte vorhanden.</td></tr>'}</tbody></table></div><div class="bk-note" data-regie-status-message></div>`;const grid=el.querySelector(".bk-grid");grid?.insertBefore(statusCard,grid.children[1]||null);statusCard.querySelectorAll("[data-regie-status]").forEach(select=>select.addEventListener("change",async()=>{const message=statusCard.querySelector("[data-regie-status-message]"),reportId=select.dataset.regieStatus;select.disabled=true;message.textContent="Status wird gespeichert …";try{await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/documentation/regie-report/${encodeURIComponent(reportId)}/status`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({billingStatus:select.value})});message.textContent="✓ Status gespeichert · Summen werden neu berechnet";await loadJob(j.jobId);selectTab("regie")}catch(error){message.textContent="Status konnte nicht gespeichert werden: "+error.message;select.disabled=false}}));
     const rateCard=document.createElement("div");rateCard.className="bk-card bk-wide";rateCard.innerHTML=`<div class="bk-section-title"><div><h3>Faktbox Regie</h3><div class="bk-note">Diese Werte gelten künftig für alle neuen Regieberichte dieser Baustelle.</div></div><div class="bk-actions"><a class="primary" href="${esc(tokenUrl(`/kristine/eingang?jobId=${encodeURIComponent(j.jobId)}`))}">+ Regiebericht</a><button class="primary" type="button" id="bkSaveRegieRates">Speichern</button></div></div><div class="bk-form-grid"><label>Stundensatz netto €<input id="bkRegieHourlyRate" type="number" min="0" step="0.01" value="${esc(j.regieHourlyRate??75)}"></label><label>Materialaufschlag %<input id="bkRegieMaterialMarkup" type="number" min="0" step="0.1" value="${esc(j.regieMaterialMarkup??80)}"></label><div id="bkRegieRateStatus" class="bk-save-status"></div></div>`;el.querySelector(".bk-grid")?.prepend(rateCard);rateCard.querySelector("#bkSaveRegieRates").onclick=async()=>{const status=rateCard.querySelector("#bkRegieRateStatus");status.textContent="Speichere …";try{const payload={regieHourlyRate:num(rateCard.querySelector("#bkRegieHourlyRate").value),regieMaterialMarkup:num(rateCard.querySelector("#bkRegieMaterialMarkup").value)};await api(`/admin/api/job/${encodeURIComponent(j.jobId)}/meta`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});j.regieHourlyRate=payload.regieHourlyRate;j.regieMaterialMarkup=payload.regieMaterialMarkup;status.textContent="✓ Für diese Baustelle gespeichert"}catch(error){status.textContent="Fehler: "+error.message}};
 
+    mountRegieInvoiceStart(el,j,billingState,billing);
     el.querySelector("#bkPrintRegie")?.addEventListener("click",()=>{
       const dialog=document.createElement("dialog");
       dialog.style.cssText="border:1px solid #cbd8ca;border-radius:12px;padding:22px;max-width:440px;width:calc(100% - 32px);box-shadow:0 16px 50px #0003";
