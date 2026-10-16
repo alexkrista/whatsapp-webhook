@@ -160,3 +160,5 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 .compact-catalog .compact-catalog-panel.hide{display:none!important}
 .compact-catalog .bulk-panel{margin-top:9px}
 @media(max-width:800px){.compact-catalog .compact-catalog-bar{align-items:stretch}.compact-catalog .compact-catalog-search{flex-basis:100%}}
+
+.next-room-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:14px;padding:14px 0 4px;border-top:1px solid #dce5d9}.next-room-actions span{margin-right:auto;color:#617768;font-weight:700;font-size:13px}
