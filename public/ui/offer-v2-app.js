@@ -415,6 +415,7 @@
           for(const m of s.measurements.filter(x=>x.roomId===original.id)){
             const clone=C.copy(m);clone.id=C.id("measure");clone.roomId=created.id;s.measurements.push(clone);remap.set(m.id,clone.id);
           }
+          if(!remap.size)C.addMeasurement(offer,s.id,created.id);
           created.positions=original.positions.map(p=>{
             const clone=C.copy(p);clone.id=C.id("pos");
             clone.measurementIds=(clone.measurementIds||[]).map(id=>remap.get(id)||id);
@@ -423,7 +424,7 @@
         }
         toast("Raum als unabhängige Kopie angelegt.");break;
       }
-      case "add-room":snapshot();C.addRoom(offer,s.id);break;
+      case "add-room":{snapshot();const created=C.addRoom(offer,s.id);C.addMeasurement(offer,s.id,created.id);break;}
       case "remove-room":if(!r||!confirm('Raum "'+r.name+'" samt '+r.positions.length+' Position(en) löschen?'))return;snapshot();s.rooms=s.rooms.filter(x=>x.id!==r.id);s.measurements=s.measurements.filter(x=>x.roomId!==r.id);break;
       case "remove-section":if(!s||!confirm('Ganzen Abschnitt "'+s.name+'" löschen?'))return;snapshot();offer.sections=offer.sections.filter(x=>x.id!==s.id);if(!offer.sections.length)offer.sections.push(C.fresh().sections[0]);break;
       case "move-section-up":case "move-section-down":snapshot();C.reorder(offer.sections,s.id,action.endsWith("up")?-1:1);break;
