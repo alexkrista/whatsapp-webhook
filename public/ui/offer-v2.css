@@ -132,3 +132,9 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
   .offer-print tr{break-inside:avoid}
   .offer-print footer{display:none}
 }
+
+/* Abschnitts-Sortierung: nur geschlossene Abschnitte am Griff verschieben. */
+.section-drag{display:inline-flex;align-items:center;justify-content:center;min-width:30px;min-height:34px;cursor:grab;border:1px solid #adc2af;border-radius:8px;background:#eef5ec;color:#2b6140;font-size:22px;user-select:none;touch-action:none}
+.section-drag:active{cursor:grabbing}
+.section-dragging{opacity:.55}
+.section-drop-target{outline:3px dashed #3d8051;outline-offset:3px}
