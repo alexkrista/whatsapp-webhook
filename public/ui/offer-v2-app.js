@@ -122,6 +122,11 @@
       field("Land","country")+
       '<p class="subtle wide">Kundenstamm-Verknüpfung vorbereitet. In dieser isolierten Testversion werden die Adressfelder noch manuell bearbeitet.</p>'+
       '<label class="wide">Einleitung<textarea data-offer-field="intro">'+e(offer.intro)+'</textarea></label>'+
+      '<h3 class="wide" style="margin:12px 0 0">Termine</h3>'+
+      field("Termin vor Ort (intern)","siteVisitDate","date")+
+      field("Uhrzeit vor Ort (intern)","siteVisitTime","time")+
+      '<label>Ausführungstermin<select data-offer-field="executionMode"><option value="agreement"'+(!offer.executionMode||offer.executionMode==="agreement"?' selected':'')+'>Nach Absprache</option><option value="date"'+(offer.executionMode==="date"?' selected':'')+'>Fixes Datum</option><option value="period"'+(offer.executionMode==="period"?' selected':'')+'>Zeitraum</option></select></label>'+
+      (offer.executionMode==="date"?field("Ausführung am","executionDate","date"):offer.executionMode==="period"?field("Ausführung von","executionStart","date")+field("Ausführung bis","executionEnd","date"):"")+
       '<h3 class="wide" style="margin:12px 0 0">Konditionen</h3>'+
       field("Gesamtrabatt %","discountPercent","number",'min="0" max="100" step="0.1"')+
       field("MwSt. %","vatRate","number",'min="0" max="100" step="0.1"')+
@@ -339,7 +344,7 @@
     }}
     else subject[key]=target.value;
     if(key==="unit"&&subject.quantityMode==="linked")subject.measurementIds=[];
-    if(["quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
+    if(["executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
     updatePreview();autosave();
   }
   function structural(action,target){
