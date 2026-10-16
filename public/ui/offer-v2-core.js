@@ -33,7 +33,7 @@
   function fresh(){
     return {schemaVersion:2,documentId:id("offer"),number:"TEST-ENTWURF",title:"Neues Angebot",customer:"",address:"",
       intro:"Wir bedanken uns für Ihre Anfrage und bieten folgende Leistungen an.",sections:[section("Malerarbeiten")],
-      discountPercent:0,vatRate:20,createdDate:new Date().toISOString().slice(0,10)};
+      discountPercent:0,vatRate:20,cashDiscountPercent:2,cashDiscountDays:5,netPaymentDays:14,advancePercent:50,advanceDiscountPercent:4,createdDate:new Date().toISOString().slice(0,10)};
   }
   // Strict arithmetic parser; deliberately never evaluate JS supplied by a user.
   function formulaValue(source){
