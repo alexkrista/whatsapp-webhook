@@ -97,3 +97,38 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 .position-card .position-top > [data-action="remove-pos"]{grid-column:8;grid-row:1}
 .position-columns{grid-template-columns:28px 34px minmax(320px,1fr) 90px 70px 100px 104px 36px;gap:8px;padding:0 10px}
 @media(max-width:1100px){.position-table{overflow-x:auto}.position-card,.position-columns{min-width:850px}}
+
+/* KRISADMIN Formularvorlage v3: dieselben hinterlegten Standardmaße für A4.
+   Test bleibt isoliert: keine Anfrage an produktive Layout-Einstellungen. */
+:root{
+  --formular-left:17mm;--formular-right:18mm;
+  --formular-first-top:14mm;--formular-first-body:100mm;
+  --formular-follow-top:32mm;--formular-bottom:27mm;
+  --formular-font:9.92pt;--formular-title:12.76pt;
+}
+.offer-print{
+  font-family:Arial,Helvetica,sans-serif;
+  font-size:var(--formular-font);line-height:1.1996;
+  color:#151515;background:#fff;box-shadow:0 6px 20px #1a25192a;
+}
+.offer-print-head{border:0;padding-bottom:0;font-family:Arial,Helvetica,sans-serif}
+.offer-print-brand{color:#171717;font-family:Arial,Helvetica,sans-serif;font-size:var(--formular-title);letter-spacing:0}
+.offer-print-brand small{letter-spacing:0;color:#333}
+.offer-print h1{font-family:Arial,Helvetica,sans-serif;font-size:var(--formular-title);color:#111}
+.offer-print h2,.offer-print h3,.offer-print h4{font-family:Arial,Helvetica,sans-serif;color:#111;border:0}
+.offer-print table,.offer-print td,.offer-print th{font-family:Arial,Helvetica,sans-serif;color:#111}
+.offer-print th{background:#fff;border-bottom:1px solid #222}
+.offer-print tfoot{background:#fff}
+.offer-print .print-grand{border-top:1px solid #333}
+.offer-print .print-grand .final{background:#fff;color:#111;border-top:1px solid #333}
+@media print{
+  @page{size:A4;margin:32mm 18mm 27mm 17mm}
+  @page :first{margin:14mm 18mm 27mm 17mm}
+  .offer-print{padding:0!important;max-width:none!important;min-height:0!important;
+    font-family:Arial,Helvetica,sans-serif;font-size:9.92pt!important;line-height:1.1996}
+  .offer-print-head{min-height:calc(100mm - 14mm);display:flex;align-items:flex-start}
+  .offer-print h1{font-size:12.76pt}
+  .offer-print h3{break-after:avoid}
+  .offer-print tr{break-inside:avoid}
+  .offer-print footer{display:none}
+}
