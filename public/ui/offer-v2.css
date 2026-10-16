@@ -141,3 +141,13 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 
 /* Trennstrich zwischen Abschnittsübersicht und Angebotssumme netto. */
 .offer-print .print-grand .print-summary-net{border-top:1px solid #333;margin-top:8px;padding-top:12px}
+
+.room-adjust{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 12px;margin-bottom:12px;border:1px solid #d4e2d5;border-radius:9px;background:#f7faf6}
+.room-adjust label{display:inline-flex;align-items:center;gap:9px;font-weight:750}
+.room-adjust input{width:88px;padding:6px;text-align:right}
+.room-adjust small{color:#64796a}
+.position-adjust{display:inline-flex;align-items:center;justify-content:center;min-width:46px;border-radius:7px;padding:4px 7px;font-size:11px;font-weight:800}
+.position-adjust.positive{color:#1a653a;background:#e0f4e5}
+.position-adjust.negative{color:#a42b29;background:#fde9e7}
+.position-adjust.neutral{color:#7a807a;background:#f0f1ee}
+.print-position-adjust{font-size:9px;font-weight:700}
