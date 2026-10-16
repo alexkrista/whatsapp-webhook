@@ -227,6 +227,14 @@
   }
   function renderEditor(){
     const beforeCatalog=captureCatalogUi();
+    // Der Neuaufbau darf keine vom Benutzer geschlossenen Räume/Abschnitte öffnen.
+    const collapsedSections=new Set([...$("editor").querySelectorAll(".section-card")].filter(el=>el.querySelector(".section-body")?.classList.contains("hide")).map(el=>el.dataset.sid));
+    const collapsedRooms=new Set([...$("editor").querySelectorAll(".room-card")].filter(el=>el.querySelector(".room-body")?.classList.contains("hide")).map(el=>el.dataset.rid));
+    const scrollY=window.scrollY;
+    const anchor=document.activeElement?.closest?.(".room-card,.section-card");
+    const anchorKind=anchor?.classList.contains("room-card")?"room":"section";
+    const anchorId=anchor?.dataset[anchorKind==="room"?"rid":"sid"];
+    const anchorTop=anchor?.getBoundingClientRect().top;
     const calc=C.totals(offer);
     $("editor").innerHTML=offerHeader()+
       '<div class="button-row" style="justify-content:space-between;margin:4px 0 14px"><h2 style="margin:0">2. Abschnitte · Räume · Positionen</h2><span class="status-mark">'+offer.sections.length+' Abschnitte</span></div>'+
@@ -237,6 +245,25 @@
       '<button type="button" class="action" data-action="new-section" data-new-mode="extend">Aufmaß übernehmen + ergänzen</button>'+
       '<button type="button" class="action solid" data-action="new-section" data-new-mode="new">Ganz neuer Abschnitt</button></div></div>';
     restoreCatalogUi(beforeCatalog);
+    for(const el of $("editor").querySelectorAll(".section-card")){
+      if(!collapsedSections.has(el.dataset.sid))continue;
+      el.querySelector(".section-body")?.classList.add("hide");
+      const btn=el.querySelector('[data-action="collapse-section"]');
+      if(btn){btn.textContent="Öffnen ▾";btn.setAttribute("aria-expanded","false");}
+    }
+    for(const el of $("editor").querySelectorAll(".room-card")){
+      if(!collapsedRooms.has(el.dataset.rid))continue;
+      el.querySelector(".room-body")?.classList.add("hide");
+      const btn=el.querySelector('[data-action="collapse-room"]');
+      if(btn){btn.textContent="Öffnen ▾";btn.setAttribute("aria-expanded","false");}
+    }
+    // Nach Einfügen/Kopieren am bisherigen Raum bleiben, statt an den Seitenanfang zu springen.
+    if(anchorId&&Number.isFinite(anchorTop)){
+      const match=[...$("editor").querySelectorAll(anchorKind==="room"?".room-card":".section-card")]
+        .find(el=>el.dataset[anchorKind==="room"?"rid":"sid"]===anchorId);
+      if(match)window.scrollBy(0,match.getBoundingClientRect().top-anchorTop);
+      else window.scrollTo(0,scrollY);
+    }else window.scrollTo(0,scrollY);
     $("summaryTotal").textContent=C.currency(calc.gross);
     $("undoBtn").disabled=!history.length;$("redoBtn").disabled=!future.length;
   }
