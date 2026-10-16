@@ -250,6 +250,16 @@ function createPreviewServer({ password, onRequest = () => {}, readOverview = nu
         return res.end('Angebots-Schnellstart V2 nicht bereit.');
       }
     }
+    if (page.pathname === '/raumskizze-test') {
+      try {
+        const html=fs.readFileSync(path.join(ROOT,'public','raumskizze-test.html'),'utf8');
+        res.setHeader('Content-Type','text/html; charset=utf-8');
+        res.writeHead(200);
+        return res.end(req.method === 'HEAD' ? undefined : html);
+      }catch{
+        res.writeHead(503);return res.end('Raumskizze-Test nicht bereit.');
+      }
+    }
     if (page.pathname === '/angebot-v2') {
       try {
         const html = fs.readFileSync(path.join(ROOT, 'public', 'angebot-v2.html'), 'utf8');
