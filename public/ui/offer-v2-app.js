@@ -172,6 +172,7 @@
         del("remove-measure","Aufmaßzeile entfernen")+'</div>';
     }).join("");
     return '<div class="measurement-panel"><div class="measurement-heading"><div><div class="sheet-label">📐 Aufmaß für den gesamten Abschnitt</div><div class="sheet-note">Eine Aufmaßzeile kann mehreren Positionen zugeordnet werden. Formeln mit Klammern, ×, + und − sind möglich.</div></div>'+button("+ Aufmaßzeile","add-measure")+'</div>'+
+      '<div class="measurement-copy-actions"><label>Aufmaß von Raum <select data-measure-copy-source><option value="">Raum auswählen …</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'">'+e(r.name)+'</option>').join("")+'</select></label>'+button("Aufmaß kopieren","copy-room-measure")+'</div>'+
       head+(lines||'<div class="empty-note">Noch keine Aufmaßzeile. Du kannst Positionen trotzdem mit freier Menge erfassen.</div>')+'</div>';
   }
   function measurementChoices(sec,p){
@@ -397,6 +398,19 @@
       selectedPositions.clear();all();toast(items.length+" Position(en) "+(action==="multi-move"?"verschoben":"gelöscht")+".");return;
     }
     switch(action){
+      case "copy-room-measure":{
+        const sourceId=n.secElement?.querySelector("[data-measure-copy-source]")?.value;
+        const source=s?.rooms.find(x=>x.id===sourceId);
+        const targetId=prompt("In welchen Raum kopieren? Bitte Raum auswählen:\n"+s.rooms.map((x,i)=>(i+1)+". "+x.name).join("\n"));
+        const target=s?.rooms[Number(targetId)-1];
+        if(!source||!target)return toast("Quell- und Zielraum auswählen.",true);
+        if(source.id===target.id)return toast("Bitte einen anderen Zielraum wählen.",true);
+        const rows=s.measurements.filter(m=>m.roomId===source.id);
+        if(!rows.length)return toast("Im Quellraum ist kein Aufmaß vorhanden.");
+        snapshot();
+        for(const m of rows){const copy=C.copy(m);copy.id=C.id("measure");copy.roomId=target.id;s.measurements.push(copy);}
+        toast(rows.length+" Aufmaßzeile(n) eigenständig kopiert.");break;
+      }
       case "add-measure":snapshot();C.addMeasurement(offer,s.id);break;
       case "remove-measure":{
         if(!m)return;const used=s.rooms.flatMap(x=>x.positions).filter(x=>(x.measurementIds||[]).includes(m.id));
