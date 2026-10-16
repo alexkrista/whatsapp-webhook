@@ -200,8 +200,15 @@
     const calc=totals(offer);
     if(calc.errors.length)throw Error("Aufmaß bitte prüfen: "+calc.errors[0]);
     let html='<article class="offer-print"><header class="offer-print-head"><div class="offer-print-brand">FARBEN KRISTA <small>ANGEBOT V2 · TESTENTWURF</small></div><div>Nr. '+esc(offer.number||"TEST")+'</div></header>';
-    html+='<h1>Angebot</h1><p class="print-intro">'+esc(offer.customer||"Kunde noch offen")+'<br>'+esc(offer.address||"")+'</p>';
+    const street=[offer.street,offer.houseNumber].filter(Boolean).join(" ");
+    const place=[offer.postalCode,offer.city].filter(Boolean).join(" ");
+    const address=[offer.customer||"Kunde noch offen",offer.contactName,street,place,offer.country].filter(Boolean);
+    if(!street&&!place&&offer.address)address.push(offer.address);
+    html+='<h1>Angebot</h1><p class="print-intro">'+address.map(esc).join('<br>')+'</p>';
     html+='<h2>'+esc(offer.title)+'</h2><p class="print-intro">'+esc(offer.intro||"")+'</p>';
+    const date=v=>{const parts=String(v||"").split("-");return parts.length===3?parts.reverse().join("."):"";};
+    const execution=offer.executionMode==="date"?(date(offer.executionDate)||"Nach Absprache"):offer.executionMode==="period"?([date(offer.executionStart),date(offer.executionEnd)].filter(Boolean).join(" – ")||"Nach Absprache"):"Nach Absprache";
+    html+='<p class="print-intro"><strong>Ausführungstermin:</strong> '+esc(execution)+'</p>';
     (offer.sections||[]).forEach((sec,i)=>{
       html+='<section class="offer-print-section"><h3>'+(i+1)+'. '+esc(sec.name)+'</h3>';
       (sec.rooms||[]).forEach((r,j)=>{
