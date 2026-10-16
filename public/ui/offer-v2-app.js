@@ -217,7 +217,7 @@
       del("remove-section","Gesamten Abschnitt entfernen")+'</div></div>'+
       '<div class="section-body">'+
       '<div class="section-tools"><div class="sheet-note">Pro Abschnitt ein Aufmaß. Jeder Raum / jedes Bauteil kann darauf zugreifen.</div>'+
-      button("+ Raum / Bauteil","add-room")+'</div>'+
+      button("+ Raum wie letzter","add-room-copy")+button("+ Leerer Raum","add-room")+'</div>'+
       sectionMeasurements(sec)+
       '<div class="rooms-stack">'+sec.rooms.map((r,i)=>roomCard(sec,r,i,summary.rooms[i])).join("")+'</div>'+
       '</div></section>';
@@ -380,6 +380,26 @@
         if(!m)return;const used=s.rooms.flatMap(x=>x.positions).filter(x=>(x.measurementIds||[]).includes(m.id));
         if(used.length&&!confirm("Dieses Aufmaß ist "+used.length+" Position(en) zugeordnet. Entfernen und Zuordnungen anschließend prüfen?"))return;
         snapshot();s.measurements=s.measurements.filter(x=>x.id!==m.id);break;
+      }
+      case "add-room-copy":{
+        if(!s)return;
+        const original=s.rooms.at(-1);
+        snapshot();
+        const created=C.addRoom(offer,s.id);
+        if(original){
+          created.description=original.description||"";
+          created.adjustmentPercent=original.adjustmentPercent||0;
+          const remap=new Map();
+          for(const m of s.measurements.filter(x=>x.roomId===original.id)){
+            const clone=C.copy(m);clone.id=C.id("measure");clone.roomId=created.id;s.measurements.push(clone);remap.set(m.id,clone.id);
+          }
+          created.positions=original.positions.map(p=>{
+            const clone=C.copy(p);clone.id=C.id("pos");
+            clone.measurementIds=(clone.measurementIds||[]).map(id=>remap.get(id)||id);
+            return clone;
+          });
+        }
+        toast("Raum als unabhängige Kopie angelegt.");break;
       }
       case "add-room":snapshot();C.addRoom(offer,s.id);break;
       case "remove-room":if(!r||!confirm('Raum "'+r.name+'" samt '+r.positions.length+' Position(en) löschen?'))return;snapshot();s.rooms=s.rooms.filter(x=>x.id!==r.id);s.measurements=s.measurements.filter(x=>x.roomId!==r.id);break;
