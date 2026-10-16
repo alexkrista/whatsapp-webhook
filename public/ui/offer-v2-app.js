@@ -88,6 +88,18 @@
   function filterCatalogBrowser(container,value){
     if(!container)return 0;
     const term=catalogSearchKey(value);
+    if(container.dataset.catalogKind==="flat"){
+      let count=0;
+      for(const item of container.querySelectorAll("[data-catalog-item]")){
+        const match=!term||catalogSearchKey(item.dataset.catalogText).includes(term);
+        item.hidden=!match;if(match)count++;
+      }
+      const status=container.querySelector("[data-catalog-status]");
+      if(status)status.textContent=count+" Position(en)";
+      const empty=container.querySelector("[data-catalog-empty]");
+      if(empty)empty.hidden=count!==0;
+      return count;
+    }
     let count=0;
     for(const group of container.querySelectorAll("[data-catalog-group]")){
       const categoryMatches=term!==""&&catalogSearchKey(group.dataset.catalogGroupName).includes(term);
@@ -204,7 +216,7 @@
       '<button type="button" class="action compact secondary" data-action="toggle-catalog">Alle Positionen aufklappen</button>'+
       '<button type="button" class="action compact secondary" data-action="add-pos" data-template-id="free">+ Freie Position</button>'+
       '</div>'+
-      '<div class="compact-catalog-panel hide">'+catalogBrowser()+'</div>'+
+      '<div class="compact-catalog-panel hide"><div class="catalog-browser" data-catalog-browser data-catalog-kind="flat"><div class="catalog-browser-status" data-catalog-status>Positionen auswählen</div><div class="catalog-flat-list">'+C.catalog.map(p=>'<button type="button" class="catalog-entry" data-catalog-item data-catalog-text="'+e(p.text+" "+p.category+" "+p.unit)+'" data-action="add-pos" data-template-id="'+e(p.id)+'"><span>'+e(p.text)+'</span><small>'+e(p.unit)+' · +</small></button>').join("")+'</div><p class="catalog-empty" data-catalog-empty hidden>Keine Position gefunden.</p></div></div>'+
       '<details class="bulk-panel"><summary>+ Leistungspaket gesammelt auswählen</summary><p class="sheet-note">Mehrere Positionen auswählen und gemeinsam hinzufügen.</p>'+catalogBrowser("bulk")+'<button type="button" class="action solid" data-action="bulk-add">✓ Markierte Positionen hinzufügen</button></details>'+
       '</div></article>';
   }
@@ -457,7 +469,7 @@
     if(t.matches("[data-multi-mark]")){if(t.checked)selectedPositions.add(t.dataset.multiMark);else selectedPositions.delete(t.dataset.multiMark);renderEditor();return;}
     if(t.matches("[data-multi-all]")){selectedPositions.clear();if(t.checked)offer.sections.forEach(sec=>sec.rooms.forEach(r=>r.positions.forEach(p=>selectedPositions.add(p.id))));renderEditor();return;}
     if(t.matches(".compact-catalog-search")){
-      const room=t.closest(".room-card"),panel=room?.querySelector(".compact-catalog-panel"),browser=panel?.querySelector('[data-catalog-kind="single"]');
+      const room=t.closest(".room-card"),panel=room?.querySelector(".compact-catalog-panel"),browser=panel?.querySelector('[data-catalog-kind="flat"]');
       if(panel)panel.classList.remove("hide");
       const toggle=room?.querySelector('[data-action="toggle-catalog"]');if(toggle)toggle.textContent="Positionen zuklappen";
       if(browser){const inside=browser.querySelector("[data-catalog-search]");if(inside)inside.value=t.value;filterCatalogBrowser(browser,t.value);}
