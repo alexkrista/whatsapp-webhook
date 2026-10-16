@@ -237,9 +237,10 @@
       del("remove-section","Gesamten Abschnitt entfernen")+'</div></div>'+
       '<div class="section-body">'+
       '<div class="section-tools"><div class="sheet-note">Pro Abschnitt ein Aufmaß. Jeder Raum / jedes Bauteil kann darauf zugreifen.</div>'+
-      button("+ Raum wie letzter","add-room-copy")+button("+ Leerer Raum","add-room")+'</div>'+
++'</div>'+
       sectionMeasurements(sec)+
       '<div class="rooms-stack">'+sec.rooms.map((r,i)=>roomCard(sec,r,i,summary.rooms[i])).join("")+'</div>'+
+      '<div class="next-room-actions"><span>Nächsten Raum anlegen</span>'+button("+ Raum wie letzter","add-room-copy")+button("+ Leerer Raum","add-room")+'</div>'+
       '</div></section>';
   }
   function captureCatalogUi(){
