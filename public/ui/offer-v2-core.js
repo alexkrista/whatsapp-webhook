@@ -64,8 +64,19 @@
     return round(result);
   }
   function measured(line){
-    try{return{value:formulaValue(line.formula),error:null};}
-    catch(error){return{value:null,error:String(error.message||error)};}
+    try{
+      if(Array.isArray(line.calculations)&&line.calculations.length){
+        let total=0,hasValue=false;
+        for(const item of line.calculations){
+          const value=formulaValue(item.formula);
+          if(value===null)continue;
+          hasValue=true;
+          total+=(item.deduction?-1:1)*Math.abs(value);
+        }
+        return{value:hasValue?round(total):null,error:null};
+      }
+      return{value:formulaValue(line.formula),error:null};
+    }catch(error){return{value:null,error:String(error.message||error)};}
   }
   function positionQuantity(sec,p){
     if(p.quantityMode!=="linked")return {value:amount(p.quantity),error:null};
