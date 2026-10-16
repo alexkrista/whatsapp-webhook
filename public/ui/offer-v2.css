@@ -69,3 +69,9 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 
 .position-price-origin{font-size:10px;border-radius:8px;padding:5px 7px;background:#fff7e7;color:#765521;font-weight:850;white-space:normal}
 .position-price-origin:has(+ .action){margin-right:4px}
+
+/* Angebotspositionen: Markierung und Spaltenbeschriftung fluchten exakt. */
+.position-top,.position-columns{display:grid;grid-template-columns:42px 30px minmax(180px,1fr) 88px 68px 98px 102px 34px;gap:6px;align-items:center}
+.position-columns{color:#607766;font-size:11px;font-weight:800;text-transform:uppercase;padding:0 10px}
+.position-top > label:first-child{display:flex;justify-content:center;align-items:center}
+@media(max-width:850px){.position-table{overflow-x:auto}.position-card,.position-columns{min-width:780px}}
