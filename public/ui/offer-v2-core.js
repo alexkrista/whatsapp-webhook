@@ -224,7 +224,7 @@
         r.positions.forEach((p,k)=>{
           const q=summary.positions[k],alt=q.alternative;
           const details=sec.showUnitPrices!==false||p.alwaysShowUnitPrice===true||/^(Std\.?|Stunden?|h)$/i.test(String(p.unit||"").trim())||/^Material und Maschinen/i.test(p.text||"");
-          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(q.adjustment?'<small class="print-position-adjust"> ('+(q.adjustment>0?'+':'')+number(q.adjustment)+' %)</small>':'')+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+(details?number(q.quantity):'')+'</td><td>'+(details?esc(p.unit):'')+'</td><td class="num">'+(details?currency(amount(p.unitPrice)):'')+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
+          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(q.adjustment?'<small class="print-position-adjust"> ('+(q.adjustment>0?'+':'')+number(q.adjustment)+' %)</small>':'')+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+(details?number(q.quantity):'')+'</td><td>'+(details?esc(p.unit):'')+'</td><td class="num">'+(details?currency(round(amount(p.unitPrice)*(1+q.adjustment/100))):'')+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
         });
         html+='</tbody><tfoot><tr><td colspan="5">Summe '+esc(r.name)+'</td><td class="num">'+currency(summary.total)+'</td></tr></tfoot></table>';
       });
