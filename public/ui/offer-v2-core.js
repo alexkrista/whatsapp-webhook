@@ -27,7 +27,7 @@
     {id:"free",category:"Eigene Leistung",text:"Neue freie Position",unit:"PA",price:0}
   ]);
   const position=template=>({id:id("pos"),text:clean(template?.text||"Neue Position",1000),unit:clean(template?.unit||"PA",20),unitPrice:amount(template?.price??template?.unitPrice??0),quantityMode:"manual",quantity:1,measurementIds:[],alternative:false,notes:""});
-  const room=title=>({id:id("room"),name:clean(title||"Neuer Raum / Bauteil"),description:"",positions:[]});
+  const room=title=>({id:id("room"),name:clean(title||"Neuer Raum / Bauteil"),description:"",adjustmentPercent:0,positions:[]});
   const measurement=(roomId="",name="Neues Aufmaß",unit="m²",formula="")=>({id:id("measure"),roomId,label:clean(name),unit:clean(unit),formula:clean(formula,400)});
   const section=title=>({id:id("section"),name:clean(title||"Neuer Abschnitt"),showUnitPrices:true,measurements:[],rooms:[room("Raum 1")]});
   function fresh(){
@@ -82,6 +82,8 @@
     }
     return {value:round(total),error:null};
   }
+  function isRegieMaterial(p){return p.alwaysShowUnitPrice===true||/^(Std\.?|Stunden?|h)$/i.test(String(p.unit||"").trim())||/^Material und Maschinen/i.test(String(p.text||""));}
+  function roomAdjustment(r,p){return isRegieMaterial(p)?0:Math.max(-100,Math.min(100,Number(r.adjustmentPercent)||0));}
   function totals(offer){
     const errors=[];let before=0;let alternatives=0;
     const sections=(offer.sections||[]).map(sec=>{
@@ -91,9 +93,11 @@
         const positions=(r.positions||[]).map(p=>{
           const q=positionQuantity(sec,p);
           if(q.error)errors.push(sec.name+" / "+r.name+": "+p.text+" – "+q.error);
-          const net=round(q.value*amount(p.unitPrice));
+          const baseNet=round(q.value*amount(p.unitPrice));
+          const adjustment=roomAdjustment(r,p);
+          const net=round(baseNet*(1+adjustment/100));
           if(p.alternative)alternatives+=net;else roomSum=round(roomSum+net);
-          return{positionId:p.id,quantity:q.value,net,error:q.error,alternative:!!p.alternative};
+          return{positionId:p.id,quantity:q.value,net,adjustment,baseNet,error:q.error,alternative:!!p.alternative};
         });
         sectionSum=round(sectionSum+roomSum);
         return{roomId:r.id,total:roomSum,positions};
@@ -220,7 +224,7 @@
         r.positions.forEach((p,k)=>{
           const q=summary.positions[k],alt=q.alternative;
           const details=sec.showUnitPrices!==false||p.alwaysShowUnitPrice===true||/^(Std\.?|Stunden?|h)$/i.test(String(p.unit||"").trim())||/^Material und Maschinen/i.test(p.text||"");
-          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+(details?number(q.quantity):'')+'</td><td>'+(details?esc(p.unit):'')+'</td><td class="num">'+(details?currency(amount(p.unitPrice)):'')+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
+          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(q.adjustment?'<small class="print-position-adjust"> ('+(q.adjustment>0?'+':'')+number(q.adjustment)+' %)</small>':'')+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+(details?number(q.quantity):'')+'</td><td>'+(details?esc(p.unit):'')+'</td><td class="num">'+(details?currency(amount(p.unitPrice)):'')+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
         });
         html+='</tbody><tfoot><tr><td colspan="5">Summe '+esc(r.name)+'</td><td class="num">'+currency(summary.total)+'</td></tr></tfoot></table>';
       });
