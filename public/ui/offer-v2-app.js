@@ -346,7 +346,7 @@
     }}
     else subject[key]=target.value;
     if(key==="unit"&&subject.quantityMode==="linked")subject.measurementIds=[];
-    if(["adjustmentPercent","executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
+    if((key==="adjustmentPercent"&&eventType==="change")||["executionMode","quantityMode","measurementIds","alternative"].includes(key)||(key==="unit"&&eventType==="change"))renderEditor();
     updatePreview();autosave();
   }
   function structural(action,target){
