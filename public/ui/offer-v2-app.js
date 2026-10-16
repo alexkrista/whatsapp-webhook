@@ -197,10 +197,15 @@
       '<div class="room-adjust"><label>Zu-/Abschlag Raum % <input type="number" min="-100" max="100" step="0.1" data-room-field="adjustmentPercent" value="'+e(r.adjustmentPercent??0)+'"></label><small>Regie und Material ausgenommen · grün + / rot −</small></div>'+
       '<label class="edit-field room-description">Beschreibung dieses Raums (wird gedruckt)<textarea data-room-field="description">'+e(r.description||"")+'</textarea></label>'+
       '<div class="position-table">'+(r.positions.length?'<div class="position-columns"><span>Auswahl</span><span>Pos.</span><span>Leistungsbeschreibung</span><span>Menge</span><span>Einheit</span><span>Einzelpreis €</span><span>Gesamt €</span><span></span></div>':'')+(r.positions.map((p,j)=>positionRow(sec,r,p,j,summary)).join("")||'<div class="empty-note">Noch keine Position. Einzelne Leistung oder Paket auswählen.</div>')+'</div>'+
-      '<div class="position-controls"><div class="catalog-panel-head"><strong>+ Leistungsposition einzeln hinzufügen</strong><span class="muted">Nach Gruppen aufklappbar und suchbar · aktuell Testkatalog, nicht der WinWorker-Firmenstamm</span></div>'+catalogBrowser()+
-      '<div class="position-add"><button type="button" class="action secondary compact" data-action="add-pos" data-template-id="free">+ Freie Position</button><span class="muted">Jede gewählte Position ist unabhängig bearbeitbar und löschbar. Preise hier sind Musterwerte.</span></div></div>'+
-      '<details class="bulk-panel"><summary>+ Leistungspaket gesammelt auswählen</summary><p class="sheet-note">Mehrere einzelne Positionen anhaken. Auch bei der Sammelauswahl bleibt jede Position einzeln löschbar.</p>'+
-      catalogBrowser("bulk")+'<button type="button" class="action solid" data-action="bulk-add">✓ Markierte Positionen hinzufügen</button></details>'+
+      '<div class="position-controls compact-catalog">'+
+      '<div class="compact-catalog-bar">'+
+      '<input type="search" class="compact-catalog-search" data-catalog-search aria-label="Leistungspositionen suchen" placeholder="🔎 Position suchen …">'+
+      '<button type="button" class="action compact" data-action="add-regie-material">+ Regie & Material</button>'+
+      '<button type="button" class="action compact secondary" data-action="toggle-catalog">Alle Positionen aufklappen</button>'+
+      '<button type="button" class="action compact secondary" data-action="add-pos" data-template-id="free">+ Freie Position</button>'+
+      '</div>'+
+      '<div class="compact-catalog-panel hide">'+catalogBrowser()+'</div>'+
+      '<details class="bulk-panel"><summary>+ Leistungspaket gesammelt auswählen</summary><p class="sheet-note">Mehrere Positionen auswählen und gemeinsam hinzufügen.</p>'+catalogBrowser("bulk")+'<button type="button" class="action solid" data-action="bulk-add">✓ Markierte Positionen hinzufügen</button></details>'+
       '</div></article>';
   }
   function sectionCard(sec,index,summary){
@@ -381,6 +386,23 @@
       case "remove-section":if(!s||!confirm('Ganzen Abschnitt "'+s.name+'" löschen?'))return;snapshot();offer.sections=offer.sections.filter(x=>x.id!==s.id);if(!offer.sections.length)offer.sections.push(C.fresh().sections[0]);break;
       case "move-section-up":case "move-section-down":snapshot();C.reorder(offer.sections,s.id,action.endsWith("up")?-1:1);break;
       case "move-room-up":case "move-room-down":snapshot();C.reorder(s.rooms,r.id,action.endsWith("up")?-1:1);break;
+      case "add-regie-material":{
+        if(!r)return;
+        snapshot();
+        const exists=new Set(r.positions.filter(x=>x.alwaysShowUnitPrice).map(x=>x.text));
+        for(const key of ["regie","material"]){
+          const tpl=C.catalog.find(x=>x.id===key);
+          if(tpl&&!exists.has(tpl.text))C.addPosition(offer,s.id,r.id,key);
+        }
+        toast("Regie und Material eingefügt.");break;
+      }
+      case "toggle-catalog":{
+        const box=n.roomElement?.querySelector(".compact-catalog-panel");
+        if(!box)return;
+        box.classList.toggle("hide");
+        target.textContent=box.classList.contains("hide")?"Alle Positionen aufklappen":"Positionen zuklappen";
+        return;
+      }
       case "add-pos":{
         const template=target.dataset.templateId||"free";
         if(!C.catalog.some(x=>x.id===template))return toast("Unbekannte Leistungsposition.",true);
@@ -414,6 +436,13 @@
     const t=event.target;
     if(t.matches("[data-multi-mark]")){if(t.checked)selectedPositions.add(t.dataset.multiMark);else selectedPositions.delete(t.dataset.multiMark);renderEditor();return;}
     if(t.matches("[data-multi-all]")){selectedPositions.clear();if(t.checked)offer.sections.forEach(sec=>sec.rooms.forEach(r=>r.positions.forEach(p=>selectedPositions.add(p.id))));renderEditor();return;}
+    if(t.matches(".compact-catalog-search")){
+      const room=t.closest(".room-card"),panel=room?.querySelector(".compact-catalog-panel"),browser=panel?.querySelector('[data-catalog-kind="single"]');
+      if(panel)panel.classList.remove("hide");
+      const toggle=room?.querySelector('[data-action="toggle-catalog"]');if(toggle)toggle.textContent="Positionen zuklappen";
+      if(browser){const inside=browser.querySelector("[data-catalog-search]");if(inside)inside.value=t.value;filterCatalogBrowser(browser,t.value);}
+      return;
+    }
     if(t.matches("[data-catalog-search]")){
       filterCatalogBrowser(t.closest("[data-catalog-browser]"),t.value);
       return;
