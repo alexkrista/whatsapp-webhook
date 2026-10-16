@@ -138,3 +138,6 @@ input:not([type=checkbox]),select,textarea{width:100%;min-width:0;background:#ff
 .section-drag:active{cursor:grabbing}
 .section-dragging{opacity:.55}
 .section-drop-target{outline:3px dashed #3d8051;outline-offset:3px}
+
+/* Trennstrich zwischen Abschnittsübersicht und Angebotssumme netto. */
+.offer-print .print-grand .print-summary-net{border-top:1px solid #333;margin-top:8px;padding-top:12px}
