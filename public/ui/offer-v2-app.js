@@ -14,7 +14,14 @@
   function initial(){
     try{
       const saved=localStorage.getItem(KEY);
-      if(saved)return C.parseOffer(JSON.parse(saved));
+      if(saved){
+        const existing=C.parseOffer(JSON.parse(saved));
+        const defaults={cashDiscountPercent:2,cashDiscountDays:5,netPaymentDays:14,advancePercent:50,advanceDiscountPercent:4};
+        for(const [key,value] of Object.entries(defaults)){
+          if(existing[key]===undefined||existing[key]===null||existing[key]==="")existing[key]=value;
+        }
+        return existing;
+      }
     }catch{}
     return C.sample();
   }
