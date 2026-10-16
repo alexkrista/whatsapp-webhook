@@ -108,17 +108,32 @@
     return count;
   }
   function offerHeader(){
+    const field=(label,key,type="text",attrs="")=>'<label>'+label+'<input type="'+type+'" '+attrs+' data-offer-field="'+key+'" value="'+e(offer[key]??"")+'"></label>';
     return '<section class="editor-card"><h2 class="card-title">1. Angebot und Kunde</h2><div class="form-grid">'+
-      '<label>Projekt / Angebotsbezeichnung<input data-offer-field="title" value="'+e(offer.title)+'"></label>'+
-      '<label>Angebotsnummer (nur TEST)<input data-offer-field="number" value="'+e(offer.number)+'"></label>'+
-      '<label>Kunde / Bauherrschaft<input data-offer-field="customer" value="'+e(offer.customer)+'"></label>'+
-      '<label>Adresse<input data-offer-field="address" value="'+e(offer.address)+'"></label>'+
+      field("Projekt / Angebotsbezeichnung","title")+
+      field("Angebotsnummer (nur TEST)","number")+
+      '<h3 class="wide" style="margin:10px 0 0">Kundenanschrift</h3>'+
+      field("Kunde / Firma / Bauherrschaft","customer")+
+      field("Ansprechperson","contactName")+
+      field("Straße","street")+
+      field("Hausnummer","houseNumber")+
+      field("PLZ","postalCode")+
+      field("Ort","city")+
+      field("Land","country")+
+      '<p class="subtle wide">Kundenstamm-Verknüpfung vorbereitet. In dieser isolierten Testversion werden die Adressfelder noch manuell bearbeitet.</p>'+
       '<label class="wide">Einleitung<textarea data-offer-field="intro">'+e(offer.intro)+'</textarea></label>'+
-      '<label>Gesamtrabatt %<input type="number" min="0" max="100" step=".1" data-offer-field="discountPercent" value="'+e(offer.discountPercent)+'"></label>'+
-      '<label>MwSt. %<input type="number" min="0" max="100" step=".1" data-offer-field="vatRate" value="'+e(offer.vatRate)+'"></label>'+
-      '</div><p class="subtle">Unterschiedliche Preise und Mengen bleiben je Position erhalten. Der Ausdruck benutzt dieselben Daten wie diese Eingabe.</p></section>';
+      '<h3 class="wide" style="margin:12px 0 0">Konditionen</h3>'+
+      field("Gesamtrabatt %","discountPercent","number",'min="0" max="100" step="0.1"')+
+      field("MwSt. %","vatRate","number",'min="0" max="100" step="0.1"')+
+      field("Skonto %","cashDiscountPercent","number",'min="0" max="100" step="0.1"')+
+      field("Skonto innerhalb von (Tagen)","cashDiscountDays","number",'min="0" max="365" step="1"')+
+      field("Zahlungsziel netto (Tage)","netPaymentDays","number",'min="0" max="365" step="1"')+
+      field("Vorauskassa / Anzahlung % vom Auftrag","advancePercent","number",'min="0" max="100" step="0.1"')+
+      field("Skonto auf Vorauskassa %","advanceDiscountPercent","number",'min="0" max="100" step="0.1"')+
+      '<p class="subtle wide">Zahlungsbedingungen werden im TEST-Entwurf gespeichert; Übernahme in die Kundenmappe und Belegprüfung folgen mit der Stammdatenanbindung.</p>'+
+      '</div></section>';
   }
-  function sectionMeasurements(sec){
+    function sectionMeasurements(sec){
     const head='<div class="measure-grid measure-head"><span>Raum / Bauteil</span><span>Aufmaß / Rechnung</span><span>Einheit</span><span>Menge</span><span>Ergebnis</span><span></span></div>';
     const lines=sec.measurements.map(m=>{
       const computed=C.measured(m);
@@ -317,7 +332,7 @@
     if(!subject)return;
     if(key==="measurementIds"){subject.measurementIds=target.value?[target.value]:[];}
     else if(key==="alternative"){subject[key]=target.checked;}
-    else if(["unitPrice","quantity","discountPercent","vatRate"].includes(key)){subject[key]=Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
+    else if(["unitPrice","quantity","discountPercent","vatRate","cashDiscountPercent","cashDiscountDays","netPaymentDays","advancePercent","advanceDiscountPercent"].includes(key)){subject[key]=Math.max(0,Number(target.value)||0);if(key==="unitPrice")subject.priceOrigin="manual";}
     else if(key==="quantityMode"){subject[key]=target.value==="linked"?"linked":"manual";if(subject.quantityMode==="linked"&&!subject.measurementIds?.length){
       const eligible=n.sec.measurements.find(m=>m.unit===subject.unit&&(m.roomId===""||m.roomId===n.room.id));
       subject.measurementIds=eligible?[eligible.id]:[];
