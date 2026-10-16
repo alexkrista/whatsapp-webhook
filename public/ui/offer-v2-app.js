@@ -167,7 +167,14 @@
         '<select data-measure-field="roomId" aria-label="Raum / Bauteil"><option value="">Alle Räume</option>'+sec.rooms.map(r=>'<option value="'+e(r.id)+'"'+(r.id===m.roomId?' selected':'')+'>'+e(r.name)+'</option>').join("")+'</select>'+
         '<input data-measure-field="label" aria-label="Aufmaßbezeichnung" value="'+e(m.label)+'" placeholder="z. B. Wandflächen">'+
         '<select data-measure-field="unit" aria-label="Einheit">'+["m²","m","Stk","PA","Std"].map(u=>'<option'+(u===m.unit?' selected':'')+'>'+e(u)+'</option>').join("")+'</select>'+
-        '<input data-measure-field="formula" aria-label="Aufmaßformel" title="Rechnung z. B. (4,6 + 3,2) × 2 × 2,5 - 3" value="'+e(m.formula||"")+'" placeholder="4,5×2,5">'+
+        '<div class="measure-calculations" data-calc-holder>'+
+        (Array.isArray(m.calculations)&&m.calculations.length?m.calculations:[{label:"",formula:m.formula||"",deduction:false}]).map((c,i)=>
+          '<div class="measure-calc-row'+(c.deduction?' deduction':'')+'">'+
+          '<button type="button" data-calc-sign="'+i+'" title="Zwischen Zugang und Abzug wechseln">'+(c.deduction?'−':'+')+'</button>'+
+          '<input data-calc-label="'+i+'" value="'+e(c.label||"")+'" placeholder="z. B. Wand, Tür">'+
+          '<input data-calc-formula="'+i+'" value="'+e(c.formula||"")+'" placeholder="4,5×2,5">'+
+          '<button type="button" data-calc-remove="'+i+'" title="Berechnungszeile entfernen">×</button></div>').join("")+
+        '<div class="measure-calc-buttons"><button type="button" data-calc-add="plus">+ Berechnungszeile</button><button type="button" data-calc-add="minus">− Abzug</button></div></div>'+
         '<output class="measure-total" data-measure-result="'+e(m.id)+'">'+val+'</output>'+
         del("remove-measure","Aufmaßzeile entfernen")+'</div>';
     }).join("");
@@ -513,6 +520,24 @@
       if(!t.checked)n.pos.measurementIds=n.pos.measurementIds.filter(id=>id!==t.value);
       updatePreview();autosave();return;
     }
+    const calcControl=t.closest("[data-calc-holder]")&&t.closest("[data-calc-formula],[data-calc-label],[data-calc-sign],[data-calc-remove],[data-calc-add]");
+    if(calcControl){
+      const n=findNodes(t),m=n.measure;
+      if(!m)return;
+      if(!Array.isArray(m.calculations)||!m.calculations.length)m.calculations=[{label:"",formula:m.formula||"",deduction:false}];
+      const idx=Number(t.dataset.calcFormula??t.dataset.calcLabel??t.dataset.calcSign??t.dataset.calcRemove);
+      if(t.hasAttribute("data-calc-formula"))m.calculations[idx].formula=t.value;
+      else if(t.hasAttribute("data-calc-label"))m.calculations[idx].label=t.value;
+      else if(event.type==="click"){
+        if(t.hasAttribute("data-calc-sign"))m.calculations[idx].deduction=!m.calculations[idx].deduction;
+        if(t.hasAttribute("data-calc-remove"))m.calculations.splice(idx,1);
+        if(t.hasAttribute("data-calc-add"))m.calculations.push({label:"",formula:"",deduction:t.dataset.calcAdd==="minus"});
+        if(!m.calculations.length)m.calculations.push({label:"",formula:"",deduction:false});
+      }
+      m.formula="";
+      if(event.type==="click")renderEditor();
+      updatePreview();autosave();return;
+    }
     if(t.matches("[data-offer-field],[data-section-field],[data-room-field],[data-measure-field],[data-p-field]")){
       changeField(t,event.type);
     }
@@ -566,6 +591,7 @@
     $("editor").addEventListener("input",documentChange);
     $("editor").addEventListener("change",documentChange);
     $("editor").addEventListener("click",documentClick);
+    $("editor").addEventListener("click",evt=>{if(evt.target.closest("[data-calc-sign],[data-calc-remove],[data-calc-add]"))documentChange(evt);});
     $("editor").addEventListener("dragstart",sectionDragStart);
     $("editor").addEventListener("dragover",sectionDragOver);
     $("editor").addEventListener("drop",sectionDrop);
