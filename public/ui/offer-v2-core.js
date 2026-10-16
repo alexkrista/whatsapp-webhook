@@ -29,7 +29,7 @@
   const position=template=>({id:id("pos"),text:clean(template?.text||"Neue Position",1000),unit:clean(template?.unit||"PA",20),unitPrice:amount(template?.price??template?.unitPrice??0),quantityMode:"manual",quantity:1,measurementIds:[],alternative:false,notes:""});
   const room=title=>({id:id("room"),name:clean(title||"Neuer Raum / Bauteil"),description:"",positions:[]});
   const measurement=(roomId="",name="Neues Aufmaß",unit="m²",formula="")=>({id:id("measure"),roomId,label:clean(name),unit:clean(unit),formula:clean(formula,400)});
-  const section=title=>({id:id("section"),name:clean(title||"Neuer Abschnitt"),measurements:[],rooms:[room("Raum 1")]});
+  const section=title=>({id:id("section"),name:clean(title||"Neuer Abschnitt"),showUnitPrices:true,measurements:[],rooms:[room("Raum 1")]});
   function fresh(){
     return {schemaVersion:2,documentId:id("offer"),number:"TEST-ENTWURF",title:"Neues Angebot",customer:"",address:"",
       intro:"Wir bedanken uns für Ihre Anfrage und bieten folgende Leistungen an.",sections:[section("Malerarbeiten")],
@@ -122,7 +122,7 @@
   function addPosition(offer,sectionId,roomId,templateId="free"){
     const r=findRoom(offer,sectionId,roomId);if(!r)throw Error("Raum nicht gefunden");
     const template=catalog.find(x=>x.id===templateId)||catalog.find(x=>x.id==="free");
-    const item=position(template);r.positions.push(item);return item;
+    const item=position(template);if(templateId==="regie"||templateId==="material")item.alwaysShowUnitPrice=true;r.positions.push(item);return item;
   }
   function addBulk(offer,sectionId,roomId,templateIds){
     return [...new Set(templateIds||[])].map(key=>addPosition(offer,sectionId,roomId,key));
@@ -212,7 +212,8 @@
         html+='<table><thead><tr><th>Pos.</th><th>Leistung</th><th class="num">Menge</th><th>EH</th><th class="num">EP</th><th class="num">Gesamt</th></tr></thead><tbody>';
         r.positions.forEach((p,k)=>{
           const q=summary.positions[k],alt=q.alternative;
-          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+number(q.quantity)+'</td><td>'+esc(p.unit)+'</td><td class="num">'+currency(amount(p.unitPrice))+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
+          const details=sec.showUnitPrices!==false||p.alwaysShowUnitPrice===true||/^(Std\.?|Stunden?|h)$/i.test(String(p.unit||"").trim())||/^Material und Maschinen/i.test(p.text||"");
+          html+='<tr'+(alt?' class="print-alternative"':'')+'><td>'+(i+1)+'.'+(j+1)+'.'+(k+1)+'</td><td>'+esc(p.text)+(alt?' <em>(Alternative)</em>':'')+'</td><td class="num">'+(details?number(q.quantity):'')+'</td><td>'+(details?esc(p.unit):'')+'</td><td class="num">'+(details?currency(amount(p.unitPrice)):'')+'</td><td class="num">'+(alt?'nicht enthalten':currency(q.net))+'</td></tr>';
         });
         html+='</tbody><tfoot><tr><td colspan="5">Summe '+esc(r.name)+'</td><td class="num">'+currency(summary.total)+'</td></tr></tfoot></table>';
       });
