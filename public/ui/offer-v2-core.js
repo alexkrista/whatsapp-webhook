@@ -216,11 +216,12 @@
         });
         html+='</tbody><tfoot><tr><td colspan="5">Summe '+esc(r.name)+'</td><td class="num">'+currency(summary.total)+'</td></tr></tfoot></table>';
       });
-      html+='<p class="print-section-sum">Summe '+esc(sec.name)+': <strong>'+currency(calc.sections[i].total)+'</strong></p></section>';
+      html+='</section>';
     });
-    html+='<section class="print-grand"><div>Positionssumme <strong>'+currency(calc.base)+'</strong></div>';
+    html+='<section class="print-grand"><h3>Zusammenfassung</h3>';
+    offer.sections.forEach((sec,i)=>{html+='<div><span>'+esc(sec.name)+'</span><strong>'+currency(calc.sections[i].total)+'</strong></div>';});
     if(calc.discount)html+='<div>Rabatt '+number(offer.discountPercent)+' % <strong>− '+currency(calc.discount)+'</strong></div>';
-    html+='<div>Netto <strong>'+currency(calc.net)+'</strong></div><div>MwSt. '+number(offer.vatRate)+' % <strong>'+currency(calc.vat)+'</strong></div><div class="final">Angebotssumme brutto <strong>'+currency(calc.gross)+'</strong></div></section><footer>KRISTINE Angebotseditor V2 · isolierte Testfassung · kein verbindliches Kundenangebot</footer></article>';
+    html+='<div>Angebotssumme netto <strong>'+currency(calc.net)+'</strong></div><div>'+number(offer.vatRate)+' % MwSt. <strong>'+currency(calc.vat)+'</strong></div><div class="final">Angebotssumme brutto <strong>'+currency(calc.gross)+'</strong></div></section><footer>KRISTINE Angebotseditor V2 · isolierte Testfassung · kein verbindliches Kundenangebot</footer></article>';
     return html;
   }
   return{catalog,currency,number,fresh,sample,formulaValue,measured,positionQuantity,totals,findSection,findRoom,addSection,addRoom,addMeasurement,addPosition,addBulk,removePosition,duplicatePosition,reorder,parseOffer,fromLegacy,printMarkup,copy,esc,id};
