@@ -435,10 +435,14 @@ def render_invoice_pdf(invoice, settings, destination):
             money(ep), "" if disc else money(net),
         ])
         if disc:
-            discount_amount = raw_total - net
+            # Show per-unit discount next to percentage; display discounted EP and total.
+            unit_discount = (raw_total - net) / quantity if quantity else Decimal("0")
+            discounted_unit = net / quantity if quantity else Decimal("0")
             line_rows.append([
-                "", "", "", Paragraph(f"{percent(disc)} Rabatt", small),
-                money(-discount_amount), money(net),
+                "", "", "",
+                Paragraph(f"{percent(disc)} Rabatt  -{money(unit_discount)}", small),
+                Paragraph(f"<b>{money(discounted_unit)}</b>", base),
+                money(net),
             ])
     if regie_position_count:
         category_row = len(line_rows)
