@@ -52,7 +52,7 @@ function createAliasResolver(dataDir) {
 // server accepts requests. Physical files are kept; the old path remains a
 // symlink so stored/signed document URLs still refer to exactly the same data.
 function safeRenumber({ dataDir, oldJobId, newJobId, checkpoint = () => {} }) {
-  if (!/^\\d{5}$/.test(String(oldJobId)) || !/^\\d{5}$/.test(String(newJobId)) || oldJobId===newJobId) return {status:'blocked',reason:'Ungültige Projektnummer'};
+  if (!/^\d{5}$/.test(String(oldJobId)) || !/^\d{5}$/.test(String(newJobId)) || oldJobId===newJobId) return {status:'blocked',reason:'Ungültige Projektnummer'};
   const SOURCE_ID=oldJobId;
   const MIGRATION=`renumber-${oldJobId}-to-${newJobId}-v1`;
   const repair = path.join(dataDir, "_system/repairs", MIGRATION), planPath = path.join(repair, "plan.json"), donePath = path.join(repair, "completed.json");
