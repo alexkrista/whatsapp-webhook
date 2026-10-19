@@ -601,6 +601,7 @@ ${voicemailBlock}
     };
     const groupDefinitions = [
       { key:"other", label:"Aufgaben", icon:"📌" },
+      { key:"fahrtenbuch", label:"Fahrtenbücher", icon:"🚗" },
       { key:"regie", label:"Regie", icon:"📋" },
       { key:"invoice", label:"Rechnungen", icon:"💶" },
       { key:"customer", label:"Kundenpunkte", icon:"👤" },
@@ -612,7 +613,7 @@ ${voicemailBlock}
     list.innerHTML = groupDefinitions.map(group => {
       const rows = grouped.get(group.key) || [];
       const remembered = existingState.get(group.key);
-      const open = remembered === undefined ? true : remembered;
+      const open = remembered === undefined ? group.key !== "fahrtenbuch" : remembered;
       let rowContent = rows.length ? rows.map(taskRowHtml).join("") : '<div class="krista-task-group-empty">Keine Einträge.</div>';
       if (group.key === "customer" && rows.length) {
         const siteGroups = new Map();
@@ -637,6 +638,7 @@ ${voicemailBlock}
   function taskGroupKey(task) {
     const title = String(task?.title || "").toLowerCase();
     const reminder = String(task?.reminder || "");
+    if (String(task?.id || "").startsWith("krisdrive-day-") || String(task?.creatorId || "") === "krisdrive") return "fahrtenbuch";
     if (reminder.includes("[FINANCE_APPROVAL]") || title.includes("rechnung freigeben")) return "invoice";
     if (reminder.includes("[REGIE_APPROVAL]") || title.includes("regiebericht prüfen")) return "regie";
     if (String(task?.creatorId || "") === "customer-portal" || title.includes("kundenpunkt prüfen")) return "customer";
