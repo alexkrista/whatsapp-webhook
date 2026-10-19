@@ -3,6 +3,7 @@
   if(!/\/kristine\/?$/.test(location.pathname))return;
   const style=document.createElement("style");
   style.textContent=".portal-activity-row{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid #ddd;padding:9px 12px;cursor:pointer;color:inherit;font:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.portal-activity-new{font-weight:750}.portal-activity-dialog{border:1px solid #aaa;border-radius:14px;max-width:min(760px,94vw);max-height:85vh;padding:20px}.portal-activity-dialog button{cursor:pointer}.portal-activity-history{max-height:60vh;overflow:auto}.portal-activity-person{border-bottom:1px solid #ddd;padding:10px 0}.portal-activity-person summary{cursor:pointer;line-height:1.5}.portal-activity-person summary small{display:block;color:#666}.portal-activity-movement{padding:6px 12px;overflow-wrap:anywhere;font-size:14px}.portal-activity-visit{margin:12px 0 4px;padding:7px 12px;background:#f2f4f2;font-weight:650}";
+  style.textContent+=".portal-activity-section{margin-top:8px;border:1px solid #ddd8cf;border-radius:12px;background:#f7f6f2;overflow:hidden}.portal-activity-section>summary{cursor:pointer;list-style:none;padding:11px 14px;background:#eeece6;font-weight:850}.portal-activity-section>summary::-webkit-details-marker{display:none}.portal-activity-section>summary:before{content:\'▶\';font-size:10px;margin-right:10px;color:#657068}.portal-activity-section[open]>summary:before{content:\'▼\'}";
   document.head.append(style);
   let entries=[];
   const params=url=>{const u=new URL(url,location.origin),token=new URLSearchParams(location.search).get("token");if(token)u.searchParams.set("token",token);return u.pathname+u.search};
@@ -49,7 +50,7 @@
   function render(){
     const taskList=document.getElementById("taskList");if(!taskList)return;
     let section=document.getElementById("portalActivityTasks");
-    if(!section){section=document.createElement("details");section.id="portalActivityTasks";section.className="krista-task-group";section.open=true;taskList.parentElement.insertBefore(section,taskList);}
+    if(!section){section=document.createElement("details");section.id="portalActivityTasks";section.className="portal-activity-section";section.open=false;taskList.insertAdjacentElement("afterend",section);}
     const unread=entries.filter(e=>!e.read),groups=people();
     section.replaceChildren();
     const head=document.createElement("summary");head.textContent="👁 Kundenportal-Besuche · "+groups.length+" Personen · "+unread.length+" neu";section.append(head);
