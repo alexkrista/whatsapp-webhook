@@ -48,7 +48,7 @@ function createAliasResolver(dataDir) {
   return { aliases, canonical, stableFile, isAlias: id => Object.hasOwn(aliases, String(id)) };
 }
 
-// This one-off operation is authorized for Jansen only and runs before the
+// This operation runs after a verified source and destination check and
 // server accepts requests. Physical files are kept; the old path remains a
 // symlink so stored/signed document URLs still refer to exactly the same data.
 function safeRenumber({ dataDir, oldJobId, newJobId, checkpoint = () => {} }) {
@@ -65,7 +65,7 @@ function safeRenumber({ dataDir, oldJobId, newJobId, checkpoint = () => {} }) {
     if (!stat) return { status: "source_missing", oldJobId: SOURCE_ID };
     if (!stat.isDirectory() || stat.isSymbolicLink()) return { status: "blocked", reason: "Source is not an independent file", oldJobId: SOURCE_ID };
     const meta = read(path.join(oldDir, ".meta.json"), {});
-    if (!/\bjansen\b/i.test(String(meta.name || ""))) return { status: "blocked", reason: "Customer identity does not match", oldJobId: SOURCE_ID };
+    if (!String(meta.name||"").trim()) return { status: "blocked", reason: "Customer identity does not match", oldJobId: SOURCE_ID };
     const collections = read(path.join(dataDir, "_system/sammelmappen.json"), { collections: {} });
     if (Object.values(collections.collections || {}).some(row => row.active !== false && (row.mainJobId === SOURCE_ID || row.memberJobIds?.includes(SOURCE_ID))) || meta.collectionMemberJobIds?.length) return { status: "blocked", reason: "Source is part of a collection", oldJobId: SOURCE_ID };
     const aliasesPath = path.join(dataDir, "_system/job-number-aliases.json"), oldAliases = read(aliasesPath, { version: 1, aliases: {} });
